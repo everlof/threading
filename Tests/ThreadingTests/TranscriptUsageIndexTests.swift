@@ -53,8 +53,11 @@ final class TranscriptUsageIndexTests: XCTestCase {
     func testCountsBilledTokensAndKeepsCacheReadsApart() throws {
         let url = try write("a.jsonl", [record(id: "m1", request: "r1")])
 
-        var seen: Set<String> = []
-        let entries = TranscriptUsageIndex.entries(inTranscriptAt: url, seen: &seen)
+        var deduplicator = TranscriptUsageDeduplicator()
+        let entries = TranscriptUsageIndex.entries(
+            inTranscriptAt: url,
+            deduplicator: &deduplicator
+        )
         let entry = try XCTUnwrap(entries.first)
 
         // input + output + cache *writes*; reads are the cheap path and would drown everything.
@@ -75,13 +78,42 @@ final class TranscriptUsageIndexTests: XCTestCase {
         // A fork carries the parent's turn forward, then adds its own.
         let fork = try write("fork.jsonl", [shared, record(id: "m3", request: "r3")])
 
-        var seen: Set<String> = []
-        let all = TranscriptUsageIndex.entries(inTranscriptAt: parent, seen: &seen)
-            + TranscriptUsageIndex.entries(inTranscriptAt: fork, seen: &seen)
+        var deduplicator = TranscriptUsageDeduplicator()
+        let all = TranscriptUsageIndex.entries(
+            inTranscriptAt: parent,
+            deduplicator: &deduplicator
+        ) + TranscriptUsageIndex.entries(
+            inTranscriptAt: fork,
+            deduplicator: &deduplicator
+        )
 
         let total = all.reduce(TranscriptUsage()) { $0 + $1.usage }
         XCTAssertEqual(total.turns, 3, "four records, three distinct turns")
         XCTAssertEqual(total.billedTokens, 180)
+    }
+
+    func testStreamingPartialsKeepTheMaximumCountersAcrossTranscripts() throws {
+        let parent = try write("parent.jsonl", [
+            record(id: "m1", request: "r1", output: 5, cacheRead: 100)
+        ])
+        let fork = try write("fork.jsonl", [
+            record(id: "m1", request: "r1", output: 160, cacheRead: 100),
+            record(id: "m1", request: "r1", output: 20, cacheRead: 100)
+        ])
+
+        var deduplicator = TranscriptUsageDeduplicator()
+        let all = TranscriptUsageIndex.entries(
+            inTranscriptAt: parent,
+            deduplicator: &deduplicator
+        ) + TranscriptUsageIndex.entries(
+            inTranscriptAt: fork,
+            deduplicator: &deduplicator
+        )
+
+        let total = all.reduce(TranscriptUsage()) { $0 + $1.usage }
+        XCTAssertEqual(total.turns, 1)
+        XCTAssertEqual(total.billedTokens, 200)
+        XCTAssertEqual(total.cachedTokens, 100)
     }
 
     /// Two turns can share a message id across different requests — retries do this — so the
@@ -92,8 +124,11 @@ final class TranscriptUsageIndexTests: XCTestCase {
             record(id: "m1", request: "r2")
         ])
 
-        var seen: Set<String> = []
-        let total = TranscriptUsageIndex.entries(inTranscriptAt: url, seen: &seen)
+        var deduplicator = TranscriptUsageDeduplicator()
+        let total = TranscriptUsageIndex.entries(
+            inTranscriptAt: url,
+            deduplicator: &deduplicator
+        )
             .reduce(TranscriptUsage()) { $0 + $1.usage }
 
         XCTAssertEqual(total.turns, 2)
@@ -107,8 +142,11 @@ final class TranscriptUsageIndexTests: XCTestCase {
             #"{"type":"assistant","message":{"usage":{"input_tokens":5,"output_tokens":5}}}"#
         ])
 
-        var seen: Set<String> = []
-        let total = TranscriptUsageIndex.entries(inTranscriptAt: url, seen: &seen)
+        var deduplicator = TranscriptUsageDeduplicator()
+        let total = TranscriptUsageIndex.entries(
+            inTranscriptAt: url,
+            deduplicator: &deduplicator
+        )
             .reduce(TranscriptUsage()) { $0 + $1.usage }
 
         XCTAssertEqual(total.turns, 2)
@@ -143,8 +181,11 @@ final class TranscriptUsageIndexTests: XCTestCase {
             record(id: "m4", request: "r4", cwd: "/Users/x/repo/other", day: "2026-07-22")
         ])
 
-        var seen: Set<String> = []
-        let entries = TranscriptUsageIndex.entries(inTranscriptAt: url, seen: &seen)
+        var deduplicator = TranscriptUsageDeduplicator()
+        let entries = TranscriptUsageIndex.entries(
+            inTranscriptAt: url,
+            deduplicator: &deduplicator
+        )
 
         XCTAssertEqual(entries.count, 4)
         XCTAssertEqual(Set(entries.map { $0.day }), ["2026-07-21", "2026-07-22"])
@@ -164,8 +205,14 @@ final class TranscriptUsageIndexTests: XCTestCase {
             record(id: "m1", request: "r1")
         ])
 
-        var seen: Set<String> = []
-        XCTAssertEqual(TranscriptUsageIndex.entries(inTranscriptAt: url, seen: &seen).count, 1)
+        var deduplicator = TranscriptUsageDeduplicator()
+        XCTAssertEqual(
+            TranscriptUsageIndex.entries(
+                inTranscriptAt: url,
+                deduplicator: &deduplicator
+            ).count,
+            1
+        )
     }
 
     /// Subagent threads are nested a level deeper than ordinary transcripts and hold turns that
@@ -200,7 +247,13 @@ final class TranscriptUsageIndexTests: XCTestCase {
             record(id: "m1", request: "r1")
         ])
 
-        var seen: Set<String> = []
-        XCTAssertEqual(TranscriptUsageIndex.entries(inTranscriptAt: url, seen: &seen).count, 1)
+        var deduplicator = TranscriptUsageDeduplicator()
+        XCTAssertEqual(
+            TranscriptUsageIndex.entries(
+                inTranscriptAt: url,
+                deduplicator: &deduplicator
+            ).count,
+            1
+        )
     }
 }

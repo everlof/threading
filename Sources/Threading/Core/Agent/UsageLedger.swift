@@ -75,6 +75,20 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
         lhs = lhs + rhs
     }
 
+    /// Streaming providers may repeat one response identity while its counters are still growing.
+    /// Component-wise maxima retain the completed counters without assuming every field changes
+    /// in lockstep or allowing a later copied partial to reduce an already observed total.
+    func mergingMaximums(with other: Self) -> Self {
+        Self(
+            uncachedInput: max(uncachedInput, other.uncachedInput),
+            cachedInput: max(cachedInput, other.cachedInput),
+            cacheWrite: max(cacheWrite, other.cacheWrite),
+            cacheWrite1h: max(cacheWrite1h, other.cacheWrite1h),
+            output: max(output, other.output),
+            reasoning: max(reasoning, other.reasoning)
+        )
+    }
+
     private enum CodingKeys: String, CodingKey {
         case uncachedInput
         case cachedInput
@@ -233,6 +247,28 @@ struct UsageLedgerRecord: Codable, Equatable, Sendable {
         self.costUSD = costUSD
         self.costSource = costSource
         self.cacheSavingsUSD = max(0, cacheSavingsUSD)
+    }
+
+    /// Preserve last-wins provenance while making repeated streaming counters monotonic.
+    func mergingUsageMaximums(with later: Self) -> Self {
+        precondition(identity == later.identity)
+        let reported = [reportedCostUSD, later.reportedCostUSD]
+            .compactMap { $0 }
+            .filter { $0.isFinite && $0 >= 0 }
+            .max()
+
+        return Self(
+            identity: later.identity,
+            sessionID: later.sessionID,
+            at: later.at,
+            origin: later.origin,
+            accountID: later.accountID,
+            accountName: later.accountName,
+            model: later.model,
+            workingDirectory: later.workingDirectory,
+            tokens: tokens.mergingMaximums(with: later.tokens),
+            reportedCostUSD: reported
+        )
     }
 }
 

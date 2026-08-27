@@ -1190,9 +1190,9 @@ enum SubagentUsageReader {
         guard let format = TranscriptReplayFormat(kind: kind) else { return nil }
         switch format {
         case .claude:
-            var seen: Set<String> = []
+            var deduplicator = TranscriptUsageDeduplicator()
             let total = TranscriptUsageIndex
-                .entries(inTranscriptAt: url, seen: &seen)
+                .entries(inTranscriptAt: url, deduplicator: &deduplicator)
                 .reduce(Int64(0)) {
                     $0 + $1.usage.billedTokens + $1.usage.cachedTokens
                 }

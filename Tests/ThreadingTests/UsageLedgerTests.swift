@@ -247,6 +247,41 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(report.billedTokens, 15)
     }
 
+    func testBuilderMergesStreamingPartialsByMaximumCounterInEitherOrder() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
+        let now = try XCTUnwrap(UsageLedgerDate.parse("2026-08-08T12:00:00Z"))
+        let partial = makeRecord(
+            identity: "streamed-response",
+            at: now,
+            tokens: .init(uncachedInput: 10, cachedInput: 20, cacheWrite: 30, output: 5)
+        )
+        let complete = makeRecord(
+            identity: "streamed-response",
+            at: now,
+            tokens: .init(uncachedInput: 10, cachedInput: 20, cacheWrite: 30, output: 160)
+        )
+
+        for records in [[partial, complete], [complete, partial]] {
+            var scan = TranscriptUsageReport.ScanStatistics()
+            scan.rawRecords = records.count
+            let report = UsageLedgerBuilder.build(
+                records: records,
+                coverage: [],
+                projects: [],
+                scan: scan,
+                now: now,
+                calendar: calendar
+            )
+
+            XCTAssertEqual(report.scan.distinctRecords, 1)
+            XCTAssertEqual(report.turns, 1)
+            XCTAssertEqual(report.billedTokens, 200)
+            XCTAssertEqual(report.cachedTokens, 20)
+            XCTAssertEqual(report.sessionCells?.first?.tokens.output, 160)
+        }
+    }
+
     func testRangeSelectionUsesLocalCalendarDayBoundaries() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 2 * 60 * 60))

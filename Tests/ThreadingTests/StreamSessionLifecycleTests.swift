@@ -1595,6 +1595,25 @@ final class SubagentSessionStateTests: XCTestCase {
         XCTAssertEqual(SubagentUsageReader.read(at: url, kind: .claude), 19)
     }
 
+    func testClaudeChildUsageKeepsCompletedStreamingOutput() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let lines = [2, 20, 5].map { output in
+            """
+            {"type":"assistant","requestId":"request-1","message":{"id":"message-1","usage":\
+            {"input_tokens":10,"output_tokens":\(output),"cache_creation_input_tokens":3,\
+            "cache_read_input_tokens":4}}}
+            """
+        }
+        try (lines.joined(separator: "\n") + "\n")
+            .write(to: url, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(SubagentUsageReader.read(at: url, kind: .claude), 37)
+    }
+
     func testCodexChildUsageCountsOnlyRequestsAfterChildBoundary() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)

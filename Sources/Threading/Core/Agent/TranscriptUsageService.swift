@@ -374,12 +374,33 @@ enum UsageLedgerBuilder {
         now: Date = Date(),
         calendar: Calendar = .autoupdatingCurrent
     ) rethrows -> TranscriptUsageReport {
+        if !recordsAreDistinct {
+            var recordsByIdentity: [String: UsageLedgerRecord] = [:]
+            try forEachRecord { record in
+                if let previous = recordsByIdentity[record.identity] {
+                    recordsByIdentity[record.identity] = previous.mergingUsageMaximums(
+                        with: record
+                    )
+                } else {
+                    recordsByIdentity[record.identity] = record
+                }
+            }
+            return build(
+                forEachRecord: { body in recordsByIdentity.values.forEach(body) },
+                recordsAreDistinct: true,
+                coverage: coverage,
+                projects: projects,
+                scan: scan,
+                now: now,
+                calendar: calendar
+            )
+        }
+
         let oldest = calendar.date(
             byAdding: .day,
             value: -(UsageReportDefaults.maximumDayRange - 1),
             to: calendar.startOfDay(for: now)
         ) ?? .distantPast
-        var seen = Set<String>()
         var rootsByDirectory: [String: String] = [:]
         var labelsByRoot: [String: String] = [:]
         var byCell: [CellKey: TranscriptUsageReport.Cell] = [:]
@@ -388,9 +409,6 @@ enum UsageLedgerBuilder {
         var distinct = 0
 
         try forEachRecord { raw in
-            if !recordsAreDistinct {
-                guard seen.insert(raw.identity).inserted else { return }
-            }
             distinct += 1
             let priced = UsagePricingCatalog.price(raw)
 

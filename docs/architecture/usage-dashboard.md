@@ -205,7 +205,7 @@ Adapters make provider wire differences explicit:
 
 | Source | Contract |
 |---|---|
-| Claude Code | One ledger record per assistant response in supported JSONL transcripts. Cache read and creation remain distinct. Message/request identity deduplicates resumes, compactions, forks and copied subagent responses after all files have joined. |
+| Claude Code | One ledger record per assistant response in supported JSONL transcripts. Cache read and creation remain distinct. Message/request identity deduplicates resumes, compactions, forks and copied subagent responses after all files have joined. Repeated streaming partials merge the component-wise maximum of every token counter, so file order cannot retain a smaller output total. |
 | Codex | Stateful rollout parsing carries session metadata, working directory and active model into each `token_count`. Codex input includes cached input on the wire, so the adapter subtracts it once. An immediately repeated `last_token_usage` is suppressed without collapsing two later responses that happen to have equal counts. |
 | OpenCode | Supported CLI exports provide assistant token counts, model, provider route and reported cost. Export revision is the session's durable activity timestamp, so a warm scan does not launch OpenCode for a dormant session. |
 | OpenRouter | It is a billing route reported by an OpenCode export, not a fake fifth runtime. It gets its own coverage row and chart series so routed spend remains visible. |
@@ -278,6 +278,10 @@ revision. The comparison happens before any response envelope is read. A changed
 only its source-to-record edges, while a separate identity table retains one payload globally, so
 warm and cold results have the same exact deduplication. Sources no adapter offered this pass and
 their now-unowned records are removed once at the end of the transaction.
+
+The fallback array aggregation path applies the same component-wise maximum before grouping. The
+lightweight subagent reader uses a scan-global identity map and emits only each counter's positive
+delta, keeping its line-by-line memory bound while reaching the same completed response total.
 
 `UsageScanCache` remains the cold/migration layer for a source the index does not yet know. It
 stores one private envelope per source and feeds either the existing envelope or a fresh parse into

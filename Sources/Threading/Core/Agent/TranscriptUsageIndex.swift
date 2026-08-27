@@ -49,6 +49,49 @@ struct TranscriptUsageEntry: Equatable {
     var usage: TranscriptUsage
 }
 
+/// Global response-identity state shared across every transcript in one scan.
+///
+/// Claude emits streaming partials with stable input counters and growing output. Returning only
+/// the positive component-wise delta lets callers keep streaming entries without retaining every
+/// parsed record, while copied or later partials can never reduce the completed total.
+struct TranscriptUsageDeduplicator {
+    private var tokensByIdentity: [String: UsageTokenCounts] = [:]
+
+    mutating func contribution(
+        identity: String,
+        tokens: UsageTokenCounts
+    ) -> TranscriptUsage? {
+        guard identity != "|" else {
+            return Self.usage(from: tokens, turns: 1)
+        }
+
+        guard let previous = tokensByIdentity[identity] else {
+            tokensByIdentity[identity] = tokens
+            return Self.usage(from: tokens, turns: 1)
+        }
+
+        let merged = previous.mergingMaximums(with: tokens)
+        tokensByIdentity[identity] = merged
+        guard merged != previous else { return nil }
+
+        return TranscriptUsage(
+            billedTokens: (merged.uncachedInput - previous.uncachedInput)
+                + (merged.cacheWrite - previous.cacheWrite)
+                + (merged.output - previous.output),
+            cachedTokens: merged.cachedInput - previous.cachedInput,
+            turns: 0
+        )
+    }
+
+    private static func usage(from tokens: UsageTokenCounts, turns: Int) -> TranscriptUsage {
+        TranscriptUsage(
+            billedTokens: tokens.uncachedInput + tokens.cacheWrite + tokens.output,
+            cachedTokens: tokens.cachedInput,
+            turns: turns
+        )
+    }
+}
+
 // MARK: - Transcript Usage Index
 
 /// Reads what conversations actually cost from the transcripts the CLIs already keep.
@@ -94,14 +137,14 @@ enum TranscriptUsageIndex {
 
     // MARK: - Reading
 
-    /// Every priced turn in one transcript, deduplicated against `seen`, which the caller owns
-    /// so that duplicates are caught *across* files rather than only within one.
+    /// Every priced turn in one transcript, deduplicated against scan-global state the caller
+    /// owns so duplicates and growing partials are reconciled *across* files.
     ///
     /// Streams line by line: these files reach hundreds of megabytes, and only the lines
     /// carrying a `usage` object are ever parsed.
     static func entries(
         inTranscriptAt url: URL,
-        seen: inout Set<String>
+        deduplicator: inout TranscriptUsageDeduplicator
     ) -> [TranscriptUsageEntry] {
         let transcriptID = url.deletingPathExtension().lastPathComponent
         var byKey: [String: TranscriptUsageEntry] = [:]
@@ -119,12 +162,11 @@ enum TranscriptUsageIndex {
 
             let identity = "\(message[UsageIndexDefaults.idKey] as? String ?? "")"
                 + "|\(object[UsageIndexDefaults.requestKey] as? String ?? "")"
-
-            // An unidentifiable turn is counted rather than skipped: dropping it would
-            // understate, and understating is the failure this whole index exists to avoid.
-            if identity != "|" {
-                guard seen.insert(identity).inserted else { return true }
-            }
+            let tokens = tokenCounts(from: usage)
+            guard let contribution = deduplicator.contribution(
+                identity: identity,
+                tokens: tokens
+            ) else { return true }
 
             let bucket = quarterHour(of: object[UsageIndexDefaults.timestampKey] as? String ?? "")
             let model = message[UsageIndexDefaults.modelKey] as? String ?? UsageIndexDefaults.unknownModel
@@ -139,7 +181,7 @@ enum TranscriptUsageIndex {
                 usage: TranscriptUsage()
             )
 
-            entry.usage = entry.usage + reading(from: usage)
+            entry.usage = entry.usage + contribution
             byKey[key] = entry
             return true
         }
@@ -182,17 +224,13 @@ enum TranscriptUsageIndex {
         return hour + (quarter < 10 ? ":0" : ":") + String(quarter)
     }
 
-    /// One record's tokens.
-    static func reading(from usage: [String: Any]) -> TranscriptUsage {
-        let input = int(usage[UsageIndexDefaults.inputKey])
-        let output = int(usage[UsageIndexDefaults.outputKey])
-        let cacheWrite = int(usage[UsageIndexDefaults.cacheWriteKey])
-        let cacheRead = int(usage[UsageIndexDefaults.cacheReadKey])
-
-        return TranscriptUsage(
-            billedTokens: input + output + cacheWrite,
-            cachedTokens: cacheRead,
-            turns: 1
+    /// One record's provider-neutral token counters before identity reconciliation.
+    static func tokenCounts(from usage: [String: Any]) -> UsageTokenCounts {
+        UsageTokenCounts(
+            uncachedInput: int(usage[UsageIndexDefaults.inputKey]),
+            cachedInput: int(usage[UsageIndexDefaults.cacheReadKey]),
+            cacheWrite: int(usage[UsageIndexDefaults.cacheWriteKey]),
+            output: int(usage[UsageIndexDefaults.outputKey])
         )
     }
 
