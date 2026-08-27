@@ -1416,7 +1416,8 @@ final class ExtensionHostService {
                         status: reading.status,
                         headers: reading.headers,
                         bodyBase64: reading.body.base64EncodedString(),
-                        credential: reading.credential.rawValue
+                        credential: reading.credential.rawValue,
+                        finalURL: reading.finalURL
                     )
                 )))
             case .failure(let failure):

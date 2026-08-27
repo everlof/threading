@@ -90,7 +90,10 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   anonymous, in that order — walks the tiers on 401/403/404 GETs, and reports which tier
   answered in the response. Tokens never reach the extension. A credentialed grant is refused
   at inspection when the same manifest ships a companion holding raw `network.client`, because
-  that pairing is the only way brokered data could leave the machine.
+  that pairing is the only way brokered data could leave the machine. Redirects may continue
+  only over HTTPS on the same exact host and method; any other redirect returns its 3xx for an
+  independently granted re-request. The response's optional `finalURL` reports the URL that
+  answered after same-host redirects without breaking decoding from an older host.
 
 `ThreadingExtensionAPI.safeCapabilities` is the normative capability set. `network.client` is
 not a safe-v1 capability: it remains decodable for deprecated native format-1 compatibility,

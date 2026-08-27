@@ -993,7 +993,11 @@ A completed HTTP exchange always returns, whatever its status; interpreting stat
 extension's business. `ExtensionBrokeredFetchFailure` is thrown only for transport failure,
 and `ExtensionHostClientError.rejected` means the request fell outside the declared grants.
 Responses are capped at 4 MiB; `Authorization`, `Cookie`, and `Host` request headers belong
-to the broker and are refused.
+to the broker and are refused. HTTPS redirects are followed only when they keep the exact
+approved host, method, and no-port/no-user-info shape. A redirect outside that authority returns
+its original 3xx and `Location`; submit the target as a new brokered request so its grant is
+checked independently. `response.finalURL` names the URL that actually answered after any
+same-host redirects (and is optional when decoding a response from an older host).
 
 ### Reading host snapshots and events
 

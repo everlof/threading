@@ -204,6 +204,11 @@ public struct ExtensionBrokeredFetchResponse: Codable, Equatable, Sendable {
     public let bodyBase64: String
     /// Raw on the wire so a newer host's tier does not turn the response undecodable.
     public let credential: String
+    /// The URL that produced this response after any same-host redirects.
+    ///
+    /// Optional for source and wire compatibility with hosts built before this field existed.
+    /// A cross-host redirect is not followed; that exchange reports the original URL and its 3xx.
+    public let finalURL: String?
 
     public var body: Data? {
         Data(base64Encoded: bodyBase64)
@@ -213,11 +218,18 @@ public struct ExtensionBrokeredFetchResponse: Codable, Equatable, Sendable {
         ExtensionBrokeredCredentialTier(rawValue: credential)
     }
 
-    public init(status: Int, headers: [String: String], bodyBase64: String, credential: String) {
+    public init(
+        status: Int,
+        headers: [String: String],
+        bodyBase64: String,
+        credential: String,
+        finalURL: String? = nil
+    ) {
         self.status = status
         self.headers = headers
         self.bodyBase64 = bodyBase64
         self.credential = credential
+        self.finalURL = finalURL
     }
 }
 

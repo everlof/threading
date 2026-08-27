@@ -102,7 +102,7 @@
       "type": "array",
       "maxItems": 8,
       "default": [],
-      "description": "Origins the network.brokered capability may fetch from, shown verbatim in the install dialog. Every fetch runs host-side; the guest gains no socket. v1 grants are https-only exact DNS hosts with GET/HEAD. A grant naming a credential provider (v1: github) is served with the user's best connected credential — app connection, gh CLI, git credential helper, anonymous — and the response reports which tier answered; tokens never reach the extension. A credentialed grant is refused when the manifest also declares a companion holding network.client.",
+      "description": "Origins the network.brokered capability may fetch from, shown verbatim in the install dialog. Every fetch runs host-side; the guest gains no socket. v1 grants are https-only exact DNS hosts with GET/HEAD. Redirects are followed only when HTTPS, host, method, absent port, and absent user info remain inside that same grant; any other redirect returns its original 3xx for a new independently checked request. A grant naming a credential provider (v1: github) is served with the user's best connected credential — app connection, gh CLI, git credential helper, anonymous — and the response reports which tier answered; tokens never reach the extension. A credentialed grant is refused when the manifest also declares a companion holding network.client.",
       "items": {
         "type": "object",
         "additionalProperties": false,

@@ -58,6 +58,7 @@ final class ExtensionNetworkBrokerTests: XCTestCase {
         XCTAssertEqual(reading.status, 404)
         XCTAssertEqual(reading.credential, .anonymous)
         XCTAssertEqual(reading.body, Data("missing".utf8))
+        XCTAssertEqual(reading.finalURL, request().url)
     }
 
     func testTheWalkFindsTheRepositoryTheAppInstallationCannotSee() async {
@@ -171,6 +172,35 @@ final class ExtensionNetworkBrokerTests: XCTestCase {
         XCTAssertEqual(reading.headers["x-ratelimit-remaining"], "0")
         XCTAssertEqual(reading.headers["content-type"], "application/json")
     }
+
+    func testRedirectsStayInsideTheExactApprovedHostAndMethod() throws {
+        var original = URLRequest(url: try XCTUnwrap(URL(
+            string: "https://api.github.com/repos/o/r/checks"
+        )))
+        original.httpMethod = "GET"
+        let gate = try XCTUnwrap(ExtensionBrokeredRedirectGate(request: original))
+
+        var sameGrant = URLRequest(url: try XCTUnwrap(URL(
+            string: "https://api.github.com/repositories/1/checks"
+        )))
+        sameGrant.httpMethod = "GET"
+        XCTAssertTrue(gate.allows(sameGrant))
+
+        let refused = [
+            "https://attacker.example/collect",
+            "http://api.github.com/collect",
+            "https://api.github.com:8443/collect",
+            "https://user:password@api.github.com/collect"
+        ]
+        for url in refused {
+            var redirect = URLRequest(url: try XCTUnwrap(URL(string: url)))
+            redirect.httpMethod = "GET"
+            XCTAssertFalse(gate.allows(redirect), url)
+        }
+
+        sameGrant.httpMethod = "HEAD"
+        XCTAssertFalse(gate.allows(sameGrant), "a redirect may not widen or rewrite the method")
+    }
 }
 
 final class TransportCounter: @unchecked Sendable {
@@ -196,7 +226,8 @@ final class ExtensionHostBrokeredFetchRouteTests: XCTestCase {
                 status: 200,
                 headers: ["content-type": "application/json"],
                 body: Data("{}".utf8),
-                credential: .ghCLI
+                credential: .ghCLI,
+                finalURL: "https://api.github.com/repos/o/r/commits/abc/check-runs"
             )
         )
 
@@ -299,6 +330,10 @@ final class ExtensionHostBrokeredFetchRouteTests: XCTestCase {
         )
         XCTAssertEqual(result.response?.status, 200)
         XCTAssertEqual(result.response?.credentialTier, .ghCLI)
+        XCTAssertEqual(
+            result.response?.finalURL,
+            "https://api.github.com/repos/o/r/commits/abc/check-runs"
+        )
         XCTAssertEqual(broker.lastCredentialProvider, "github")
     }
 

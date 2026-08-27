@@ -7,6 +7,7 @@ struct BrokeredFetchReading: Equatable, Sendable {
     let headers: [String: String]
     let body: Data
     let credential: GitHubCredential.Tier
+    let finalURL: String
 }
 
 /// The transport itself failed — nothing came back to interpret.
@@ -47,7 +48,7 @@ final class ExtensionNetworkBroker: ExtensionNetworkBrokering {
 
     init(
         credentialResolvers: [String: GitHubCredentialResolver],
-        transport: @escaping Transport = GitHubAppConnection.liveTransport
+        transport: @escaping Transport = ExtensionBrokeredURLSessionTransport.live
     ) {
         self.credentialResolvers = credentialResolvers
         self.transport = transport
@@ -155,7 +156,8 @@ final class ExtensionNetworkBroker: ExtensionNetworkBrokering {
                 status: http.statusCode,
                 headers: headers,
                 body: data,
-                credential: credential.tier
+                credential: credential.tier,
+                finalURL: http.url?.absoluteString ?? request.url
             )
 
             let isWalkable = (request.method == "GET" || request.method == "HEAD")
@@ -180,5 +182,83 @@ final class ExtensionNetworkBroker: ExtensionNetworkBrokering {
             message: L10n.string("Every GitHub credential Threading holds was refused."),
             credential: .anonymous
         ))
+    }
+}
+
+/// Redirect authority for one already-approved broker request.
+///
+/// The host route checked the original exact host and method against what the user approved.
+/// Foundation asks this object before following every redirect, so only a move that stays inside
+/// that same authority may continue. A refused redirect remains an ordinary 3xx response whose
+/// `Location` the extension may submit as a new, independently checked broker request.
+struct ExtensionBrokeredRedirectGate: Sendable {
+    private let host: String
+    private let method: String
+
+    init?(request: URLRequest) {
+        guard let url = request.url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme?.lowercased() == "https",
+              let host = components.host?.lowercased(),
+              !host.isEmpty,
+              components.port == nil,
+              components.user == nil,
+              components.password == nil,
+              let method = request.httpMethod else {
+            return nil
+        }
+        self.host = host
+        self.method = method
+    }
+
+    func allows(_ request: URLRequest) -> Bool {
+        guard let url = request.url,
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return false
+        }
+        return components.scheme?.lowercased() == "https"
+            && components.host?.lowercased() == host
+            && components.port == nil
+            && components.user == nil
+            && components.password == nil
+            && request.httpMethod == method
+    }
+}
+
+private final class ExtensionBrokeredRedirectDelegate: NSObject,
+    URLSessionTaskDelegate,
+    @unchecked Sendable
+{
+    private let gate: ExtensionBrokeredRedirectGate
+
+    init(gate: ExtensionBrokeredRedirectGate) {
+        self.gate = gate
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(gate.allows(request) ? request : nil)
+    }
+}
+
+private enum ExtensionBrokeredURLSessionTransport {
+    nonisolated static let live: ExtensionNetworkBroker.Transport = { request in
+        guard let gate = ExtensionBrokeredRedirectGate(request: request) else {
+            throw URLError(.badURL)
+        }
+        let delegate = ExtensionBrokeredRedirectDelegate(gate: gate)
+        let (data, response) = try await URLSession.shared.data(
+            for: request,
+            delegate: delegate
+        )
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        return (data, http)
     }
 }

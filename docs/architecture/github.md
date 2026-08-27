@@ -337,7 +337,11 @@ Rules, each load-bearing:
 - **Every fetch runs host-side** (`ExtensionNetworkBroker`), checked against the authorized
   generation's grants in `ExtensionHostService.routeBrokeredFetch`. The guest gains no socket;
   `Authorization`/`Cookie`/`Host` request headers are refused as broker-owned, `Set-Cookie`
-  never travels back, responses cap at 4 MiB.
+  never travels back, responses cap at 4 MiB. URLSession's redirect delegate re-applies the
+  approved authority before every hop: HTTPS, exact host, no port/user info, and the same method.
+  A redirect that leaves it is not followed; its 3xx and `Location` return so a new request must
+  cross the grant check. The response's additive optional `finalURL` makes same-host redirect
+  resolution visible without breaking an extension talking to an older host.
 - **`credential` names a host-known provider** (registry in `ExtensionNetworkBroker.live()`;
   v1 knows `github`). The broker attaches the resolved token itself and reports which tier
   answered — that tier is what lets a card say "connect GitHub in Settings" only when the read

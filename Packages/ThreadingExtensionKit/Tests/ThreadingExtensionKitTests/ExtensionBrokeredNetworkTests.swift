@@ -197,7 +197,8 @@ final class ExtensionBrokeredNetworkTests: XCTestCase {
                 status: 200,
                 headers: ["content-type": "application/json"],
                 bodyBase64: body.base64EncodedString(),
-                credential: "gh-cli"
+                credential: "gh-cli",
+                finalURL: "https://api.github.com/repos/o/r/check-runs"
             )
         )
         let decoded = try JSONDecoder().decode(
@@ -207,6 +208,7 @@ final class ExtensionBrokeredNetworkTests: XCTestCase {
         XCTAssertEqual(decoded, result)
         XCTAssertEqual(decoded.response?.body, body)
         XCTAssertEqual(decoded.response?.credentialTier, .ghCLI)
+        XCTAssertEqual(decoded.response?.finalURL, "https://api.github.com/repos/o/r/check-runs")
         XCTAssertNil(decoded.failure)
     }
 
@@ -240,5 +242,6 @@ final class ExtensionBrokeredNetworkTests: XCTestCase {
         )
         XCTAssertEqual(decoded.response?.credential, "quantum-vault")
         XCTAssertNil(decoded.response?.credentialTier)
+        XCTAssertNil(decoded.response?.finalURL, "responses from an older host remain decodable")
     }
 }
