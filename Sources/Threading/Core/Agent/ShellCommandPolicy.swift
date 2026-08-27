@@ -79,7 +79,12 @@ enum ShellCommandPolicy {
     }
 
     private static func isReadOnlySegment(_ segment: String) -> Bool {
-        let tokens = segment.split(separator: " ").map(String.init)
+        // Match the shell's ordinary IFS word boundaries. Newlines are rejected before this
+        // point; tabs must still split, or `find .\t-exec …` hides every argument from the
+        // policy while `/bin/sh` executes it as a separate word.
+        let tokens = segment
+            .split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .map(String.init)
         guard let name = tokens.first else { return false }
 
         // `FOO=bar cmd` runs `cmd` with an environment this policy never inspected, and

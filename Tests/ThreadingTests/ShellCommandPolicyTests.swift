@@ -203,6 +203,31 @@ final class ShellCommandPolicyTests: XCTestCase {
         assertPrompts(#"git diff "--output=/tmp/patch""#)
     }
 
+    /// A shell tab is a word boundary just like a space. If the policy leaves it inside a token,
+    /// every argument rule sees only the command name while `/bin/sh` goes on to execute the
+    /// hidden flags as ordinary arguments.
+    func testTabsCannotHideArgumentsFromThePolicy() {
+        for command in [
+            "find .\t-delete",
+            "find .\t-exec\trm\t{}\t+",
+            "find .\t-execdir\trm\t{}\t+",
+            "fd .\t-x\trm",
+            "fd .\t--exec-batch\trm",
+            "sort a\t-o\t/tmp/pwned",
+            "tree .\t-o\t/tmp/pwned",
+            "yq .\t-i\tx.yaml",
+            "rg pat\t--pre=/tmp/evil\t.",
+            "rg pat\t--hostname-bin=/tmp/evil\t.",
+            "uniq in\tout",
+            "git diff\t--output=/tmp/pwned"
+        ] {
+            assertPrompts(command)
+        }
+
+        assertReadOnly("ls\t-la")
+        assertReadOnly("sed\t-n\t'1,20p'\tfile")
+    }
+
     /// Unquoting is applied to arguments only. The command *name* keeps its quotes and so keeps
     /// failing the allowlist, because widening what passes is the one thing this policy must
     /// never do to fix a bug.
