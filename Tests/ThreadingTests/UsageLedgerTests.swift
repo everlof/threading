@@ -130,6 +130,52 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertNil(UsagePricingCatalog.price(ambiguous).costUSD)
     }
 
+    func testCatalogPricesOfficialCodexVariantsButNotInternalModeLabels() throws {
+        let official: [(model: String, expected: Double)] = [
+            ("gpt-5.3-codex", 15.75),
+            ("gpt-5.2-codex", 15.75),
+            ("gpt-5.1-codex-max", 11.25),
+            ("gpt-5.1-codex-mini", 2.25),
+            ("gpt-5.1-codex", 11.25),
+            ("gpt-5-codex", 11.25)
+        ]
+
+        for fixture in official {
+            let priced = UsagePricingCatalog.price(makeRecord(
+                identity: fixture.model,
+                model: fixture.model,
+                tokens: .init(uncachedInput: 1_000_000, output: 1_000_000)
+            ))
+            XCTAssertEqual(priced.costSource, .catalogPriced, fixture.model)
+            XCTAssertEqual(
+                try XCTUnwrap(priced.costUSD, fixture.model),
+                fixture.expected,
+                accuracy: 0.000_001,
+                fixture.model
+            )
+        }
+
+        let modeLabel = makeRecord(
+            identity: "codex-auto-review",
+            model: "codex-auto-review",
+            tokens: .init(uncachedInput: 1_000_000)
+        )
+        XCTAssertEqual(UsagePricingCatalog.price(modeLabel).costSource, .unpriced)
+        XCTAssertNil(UsagePricingCatalog.price(modeLabel).costUSD)
+    }
+
+    func testCatalogUsesCurrentGPT56SolPromotionalRate() throws {
+        let record = makeRecord(
+            identity: "gpt-5.6-sol",
+            model: "gpt-5.6-sol",
+            tokens: .init(uncachedInput: 100_000, output: 100_000)
+        )
+
+        let priced = UsagePricingCatalog.price(record)
+
+        XCTAssertEqual(try XCTUnwrap(priced.costUSD), 2.4, accuracy: 0.000_001)
+    }
+
     func testAnthropicCatalogPricesEveryClaudeModelObservedInLocalTranscripts() throws {
         let observed: [(model: String, expected: Double)] = [
             ("claude-fable-5", 60),

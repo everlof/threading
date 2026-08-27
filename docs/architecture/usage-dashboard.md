@@ -257,6 +257,12 @@ afterwards. Claude's transcript preserves the five-minute and one-hour cache-wri
 catalog applies the published 1.25× and 2× input rates rather than pricing every write as the
 cheaper duration. `cacheWrite` remains their aggregate at the presentation/remote boundary.
 
+OpenAI rows likewise come from its official [API pricing table](https://developers.openai.com/api/docs/pricing)
+and exact model pages. Coding-specialized IDs such as `gpt-5.2-codex` have their own rows even
+when their current rate equals the base family; the matcher never infers that equality from the
+name. Internal mode labels such as `codex-auto-review`, and product variants without an official
+API price such as Codex Spark, deliberately remain unpriced.
+
 The page shows the catalog version, splits provider-reported and catalog-priced spend, and reports
 unpriced tokens and estimated cache savings. Standard list pricing cannot see a private discount,
 US-only inference or fast-mode modifier absent from the transcript, which is another reason the
