@@ -48,6 +48,11 @@ xcodebuild \
     SWIFT_STRICT_CONCURRENCY=complete \
     COMPILER_INDEX_STORE_ENABLE=NO
 
+say "Testing ThreadingMobile (complete iOS Simulator target)"
+"${script_directory}/test-mobile.sh" \
+    SWIFT_STRICT_CONCURRENCY=complete \
+    COMPILER_INDEX_STORE_ENABLE=NO
+
 for package in ThreadingExtensionKit ThreadingRemoteKit ThreadingWasmRuntime ThreadingScenarioKit ThreadingPeerTransport ThreadingSimulatorKit; do
     say "Testing ${package}"
     swift test --package-path "${repository_directory}/Packages/${package}"
@@ -74,6 +79,9 @@ python3 -m unittest "${repository_directory}/scripts/tests/test_generate_diagnos
 
 say "Testing mobile report intake configuration"
 python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_report_intake_configuration.py"
+
+say "Testing mobile test gate configuration"
+python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_test_gate.py"
 
 say "Testing agent feedback audit"
 python3 "${repository_directory}/scripts/tests/test_agent_feedback_audit.py"

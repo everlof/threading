@@ -4,7 +4,7 @@
 #
 #   scripts/test.sh              # fast  — default; no window is ordered on screen
 #   scripts/test.sh fast
-#   scripts/test.sh all          # everything, including the on-screen WKWebView tests
+#   scripts/test.sh all          # every Mac and iPhone unit test, plus on-screen WKWebView tests
 #   scripts/test.sh ui           # app-level XCUITest scenarios in a disposable Cocoa home
 #   scripts/test.sh e2e          # real APNs + optionally a real Claude; needs credentials
 #
@@ -221,6 +221,17 @@ set -e
 stop_process_guard
 if [[ "${process_leak_detected}" != "0" ]]; then
   status=1
+fi
+
+if [[ "${level}" == "all" && "${status}" == "0" ]]; then
+  echo "test: Mac target passed; running the complete ThreadingMobileTests target…" >&2
+  set +e
+  "${script_directory}/test-mobile.sh"
+  mobile_status=$?
+  set -e
+  if [[ "${mobile_status}" != "0" ]]; then
+    status="${mobile_status}"
+  fi
 fi
 
 # Sweep the empty preference files the scratch suites leave behind.

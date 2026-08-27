@@ -453,7 +453,7 @@ Three levels, one entry point — `scripts/test.sh <level>`. **Run `fast` while 
 | Level | Command | Covers | Cost |
 |---|---|---|---|
 | **fast** | `scripts/test.sh` | `Threading-Fast` test plan — the whole `ThreadingTests` target minus the cases that must order a window on screen | default; nothing appears on screen |
-| **all** | `scripts/test.sh all` | `Threading-All` test plan — the entire target | adds ~14 live-WKWebView tests that flash real windows and load real pages |
+| **all** | `scripts/test.sh all` | `Threading-All` test plan — the entire Mac target — then the complete `ThreadingMobileTests` target in an iOS Simulator | adds ~14 live-WKWebView tests that flash real windows and load real pages, plus one simulator run |
 | **e2e** | `scripts/test.sh e2e` | `ThreadingNotificationE2E` scheme — real APNs delivery; `--claude` also spawns a real Claude | needs the four `THREADING_APNS_*` credentials; exits 2 without them, so it never fires by accident |
 
 The plans live in `TestPlans/` and are attached to the `Threading` scheme, so Xcode's test-plan
@@ -461,8 +461,8 @@ picker offers the same choice. `-only-testing:` still works through the script f
 
 Connectivity has a focused cross-platform runner outside these three ordinary levels:
 `scripts/test-connectivity.sh software|topology|all` runs the Mac contracts plus the matching
-`ThreadingMobileTests` in an iOS Simulator. `simulator-chaos` repeatedly terminates the real iOS
-app against an isolated real server, while `hardware --device <name-or-UDID>` owns physical
+subset of `ThreadingMobileTests` in an iOS Simulator. `simulator-chaos` repeatedly terminates the
+real iOS app against an isolated real server, while `hardware --device <name-or-UDID>` owns physical
 faults and topology. Both process lanes verify recovery from the app's share-safe diagnostic
 journal rather than from timed UI observations. Their scope, evidence and the still-unautomated
 two-shipping-app chaos lane are documented in
@@ -476,8 +476,10 @@ is one line; the logic is `scripts/pre_push.sh`, which is versioned and reviewab
 pushes skip the gate. Bypass deliberately with `THREADING_SKIP_TESTS=1 git push` — prefer it over
 `--no-verify`, which also skips Git LFS.
 
-The canonical non-interactive CI/release gate also builds `ThreadingMobile` for a generic iOS
-Simulator destination, so both shipping apps are type-checked without booting or locking a device.
+The canonical non-interactive CI/release gate builds `ThreadingMobile` for a generic iOS Simulator
+destination and then runs its complete test target through `scripts/test-mobile.sh`. That runner
+and the `all` push gate share the host-wide CoreSimulator lock. Override its concrete destination
+with `THREADING_MOBILE_TEST_DESTINATION` when the default iPhone simulator is unavailable.
 
 The same hook runs `scripts/check_secrets.sh` over the range being pushed first, and that half
 is **not** covered by `THREADING_SKIP_TESTS`: it costs under a second, and it is the only gate

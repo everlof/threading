@@ -13,6 +13,14 @@ import XCTest
 final class RemoteTerminalScrollTests: XCTestCase {
     private var hostWindows: [UIWindow] = []
 
+    override func tearDown() {
+        for window in hostWindows {
+            window.isHidden = true
+        }
+        hostWindows.removeAll()
+        super.tearDown()
+    }
+
     // MARK: - Constants
 
     private enum Fixture {
@@ -315,13 +323,16 @@ final class RemoteTerminalScrollTests: XCTestCase {
     /// scrollbar over an entirely empty terminal, which is the on-device Codex failure this
     /// guards. A midpoint deliberately avoids both zero-offset and live-tail special cases.
     func testScrolledBackRowsProduceVisiblePixels() throws {
-        let view = makeView(feeding: Fixture.lines)
+        let view = makeView(feeding: Fixture.lines, visible: true)
         view.nativeBackgroundColor = .black
         view.nativeForegroundColor = .white
         view.backgroundColor = .black
         let maximumOffset = view.contentSize.height - view.bounds.height
+        let renderCount = view.diagnostics.renders
         view.contentOffset = CGPoint(x: 0, y: maximumOffset * 0.5)
-        settleTerminalCallbacks(for: view)
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        waitForTerminalRender(in: view, after: renderCount)
 
         XCTAssertNotNil(visibleTopLine(of: view), "the emulator fixture must contain visible text")
         XCTAssertGreaterThan(view.contentOffset.y, 0, "the fixture must exercise a real offset")
@@ -590,13 +601,16 @@ final class RemoteTerminalScrollTests: XCTestCase {
         )
     }
 
-    private func makeView(feeding lines: Int) -> RemoteTerminalView {
+    private func makeView(feeding lines: Int, visible: Bool = false) -> RemoteTerminalView {
         let view = RemoteTerminalView(
             frame: Fixture.frame,
             font: UIFont.monospacedSystemFont(ofSize: Fixture.fontSize, weight: .regular)
         )
-        let window = UIWindow(frame: Fixture.frame)
+        let window = visible ? makeHostWindow() : UIWindow(frame: Fixture.frame)
         window.addSubview(view)
+        if visible {
+            window.isHidden = false
+        }
         hostWindows.append(window)
         for line in 0..<lines {
             view.feed(text: "line \(line)\r\n")
@@ -625,6 +639,32 @@ final class RemoteTerminalScrollTests: XCTestCase {
         view.setNeedsLayout()
         view.layoutIfNeeded()
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+    }
+
+    private func makeHostWindow() -> UIWindow {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        if let scene = scenes.first(where: { $0.activationState == .foregroundActive })
+            ?? scenes.first {
+            let window = UIWindow(windowScene: scene)
+            window.frame = Fixture.frame
+            return window
+        }
+        return UIWindow(frame: Fixture.frame)
+    }
+
+    /// A visible SwiftTerm view refreshes its render snapshot on the display cadence. Waiting for
+    /// that observed draw keeps the pixel assertion tied to the production frame path instead of
+    /// assuming a particular simulator frame time while the rest of the mobile suite is busy.
+    private func waitForTerminalRender(in view: TerminalView, after renderCount: Int) {
+        let deadline = Date(timeIntervalSinceNow: 1)
+        while view.diagnostics.renders <= renderCount, Date() < deadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+        XCTAssertGreaterThan(
+            view.diagnostics.renders,
+            renderCount,
+            "the visible terminal did not produce the frame requested by its scroll"
+        )
     }
 
     /// `Terminal.getLine` is viewport-relative, so row 0 is whatever the person is looking at.
