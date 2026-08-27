@@ -404,6 +404,48 @@ final class ProjectScriptTests: XCTestCase {
         XCTAssertFalse(alert.showsSuppressionButton)
     }
 
+    /// Consent covers the command the terminal will execute, not a plausible prefix chosen by
+    /// the repository. The old 600-character excerpt hid this suffix even though the loader
+    /// deliberately accepts a bounded 4 KiB command.
+    func testProjectScriptConfirmationShowsEveryByteOfTheMaximumCommand() throws {
+        let dangerousSuffix = "\nprintf 'hidden suffix reached' >&2"
+        let command = String(
+            repeating: "#",
+            count: ProjectScriptDefaults.maximumCommandBytes - dangerousSuffix.utf8.count
+        ) + dangerousSuffix
+        XCTAssertEqual(command.utf8.count, ProjectScriptDefaults.maximumCommandBytes)
+        XCTAssertFalse(String(command.prefix(600)).contains(dangerousSuffix))
+
+        let invocation = ProjectScriptInvocation(
+            script: ProjectScript(
+                id: "review",
+                name: "Review command",
+                command: command,
+                icon: nil,
+                workingDirectory: ".",
+                previewURL: nil
+            ),
+            repositoryRoot: URL(fileURLWithPath: "/tmp/Project Script"),
+            workingDirectory: URL(fileURLWithPath: "/tmp/Project Script")
+        )
+        let request = AppDelegate.projectScriptConfirmation(for: invocation)
+        let accessory = try XCTUnwrap(request.accessory)
+        let scroll = try XCTUnwrap(
+            accessory.subviews.compactMap { $0 as? ThemedTextScrollView }.first
+        )
+
+        XCTAssertEqual(scroll.textView.string, command)
+        XCTAssertTrue(scroll.textView.string.hasSuffix(dangerousSuffix))
+        XCTAssertFalse(scroll.textView.isEditable)
+        XCTAssertTrue(scroll.textView.isSelectable)
+        XCTAssertTrue(scroll.hasVerticalScroller)
+        XCTAssertFalse(
+            request.message.contains(String(command.prefix(600))),
+            "the explanatory copy must not reintroduce a truncated command"
+        )
+        XCTAssertTrue(request.message.contains(invocation.workingDirectory.path))
+    }
+
     private var configurationURL: URL {
         root.appendingPathComponent(ProjectScriptDefaults.configurationFileName)
     }

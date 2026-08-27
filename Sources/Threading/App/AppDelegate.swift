@@ -2520,23 +2520,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         _ = hostCommandPlane.invoke(commandID: id)
     }
 
+    /// The complete repository-authored command, in a bounded viewport rather than bounded text.
+    ///
+    /// Commands are accepted up to `ProjectScriptDefaults.maximumCommandBytes`. Truncating one
+    /// here made the consent dishonest: a repository could put 600 plausible characters first
+    /// and the action the terminal would actually run after them. The viewport may be short, but
+    /// its selectable document is the exact command and every byte remains reachable by scrolling.
+    @MainActor
+    static func projectScriptConfirmation(
+        for invocation: ProjectScriptInvocation
+    ) -> ConfirmationRequest {
+        let preview = ThemedSurfaceView()
+        preview.frame = NSRect(x: 0, y: 0, width: 500, height: 160)
+        preview.applySurface(
+            fill: Design.Surface.controlResting,
+            radius: .control,
+            border: Design.Surface.border
+        )
+
+        let scroll = ThemedTextView.scrolling()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.verticalScrollElasticity = .none
+        preview.addSubview(scroll)
+
+        let text = scroll.textView
+        text.string = invocation.script.command
+        text.isEditable = false
+        text.isSelectable = true
+        text.isRichText = false
+        text.importsGraphics = false
+        text.allowsUndo = false
+        text.applyFont(.code())
+        text.textContainerInset = NSSize(
+            width: Design.Spacing.small,
+            height: Design.Spacing.small
+        )
+        text.setAccessibilityLabel(L10n.string("Command"))
+
+        NSLayoutConstraint.activate([
+            scroll.topAnchor.constraint(equalTo: preview.topAnchor, constant: Design.Spacing.tight),
+            scroll.bottomAnchor.constraint(
+                equalTo: preview.bottomAnchor,
+                constant: -Design.Spacing.tight
+            ),
+            scroll.leadingAnchor.constraint(
+                equalTo: preview.leadingAnchor,
+                constant: Design.Spacing.tight
+            ),
+            scroll.trailingAnchor.constraint(
+                equalTo: preview.trailingAnchor,
+                constant: -Design.Spacing.tight
+            )
+        ])
+
+        return ConfirmationRequest(
+            prompt: .runProjectScript,
+            title: L10n.format("Run “%@”?", invocation.script.name),
+            message: L10n.format(
+                "This repository defines the command below. It will run in %@ only after you choose Run.",
+                invocation.workingDirectory.path
+            ),
+            confirmTitle: L10n.string("Run in Terminal"),
+            accessory: preview
+        )
+    }
+
     @MainActor @objc private func performProjectScript(_ sender: NSMenuItem) {
         guard let id = sender.representedObject as? String,
               let invocation = ProjectScriptService.shared
                 .availability(commandID: id).invocation else { return }
 
-        let command = String(invocation.script.command.prefix(600))
-            + (invocation.script.command.count > 600 ? "…" : "")
-        let request = ConfirmationRequest(
-            prompt: .runProjectScript,
-            title: L10n.format("Run “%@”?", invocation.script.name),
-            message: L10n.format(
-                "This repository defines the command below. It will run in %@ only after you choose Run.\n\n%@",
-                invocation.workingDirectory.path,
-                command
-            ),
-            confirmTitle: L10n.string("Run in Terminal")
-        )
+        let request = Self.projectScriptConfirmation(for: invocation)
 
         let window = mainWindowController?.window
         ConfirmationAlert.ask(request, in: window) { [weak self] accepted in

@@ -1173,6 +1173,27 @@
       }
     },
     {
+      "id": "project-script-confirmation",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Project-script consent",
+      "description": "The repository-authored command in the shipping themed confirmation sheet, with its plausible beginning and formerly concealed suffix both reachable inside the bounded preview.",
+      "states": ["Command beginning", "Command suffix after scrolling"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Windows 98"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["500×160-point command viewport"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ProjectScriptConfirmationRenderTests.swift",
+        "test": "ThreadingTests/ProjectScriptConfirmationRenderTests/testRendersCompleteProjectScriptConsentInTheShippingSheet"
+      },
+      "capture": {
+        "glob": "project-script-confirmation-*.png"
+      }
+    },
+    {
       "id": "manager-role-and-grants",
       "kind": "surface",
       "status": "implemented",

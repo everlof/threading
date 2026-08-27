@@ -429,7 +429,7 @@
     "Search commands": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sök kommandon"}}}},
     "Select a project or checkout first.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj först ett projekt eller en checkout."}}}},
     "The project script did not start": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Projektskriptet startade inte"}}}},
-    "This repository defines the command below. It will run in %@ only after you choose Run.\n\n%@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det här kodförrådet definierar kommandot nedan. Det körs i %@ först när du väljer Kör.\n\n%@"}}}},
+    "This repository defines the command below. It will run in %@ only after you choose Run.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Det här kodförrådet definierar kommandot nedan. Det körs i %@ först när du väljer Kör."}}}},
     "Unavailable in the current context.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inte tillgängligt i det aktuella sammanhanget."}}}},
     "Unavailable in the current window.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inte tillgängligt i det aktuella fönstret."}}}},
     "Unavailable while Threading is in recovery mode.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inte tillgängligt när Threading är i återställningsläge."}}}},
