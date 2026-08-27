@@ -111,19 +111,116 @@ final class ExtensionHostService {
         let error: String
     }
 
+    /// Every path this host answers, and the only place a `/v1/…` literal is written.
+    ///
+    /// The route table used to be spelled three times: a block of path constants, the `||`
+    /// chain that decides whether an unknown path is a 404, and the dispatch `switch`. Half
+    /// the chain re-spelled its literals rather than using the constants, so the three lists
+    /// could disagree with nothing to catch it — a route added to the dispatch but missed in
+    /// the gate is silently unreachable, and the gate fails closed. Parsing here makes the
+    /// gate and the dispatch the same list by construction: `route(_:respond:)` switches over
+    /// this type with no `default:`, so a new case has to be answered.
+    ///
+    /// Payloads carry the already-decoded identifier, so no handler re-derives one from a
+    /// prefix it would have to spell again.
+    enum Route: Equatable {
+        /// Read routes share a `GET` guard and a snapshot refresh, so they are grouped rather
+        /// than repeating both in five sibling cases.
+        enum Read: Equatable {
+            case projects(String?)
+            case sessions(Session)
+            case providers(String?)
+            case accounts(String?)
+            case events
+        }
+
+        enum Session: Equatable {
+            case collection
+            case item(String)
+            case runtime(String)
+        }
+
+        case componentPatches
+        case identityResolutions
+        /// The suffix after `/v1/services/`, still unparsed: the handler answers a malformed
+        /// one with 400 *after* its capability check, which a refusal here would turn into 404.
+        case services(String)
+        /// The suffix after `/v1/companions/`, unparsed for the same reason.
+        case companions(String)
+        case networkFetch
+        case projectFilesQuery
+        /// `nil` is the collection; a value is one item, decoded and possibly empty.
+        case secrets(String?)
+        case keyValue(String?)
+        case cache(String?)
+        case read(Read)
+
+        init?(path: String) {
+            switch path {
+            case "/v1/component-patches": self = .componentPatches
+            case "/v1/identity-resolutions": self = .identityResolutions
+            case "/v1/network/fetch": self = .networkFetch
+            case "/v1/project-files/query": self = .projectFilesQuery
+            case "/v1/secrets": self = .secrets(nil)
+            case "/v1/storage/kv": self = .keyValue(nil)
+            case "/v1/storage/cache": self = .cache(nil)
+            case "/v1/projects": self = .read(.projects(nil))
+            case "/v1/sessions": self = .read(.sessions(.collection))
+            case "/v1/providers": self = .read(.providers(nil))
+            case "/v1/accounts": self = .read(.accounts(nil))
+            case "/v1/events": self = .read(.events)
+            default:
+                if let suffix = Self.suffix(of: path, after: "/v1/services/") {
+                    self = .services(suffix)
+                } else if let suffix = Self.suffix(of: path, after: "/v1/companions/") {
+                    self = .companions(suffix)
+                } else if let key = Self.identifier(of: path, after: "/v1/secrets/") {
+                    self = .secrets(key)
+                } else if let key = Self.identifier(of: path, after: "/v1/storage/kv/") {
+                    self = .keyValue(key)
+                } else if let name = Self.identifier(of: path, after: "/v1/storage/cache/") {
+                    self = .cache(name)
+                } else if let id = Self.identifier(of: path, after: "/v1/projects/") {
+                    self = .read(.projects(id))
+                } else if let suffix = Self.suffix(of: path, after: "/v1/sessions/") {
+                    self = .read(.sessions(Self.session(suffix: suffix, in: path)))
+                } else if let id = Self.identifier(of: path, after: "/v1/providers/") {
+                    self = .read(.providers(id))
+                } else if let id = Self.identifier(of: path, after: "/v1/accounts/") {
+                    self = .read(.accounts(id))
+                } else {
+                    return nil
+                }
+            }
+        }
+
+        private static let runtimeSuffix = "/runtime"
+
+        /// The runtime test is on the **whole path**, not on the suffix, because that is what
+        /// the dispatch it replaced did. `/v1/sessions/runtime` therefore parses as a runtime
+        /// read of the empty id — a 404 that costs `hostSessionRuntimeRead` — rather than as a
+        /// session named `runtime`. Reading it off the suffix instead would quietly move which
+        /// capability that path demands.
+        private static func session(suffix: String, in path: String) -> Session {
+            guard path.hasSuffix(runtimeSuffix) else { return .item(decoded(suffix)) }
+            return .runtime(decoded(String(suffix.dropLast(runtimeSuffix.count))))
+        }
+
+        private static func suffix(of path: String, after prefix: String) -> String? {
+            guard path.hasPrefix(prefix) else { return nil }
+            return String(path.dropFirst(prefix.count))
+        }
+
+        private static func identifier(of path: String, after prefix: String) -> String? {
+            suffix(of: path, after: prefix).map(decoded)
+        }
+
+        private static func decoded(_ value: String) -> String {
+            value.removingPercentEncoding ?? value
+        }
+    }
+
     private static let host = "127.0.0.1"
-    private static let componentPatchesPath = "/v1/component-patches"
-    private static let identityResolutionsPath = "/v1/identity-resolutions"
-    private static let servicesPathPrefix = "/v1/services/"
-    private static let companionsPathPrefix = "/v1/companions/"
-    private static let networkFetchPath = "/v1/network/fetch"
-    private static let projectFilesQueryPath = "/v1/project-files/query"
-    private static let secretsPath = "/v1/secrets"
-    private static let secretsPathPrefix = "/v1/secrets/"
-    private static let keyValuePath = "/v1/storage/kv"
-    private static let keyValuePathPrefix = "/v1/storage/kv/"
-    private static let cachePath = "/v1/storage/cache"
-    private static let cachePathPrefix = "/v1/storage/cache/"
     /// A brokered cache write is base64 in JSON, which inflates the entry by a third. The
     /// allowance is the entry cap plus that inflation and the envelope, and still well under
     /// `MCPDefaults.maximumRequestBytes`.
@@ -479,29 +576,10 @@ final class ExtensionHostService {
             respond(jsonFailure(status: 400, reason: "Bad Request", "Invalid request path."))
             return
         }
-        let path = components.path
-        let knownRoute = path == Self.componentPatchesPath
-            || path == Self.identityResolutionsPath
-            || path == "/v1/projects"
-            || path.hasPrefix("/v1/projects/")
-            || path == "/v1/sessions"
-            || path.hasPrefix("/v1/sessions/")
-            || path == "/v1/providers"
-            || path.hasPrefix("/v1/providers/")
-            || path == "/v1/accounts"
-            || path.hasPrefix("/v1/accounts/")
-            || path == "/v1/events"
-            || path.hasPrefix(Self.servicesPathPrefix)
-            || path.hasPrefix(Self.companionsPathPrefix)
-            || path == Self.networkFetchPath
-            || path == Self.projectFilesQueryPath
-            || path == Self.secretsPath
-            || path.hasPrefix(Self.secretsPathPrefix)
-            || path == Self.keyValuePath
-            || path.hasPrefix(Self.keyValuePathPrefix)
-            || path == Self.cachePath
-            || path.hasPrefix(Self.cachePathPrefix)
-        guard knownRoute else {
+        // The 404 comes *before* authentication, deliberately: an unknown path is refused
+        // without ever consulting the token, so an unauthenticated caller cannot map which
+        // routes exist by telling 404 from 401.
+        guard let route = Route(path: components.path) else {
             respond(.status(404, "Not Found"))
             return
         }
@@ -510,87 +588,122 @@ final class ExtensionHostService {
             return
         }
 
-        if request.method == "PUT", path == Self.componentPatchesPath {
+        // No `default:`. A case added to `Route` has to be answered here, which is the whole
+        // point of the type: the gate and the dispatch cannot drift apart any more.
+        switch route {
+        case .componentPatches:
+            guard request.method == "PUT" else {
+                respond(Self.unsupportedMethod(request))
+                return
+            }
             routeComponentPublication(request, authority: authority, respond: respond)
-            return
-        }
-        if request.method == "PUT", path == Self.identityResolutionsPath {
+
+        case .identityResolutions:
+            guard request.method == "PUT" else {
+                respond(Self.unsupportedMethod(request))
+                return
+            }
             routeIdentityPublication(request, authority: authority, respond: respond)
-            return
-        }
-        if request.method == "POST", path.hasPrefix(Self.servicesPathPrefix) {
-            routeServiceCall(request, path: path, authority: authority, respond: respond)
-            return
-        }
-        if request.method == "POST", path.hasPrefix(Self.companionsPathPrefix) {
+
+        case let .services(suffix):
+            guard request.method == "POST" else {
+                respond(Self.unsupportedMethod(request))
+                return
+            }
+            routeServiceCall(request, suffix: suffix, authority: authority, respond: respond)
+
+        case let .companions(suffix):
+            guard request.method == "POST" else {
+                respond(Self.unsupportedMethod(request))
+                return
+            }
             routeCompanionOperation(
                 request,
-                path: path,
+                suffix: suffix,
                 authority: authority,
                 respond: respond
             )
-            return
-        }
-        if request.method == "POST", path == Self.networkFetchPath {
+
+        case .networkFetch:
+            guard request.method == "POST" else {
+                respond(Self.unsupportedMethod(request))
+                return
+            }
             routeBrokeredFetch(request, authority: authority, respond: respond)
-            return
-        }
-        if request.method == "POST", path == Self.projectFilesQueryPath {
+
+        case .projectFilesQuery:
+            guard request.method == "POST" else {
+                respond(Self.unsupportedMethod(request))
+                return
+            }
             routeProjectFileQuery(request, authority: authority, respond: respond)
-            return
-        }
-        if path == Self.secretsPath || path.hasPrefix(Self.secretsPathPrefix) {
-            routeSecretRequest(
-                request,
-                path: path,
-                authority: authority,
-                respond: respond
-            )
-            return
-        }
-        if path == Self.keyValuePath || path.hasPrefix(Self.keyValuePathPrefix) {
+
+        case let .secrets(key):
+            routeSecretRequest(request, key: key, authority: authority, respond: respond)
+
+        case let .keyValue(key):
             guard require(.keyValueStorage, for: authority, respond: respond) else { return }
             storageRouter.routeKeyValue(
                 request,
-                path: path,
+                key: key,
                 extensionIdentifier: authority.extensionIdentifier,
                 respond: respond
             )
-            return
-        }
-        if path == Self.cachePath || path.hasPrefix(Self.cachePathPrefix) {
+
+        case let .cache(name):
             guard require(.cacheStorage, for: authority, respond: respond) else { return }
             storageRouter.routeCache(
                 request,
-                path: path,
+                name: name,
                 extensionIdentifier: authority.extensionIdentifier,
                 maximumRequestBytes: Self.maximumCacheRequestBytes,
                 respond: respond
             )
-            return
-        }
 
-        guard request.method == "GET" else {
-            respond(.status(405, "Method Not Allowed"))
-            return
-        }
-
-        refreshSnapshotJournal()
-
-        switch path {
-        case "/v1/projects":
-            guard require(.hostProjectsRead, for: authority, respond: respond) else { return }
-            respond(jsonResponse(ExtensionProjectSnapshotPage(
-                cursor: currentCursor,
-                projects: visibleProjects(for: authority)
-            )))
-
-        case let value where value.hasPrefix("/v1/projects/"):
-            guard require(.hostProjectsRead, for: authority, respond: respond) else { return }
-            let identifier = decodedIdentifier(
-                in: value,
-                after: "/v1/projects/"
+        case let .read(read):
+            guard request.method == "GET" else {
+                respond(.status(405, "Method Not Allowed"))
+                return
+            }
+            refreshSnapshotJournal()
+            routeSnapshotRead(
+                read,
+                queryItems: components.queryItems ?? [],
+                authority: authority,
+                respond: respond
             )
+        }
+    }
+
+    /// What a known route answers a method it does not implement.
+    ///
+    /// `GET` is 404 rather than 405, which looks wrong until you follow the code this replaced:
+    /// a `GET` of a write-only route fell past the method-matched `if` chain, through the read
+    /// `switch`, and out of its `default:`. Preserved deliberately so unifying the gate and the
+    /// dispatch changed no response anybody could observe.
+    private static func unsupportedMethod(_ request: HTTPRequest) -> HTTPResponse {
+        request.method == "GET"
+            ? .status(404, "Not Found")
+            : .status(405, "Method Not Allowed")
+    }
+
+    /// The `GET`-only snapshot reads, answered from the journal `route(_:respond:)` refreshed.
+    private func routeSnapshotRead(
+        _ read: Route.Read,
+        queryItems: [URLQueryItem],
+        authority: Authority,
+        respond: @escaping @Sendable (HTTPResponse) -> Void
+    ) {
+        switch read {
+        case let .projects(identifier):
+            guard require(.hostProjectsRead, for: authority, respond: respond) else { return }
+            guard let identifier else {
+                respond(jsonResponse(ExtensionProjectSnapshotPage(
+                    cursor: currentCursor,
+                    projects: visibleProjects(for: authority)
+                )))
+                return
+            }
             guard !identifier.isEmpty, let project = projectSnapshots[identifier] else {
                 respond(jsonFailure(status: 404, reason: "Not Found", "Project not found."))
                 return
@@ -600,23 +713,87 @@ final class ExtensionHostService {
                 project: visible(project: project, for: authority)
             )))
 
-        case "/v1/sessions":
+        case let .sessions(session):
+            routeSessionRead(session, authority: authority, respond: respond)
+
+        case let .providers(identifier):
+            guard require(.hostProvidersRead, for: authority, respond: respond) else { return }
+            guard let identifier else {
+                respond(jsonResponse(ExtensionProviderSnapshotPage(
+                    cursor: currentCursor,
+                    providers: providerSnapshots.values.sorted { $0.id < $1.id }
+                )))
+                return
+            }
+            guard !identifier.isEmpty, let provider = providerSnapshots[identifier] else {
+                respond(jsonFailure(status: 404, reason: "Not Found", "Provider not found."))
+                return
+            }
+            respond(jsonResponse(ExtensionProviderSnapshotResult(
+                cursor: currentCursor,
+                provider: provider
+            )))
+
+        case let .accounts(identifier):
+            guard require(
+                .hostAccountsPresentationRead,
+                for: authority,
+                respond: respond
+            ) else { return }
+            guard let identifier else {
+                respond(jsonResponse(ExtensionAccountSnapshotPage(
+                    cursor: currentCursor,
+                    accounts: accountSnapshots.values.sorted { $0.id < $1.id }
+                )))
+                return
+            }
+            guard !identifier.isEmpty, let account = accountSnapshots[identifier] else {
+                respond(jsonFailure(status: 404, reason: "Not Found", "Account not found."))
+                return
+            }
+            respond(jsonResponse(ExtensionAccountSnapshotResult(
+                cursor: currentCursor,
+                account: account
+            )))
+
+        case .events:
+            guard require(.hostEvents, for: authority, respond: respond) else { return }
+            routeEvents(queryItems: queryItems, respond: respond)
+        }
+    }
+
+    /// The collection, one session, and one session's runtime reading — three capabilities,
+    /// so they stay separate cases rather than an optional identifier.
+    private func routeSessionRead(
+        _ session: Route.Session,
+        authority: Authority,
+        respond: @escaping @Sendable (HTTPResponse) -> Void
+    ) {
+        switch session {
+        case .collection:
             guard require(.hostSessionsRead, for: authority, respond: respond) else { return }
             respond(jsonResponse(ExtensionSessionSnapshotPage(
                 cursor: currentCursor,
                 sessions: sessionSnapshots.values.sorted { $0.id < $1.id }
             )))
 
-        case let value where value.hasPrefix("/v1/sessions/") && value.hasSuffix("/runtime"):
+        case let .item(identifier):
+            guard require(.hostSessionsRead, for: authority, respond: respond) else { return }
+            guard !identifier.isEmpty, let session = sessionSnapshots[identifier] else {
+                respond(jsonFailure(status: 404, reason: "Not Found", "Session not found."))
+                return
+            }
+            respond(jsonResponse(ExtensionSessionSnapshotResult(
+                cursor: currentCursor,
+                session: session
+            )))
+
+        case let .runtime(identifier):
             guard require(
                 .hostSessionRuntimeRead,
                 for: authority,
                 respond: respond
             ) else { return }
-            let encoded = String(
-                value.dropFirst("/v1/sessions/".count).dropLast("/runtime".count)
-            )
-            let identifier = encoded.removingPercentEncoding ?? encoded
             guard !identifier.isEmpty, sessionSnapshots[identifier] != nil else {
                 respond(jsonFailure(status: 404, reason: "Not Found", "Session not found."))
                 return
@@ -641,80 +818,6 @@ final class ExtensionHostService {
                 }
                 respond(self.jsonResponse(snapshot))
             }
-
-        case let value where value.hasPrefix("/v1/sessions/"):
-            guard require(.hostSessionsRead, for: authority, respond: respond) else { return }
-            let identifier = decodedIdentifier(
-                in: value,
-                after: "/v1/sessions/"
-            )
-            guard !identifier.isEmpty, let session = sessionSnapshots[identifier] else {
-                respond(jsonFailure(status: 404, reason: "Not Found", "Session not found."))
-                return
-            }
-            respond(jsonResponse(ExtensionSessionSnapshotResult(
-                cursor: currentCursor,
-                session: session
-            )))
-
-        case "/v1/providers":
-            guard require(.hostProvidersRead, for: authority, respond: respond) else { return }
-            respond(jsonResponse(ExtensionProviderSnapshotPage(
-                cursor: currentCursor,
-                providers: providerSnapshots.values.sorted { $0.id < $1.id }
-            )))
-
-        case let value where value.hasPrefix("/v1/providers/"):
-            guard require(.hostProvidersRead, for: authority, respond: respond) else { return }
-            let identifier = decodedIdentifier(
-                in: value,
-                after: "/v1/providers/"
-            )
-            guard !identifier.isEmpty, let provider = providerSnapshots[identifier] else {
-                respond(jsonFailure(status: 404, reason: "Not Found", "Provider not found."))
-                return
-            }
-            respond(jsonResponse(ExtensionProviderSnapshotResult(
-                cursor: currentCursor,
-                provider: provider
-            )))
-
-        case "/v1/accounts":
-            guard require(
-                .hostAccountsPresentationRead,
-                for: authority,
-                respond: respond
-            ) else { return }
-            respond(jsonResponse(ExtensionAccountSnapshotPage(
-                cursor: currentCursor,
-                accounts: accountSnapshots.values.sorted { $0.id < $1.id }
-            )))
-
-        case let value where value.hasPrefix("/v1/accounts/"):
-            guard require(
-                .hostAccountsPresentationRead,
-                for: authority,
-                respond: respond
-            ) else { return }
-            let identifier = decodedIdentifier(
-                in: value,
-                after: "/v1/accounts/"
-            )
-            guard !identifier.isEmpty, let account = accountSnapshots[identifier] else {
-                respond(jsonFailure(status: 404, reason: "Not Found", "Account not found."))
-                return
-            }
-            respond(jsonResponse(ExtensionAccountSnapshotResult(
-                cursor: currentCursor,
-                account: account
-            )))
-
-        case "/v1/events":
-            guard require(.hostEvents, for: authority, respond: respond) else { return }
-            routeEvents(queryItems: components.queryItems ?? [], respond: respond)
-
-        default:
-            respond(.status(404, "Not Found"))
         }
     }
 
@@ -781,15 +884,16 @@ final class ExtensionHostService {
         }
     }
 
+    /// `key` is `nil` for the collection and the decoded identifier for one secret.
     private func routeSecretRequest(
         _ request: HTTPRequest,
-        path: String,
+        key: String?,
         authority: Authority,
         respond: (HTTPResponse) -> Void
     ) {
         guard require(.secrets, for: authority, respond: respond) else { return }
 
-        if path == Self.secretsPath {
+        guard let key else {
             guard request.method == "GET" else {
                 respond(.status(405, "Method Not Allowed"))
                 return
@@ -818,7 +922,6 @@ final class ExtensionHostService {
             return
         }
 
-        let key = decodedIdentifier(in: path, after: Self.secretsPathPrefix)
         do {
             try ExtensionSecretConstraints.validate(key: key)
         } catch {
@@ -916,298 +1019,6 @@ final class ExtensionHostService {
         }
     }
 
-    /// Brokered key-value storage: the whole store on `GET`, one key per `PUT`/`DELETE`.
-    ///
-    /// The limits are enforced here rather than in the extension because this is where the
-    /// authority is. The SDK keeps its own pre-checks so an obvious mistake answers without a
-    /// round trip, but a client that skipped them still cannot exceed a quota.
-    private func routeKeyValueRequest(
-        _ request: HTTPRequest,
-        path: String,
-        authority: Authority,
-        respond: @escaping @Sendable (HTTPResponse) -> Void
-    ) {
-        guard require(.keyValueStorage, for: authority, respond: respond) else { return }
-        guard let keyValueStore else {
-            respond(jsonFailure(
-                status: 503,
-                reason: "Service Unavailable",
-                "Extension key-value storage is unavailable."
-            ))
-            return
-        }
-
-        if path == Self.keyValuePath {
-            guard request.method == "GET" else {
-                respond(.status(405, "Method Not Allowed"))
-                return
-            }
-            do {
-                respond(jsonResponse(ExtensionKeyValueSnapshot(
-                    values: try keyValueStore.keyValues(
-                        extensionIdentifier: authority.extensionIdentifier
-                    )
-                )))
-            } catch {
-                respond(keyValueFailure(error))
-            }
-            return
-        }
-
-        let key = decodedIdentifier(in: path, after: Self.keyValuePathPrefix)
-        guard !key.isEmpty, (try? ExtensionKeyValueStore.validate(key: key)) != nil else {
-            respond(jsonFailure(status: 400, reason: "Bad Request", "Invalid storage key."))
-            return
-        }
-
-        switch request.method {
-        case "PUT":
-            guard request.header("content-type")?
-                .lowercased()
-                .hasPrefix("application/json") == true else {
-                respond(jsonFailure(
-                    status: 415,
-                    reason: "Unsupported Media Type",
-                    "Expected application/json."
-                ))
-                return
-            }
-            guard request.body.count <= ExtensionKeyValueStore.maximumStoreBytes else {
-                respond(jsonFailure(
-                    status: 413,
-                    reason: "Payload Too Large",
-                    "The value exceeds the key-value store quota."
-                ))
-                return
-            }
-            do {
-                let write = try JSONDecoder().decode(
-                    ExtensionKeyValueWrite.self,
-                    from: request.body
-                )
-                guard write.protocolVersion
-                    == ExtensionKeyValueWrite.currentProtocolVersion else {
-                    respond(jsonFailure(
-                        status: 422,
-                        reason: "Unprocessable Content",
-                        "The key-value protocol version is unsupported."
-                    ))
-                    return
-                }
-                try keyValueStore.setKeyValue(
-                    write.value,
-                    extensionIdentifier: authority.extensionIdentifier,
-                    key: key
-                )
-                respond(.status(204, "No Content"))
-            } catch is DecodingError {
-                respond(jsonFailure(
-                    status: 400,
-                    reason: "Bad Request",
-                    "Invalid key-value request."
-                ))
-            } catch {
-                respond(keyValueFailure(error))
-            }
-
-        case "DELETE":
-            do {
-                try keyValueStore.removeKeyValue(
-                    extensionIdentifier: authority.extensionIdentifier,
-                    key: key
-                )
-                respond(.status(204, "No Content"))
-            } catch {
-                respond(keyValueFailure(error))
-            }
-
-        default:
-            respond(.status(405, "Method Not Allowed"))
-        }
-    }
-
-    /// Brokered cache storage: names on `GET` of the collection, one entry per name otherwise.
-    ///
-    /// A miss is a 200 carrying a null value rather than a 404, because a cache miss is an
-    /// ordinary answer here — Threading may reclaim any entry at any moment, and an extension
-    /// that had to tell "absent" from "refused" by status code would get that wrong.
-    private func routeCacheRequest(
-        _ request: HTTPRequest,
-        path: String,
-        authority: Authority,
-        respond: @escaping @Sendable (HTTPResponse) -> Void
-    ) {
-        guard require(.cacheStorage, for: authority, respond: respond) else { return }
-        guard let cacheStore else {
-            respond(jsonFailure(
-                status: 503,
-                reason: "Service Unavailable",
-                "Extension cache storage is unavailable."
-            ))
-            return
-        }
-
-        if path == Self.cachePath {
-            guard request.method == "GET" else {
-                respond(.status(405, "Method Not Allowed"))
-                return
-            }
-            do {
-                respond(jsonResponse(ExtensionCacheListing(
-                    names: try cacheStore.cacheNames(
-                        extensionIdentifier: authority.extensionIdentifier
-                    )
-                )))
-            } catch {
-                respond(cacheFailure(error))
-            }
-            return
-        }
-
-        let name = decodedIdentifier(in: path, after: Self.cachePathPrefix)
-        guard !name.isEmpty, (try? ExtensionCacheStore.validate(name: name)) != nil else {
-            respond(jsonFailure(status: 400, reason: "Bad Request", "Invalid cache name."))
-            return
-        }
-
-        switch request.method {
-        case "GET":
-            do {
-                respond(jsonResponse(ExtensionCacheEntry(
-                    value: try cacheStore.cacheData(
-                        extensionIdentifier: authority.extensionIdentifier,
-                        name: name
-                    )
-                )))
-            } catch {
-                respond(cacheFailure(error))
-            }
-
-        case "PUT":
-            guard request.header("content-type")?
-                .lowercased()
-                .hasPrefix("application/json") == true else {
-                respond(jsonFailure(
-                    status: 415,
-                    reason: "Unsupported Media Type",
-                    "Expected application/json."
-                ))
-                return
-            }
-            guard request.body.count <= Self.maximumCacheRequestBytes else {
-                respond(jsonFailure(
-                    status: 413,
-                    reason: "Payload Too Large",
-                    "The cache entry exceeds its size limit."
-                ))
-                return
-            }
-            do {
-                let write = try JSONDecoder().decode(
-                    ExtensionCacheWrite.self,
-                    from: request.body
-                )
-                guard write.protocolVersion
-                    == ExtensionCacheWrite.currentProtocolVersion else {
-                    respond(jsonFailure(
-                        status: 422,
-                        reason: "Unprocessable Content",
-                        "The cache protocol version is unsupported."
-                    ))
-                    return
-                }
-                guard write.value.count <= ExtensionCacheStore.maximumEntryBytes else {
-                    respond(jsonFailure(
-                        status: 413,
-                        reason: "Payload Too Large",
-                        "The cache entry exceeds its size limit."
-                    ))
-                    return
-                }
-                try cacheStore.setCacheData(
-                    write.value,
-                    extensionIdentifier: authority.extensionIdentifier,
-                    name: name
-                )
-                respond(.status(204, "No Content"))
-            } catch is DecodingError {
-                respond(jsonFailure(
-                    status: 400,
-                    reason: "Bad Request",
-                    "Invalid cache request."
-                ))
-            } catch {
-                respond(cacheFailure(error))
-            }
-
-        case "DELETE":
-            do {
-                try cacheStore.removeCacheData(
-                    extensionIdentifier: authority.extensionIdentifier,
-                    name: name
-                )
-                respond(.status(204, "No Content"))
-            } catch {
-                respond(cacheFailure(error))
-            }
-
-        default:
-            respond(.status(405, "Method Not Allowed"))
-        }
-    }
-
-    private func cacheFailure(_ error: Error) -> HTTPResponse {
-        switch error as? ExtensionStorageError {
-        case .invalidName:
-            return jsonFailure(status: 400, reason: "Bad Request", "Invalid cache name.")
-        case .quotaExceeded:
-            return jsonFailure(
-                status: 413,
-                reason: "Payload Too Large",
-                "The extension cache is full."
-            )
-        default:
-            ThreadingLogger.extensions.error(
-                "Extension cache operation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
-            return jsonFailure(
-                status: 500,
-                reason: "Internal Server Error",
-                "The extension cache is unavailable."
-            )
-        }
-    }
-
-    /// Maps the store's own errors onto the status codes the SDK translates back into the same
-    /// `ExtensionStorageError` cases the directory backing raises.
-    private func keyValueFailure(_ error: Error) -> HTTPResponse {
-        switch error as? ExtensionStorageError {
-        case .invalidKey:
-            return jsonFailure(status: 400, reason: "Bad Request", "Invalid storage key.")
-        case .tooManyKeys:
-            return jsonFailure(
-                status: 409,
-                reason: "Conflict",
-                "The key-value store is full."
-            )
-        case .quotaExceeded:
-            return jsonFailure(
-                status: 413,
-                reason: "Payload Too Large",
-                "The key-value store exceeds its quota."
-            )
-        default:
-            ThreadingLogger.extensions.error(
-                "Extension key-value operation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
-            return jsonFailure(
-                status: 500,
-                reason: "Internal Server Error",
-                "The extension key-value store is unavailable."
-            )
-        }
-    }
-
     private func secretStoreFailure(_ error: Error) -> HTTPResponse {
         ThreadingLogger.extensions.error(
                 "Extension Keychain operation failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
@@ -1219,9 +1030,12 @@ final class ExtensionHostService {
         )
     }
 
+    /// `suffix` is everything after `/v1/companions/`, still unparsed: a malformed one is a
+    /// 400 answered *after* the capability check, which a refusal in `Route` would have turned
+    /// into a 404.
     private func routeCompanionOperation(
         _ request: HTTPRequest,
-        path: String,
+        suffix: String,
         authority: Authority,
         respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
@@ -1246,7 +1060,6 @@ final class ExtensionHostService {
             return
         }
 
-        let suffix = path.dropFirst(Self.companionsPathPrefix.count)
         let parts = suffix.split(separator: "/", omittingEmptySubsequences: false)
         guard parts.count == 3,
               parts[1] == "operations",
@@ -1431,9 +1244,11 @@ final class ExtensionHostService {
         }
     }
 
+    /// `suffix` is everything after `/v1/services/`, unparsed for the same reason as
+    /// `routeCompanionOperation(_:suffix:authority:respond:)`.
     private func routeServiceCall(
         _ request: HTTPRequest,
-        path: String,
+        suffix: String,
         authority: Authority,
         respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
@@ -1457,7 +1272,6 @@ final class ExtensionHostService {
             return
         }
 
-        let suffix = path.dropFirst(Self.servicesPathPrefix.count)
         let parts = suffix.split(separator: "/", omittingEmptySubsequences: false)
         guard parts.count == 2,
               let providerIdentifier = String(parts[0]).removingPercentEncoding,
@@ -1951,11 +1765,6 @@ final class ExtensionHostService {
             nextCursor: events.last?.cursor ?? after,
             hasMore: available.count > events.count
         )))
-    }
-
-    private func decodedIdentifier(in path: String, after prefix: String) -> String {
-        let encoded = String(path.dropFirst(prefix.count))
-        return encoded.removingPercentEncoding ?? encoded
     }
 
     private func beginObservingHostData() {

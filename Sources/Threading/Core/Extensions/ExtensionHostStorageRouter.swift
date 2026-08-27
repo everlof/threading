@@ -29,9 +29,11 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
         lock.unlock()
     }
 
+    /// `key` is `nil` for the whole store and the decoded key for one entry.
+    /// `ExtensionHostService.Route` owns the parsing, so no `/v1/...` literal lives here.
     func routeKeyValue(
         _ request: HTTPRequest,
-        path: String,
+        key: String?,
         extensionIdentifier: String,
         respond: @escaping @Sendable (HTTPResponse) -> Void
     ) {
@@ -49,16 +51,17 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
             }
             respond(Self.handleKeyValue(
                 request,
-                path: path,
+                key: key,
                 extensionIdentifier: extensionIdentifier,
                 store: store
             ))
         }
     }
 
+    /// `name` is `nil` for the listing and the decoded entry name otherwise.
     func routeCache(
         _ request: HTTPRequest,
-        path: String,
+        name: String?,
         extensionIdentifier: String,
         maximumRequestBytes: Int,
         respond: @escaping @Sendable (HTTPResponse) -> Void
@@ -77,7 +80,7 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
             }
             respond(Self.handleCache(
                 request,
-                path: path,
+                name: name,
                 extensionIdentifier: extensionIdentifier,
                 maximumRequestBytes: maximumRequestBytes,
                 store: store
@@ -87,13 +90,11 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
 
     private static func handleKeyValue(
         _ request: HTTPRequest,
-        path: String,
+        key: String?,
         extensionIdentifier: String,
         store: ExtensionKeyValueStoring
     ) -> HTTPResponse {
-        let collection = "/v1/storage/kv"
-        let prefix = collection + "/"
-        if path == collection {
+        guard let key else {
             guard request.method == "GET" else {
                 return .status(405, "Method Not Allowed")
             }
@@ -106,7 +107,6 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
             }
         }
 
-        let key = decodedIdentifier(in: path, after: prefix)
         guard !key.isEmpty, (try? ExtensionKeyValueStore.validate(key: key)) != nil else {
             return failure(status: 400, reason: "Bad Request", "Invalid storage key.")
         }
@@ -175,14 +175,12 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
 
     private static func handleCache(
         _ request: HTTPRequest,
-        path: String,
+        name: String?,
         extensionIdentifier: String,
         maximumRequestBytes: Int,
         store: ExtensionCacheStoring
     ) -> HTTPResponse {
-        let collection = "/v1/storage/cache"
-        let prefix = collection + "/"
-        if path == collection {
+        guard let name else {
             guard request.method == "GET" else {
                 return .status(405, "Method Not Allowed")
             }
@@ -195,7 +193,6 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
             }
         }
 
-        let name = decodedIdentifier(in: path, after: prefix)
         guard !name.isEmpty, (try? ExtensionCacheStore.validate(name: name)) != nil else {
             return failure(status: 400, reason: "Bad Request", "Invalid cache name.")
         }
@@ -279,11 +276,6 @@ final class ExtensionHostStorageRouter: @unchecked Sendable {
         default:
             return .status(405, "Method Not Allowed")
         }
-    }
-
-    private static func decodedIdentifier(in path: String, after prefix: String) -> String {
-        let encoded = String(path.dropFirst(prefix.count))
-        return encoded.removingPercentEncoding ?? encoded
     }
 
     private static func keyValueFailure(_ error: Error) -> HTTPResponse {
