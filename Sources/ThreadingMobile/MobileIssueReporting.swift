@@ -770,16 +770,16 @@ actor MobileIssueReportOutbox {
     ///
     /// **An endpoint is stated or absent, never assumed**, which is the rule the Mac already
     /// follows and the one this side was breaking. It carried a compiled-in
-    /// `https://remote.threading.codes/v1/reports` fallback, and that host is not serving the
-    /// intake: its DNS is the registrar's parking record, and the address behind it answers a TLS
-    /// ClientHello with a handshake_failure alert and no certificate at all. That is `url.-1200`,
-    /// in a few hundred milliseconds, on every network — which is exactly what the 2026-08-21
-    /// report contains, 250 times, with not one success anywhere in the journal.
+    /// `https://remote.threading.codes/v1/reports` fallback before that host served the intake:
+    /// its registrar parking endpoint answered a TLS ClientHello with no certificate. That is
+    /// `url.-1200` in a few hundred milliseconds, on every network — exactly what the 2026-08-21
+    /// report contains 250 times, with not one success anywhere in the journal.
     ///
     /// So the fallback was not a safety net; it was a guess that could only ever fail, and it
     /// spent the phone's radio and the report's own bounded journal ring proving it. A build that
-    /// states no endpoint now writes its record and posts nothing, and setting the Info.plist key
-    /// is a release-checklist item exactly as it is for the Mac.
+    /// states no endpoint writes its record and posts nothing. Debug deliberately states none;
+    /// Release expands the source-controlled Info.plist key to the reviewed private Worker, and
+    /// the release checklist still requires a receipt from the candidate build.
     nonisolated static func configuredEndpoint(
         infoDictionary: [String: Any]? = Bundle.main.infoDictionary
     ) -> URL? {
@@ -1102,6 +1102,7 @@ extension MobileDiagnostics {
             .applicationState: applicationState(UIApplication.shared.applicationState).rawValue,
             .connectionState: connectionState(model.phase).rawValue,
             .connectionStateHistory: MobileConnectionStateLog.summary() ?? "none",
+            .attachmentPreviewHistory: MobileAttachmentPreviewLog.summary() ?? "none",
             .pairedHostCount: String(model.hosts.count),
             .visibleSessionCount: String(model.me?.sessions.count ?? 0),
             .activeScope: model.me?.share.scope.rawValue ?? "none",

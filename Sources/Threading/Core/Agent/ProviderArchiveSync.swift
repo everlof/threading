@@ -288,6 +288,10 @@ final class ProviderArchiveSync {
     static let shared = ProviderArchiveSync()
 
     typealias Completion = @MainActor @Sendable (Result<Void, ProviderArchiveFailure>) -> Void
+    typealias ProcessStopper = @MainActor (
+        _ sessionID: SessionID,
+        _ completion: @escaping @MainActor @Sendable () -> Void
+    ) -> Void
 
     private struct Candidate: Sendable {
         let sessionID: SessionID
@@ -302,6 +306,7 @@ final class ProviderArchiveSync {
 
     private let store: ProjectStore
     private let center: NotificationCenter
+    private let processStopper: ProcessStopper
     private var observations: AppEventObservations?
     private var pending = Set<SessionID>()
     private var reconciliationGeneration = 0
@@ -309,10 +314,14 @@ final class ProviderArchiveSync {
 
     init(
         store: ProjectStore = .shared,
-        center: NotificationCenter = .default
+        center: NotificationCenter = .default,
+        processStopper: @escaping ProcessStopper = { sessionID, completion in
+            PTYHostArchiveStop.run(sessionID: sessionID, completion: completion)
+        }
     ) {
         self.store = store
         self.center = center
+        self.processStopper = processStopper
     }
 
     func start() {
@@ -349,21 +358,31 @@ final class ProviderArchiveSync {
 
         guard session.kind.supports(.providerArchive),
               let transcriptID = session.resumeState.transcriptID else {
-            pending.remove(sessionID)
             switch store.setArchived(archived, for: sessionID) {
-            case .applied:
-                if archived { AgentRuntime.shared.discard(sessionID: sessionID) }
-                announceIfLocalStateChanged(
-                    sessionID: sessionID,
-                    from: session.isArchived,
-                    to: archived
-                )
-                completion(.success(()))
-            case .unchanged:
-                completion(.success(()))
+            case .applied, .unchanged:
+                let wasArchived = session.isArchived
+                let finish: @MainActor @Sendable () -> Void = { [weak self] in
+                    self?.pending.remove(sessionID)
+                    self?.announceIfLocalStateChanged(
+                        sessionID: sessionID,
+                        from: wasArchived,
+                        to: archived
+                    )
+                    completion(.success(()))
+                }
+                if archived {
+                    // A local-only provider can still be running in `threading-ptyd`. The row is
+                    // durable now; do not report the archive complete until that invisible child
+                    // has received the same stop as an in-process surface.
+                    processStopper(sessionID, finish)
+                } else {
+                    finish()
+                }
             case .targetNotFound:
+                pending.remove(sessionID)
                 completion(.failure(.sessionNotFound))
             case .persistenceRefused, .unsupportedValue:
+                pending.remove(sessionID)
                 completion(.failure(.persistenceUnavailable(processStopped: false)))
             }
             return
@@ -384,13 +403,38 @@ final class ProviderArchiveSync {
             return
         }
 
-        // Codex moves the rollout file, so its writer must be gone before the provider command.
-        // The preflight above prevents every known refusal; a later disk failure is still
-        // reported by `finishUserChange` rather than acknowledged as a successful archive.
+        // Codex moves the rollout file, so every writer must be gone before the provider command.
+        // That includes a controller cached by this process and a child `threading-ptyd` kept
+        // alive across a restart. The latter is invisible to `AgentRuntime`, so the asynchronous
+        // stop is a barrier in front of both the provider snapshot and the command.
         if archived {
-            AgentRuntime.shared.discard(sessionID: sessionID)
+            processStopper(sessionID) { [weak self] in
+                self?.continueUserChange(
+                    archives: archived,
+                    sessionID: sessionID,
+                    transcriptID: transcriptID,
+                    account: account,
+                    completion: completion
+                )
+            }
+            return
         }
+        continueUserChange(
+            archives: archived,
+            sessionID: sessionID,
+            transcriptID: transcriptID,
+            account: account,
+            completion: completion
+        )
+    }
 
+    private func continueUserChange(
+        archives: Bool,
+        sessionID: SessionID,
+        transcriptID: TranscriptID,
+        account: AgentAccount,
+        completion: @escaping Completion
+    ) {
         DispatchQueue.global(qos: .utility).async {
             let snapshot = ProviderArchiveSnapshot.read(
                 account: account,
@@ -398,16 +442,16 @@ final class ProviderArchiveSync {
             )
             Task { @MainActor [weak self] in
                 guard let self, pending.contains(sessionID) else { return }
-                if snapshot?[transcriptID].archivedValue == archived {
+                if snapshot?[transcriptID].archivedValue == archives {
                     finishUserChange(
                         sessionID: sessionID,
-                        archived: archived,
+                        archived: archives,
                         completion: completion
                     )
                     return
                 }
                 runUserCommand(
-                    archives: archived,
+                    archives: archives,
                     sessionID: sessionID,
                     transcriptID: transcriptID,
                     account: account,
@@ -585,10 +629,37 @@ final class ProviderArchiveSync {
         candidate: Candidate,
         generation: Int
     ) {
-        guard pending.insert(candidate.sessionID).inserted,
-              let session = store.session(withID: candidate.sessionID) else { return }
+        guard pending.insert(candidate.sessionID).inserted else { return }
+        guard store.session(withID: candidate.sessionID) != nil else {
+            pending.remove(candidate.sessionID)
+            return
+        }
         if archives {
-            AgentRuntime.shared.discard(sessionID: candidate.sessionID)
+            processStopper(candidate.sessionID) { [weak self] in
+                self?.continueAutomaticCommand(
+                    archives: archives,
+                    candidate: candidate,
+                    generation: generation
+                )
+            }
+            return
+        }
+        continueAutomaticCommand(
+            archives: archives,
+            candidate: candidate,
+            generation: generation
+        )
+    }
+
+    private func continueAutomaticCommand(
+        archives: Bool,
+        candidate: Candidate,
+        generation: Int
+    ) {
+        guard pending.contains(candidate.sessionID) else { return }
+        guard let session = store.session(withID: candidate.sessionID) else {
+            pending.remove(candidate.sessionID)
+            return
         }
         let command = ProviderArchiveCommand.make(
             archives: archives,

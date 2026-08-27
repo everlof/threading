@@ -404,13 +404,12 @@ final class ProjectStore {
         let account = kind.supportsAccounts
             ? AgentAccountDiscovery.account(for: kind, handle: accountHandle)
             : nil
-        let resolvedModel = model ?? AgentModels.defaultModel(for: kind, account: account)
-        let validEffort = reasoningEffort == nil
-            || AgentModels.option(
-                identifier: resolvedModel,
-                for: kind,
-                account: account
-            )?.supports(reasoningEffort: reasoningEffort) == true
+        let validEffort = AgentModels.supports(
+            reasoningEffort: reasoningEffort,
+            kind: kind,
+            model: model,
+            account: account
+        )
 
         guard validEffort,
               let index = index(ofProject: projectID),

@@ -56,11 +56,26 @@ say "Validating recorded agent scenarios"
 say "Testing UI evidence tooling"
 python3 -m unittest "${repository_directory}/scripts/tests/test_ui_evidence_tools.py"
 
+say "Testing connectivity evidence tooling"
+python3 -m unittest "${repository_directory}/scripts/tests/test_connectivity_diagnostics.py"
+
+say "Testing generated diagnostic contract"
+python3 -m unittest "${repository_directory}/scripts/tests/test_generate_diagnostic_contract.py"
+
+say "Testing mobile report intake configuration"
+python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_report_intake_configuration.py"
+
 say "Testing agent feedback audit"
 python3 "${repository_directory}/scripts/tests/test_agent_feedback_audit.py"
 
 say "Testing release tag policy"
 python3 -m unittest "${repository_directory}/scripts/tests/test_release_tag_policy.py"
+
+say "Installing ThreadingControlPlane test dependencies"
+npm --prefix "${repository_directory}/Service/ThreadingControlPlane" ci
+
+say "Testing ThreadingControlPlane"
+npm --prefix "${repository_directory}/Service/ThreadingControlPlane" test
 
 say "Testing Threading (off-screen plan, complete concurrency checking)"
 "${script_directory}/test.sh" fast \

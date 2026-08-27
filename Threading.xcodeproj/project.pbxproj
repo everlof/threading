@@ -355,6 +355,8 @@
 				ThreadingMobile/ProjectTerminalDetailView.swift,
 				ThreadingMobile/RemoteAppModel.swift,
 				ThreadingMobile/RemoteAttachmentGallery.swift,
+				ThreadingMobile/RemoteAttachmentPreviewFailure.swift,
+				ThreadingMobile/RemoteAttachmentPreviewLoad.swift,
 				ThreadingMobile/RemoteAttachmentThumbnailStore.swift,
 				ThreadingMobile/RemoteAttachmentsView.swift,
 				ThreadingMobile/RemoteBrowserFollowView.swift,
@@ -1728,6 +1730,7 @@
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				THREADING_REPORT_INTAKE_URL = "";
 			};
 			name = Debug;
 		};
@@ -1767,6 +1770,7 @@
 				SWIFT_STRICT_CONCURRENCY = complete;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
+				THREADING_REPORT_INTAKE_URL = "https://remote.threading.codes/v1/reports";
 			};
 			name = Release;
 		};

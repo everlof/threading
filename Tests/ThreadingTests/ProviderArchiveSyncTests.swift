@@ -220,6 +220,44 @@ final class ProviderArchiveSyncTests: XCTestCase {
         XCTAssertEqual(failure, .sessionNotFound)
     }
 
+    /// Local-only agents can be daemon-owned too. The durable row moves first because there is no
+    /// provider transaction to protect, but success must wait until the shared process stopper
+    /// has dealt with both the runtime cache and `threading-ptyd`.
+    @MainActor
+    func testLocalOnlyArchiveWaitsForTheProcessStopper() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("local-archive-stop-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = ProjectStore(
+            stateManager: StateManager(appSupportDirectory: directory),
+            refusesWrites: false
+        )
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        var stoppedSessionID: SessionID?
+        var releaseStop: (@MainActor @Sendable () -> Void)?
+        let synchronizer = ProviderArchiveSync(
+            store: store,
+            processStopper: { sessionID, completion in
+                stoppedSessionID = sessionID
+                releaseStop = completion
+            }
+        )
+        var received: Result<Void, ProviderArchiveFailure>?
+
+        synchronizer.setArchived(true, for: session.id) { received = $0 }
+
+        XCTAssertEqual(stoppedSessionID, session.id)
+        XCTAssertTrue(try XCTUnwrap(store.session(withID: session.id)).isArchived)
+        XCTAssertNil(received, "archive completion must wait for the daemon-owned writer")
+
+        try XCTUnwrap(releaseStop)()
+        guard case .success = try XCTUnwrap(received) else {
+            return XCTFail("the archive did not complete after its process stopped")
+        }
+    }
+
     private func rollout(in directory: URL, id: TranscriptID) -> URL {
         directory.appendingPathComponent("rollout-2026-08-08T00-00-00-\(id.rawValue).jsonl")
     }

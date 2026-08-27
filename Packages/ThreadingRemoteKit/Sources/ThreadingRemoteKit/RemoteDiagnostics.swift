@@ -1,98 +1,5 @@
 import Foundation
 
-/// A deliberately content-free diagnostic vocabulary shared by the Mac and its clients.
-///
-/// Events describe transport state, never what a person or agent wrote. Field names are an
-/// allowlist so a convenient `[String: Any]` cannot quietly turn a support report into a copy of
-/// prompts, paths, notification text, bearer tokens, or invitation URLs.
-public enum RemoteDiagnosticEvent: String, Codable, Sendable {
-    case appLaunched
-    case appBecameActive
-    case hostPairingStarted
-    case hostPairingSucceeded
-    case hostPairingFailed
-    case hostRemoved
-    /// One catalogue refresh began. `trace` joins its route attempts and final result.
-    case hostRefreshStarted
-    case hostRefreshSucceeded
-    case hostRefreshFailed
-    /// One bounded way into a host began or ended. These are lifecycle records rather than
-    /// request logs: at most the fixed route/port candidate set is represented.
-    case hostRouteStarted
-    /// One coarse, bounded stage inside an already-started route attempt.
-    case hostRouteProgress
-    case hostRouteEnded
-    case hostListenerStarted
-    case hostListenerFailed
-    /// One door of the host's listener set started answering on its addresses.
-    case hostDoorBound
-    /// One enabled door has nothing listening for it right now. The `reason` field says why.
-    case hostDoorUnreachable
-    /// This Mac minted the identity its routable listeners present. `detail` carries a short
-    /// hash of the fingerprint, never the fingerprint and never anything about the key.
-    case hostIdentityCreated
-    /// The identity was thrown away and replaced, which unpairs every device that did not
-    /// receive a rotation announcement.
-    case hostIdentityReset
-    /// A prepared successor identity became the one the listeners present.
-    case hostIdentityRotated
-    /// This Mac started advertising its listener on the local network. `origin` carries a hash of
-    /// the addresses behind the advertisement, never the addresses and never the instance name.
-    case hostDiscoveryRegistered
-    /// This Mac stopped advertising, because discovery was turned off, the LAN door closed, or
-    /// the identity behind the advertisement changed and a new registration replaced it.
-    case hostDiscoveryWithdrawn
-    /// A client saw a Threading service on the local network. `peer` is a pseudonym of the
-    /// advertised host id; the instance name and the address are never recorded.
-    case hostDiscoveryFound
-    /// A discovered service's fingerprint matched a Mac this client is already paired with, and
-    /// its address became a candidate for that Mac.
-    case hostDiscoveryMatched
-    /// A discovered service was not a Mac this client is paired with, so nothing was learned
-    /// from it. Discovery finds a known Mac's current address; it never acquires a new Mac.
-    case hostDiscoveryIgnored
-    /// A transport of the host's published the origin it is serving at, or could not.
-    ///
-    /// **Legacy names.** They were written for the Cloudflare relay, which is gone; the one
-    /// transport left behind them is the Tailscale Serve browser convenience. The cases keep
-    /// their spelling so a report groups against bundles collected before that change.
-    case relayConnected
-    case relayFailed
-    case authenticationRefused
-    case socketConnecting
-    case socketConnected
-    case socketEnded
-    case socketFailed
-    /// A failed live socket scheduled one bounded exponential retry.
-    case socketReconnectScheduled
-    case permissionDecisionSent
-    case permissionDecisionReceived
-    case notificationAuthorization
-    case apnsRegistrationSucceeded
-    case apnsRegistrationFailed
-    case notificationRegistrationStarted
-    case notificationRegistrationSucceeded
-    case notificationRegistrationFailed
-    case notificationRegistrationReceived
-    case notificationReceived
-    case notificationSuppressed
-    case notificationPresented
-    case notificationOpened
-    case pushProviderAccepted
-    case pushProviderRefused
-    case issueReportOpened
-    case issueReportExported
-    case issueReportSubmissionStarted
-    case issueReportSubmissionSucceeded
-    case issueReportSubmissionDeferred
-    case issueReportSubmissionFailed
-    case uncleanExitDetected
-    case recoveryModeEntered
-    case diagnosticSharingStarted
-    case diagnosticSharingStopped
-    case diagnosticUploadReceived
-}
-
 public enum RemoteDiagnosticLevel: String, Codable, Sendable {
     case info
     case warning
@@ -103,136 +10,6 @@ public enum RemoteDiagnosticSource: String, Codable, Sendable {
     case macOSHost
     case iOSClient
     case browserClient
-}
-
-/// Safe structural facts. Values are still bounded and stripped of controls by the journal.
-///
-/// `trace` is an opaque event/request identifier minted for correlation, never an auth token.
-/// `peer` and `session` must be locally pseudonymised before they are passed here.
-public enum RemoteDiagnosticField: String, CaseIterable, Sendable {
-    case trace
-    case providerTrace
-    case peer
-    case session
-    case kind
-    case transport
-    case result
-    case code
-    case status
-    case environment
-    case protocolVersion
-    case minimumProtocolVersion
-    case capability
-    case surface
-    case enabledKindCount
-    case recordCount
-    /// A fixed stage name such as `refresh`, `prepare`, `request`, `hello`, or `backoff`.
-    case phase
-    /// Whole milliseconds derived from a monotonic clock.
-    case durationMS
-    case timeoutMS
-    case delayMS
-    /// Coarse URL-loading phases for one bounded request. Missing durations are meaningful: a
-    /// request that reached `tcp` but has no `tcpMS` was still inside that phase when it ended.
-    case networkStage
-    case dnsMS
-    case tcpMS
-    case tlsMS
-    case serverWaitMS
-    case responseMS
-    /// Fixed URLSession tokens only; never an address, interface name, or request URL.
-    case networkProtocol
-    case networkPath
-    case connectionReused
-    /// One-based position in a bounded attempt set, and that set's fixed upper bound.
-    case attempt
-    case total
-    /// Which pass of a bounded walk an attempt belongs to, as a fixed token such as `route`,
-    /// `address` or `port`.
-    ///
-    /// `attempt` alone cannot say why a walk was long: twenty attempts against one address it had
-    /// already been told nothing was listening at, and twenty against twenty addresses, look
-    /// identical in a support report. This separates them.
-    case wave
-    case reason
-    /// A truncated hash of the address a client aimed at, or that a host advertised.
-    ///
-    /// It exists so "wrong address" and "right address, host down" stop looking identical in a
-    /// support report, and it is a hash because the address itself is a routable location of
-    /// someone's machine. Both hosts pseudonymise it the way they pseudonymise a session id;
-    /// the boundary requires `origin-` followed by exactly twelve lowercase hex digits.
-    case origin
-    /// A bounded machine token qualifying `code` or `reason`, such as the values a refused
-    /// request carried. Never prose, a path, or anything a person or an agent wrote.
-    case detail
-}
-
-/// Optional device/app context that a reporter explicitly consents to include.
-///
-/// This is a second allowlist rather than a free-form dictionary so the opt-in cannot quietly
-/// grow into device names, stable identifiers, request URLs, or conversation state.
-public enum RemoteDiagnosticExtraField: String, CaseIterable, Sendable {
-    case deviceModel
-    case interfaceIdiom
-    case locale
-    case preferredLanguage
-    case timeZone
-    case lowPowerMode
-    case thermalState
-    case physicalMemoryMB
-    case availableStorageMB
-    case displayPoints
-    case displayScale
-    case applicationState
-    case connectionState
-    /// The bounded ring of connection-state transitions behind `connectionState`.
-    ///
-    /// One snapshot value cannot tell a client that never connected from one that connected and
-    /// dropped, which are the two failures a remote support report exists to separate.
-    case connectionStateHistory
-    case pairedHostCount
-    case visibleSessionCount
-    case activeScope
-    case activeCapability
-    case notificationAuthorization
-    case notificationDelivery
-
-    // The Mac host's own facts. Every one of these is a count, an enum, or a version string —
-    // never a name, path, or anything an agent produced. That is the same rule the rest of this
-    // file follows, and it is the reason a support report can be handed to someone else without
-    // reading it first.
-    case accessibilityAuthorization
-    case screenRecordingAuthorization
-    case remoteAccessEnabled
-    case appThemeID
-    case projectCount
-    case sessionCount
-    case extensionCount
-    case extensionCompanionCount
-    case agentAccountSummary
-    case previousLaunchClean
-    case automaticUpdateChecks
-    case simulatorStreaming
-
-    // What the app's own launch history says, beside `previousLaunchClean`, which only ever
-    // describes the one launch before this one. These describe the run of them: the verdict, the
-    // state of the ledger it was read from, and how far the last launch that died actually got.
-    // Counts and enum tokens as everywhere else here — a checkpoint is a case name, and the
-    // ledger's field says whether damage was moved aside rather than where it went.
-    case crashLoopDecision
-    case launchLedger
-    case lastStartupCheckpoint
-
-    // What Apple's own delayed diagnostics saw, as counts and a covered window rather than the
-    // payloads. `metricKitLastCrash` is the exception type, signal, termination reason and app
-    // version of the newest crash MetricKit reported — never a call tree, frame, or address.
-    case metricKitDiagnostics
-    case metricKitWindow
-    case metricKitLastCrash
-
-    // The app's immediate watchdog, which survives a force-quit during the hang. Counts,
-    // duration and compile-time operation names only; sampled stacks remain owner-local.
-    case mainThreadStalls
 }
 
 public struct RemoteDiagnosticRecord: Codable, Equatable, Sendable {
@@ -348,7 +125,10 @@ public enum RemoteDiagnosticUploadPolicy {
     /// Imported values are machine tokens, never prose. Constraining the alphabet at the trust
     /// boundary prevents a compromised or buggy client from putting a prompt, path, URL or
     /// terminal line under an otherwise legitimate field name.
-    private static func allowedFieldValue(_ value: String, for key: String) -> Bool {
+    /// Shared by client-to-host uploads and public reports so a field cannot be valid at one
+    /// native boundary and rejected at the next. The generated contract owns the value class;
+    /// this function owns the concrete, content-free spelling of each class.
+    static func allowedFieldValue(_ value: String, for key: String) -> Bool {
         guard !value.isEmpty, value.utf8.count <= 160,
               value.utf8.allSatisfy({ byte in
                   (byte >= 48 && byte <= 57)
@@ -359,22 +139,19 @@ public enum RemoteDiagnosticUploadPolicy {
             return false
         }
 
-        switch RemoteDiagnosticField(rawValue: key) {
-        case .enabledKindCount, .recordCount, .protocolVersion, .minimumProtocolVersion,
-             .durationMS, .timeoutMS, .delayMS, .dnsMS, .tcpMS, .tlsMS, .serverWaitMS,
-             .responseMS, .attempt, .total:
-            return value.allSatisfy(\.isNumber)
-        case .peer:
+        guard let field = RemoteDiagnosticField(rawValue: key) else { return false }
+        switch field.validation {
+        case .unsignedInteger:
+            return value.utf8.allSatisfy { byte in byte >= 48 && byte <= 57 }
+        case .peerPseudonym:
             return isPseudonym(value, prefixes: ["peer-", "device-"])
-        case .session:
+        case .sessionPseudonym:
             return isPseudonym(value, prefixes: ["session-"])
         // Exact shape, not only a prefix: `origin-192.168.1.42` must never be mistaken for the
         // truncated SHA-256 value every shipping producer emits.
-        case .origin:
+        case .originDigest:
             return isPseudonym(value, prefixes: ["origin-"])
-        case .none:
-            return false
-        default:
+        case .token:
             return true
         }
     }
@@ -391,47 +168,7 @@ public enum RemoteDiagnosticUploadPolicy {
         _ source: RemoteDiagnosticSource,
         allows event: RemoteDiagnosticEvent
     ) -> Bool {
-        switch source {
-        case .macOSHost:
-            return false
-        case .browserClient:
-            switch event {
-            case .appLaunched,
-                 .hostPairingStarted, .hostPairingSucceeded, .hostPairingFailed,
-                 .hostRefreshStarted, .hostRefreshSucceeded, .hostRefreshFailed,
-                 .hostRouteStarted, .hostRouteProgress, .hostRouteEnded,
-                 .socketConnecting, .socketConnected, .socketEnded, .socketFailed,
-                 .socketReconnectScheduled,
-                 .diagnosticSharingStarted, .diagnosticSharingStopped:
-                return true
-            default:
-                return false
-            }
-        case .iOSClient:
-            switch event {
-            case .appLaunched, .appBecameActive,
-                 .hostPairingStarted, .hostPairingSucceeded, .hostPairingFailed, .hostRemoved,
-                 .hostRefreshStarted, .hostRefreshSucceeded, .hostRefreshFailed,
-                 .hostRouteStarted, .hostRouteProgress, .hostRouteEnded,
-                 .hostDiscoveryFound, .hostDiscoveryMatched, .hostDiscoveryIgnored,
-                 .socketConnecting, .socketConnected, .socketEnded, .socketFailed,
-                 .socketReconnectScheduled,
-                 .permissionDecisionSent,
-                 .notificationAuthorization,
-                 .apnsRegistrationSucceeded, .apnsRegistrationFailed,
-                 .notificationRegistrationStarted, .notificationRegistrationSucceeded,
-                 .notificationRegistrationFailed,
-                 .notificationReceived, .notificationSuppressed, .notificationPresented,
-                 .notificationOpened,
-                 .issueReportOpened, .issueReportExported,
-                 .issueReportSubmissionStarted, .issueReportSubmissionSucceeded,
-                 .issueReportSubmissionDeferred, .issueReportSubmissionFailed,
-                 .diagnosticSharingStarted, .diagnosticSharingStopped:
-                return true
-            default:
-                return false
-            }
-        }
+        event.allowsClientUpload(from: source)
     }
 }
 

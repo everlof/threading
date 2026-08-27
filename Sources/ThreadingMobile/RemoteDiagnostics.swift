@@ -351,6 +351,88 @@ enum MobileConnectionStateLog {
     }
 }
 
+/// The recent lifecycle of attachment previews, reduced to a closed, content-free vocabulary.
+///
+/// A snapshot cannot distinguish a page that never asked from one whose request was cancelled.
+/// This ring answers that exact triage question without putting normal preview traffic into the
+/// 5,000-record journal. Unlike connection states, repeated values are attempts and must not be
+/// coalesced. The five-character kind tokens and six-character outcomes keep every possible
+/// eight-entry value inside the public report's 160-byte field ceiling.
+@MainActor
+enum MobileAttachmentPreviewLog {
+    static let capacity = 8
+    static let maximumAgeSeconds = 99_999
+
+    enum KindToken: String, CaseIterable {
+        case image
+        case pdf
+        case html
+        case arch
+        case doc
+        case diag
+        case video
+        case media
+        case text
+        case unk
+    }
+
+    enum Outcome: String, CaseIterable {
+        case start
+        case ok
+        case fail
+        case cancel
+        case skip
+    }
+
+    private struct Entry {
+        let kind: KindToken
+        let outcome: Outcome
+        let at: Date
+    }
+
+    private static var entries: [Entry] = []
+
+    static func kindToken(for kind: RemoteAttachmentKind) -> KindToken {
+        switch kind {
+        case .image: .image
+        case .pdf: .pdf
+        case .html: .html
+        case .archive: .arch
+        case .document: .doc
+        case .diagram: .diag
+        case .video: .video
+        case .media: .media
+        case .text: .text
+        case .unknown: .unk
+        }
+    }
+
+    static func record(
+        kind: RemoteAttachmentKind,
+        outcome: Outcome,
+        at moment: Date = Date()
+    ) {
+        entries.append(Entry(kind: kindToken(for: kind), outcome: outcome, at: moment))
+        if entries.count > capacity {
+            entries.removeFirst(entries.count - capacity)
+        }
+    }
+
+    /// `<kind>.<outcome>-<secondsAgo>`, oldest first.
+    static func summary(now: Date = Date()) -> String? {
+        guard !entries.isEmpty else { return nil }
+        return entries.map { entry in
+            let age = max(0, Int(now.timeIntervalSince(entry.at)))
+            return "\(entry.kind.rawValue).\(entry.outcome.rawValue)-"
+                + "\(min(age, maximumAgeSeconds))"
+        }.joined(separator: ":")
+    }
+
+    static func reset() {
+        entries.removeAll()
+    }
+}
+
 private func reportMobileDiagnosticStorageEvent(
     _ event: RemoteDiagnosticJournalStorageEvent
 ) {

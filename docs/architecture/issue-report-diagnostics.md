@@ -13,6 +13,7 @@ credential, or device/account name into this vocabulary.
 | App launch and crash recovery | `appLaunched`, `uncleanExitDetected`, `recoveryModeEntered`; launch verdict, last checkpoint, bounded MetricKit crash tokens | `.ips` files, call trees, addresses, raw EventLog and unified log |
 | Manual, inspector and connection-recovery reporting | `issueReportOpened`, submission started/succeeded/deferred/failed; surface and trigger tokens | Inspector PNG path, full-resolution capture, clipboard contents |
 | Report delivery | One trace per idempotent report ID, 30-second HTTPS timeout, duration, structural error/status and delivered/queued/failed result; protected iOS outbox retries at launch, foreground entry and foreground connectivity return | HTTP body logging, caller address, authorization headers |
+| Attachment preview | Bounded `attachmentPreviewHistory` records start/ok/fail/cancel/skip in order; a terminal failure adds `attachmentPreviewFailed` with only kind and structural error code | Attachment name/path/id, bytes, localized error text, normal success/cancellation journal traffic |
 | Pairing and host connectivity | pairing, catalogue refresh, mutation/notification failover, discovery resolution and hosted-credential provisioning; bounded route phase, attempt/total, timeout, duration, cancellation and winning-transport tokens | invitation URLs, bearers, raw origins, host/device names, request/response bodies |
 | Remote listener and live transports | listener/door/socket lifecycle, protocol versions, explicit session and dashboard-event hello deadlines, reconnect attempt/backoff, pseudonymous peer/session tokens; hosted setup exposes only rendezvous/host-wait/offer/ICE/proxy stage names; `relayFailed` keeps its legacy name and carries a `TailscaleReadinessIssue` code beside its reason | SDP, ICE candidates or addresses, terminal/event frames and connection credentials |
 | Permission decisions | sent/received and capability/result tokens | command text, tool input, provider evidence |
@@ -20,8 +21,10 @@ credential, or device/account name into this vocabulary.
 | Optional environment | counts, enums, versions, permission states, memory/storage buckets | project/session/account names, stable identifiers, paths |
 
 The repository-root `./dev` launcher directs both Debug apps at the loopback report intake. The
-macOS `THREADING_REPORT_INTAKE_URL` override is compiled only into Debug builds; a production app
-cannot redirect reviewed customer reports through its process environment.
+macOS `THREADING_REPORT_INTAKE_URL` process override is compiled only into Debug builds; a
+production Mac app cannot redirect reviewed customer reports through its environment. The iOS
+target makes the same distinction in Xcode build settings: Debug expands the plist value to an
+empty string, while Release names `https://remote.threading.codes/v1/reports`.
 
 An endpoint is stated or absent, never assumed: with neither the Debug override nor Info.plist's
 `ThreadingReportIntakeURL`, the Mac writes its record and posts nothing, and the sheet says
@@ -29,15 +32,14 @@ An endpoint is stated or absent, never assumed: with neither the Debug override 
 delivers nothing at all, which is a release-checklist item rather than a default. See
 [`github.md`](github.md#where-a-private-report-goes-macissuereportoutbox).
 
-**The iPhone follows the same rule, and did not.** `MobileIssueReportOutbox` carried a compiled-in
-`https://remote.threading.codes/v1/reports` fallback, which is what the 2026-08-21 support report
-is full of: 250 deliveries, every one `url.-1200` in a few hundred milliseconds, and not one
-success in the whole journal. The host is not serving the intake — its DNS is the domain
-registrar's parking record, and the address behind it answers a TLS ClientHello with a
-`handshake_failure` alert and no certificate at all — so the fallback was never a safety net,
-only a guess that could not succeed, spending the phone's radio and the report's own bounded
-journal ring proving it. The fallback is gone; a phone with no stated intake keeps its records and
-makes no attempt, and the sheet says the report was saved and can be shared.
+The iPhone used to violate that rule with a compiled-in fallback aimed at this hostname before it
+served the intake. The 2026-08-21 support report contains 250 failed handshakes and no success.
+That fallback remains gone: a phone with no stated intake keeps its records, makes no attempt, and
+says the report was saved. The shipping destination is now an explicit source-controlled Release
+property in `Sources/ThreadingMobile-Info.plist` and the `ThreadingMobile` target, and
+`test_mobile_report_intake_configuration.py` keeps Debug off and Release pointed at the reviewed
+private Worker. A release-candidate receipt is still an operations check; source configuration is
+not evidence that the deployed service answered that particular build.
 
 Delivery that *is* configured now goes through `RemoteClient.deliverIssueReport`, whose session
 shares the one `RemoteCertificatePinningDelegate` with every REST call and socket. It was
@@ -53,14 +55,30 @@ delivery now earns 30 seconds, doubling to a ceiling of 15 minutes, recorded in 
 record's `attempt` and `delayMS`. A person tapping Send is a fresh instruction and never waits for
 a backoff.
 
-The Worker independently carries the same event/field allowlists. Adding a native event without
-adding and testing the corresponding intake event is incomplete because the server will reject
-the report. A platform log with no safe representation is not automatically a blind spot: it is
-local-only by design until a concrete triage question justifies a new typed token.
+The vocabulary is not mirrored by hand. The authoritative manifest is
+`Packages/ThreadingRemoteKit/Contracts/RemoteDiagnosticContract.json`; running
+`scripts/generate_diagnostic_contract.py` produces the Swift enums/policies and the Worker
+events, value classes, and source-scoped additional-detail sets. Architecture checks compare the
+generated files byte-for-byte, and CI tests the generator plus the Worker's intake suite. Adding
+a field or event anywhere else is incomplete by construction.
+
+The Worker is the one public intake; the old `web/app/api/reports/route.ts` experiment is not a
+shipping route or a second contract projection. At deploy-version skew, unknown additional-detail
+or known-event field names are dropped without reading them into the stored DTO, and an unknown
+event drops its complete record. The stored envelope carries a behavior-only contract fingerprint
+plus `droppedUnknownFieldCount` and `droppedUnknownRecordCount`, and those counts participate in
+idempotency. Known names still have every byte, alphabet, numeric, pseudonym, source, timestamp,
+record-count, and body-size check. Unknown structural object keys and malformed known values still
+reject the request. This preserves the privacy boundary while making a newer app lose one piece
+of evidence rather than the person's entire report.
+
+A platform log with no safe representation is not automatically a blind spot: it is local-only
+by design until a concrete triage question justifies a new typed token.
 
 ## Review gate for new coverage
 
 Before adding a field, state the exact triage question it answers and confirm that the value is a
-bounded count, enum, version, timestamp, or locally pseudonymised identifier. Then update the
-shared native vocabulary, Worker allowlist, contract tests, and this matrix together. Free-form
-error text belongs in local logs, never in the diagnostic journal.
+bounded count, enum, version, timestamp, or locally pseudonymised identifier. Then edit the shared
+manifest, regenerate both projections, add behavior tests, and update this matrix. Never edit a
+generated projection or add a second hand-maintained allowlist. Free-form error text belongs in
+local logs, never in the diagnostic journal.

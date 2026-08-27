@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import type { Env } from "../src/environment";
+import { diagnosticContractFingerprint } from "../src/issue-report-contract.generated";
 import { ISSUE_REPORT_BOUNDS } from "../src/issue-report-intake";
 import worker from "../src/index";
 
@@ -24,10 +25,21 @@ describe("private issue-report intake", () => {
     const envelope = await stored?.json<Record<string, unknown>>();
     expect(envelope).toMatchObject({
       receivedAt: expect.any(String),
+      diagnosticNormalization: {
+        contractFingerprint: diagnosticContractFingerprint,
+        droppedUnknownFieldCount: 0,
+        droppedUnknownRecordCount: 0,
+      },
       report: {
         id: report.id,
         description: report.description,
-        diagnostics: { source: "iOSClient" },
+        diagnostics: {
+          source: "iOSClient",
+          additionalDetails: {
+            connectionStateHistory: "connecting-3:online-1",
+            attachmentPreviewHistory: "pdf.start-3:pdf.fail-1",
+          },
+        },
       },
     });
     expect(stored?.customMetadata).toMatchObject({
@@ -36,6 +48,7 @@ describe("private issue-report intake", () => {
       source: "iOSClient",
       trigger: "diagnostics",
       kind: "diagnostics",
+      diagnosticContract: diagnosticContractFingerprint,
     });
 
     const publicRead = await worker.fetch(new Request(
@@ -88,7 +101,7 @@ describe("private issue-report intake", () => {
     expect(await todayCount()).toBe(afterFirst);
   });
 
-  it("rejects unknown fields and content-bearing diagnostic values", async () => {
+  it("rejects unknown structural fields and content-bearing known diagnostic values", async () => {
     const report = makeReport();
     const unknown = await submit({ ...report, accidentalSecret: "do not retain" });
     expect(unknown.status).toBe(400);
@@ -113,6 +126,88 @@ describe("private issue-report intake", () => {
     const proseDuration = makeReport();
     proseDuration.diagnostics.records[0]!.fields.durationMS = "fifteen-seconds";
     expect((await submit(proseDuration)).status).toBe(400);
+
+    const hostEventFromIOS = makeReport();
+    hostEventFromIOS.diagnostics.records[0]!.event = "hostListenerStarted";
+    expect((await submit(hostEventFromIOS)).status).toBe(400);
+
+    const malformedFutureEvent = makeReport();
+    malformedFutureEvent.diagnostics.records.push({
+      timestamp: malformedFutureEvent.createdAt,
+      source: "iOSClient",
+      level: "warning",
+      event: "futureRouteEvent",
+      fields: "not-an-object" as unknown as Record<string, string>,
+    });
+    expect((await submit(malformedFutureEvent)).status).toBe(400);
+  });
+
+  it("drops and counts unknown diagnostic vocabulary without retaining its content", async () => {
+    const report = makeReport();
+    report.diagnostics.additionalDetails.futureConnectionDetail = "private future detail";
+    report.diagnostics.records[0]!.fields.futureRouteField = "private future field";
+    report.diagnostics.records.push({
+      timestamp: report.createdAt,
+      source: "iOSClient",
+      level: "warning",
+      event: "futureRouteEvent",
+      fields: { futurePayload: "private future payload" },
+    });
+
+    expect((await submit(report)).status).toBe(201);
+    const stored = await testEnv.ISSUE_REPORTS.get(`reports/v1/${report.id}.json`);
+    const envelope = await stored?.json<{
+      diagnosticNormalization: {
+        contractFingerprint: string;
+        droppedUnknownFieldCount: number;
+        droppedUnknownRecordCount: number;
+      };
+      report: TestReport;
+    }>();
+    expect(envelope?.diagnosticNormalization).toEqual({
+      contractFingerprint: diagnosticContractFingerprint,
+      droppedUnknownFieldCount: 2,
+      droppedUnknownRecordCount: 1,
+    });
+    expect(envelope?.report.diagnostics.additionalDetails).not.toHaveProperty(
+      "futureConnectionDetail",
+    );
+    expect(envelope?.report.diagnostics.records[0]?.fields).not.toHaveProperty(
+      "futureRouteField",
+    );
+    expect(envelope?.report.diagnostics.records).toHaveLength(1);
+    expect(JSON.stringify(envelope)).not.toContain("private future");
+  });
+
+  it("includes normalization loss in idempotency", async () => {
+    const report = makeReport();
+    report.diagnostics.records[0]!.fields.futureRouteField = "dropped";
+    expect((await submit(report)).status).toBe(201);
+
+    const changedLoss = structuredClone(report);
+    changedLoss.diagnostics.records[0]!.fields.anotherFutureField = "also-dropped";
+    const conflict = await submit(changedLoss);
+    expect(conflict.status).toBe(409);
+    await expect(conflict.json()).resolves.toMatchObject({
+      error: { code: "idempotencyConflict" },
+    });
+  });
+
+  it("rejects nonnumeric values for every duration field in the shared contract", async () => {
+    for (const field of [
+      "durationMS",
+      "timeoutMS",
+      "delayMS",
+      "dnsMS",
+      "tcpMS",
+      "tlsMS",
+      "serverWaitMS",
+      "responseMS",
+    ]) {
+      const report = makeReport();
+      report.diagnostics.records[0]!.fields[field] = "not-a-number";
+      expect((await submit(report)).status, field).toBe(400);
+    }
   });
 
   it("accepts joined client records only inside a Mac host report", async () => {
@@ -269,7 +364,11 @@ function makeReport(): TestReport {
       operatingSystem: "iOS 19.0",
       protocolVersion: 1,
       minimumProtocolVersion: 1,
-      additionalDetails: { connectionState: "connected" },
+      additionalDetails: {
+        connectionState: "connected",
+        connectionStateHistory: "connecting-3:online-1",
+        attachmentPreviewHistory: "pdf.start-3:pdf.fail-1",
+      },
       records: [{
         timestamp: now,
         source: "iOSClient",
@@ -282,6 +381,16 @@ function makeReport(): TestReport {
           result: "failed",
           durationMS: "15017",
           timeoutMS: "15000",
+          delayMS: "0",
+          networkStage: "response",
+          dnsMS: "12",
+          tcpMS: "23",
+          tlsMS: "34",
+          serverWaitMS: "45",
+          responseMS: "56",
+          networkProtocol: "h2",
+          networkPath: "wifi",
+          connectionReused: "true",
           attempt: "1",
           total: "2",
           origin: "origin-abcdef123456",

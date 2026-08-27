@@ -2,6 +2,14 @@ import type { Env } from "./environment";
 import { HttpError } from "./environment";
 import { sha256Hex } from "./crypto";
 import { assertExactKeys, json, readJSON } from "./http";
+import {
+  additionalDetailFieldsByReportSource,
+  diagnosticContractFingerprint,
+  diagnosticEvents,
+  diagnosticEventsByRecordSource,
+  diagnosticFieldValidation,
+  type DiagnosticFieldValidation,
+} from "./issue-report-contract.generated";
 
 export const ISSUE_REPORT_BOUNDS = {
   requestBytes: 64 * 1024,
@@ -44,132 +52,6 @@ const triggers = new Set([
 const reportSources = new Set(["iOSClient", "macOSHost"]);
 const recordSources = new Set(["iOSClient", "macOSHost", "browserClient"]);
 const levels = new Set(["info", "warning", "error"]);
-const events = new Set([
-  "appLaunched",
-  "appBecameActive",
-  "hostPairingStarted",
-  "hostPairingSucceeded",
-  "hostPairingFailed",
-  "hostRemoved",
-  "hostRefreshStarted",
-  "hostRefreshSucceeded",
-  "hostRefreshFailed",
-  "hostRouteStarted",
-  "hostRouteProgress",
-  "hostRouteEnded",
-  "hostListenerStarted",
-  "hostListenerFailed",
-  "hostDoorBound",
-  "hostDoorUnreachable",
-  "hostIdentityCreated",
-  "hostIdentityReset",
-  "hostIdentityRotated",
-  "hostDiscoveryRegistered",
-  "hostDiscoveryWithdrawn",
-  "hostDiscoveryFound",
-  "hostDiscoveryMatched",
-  "hostDiscoveryIgnored",
-  "relayConnected",
-  "relayFailed",
-  "authenticationRefused",
-  "socketConnecting",
-  "socketConnected",
-  "socketEnded",
-  "socketFailed",
-  "socketReconnectScheduled",
-  "permissionDecisionSent",
-  "permissionDecisionReceived",
-  "notificationAuthorization",
-  "apnsRegistrationSucceeded",
-  "apnsRegistrationFailed",
-  "notificationRegistrationStarted",
-  "notificationRegistrationSucceeded",
-  "notificationRegistrationFailed",
-  "notificationRegistrationReceived",
-  "notificationReceived",
-  "notificationSuppressed",
-  "notificationPresented",
-  "notificationOpened",
-  "pushProviderAccepted",
-  "pushProviderRefused",
-  "issueReportOpened",
-  "issueReportExported",
-  "issueReportSubmissionStarted",
-  "issueReportSubmissionSucceeded",
-  "issueReportSubmissionDeferred",
-  "issueReportSubmissionFailed",
-  "uncleanExitDetected",
-  "recoveryModeEntered",
-  "diagnosticSharingStarted",
-  "diagnosticSharingStopped",
-  "diagnosticUploadReceived",
-]);
-const diagnosticFields = new Set([
-  "trace",
-  "providerTrace",
-  "peer",
-  "session",
-  "kind",
-  "transport",
-  "result",
-  "code",
-  "status",
-  "environment",
-  "protocolVersion",
-  "minimumProtocolVersion",
-  "capability",
-  "surface",
-  "enabledKindCount",
-  "recordCount",
-  "phase",
-  "durationMS",
-  "timeoutMS",
-  "delayMS",
-  "attempt",
-  "total",
-  "wave",
-  "reason",
-  "origin",
-  "detail",
-]);
-const additionalDetailFields = new Set([
-  "deviceModel",
-  "interfaceIdiom",
-  "locale",
-  "preferredLanguage",
-  "timeZone",
-  "lowPowerMode",
-  "thermalState",
-  "physicalMemoryMB",
-  "availableStorageMB",
-  "displayPoints",
-  "displayScale",
-  "applicationState",
-  "connectionState",
-  "pairedHostCount",
-  "visibleSessionCount",
-  "activeScope",
-  "activeCapability",
-  "notificationAuthorization",
-  "notificationDelivery",
-  "accessibilityAuthorization",
-  "screenRecordingAuthorization",
-  "remoteAccessEnabled",
-  "appThemeID",
-  "projectCount",
-  "sessionCount",
-  "extensionCount",
-  "extensionCompanionCount",
-  "agentAccountSummary",
-  "previousLaunchClean",
-  "automaticUpdateChecks",
-  "crashLoopDecision",
-  "launchLedger",
-  "lastStartupCheckpoint",
-  "metricKitDiagnostics",
-  "metricKitWindow",
-  "metricKitLastCrash",
-]);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const iso8601Pattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/u;
 const machineTokenPattern = /^[A-Za-z0-9._:-]+$/u;
@@ -177,10 +59,6 @@ const unsignedIntegerPattern = /^\d+$/u;
 const peerPseudonymPattern = /^(?:peer|device)-[0-9a-f]{12}$/u;
 const sessionPseudonymPattern = /^session-[0-9a-f]{12}$/u;
 const originDigestPattern = /^origin-[0-9a-f]{12}$/u;
-const numericDiagnosticFields = new Set([
-  "enabledKindCount", "recordCount", "protocolVersion", "minimumProtocolVersion",
-  "durationMS", "timeoutMS", "delayMS", "attempt", "total",
-]);
 const base64Pattern = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
 
 interface NormalizedIssueReport {
@@ -213,6 +91,12 @@ interface NormalizedDiagnostics {
   }>;
 }
 
+interface DiagnosticNormalization {
+  contractFingerprint: string;
+  droppedUnknownFieldCount: number;
+  droppedUnknownRecordCount: number;
+}
+
 export type IssueReportKind = "report" | "crash" | "diagnostics";
 
 export async function handleIssueReport(request: Request, env: Env): Promise<Response> {
@@ -227,13 +111,27 @@ export async function handleIssueReport(request: Request, env: Env): Promise<Res
   await enforceReportRateLimit(request, env);
 
   const raw = await readJSON(request, ISSUE_REPORT_BOUNDS.requestBytes);
-  const report = normalizeReport(raw);
+  const normalization: DiagnosticNormalization = {
+    contractFingerprint: diagnosticContractFingerprint,
+    droppedUnknownFieldCount: 0,
+    droppedUnknownRecordCount: 0,
+  };
+  const report = normalizeReport(raw, normalization);
   const idempotencyKey = request.headers.get("Idempotency-Key");
   if (idempotencyKey !== report.id) {
     throw new HttpError(400, "invalidIdempotencyKey", "Idempotency-Key must match the report id");
   }
 
-  const canonical = JSON.stringify(report);
+  // Idempotency covers the normalized evidence and what version skew cost. The current contract
+  // fingerprint remains stored as provenance, but is deliberately excluded here: deploying an
+  // unrelated additive contract revision must not turn an otherwise exact retry into a conflict.
+  const canonical = JSON.stringify({
+    report,
+    diagnosticNormalization: {
+      droppedUnknownFieldCount: normalization.droppedUnknownFieldCount,
+      droppedUnknownRecordCount: normalization.droppedUnknownRecordCount,
+    },
+  });
   const digest = await sha256Hex(canonical);
   const key = `reports/v1/${report.id}.json`;
   const existing = await env.ISSUE_REPORTS.head(key);
@@ -241,7 +139,11 @@ export async function handleIssueReport(request: Request, env: Env): Promise<Res
   await reserveDailyCapacity(env);
 
   const receivedAt = new Date().toISOString();
-  const stored = encoder.encode(JSON.stringify({ receivedAt, report }));
+  const stored = encoder.encode(JSON.stringify({
+    receivedAt,
+    diagnosticNormalization: normalization,
+    report,
+  }));
   const checksum = await crypto.subtle.digest("SHA-256", stored);
   const object = await env.ISSUE_REPORTS.put(key, stored, {
     onlyIf: { etagDoesNotMatch: "*" },
@@ -254,6 +156,7 @@ export async function handleIssueReport(request: Request, env: Env): Promise<Res
       source: report.diagnostics.source,
       trigger: report.trigger,
       kind: issueReportKind(report.trigger),
+      diagnosticContract: normalization.contractFingerprint,
     },
     sha256: checksum,
   });
@@ -267,6 +170,8 @@ export async function handleIssueReport(request: Request, env: Env): Promise<Res
     reportID: report.id,
     source: report.diagnostics.source,
     alreadyReceived: false,
+    droppedUnknownFieldCount: normalization.droppedUnknownFieldCount,
+    droppedUnknownRecordCount: normalization.droppedUnknownRecordCount,
   });
   return receipt(report.id, false, 201);
 }
@@ -301,7 +206,10 @@ async function enforceReportRateLimit(request: Request, env: Env): Promise<void>
   }
 }
 
-function normalizeReport(value: Record<string, unknown>): NormalizedIssueReport {
+function normalizeReport(
+  value: Record<string, unknown>,
+  normalization: DiagnosticNormalization,
+): NormalizedIssueReport {
   assertExactKeys(value, reportKeys);
   if (value.schemaVersion !== 1) invalid("Report schema version is unsupported");
   const id = requiredString(value.id, "id", 36);
@@ -315,7 +223,10 @@ function normalizeReport(value: Record<string, unknown>): NormalizedIssueReport 
     ISSUE_REPORT_BOUNDS.descriptionBytes,
   );
   if (description.trim().length === 0) invalid("Report description is empty");
-  const diagnostics = normalizeDiagnostics(requiredObject(value.diagnostics, "diagnostics"));
+  const diagnostics = normalizeDiagnostics(
+    requiredObject(value.diagnostics, "diagnostics"),
+    normalization,
+  );
 
   const screenshot = optionalString(value.screenshotPreviewBase64, "screenshotPreviewBase64");
   const mediaType = optionalString(value.screenshotMediaType, "screenshotMediaType");
@@ -341,7 +252,10 @@ function normalizeReport(value: Record<string, unknown>): NormalizedIssueReport 
   };
 }
 
-function normalizeDiagnostics(value: Record<string, unknown>): NormalizedDiagnostics {
+function normalizeDiagnostics(
+  value: Record<string, unknown>,
+  normalization: DiagnosticNormalization,
+): NormalizedDiagnostics {
   assertExactKeys(value, diagnosticsKeys);
   if (value.schemaVersion !== 1) invalid("Diagnostic schema version is unsupported");
   const generatedAt = boundedTimestamp(value.generatedAt, "diagnostics.generatedAt");
@@ -355,17 +269,20 @@ function normalizeDiagnostics(value: Record<string, unknown>): NormalizedDiagnos
     value.minimumProtocolVersion,
     "diagnostics.minimumProtocolVersion",
   );
-  const additionalDetails = optionalStringDictionary(
+  const allowedAdditionalDetails = additionalDetailFieldsByReportSource.get(source);
+  if (!allowedAdditionalDetails) invalid("Diagnostic source has no additional-detail contract");
+  const additionalDetails = normalizeAdditionalDetails(
     value.additionalDetails,
     "diagnostics.additionalDetails",
-    additionalDetailFields,
-    false,
+    allowedAdditionalDetails,
+    normalization,
   );
   if (!Array.isArray(value.records)
     || value.records.length > ISSUE_REPORT_BOUNDS.diagnosticRecords) {
     invalid("Diagnostic records are invalid");
   }
-  const records = value.records.map((candidate, index) => {
+  const records: NormalizedDiagnostics["records"] = [];
+  value.records.forEach((candidate, index) => {
     const record = requiredObject(candidate, `diagnostics.records[${index}]`);
     assertExactKeys(record, recordKeys);
     const timestamp = boundedTimestamp(record.timestamp, `diagnostics.records[${index}].timestamp`);
@@ -377,14 +294,20 @@ function normalizeDiagnostics(value: Record<string, unknown>): NormalizedDiagnos
     const level = requiredString(record.level, "diagnostic record level", 16);
     if (!levels.has(level)) invalid("Diagnostic record level is invalid");
     const event = requiredString(record.event, "diagnostic record event", 64);
-    if (!events.has(event)) invalid("Diagnostic record event is invalid");
-    const fields = optionalStringDictionary(
-      record.fields,
+    const rawFields = requiredObject(record.fields, "diagnostic record fields");
+    if (!diagnosticEvents.has(event)) {
+      normalization.droppedUnknownRecordCount += 1;
+      return;
+    }
+    if (diagnosticEventsByRecordSource.get(recordSource)?.has(event) !== true) {
+      invalid("Diagnostic record event does not match its source");
+    }
+    const fields = normalizeDiagnosticFields(
+      rawFields,
       "diagnostic record fields",
-      diagnosticFields,
-      true,
-    ) ?? {};
-    return { timestamp, source: recordSource, level, event, fields };
+      normalization,
+    );
+    records.push({ timestamp, source: recordSource, level, event, fields });
   });
 
   const normalized: NormalizedDiagnostics = {
@@ -405,37 +328,69 @@ function normalizeDiagnostics(value: Record<string, unknown>): NormalizedDiagnos
   return normalized;
 }
 
-function optionalStringDictionary(
+function normalizeAdditionalDetails(
   value: unknown,
   name: string,
-  allowedKeys: Set<string>,
-  requireMachineTokens: boolean,
+  allowedKeys: ReadonlySet<string>,
+  normalization: DiagnosticNormalization,
 ): Record<string, string> | undefined {
   if (value === undefined || value === null) return undefined;
   const source = requiredObject(value, name);
   const result: Record<string, string> = {};
   for (const key of Object.keys(source).sort()) {
-    if (!allowedKeys.has(key)) invalid(`${name} contains an unknown field`);
+    if (!allowedKeys.has(key)) {
+      normalization.droppedUnknownFieldCount += 1;
+      continue;
+    }
     const fieldValue = safeText(source[key], `${name}.${key}`, 160);
-    if (requireMachineTokens && !machineTokenPattern.test(fieldValue)) {
-      invalid(`${name}.${key} is not a machine token`);
-    }
-    if (requireMachineTokens && numericDiagnosticFields.has(key)
-      && !unsignedIntegerPattern.test(fieldValue)) {
-      invalid(`${name}.${key} is not an unsigned integer`);
-    }
-    if (requireMachineTokens && key === "peer" && !peerPseudonymPattern.test(fieldValue)) {
-      invalid(`${name}.${key} is not pseudonymized`);
-    }
-    if (requireMachineTokens && key === "session" && !sessionPseudonymPattern.test(fieldValue)) {
-      invalid(`${name}.${key} is not pseudonymized`);
-    }
-    if (requireMachineTokens && key === "origin" && !originDigestPattern.test(fieldValue)) {
-      invalid(`${name}.${key} is not hashed`);
-    }
     result[key] = fieldValue;
   }
   return result;
+}
+
+function normalizeDiagnosticFields(
+  source: Record<string, unknown>,
+  name: string,
+  normalization: DiagnosticNormalization,
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const key of Object.keys(source).sort()) {
+    const validation = diagnosticFieldValidation.get(key);
+    if (validation === undefined) {
+      normalization.droppedUnknownFieldCount += 1;
+      continue;
+    }
+    const fieldValue = safeText(source[key], `${name}.${key}`, 160);
+    validateDiagnosticFieldValue(fieldValue, key, name, validation);
+    result[key] = fieldValue;
+  }
+  return result;
+}
+
+function validateDiagnosticFieldValue(
+  value: string,
+  key: string,
+  dictionaryName: string,
+  validation: DiagnosticFieldValidation,
+): void {
+  const name = `${dictionaryName}.${key}`;
+  if (!machineTokenPattern.test(value)) invalid(`${name} is not a machine token`);
+  switch (validation) {
+    case "unsignedInteger":
+      if (!unsignedIntegerPattern.test(value)) invalid(`${name} is not an unsigned integer`);
+      break;
+    case "peerPseudonym":
+      if (!peerPseudonymPattern.test(value)) invalid(`${name} is not pseudonymized`);
+      break;
+    case "sessionPseudonym":
+      if (!sessionPseudonymPattern.test(value)) invalid(`${name} is not pseudonymized`);
+      break;
+    case "originDigest":
+      if (!originDigestPattern.test(value)) invalid(`${name} is not hashed`);
+      break;
+    case "token":
+      break;
+  }
 }
 
 function validateJPEG(encoded: string): void {

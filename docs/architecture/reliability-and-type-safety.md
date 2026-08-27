@@ -29,6 +29,13 @@ Split a new package only when the compiler-enforced import boundary pays for its
 maintenance cost. Wire contracts already meet that bar because two processes or products must
 agree on them. Within the app, protocols and explicit dependencies are the first seam.
 
+When one vocabulary crosses language runtimes, it has one declarative owner and generated
+projections. Diagnostic events, fields, value classes, and report-source scope live in
+`RemoteDiagnosticContract.json`; Swift and Worker TypeScript are generated and checked for
+byte-for-byte freshness. A hand-maintained mirror is not a second authority. Runtime version skew
+is explicit too: the public intake drops and counts unknown diagnostic vocabulary without storing
+its values, while malformed structure and invalid known values still fail closed.
+
 ## Fail closed at every external boundary
 
 An invalid value must not accidentally become a permissive or destructive default.

@@ -120,6 +120,7 @@ struct RemoteAttachmentGallery: View {
                         client: client,
                         initialData: initialData[attachment.id],
                         loadsRemotely: loadsRemotely,
+                        isCurrentPage: attachment.id == current?.id,
                         onDecodedImageSize: { size in pixelSizes[attachment.id] = size }
                     )
                     // A page is the scroller's whole viewport, both ways: a preview sized to

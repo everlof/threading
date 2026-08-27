@@ -158,6 +158,50 @@ final class ModelNameTests: XCTestCase {
         )
     }
 
+    /// The iPhone represents the account's default model as nil on the wire while still allowing
+    /// an explicit effort. Admission must validate that effort against the resolved default;
+    /// requiring an explicit model makes the first request fail and only its refresh-backed retry
+    /// succeed.
+    func testExplicitEffortIsAcceptedForAnInheritedDefaultModel() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data(#"model = "gpt-default""#.utf8).write(
+            to: directory.appendingPathComponent(AgentDefaults.codexConfigFile)
+        )
+        try Data("""
+            {"models":[{
+              "slug":"gpt-default",
+              "display_name":"GPT Default",
+              "visibility":"list",
+              "default_reasoning_level":"medium",
+              "supported_reasoning_levels":[
+                {"effort":"medium","description":"Balanced"},
+                {"effort":"high","description":"Deep"}
+              ]
+            }]}
+            """.utf8).write(
+                to: directory.appendingPathComponent(AgentDefaults.codexModelsCacheFile)
+            )
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .standard,
+            configPath: directory.path
+        )
+
+        XCTAssertTrue(AgentModels.supports(
+            reasoningEffort: "high",
+            kind: .codex,
+            model: nil,
+            account: account
+        ))
+        XCTAssertFalse(AgentModels.supports(
+            reasoningEffort: "ultra",
+            kind: .codex,
+            model: nil,
+            account: account
+        ))
+    }
+
     func testUnsupportedAccountEffortFallsBackToTheSelectedModelsDefault() throws {
         let directory = try temporaryAccountDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

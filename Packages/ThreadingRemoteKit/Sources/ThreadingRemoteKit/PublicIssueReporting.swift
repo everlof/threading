@@ -156,9 +156,9 @@ public enum PublicIssueReportPolicy {
             return false
         }
         let allowedFields = Set(RemoteDiagnosticField.allCases.map(\.rawValue))
-        let allowedExtraFields = Set(RemoteDiagnosticExtraField.allCases.map(\.rawValue))
         guard diagnostics.additionalDetails?.allSatisfy({ key, value in
-            allowedExtraFields.contains(key)
+            RemoteDiagnosticExtraField(rawValue: key)?.allowsReportSource(diagnostics.source)
+                == true
                 && !value.isEmpty
                 && value.utf8.count <= 160
                 && !value.unicodeScalars.contains(where: {
@@ -192,18 +192,19 @@ public enum PublicIssueReportPolicy {
         case .browserClient:
             sourceIsAllowed = false
         }
+        let eventIsAllowed: Bool
+        switch record.source {
+        case .macOSHost:
+            eventIsAllowed = true
+        case .iOSClient, .browserClient:
+            eventIsAllowed = record.event.allowsClientUpload(from: record.source)
+        }
         return sourceIsAllowed
+            && eventIsAllowed
             && Set(record.fields.keys).isSubset(of: allowedFields)
             && record.timestamp.utf8.count <= 64
-            && record.fields.values.allSatisfy {
-                !$0.isEmpty
-                    && $0.utf8.count <= 160
-                    && $0.utf8.allSatisfy { byte in
-                        (byte >= 48 && byte <= 57)
-                            || (byte >= 65 && byte <= 90)
-                            || (byte >= 97 && byte <= 122)
-                            || byte == 45 || byte == 46 || byte == 58 || byte == 95
-                    }
+            && record.fields.allSatisfy { key, value in
+                RemoteDiagnosticUploadPolicy.allowedFieldValue(value, for: key)
             }
     }
 

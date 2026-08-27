@@ -55,8 +55,11 @@ Internet route is available.
 
 ## Public wire contract
 
-`Packages/ThreadingRemoteKit/PublicIssueReporting.swift` is the native contract. The Worker in
-`Service/ThreadingControlPlane/src/issue-report-intake.ts` independently revalidates and
+`Packages/ThreadingRemoteKit/Contracts/RemoteDiagnosticContract.json` is the shared diagnostic
+vocabulary. `scripts/generate_diagnostic_contract.py` projects it into Swift types/policies and
+the Worker's TypeScript sets/value classes; generated-file freshness, generator tests, native
+policy tests, and the Worker's intake suite all run in `scripts/ci.sh`. The public DTO remains in
+`PublicIssueReporting.swift`, and `issue-report-intake.ts` independently revalidates and
 normalizes every field because public input is hostile.
 
 - The description is required and capped at 10 KiB.
@@ -72,14 +75,19 @@ normalizes every field because public input is hostile.
 - The lowercase UUID is both the protected-outbox key and `Idempotency-Key`. The object key is
   server-derived; an exact retry returns its first receipt, while reuse with different content is
   a conflict.
-- Unknown keys, old/future timestamps, control characters, unapproved diagnostic fields, prose
-  in machine-token fields, mismatched sources, compressed bodies, and non-JPEG previews are
-  rejected.
+- Unknown structural object keys, old/future timestamps, control characters in known fields,
+  invalid known diagnostic values, mismatched sources, compressed bodies, and non-JPEG previews
+  are rejected. Unknown diagnostic field names are dropped and counted. An unknown event drops
+  its complete record and is counted; its unrecognized fields are never retained.
 
-The stored object is normalized JSON with a server receipt time and the accepted DTO. The service
-does not retain the caller's address or headers in the object. Worker logs contain only the random
-report ID, diagnostic source, idempotency outcome, and bounded error code—not request bodies,
-descriptions, screenshots, addresses, or credentials.
+The stored object is normalized JSON with a server receipt time, accepted DTO, behavior-only
+shared-contract fingerprint, and dropped-field/record counts. The loss counts participate in the
+idempotency digest, so two submissions that lost different amounts of evidence are not treated as
+one exact retry; the fingerprint is provenance and does not break retries across unrelated
+contract deployments. The service does not retain dropped values, the caller's address, or
+headers in the object. Worker logs contain only the random report ID, diagnostic source, idempotency outcome,
+drop counts, and bounded error code—not request bodies, descriptions, screenshots, addresses, or
+credentials.
 
 R2 emits a `PutObject` event only after commit. The bounded Queue consumer looks the object up by
 its server-derived key, validates custom metadata, and sends an idempotent triage event containing

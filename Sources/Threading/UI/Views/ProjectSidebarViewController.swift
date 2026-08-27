@@ -2041,6 +2041,35 @@ extension ProjectSidebarViewController {
     var selectedSessionID: SessionID? { selectedNode()?.sessionID }
     var selectedTerminalID: TerminalID? { selectedTerminalNode()?.terminalID }
 
+    /// The identity of the row the outline currently selects.
+    ///
+    /// Reveal is a navigation operation, so its caller needs to know whether the destination
+    /// really exists before opening the column or moving keyboard focus into it. Keeping that
+    /// answer here also prevents the window controller from reaching through the sidebar's
+    /// private outline view and rebuilding node identity from project/session state.
+    var selectedRowKey: SidebarNodeKey? {
+        let row = outlineView.selectedRow
+        guard row >= 0 else { return nil }
+        return (outlineView.item(atRow: row) as? any SidebarOutlineNode)?.sidebarKey
+    }
+
+    /// Whether keyboard navigation is currently routed to the selected sidebar list.
+    var selectionHasKeyboardFocus: Bool {
+        outlineView.window?.firstResponder === outlineView
+    }
+
+    /// Gives the selected row the keyboard after a reveal.
+    ///
+    /// A selection is required: focusing an empty outline would move the keyboard without a
+    /// destination for its arrows. The window remains the owner of key status; this only moves
+    /// its first responder, which is the same operation an ordinary click on a row performs.
+    @discardableResult
+    func focusSelection() -> Bool {
+        guard outlineView.selectedRow >= 0, let window = outlineView.window else { return false }
+        scrollSelectionIntoView()
+        return window.makeFirstResponder(outlineView)
+    }
+
     func setExpanded(_ expanded: Bool, forProject projectID: ProjectID) {
         guard let node = projectNodesByID[projectID] else { return }
         if expanded {

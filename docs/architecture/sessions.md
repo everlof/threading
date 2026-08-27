@@ -404,7 +404,9 @@ on appearance. When discovery, accounts or settings replace that catalogue, the 
 every still-advertised choice and repairs only withdrawn project, agent, account, model, effort,
 permission, speed, surface or role values. A server-side race can still reject the request between
 selection and launch; the structured REST refusal names that guard, refreshes the catalogue behind
-the alert, and leaves the prompt intact for the retry.
+the alert, and leaves the prompt intact for the retry. The account's default model remains nil on
+the wire so the runtime still owns inheritance; an explicit effort beside it is validated against
+the resolved account default, through the same admission rule local and remote creation use.
 
 ### Turn admission and completion checkpoints
 
@@ -1463,6 +1465,17 @@ UI or remote caller. Local-only runtimes pass through the same service and commi
 `AgentAccountRouting` is shared with `AgentLauncher`, so both the default account's explicit
 `env -u CODEX_HOME` and an alternate account's `CODEX_HOME=<path>` remain identical for launch and
 lifecycle commands.
+
+“The agent is stopped” includes both ownership domains. `AgentRuntime.discard` stops a controller
+cached by this process; `PTYHostArchiveStop` then performs one bounded daemon survey and stops a
+matching child that survived an app restart before the provider snapshot or `codex archive` may
+run. The distinction is load-bearing: Codex refuses to move a rollout while a surviving process
+still has it open, and the runtime cache cannot name a child it never reattached. Local-only
+runtimes cross the same stop barrier after their durable row move, so archiving Claude or another
+terminal runtime cannot leave an invisible daemon-owned process behind either. Automatic
+provider reconciliation uses the same barrier rather than growing a quieter second archive path.
+The probe also runs when the host preference is now off, because that transition intentionally
+leaves already-hosted children alive until they finish or somebody explicitly stops them.
 
 Changes from another Codex client are reconciled at launch and each
 `NSApplication.didBecomeActiveNotification`. The synchronizer batches filesystem reads per

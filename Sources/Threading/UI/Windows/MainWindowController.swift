@@ -237,7 +237,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             symbolName: SessionTitleDefaults.projectSymbolName,
             inkSource: .backdrop
         )
-        title.onReveal = { [weak self] in self?.revealActivePageInSidebar() }
+        title.onReveal = { [weak self] in
+            self?.revealActivePageInSidebar(focusingSidebar: true)
+        }
         title.onActions = { [weak self] button in self?.showSessionContextMenu(from: button) }
         title.isHidden = containerViewController.isShowingSettings
         title.maxWidth = SessionTitleDefaults.maxWidth
@@ -2937,21 +2939,56 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             || containerViewController.currentTerminalID != nil
     }
 
-    /// Clicking the active page tab shows *where* it is, by selecting and scrolling to its row in
-    /// the sidebar.
+    /// Clicking the active page title shows *where* it is, by restoring the native navigator,
+    /// opening the sidebar, selecting and scrolling to its row, then moving keyboard focus there.
     ///
-    /// The tab is always the selected one — the toolbar shows exactly one page — so "select it"
+    /// The title is always the selected one — the toolbar shows exactly one page — so "select it"
     /// has nothing left to do in the pane. What it can still answer is the question a page tab
     /// raises when the sidebar has scrolled somewhere else or the row is nested under a collapsed
     /// group: *which of these is the thing I am looking at*.
-    func revealActivePageInSidebar() {
+    /// - Returns: Whether the active page has a row that could be revealed. When an animated
+    ///   sidebar reveal is needed, keyboard focus is applied from that transition's completion.
+    @discardableResult
+    func revealActivePageInSidebar(focusingSidebar: Bool = true) -> Bool {
+        let destination: SidebarNodeKey
         if let sessionID = containerViewController.currentSessionID {
-            sidebarViewController.reveal(sessionID: sessionID)
+            destination = .session(sessionID)
         } else if let terminalID = containerViewController.currentTerminalID {
-            sidebarViewController.reveal(terminalID: terminalID)
+            destination = .terminal(terminalID)
         } else if let projectID = containerViewController.currentComposerProjectID {
-            sidebarViewController.reveal(projectID: projectID)
+            destination = .project(projectID)
+        } else {
+            return false
         }
+
+        // The title names a native sidebar row. An extension navigator may currently occupy the
+        // column, so selecting inside the hidden native controller alone reveals nothing. Switch
+        // the column first and persist that explicit navigation choice.
+        selectWorkspaceNavigator(.native)
+
+        switch destination {
+        case .session(let sessionID):
+            sidebarViewController.reveal(sessionID: sessionID)
+        case .terminal(let terminalID):
+            sidebarViewController.reveal(terminalID: terminalID)
+        case .project(let projectID):
+            sidebarViewController.reveal(projectID: projectID)
+        case .repository, .branch:
+            return false
+        }
+
+        guard sidebarViewController.selectedRowKey == destination else { return false }
+
+        if sidebarItem.isCollapsed {
+            splitViewController.setCollapsed(false, on: sidebarItem) { [weak self] in
+                guard focusingSidebar else { return }
+                _ = self?.sidebarViewController.focusSelection()
+            }
+        } else if focusingSidebar {
+            return sidebarViewController.focusSelection()
+        }
+
+        return true
     }
 
     /// Closes the active page without killing the persisted session or its running agent.

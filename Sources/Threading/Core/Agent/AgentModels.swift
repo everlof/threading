@@ -436,6 +436,28 @@ enum AgentModels {
         return option(identifier: model, for: kind, account: account)?.supportsFastMode == true
     }
 
+    /// Whether an explicit reasoning effort can be admitted for a new session.
+    ///
+    /// A nil model means "let the account choose", not "there is no model". Resolve that
+    /// account default before checking its provider-owned effort catalogue so every creation
+    /// path accepts the same model/effort pair.
+    static func supports(
+        reasoningEffort: String?,
+        kind: AgentKind,
+        model: String?,
+        account: AgentAccount?,
+        options knownOptions: [AgentModelOption]? = nil
+    ) -> Bool {
+        guard let reasoningEffort else { return true }
+        let resolvedModel = model ?? defaultModel(for: kind, account: account)
+        let modelOptions = knownOptions ?? options(for: kind, account: account)
+        return option(
+            identifier: resolvedModel,
+            for: kind,
+            among: modelOptions
+        )?.supports(reasoningEffort: reasoningEffort) == true
+    }
+
     /// The Fast setting a conversation will actually run with, or nil where "whatever the
     /// account defaults to" is the only honest answer.
     ///
@@ -502,8 +524,20 @@ enum AgentModels {
         for kind: AgentKind,
         account: AgentAccount?
     ) -> AgentModelOption? {
+        option(
+            identifier: identifier,
+            for: kind,
+            among: options(for: kind, account: account)
+        )
+    }
+
+    private static func option(
+        identifier: String?,
+        for kind: AgentKind,
+        among options: [AgentModelOption]
+    ) -> AgentModelOption? {
         guard let identifier, !identifier.isEmpty else { return nil }
-        if let known = options(for: kind, account: account).first(where: {
+        if let known = options.first(where: {
             $0.identifier == identifier
         }) {
             return known

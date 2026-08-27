@@ -54,6 +54,53 @@ final class PublicIssueReportingTests: XCTestCase {
         )))
     }
 
+    func testAdditionalDetailsUseTheGeneratedReportSourcePolicy() {
+        let attachmentHistory = makeSubmission(
+            source: .iOSClient,
+            additionalDetails: [
+                .attachmentPreviewHistory: "image.start-4:image.cancel-4",
+            ]
+        )
+        XCTAssertTrue(PublicIssueReportPolicy.accepts(attachmentHistory))
+
+        let macOnlyFieldOnIOS = makeSubmission(
+            source: .iOSClient,
+            additionalDetails: [.projectCount: "2"]
+        )
+        XCTAssertFalse(PublicIssueReportPolicy.accepts(macOnlyFieldOnIOS))
+
+        let iosOnlyFieldOnMac = makeSubmission(
+            trigger: .manual,
+            source: .macOSHost,
+            additionalDetails: [.attachmentPreviewHistory: "image.ok-1"]
+        )
+        XCTAssertFalse(PublicIssueReportPolicy.accepts(iosOnlyFieldOnMac))
+    }
+
+    func testPublicReportUsesTheSameGeneratedFieldValuePolicyAsClientUpload() throws {
+        let safe = makeSubmission()
+        XCTAssertTrue(PublicIssueReportPolicy.accepts(safe))
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(safe)) as? [String: Any]
+        )
+        var diagnostics = try XCTUnwrap(object["diagnostics"] as? [String: Any])
+        var records = try XCTUnwrap(diagnostics["records"] as? [[String: Any]])
+        var first = try XCTUnwrap(records.first)
+        var fields = try XCTUnwrap(first["fields"] as? [String: String])
+        fields[RemoteDiagnosticField.origin.rawValue] = "192.168.1.42:8760"
+        first["fields"] = fields
+        records[0] = first
+        diagnostics["records"] = records
+        object["diagnostics"] = diagnostics
+        let crafted = try JSONDecoder().decode(
+            PublicIssueReportSubmissionDTO.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertFalse(PublicIssueReportPolicy.accepts(crafted))
+    }
+
     func testBoundingDropsContentInMachineFieldsAndPolicyRejectsACraftedBypass() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "public-report-\(UUID().uuidString)",
@@ -136,6 +183,42 @@ final class PublicIssueReportingTests: XCTestCase {
         XCTAssertTrue(PublicIssueReportPolicy.accepts(submission))
     }
 
+    func testReportRecordsUseTheGeneratedEventSourcePolicy() {
+        let now = ISO8601DateFormatter().string(from: Date())
+        let directIOSReport = RemoteDiagnosticReport(
+            schemaVersion: RemoteDiagnosticReport.currentSchemaVersion,
+            generatedAt: now,
+            source: .iOSClient,
+            appVersion: "1.0",
+            appBuild: "1",
+            operatingSystem: "iOS 19",
+            protocolVersion: RemoteProtocol.current,
+            minimumProtocolVersion: RemoteProtocol.minimumSupported,
+            additionalDetails: nil,
+            records: [RemoteDiagnosticRecord(
+                timestamp: now,
+                source: .iOSClient,
+                level: .info,
+                event: .hostListenerStarted,
+                fields: ["transport": "lan"]
+            )]
+        )
+        let submission = PublicIssueReportSubmissionDTO(
+            id: UUID().uuidString.lowercased(),
+            createdAt: now,
+            trigger: .diagnostics,
+            description: "A connection failed.",
+            diagnostics: PublicIssueReportDiagnosticsDTO(bounding: directIOSReport)
+        )
+
+        XCTAssertFalse(PublicIssueReportPolicy.recordIsShareSafe(
+            directIOSReport.records[0],
+            reportSource: .iOSClient
+        ))
+        XCTAssertTrue(submission.diagnostics.records.isEmpty)
+        XCTAssertTrue(PublicIssueReportPolicy.accepts(submission))
+    }
+
     func testDurableSubmissionReadUsesTheRequestByteBoundary() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("public-report-\(UUID().uuidString)", isDirectory: true)
@@ -169,7 +252,8 @@ final class PublicIssueReportingTests: XCTestCase {
     private func makeSubmission(
         description: String = "The composer stopped responding.",
         trigger: PublicIssueReportTrigger = .diagnostics,
-        source: RemoteDiagnosticSource = .iOSClient
+        source: RemoteDiagnosticSource = .iOSClient,
+        additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
     ) -> PublicIssueReportSubmissionDTO {
         PublicIssueReportSubmissionDTO(
             id: UUID().uuidString.lowercased(),
@@ -178,7 +262,8 @@ final class PublicIssueReportingTests: XCTestCase {
             description: description,
             diagnostics: PublicIssueReportDiagnosticsDTO(bounding: makeReport(
                 recordCount: 4,
-                source: source
+                source: source,
+                additionalDetails: additionalDetails
             )),
             screenshotPreviewBase64: Data([0xff, 0xd8, 0xff]).base64EncodedString(),
             screenshotMediaType: "image/jpeg"
@@ -187,7 +272,8 @@ final class PublicIssueReportingTests: XCTestCase {
 
     private func makeReport(
         recordCount: Int,
-        source: RemoteDiagnosticSource = .iOSClient
+        source: RemoteDiagnosticSource = .iOSClient,
+        additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
     ) -> RemoteDiagnosticReport {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "public-report-\(UUID().uuidString)",
@@ -206,6 +292,7 @@ final class PublicIssueReportingTests: XCTestCase {
             operatingSystem: "iOS 19",
             protocolVersion: RemoteProtocol.current,
             minimumProtocolVersion: RemoteProtocol.minimumSupported,
+            additionalDetails: additionalDetails,
             to: directory
         )
         return try! JSONDecoder().decode(

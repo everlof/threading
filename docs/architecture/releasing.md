@@ -795,7 +795,10 @@ also what makes `generate_appcast` sign the feed at all, which the script assert
 - The repository now has its public-distribution `origin`. The release and nightly workflows
   remain dormant until the five GitHub Actions secrets named in `release.yml` are installed;
   the nightly schedule is deliberately disabled until then.
-- The iOS companion's pipeline (TestFlight first, the App Store later) is not built. The
+- The iOS companion's pipeline (TestFlight first, the App Store later) is not built. Its Release
+  target now source-controls the private issue-report intake while Debug explicitly names none;
+  CI parses both the target configuration and plist placeholder. The App Store pipeline must run
+  the release-candidate receipt/pickup/outage smoke test before submission. The
   review-context problem — App Review runs the app with no Mac reachable — is answered: the
   welcome screen's **Try the demo** enters a canned Mac (`DemoExperience`,
   `Sources/ThreadingMobile/`) whose script plays the server's half of the session socket

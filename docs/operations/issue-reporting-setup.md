@@ -27,10 +27,12 @@ production Cloudflare account has been inspected.
   and confirm a release build reports a receipt rather than **saved**. There is deliberately no
   compiled-in fallback: a build that states no endpoint writes its record and posts nothing, so
   omitting this key ships an app whose reports never leave the user's Mac.
-- [ ] Do the same for `Sources/ThreadingMobile-Info.plist`. The iPhone app follows the identical
-  rule and has no fallback either. It used to have one, aimed at `remote.threading.codes` before
-  that host was serving anything, and the 2026-08-21 support report is 250 deliveries that could
-  only ever fail against a parked domain's TLS.
+- [x] Declare the same destination for iOS in source: `Sources/ThreadingMobile-Info.plist`
+  expands `THREADING_REPORT_INTAKE_URL`, the target's Debug value is empty, and Release names the
+  deployed private Worker. `test_mobile_report_intake_configuration.py` parses the real Xcode
+  target configuration in CI so a future project edit cannot silently remove it.
+- [ ] Submit from a release-candidate iOS build and confirm a receipt, private pickup, and queued
+  retry through one forced outage. Configuration and a simulator build do not check this box.
 - [x] Confirm the intake host actually resolves to the Worker before shipping a build that names
   it: `openssl s_client -connect <host>:443 -servername <host>` must present a certificate.
   A registrar parking record answers a ClientHello with `handshake_failure` and no certificate,
@@ -46,14 +48,11 @@ reports `maxAge=2592000s` on prefix `reports/v1/`; the event notification fires 
 `https://remote.threading.codes/v1/reports`, stored at `reports/v1/<id>.json`, listed through
 authenticated developer pickup, and produced a phone notification through the alert receiver.
 
-`ThreadingReportIntakeURL` is injected by `scripts/release.sh` rather than committed, because an
-ordinary Debug build must not post to production. That script now refuses to archive unless the
-intake host presents a certificate, which is the check this file already demanded and nothing
-enforced.
-
-**The macOS half is done. The iOS half is not**: `Sources/ThreadingMobile-Info.plist` still names
-no intake, and there is deliberately no fallback, so an iOS build today writes its record and
-posts nothing.
+The Mac's `ThreadingReportIntakeURL` is injected by `scripts/release.sh`; the iOS target cannot use
+that Mac archive path, so its Debug/Release values are source-controlled in the Xcode target.
+Both keep ordinary Debug builds away from production. The Mac script refuses to archive unless
+the intake host presents a certificate. The iOS declaration and build test are now done; the
+release-candidate end-to-end receipt above remains deliberately unchecked.
 
 ## Abuse and availability
 

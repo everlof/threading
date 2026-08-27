@@ -408,6 +408,26 @@ brings it on screen, once per attachment (a failure is not retried), through a c
 asked, and a notification that names one attachment opens the gallery on it with the listing
 that resolved it as the set.
 
+**A page stops asking for its bytes only once it holds them** — never because an attempt is
+already running. `RemoteAttachmentPreviewLoad.shouldRequestBytes` is the whole rule, and it
+takes no in-flight flag, because the page shipped with one and it was how a preview could
+strand. SwiftUI cancels a lazy page's `.task` the moment the page leaves the retained window;
+the cancelled attempt is suspended off the main actor, so it cleared `isLoading` only after
+hopping back — *after* SwiftUI had already started the page's next task in the same layout
+pass. The retry read a stale `true` and returned without asking, the cancelled attempt then
+cleared the flag with nobody left to read it, and the page kept its loading placeholder for as
+long as it was on screen: no bytes, no error, no **Try Again**, and — because cancellation is
+correctly not a degradation — nothing in the journal either. The reported shape was an image
+whose ledger thumbnail drew and whose page never did, which is exactly the asymmetry: the
+ledger's own store already separates a cancelled request from a failed one so the next
+appearance retries, and cells reappear constantly while a page gets one chance.
+
+So the page takes its chance more than once. `RemoteAttachmentPreviewContent` runs its load as
+`.task(id: isCurrentPage)`, so the attachment a person is actually looking at asks again the
+moment it becomes the current page, and a page that already holds its bytes costs that nothing.
+Two overlapping requests for one 24 MB-bounded file cost a duplicate GET; a page that stops
+asking costs the person the file.
+
 When an agent opens or navigates a browser
 tab, the phone never changes screens: the account disc takes one quiet breath (a scale phase,
 since a brand mark is not a symbol and takes no symbol effect) and an unread

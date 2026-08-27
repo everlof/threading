@@ -129,6 +129,33 @@ final class RemoteDiagnosticsTests: XCTestCase {
         )))
     }
 
+    func testAttachmentPreviewFailuresCanOnlyBeUploadedByIOS() {
+        let fields: [RemoteDiagnosticField: String] = [
+            .kind: "image",
+            .code: "url.-1009",
+        ]
+        XCTAssertTrue(RemoteDiagnosticUploadPolicy.accepts(uploadRequest(
+            event: .attachmentPreviewFailed,
+            fields: fields
+        )))
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let browserRequest = RemoteDiagnosticUploadRequestDTO(
+            source: .browserClient,
+            records: [RemoteDiagnosticRecord(
+                timestamp: formatter.string(from: Date()),
+                source: .browserClient,
+                level: .warning,
+                event: .attachmentPreviewFailed,
+                fields: Dictionary(uniqueKeysWithValues: fields.map {
+                    ($0.key.rawValue, $0.value)
+                })
+            )]
+        )
+        XCTAssertFalse(RemoteDiagnosticUploadPolicy.accepts(browserRequest))
+    }
+
     private func uploadRequest(
         event: RemoteDiagnosticEvent = .socketFailed,
         fields: [RemoteDiagnosticField: String]

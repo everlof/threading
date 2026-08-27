@@ -55,6 +55,7 @@
         "BrowserAgentBridgeIntegrationTests",
         "BrowserCaptureGeometryTests",
         "BrowserOffScreenCaptureTests",
+        "SidebarRevealFocusTests",
         "ThemedControlTests\/testOnScreenTextFieldContainsOnlyItsNamedPrivateEditorBoundary()",
         "ThemedControlTests\/testPromptCanTakeFocusAndShowsItOnTheWholeSurface()",
         "ThemedPresentationTests\/testAlertDismissEndsTheSheetWithoutAButtonAnswer()",

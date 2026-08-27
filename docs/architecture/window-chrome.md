@@ -235,6 +235,15 @@ raises once the list has scrolled elsewhere). The actions did not go anywhere �
 a session, the sidebar's per-project `+` still makes one in place, and ⌘W still clears the pane.
 What went is three affordances that misdescribed them.
 
+**Reveal means the visible, keyboard-usable sidebar, not a selection in a hidden controller.**
+The column may currently contain an extension navigator or be collapsed entirely, so the title's
+press takes one ordered route: restore and persist the native navigator, select and scroll the
+active page's row, open the column, then focus the outline after the pane transition settles.
+Selecting the native outline without the first and third steps changed invisible state and looked
+like a dead control; leaving focus on the title after the reveal made the visible row unreachable
+by arrow key. `SidebarRevealFocusTests` holds both the main-window route and a genuinely key
+panel's responder chain.
+
 **The `⋯` sits against the name, not in the group at the far end.** Everything trailing in this
 row answers "what is on screen" — an editor to leave for, an account's budget, four surfaces to
 show or hide — while this menu acts on the page the header just named. Held at the other end of

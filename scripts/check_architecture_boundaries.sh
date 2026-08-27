@@ -7,6 +7,13 @@ script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
 failed=0
 
+if ! python3 "${script_directory}/generate_diagnostic_contract.py" \
+    --root "${repository_directory}" --check; then
+  echo "architecture-boundary: regenerate the diagnostic contract projections" >&2
+  echo "  with scripts/generate_diagnostic_contract.py after editing the one manifest" >&2
+  failed=1
+fi
+
 if ! python3 "${script_directory}/check_logging_boundaries.py" "${repository_directory}"; then
   failed=1
 fi

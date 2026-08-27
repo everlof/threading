@@ -3505,6 +3505,90 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         )
     }
 
+    /// A deterministic PNG whose pixels do not compress, so the encoded file lands in the size
+    /// band a real page raster occupies rather than a few hundred bytes of flat colour.
+    private static func incompressiblePNG(side: Int) throws -> Data {
+        let rep = try XCTUnwrap(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: side,
+            pixelsHigh: side,
+            bitsPerSample: 8,
+            samplesPerPixel: 3,
+            hasAlpha: false,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        let plane = try XCTUnwrap(rep.bitmapData)
+        var state: UInt64 = 0x2545_F491_4F6C_DD1D
+        for index in 0..<(rep.bytesPerRow * side) {
+            state ^= state << 13
+            state ^= state >> 7
+            state ^= state << 17
+            plane[index] = UInt8(truncatingIfNeeded: state)
+        }
+        return try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+    }
+
+    /// The gallery asks the Mac two questions about one file, and the answers have to agree.
+    ///
+    /// The pair had only a refusal test: nothing anywhere proved that an attachment the ledger
+    /// can draw a thumbnail of also comes back whole, which is exactly the asymmetry a report
+    /// described — the thumbnail arrived and the preview never did.
+    func testServesAnInCheckoutImageWholeAndAsAThumbnail() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-attachment-bytes-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .claude,
+            title: "Attachment bytes"
+        ))
+
+        let nested = temporary.appendingPathComponent("tmp/pdfs", isDirectory: true)
+        try FileManager.default.createDirectory(at: nested, withIntermediateDirectories: true)
+        let file = nested.appendingPathComponent("reception-certificate-after-1.png")
+        let png = try Self.incompressiblePNG(side: 210)
+        try png.write(to: file)
+
+        let attachment = try XCTUnwrap(SessionAttachmentStore.shared.record(
+            url: file,
+            sessionID: session.id,
+            projectRoot: temporary
+        ))
+        XCTAssertEqual(attachment.kind, .image)
+
+        let listing = try XCTUnwrap(get(
+            "/api/session/\(session.id.uuidString)/attachments",
+            bearer: "goodtoken"
+        ))
+        XCTAssertEqual(listing.status, 200)
+        let listed = try JSONDecoder().decode(RemoteAttachmentsDTO.self, from: listing.body)
+        XCTAssertEqual(listed.attachments.map(\.id), [attachment.id])
+        XCTAssertEqual(listed.attachments.first?.byteCount, Int64(png.count))
+
+        let thumbnail = try XCTUnwrap(get(
+            "/api/session/\(session.id.uuidString)/attachment-thumbnail?id=\(attachment.id)",
+            bearer: "goodtoken"
+        ))
+        XCTAssertEqual(thumbnail.status, 200, "the ledger's thumbnail is the half that worked")
+        XCTAssertFalse(thumbnail.body.isEmpty)
+
+        let whole = try XCTUnwrap(get(
+            "/api/session/\(session.id.uuidString)/attachment?id=\(attachment.id)",
+            bearer: "goodtoken"
+        ))
+        XCTAssertEqual(whole.status, 200)
+        XCTAssertEqual(whole.headers["Content-Type"] as? String, "image/png")
+        XCTAssertEqual(whole.body, png, "the preview must receive the file's exact bytes")
+    }
+
     func testAttachmentStoreDeduplicatesAndMovesLatestReferenceFirst() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -3527,6 +3611,48 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         let attachments = store.attachments(for: sessionID)
         XCTAssertEqual(attachments.map(\.relativePath), ["first.png", "second.pdf"])
         XCTAssertEqual(attachments.first?.referencedAt, instant)
+    }
+
+    /// Keeps the real HTTP/WebSocket server alive for the non-interactive iOS process-chaos
+    /// driver. The app receives this loopback URL through the same narrow DEBUG-only door as the
+    /// terminal wire lab, so no durable pairing, developer Keychain item, or production listener
+    /// is touched. The shell driver owns process faults and proves recovery from the app's
+    /// share-safe journal; this fixture owns only a bounded server lifetime.
+    func testRemoteConnectivityProcessFixtureWhenEnabled() throws {
+        let environment = ProcessInfo.processInfo.environment
+        try XCTSkipUnless(
+            environment["THREADING_REMOTE_CONNECTIVITY_FIXTURE"] == "1",
+            "Run only from the iOS connectivity process-chaos driver."
+        )
+        let launchURL = URL(fileURLWithPath: try XCTUnwrap(
+            environment["THREADING_REMOTE_CONNECTIVITY_LAUNCH_PATH"]
+        ))
+        let stopURL = URL(fileURLWithPath: try XCTUnwrap(
+            environment["THREADING_REMOTE_CONNECTIVITY_STOP_PATH"]
+        ))
+        try? FileManager.default.removeItem(at: launchURL)
+        try? FileManager.default.removeItem(at: stopURL)
+
+        let launch = ["url": "http://127.0.0.1:\(port!)/#goodtoken"]
+        try JSONSerialization.data(withJSONObject: launch, options: [.sortedKeys])
+            .write(to: launchURL, options: .atomic)
+        print("THREADING_REMOTE_CONNECTIVITY_READY \(launchURL.path)")
+
+        defer {
+            try? FileManager.default.removeItem(at: launchURL)
+            try? FileManager.default.removeItem(at: stopURL)
+        }
+        let timeout = TimeInterval(
+            environment["THREADING_REMOTE_CONNECTIVITY_TIMEOUT"] ?? ""
+        ) ?? 300
+        let deadline = Date(timeIntervalSinceNow: min(max(timeout, 30), 1_800))
+        while !FileManager.default.fileExists(atPath: stopURL.path), Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date(timeIntervalSinceNow: 0.05)))
+        }
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: stopURL.path),
+            "The connectivity process fixture timed out before its stop marker."
+        )
     }
 
     /// Hosts two token-free, provider-shaped terminal workloads for the iOS simulator lab.

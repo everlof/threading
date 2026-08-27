@@ -1050,8 +1050,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             if let effort = creation.reasoningEffort {
-                guard let option = modelOptions.first(where: { $0.identifier == creation.model }),
-                      option.supports(reasoningEffort: effort) else {
+                guard AgentModels.supports(
+                    reasoningEffort: effort,
+                    kind: kind,
+                    model: creation.model,
+                    account: account,
+                    options: modelOptions
+                ) else {
                     respond(.respond(RemoteRouter.error(
                         422,
                         "Unknown Reasoning Effort",

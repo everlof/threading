@@ -990,6 +990,16 @@ simply went away — closes and lets go. A deinit deliberately does *not* send `
 deinit has no emulator to repaint from: the seeds would be empty, and an `.exact` replay of bytes
 with no screen to put them on is worse than the honest cut a bare close produces.
 
+Archive is explicit stop even when this launch never rebuilt the controller. Before an archive
+moves provider state, `PTYHostArchiveStop` surveys the daemon for that `SessionID` and uses the same
+`PTYHostSessionStop` attach-then-kill operation as the Background Sessions page. This closes the
+ownership gap where `AgentRuntime.discard` found no cached controller, a surviving Codex child kept
+its rollout open, and `codex archive` refused the move. The provider command waits behind the
+bounded stop; local-only archives wait behind it before reporting completion as well.
+This is the deliberate exception to the off switch's no-connect rule: disabling the feature leaves
+already-hosted work alive, so an explicit archive probes the known rendezvous once even while the
+switch is off. A machine that never hosted anything gets an immediate failed socket connection.
+
 The quit question's count excludes host-backed sessions, because its message says every open
 session closes and only work in flight is lost, and neither is true of one the daemon keeps. The
 *wording* is the visibility surface's; this is only the count refusing to overstate.

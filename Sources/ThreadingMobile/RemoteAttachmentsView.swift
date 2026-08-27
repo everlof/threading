@@ -295,8 +295,13 @@ struct RemoteAttachmentPreviewContent: View {
     @Environment(\.remoteTheme) private var theme
     @State private var data: Data?
     @State private var errorMessage: String?
-    @State private var isLoading = false
+    @State private var didRecordUnavailablePreview = false
+    @State private var loadGeneration = 0
     private let loadsRemotely: Bool
+    /// Whether this page is the one the gallery is showing. A page that becomes current asks
+    /// again if it still holds nothing, which is what gives the attachment a person is actually
+    /// looking at a live attempt after a swipe cancelled its first one.
+    private let isCurrentPage: Bool
     /// Told the pixel size of a decoded image, for the gallery's detail line.
     private let onDecodedImageSize: ((CGSize) -> Void)?
 
@@ -306,12 +311,14 @@ struct RemoteAttachmentPreviewContent: View {
         client: RemoteClient,
         initialData: Data? = nil,
         loadsRemotely: Bool = true,
+        isCurrentPage: Bool = true,
         onDecodedImageSize: ((CGSize) -> Void)? = nil
     ) {
         self.sessionID = sessionID
         self.attachment = attachment
         self.client = client
         self.loadsRemotely = loadsRemotely
+        self.isCurrentPage = isCurrentPage
         self.onDecodedImageSize = onDecodedImageSize
         _data = State(initialValue: initialData)
     }
@@ -334,7 +341,7 @@ struct RemoteAttachmentPreviewContent: View {
                 // the phone needs a poster-frame or frame-stream endpoint the remote surface does
                 // not have yet, and a silent blank card would be worse than a sentence.
                 unavailable("This animation plays on your Mac.")
-            } else if Self.previewsOnMacOnly.contains(attachment.kind) {
+            } else if RemoteAttachmentPreviewLoad.previewsOnMacOnly(attachment.kind) {
                 unavailable("This file previews on your Mac.")
             } else if let data {
                 if attachment.kind == .pdf {
@@ -376,7 +383,7 @@ struct RemoteAttachmentPreviewContent: View {
             }
         }
         .background(theme.ground)
-        .task { await load() }
+        .task(id: isCurrentPage) { await load() }
     }
 
     private func reportImageSize(in data: Data) {
@@ -397,36 +404,62 @@ struct RemoteAttachmentPreviewContent: View {
         )
     }
 
-    private static let previewsOnMacOnly: Set<RemoteAttachmentKind> = [
-        .archive, .document, .diagram, .media, .video
-    ]
-
     private var unavailableIconName: String {
         RemoteAttachmentGlyph.name(for: attachment.kind)
     }
 
     @MainActor
     private func load() async {
-        // The body never renders these kinds, so their bytes are never asked for.
-        guard !Self.previewsOnMacOnly.contains(attachment.kind) else { return }
-        guard loadsRemotely else {
+        let decision = RemoteAttachmentPreviewLoad.decision(
+            kind: attachment.kind,
+            hasData: data != nil,
+            loadsRemotely: loadsRemotely
+        )
+        switch decision {
+        case .localFixture:
             if let data { reportImageSize(in: data) }
             return
+        case .alreadyLoaded:
+            return
+        case .previewUnavailable:
+            if !didRecordUnavailablePreview {
+                MobileAttachmentPreviewLog.record(kind: attachment.kind, outcome: .skip)
+                didRecordUnavailablePreview = true
+            }
+            return
+        case .requestBytes:
+            break
         }
-        guard !isLoading else { return }
-        isLoading = true
-        defer { isLoading = false }
+
+        // Holding the bytes is the only state that ends the asking. `loadGeneration` does not
+        // gate requests; it only stops an older overlapping completion from overwriting the
+        // current attempt's UI after SwiftUI has already restarted the page task.
+        loadGeneration += 1
+        let generation = loadGeneration
+        errorMessage = nil
+        MobileAttachmentPreviewLog.record(kind: attachment.kind, outcome: .start)
         do {
             let fetched = try await client.attachmentData(
                 sessionID: sessionID,
                 id: attachment.id
             )
+            MobileAttachmentPreviewLog.record(kind: attachment.kind, outcome: .ok)
+            guard generation == loadGeneration else { return }
             data = fetched
             errorMessage = nil
             reportImageSize(in: fetched)
         } catch {
-            guard let message = RemoteAttachmentPreviewFailure.message(for: error) else { return }
+            guard let message = RemoteAttachmentPreviewFailure.message(for: error) else {
+                MobileAttachmentPreviewLog.record(kind: attachment.kind, outcome: .cancel)
+                return
+            }
+            MobileAttachmentPreviewLog.record(kind: attachment.kind, outcome: .fail)
+            MobileDiagnostics.record(.attachmentPreviewFailed, level: .warning, fields: [
+                .kind: MobileAttachmentPreviewLog.kindToken(for: attachment.kind).rawValue,
+                .code: MobileDiagnostics.errorCode(error),
+            ])
             MobileDiagnostics.logDegraded(.attachmentContent, error: error)
+            guard generation == loadGeneration else { return }
             data = nil
             errorMessage = message
         }

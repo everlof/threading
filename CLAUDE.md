@@ -33,6 +33,8 @@ xcodebuild -project Threading.xcodeproj -scheme Threading -configuration Debug b
 scripts/test.sh          # fast: everything except the tests that put a window on screen
 scripts/test.sh all      # the whole ThreadingTests target
 scripts/test.sh ui       # app-level XCUITest scenarios in an isolated Cocoa home
+scripts/test-connectivity.sh software  # focused Mac + iOS Simulator connectivity contracts
+scripts/test-connectivity.sh hardware --device <name-or-UDID> --scenario automatic --non-interactive  # unattended device lifecycle lane
 
 # Run the built app (never the bare binary — build with xcodebuild, then open the bundle)
 open "$(ls -dt ~/Library/Developer/Xcode/DerivedData/Threading-*/Build/Products/Debug/Threading.app | head -1)"
@@ -456,6 +458,15 @@ Three levels, one entry point — `scripts/test.sh <level>`. **Run `fast` while 
 
 The plans live in `TestPlans/` and are attached to the `Threading` scheme, so Xcode's test-plan
 picker offers the same choice. `-only-testing:` still works through the script for a single class.
+
+Connectivity has a focused cross-platform runner outside these three ordinary levels:
+`scripts/test-connectivity.sh software|topology|all` runs the Mac contracts plus the matching
+`ThreadingMobileTests` in an iOS Simulator. `simulator-chaos` repeatedly terminates the real iOS
+app against an isolated real server, while `hardware --device <name-or-UDID>` owns physical
+faults and topology. Both process lanes verify recovery from the app's share-safe diagnostic
+journal rather than from timed UI observations. Their scope, evidence and the still-unautomated
+two-shipping-app chaos lane are documented in
+[`docs/CONNECTIVITY_TESTING.md`](docs/CONNECTIVITY_TESTING.md).
 
 **`all` is enforced on push.** `scripts/install_git_hooks.sh` installs the gate; run it once per
 clone. `core.hooksPath` points at a shared `~/.git-hooks` whose `pre-commit` already delegates to
