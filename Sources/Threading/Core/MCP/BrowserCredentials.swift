@@ -168,25 +168,13 @@ struct BrowserCredentialStore: Sendable {
     /// Reads still prompt, so an agent cannot *learn* a stored password either way — but it can
     /// plant or delete one. `isShellReachable` exists so that difference is stated in the UI and
     /// the docs instead of being a promise only some builds keep.
-    static let usesDataProtectionKeychain: Bool = {
-        let probeAccount = "codes.threading.browser.credential.probe"
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "codes.threading.browser.credential.probe",
-            kSecAttrAccount as String: probeAccount,
-            kSecUseDataProtectionKeychain as String: true,
-            kSecValueData as String: Data("probe".utf8)
-        ]
-        SecItemDelete(query as CFDictionary)
-        let status = SecItemAdd(query as CFDictionary, nil)
-        guard status == errSecSuccess else { return false }
-        SecItemDelete(query as CFDictionary)
-        return true
-    }()
+    static var usesDataProtectionKeychain: Bool {
+        KeychainStoragePolicy.usesDataProtectionKeychain
+    }
 
     /// Whether the agent's own shell could plant or delete an entry. True on a build without the
     /// entitlement — see above.
-    static var isShellReachable: Bool { !usesDataProtectionKeychain }
+    static var isShellReachable: Bool { KeychainStoragePolicy.isShellReachable }
 
     private let service: String
     private let dataProtection: Bool

@@ -124,9 +124,11 @@ credential that can form an encrypted ICE/TURN route to this Mac, and the existi
 bootstrap that must still be redeemed by the loopback remote server. The Mac exchanges the
 bootstrap for a unique 256-bit, device-bound owner credential, rotates the code, issues the
 phone's durable hosted credential, and revokes the temporary pairing route. A QR code for a bound
-door redeems the same owner bootstrap over that door. The Mac stores the device record
-in the login Keychain and iOS stores the paired host and its credentials in its Keychain. Pairing therefore
-survives a Threading restart and also survives turning Remote Access off and back on. Settings
+door redeems the same owner bootstrap over that door. The Mac stores the device record in the
+data-protection Keychain when the signed build can access it and iOS stores the paired host and its
+credentials in its Keychain. An ad-hoc Mac build falls back to the login Keychain and says so in
+Settings. Pairing therefore survives a Threading restart and also survives turning Remote Access
+off and back on. Settings
 lists each paired owner device with an explicit **Revoke** action; **Reset Everything** also
 deletes the Mac-side owner credentials. A browser owner pairing deliberately remains tab-scoped.
 Any number of named iPhones and iPads can be paired with the same Mac. They use independent
@@ -918,8 +920,9 @@ Pairing and sharing are deliberately different actions:
   session bytes through a service that promises never to see them.
 - An unused invitation expires after 24 hours. Accepting it consumes that URL and creates a new
   device-bound membership without a 24-hour timer. Unused invitations and accepted memberships
-  are stored in the Mac login Keychain, so turning Remote Access off, restarting Threading, or
-  switching a way in suspends the route without silently removing the share.
+  use the same protected-when-available Mac Keychain policy as paired owner devices, so turning
+  Remote Access off, restarting Threading, or switching a way in suspends the route without
+  silently removing the share.
   The member keeps access until **Stop Sharing** or their named membership is revoked. Create
   another invitation for another person; forwarding an already accepted invite does not clone
   the membership. A credential that cannot be restored exactly fails closed rather than creating
@@ -1455,6 +1458,14 @@ feature lock.
   failure is the one that matters. A missing or unreadable identity is a named state, never a
   quiet regenerate: a door with nothing to present binds nothing at all rather than falling back
   to cleartext, and the identity is minted only on first enable and on an explicit reset.
+- **Active owner-device and guest-share bearer records prefer the data-protection Keychain.** The
+  build probes the entitlement once; a build that cannot use it falls back to the login Keychain
+  and the Remote Access page warns that the agent's command line can add or delete entries there.
+  On upgrade, a legacy envelope is decoded and fully validated before it is copied. The protected
+  write commits before the legacy item is removed, corrupt or future-version data stays untouched,
+  and a protected empty sentinel prevents a login-Keychain item planted after the first upgraded
+  launch from becoming authority. Once present, the protected item is the only item read for
+  authorization.
 - The pairing code carries the fingerprint. `SHA-256` over the leaf certificate's DER, truncated
   to 128 bits and written base32 upper case, is 26 characters entirely inside QR's alphanumeric
   mode, and it rides as a second fragment component: `HTTPS://192.168.1.42:8760#<token>.<code>`.

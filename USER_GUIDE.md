@@ -2465,9 +2465,11 @@ change files without asking you. View only needs the chat to be running — watc
 starts an agent — so its button waits, and says why. The invitation works once and expires after
 24 hours only if unused. Acceptance creates a device-bound membership that lasts until
 **Stop Sharing** or explicit member revocation. Unused invitations and accepted memberships are
-kept in the Mac login Keychain, so disabling Remote Access or restarting the app suspends them
-without silently making collaborators rejoin. Permission approval is an explicit right for that
-member and chat; it never grants another chat, Mac settings, or the ability to create shares.
+kept in the Mac's protected Keychain when this build can access it, so disabling Remote Access or
+restarting the app suspends them without silently making collaborators rejoin. An ad-hoc build
+falls back to the login Keychain and the **Remote credentials** row says that the command line can
+add or delete entries there. Permission approval is an explicit right for that member and chat;
+it never grants another chat, Mac settings, or the ability to create shares.
 
 Paired owner devices also see **standalone terminals** in the iPhone and browser dashboard. On
 iPhone a terminal is a row in the same list as the chats, drawn the same way: where a chat's tile
@@ -2811,9 +2813,10 @@ network route; that does not prove both devices are on the same physical Wi-Fi a
 Every link is a password, but an owner pairing code is much more powerful than a one-chat guest
 link. It is a one-time bootstrap exchanged for a unique device credential kept in Keychain on
 both Mac and iPhone. Turning Remote Access off or quitting closes every connection and suspends
-both paired-owner and one-chat guest credentials. They are restored from the Mac login Keychain
-when Remote Access starts again; use **Stop Sharing** or revoke a named member/device to remove one
-permanently. A pairing on the tailnet has a stable private address and reconnects after a restart,
+both paired-owner and one-chat guest credentials. They are restored from the protected Keychain
+when available, or from the explicitly reported login-Keychain fallback, when Remote Access starts
+again; use **Stop Sharing** or revoke a named member/device to remove one permanently. A pairing on
+the tailnet has a stable private address and reconnects after a restart,
 because the port is sticky and a tailnet address does not move. If you also switch **Open in a
 browser on your tailnet** on, Threading refuses to replace an unrelated Tailscale Serve handler
 already using its HTTPS 8443 endpoint. Tailnet ACL rules written against port 8443 were written
@@ -4856,24 +4859,25 @@ Ordinary settings and work live in exactly two file locations, and both are show
 | Settings | `~/Library/Preferences/codes.threading.plist` | Themes, profiles, every preference |
 | Data | `~/Library/Application Support/Threading` | Projects, sessions, conversations, panel layouts, icons, caches |
 
-Security capabilities are separate: paired-owner device credentials live in the login Keychain,
-not in either file location or the database.
+Security capabilities are separate: paired-owner and guest-share credentials live in the
+protected Keychain when the build can access it, with an explicitly reported login-Keychain
+fallback, not in either file location or the database.
 
 Two ways to start over, because they cost different things:
 
 - **Reset Settings…** puts themes, profiles and every preference back to their defaults. Projects,
   sessions and conversations are untouched. This is the one for "something in my settings is
   wrong", and it is worth trying before the other.
-- **Reset Everything…** also clears the data directory and revokes paired-owner credentials, so
-  Threading restarts as if newly installed — no projects, no sessions, no conversations, no
-  paired devices.
+- **Reset Everything…** also clears the data directory and revokes paired-owner and guest-share
+  credentials, so Threading restarts as if newly installed — no projects, no sessions, no
+  conversations, no paired devices.
 
 **File state is not deleted.** Both resets *move* the old files into a dated folder,
 `~/Library/Application Support/Threading Resets/2026-07-30 14-32-05/`, so a reset you regret is a
 drag back rather than a loss, and a database that was corrupt is still there to be looked at. The
 folders stay until you remove them, which is the other reason the page reveals that location.
-Paired-owner credentials are deliberately not copied there — that would turn a backup folder into
-a credential export — so their revocation by Reset Everything cannot be undone from the folder.
+Remote credentials are deliberately not copied there — that would turn a backup folder into a
+credential export — so their revocation by Reset Everything cannot be undone from the folder.
 
 Threading restarts itself immediately after a reset. That is not a convenience: the running app
 holds your projects and window layout in memory and would write them straight back over the reset
@@ -4884,9 +4888,9 @@ display where it was last used. If that display is no longer connected, the wind
 the main display instead. After a force quit or crash, Threading ignores that saved size and
 display position for the next launch and opens a default-sized window in the centre instead.
 
-**Only Threading's two file locations and, for Reset Everything, its paired-owner Keychain item
-are touched.** Your agent logins, and anything the Claude or Codex CLIs keep for themselves, live
-in their own stores and are left exactly where they are — so a reset does not sign you out.
+**Only Threading's two file locations and, for Reset Everything, its remote-credential Keychain
+items are touched.** Your agent logins, and anything the Claude or Codex CLIs keep for themselves,
+live in their own stores and are left exactly where they are — so a reset does not sign you out.
 
 ### Profiles, Themes, AI
 Terminal font and cursor, colour schemes, and AI provider configuration.

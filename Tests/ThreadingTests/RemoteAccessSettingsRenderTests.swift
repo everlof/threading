@@ -985,6 +985,54 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
 
     // MARK: - Images
 
+    /// The credential warning is security copy, but it still has to survive the theme boundary:
+    /// the fallback is the longest line in this card and is the one ad-hoc builds actually show.
+    /// Keep one real settings-shell page under System and two deliberately different authored
+    /// themes, as required for a changed durable surface by `docs/THEME_BOUNDARY.md`.
+    func testRendersCredentialStorageDisclosureAcrossThemes() throws {
+        let previousTheme = AppThemeLibrary.current
+        defer {
+            AppThemePalette.set(previousTheme)
+            NotificationCenter.default.post(AppThemeDidChange(themeID: previousTheme.id))
+        }
+
+        let directory = Render.directory
+        if let directory {
+            try FileManager.default.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+        }
+        let fixtures: [(String, AppTheme, NSAppearance.Name, Bool)] = [
+            ("system-light", .system, .aqua, true),
+            ("system-protected", .system, .aqua, false),
+            ("cyberpunk", AppThemeStyles.cyberpunk, .darkAqua, true),
+            ("swiss", AppThemeStyles.swissMinimalist, .aqua, true),
+        ]
+
+        for (name, theme, appearanceName, isShellReachable) in fixtures {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            var png: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                AppThemePalette.set(theme)
+                NotificationCenter.default.post(AppThemeDidChange(themeID: theme.id))
+                let page = self.page(
+                    state: .lanBound,
+                    appearance: appearance,
+                    credentialStorageIsShellReachable: isShellReachable
+                )
+                png = self.pngData(of: page.trimmedToContent().host)
+            }
+            let data = try XCTUnwrap(png, "\(name) rendered nothing")
+            XCTAssertGreaterThan(data.count, 20_000, "\(name) rendered empty")
+            let fileName = "remote-credential-storage-\(name)"
+            attach(data, named: fileName)
+            if let directory {
+                try data.write(to: directory.appendingPathComponent("\(fileName).png"))
+            }
+        }
+    }
+
     func testRendersEveryStateToImages() throws {
         let directory = Render.directory
         if let directory {
@@ -1466,12 +1514,15 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         width: CGFloat = Render.pageWidth,
         height: CGFloat = Render.height,
         appearance: NSAppearance? = nil,
+        credentialStorageIsShellReachable: Bool = KeychainStoragePolicy.isShellReachable,
         identity: RemoteIdentityCardPresentation? = nil,
         discovery: RemoteDiscoveryPresentation? = nil,
         selecting wayIn: RemoteAccessWayIn? = nil,
         showsThreadingDirect: Bool = false
     ) -> Page {
-        let controller = RemoteAccessPreferencesViewController()
+        let controller = RemoteAccessPreferencesViewController(
+            credentialStorageIsShellReachable: credentialStorageIsShellReachable
+        )
         let window = NSWindow(
             contentRect: NSRect(
                 x: 0,

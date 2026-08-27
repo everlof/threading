@@ -540,6 +540,27 @@
       }
     },
     {
+      "id": "remote-credential-storage",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Remote credential storage disclosure",
+      "description": "The host-owned Keychain boundary reported beside owner-device and guest-share credentials in the real Remote Access settings shell.",
+      "states": ["Login-Keychain fallback warning", "Protected-Keychain guarantee"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Full Remote Access settings content"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/RemoteAccessSettingsRenderTests.swift",
+        "test": "ThreadingTests/RemoteAccessSettingsRenderTests/testRendersCredentialStorageDisclosureAcrossThemes"
+      },
+      "capture": {
+        "glob": "remote-credential-storage-*.png"
+      }
+    },
+    {
       "id": "github-settings",
       "kind": "surface",
       "status": "implemented",

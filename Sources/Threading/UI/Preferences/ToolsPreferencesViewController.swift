@@ -661,16 +661,9 @@ final class ToolsPreferencesViewController: NSViewController {
     private func browserSignInVaultAddRow() -> NSView {
         SettingsUI.row(
             title: L10n.string("Another test account"),
-            subtitle: BrowserCredentialStore.isShellReachable
-                ? L10n.string("""
-                    Stored in your login Keychain, and removed by Reset Everything. This build \
-                    cannot use the protected Keychain, so a command line on this Mac — including \
-                    an agent's — could add or delete entries here.
-                    """)
-                : L10n.string("""
-                    Stored in your protected Keychain, out of reach of the command line, and \
-                    removed by Reset Everything.
-                    """),
+            subtitle: KeychainStoragePolicy.storageDescription(
+                isShellReachable: BrowserCredentialStore.isShellReachable
+            ),
             control: SettingsUI.button(
                 "Add…",
                 target: self,

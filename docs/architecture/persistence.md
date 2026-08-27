@@ -799,17 +799,32 @@ and unwritable at runtime. So the registration is the second piece of this app's
 outside the usual containers, beside the extension helpers' quarantine flags — see
 [`releasing.md`](releasing.md#what-remains-open).
 
-Security capabilities are the deliberate third category. Native owner-device records, including
-their 256-bit bearers, live in one versioned login-Keychain item with
+Security capabilities are the deliberate third category. Native owner-device and guest-share
+records, including their 256-bit bearers, each live in one versioned generic-password item with
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`; the paired iPhone keeps its side in its own
-Keychain. A decode or write failure is fail-closed: the app neither overwrites an unreadable item
-nor issues a credential it cannot persist. Turning Remote Access off clears runtime authority but
-does not unpair devices. Named revocation writes Keychain first, then drops live authority and
-sockets, so a failed revoke cannot appear successful and return after restart.
+Keychain. Both Mac stores use the data-protection Keychain when the signed build can access it,
+under the same shared probe as the browser vault below. An ad-hoc build falls back to the login
+Keychain and Settings states that weaker boundary rather than claiming the Release guarantee.
 
-The browser's **test credentials** are the second store in that third category, and the one whose
+The move from the old login-Keychain items is validation-first. With no protected item, a valid
+legacy envelope is written to the protected Keychain before the obsolete item is removed; corrupt
+or future-version data remains untouched and fails closed. If neither item exists, an empty
+versioned protected envelope is written once. That sentinel makes the protected store
+authoritative immediately, so a login-Keychain item planted later by the agent's shell is ignored
+and removed rather than imported. Once a protected item exists every read and write ignores the
+legacy item for authority; the protected envelope is validated before legacy cleanup, and cleanup
+is retried but cannot make an already committed protected write appear to have failed to the live
+registry. Reset Everything attempts both locations explicitly.
+
+A decode or write failure is fail-closed: the app neither overwrites an unreadable item nor issues
+a credential it cannot persist. Turning Remote Access off clears runtime authority but does not
+unpair devices or revoke shares. Named revocation writes Keychain first, then drops live authority
+and sockets, so a failed revoke cannot appear successful and return after restart.
+
+The browser's **test credentials** are another store in that third category, and one whose
 placement is a decision rather than a default. `BrowserCredentialStore` writes generic-password
-items under `codes.threading.browser.credential`, preferring `kSecUseDataProtectionKeychain` —
+items under `codes.threading.browser.credential`, using the shared `KeychainStoragePolicy` to
+prefer `kSecUseDataProtectionKeychain` —
 which puts them out of reach of `security add-generic-password` and `security
 delete-generic-password`, since the CLI cannot address that keychain at all and this app launches
 agents with an unrestricted shell. That keychain needs an entitlement an ad-hoc-signed build does
@@ -817,11 +832,12 @@ not have, so the store **probes once and falls back** to the login keychain, and
 it got through `isShellReachable` rather than letting a Debug build claim a Release build's
 guarantee. It is deliberately separate from `KeychainManager`, which keeps
 API keys in the login keychain: moving those to share one implementation would orphan every key
-already saved. Because neither store lives under Application Support, **Reset Everything deletes
-each explicitly**; without that, a reset would move the app's directories aside while leaving every
-stored credential behind, having told the user it removed the app's state. Under a hosted test
-bundle the service name redirects to a scratch service, for the same reason `PreferenceStore`
-redirects its suite.
+already saved. Because none of these stores lives under Application Support, **Reset Everything
+deletes each explicitly**; without that, a reset would move the app's directories aside while
+leaving every stored credential behind, having told the user it removed the app's state. Under a
+hosted test bundle the browser service name redirects to a scratch service, for the same reason
+`PreferenceStore` redirects its suite; the remote migration tests instead inject an in-memory
+Security adapter and never touch the developer's Keychain.
 
 **What is deliberately outside the two.** Anything written into *another* program's folder is not
 ours to reset: the Claude status-line cache under `Claudex/ClaudeStatus` is there because that is

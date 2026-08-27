@@ -1,12 +1,28 @@
 import AppKit
 import AuthenticationServices
 
+struct RemoteCredentialStoragePresentation: Equatable {
+    let title: String
+    let detail: String
+
+    static func resolve(isShellReachable: Bool) -> RemoteCredentialStoragePresentation {
+        RemoteCredentialStoragePresentation(
+            title: L10n.string("Remote credentials"),
+            detail: KeychainStoragePolicy.storageDescription(
+                isShellReachable: isShellReachable
+            )
+        )
+    }
+}
+
 /// Remote Access gets a page of its own because it is a setup flow, not a behavioural toggle.
 ///
 /// General used to hide the feature below several unrelated sections and then put the actual
 /// pairing instructions in an alert. This page keeps the whole journey visible: opt in, watch
 /// the listener and selected transport come up, scan the code, and understand the authority.
 final class RemoteAccessPreferencesViewController: NSViewController {
+
+    private let credentialStorageIsShellReachable: Bool
 
     // MARK: - Controls
 
@@ -112,6 +128,18 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let appEvents = AppEventObservations()
 
     // MARK: - Lifecycle
+
+    init(
+        credentialStorageIsShellReachable: Bool = KeychainStoragePolicy.isShellReachable
+    ) {
+        self.credentialStorageIsShellReachable = credentialStorageIsShellReachable
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
 
     override func loadView() {
         view = NSView()
@@ -932,7 +960,10 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     // MARK: - Sharing
 
     private func securityCard() -> SettingsCard {
-        SettingsCard(rows: [
+        let credentialStorage = RemoteCredentialStoragePresentation.resolve(
+            isShellReachable: credentialStorageIsShellReachable
+        )
+        return SettingsCard(rows: [
             SettingsUI.row(
                 title: "New shared chats",
                 subtitle: "Collaborative lets everyone with reply access send. Focused starts "
@@ -988,6 +1019,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                         )
                     ]
                 )
+            ),
+            SettingsUI.detailRow(
+                symbol: "key.fill",
+                title: credentialStorage.title,
+                detail: credentialStorage.detail,
+                localizes: false
             ),
             pairedDevicesStack
         ])

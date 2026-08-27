@@ -481,8 +481,9 @@ delete-generic-password`, which the file-based login keychain is not — and thi
 unrestricted shell. But it needs a `keychain-access-groups` entitlement backed by a real team
 identity, so an ad-hoc-signed Debug build gets `errSecMissingEntitlement` on every write. This was
 found by the store's own suite failing eight tests while the feature "worked": the writes had been
-silently going nowhere. `BrowserCredentialStore.usesDataProtectionKeychain` therefore runs one
-throwaway write at startup and falls back to the login keychain, and
+silently going nowhere. Shared `KeychainStoragePolicy` therefore runs one throwaway write at
+startup for both the browser vault and the remote-capability stores and falls back to the login
+keychain, and `BrowserCredentialStore.usesDataProtectionKeychain` projects that answer while
 `isShellReachable` reports which vault the build actually got — surfaced in the Settings row and in
 `browser_capabilities` as `vault_reachable_from_shell`. Reads prompt in either keychain, so an
 agent cannot *learn* a stored password either way; what the weaker one allows is planting or

@@ -28316,6 +28316,16 @@
         }
       }
     },
+    "Remote credentials": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fjärråtkomstuppgifter"
+          }
+        }
+      }
+    },
     "Stored in your login Keychain, and removed by Reset Everything. This build cannot use the protected Keychain, so a command line on this Mac — including an agent's — could add or delete entries here.": {
       "localizations": {
         "sv": {

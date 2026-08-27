@@ -48,16 +48,53 @@ enum RemoteOwnerDeviceStoreError: LocalizedError {
 /// A versioned Keychain blob. An unreadable value is never treated as an empty list: pairing and
 /// revocation fail closed instead of overwriting the only copy of the user's device grants.
 final class RemoteOwnerDeviceKeychainStore: RemoteOwnerDevicePersisting {
-    private let service = "codes.threading.remote.owner-devices"
-    private let account = "owner-devices-v1"
+    private let blobs: MigratingKeychainBlobStore
+
+    init(
+        dataProtection: Bool? = nil,
+        keychain: any KeychainItemAccessing = SystemKeychainItemAccess()
+    ) {
+        blobs = MigratingKeychainBlobStore(
+            service: "codes.threading.remote.owner-devices",
+            account: "owner-devices-v1",
+            dataProtection: dataProtection,
+            keychain: keychain
+        )
+    }
 
     func load() throws -> [RemoteOwnerDeviceRecord] {
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(readQuery as CFDictionary, &result)
-        if status == errSecItemNotFound { return [] }
-        guard status == errSecSuccess, let data = result as? Data else {
-            throw RemoteOwnerDeviceStoreError.keychain(status)
+        let result: MigratingKeychainBlobStore.ReadResult
+        do {
+            result = try blobs.read()
+        } catch {
+            throw mapped(error)
         }
+        switch result {
+        case .current(let data):
+            let devices = try decode(data)
+            blobs.discardLegacyCopyAfterValidatedCurrentRead()
+            return devices
+        case .legacy(let data):
+            let devices = try decode(data)
+            do {
+                try blobs.save(data)
+            } catch {
+                throw mapped(error)
+            }
+            return devices
+        case .missing:
+            guard blobs.usesDataProtectionKeychain else { return [] }
+            let data = try encode([])
+            do {
+                try blobs.save(data)
+            } catch {
+                throw mapped(error)
+            }
+            return []
+        }
+    }
+
+    private func decode(_ data: Data) throws -> [RemoteOwnerDeviceRecord] {
         let envelope: Envelope
         do {
             envelope = try JSONDecoder().decode(Envelope.self, from: data)
@@ -74,49 +111,39 @@ final class RemoteOwnerDeviceKeychainStore: RemoteOwnerDevicePersisting {
     }
 
     func save(_ devices: [RemoteOwnerDeviceRecord]) throws {
+        let data = try encode(devices)
+        do {
+            try blobs.save(data)
+        } catch {
+            throw mapped(error)
+        }
+    }
+
+    private func encode(_ devices: [RemoteOwnerDeviceRecord]) throws -> Data {
         guard Self.isValid(devices) else { throw RemoteOwnerDeviceStoreError.corrupt }
-        let data = try JSONEncoder().encode(Envelope(
+        return try JSONEncoder().encode(Envelope(
             version: RemoteOwnerDeviceDefaults.version,
             devices: devices
         ))
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        ]
-        let updateStatus = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
-        if updateStatus == errSecSuccess { return }
-        guard updateStatus == errSecItemNotFound else {
-            throw RemoteOwnerDeviceStoreError.keychain(updateStatus)
-        }
-
-        var add = baseQuery
-        attributes.forEach { add[$0.key] = $0.value }
-        let addStatus = SecItemAdd(add as CFDictionary, nil)
-        guard addStatus == errSecSuccess else {
-            throw RemoteOwnerDeviceStoreError.keychain(addStatus)
-        }
     }
 
     func deleteAll() throws {
-        let status = SecItemDelete(baseQuery as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw RemoteOwnerDeviceStoreError.keychain(status)
+        do {
+            try blobs.deleteAll()
+        } catch {
+            throw mapped(error)
         }
     }
 
-    private var baseQuery: [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-    }
-
-    private var readQuery: [String: Any] {
-        var query = baseQuery
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        return query
+    private func mapped(_ error: Error) -> RemoteOwnerDeviceStoreError {
+        switch error {
+        case MigratingKeychainBlobStoreError.keychain(let status):
+            return .keychain(status)
+        case MigratingKeychainBlobStoreError.malformedResult:
+            return .corrupt
+        default:
+            return .corrupt
+        }
     }
 
     private static func isValid(_ devices: [RemoteOwnerDeviceRecord]) -> Bool {
