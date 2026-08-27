@@ -275,3 +275,9 @@ component wants.
 
 Status is carried by a word, not by the dot — colour alone fails the accessibility rule in
 `docs/THEME_BOUNDARY.md`, and each row states title and status together to VoiceOver.
+
+The **Leaving This Mac** inventory also names the app's default-on identity lookups. Project icon
+discovery may ask GitHub about the organisation implied by a project's origin remote; it does not
+follow a repository-declared homepage. Account avatar discovery sends an email hash to Gravatar
+and, after a miss, the email to GitHub's public-user search. Both rows point back to their General
+switches, and a non-GitHub website is contacted only after **Use Website Favicon…** names it.

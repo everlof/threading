@@ -504,6 +504,23 @@ final class PrivacyPreferencesViewController: NSViewController {
                     + "GitLab uses glab. Turning off the card stops these lookups."
             ),
             SettingsUI.detailRow(
+                symbol: "photo.badge.magnifyingglass",
+                title: "Project icon discovery reaches GitHub",
+                detail: "When on, Threading may ask GitHub whether the owner in a project's "
+                    + "origin remote is an organization and download that organization's "
+                    + "avatar. It never follows a package.json homepage automatically; Use "
+                    + "Website Favicon… contacts only the address you enter. Turn it off in "
+                    + "General to stop automatic lookups."
+            ),
+            SettingsUI.detailRow(
+                symbol: "person.crop.circle.badge.questionmark",
+                title: "Account avatar discovery uses the login email",
+                detail: "When on, Threading sends a SHA-256 hash of the login email to "
+                    + "Gravatar. If no avatar is found, it sends the email to GitHub's public-"
+                    + "user search and may download the returned avatar. A chosen emoji still "
+                    + "wins. Turn it off in General to stop the lookups."
+            ),
+            SettingsUI.detailRow(
                 symbol: "arrow.down.circle",
                 title: "Update checks reach release sources",
                 detail: "Once a day, Threading asks GitHub about the app, npm about installed "

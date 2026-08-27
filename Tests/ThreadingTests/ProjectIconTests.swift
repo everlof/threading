@@ -503,6 +503,13 @@ final class ProjectIconTests: XCTestCase {
 
     // MARK: - Website Origins
 
+    func testAutomaticDiscoveryNeverFollowsRepositoryHomepageMetadata() {
+        XCTAssertEqual(
+            ProjectIconDiscovery.automaticSources,
+            [.checkoutFiles, .gitHubOrganizationAvatar]
+        )
+    }
+
     func testOriginFromWebsiteNormalisesInput() {
         XCTAssertEqual(
             ProjectIconDiscovery.origin(fromWebsite: "sonda.io")?.absoluteString,

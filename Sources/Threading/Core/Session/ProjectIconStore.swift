@@ -503,11 +503,8 @@ enum ProjectIconDefaults {
     static let avatarPixelSize = 128
     static let gitHubHost = "github.com"
 
-    /// Paths probed under a declared homepage, same preference order as local files.
-    static let homepageProbes = ["apple-touch-icon.png", "favicon.png", "favicon.ico"]
-
-    static let packageManifestName = "package.json"
-    static let homepageKey = "homepage"
+    /// Paths probed after the user explicitly supplies a website.
+    static let websiteIconProbes = ["apple-touch-icon.png", "favicon.png", "favicon.ico"]
 
     static let requestTimeout: TimeInterval = 10
 }

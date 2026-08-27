@@ -76,11 +76,13 @@ page served with a 200 fails the same decode gate that admits real images.
 `ProjectIconDiscovery` fills empty slots free of any agent, and **probes known paths rather
 than walking the tree**: a recursive scan would surface `node_modules/<lib>/favicon.ico` as
 the project's mark. Only the `AppIcon.appiconset` search enumerates, bounded and skipping
-dependency directories. Then the GitHub owner avatar (read from the *shared* git config via
-`GitInfo.remoteOriginURL` — remotes belong to the repository, not a checkout), then the
-favicon of the `package.json` homepage; the network sources only contact hosts the project
-itself points at, plus one GitHub API call gating the avatar. Automatic discovery only ever
-fills an **empty** slot; a user's explicit choice (`.custom`) is never displaced.
+dependency directories. Then it may fetch the GitHub owner avatar (read from the *shared* git
+config via `GitInfo.remoteOriginURL` — remotes belong to the repository, not a checkout).
+`automaticSources` is the closed unattended policy: checkout files and the GitHub organisation
+implied by an origin remote. A `package.json` homepage is repository-controlled metadata and is
+never followed automatically. **Use Website Favicon…** remains the explicit gesture that may
+contact another origin. Automatic discovery only ever fills an **empty** slot; a user's explicit
+choice (`.custom`) is never displaced.
 
 The avatar is admitted **only for organisation owners** (`isOrganization`, via
 `api.github.com/users/<owner>`): a person's avatar puts the same face on every repo they

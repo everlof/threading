@@ -456,14 +456,16 @@ final class GeneralPreferencesViewController: NSViewController {
             ),
             SettingsUI.row(
                 title: "Discover project icons",
-                subtitle: "Projects without an icon use their own favicon or app icon, "
-                    + "else their GitHub avatar or homepage favicon.",
+                subtitle: "Projects without an icon use an image in the checkout or request "
+                    + "the GitHub organization avatar implied by the origin remote. Other "
+                    + "websites are contacted only when you choose Use Website Favicon.",
                 control: projectIconToggle
             ),
             SettingsUI.row(
                 title: "Discover account avatars",
-                subtitle: "Sessions show their account's Gravatar or GitHub avatar, "
-                    + "found by its login email. A chosen emoji still wins.",
+                subtitle: "Finding an account avatar sends a hash of its login email to "
+                    + "Gravatar, then the email to GitHub's public-user search. A chosen emoji "
+                    + "still wins.",
                 control: accountAvatarToggle
             )
         ])

@@ -3,8 +3,7 @@ import Foundation
 // MARK: - Project Icon Discovery
 
 /// Finds a project's sidebar icon without an agent: the checkout's own favicon or app icon
-/// first, then the repository's GitHub owner avatar, then the favicon of the homepage its
-/// `package.json` declares.
+/// first, then the repository's GitHub organisation avatar.
 ///
 /// The local search **probes known locations rather than walking the tree**: a recursive
 /// scan would happily surface `node_modules/<lib>/favicon.ico` as the project's mark, when
@@ -15,6 +14,15 @@ import Foundation
 /// discovered icon is never replaced except by an explicit "Find Project Icon" request.
 @MainActor
 final class ProjectIconDiscovery {
+
+    /// The closed set allowed to run without a user gesture. A repository may describe arbitrary
+    /// websites in its files, but only its checkout and GitHub origin are automatic inputs.
+    enum AutomaticSource: CaseIterable, Sendable {
+        case checkoutFiles
+        case gitHubOrganizationAvatar
+    }
+
+    nonisolated static let automaticSources: [AutomaticSource] = AutomaticSource.allCases
 
     // MARK: - Singleton
 
@@ -173,14 +181,17 @@ final class ProjectIconDiscovery {
     // MARK: - Candidate Search
 
     nonisolated private static func findIcon(for folder: URL) -> (data: Data, source: ProjectIconSource)? {
-        if let data = repoFileIcon(in: folder) {
-            return (data, .repoFile)
-        }
-        if let data = gitHubAvatar(for: folder) {
-            return (data, .remoteAvatar)
-        }
-        if let data = homepageIcon(in: folder) {
-            return (data, .homepage)
+        for source in automaticSources {
+            switch source {
+            case .checkoutFiles:
+                if let data = repoFileIcon(in: folder) {
+                    return (data, .repoFile)
+                }
+            case .gitHubOrganizationAvatar:
+                if let data = gitHubAvatar(for: folder) {
+                    return (data, .remoteAvatar)
+                }
+            }
         }
         return nil
     }
@@ -299,21 +310,7 @@ final class ProjectIconDiscovery {
         return (owner?.isEmpty ?? true) ? nil : owner
     }
 
-    /// The favicon of the homepage the project's `package.json` declares.
-    nonisolated private static func homepageIcon(in folder: URL) -> Data? {
-        let manifestURL = folder.appendingPathComponent(ProjectIconDefaults.packageManifestName)
-        guard let manifestData = try? BoundedFileReader.read(
-            manifestURL,
-            maximumBytes: 1024 * 1024
-        ),
-              let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
-              let homepage = manifest[ProjectIconDefaults.homepageKey] as? String,
-              let origin = origin(fromWebsite: homepage) else { return nil }
-
-        return websiteIcon(atOrigin: origin)
-    }
-
-    /// The probe origin for a site named by a person or a manifest — `sonda.io` and
+    /// The probe origin for a site named by a person — `sonda.io` and
     /// `https://sonda.io/deep/path` both become `https://sonda.io`.
     nonisolated static func origin(fromWebsite input: String) -> URL? {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -331,11 +328,10 @@ final class ProjectIconDiscovery {
         return components.url
     }
 
-    /// A site's icon by convention — its touch icon, else its favicon. Shared by homepage
-    /// discovery and the sidebar's explicit "Use Website Favicon…". Synchronous; call off
-    /// the main thread.
+    /// A site's icon by convention — its touch icon, else its favicon. Reached only by the
+    /// sidebar's explicit "Use Website Favicon…" gesture. Synchronous; call off the main thread.
     nonisolated static func websiteIcon(atOrigin origin: URL) -> Data? {
-        for probe in ProjectIconDefaults.homepageProbes {
+        for probe in ProjectIconDefaults.websiteIconProbes {
             if let data = fetchImage(origin.appendingPathComponent(probe)) {
                 return data
             }

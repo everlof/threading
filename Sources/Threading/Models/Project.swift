@@ -20,7 +20,8 @@ enum ProjectIconSource: String, Codable {
   case repoFile
   /// The avatar of the repository's GitHub owner.
   case remoteAvatar
-  /// The favicon of the homepage the project declares.
+  /// Legacy automatic homepage discovery. Retained so existing project records still decode;
+  /// repository-declared homepages are no longer contacted automatically.
   case homepage
   /// Set by an agent, through the MCP tool or icon research.
   case agent

@@ -389,6 +389,16 @@ final class PrivacyPreferencesTests: XCTestCase {
         )
     }
 
+    func testTheEgressInventoryNamesAutomaticIconAndAvatarTraffic() {
+        let copy = labels(in: page(reader()).view).joined(separator: "\n")
+
+        XCTAssertTrue(copy.contains("Project icon discovery reaches GitHub"))
+        XCTAssertTrue(copy.contains("never follows a package.json homepage automatically"))
+        XCTAssertTrue(copy.contains("Account avatar discovery uses the login email"))
+        XCTAssertTrue(copy.contains("SHA-256 hash"))
+        XCTAssertTrue(copy.contains("GitHub's public-user search"))
+    }
+
     /// Caught by looking at a render, not by an assertion anyone would have written first: two
     /// of the informational rows wrapped into a column a third of the card wide while their
     /// longer siblings filled it, because the horizontal stack left its slack unassigned. The
