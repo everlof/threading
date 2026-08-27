@@ -220,11 +220,10 @@ final class ProviderArchiveSyncTests: XCTestCase {
         XCTAssertEqual(failure, .sessionNotFound)
     }
 
-    /// Local-only agents can be daemon-owned too. The durable row moves first because there is no
-    /// provider transaction to protect, but success must wait until the shared process stopper
-    /// has dealt with both the runtime cache and `threading-ptyd`.
+    /// Local-only agents can be daemon-owned too. There is no provider transaction to protect, so
+    /// the durable row is acknowledged while the shared process stopper finishes in the background.
     @MainActor
-    func testLocalOnlyArchiveWaitsForTheProcessStopper() throws {
+    func testLocalOnlyArchiveAcknowledgesDurableStateWhileProcessStopContinues() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("local-archive-stop-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -244,18 +243,19 @@ final class ProviderArchiveSyncTests: XCTestCase {
                 releaseStop = completion
             }
         )
-        var received: Result<Void, ProviderArchiveFailure>?
+        var received: [Result<Void, ProviderArchiveFailure>] = []
 
-        synchronizer.setArchived(true, for: session.id) { received = $0 }
+        synchronizer.setArchived(true, for: session.id) { received.append($0) }
 
         XCTAssertEqual(stoppedSessionID, session.id)
         XCTAssertTrue(try XCTUnwrap(store.session(withID: session.id)).isArchived)
-        XCTAssertNil(received, "archive completion must wait for the daemon-owned writer")
+        guard case .success = try XCTUnwrap(received.first) else {
+            return XCTFail("the durable local archive was not acknowledged immediately")
+        }
+        XCTAssertEqual(received.count, 1)
 
         try XCTUnwrap(releaseStop)()
-        guard case .success = try XCTUnwrap(received) else {
-            return XCTFail("the archive did not complete after its process stopped")
-        }
+        XCTAssertEqual(received.count, 1, "finishing the background stop must not complete twice")
     }
 
     private func rollout(in directory: URL, id: TranscriptID) -> URL {

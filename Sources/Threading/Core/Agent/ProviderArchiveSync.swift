@@ -378,23 +378,19 @@ final class ProviderArchiveSync {
             switch store.setArchived(archived, for: sessionID) {
             case .applied, .unchanged:
                 let wasArchived = session.isArchived
-                let finish: @MainActor @Sendable () -> Void = { [weak self] in
-                    self?.pending.remove(sessionID)
-                    self?.announceIfLocalStateChanged(
-                        sessionID: sessionID,
-                        from: wasArchived,
-                        to: archived
-                    )
-                    completion(.success(()))
-                }
                 if archived {
                     // A local-only provider can still be running in `threading-ptyd`. The row is
-                    // durable now; do not report the archive complete until that invisible child
-                    // has received the same stop as an in-process surface.
-                    processStopper(sessionID, finish)
-                } else {
-                    finish()
+                    // already durable, so start the same stop as an in-process surface without
+                    // keeping the pane and pending state behind the daemon's bounded I/O.
+                    processStopper(sessionID) {}
                 }
+                pending.remove(sessionID)
+                announceIfLocalStateChanged(
+                    sessionID: sessionID,
+                    from: wasArchived,
+                    to: archived
+                )
+                completion(.success(()))
             case .targetNotFound:
                 pending.remove(sessionID)
                 completion(.failure(.sessionNotFound))

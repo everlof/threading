@@ -1000,6 +1000,9 @@ once, live matches are stopped on one shared operation queue with at most four r
 flight, and provider archive commands run on a separate four-operation queue. A retained-session
 sweep can therefore enqueue work without constructing one queue, one daemon survey, or one login
 shell per row at the same instant. A user archive takes the same path as a one-id batch.
+Provider-backed archives still use the stop as a barrier because moving a rollout requires every
+writer to be gone. A local-only archive has no provider transaction: once its row is durable, the
+pane and pending state are released immediately while the daemon stop continues in the background.
 This is the deliberate exception to the off switch's no-connect rule: disabling the feature leaves
 already-hosted work alive, so an explicit archive probes the known rendezvous once even while the
 switch is off. A machine that never hosted anything gets an immediate failed socket connection.
