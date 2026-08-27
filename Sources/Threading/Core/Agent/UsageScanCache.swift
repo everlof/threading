@@ -652,7 +652,7 @@ enum UsageScanCacheDefaults {
     /// The cache is only a migration/fallback layer once `UsageLedgerIndex` has a source. It may
     /// use enough room to avoid reparsing a recent working set, but never several gigabytes.
     static let maximumTotalBytes: Int64 = 512 * 1024 * 1024
-    static let claudeParserID = "claude-v2"
+    static let claudeParserID = "claude-v3"
     static let codexParserID = "codex-v1"
     static let openCodeParserID = "opencode-export-v1"
 }

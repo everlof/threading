@@ -29,6 +29,15 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(tokens.processed, 1_080)
     }
 
+    func testLegacyTokenCountsDecodeWithoutCacheWriteDurationDetail() throws {
+        let legacy = Data(#"{"uncachedInput":10,"cachedInput":20,"cacheWrite":30,"output":40,"reasoning":5}"#.utf8)
+
+        let decoded = try JSONDecoder().decode(UsageTokenCounts.self, from: legacy)
+
+        XCTAssertEqual(decoded.cacheWrite, 30)
+        XCTAssertEqual(decoded.cacheWrite1h, 0)
+    }
+
     func testOpenCodeRuntimeAndOpenRouterBillingStayDistinct() {
         let direct = UsageOrigin.direct(.openCode)
         let routed = UsageOrigin.openCode(providerID: "openrouter")
@@ -121,6 +130,51 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertNil(UsagePricingCatalog.price(ambiguous).costUSD)
     }
 
+    func testAnthropicCatalogPricesEveryClaudeModelObservedInLocalTranscripts() throws {
+        let observed: [(model: String, expected: Double)] = [
+            ("claude-fable-5", 60),
+            ("claude-opus-5", 30),
+            ("claude-opus-4-8", 30),
+            ("claude-opus-4-5-20251101", 30),
+            ("claude-sonnet-5", 12),
+            ("claude-haiku-4-5-20251001", 6)
+        ]
+
+        for fixture in observed {
+            let priced = UsagePricingCatalog.price(makeRecord(
+                identity: fixture.model,
+                origin: .direct(.claude),
+                model: fixture.model,
+                tokens: .init(uncachedInput: 1_000_000, output: 1_000_000)
+            ))
+            XCTAssertEqual(priced.costSource, .catalogPriced, fixture.model)
+            XCTAssertEqual(
+                try XCTUnwrap(priced.costUSD, fixture.model),
+                fixture.expected,
+                accuracy: 0.000_001,
+                fixture.model
+            )
+        }
+    }
+
+    func testAnthropicPricingDistinguishesFiveMinuteAndOneHourCacheWrites() throws {
+        let record = makeRecord(
+            identity: "claude-cache-ttls",
+            origin: .direct(.claude),
+            model: "claude-opus-5",
+            tokens: .init(
+                cachedInput: 1_000_000,
+                cacheWrite: 2_000_000,
+                cacheWrite1h: 1_000_000
+            )
+        )
+
+        let priced = UsagePricingCatalog.price(record)
+
+        XCTAssertEqual(try XCTUnwrap(priced.costUSD), 16.75, accuracy: 0.000_001)
+        XCTAssertEqual(priced.cacheSavingsUSD, 4.5, accuracy: 0.000_001)
+    }
+
     func testBuilderDeduplicatesAcrossSourceCachesBeforeAggregation() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try XCTUnwrap(TimeZone(secondsFromGMT: 0))
@@ -165,6 +219,7 @@ final class UsageLedgerTests: XCTestCase {
     private func makeRecord(
         identity: String,
         at: Date? = Date(timeIntervalSince1970: 1_770_000_000),
+        origin: UsageOrigin = .direct(.codex),
         model: String = "gpt-5.4",
         tokens: UsageTokenCounts,
         reportedCostUSD: Double? = nil
@@ -173,7 +228,7 @@ final class UsageLedgerTests: XCTestCase {
             identity: identity,
             sessionID: "session",
             at: at,
-            origin: .direct(.codex),
+            origin: origin,
             accountID: "codex:default",
             accountName: "Codex",
             model: model,

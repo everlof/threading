@@ -36,6 +36,8 @@ enum ClaudeUsageAdapter {
             let reported = double(object["costUSD"])
                 ?? double(message["costUSD"])
                 ?? double(object["cost_usd"])
+            let cacheCreation = usage[UsageIndexDefaults.cacheWriteDetailKey]
+                as? [String: Any]
 
             found.append(UsageLedgerRecord(
                 identity: identity,
@@ -51,6 +53,9 @@ enum ClaudeUsageAdapter {
                     uncachedInput: integer(usage[UsageIndexDefaults.inputKey]),
                     cachedInput: integer(usage[UsageIndexDefaults.cacheReadKey]),
                     cacheWrite: integer(usage[UsageIndexDefaults.cacheWriteKey]),
+                    cacheWrite1h: integer(
+                        cacheCreation?[UsageIndexDefaults.cacheWrite1hKey]
+                    ),
                     output: integer(usage[UsageIndexDefaults.outputKey])
                 ),
                 reportedCostUSD: reported

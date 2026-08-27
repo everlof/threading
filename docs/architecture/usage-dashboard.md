@@ -248,11 +248,21 @@ Pricing follows this order:
    form with the versioned list-price row.
 3. An unmatched or ambiguous identifier remains visibly unpriced; its tokens are still counted.
 
-The catalog is deliberately small and explicit rather than a copied community rate dump. The page
-shows its version, splits provider-reported and catalog-priced spend, and reports unpriced tokens
-and estimated cache savings. For OpenAI's listed 1.05M-context models, more than 272K total input
-tokens applies the documented 2× input and 1.5× output tier to the whole request. A local estimate
-is never described as an invoice.
+The catalog is deliberately small and explicit rather than a copied community rate dump. Its
+Anthropic rows use the standard global rates in the official
+[model-pricing table](https://platform.claude.com/docs/en/about-claude/pricing), and accept both
+the compact `YYYYMMDD` snapshots Anthropic used before 4.6 and the dateless pinned IDs described
+by its [model-versioning contract](https://platform.claude.com/docs/en/about-claude/models/model-ids-and-versions)
+afterwards. Claude's transcript preserves the five-minute and one-hour cache-write split, so the
+catalog applies the published 1.25× and 2× input rates rather than pricing every write as the
+cheaper duration. `cacheWrite` remains their aggregate at the presentation/remote boundary.
+
+The page shows the catalog version, splits provider-reported and catalog-priced spend, and reports
+unpriced tokens and estimated cache savings. Standard list pricing cannot see a private discount,
+US-only inference or fast-mode modifier absent from the transcript, which is another reason the
+result remains an estimate rather than an invoice. For OpenAI's listed 1.05M-context models, more
+than 272K total input tokens applies the documented 2× input and 1.5× output tier to the whole
+request.
 
 ### Incremental scan and aggregation
 

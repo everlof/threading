@@ -12,6 +12,9 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
     var uncachedInput: Int64 = 0
     var cachedInput: Int64 = 0
     var cacheWrite: Int64 = 0
+    /// The one-hour portion of `cacheWrite`; the remainder uses the ordinary five-minute rate.
+    /// Kept as a subset so presentation and transport can retain one aggregate cache-write total.
+    var cacheWrite1h: Int64 = 0
     var output: Int64 = 0
     var reasoning: Int64 = 0
 
@@ -19,12 +22,14 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
         uncachedInput: Int64 = 0,
         cachedInput: Int64 = 0,
         cacheWrite: Int64 = 0,
+        cacheWrite1h: Int64 = 0,
         output: Int64 = 0,
         reasoning: Int64 = 0
     ) {
         self.uncachedInput = max(0, uncachedInput)
         self.cachedInput = max(0, cachedInput)
         self.cacheWrite = max(0, cacheWrite)
+        self.cacheWrite1h = min(max(0, cacheWrite1h), self.cacheWrite)
         self.output = max(0, output)
         self.reasoning = min(max(0, reasoning), max(0, output))
     }
@@ -35,6 +40,7 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
         inputIncludingCached: Int64,
         cachedInput: Int64,
         cacheWrite: Int64 = 0,
+        cacheWrite1h: Int64 = 0,
         output: Int64,
         reasoning: Int64 = 0
     ) {
@@ -42,6 +48,7 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
             uncachedInput: max(0, inputIncludingCached - cachedInput - cacheWrite),
             cachedInput: cachedInput,
             cacheWrite: cacheWrite,
+            cacheWrite1h: cacheWrite1h,
             output: output,
             reasoning: reasoning
         )
@@ -58,6 +65,7 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
             uncachedInput: lhs.uncachedInput + rhs.uncachedInput,
             cachedInput: lhs.cachedInput + rhs.cachedInput,
             cacheWrite: lhs.cacheWrite + rhs.cacheWrite,
+            cacheWrite1h: lhs.cacheWrite1h + rhs.cacheWrite1h,
             output: lhs.output + rhs.output,
             reasoning: lhs.reasoning + rhs.reasoning
         )
@@ -65,6 +73,37 @@ struct UsageTokenCounts: Codable, Equatable, Sendable {
 
     static func += (lhs: inout Self, rhs: Self) {
         lhs = lhs + rhs
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case uncachedInput
+        case cachedInput
+        case cacheWrite
+        case cacheWrite1h
+        case output
+        case reasoning
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            uncachedInput: try values.decodeIfPresent(Int64.self, forKey: .uncachedInput) ?? 0,
+            cachedInput: try values.decodeIfPresent(Int64.self, forKey: .cachedInput) ?? 0,
+            cacheWrite: try values.decodeIfPresent(Int64.self, forKey: .cacheWrite) ?? 0,
+            cacheWrite1h: try values.decodeIfPresent(Int64.self, forKey: .cacheWrite1h) ?? 0,
+            output: try values.decodeIfPresent(Int64.self, forKey: .output) ?? 0,
+            reasoning: try values.decodeIfPresent(Int64.self, forKey: .reasoning) ?? 0
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(uncachedInput, forKey: .uncachedInput)
+        try values.encode(cachedInput, forKey: .cachedInput)
+        try values.encode(cacheWrite, forKey: .cacheWrite)
+        try values.encode(cacheWrite1h, forKey: .cacheWrite1h)
+        try values.encode(output, forKey: .output)
+        try values.encode(reasoning, forKey: .reasoning)
     }
 }
 
@@ -227,6 +266,7 @@ struct UsageModelRate: Equatable, Sendable {
     let input: Double
     let cachedInput: Double?
     let cacheWrite: Double?
+    let cacheWrite1h: Double?
     let output: Double
     let longContextThreshold: Int64?
 
@@ -236,6 +276,7 @@ struct UsageModelRate: Equatable, Sendable {
         input: Double,
         cachedInput: Double?,
         cacheWrite: Double?,
+        cacheWrite1h: Double? = nil,
         output: Double,
         longContextThreshold: Int64? = nil
     ) {
@@ -244,6 +285,7 @@ struct UsageModelRate: Equatable, Sendable {
         self.input = input
         self.cachedInput = cachedInput
         self.cacheWrite = cacheWrite
+        self.cacheWrite1h = cacheWrite1h
         self.output = output
         self.longContextThreshold = longContextThreshold
     }
@@ -255,12 +297,27 @@ struct UsageModelRate: Equatable, Sendable {
 /// from official provider pricing and ambiguous aliases remain unpriced. The version appears in
 /// the Usage page so an estimate never masquerades as an invoice.
 enum UsagePricingCatalog {
-    static let version = "2026-08-09"
-    static let sourceDescription = "Official provider list prices checked 9 Aug 2026"
+    static let version = "2026-08-28"
+    static let sourceDescription = "Official provider list prices checked 28 Aug 2026"
 
-    /// OpenAI standard-processing rows from the official API pricing page. The exact-match rule
-    /// below also accepts `YYYY-MM-DD` snapshots of these stable model identifiers.
+    /// Standard, global-processing rows from the providers' official API pricing pages. The
+    /// exact-match rule below also accepts their dated snapshots without accepting feature names.
     private static let rates: [UsageModelRate] = [
+        anthropicRate(model: "claude-fable-5", input: 10, output: 50),
+        anthropicRate(model: "claude-mythos-5", input: 10, output: 50),
+        anthropicRate(model: "claude-opus-5", input: 5, output: 25),
+        anthropicRate(model: "claude-opus-4-8", input: 5, output: 25),
+        anthropicRate(model: "claude-opus-4-7", input: 5, output: 25),
+        anthropicRate(model: "claude-opus-4-6", input: 5, output: 25),
+        anthropicRate(model: "claude-opus-4-5", input: 5, output: 25),
+        anthropicRate(model: "claude-opus-4-1", input: 15, output: 75),
+        anthropicRate(model: "claude-opus-4", input: 15, output: 75),
+        anthropicRate(model: "claude-sonnet-5", input: 2, output: 10),
+        anthropicRate(model: "claude-sonnet-4-6", input: 3, output: 15),
+        anthropicRate(model: "claude-sonnet-4-5", input: 3, output: 15),
+        anthropicRate(model: "claude-sonnet-4", input: 3, output: 15),
+        anthropicRate(model: "claude-haiku-4-5", input: 1, output: 5),
+        anthropicRate(model: "claude-3-5-haiku", input: 0.8, output: 4),
         .init(providerID: "openai", model: "gpt-5.6-sol", input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 30, longContextThreshold: 272_000),
         .init(providerID: "openai", model: "gpt-5.6-terra", input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12, longContextThreshold: 272_000),
         .init(providerID: "openai", model: "gpt-5.6-luna", input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2, longContextThreshold: 272_000),
@@ -281,6 +338,22 @@ enum UsagePricingCatalog {
         .init(providerID: "openai", model: "o3", input: 2, cachedInput: 0.5, cacheWrite: nil, output: 8),
         .init(providerID: "openai", model: "o4-mini", input: 1.1, cachedInput: 0.275, cacheWrite: nil, output: 4.4)
     ]
+
+    private static func anthropicRate(
+        model: String,
+        input: Double,
+        output: Double
+    ) -> UsageModelRate {
+        UsageModelRate(
+            providerID: "anthropic",
+            model: model,
+            input: input,
+            cachedInput: input * 0.1,
+            cacheWrite: input * 1.25,
+            cacheWrite1h: input * 2,
+            output: output
+        )
+    }
 
     static func price(_ record: UsageLedgerRecord) -> UsageLedgerRecord {
         var priced = record
@@ -321,7 +394,12 @@ enum UsagePricingCatalog {
         let cachedRate = rate.cachedInput ?? rate.input
         let cached = Double(record.tokens.cachedInput) * cachedRate * inputMultiplier / million
         let cacheWriteRate = rate.cacheWrite ?? rate.input
-        let writes = Double(record.tokens.cacheWrite) * cacheWriteRate * inputMultiplier / million
+        let oneHourWrites = record.tokens.cacheWrite1h
+        let ordinaryWrites = record.tokens.cacheWrite - oneHourWrites
+        let writes = (
+            Double(ordinaryWrites) * cacheWriteRate
+                + Double(oneHourWrites) * (rate.cacheWrite1h ?? cacheWriteRate)
+        ) * inputMultiplier / million
         let output = Double(record.tokens.output) * rate.output * outputMultiplier / million
 
         priced.costUSD = input + cached + writes + output
@@ -369,7 +447,11 @@ enum UsagePricingCatalog {
 
         let prefix = model + "-"
         guard candidate.hasPrefix(prefix) else { return false }
-        let components = candidate.dropFirst(prefix.count).split(separator: "-", omittingEmptySubsequences: false)
+        let suffix = candidate.dropFirst(prefix.count)
+        if suffix.count == 8, suffix.utf8.allSatisfy({ byte in byte >= 48 && byte <= 57 }) {
+            return true
+        }
+        let components = suffix.split(separator: "-", omittingEmptySubsequences: false)
         guard components.count == 3,
               components[0].count == 4,
               components[1].count == 2,

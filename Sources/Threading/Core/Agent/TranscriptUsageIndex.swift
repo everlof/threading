@@ -219,6 +219,8 @@ enum UsageIndexDefaults {
     static let inputKey = "input_tokens"
     static let outputKey = "output_tokens"
     static let cacheWriteKey = "cache_creation_input_tokens"
+    static let cacheWriteDetailKey = "cache_creation"
+    static let cacheWrite1hKey = "ephemeral_1h_input_tokens"
     static let cacheReadKey = "cache_read_input_tokens"
 
     static let unknownModel = "unknown"

@@ -15,7 +15,7 @@ final class UsageProviderAdapterTests: XCTestCase {
     }
 
     func testClaudePreservesEveryTokenClassAndReportedCost() throws {
-        let line = #"{"requestId":"request-1","timestamp":"2026-08-08T10:00:00.000Z","cwd":"/work","costUSD":1.5,"message":{"id":"message-1","model":"claude-test","usage":{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"output_tokens":40}}}"#
+        let line = #"{"requestId":"request-1","timestamp":"2026-08-08T10:00:00.000Z","cwd":"/work","costUSD":1.5,"message":{"id":"message-1","model":"claude-test","usage":{"input_tokens":10,"cache_read_input_tokens":20,"cache_creation_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":18,"ephemeral_1h_input_tokens":12},"output_tokens":40}}}"#
         let url = try write("claude.jsonl", lines: [line])
 
         let record = try XCTUnwrap(ClaudeUsageAdapter.records(
@@ -29,6 +29,7 @@ final class UsageProviderAdapterTests: XCTestCase {
             uncachedInput: 10,
             cachedInput: 20,
             cacheWrite: 30,
+            cacheWrite1h: 12,
             output: 40
         ))
         XCTAssertEqual(record.reportedCostUSD, 1.5)
