@@ -41,6 +41,56 @@ final class CommandLineRedactorTests: XCTestCase {
         XCTAssertEqual(redacted.redactedCount, 1)
     }
 
+    func testVendorNamespacedAndCamelCaseKeysAreRedactedByTheirSegments() {
+        let redacted = CommandLineRedactor.redact([
+            "env",
+            "GITHUB_TOKEN=ghp-secret",
+            "ANTHROPIC_API_KEY=sk-ant-secret",
+            "AWS_SECRET_ACCESS_KEY=aws-secret",
+            "npmToken=npm-secret",
+            "run"
+        ])
+
+        XCTAssertEqual(redacted.arguments, [
+            "env",
+            "GITHUB_TOKEN=<redacted>",
+            "ANTHROPIC_API_KEY=<redacted>",
+            "AWS_SECRET_ACCESS_KEY=<redacted>",
+            "npmToken=<redacted>",
+            "run"
+        ])
+        XCTAssertEqual(redacted.redactedCount, 4)
+    }
+
+    func testCredentialHeadersAndEmbeddedURLCredentialsAreRedacted() {
+        let redacted = CommandLineRedactor.redact([
+            "curl",
+            "-H", "Authorization: Bearer sk-ant-secret",
+            "--header=X-Api-Key: vendor-secret",
+            "https://x-access-token:ghp-secret@github.com/o/r.git?oauthCode=temporary"
+        ])
+
+        XCTAssertEqual(redacted.arguments, [
+            "curl",
+            "-H", "Authorization: <redacted>",
+            "--header=X-Api-Key: <redacted>",
+            "https://github.com/o/r.git?oauthCode=%3Credacted%3E"
+        ])
+        XCTAssertEqual(redacted.redactedCount, 4)
+    }
+
+    func testBearerAndAuthFlagsRedactTheirFollowingValues() {
+        let redacted = CommandLineRedactor.redact([
+            "tool", "--bearer", "one", "--auth", "two", "--port", "80"
+        ])
+
+        XCTAssertEqual(
+            redacted.arguments,
+            ["tool", "--bearer", "<redacted>", "--auth", "<redacted>", "--port", "80"]
+        )
+        XCTAssertEqual(redacted.redactedCount, 2)
+    }
+
     /// An ordinary command line passes through untouched, and says so: a zero count is what
     /// tells the row it has no reveal to offer.
     func testAnInnocentCommandLineIsUntouched() {
@@ -87,7 +137,13 @@ final class CommandLineRedactorTests: XCTestCase {
     func testTheVocabularyNormalizesSpellings() {
         XCTAssertTrue(CredentialVocabulary.isCredentialKey("X-Api-Key"))
         XCTAssertTrue(CredentialVocabulary.isCredentialKey("ACCESS_TOKEN"))
+        XCTAssertTrue(CredentialVocabulary.isCredentialKey("githubToken"))
+        XCTAssertTrue(CredentialVocabulary.isCredentialKey("AWS_SECRET_ACCESS_KEY"))
         XCTAssertTrue(CredentialVocabulary.isCredentialKey("password"))
+        XCTAssertTrue(CredentialVocabulary.isSensitiveURLQueryKey("oauthCode"))
+        XCTAssertFalse(CredentialVocabulary.isCredentialKey("sourceCode"))
+        XCTAssertFalse(CredentialVocabulary.isCredentialKey("mapping"))
+        XCTAssertFalse(CredentialVocabulary.isCredentialKey("spinner"))
         XCTAssertFalse(CredentialVocabulary.isCredentialKey("port"))
         XCTAssertFalse(CredentialVocabulary.isCredentialKey("verbose"))
     }

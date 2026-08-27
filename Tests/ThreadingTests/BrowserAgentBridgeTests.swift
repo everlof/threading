@@ -305,7 +305,7 @@ final class BrowserAgentBridgeTests: XCTestCase {
         let entry = BrowserNetworkEntry(
             method: "GET",
             url: """
-                https://name:password@example.com/api?token=secret-value&view=compact#private
+                https://name:password@example.com/api?token=secret-value&oauthCode=oauth-secret&sourceCode=visible&view=compact#private
                 """,
             kind: "fetch",
             status: 401,
@@ -316,8 +316,12 @@ final class BrowserAgentBridgeTests: XCTestCase {
 
         XCTAssertTrue(entry.isError)
         XCTAssertTrue(entry.redactedURL.contains("token=%5Bredacted%5D"))
+        XCTAssertTrue(entry.redactedURL.contains("oauthCode=%5Bredacted%5D"))
+        XCTAssertTrue(entry.redactedURL.contains("sourceCode=%5Bredacted%5D"))
         XCTAssertTrue(entry.redactedURL.contains("view=compact"))
         XCTAssertFalse(entry.redactedURL.contains("secret-value"))
+        XCTAssertFalse(entry.redactedURL.contains("oauth-secret"))
+        XCTAssertFalse(entry.redactedURL.contains("sourceCode=visible"))
         XCTAssertFalse(entry.redactedURL.contains("private"))
         XCTAssertFalse(entry.redactedURL.contains("name:password"))
     }

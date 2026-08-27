@@ -26,20 +26,52 @@ enum CommandLineRedactor {
     /// Short flags whose following argument is a secret by convention rather than by name:
     /// `-p` is the password flag of `mysql`, `psql` and `sshpass`.
     private static let shortSecretFlags: Set<String> = ["-p"]
+    private static let headerFlags: Set<String> = ["-H", "--header"]
+
+    private enum PendingValue {
+        case credential
+        case header
+    }
 
     static func redact(_ arguments: [String]) -> Redacted {
         var result: [String] = []
         result.reserveCapacity(arguments.count)
         var redactedCount = 0
-        var redactNext = false
+        var pendingValue: PendingValue?
 
         for argument in arguments {
-            if redactNext {
-                // Unconditionally: a secret is allowed to start with a dash, and a flag that
-                // names a credential is followed by its value in every CLI worth guessing at.
-                result.append(placeholder)
+            if let pending = pendingValue {
+                switch pending {
+                case .credential:
+                    // Unconditionally: a secret is allowed to start with a dash, and a flag that
+                    // names a credential is followed by its value in every CLI worth guessing at.
+                    result.append(placeholder)
+                    redactedCount += 1
+                case .header:
+                    if let redacted = redactedHeader(argument) {
+                        result.append(redacted)
+                        redactedCount += 1
+                    } else {
+                        result.append(argument)
+                    }
+                }
+                pendingValue = nil
+                continue
+            }
+
+            if let inlineHeader = redactedInlineHeader(argument) {
+                result.append(inlineHeader)
                 redactedCount += 1
-                redactNext = false
+                continue
+            }
+
+            if let redactedURL = CredentialURLRedactor.redact(
+                argument,
+                placeholder: placeholder,
+                removingFragment: false
+            ) {
+                result.append(redactedURL.value)
+                redactedCount += redactedURL.redactedCount
                 continue
             }
 
@@ -49,8 +81,10 @@ enum CommandLineRedactor {
                 continue
             }
 
-            if namesASecretValue(argument) {
-                redactNext = true
+            if headerFlags.contains(argument) {
+                pendingValue = .header
+            } else if namesASecretValue(argument) {
+                pendingValue = .credential
             }
             result.append(argument)
         }
@@ -59,6 +93,29 @@ enum CommandLineRedactor {
     }
 
     // MARK: - Private Methods
+
+    /// Curl-style `-H Authorization: Bearer …` arguments preserve the header name while hiding
+    /// its complete value. Innocent headers pass through unchanged.
+    private static func redactedHeader(_ argument: String) -> String? {
+        guard let colon = argument.firstIndex(of: ":") else { return nil }
+        let name = String(argument[..<colon]).trimmingCharacters(in: .whitespaces)
+        guard CredentialVocabulary.isCredentialKey(name) else { return nil }
+
+        let valueStart = argument.index(after: colon)
+        let remainder = argument[valueStart...]
+        guard remainder.contains(where: { !$0.isWhitespace }) else { return nil }
+        let whitespace = remainder.prefix(while: \.isWhitespace)
+        return "\(argument[...colon])\(whitespace)\(placeholder)"
+    }
+
+    private static func redactedInlineHeader(_ argument: String) -> String? {
+        guard let equals = argument.firstIndex(of: "=") else { return nil }
+        let flag = String(argument[..<equals])
+        guard headerFlags.contains(flag),
+              let redacted = redactedHeader(String(argument[argument.index(after: equals)...]))
+        else { return nil }
+        return "\(flag)=\(redacted)"
+    }
 
     /// `--api-key=v`, `-token=v` and `API_KEY=v` in one shape: everything before the first `=`
     /// is the key, dashes stripped for the vocabulary but preserved in what is drawn.

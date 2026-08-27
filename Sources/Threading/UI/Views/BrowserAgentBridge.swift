@@ -572,21 +572,17 @@ enum BrowserHistoryAction: String {
 /// values never belong in model-visible snapshots, console locations, or navigation receipts.
 enum BrowserURLRedactor {
     static func redact(_ value: String) -> String {
-        guard var components = URLComponents(string: value) else {
-            return "(invalid or redacted URL)"
-        }
-        components.user = nil
-        components.password = nil
-        components.fragment = nil
-        components.queryItems = components.queryItems?.map { item in
-            let name = item.name.lowercased()
-            let sensitive = BrowserAgentDefaults.sensitiveQueryNameFragments.contains {
-                name.contains($0)
+        guard let redacted = CredentialURLRedactor.redact(
+            value,
+            placeholder: "[redacted]",
+            removingFragment: true
+        ) else {
+            guard URLComponents(string: value) != nil else {
+                return "(invalid or redacted URL)"
             }
-            return URLQueryItem(name: item.name, value: sensitive ? "[redacted]" : item.value)
+            return String(value.prefix(BrowserAgentDefaults.maximumNetworkURLLength))
         }
-        guard let rendered = components.string else { return "(invalid or redacted URL)" }
-        return String(rendered.prefix(BrowserAgentDefaults.maximumNetworkURLLength))
+        return String(redacted.value.prefix(BrowserAgentDefaults.maximumNetworkURLLength))
     }
 }
 
@@ -3999,8 +3995,4 @@ enum BrowserAgentDefaults {
     /// settle allowance rather than a poll: nothing here retries the selection itself.
     static let sessionSelectionSettleTurns = 4
     static let maximumSnapshotHeight: CGFloat = 16_000
-    static let sensitiveQueryNameFragments = [
-        "access_token", "auth", "code", "credential", "key", "password",
-        "secret", "session", "signature", "token"
-    ]
 }

@@ -55,7 +55,10 @@ fidelity, explicit redaction paths, the previous digest and its own digest.
 - **Exact · redacted** means the native shape is retained with specific values replaced. Every
   replacement is listed by JSON path and reason in `redactions`. The credential-key list the
   sanitizer matches against lives in `CredentialVocabulary` (`Core/Agent/`), shared with the
-  info panel's command-line redactor so the two surfaces cannot drift on what counts as a secret.
+  info panel's command-line redactor and browser URL sanitizer so the surfaces cannot drift on
+  what counts as a secret. Camel, snake and kebab spellings are split into whole segments, making
+  vendor-prefixed names such as `GITHUB_TOKEN` and `apiToken` sensitive without substring-matching
+  innocent words such as `mapping` or `spinner`.
 - **Canonicalized** exists for an explicitly projected source that cannot provide a native value. It
   must never be used to make a normalized provider tool row look exact.
 
@@ -71,6 +74,8 @@ are part of the exact tool call. Deterministically credential-shaped keys (passw
 authorization/cookie fields and payment verification codes) are replaced, as are image bytes; each
 replacement becomes a labelled placeholder with an explicit path and reason. Password values are
 already unavailable to browser tools, but the storage boundary does not rely on that upstream fact.
+The drawn process command applies the same policy to flags, environment assignments, HTTP headers,
+and URL user-info or sensitive query values before the panel can enter a screenshot.
 
 `browser_fill_credentials` is the one tool whose *arguments* are safe by construction rather than
 by redaction: it accepts no origin, username or password, only an optional user-authored account

@@ -151,6 +151,37 @@ final class ExecutionAuditTests: XCTestCase {
         )
     }
 
+    func testNamespacedAndCamelCaseCredentialFieldsArePersistedOnlyAsRedactions() throws {
+        let fixture = try makeStore()
+        let sessionID = SessionID()
+
+        fixture.store.recordToolRequest(
+            sessionID: sessionID,
+            source: .providerStream,
+            provider: "codex",
+            operation: "exec_command",
+            callID: "secrets-1",
+            input: .object([
+                "GITHUB_TOKEN": .string("ghp-secret"),
+                "apiToken": .string("vendor-secret"),
+                "sourceCode": .string("let visible = true"),
+                "mapping": .string("ordinary")
+            ]),
+            fidelity: .exact
+        )
+
+        let record = try XCTUnwrap(fixture.store.read(sessionID: sessionID).records.first)
+        XCTAssertEqual(record.fidelity, .exactWithRedactions)
+        XCTAssertEqual(record.redactions, [
+            .init(path: "input.GITHUB_TOKEN", reason: .credential),
+            .init(path: "input.apiToken", reason: .credential)
+        ])
+        XCTAssertEqual(record.input?.objectValue?["GITHUB_TOKEN"], .string("<redacted:credential>"))
+        XCTAssertEqual(record.input?.objectValue?["apiToken"], .string("<redacted:credential>"))
+        XCTAssertEqual(record.input?.objectValue?["sourceCode"], .string("let visible = true"))
+        XCTAssertEqual(record.input?.objectValue?["mapping"], .string("ordinary"))
+    }
+
     func testStreamCaptureNeverStoresPromptReasoningOrAssistantProse() throws {
         let fixture = try makeStore()
         let sessionID = SessionID()
