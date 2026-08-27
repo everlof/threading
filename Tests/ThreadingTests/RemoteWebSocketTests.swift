@@ -6,6 +6,23 @@ import XCTest
 /// against our own idea of it.
 final class RemoteWebSocketTests: XCTestCase {
 
+    func testDecoderAcceptsANonZeroBasedCursorSlice() {
+        let prefix = Data([0xFF, 0xFE, 0xFD])
+        let maskedEmptyPing = Data([0x89, 0x80, 0, 0, 0, 0])
+        let storage = prefix + maskedEmptyPing
+
+        guard case .frame(let frame, let consumed) = RemoteWebSocket.decodeFrame(
+            from: storage[prefix.count...],
+            maximumPayload: RemoteAccessDefaults.maximumFrameBytes
+        ) else {
+            return XCTFail("the decoder did not accept a cursor slice")
+        }
+
+        XCTAssertEqual(frame.opcode, .ping)
+        XCTAssertTrue(frame.payload.isEmpty)
+        XCTAssertEqual(consumed, maskedEmptyPing.count)
+    }
+
     // MARK: - Handshake
 
     /// RFC 6455 §1.3: key `dGhlIHNhbXBsZSBub25jZQ==` → accept `s3pPLMBiTxaQ9kYGzzhZRbK+xOo=`.

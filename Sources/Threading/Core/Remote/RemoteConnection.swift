@@ -267,15 +267,27 @@ final class RemoteConnection: @unchecked Sendable {
     // MARK: - WebSocket phase
 
     private func processFrames() {
+        let start = buffer.startIndex
+        var cursor = start
+        defer {
+            // One compaction per receive, regardless of how many complete frames it contained.
+            // Re-basing the whole remainder after every minimal frame makes this loop quadratic.
+            if cursor > start {
+                buffer.removeSubrange(start..<cursor)
+            }
+        }
         while !isClosed {
-            switch RemoteWebSocket.decodeFrame(from: buffer, maximumPayload: RemoteAccessDefaults.maximumFrameBytes) {
+            switch RemoteWebSocket.decodeFrame(
+                from: buffer[cursor...],
+                maximumPayload: RemoteAccessDefaults.maximumFrameBytes
+            ) {
             case .incomplete:
                 return
             case .protocolError(let code, let reason):
                 write(RemoteWebSocket.closeFrame(code: code, reason: reason), thenClose: true)
                 return
             case .frame(let frame, let consumed):
-                buffer = Data(buffer.dropFirst(consumed))
+                cursor = buffer.index(cursor, offsetBy: consumed)
                 switch reassembler.accept(frame) {
                 case .buffered:
                     continue
