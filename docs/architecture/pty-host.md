@@ -995,7 +995,11 @@ moves provider state, `PTYHostArchiveStop` surveys the daemon for that `SessionI
 `PTYHostSessionStop` attach-then-kill operation as the Background Sessions page. This closes the
 ownership gap where `AgentRuntime.discard` found no cached controller, a surviving Codex child kept
 its rollout open, and `codex archive` refused the move. The provider command waits behind the
-bounded stop; local-only archives wait behind it before reporting completion as well.
+bounded stop. Launch reconciliation submits every archiving id as one batch: the daemon is surveyed
+once, live matches are stopped on one shared operation queue with at most four round trips in
+flight, and provider archive commands run on a separate four-operation queue. A retained-session
+sweep can therefore enqueue work without constructing one queue, one daemon survey, or one login
+shell per row at the same instant. A user archive takes the same path as a one-id batch.
 This is the deliberate exception to the off switch's no-connect rule: disabling the feature leaves
 already-hosted work alive, so an explicit archive probes the known rendezvous once even while the
 switch is off. A machine that never hosted anything gets an immediate failed socket connection.

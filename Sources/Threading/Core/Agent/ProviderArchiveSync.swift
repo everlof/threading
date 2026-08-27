@@ -197,11 +197,19 @@ enum ProviderArchiveFailure: LocalizedError, Equatable, Sendable {
 }
 
 private enum ProviderArchiveCommandRunner {
+    private static let queue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "codes.threading.provider-archive.commands"
+        queue.qualityOfService = .utility
+        queue.maxConcurrentOperationCount = ProviderArchiveDefaults.maximumConcurrentCommands
+        return queue
+    }()
+
     static func run(
         _ command: ProviderArchiveCommand,
         completion: @escaping @MainActor @Sendable (Result<Void, ProviderArchiveFailure>) -> Void
     ) {
-        DispatchQueue.global(qos: .utility).async {
+        queue.addOperation {
             let result = runSynchronously(command)
             Task { @MainActor in completion(result) }
         }
@@ -292,6 +300,10 @@ final class ProviderArchiveSync {
         _ sessionID: SessionID,
         _ completion: @escaping @MainActor @Sendable () -> Void
     ) -> Void
+    typealias ReconciliationProcessStopper = @MainActor (
+        _ sessionIDs: [SessionID],
+        _ completion: @escaping @MainActor @Sendable () -> Void
+    ) -> Void
 
     private struct Candidate: Sendable {
         let sessionID: SessionID
@@ -307,6 +319,7 @@ final class ProviderArchiveSync {
     private let store: ProjectStore
     private let center: NotificationCenter
     private let processStopper: ProcessStopper
+    private let reconciliationProcessStopper: ReconciliationProcessStopper
     private var observations: AppEventObservations?
     private var pending = Set<SessionID>()
     private var reconciliationGeneration = 0
@@ -317,11 +330,15 @@ final class ProviderArchiveSync {
         center: NotificationCenter = .default,
         processStopper: @escaping ProcessStopper = { sessionID, completion in
             PTYHostArchiveStop.run(sessionID: sessionID, completion: completion)
+        },
+        reconciliationProcessStopper: @escaping ReconciliationProcessStopper = { sessionIDs, completion in
+            PTYHostArchiveStop.run(sessionIDs: sessionIDs, completion: completion)
         }
     ) {
         self.store = store
         self.center = center
         self.processStopper = processStopper
+        self.reconciliationProcessStopper = reconciliationProcessStopper
     }
 
     func start() {
@@ -466,9 +483,10 @@ final class ProviderArchiveSync {
     /// Scaling boundary: ordinary use is tens to low hundreds of retained Codex sessions across
     /// 1–4 accounts; the stress case is 1,000 retained sessions among 10,000 provider rollouts.
     /// The directory walk and command waits stay on a utility queue, one snapshot is built per
-    /// account rather than per session, and the main actor receives only the retained candidates
-    /// plus one batched store write. The callback runs at launch/activation frequency, not per
-    /// provider filesystem event.
+    /// account rather than per session, one daemon survey covers every archiving candidate, and
+    /// at most four provider commands run at once. The main actor receives only the retained
+    /// candidates plus one batched store write. The callback runs at launch/activation frequency,
+    /// not per provider filesystem event.
     func reconcile() {
         reconciliationGeneration += 1
         let generation = reconciliationGeneration
@@ -556,13 +574,7 @@ final class ProviderArchiveSync {
         ThreadingLogger.session.info(
             "Provider archive reconciliation evaluated immediate=\(immediate.count, privacy: .public) commands=\(commands.count, privacy: .public)"
         )
-        for (candidate, archives) in commands {
-            runAutomaticCommand(
-                archives: archives,
-                candidate: candidate,
-                generation: generation
-            )
-        }
+        runAutomaticCommands(commands, generation: generation)
     }
 
     private func runUserCommand(
@@ -624,31 +636,41 @@ final class ProviderArchiveSync {
         }
     }
 
-    private func runAutomaticCommand(
-        archives: Bool,
-        candidate: Candidate,
+    /// Starts every automatic provider change with two explicit bounds: archiving candidates
+    /// share one daemon survey, and the command runner admits only a fixed number of login shells.
+    private func runAutomaticCommands(
+        _ commands: [(Candidate, Bool)],
         generation: Int
     ) {
-        guard pending.insert(candidate.sessionID).inserted else { return }
-        guard store.session(withID: candidate.sessionID) != nil else {
-            pending.remove(candidate.sessionID)
-            return
-        }
-        if archives {
-            processStopper(candidate.sessionID) { [weak self] in
-                self?.continueAutomaticCommand(
-                    archives: archives,
+        var archiving: [Candidate] = []
+        for (candidate, archives) in commands {
+            guard pending.insert(candidate.sessionID).inserted else { continue }
+            guard store.session(withID: candidate.sessionID) != nil else {
+                pending.remove(candidate.sessionID)
+                continue
+            }
+            if archives {
+                archiving.append(candidate)
+            } else {
+                continueAutomaticCommand(
+                    archives: false,
                     candidate: candidate,
                     generation: generation
                 )
             }
-            return
         }
-        continueAutomaticCommand(
-            archives: archives,
-            candidate: candidate,
-            generation: generation
-        )
+
+        guard !archiving.isEmpty else { return }
+        reconciliationProcessStopper(archiving.map(\.sessionID)) { [weak self] in
+            guard let self else { return }
+            for candidate in archiving {
+                continueAutomaticCommand(
+                    archives: true,
+                    candidate: candidate,
+                    generation: generation
+                )
+            }
+        }
     }
 
     private func continueAutomaticCommand(
@@ -737,4 +759,5 @@ private enum ProviderArchiveDefaults {
     static let maximumErrorLength = 800
     static let maximumCommandOutputBytes = 64 * 1024
     static let commandTimeout: TimeInterval = 30
+    static let maximumConcurrentCommands = 4
 }

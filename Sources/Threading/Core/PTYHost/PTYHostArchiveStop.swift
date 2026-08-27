@@ -10,6 +10,19 @@ import ThreadingPTYHostKit
 @MainActor
 enum PTYHostArchiveStop {
 
+    private static let surveyQueue = DispatchQueue(
+        label: "codes.threading.ptyhost.archive-stop.survey",
+        qos: .userInitiated
+    )
+
+    private static let stopQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "codes.threading.ptyhost.archive-stop"
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = 4
+        return queue
+    }()
+
     typealias Stopper = @Sendable (
         _ identity: PTYHostSessionIdentity,
         _ socketPath: String,
@@ -21,21 +34,45 @@ enum PTYHostArchiveStop {
     ///
     /// Scaling: archive is a user-frequency action. The daemon already returns one bounded list;
     /// this scans it once for the target id (ordinary: tens, stress: 1,000), constructs no views,
-    /// and performs at most one stop.
+    /// and performs at most one stop on the shared bounded queue.
     static func run(
         sessionID: SessionID,
         decision: PTYHostDecision? = nil,
         survey: PTYHostHoldingsSurvey = .connecting(),
-        queue: DispatchQueue = DispatchQueue(
-            label: "codes.threading.ptyhost.archive-stop",
-            qos: .userInitiated
-        ),
         stopper: @escaping Stopper = { identity, socketPath, build in
             PTYHostSessionStop.run(identity, socketPath: socketPath, build: build)
         },
         completion: @escaping @MainActor @Sendable () -> Void
     ) {
-        AgentRuntime.shared.discard(sessionID: sessionID)
+        run(
+            sessionIDs: [sessionID],
+            decision: decision,
+            survey: survey,
+            stopper: stopper,
+            completion: completion
+        )
+    }
+
+    /// Stops a reconciliation batch after one daemon survey. Stop calls themselves are bounded
+    /// because each one performs an attach/kill round trip and can wait for its own deadline.
+    static func run(
+        sessionIDs: [SessionID],
+        decision: PTYHostDecision? = nil,
+        survey: PTYHostHoldingsSurvey = .connecting(),
+        stopper: @escaping Stopper = { identity, socketPath, build in
+            PTYHostSessionStop.run(identity, socketPath: socketPath, build: build)
+        },
+        completion: @escaping @MainActor @Sendable () -> Void
+    ) {
+        let wanted = Set(sessionIDs)
+        for sessionID in wanted {
+            AgentRuntime.shared.discard(sessionID: sessionID)
+        }
+
+        guard !wanted.isEmpty else {
+            completion()
+            return
+        }
 
         let resolvedDecision = decision ?? PTYHostDecision.live(
             settings: .shared,
@@ -52,15 +89,28 @@ enum PTYHostArchiveStop {
             build: resolvedDecision.build
         )
 
-        queue.async {
+        let stopQueue = self.stopQueue
+        surveyQueue.async {
             let holdings = survey.holdings(for: archiveDecision)
-            let summary = holdings?.sessions.first { summary in
-                summary.sessionID == sessionID && summary.exit == nil
+            let summaries = holdings?.sessions.filter { summary in
+                summary.sessionID.map(wanted.contains) == true && summary.exit == nil
+            } ?? []
+            guard let holdings, !summaries.isEmpty else {
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated { completion() }
+                }
+                return
             }
-            if let holdings, let summary {
-                _ = stopper(summary.id, holdings.socketPath, archiveDecision.build)
+
+            let stops = DispatchGroup()
+            for summary in summaries {
+                stops.enter()
+                stopQueue.addOperation {
+                    _ = stopper(summary.id, holdings.socketPath, archiveDecision.build)
+                    stops.leave()
+                }
             }
-            DispatchQueue.main.async {
+            stops.notify(queue: .main) {
                 MainActor.assumeIsolated { completion() }
             }
         }

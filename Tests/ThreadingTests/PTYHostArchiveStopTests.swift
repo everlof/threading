@@ -35,6 +35,50 @@ final class PTYHostArchiveStopTests: XCTestCase {
         XCTAssertEqual(recorder.builds, ["archive-stop-tests"])
     }
 
+    func testReconciliationBatchSurveysOnceAndStopsEveryMatchingLiveChild() async {
+        let first = SessionID()
+        let second = SessionID()
+        let other = SessionID()
+        let socket = "/tmp/threading-archive-batch-tests.sock"
+        let recorder = ArchiveStopRecorder()
+        let completed = expectation(description: "archive batch completed")
+        let surveyedSessions = [
+            summary(other),
+            summary(first),
+            summary(second),
+            summary(first, exit: 0)
+        ]
+
+        PTYHostArchiveStop.run(
+            sessionIDs: [first, second],
+            decision: decision(enabled: true, socket: socket),
+            survey: PTYHostHoldingsSurvey { decision in
+                recorder.recordSurveyDecision(decision)
+                return PTYHostHoldings(
+                    socketPath: socket,
+                    sessions: surveyedSessions
+                )
+            },
+            stopper: { identity, socketPath, build in
+                recorder.record(identity: identity, socketPath: socketPath, build: build)
+                return true
+            },
+            completion: { completed.fulfill() }
+        )
+
+        await fulfillment(of: [completed], timeout: 1)
+        XCTAssertEqual(recorder.surveyDecisions.count, 1)
+        XCTAssertEqual(
+            Set(recorder.identities),
+            Set([
+                PTYHostSessionIdentity(.agentSession(first)),
+                PTYHostSessionIdentity(.agentSession(second))
+            ])
+        )
+        XCTAssertEqual(recorder.socketPaths, [socket, socket])
+        XCTAssertEqual(recorder.builds, ["archive-stop-tests", "archive-stop-tests"])
+    }
+
     func testArchiveStillStopsAChildAfterTheHostSettingWasTurnedOff() async {
         let target = SessionID()
         let targetIdentity = PTYHostSessionIdentity(.agentSession(target))
