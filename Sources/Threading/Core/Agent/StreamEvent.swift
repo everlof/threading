@@ -293,14 +293,18 @@ enum JSONValue: Codable, Equatable, Sendable {
     ///
     /// Conversion is all-or-nothing for containers: an unexpected non-JSON value rejects the
     /// complete object instead of silently dropping the field that made it invalid.
+    ///
+    /// **`NSNumber` is matched before `Bool`, and the order is the whole point.** A number
+    /// `JSONSerialization` parsed is an `NSNumber`, and `NSNumber as? Bool` succeeds for exactly
+    /// the values `0` and `1` — so matching `Bool` first turned a wire `1` into `true` and a wire
+    /// `0` into `false`, silently, everywhere a provider payload reached this initializer. The
+    /// `CFBooleanGetTypeID` test below is the honest question, because it asks what the number
+    /// *is* rather than what it could be read as. A Swift `Bool` still lands there: it bridges to
+    /// `__NSCFBoolean`, which that test recognises.
     init?(foundationValue value: Any) {
         switch value {
         case is NSNull:
             self = .null
-        case let value as Bool:
-            self = .bool(value)
-        case let value as String:
-            self = .string(value)
         case let value as NSNumber:
             if CFGetTypeID(value) == CFBooleanGetTypeID() {
                 self = .bool(value.boolValue)
@@ -309,6 +313,10 @@ enum JSONValue: Codable, Equatable, Sendable {
             } else {
                 self = .number(value.doubleValue)
             }
+        case let value as Bool:
+            self = .bool(value)
+        case let value as String:
+            self = .string(value)
         case let value as [Any]:
             let converted = value.compactMap(JSONValue.init(foundationValue:))
             guard converted.count == value.count else { return nil }
@@ -371,6 +379,27 @@ enum JSONValue: Codable, Equatable, Sendable {
     var objectValue: [String: JSONValue]? {
         guard case .object(let value) = self else { return nil }
         return value
+    }
+
+    var arrayValue: [JSONValue]? {
+        guard case .array(let value) = self else { return nil }
+        return value
+    }
+
+    /// The value read as a whole number, the way `NSNumber.intValue` reads one.
+    ///
+    /// A boolean is not a number here even though Foundation will hand one over as `1`: a token
+    /// count of `true` is a protocol error, not a count of one. A non-integral number truncates
+    /// toward zero and an out-of-range one saturates, both matching `intValue`.
+    var integerValue: Int? {
+        switch self {
+        case .integer(let value):
+            return Int(truncatingIfNeeded: value)
+        case .number(let value):
+            return Int(exactly: value.rounded(.towardZero)) ?? (value < 0 ? .min : .max)
+        case .object, .array, .string, .bool, .null:
+            return nil
+        }
     }
 
     var foundationValue: Any {
