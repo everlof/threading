@@ -258,6 +258,32 @@ final class RemoteIdentityCryptoTests: XCTestCase {
         }
     }
 
+    /// What the importer takes out of `SecPKCS12Import`'s result is checked, not assumed.
+    ///
+    /// `as?` cannot make this check: a conditional downcast to a CoreFoundation type is one the
+    /// compiler rejects outright as a cast that "will always succeed", so the pre-existing
+    /// `as! SecIdentity` was the only thing standing between an unexpected result and a trap.
+    /// The type is compared the way Security names it, and anything else is `nil` — which the
+    /// importer turns into the same refusal an empty result gets.
+    func testTheIdentityKeyIsCheckedAgainstSecuritysOwnTypeRatherThanForceCast() throws {
+        XCTAssertNil(RemoteIdentityImporter.identity(from: nil))
+        XCTAssertNil(RemoteIdentityImporter.identity(from: "not an identity" as CFString))
+        XCTAssertNil(RemoteIdentityImporter.identity(from: Data([0x30, 0x00]) as CFData))
+        // A different Security object is the near miss worth naming: same framework, same
+        // CoreFoundation representation, not an identity.
+        XCTAssertNil(RemoteIdentityImporter.identity(from: try RemoteIdentityCertificateBuilder.makeKey()))
+
+        let material = try Self.makeMaterial()
+        let container = try XCTUnwrap(RemotePKCS12Writer.makeContainer(
+            privateKeyPKCS8: material.pkcs8,
+            certificateDER: material.certificateDER
+        ))
+        let identity = try RemoteIdentityImporter.makeIdentity(container: container, strategy: .memoryOnly)
+        let accepted = try XCTUnwrap(RemoteIdentityImporter.identity(from: identity))
+        var certificate: SecCertificate?
+        XCTAssertEqual(SecIdentityCopyCertificate(accepted, &certificate), errSecSuccess)
+    }
+
     /// The macOS 13 and 14 path, exercised on a machine that does not need it.
     ///
     /// `kSecImportToMemoryOnly` is macOS 15 and later, and without it `SecPKCS12Import` lands in

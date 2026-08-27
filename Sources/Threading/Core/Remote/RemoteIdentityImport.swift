@@ -55,10 +55,28 @@ enum RemoteIdentityImporter {
         // yields no identity at all.
         guard let entries = items as? [[String: Any]],
               let first = entries.first,
-              let identity = first[kSecImportItemIdentity as String] else {
+              let identity = Self.identity(from: first[kSecImportItemIdentity as String]) else {
             throw RemoteIdentityFailure.identityImportFailed
         }
-        return identity as! SecIdentity
+        return identity
+    }
+
+    /// The value under `kSecImportItemIdentity`, if it really is one.
+    ///
+    /// `as?` cannot ask this question. The compiler rejects a conditional downcast to a
+    /// CoreFoundation type outright, as one that "will always succeed": a Swift cast does not tell
+    /// one CF type from another, so `as? SecIdentity` would have waved through whatever the
+    /// framework had put there. The name Security gives its own types is `CFGetTypeID`, so that is
+    /// what is compared, and only a match is taken as an identity. Parsing a container is the one
+    /// place here that reads bytes somebody else supplied, and a container that decodes to
+    /// something other than an identity is a refusal — `identityImportFailed`, the same answer an
+    /// empty result gets — never a trap.
+    static func identity(from value: Any?) -> SecIdentity? {
+        guard let value else { return nil }
+        let object = value as CFTypeRef
+        guard CFGetTypeID(object) == SecIdentityGetTypeID() else { return nil }
+        // swiftlint:disable:next force_cast - guarded by the CFTypeID comparison above.
+        return (object as! SecIdentity)
     }
 
     /// A keychain this app owns for the length of one import.
