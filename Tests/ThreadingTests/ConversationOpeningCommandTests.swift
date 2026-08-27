@@ -97,6 +97,58 @@ final class ConversationOpeningCommandTests: HostedStoreTestCase {
         })
     }
 
+    func testOpeningCommandReturnsToTheDraftIfTheAgentExitsBeforeItsCatalog() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-opening-exit-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let session = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: true,
+            title: "Failed opening command"
+        ))
+        let controller = try XCTUnwrap(ConversationViewController(
+            agentSession: session,
+            project: project,
+            currentSessionProjection: CurrentSessionProjection { sessionID in
+                store.project(withID: project.id)?.sessions.first { $0.id == sessionID }
+            },
+            launchPlanProvider: { _, _, _ in
+                AgentLaunchPlan(
+                    executable: "/bin/sh",
+                    arguments: ["-c", "/bin/sleep 0.2; exit 9"],
+                    resumeState: .unavailable
+                )
+            },
+            customizationLookup: { _ in .empty }
+        ))
+        _ = controller.view
+        defer {
+            controller.terminate(preservingViewport: false)
+            SessionContinuityStore.shared.setConversationDraft("", for: session.id)
+            _ = store.removeSession(id: session.id)
+        }
+
+        controller.launch()
+        XCTAssertTrue(waitUntil { controller.stream.isRunning })
+        controller.sendInitialPrompt("/review focus on authentication")
+        controller.promptView.stringValue = "Keep the draft I started while this was booting."
+
+        XCTAssertTrue(waitUntil { !controller.stream.isRunning }, "the fixture process did not exit")
+        let restored = "/review focus on authentication\n\n"
+            + "Keep the draft I started while this was booting."
+        XCTAssertEqual(controller.promptView.stringValue, restored)
+        XCTAssertEqual(
+            SessionContinuityStore.shared.state(for: session.id).conversationDraft,
+            restored,
+            "the recovered opening message would be lost when the failed surface is discarded"
+        )
+    }
+
     private func waitUntil(
         timeout: TimeInterval = 5,
         _ condition: () -> Bool

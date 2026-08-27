@@ -97,6 +97,12 @@ wrapped (a wrapped stack trace stops looking like the thing the terminal showed)
 its own container. It hides rather than showing an empty box for a preflight refusal, which never
 started a process and has nothing to quote.
 
+A native conversation can also die while a command-shaped opening message is waiting for its
+provider catalog. That message returns to the durable conversation draft before the ended surface
+hides its composer; if somebody typed during launch, the opening command is restored first and the
+newer draft follows it. An unavailable catalog may prevent semantic dispatch, but it cannot turn a
+message the start composer already accepted into private, undrainable controller state.
+
 Selection no longer retries. The retry is a button on the surface, which is a decision rather than
 a side effect of navigating, and it clears the record first so the gate that sent us there does
 not refuse it.

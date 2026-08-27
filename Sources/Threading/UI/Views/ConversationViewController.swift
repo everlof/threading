@@ -2226,7 +2226,30 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         if let capabilities = stream as? ComposerCapabilityProviding,
            !capabilities.isComposerCapabilityCatalogReady { return }
         pendingInitialPrompt = nil
-        _ = submit(text)
+        if !submit(text) {
+            pendingInitialPrompt = text
+        }
+    }
+
+    /// A catalog that never arrives must not take the opening message with it. Put it back in
+    /// the durable composer before the ended surface hides that composer. If somebody managed to
+    /// start another draft while the process was booting, the command stays first so its leading
+    /// trigger keeps its meaning and neither piece of user-authored text is overwritten.
+    private func restorePendingInitialPromptToComposer() {
+        guard let opening = pendingInitialPrompt else { return }
+        pendingInitialPrompt = nil
+
+        let currentDraft = promptView.stringValue
+        if currentDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            promptView.stringValue = opening
+        } else if currentDraft != opening {
+            promptView.stringValue = "\(opening)\n\n\(currentDraft)"
+        }
+        SessionContinuityStore.shared.setConversationDraft(
+            promptView.stringValue,
+            context: promptView.contextAttachments,
+            for: sessionID
+        )
     }
 
     /// The same input path as the local composer, exposed narrowly to the authenticated remote
@@ -3177,6 +3200,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// instead of reproducing its hidden-composer result by reaching into the view hierarchy.
     func handleExit(_ status: Int32) {
         clearStreaming()
+        restorePendingInitialPromptToComposer()
         // The process that owned those tasks is gone, and nothing will report them ending.
         backgroundWorkInFlight = []
         pausedOnOwnWork = false
