@@ -638,8 +638,9 @@ final class ACPStreamSession:
                 replaceComposerCapabilities(capabilities)
             }
         case "usage_update":
-            lastContextTokens = ACPWireAdapter.integer(update["used"])
-            lastContextWindow = ACPWireAdapter.integer(update["size"])
+            let usage = ACPWireAdapter.contextUsage(in: update)
+            lastContextTokens = usage.used
+            lastContextWindow = usage.size
         case "session_info_update":
             if let title = ACPWireAdapter.sessionTitle(in: update) {
                 onSessionTitleChange?(title)
@@ -848,9 +849,7 @@ final class ACPStreamSession:
         var state = toolCallID.flatMap { toolCalls[$0] } ?? ACPToolCallState(update: toolCall)
         state.merge(toolCall)
         if let toolCallID { toolCalls[toolCallID] = state }
-        let input = JSONValue.object(
-            from: ACPWireAdapter.toolInputFoundation(from: state.payload)
-        ) ?? [:]
+        let input = ACPWireAdapter.toolInput(from: state.payload)
 
         let request = PermissionRequest(
             sessionID: sessionID,

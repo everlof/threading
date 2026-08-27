@@ -81,8 +81,9 @@ final class GrokACPProfileTests: XCTestCase {
         XCTAssertEqual(GrokACPExtensions.modelStateModelID(in: [
             "_meta": ["modelState": ["currentModelId": "grok-4.5-fast"]]
         ]), "grok-4.5-fast")
-        XCTAssertEqual(ACPWireAdapter.integer(42), 42)
-        XCTAssertNil(ACPWireAdapter.integer(true))
+        XCTAssertEqual(ACPWireAdapter.contextUsage(in: ["used": 42, "size": 200_000]).used, 42)
+        XCTAssertEqual(ACPWireAdapter.contextUsage(in: ["used": 42, "size": 200_000]).size, 200_000)
+        XCTAssertNil(ACPWireAdapter.contextUsage(in: ["used": true]).used)
         XCTAssertEqual(ACPWireAdapter.sessionTitle(in: [
             "title": "  Repair the parser  "
         ]), "Repair the parser")
