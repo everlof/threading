@@ -1410,6 +1410,11 @@ push slice should keep the APNs key in the service, deduplicate/collapse bounded
 only sanitized notification or widget projections. Presence should remain connection-derived
 rather than a database heartbeat.
 
+Scheduled expiry cleanup keeps each D1 delete to a 1,000-row page, then immediately repeats only
+the statements that filled their page. An accumulated assertion, notification, rendezvous, or
+refresh-session backlog therefore drains in one scheduled invocation instead of losing ground
+behind a fixed daily cap.
+
 The Mac remains authoritative for session contents, permission evidence and actual tool
 decisions. No hosted store may become a public transcript store or an alternate way around a
 revoked membership.

@@ -164,10 +164,11 @@ steps below remain the complete control-plane deployment sequence.
    Worker, with a documented short retention.
 7. Verify `GET /health`, `GET /ready`, Sign in with Apple, first-install QR pairing, direct ICE,
    forced TURN, APNs sandbox and production delivery while iOS is suspended, device revoke, host
-   sign-out, scheduled Apple refresh validation, Apple consent revocation and retryable account
-   deletion from a signed release candidate. Run the credentialed relay-only
-   package probe documented in `Packages/ThreadingPeerTransport/README.md` separately for the
-   provisioner's TURN-over-UDP, TURN-over-TCP and TURN-over-TLS URLs; the probe fails if WebRTC
+   sign-out, scheduled Apple refresh validation, backlog-draining expiry cleanup, Apple consent
+   revocation and retryable account deletion from a signed release candidate. Run the
+   credentialed relay-only package probe documented in
+   `Packages/ThreadingPeerTransport/README.md` separately for the provisioner's TURN-over-UDP,
+   TURN-over-TCP and TURN-over-TLS URLs; the probe fails if WebRTC
    silently uses a direct candidate. Confirm D1 contains no transcript, terminal, path or
    provider-secret fields.
 

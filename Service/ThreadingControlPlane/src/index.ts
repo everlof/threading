@@ -31,6 +31,8 @@ import { BOUNDS, validateIdentifier } from "./protocol";
 
 export { HostRendezvous } from "./host-rendezvous";
 
+const cleanupPageSize = 1_000;
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
@@ -116,41 +118,58 @@ export default {
 
   async scheduled(event: ScheduledController, env: Env): Promise<void> {
     const now = Math.floor(Date.now() / 1000);
+    const cleanupStatements: D1PreparedStatement[] = [];
     if (event.cron === "17 3 * * *") {
       const reportQuotaCutoffDay = new Date((now - 7 * 24 * 60 * 60) * 1000)
         .toISOString()
         .slice(0, 10);
-      await env.DB.batch([
+      cleanupStatements.push(
         env.DB.prepare(
           "DELETE FROM apple_assertions WHERE digest IN "
-            + "(SELECT digest FROM apple_assertions WHERE expires_at < ? LIMIT 1000)",
+            + `(SELECT digest FROM apple_assertions WHERE expires_at < ? LIMIT ${cleanupPageSize})`,
         ).bind(now),
         env.DB.prepare(
           "DELETE FROM apple_notifications WHERE jti_digest IN "
-            + "(SELECT jti_digest FROM apple_notifications WHERE expires_at < ? LIMIT 1000)",
+            + `(SELECT jti_digest FROM apple_notifications WHERE expires_at < ? `
+            + `LIMIT ${cleanupPageSize})`,
         ).bind(now),
         env.DB.prepare(
           "DELETE FROM rendezvous_credentials WHERE digest IN "
             + "(SELECT digest FROM rendezvous_credentials WHERE expires_at < ? "
-            + "OR (revoked_at IS NOT NULL AND revoked_at < ?) LIMIT 1000)",
+            + "OR (revoked_at IS NOT NULL AND revoked_at < ?) "
+            + `LIMIT ${cleanupPageSize})`,
         ).bind(now, now - 7 * 24 * 60 * 60),
-        env.DB.prepare("DELETE FROM issue_report_daily_quota WHERE day < ?")
-          .bind(reportQuotaCutoffDay),
-      ]);
+      );
+      await env.DB.prepare("DELETE FROM issue_report_daily_quota WHERE day < ?")
+        .bind(reportQuotaCutoffDay)
+        .run();
     } else {
       await validateDueAppleSessions(env, now);
     }
-    await env.DB.prepare(
+    cleanupStatements.push(env.DB.prepare(
       "DELETE FROM refresh_sessions WHERE digest IN (SELECT digest FROM refresh_sessions "
         + "WHERE expires_at <= ? OR revoked_at IS NOT NULL OR (consumed_at IS NOT NULL "
-        + "AND (replacement_expires_at IS NULL OR replacement_expires_at <= ?)) LIMIT 1000)",
-    ).bind(now, now).run();
+        + "AND (replacement_expires_at IS NULL OR replacement_expires_at <= ?)) "
+        + `LIMIT ${cleanupPageSize})`,
+    ).bind(now, now));
+    await drainCleanupPages(env, cleanupStatements);
   },
 
   async queue(batch: MessageBatch<unknown>, env: Env): Promise<void> {
     await handleIssueReportNotificationBatch(batch, env);
   },
 } satisfies ExportedHandler<Env>;
+
+async function drainCleanupPages(env: Env, statements: D1PreparedStatement[]): Promise<void> {
+  let pending = statements;
+  while (pending.length > 0) {
+    const results = await env.DB.batch(pending);
+    if (results.length !== pending.length) {
+      throw new Error("D1 cleanup batch returned an incomplete result set");
+    }
+    pending = pending.filter((_, index) => results[index]?.meta.changes === cleanupPageSize);
+  }
+}
 
 async function readinessResponse(env: Env): Promise<Response> {
   try {

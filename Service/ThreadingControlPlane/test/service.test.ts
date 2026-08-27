@@ -215,12 +215,75 @@ describe("service release surfaces", () => {
       oldReportQuotaDay,
     )).resolves.toBe(false);
   });
+
+  it("drains expiry backlogs larger than one D1 cleanup page", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const suffix = crypto.randomUUID();
+    const accountID = `backlog-account-${suffix}`;
+    const hostID = `backlog-host-${suffix}`;
+    const prefix = `backlog-${suffix}`;
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        "INSERT INTO accounts (id, created_at, updated_at) VALUES (?, ?, ?)",
+      ).bind(accountID, now, now),
+      testEnv.DB.prepare(
+        "INSERT INTO hosts (id, account_id, display_name, created_at, updated_at) "
+          + "VALUES (?, ?, ?, ?, ?)",
+      ).bind(hostID, accountID, "Backlog Mac", now, now),
+    ]);
+    const numbers = "WITH RECURSIVE numbers(value) AS "
+      + "(VALUES(1) UNION ALL SELECT value + 1 FROM numbers WHERE value < 1001) ";
+    await testEnv.DB.prepare(
+      "WITH RECURSIVE numbers(value) AS "
+        + "(VALUES(1) UNION ALL SELECT value + 1 FROM numbers WHERE value < 5) "
+        + "INSERT INTO accounts (id, created_at, updated_at) "
+        + "SELECT ? || '-refresh-account-' || value, ?, ? FROM numbers",
+    ).bind(prefix, now, now).run();
+    await testEnv.DB.batch([
+      testEnv.DB.prepare(
+        numbers
+          + "INSERT INTO apple_assertions (digest, account_id, expires_at, created_at) "
+          + "SELECT ? || '-assertion-' || value, ?, ?, ? FROM numbers",
+      ).bind(prefix, accountID, now - 1, now - 10),
+      testEnv.DB.prepare(
+        numbers
+          + "INSERT INTO apple_notifications (jti_digest, expires_at, created_at) "
+          + "SELECT ? || '-notification-' || value, ?, ? FROM numbers",
+      ).bind(prefix, now - 1, now - 10),
+      testEnv.DB.prepare(
+        numbers
+          + "INSERT INTO rendezvous_credentials "
+          + "(digest, kind, account_id, host_id, device_id, expires_at, created_at) "
+          + "SELECT ? || '-rendezvous-' || value, 'host', ?, ?, NULL, ?, ? FROM numbers",
+      ).bind(prefix, accountID, hostID, now - 1, now - 10),
+      testEnv.DB.prepare(
+        numbers
+          + "INSERT INTO refresh_sessions (digest, account_id, expires_at, created_at, revoked_at) "
+          + "SELECT ? || '-refresh-' || value, "
+          + "? || '-refresh-account-' || (((value - 1) % 5) + 1), ?, ?, ? FROM numbers",
+      ).bind(prefix, prefix, now - 1, now - 10, now - 1),
+    ]);
+
+    await worker.scheduled({ cron: "17 3 * * *" } as ScheduledController, testEnv);
+
+    await expect(rowCountWithPrefix("apple_assertions", "digest", prefix)).resolves.toBe(0);
+    await expect(rowCountWithPrefix("apple_notifications", "jti_digest", prefix)).resolves.toBe(0);
+    await expect(rowCountWithPrefix("rendezvous_credentials", "digest", prefix)).resolves.toBe(0);
+    await expect(rowCountWithPrefix("refresh_sessions", "digest", prefix)).resolves.toBe(0);
+  });
 });
 
 async function rowExists(table: string, column: string, value: string): Promise<boolean> {
   const row = await testEnv.DB.prepare(`SELECT 1 AS found FROM ${table} WHERE ${column} = ?`)
     .bind(value).first<{ found: number }>();
   return row?.found === 1;
+}
+
+async function rowCountWithPrefix(table: string, column: string, prefix: string): Promise<number> {
+  const row = await testEnv.DB.prepare(
+    `SELECT COUNT(*) AS count FROM ${table} WHERE ${column} LIKE ?`,
+  ).bind(`${prefix}%`).first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 type EnvOverrides = { [Key in keyof Env]?: Env[Key] | undefined };
