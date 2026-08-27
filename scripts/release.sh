@@ -350,6 +350,10 @@ run_xcodebuild "export" "$BUILD_DIR/export.log" -exportArchive \
 
 # MARK: - Verify
 
+say "Verifying declared helper entitlements"
+python3 "$ROOT/scripts/check_bundle_entitlements.py" --root "$ROOT" "$APP" \
+    || fail "an embedded helper does not carry its declared entitlements"
+
 # Notarization rejects a bundle whose *nested* code is development-signed, untimestamped, or
 # missing the hardened runtime — and it reports that only after the upload round-trip. Checking
 # every Mach-O here turns a ten-minute server rejection into an immediate local failure.

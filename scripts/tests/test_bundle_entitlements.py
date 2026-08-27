@@ -1,0 +1,97 @@
+import importlib.util
+import pathlib
+import plistlib
+import sys
+import tempfile
+import unittest
+
+
+REPOSITORY = pathlib.Path(__file__).parents[2]
+SCRIPT = REPOSITORY / "scripts/check_bundle_entitlements.py"
+SPEC = importlib.util.spec_from_file_location("check_bundle_entitlements", SCRIPT)
+assert SPEC is not None and SPEC.loader is not None
+checker = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = checker
+SPEC.loader.exec_module(checker)
+
+
+class BundleEntitlementTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.scratch = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self.scratch.name)
+        self.bundle = self.root / "Threading.app"
+        self.helpers = self.bundle / "Contents/Helpers"
+        self.helpers.mkdir(parents=True)
+        self.observed = {}
+
+        for name, relative_path in checker.HELPER_ENTITLEMENTS.items():
+            declaration = self.root / relative_path
+            declaration.parent.mkdir(parents=True, exist_ok=True)
+            value = (
+                {"com.apple.security.app-sandbox": True}
+                if name == "threading-extension-helper"
+                else {}
+            )
+            declaration.write_bytes(plistlib.dumps(value))
+            binary = self.helpers / name
+            binary.touch()
+            binary.chmod(0o755)
+            self.observed[name] = value
+
+        scc = self.helpers / "scc"
+        scc.touch()
+        scc.chmod(0o755)
+
+    def tearDown(self) -> None:
+        self.scratch.cleanup()
+
+    def signed_reader(self, binary: pathlib.Path):
+        return self.observed[binary.name]
+
+    def test_exact_helper_entitlements_pass(self) -> None:
+        self.assertEqual(
+            checker.verify_bundle(self.bundle, self.root, self.signed_reader),
+            [],
+        )
+
+    def test_app_entitlements_on_a_sandboxed_helper_fail(self) -> None:
+        self.observed["threading-extension-helper"] = {
+            "com.apple.security.cs.allow-unsigned-executable-memory": True,
+            "com.apple.security.cs.disable-library-validation": True,
+        }
+
+        problems = checker.verify_bundle(self.bundle, self.root, self.signed_reader)
+
+        self.assertEqual(len(problems), 1)
+        self.assertIn("missing com.apple.security.app-sandbox", problems[0])
+        self.assertIn("unexpected com.apple.security.cs.allow-unsigned-executable-memory", problems[0])
+
+    def test_new_unmapped_helper_fails_closed(self) -> None:
+        binary = self.helpers / "threading-new-helper"
+        binary.touch()
+        binary.chmod(0o755)
+
+        problems = checker.verify_bundle(self.bundle, self.root, self.signed_reader)
+
+        self.assertIn(
+            "threading-new-helper: executable has no entitlement declaration in the verifier",
+            problems,
+        )
+
+    def test_manifest_matches_project_entitlement_declarations(self) -> None:
+        project = (REPOSITORY / "Threading.xcodeproj/project.pbxproj").read_text(encoding="utf-8")
+        for declaration in checker.HELPER_ENTITLEMENTS.values():
+            self.assertTrue((REPOSITORY / declaration).is_file())
+            self.assertIn(f'CODE_SIGN_ENTITLEMENTS = "{declaration}";', project)
+
+    def test_auto_install_and_release_both_run_the_verifier(self) -> None:
+        autoinstall = (REPOSITORY / "scripts/autoinstall.sh").read_text(encoding="utf-8")
+        release = (REPOSITORY / "scripts/release.sh").read_text(encoding="utf-8")
+
+        self.assertNotIn("CODE_SIGN_ENTITLEMENTS=", autoinstall)
+        self.assertIn("check_bundle_entitlements.py", autoinstall)
+        self.assertIn("check_bundle_entitlements.py", release)
+
+
+if __name__ == "__main__":
+    unittest.main()

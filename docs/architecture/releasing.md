@@ -123,15 +123,24 @@ every target at once:
 
 ```
 CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application: …"
-PROVISIONING_PROFILE_SPECIFIER="" CODE_SIGN_ENTITLEMENTS=… CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
+PROVISIONING_PROFILE_SPECIFIER="" CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
 ```
 
-Two things make it work. The entitlements are derived from the app's own file with every
-`com.apple.developer.*` key removed, because those are the profile-backed family and no
-`codes.threading` profile exists on this machine — with Sign in with Apple left in, the build
-fails outright with "requires a provisioning profile with the Sign In with Apple feature". And
-`CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` strips the `get-task-allow` Xcode otherwise injects, so
-the app you leave running all day is not one any process running as you can attach a debugger to.
+Two things make it work. The app's entitlement file is derived in the disposable build checkout
+with every `com.apple.developer.*` key removed, because those are the profile-backed family and an
+ordinary auto-install names no profile. It is deliberately *not* passed as
+`CODE_SIGN_ENTITLEMENTS` on the command line: that setting would apply to every target, replacing
+the extension helpers' sandbox files with the host app's hardened-runtime relaxations. Each helper
+therefore keeps its project-declared file. `CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO` separately
+strips the `get-task-allow` Xcode otherwise injects, so the app you leave running all day is not
+one any process running as you can attach a debugger to.
+
+`scripts/check_bundle_entitlements.py` then reads the signed product and requires all six
+first-party helpers to match those files exactly. The auto-installer runs it before accepting a
+build, the release script runs it over the exported bundle, and an executable newly added under
+`Contents/Helpers` fails closed until its declaration joins the verifier. The checked-in `scc`
+binary is the sole exception: it is not an Xcode target and its checksum and architecture have a
+separate gate.
 
 The result is a bundle whose designated requirement is byte-identical to the shipping one —
 `identifier "codes.threading"` and a Developer ID leaf for the team — which is what makes the
@@ -490,6 +499,7 @@ server rejection into an immediate failure naming the binary:
 | `Timestamp=` | a secure timestamp is required, and is *not* added by a plain `codesign` |
 | no `get-task-allow` | notarization rejects a debuggable binary outright |
 | `lipo -archs` is exactly `arm64` | a second slice is 20 MB that no supported Mac can run — see [Apple silicon only](#apple-silicon-only) |
+| first-party helper entitlements exactly match their target files | a command-line build override can silently remove an extension sandbox or grant a helper host-only powers |
 
 Twelve binaries pass today: `Threading`, its six helpers — `scc`, the wasm runner, the two
 extension helpers, `threading-mcp-bridge` and `threading-ptyd` — and Sparkle's five: `Sparkle`,

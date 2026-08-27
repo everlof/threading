@@ -106,6 +106,9 @@ python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_test_gate
 say "Testing Swift warning ratchet"
 python3 -m unittest "${repository_directory}/scripts/tests/test_swift_warning_ratchet.py"
 
+say "Testing bundle entitlement verification"
+python3 -m unittest "${repository_directory}/scripts/tests/test_bundle_entitlements.py"
+
 say "Testing agent feedback audit"
 python3 "${repository_directory}/scripts/tests/test_agent_feedback_audit.py"
 

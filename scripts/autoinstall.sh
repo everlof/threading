@@ -28,13 +28,11 @@
 # build with the same identity means the grants survive the swap. An ad-hoc or development
 # signature would be a different app to macOS and would ask for all of them again, every commit.
 #
-# **Why an entitlement is dropped.** The app's entitlements ask for Sign In with Apple, which
-# manual signing can only grant through a provisioning profile, and no codes.threading profile
-# exists on this machine (`xcodebuild` fails outright: "requires a provisioning profile with the
-# Sign In with Apple feature"). Every `com.apple.developer.*` key is stripped for this build —
-# they are the profile-backed ones — and the two hardened-runtime relaxations are kept. That is
-# the same shape release.sh's manual-signing fallback has been installing all along; the copy in
-# /Applications carries exactly those two entitlements today.
+# **Why an entitlement is dropped.** Any `com.apple.developer.*` app entitlement needs a
+# provisioning profile, which an ordinary local auto-install deliberately does not use. The app's
+# plist is therefore derived inside the disposable build checkout with that family removed.
+# Helpers keep their own target entitlement files: overriding `CODE_SIGN_ENTITLEMENTS` on the
+# xcodebuild command line would replace every helper's declaration and disable their sandboxes.
 #
 # **Why it never quits or moves the running app.** Threading hosts live agent sessions in PTYs,
 # and any agent committing to master would otherwise stop your session mid-turn. A completed build
@@ -72,7 +70,6 @@ readonly STATE="$HOME_DIR/state"
 readonly BUILD_LOG="$HOME_DIR/build.log"
 readonly BUILDER_LOG="$HOME_DIR/builder.log"
 readonly HISTORY="$HOME_DIR/history.log"
-readonly ENTITLEMENTS="$HOME_DIR/local.entitlements"
 readonly PRODUCT="$DERIVED/Build/Products/Release/$SCHEME.app"
 
 readonly LOCK="$STATE/builder.lock"
@@ -263,12 +260,13 @@ prepare_round() {
 # in the repository, so it cannot drift: whatever the app asks for, this asks for too, minus the
 # keys that need a provisioning profile.
 derive_entitlements() {
-    python3 - "$CHECKOUT/$ENTITLEMENTS_IN_REPO" "$ENTITLEMENTS" <<'PYTHON'
+    python3 - "$CHECKOUT/$ENTITLEMENTS_IN_REPO" <<'PYTHON'
 import plistlib
 import sys
+from pathlib import Path
 
-source, destination = sys.argv[1], sys.argv[2]
-with open(source, "rb") as handle:
+source = Path(sys.argv[1])
+with source.open("rb") as handle:
     entitlements = plistlib.load(handle)
 
 # com.apple.developer.* is the profile-backed family; com.apple.security.* is not. Dropping by
@@ -277,8 +275,10 @@ dropped = sorted(key for key in entitlements if key.startswith("com.apple.develo
 for key in dropped:
     del entitlements[key]
 
-with open(destination, "wb") as handle:
+temporary = source.with_name(source.name + ".autoinstall")
+with temporary.open("wb") as handle:
     plistlib.dump(entitlements, handle)
+temporary.replace(source)
 
 print(" ".join(dropped))
 PYTHON
@@ -309,7 +309,6 @@ build_the_checkout() {
         CODE_SIGN_STYLE=Manual \
         CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
         PROVISIONING_PROFILE_SPECIFIER="" \
-        CODE_SIGN_ENTITLEMENTS="$ENTITLEMENTS" \
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
         THREADING_SOURCE_REVISION="$sha" \
         build >>"$BUILD_LOG" 2>&1 &
@@ -344,6 +343,10 @@ build_the_checkout() {
                 "$sha" >> "$BUILD_LOG"
             status=1
         fi
+    fi
+    if [[ $status -eq 0 ]] && ! python3 "$SOURCE_REPO/scripts/check_bundle_entitlements.py" \
+        --root "$CHECKOUT" "$PRODUCT" >>"$BUILD_LOG" 2>&1; then
+        status=1
     fi
     return "$status"
 }
