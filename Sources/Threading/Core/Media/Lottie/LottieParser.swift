@@ -76,8 +76,24 @@ enum LottieParser {
             ))
         }
 
-        var context = Context(limits: limits, embeddedImages: embeddedImages)
         let assets = (root["assets"] as? [[String: Any]]) ?? []
+        var remainingLayerCapacity = limits.maximumLayerCount
+        try reserveLayerCapacity(
+            rawLayers.count,
+            remaining: &remainingLayerCapacity,
+            limit: limits.maximumLayerCount
+        )
+        for asset in assets {
+            guard asset["id"] is String,
+                  let assetLayers = asset["layers"] as? [[String: Any]] else { continue }
+            try reserveLayerCapacity(
+                assetLayers.count,
+                remaining: &remainingLayerCapacity,
+                limit: limits.maximumLayerCount
+            )
+        }
+
+        var context = Context(limits: limits, embeddedImages: embeddedImages)
         for asset in assets {
             guard let id = asset["id"] as? String else { continue }
             if let assetLayers = asset["layers"] as? [[String: Any]] {
@@ -91,12 +107,6 @@ enum LottieParser {
 
         let layers = rawLayers.compactMap { layer(from: $0, into: &context) }
         let total = layers.count + context.precomps.values.reduce(0) { $0 + $1.count }
-        guard total <= limits.maximumLayerCount else {
-            throw MediaDocumentFailure.exceedsLimits(L10n.format(
-                "The animation has more than the %lld layers this player accepts.",
-                Int64(limits.maximumLayerCount)
-            ))
-        }
         guard !layers.isEmpty else {
             throw MediaDocumentFailure.invalidDocument(
                 L10n.string("The animation has no layers this player can draw.")
@@ -128,6 +138,22 @@ enum LottieParser {
             notes: context.notes.sorted(),
             totalLayerCount: total
         )
+    }
+
+    /// Reserves from raw cardinality, before `layer(from:into:)` allocates transforms and paths.
+    /// Unsupported layers count too: deciding that they are unsupported is itself parser work.
+    private static func reserveLayerCapacity(
+        _ count: Int,
+        remaining: inout Int,
+        limit: Int
+    ) throws {
+        guard count <= remaining else {
+            throw MediaDocumentFailure.exceedsLimits(L10n.format(
+                "The animation has more than the %lld layers this player accepts.",
+                Int64(limit)
+            ))
+        }
+        remaining -= count
     }
 
     // MARK: - Context

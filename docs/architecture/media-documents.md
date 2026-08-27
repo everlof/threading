@@ -606,8 +606,10 @@ focus, keyboard and VoiceOver behaviour are identical in either state.
 - Handles are opaque, generation-bound, and revoked with the bearer token. Their captured
   root/query scope is revalidated when opened.
 - Rendering is bounded before it starts: document bytes, layer count, pixel dimensions, frame
-  count, duration, ZIP entry ceilings. A document past any ceiling fails with a stated reason
-  rather than being partially drawn.
+  count, duration, ZIP entry ceilings. The layer ceiling is reserved from the raw composition and
+  precomp arrays before any `LottieLayer`, transform, path or asset is built; unsupported layers
+  count because classifying them is still parser work. A document past any ceiling fails with a
+  stated reason rather than being partially drawn.
 - Lottie expressions are disabled; bare-JSON filesystem asset references are dropped. A `.lottie`
   asset resolves only to an already-validated entry in its own archive.
 - `attachments.preview@1` grants no attachment read authority.

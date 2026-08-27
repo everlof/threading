@@ -140,6 +140,36 @@ final class LottieRendererTests: XCTestCase {
         XCTAssertNoThrow(try LottieParser.parse(LottieFixture.spinningDot(), limits: exact))
     }
 
+    /// The bound is on parser work, not only the subset of layers the renderer understands.
+    /// Counting after `compactMap` let an input carry an effectively unbounded number of dropped
+    /// layers in either the main composition or its precomps.
+    func testLayerCeilingCountsRawCompositionAndPrecompLayersBeforeConversion() throws {
+        let decoded = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: LottieFixture.spinningDot()) as? [String: Any]
+        )
+        let unsupportedLayers = Array(repeating: ["ty": 999], count: 2)
+
+        var topLevelOverflow = decoded
+        topLevelOverflow["layers"] = unsupportedLayers
+
+        var precompOverflow = decoded
+        precompOverflow["assets"] = [["id": "oversized", "layers": unsupportedLayers]]
+
+        var limits = MediaDocumentLimits.default
+        limits.maximumLayerCount = 1
+        for (name, object) in [
+            ("top-level", topLevelOverflow),
+            ("precomp plus composition", precompOverflow)
+        ] {
+            let data = try JSONSerialization.data(withJSONObject: object)
+            XCTAssertThrowsError(try LottieParser.parse(data, limits: limits), name) { error in
+                guard case MediaDocumentFailure.exceedsLimits = error else {
+                    return XCTFail("\(name) should hit the raw layer ceiling, got \(error)")
+                }
+            }
+        }
+    }
+
     // MARK: - Rasterizing
 
     /// The engine draws something, in the right place, and the picture changes over the timeline.
