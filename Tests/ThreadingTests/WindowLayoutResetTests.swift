@@ -22,7 +22,27 @@ final class WindowLayoutResetTests: XCTestCase {
         "ThreadingShowsStatusCard"
     ]
     private let standardKeys = ["ThreadingShellDrawerHeight"]
-    private var frameKey: String { "NSWindow Frame \(MainWindowDefaults.frameAutosaveName)" }
+    private nonisolated var frameKey: String {
+        "NSWindow Frame \(MainWindowDefaults.frameAutosaveName)"
+    }
+    /// XCTest owns one fixture instance per case and calls these lifecycle methods serially, but
+    /// its overrides are nonisolated even when the case itself is main-actor-bound.
+    private nonisolated(unsafe) var savedStandardValues: [String: Any] = [:]
+    private nonisolated(unsafe) var absentStandardKeys: Set<String> = []
+
+    override func setUp() {
+        super.setUp()
+
+        savedStandardValues.removeAll()
+        absentStandardKeys.removeAll()
+        for key in standardKeys + [frameKey] {
+            if let value = UserDefaults.standard.object(forKey: key) {
+                savedStandardValues[key] = value
+            } else {
+                absentStandardKeys.insert(key)
+            }
+        }
+    }
 
     private func writeEverything() {
         SidebarWidth.record(SidebarDefaults.minWidth + 40)
@@ -34,8 +54,12 @@ final class WindowLayoutResetTests: XCTestCase {
 
     override func tearDown() {
         for key in preferenceKeys { PreferenceStore.shared.removeObject(forKey: key) }
-        for key in standardKeys { UserDefaults.standard.removeObject(forKey: key) }
-        UserDefaults.standard.removeObject(forKey: frameKey)
+        for (key, value) in savedStandardValues {
+            UserDefaults.standard.set(value, forKey: key)
+        }
+        for key in absentStandardKeys {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
         super.tearDown()
     }
 
