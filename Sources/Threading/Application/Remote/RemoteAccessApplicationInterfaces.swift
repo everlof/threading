@@ -60,11 +60,62 @@ protocol RemoteSettingsMutating: Sendable {
     ) -> ProjectMutationResult
 }
 
+/// The detail keys a remote event may carry.
+///
+/// A journal row's *message* is prose a person reads, and stays free text. Its keys are not: they
+/// become the JSON object keys of `detail`, which is what a support report groups and joins on, so
+/// `"sesion"` hand-spelled once is a column that quietly loses a row rather than anything anyone
+/// notices. Naming them here makes that a compile error, the same way `RemoteDiagnosticField` does
+/// for the phone's diagnostics journal — a *different* vocabulary, generated from a contract and
+/// bound for a public intake, which this one is deliberately not merged into.
+///
+/// The raw values are the strings already in every journal on disk. Renaming a case renames the
+/// key, so a rename is a decision about existing records, not a tidy-up.
+enum RemoteEventField: String, CaseIterable, Hashable, Sendable {
+    /// The paired device as the client named itself, or `unknown`.
+    case device
+    /// `MacRemoteDiagnostics.pseudonym` of a device — the hashed form, where the raw id is not
+    /// what the row is about.
+    case peer
+    /// The session a route acted on, as a UUID string.
+    case session
+    /// The terminal a route acted on, as a UUID string.
+    case terminal
+    /// The share a registration or route authenticated against.
+    case share
+    /// What the authorization was allowed to do.
+    case capability
+    /// The terminal or app theme applied, or `inherit`.
+    case theme
+    /// The app setting's identity.
+    case setting
+    /// The session surface switched to.
+    case surface
+    /// The account a session was moved to.
+    case account
+    /// The limit-recovery action chosen.
+    case policy
+    /// Where an upload came from.
+    case source
+    /// How many records an upload carried.
+    case records
+    /// Whether a cached capture included a screenshot.
+    case screenshot
+    /// How a notification registration will be delivered.
+    case delivery
+    /// The answer given to a permission request.
+    case decision
+    /// Which side of the protocol needs updating.
+    case update
+    /// Why something was refused.
+    case reason
+}
+
 /// The remote adapter may append structured events but cannot inspect or manage the journal.
 protocol RemoteEventRecording: Sendable {
     func recordRemoteEvent(
         _ message: String,
-        _ detail: [String: String]
+        _ detail: [RemoteEventField: String]
     )
 }
 
@@ -91,8 +142,10 @@ protocol RemoteHostCommanding: AnyObject, Sendable {
 extension ProjectStore: RemoteSessionQuerying, RemoteSessionMutating {}
 extension AgentRuntime: RemoteRuntimeStatus {}
 extension EventLog: RemoteEventRecording {
-    func recordRemoteEvent(_ message: String, _ detail: [String: String]) {
-        record(.remote, message, detail)
+    func recordRemoteEvent(_ message: String, _ detail: [RemoteEventField: String]) {
+        record(.remote, message, detail.reduce(into: [String: String]()) { keyed, entry in
+            keyed[entry.key.rawValue] = entry.value
+        })
     }
 }
 

@@ -1833,6 +1833,13 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             422
         )
         XCTAssertTrue(eventRecorder.messages.contains("App setting changed remotely"))
+        // The journal row names which setting moved and who moved it. Both are typed fields, so
+        // this is the route filing them rather than a dictionary literal agreeing with itself.
+        XCTAssertEqual(
+            eventRecorder.detail(for: "App setting changed remotely")?[.setting],
+            "remoteInputControlDefault"
+        )
+        XCTAssertNotNil(eventRecorder.detail(for: "App setting changed remotely")?[.device])
     }
 
     func testUsageIsAdvertisedAndReadableOnlyToWholeHostOwner() throws {
@@ -4021,16 +4028,25 @@ private final class RecordingRemoteSettingsMutator: RemoteSettingsMutating {
 private final class RecordingRemoteEventRecorder: @unchecked Sendable, RemoteEventRecording {
     private let lock = NSLock()
     private var recordedMessages: [String] = []
+    private var recordedDetails: [String: [RemoteEventField: String]] = [:]
 
     var messages: [String] {
         lock.withLock { recordedMessages }
     }
 
+    /// The detail last recorded under one message, for asserting which fields a route filed.
+    func detail(for message: String) -> [RemoteEventField: String]? {
+        lock.withLock { recordedDetails[message] }
+    }
+
     func recordRemoteEvent(
         _ message: String,
-        _ detail: [String: String]
+        _ detail: [RemoteEventField: String]
     ) {
-        lock.withLock { recordedMessages.append(message) }
+        lock.withLock {
+            recordedMessages.append(message)
+            recordedDetails[message] = detail
+        }
     }
 }
 

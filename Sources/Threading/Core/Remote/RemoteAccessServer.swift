@@ -1210,9 +1210,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             self.services.eventLog.recordRemoteEvent("Remote notifications registered", [
-                "share": authorization.shareID,
-                "device": deviceID,
-                "delivery": result.delivery.rawValue,
+                .share: authorization.shareID,
+                .device: deviceID,
+                .delivery: result.delivery.rawValue,
             ])
             MacRemoteDiagnostics.record(.notificationRegistrationReceived, fields: [
                 .peer: MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
@@ -1255,9 +1255,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         let peer = MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device")
         self.services.eventLog.recordRemoteEvent("Remote diagnostics received", [
-            "source": upload.source.rawValue,
-            "records": String(upload.records.count),
-            "peer": peer,
+            .source: upload.source.rawValue,
+            .records: String(upload.records.count),
+            .peer: peer,
         ])
         respond(.respond(RemoteRouter.json(
             RemoteDiagnosticUploadResponseDTO(acceptedRecords: upload.records.count)
@@ -1291,9 +1291,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 deviceName: nil
             )
             services.eventLog.recordRemoteEvent("iOS local diagnostics cached", [
-                "device": MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
-                "records": String(upload.capture.diagnostics.count),
-                "screenshot": upload.capture.screenshotJPEGBase64 == nil ? "none" : "included",
+                .device: MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
+                .records: String(upload.capture.diagnostics.count),
+                .screenshot: upload.capture.screenshotJPEGBase64 == nil ? "none" : "included",
             ])
             respond(.respond(RemoteRouter.json(
                 RemoteMobileDiagnosticsCaptureUploadResponseDTO(
@@ -1542,8 +1542,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             self.services.eventLog.recordRemoteEvent("App theme changed remotely", [
-                "theme": appliedThemeID.rawValue,
-                "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                .theme: appliedThemeID.rawValue,
+                .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             respond(.respond(RemoteRouter.json(
                 self.services.mirrors.meResponse(for: authorization)
@@ -1576,8 +1576,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             ) {
             case .applied:
                 self.services.eventLog.recordRemoteEvent("App setting changed remotely", [
-                    "setting": identity,
-                    "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                    .setting: identity,
+                    .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
                 ])
                 respond(.respond(RemoteRouter.json(
                     self.services.mirrors.meResponse(for: authorization)
@@ -1657,9 +1657,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             self.services.eventLog.recordRemoteEvent("Session theme changed remotely", [
-                "session": sessionID.uuidString,
-                "theme": themeID?.rawValue ?? "inherit",
-                "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                .session: sessionID.uuidString,
+                .theme: themeID?.rawValue ?? "inherit",
+                .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             respond(.respond(RemoteRouter.json(
                 self.services.mirrors.meResponse(for: authorization)
@@ -1717,8 +1717,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             self.services.eventLog.recordRemoteEvent("Session renamed remotely", [
-                "session": sessionID.uuidString,
-                "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                .session: sessionID.uuidString,
+                .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             respond(.respond(RemoteRouter.json(
                 self.services.mirrors.meResponse(for: authorization)
@@ -1818,8 +1818,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     self.services.eventLog.recordRemoteEvent(choice.isArchived
                         ? "Session archived remotely"
                         : "Session restored remotely", [
-                            "session": sessionID.uuidString,
-                            "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                            .session: sessionID.uuidString,
+                            .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
                         ])
                     respond(.respond(RemoteRouter.json(
                         self.services.mirrors.meResponse(for: authorization)
@@ -1973,9 +1973,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             self.services.eventLog.recordRemoteEvent("Session UI changed remotely", [
-                "session": sessionID.uuidString,
-                "surface": choice.surface.rawValue,
-                "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                .session: sessionID.uuidString,
+                .surface: choice.surface.rawValue,
+                .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
             ])
             respond(.respond(RemoteRouter.json(
                 self.services.mirrors.meResponse(for: authorization)
@@ -2026,9 +2026,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             ) {
             case .success:
                 self.services.eventLog.recordRemoteEvent("Session account changed remotely", [
-                    "session": sessionID.uuidString,
-                    "account": choice.accountID,
-                    "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                    .session: sessionID.uuidString,
+                    .account: choice.accountID,
+                    .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
                 ])
                 respond(.respond(RemoteRouter.json(
                     self.services.mirrors.meResponse(for: authorization)
@@ -2104,9 +2104,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 self.services.eventLog.recordRemoteEvent(
                     "Session limit recovery changed remotely",
                     [
-                        "session": sessionID.uuidString,
-                        "policy": choice.policy.action,
-                        "device": request.header(RemoteRouter.deviceHeader) ?? "unknown",
+                        .session: sessionID.uuidString,
+                        .policy: choice.policy.action,
+                        .device: request.header(RemoteRouter.deviceHeader) ?? "unknown",
                     ]
                 )
                 respond(.respond(RemoteRouter.json(
@@ -2971,9 +2971,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     return
                 }
                 self.services.eventLog.recordRemoteEvent("Remote terminal connected", [
-                    "terminal": terminalID.uuidString,
-                    "capability": authorization.capability.rawValue,
-                    "device": device ?? "unknown",
+                    .terminal: terminalID.uuidString,
+                    .capability: authorization.capability.rawValue,
+                    .device: device ?? "unknown",
                 ])
             }
             return
@@ -3052,9 +3052,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         device: String?
     ) {
         services.eventLog.recordRemoteEvent("Remote client connected", [
-            "session": sessionID.uuidString,
-            "capability": authorization.capability.rawValue,
-            "device": device ?? "unknown",
+            .session: sessionID.uuidString,
+            .capability: authorization.capability.rawValue,
+            .device: device ?? "unknown",
         ])
         var fields: [RemoteDiagnosticField: String] = [
             .session: MacRemoteDiagnostics.pseudonym(
@@ -3073,7 +3073,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleInput(_ connection: RemoteConnection, data: String?) {
         guard let authorization = connection.authorization, authorization.capability == .interact else {
             connection.sendText(#"{"type":"error","code":"forbidden"}"#)
-            self.services.eventLog.recordRemoteEvent("Remote input refused", ["reason": "view-only"])
+            self.services.eventLog.recordRemoteEvent("Remote input refused", [.reason: "view-only"])
             return
         }
         guard let data else { return }
@@ -3657,9 +3657,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 return
             }
             self.services.eventLog.recordRemoteEvent("Remote permission decision", [
-                "session": sessionID.uuidString,
-                "decision": decision.rawValue,
-                "device": connection.deviceID ?? "unknown",
+                .session: sessionID.uuidString,
+                .decision: decision.rawValue,
+                .device: connection.deviceID ?? "unknown",
             ])
             var fields: [RemoteDiagnosticField: String] = [
                 .trace: id,
@@ -3782,7 +3782,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func recordFailedAuth(reason: String, device: String?) {
         authLimiter.recordFailure(device: device)
         ThreadingLogger.remote.warning("Remote auth denied: \(reason, privacy: .public)")
-        self.services.eventLog.recordRemoteEvent("Remote auth denied", ["reason": reason])
+        self.services.eventLog.recordRemoteEvent("Remote auth denied", [.reason: reason])
         var fields: [RemoteDiagnosticField: String] = [.reason: reason]
         if let device {
             fields[.peer] = MacRemoteDiagnostics.pseudonym(device, prefix: "device")
@@ -3838,7 +3838,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         ThreadingLogger.remote.warning(
             "Remote protocol mismatch, update needed on: \(update.rawValue, privacy: .public)"
         )
-        self.services.eventLog.recordRemoteEvent("Remote protocol mismatch", ["update": update.rawValue])
+        self.services.eventLog.recordRemoteEvent("Remote protocol mismatch", [.update: update.rawValue])
         return RemoteUpgradeRequiredDTO(update: update, message: message)
     }
 
