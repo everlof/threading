@@ -89,6 +89,13 @@ actually land in — a session lasting an hour is not merged into the tree that 
 started. A source still dirty at the handshake refuses the merge, retains the checkout and marks
 the workspace `needsAttention`; committing or stashing and finishing again succeeds.
 
+Initialized submodules need an explicit disposal proof. Git refuses ordinary worktree removal
+whenever one is present, even when it is clean; blindly adding `--force` would erase work hidden by
+`submodule.<name>.ignore`. Threading therefore runs status with `--ignore-submodules=none` before
+the merge and again immediately before forced removal. A dirty or untracked nested checkout keeps
+the managed workspace for attention; a clean initialized submodule no longer strands a delivery
+after the source branch has already advanced.
+
 What provisioning still requires is a repository whose source checkout is **on a branch**, since
 the branch is recorded as the delivery target and re-proved before the fast-forward.
 

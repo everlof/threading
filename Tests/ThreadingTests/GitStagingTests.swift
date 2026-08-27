@@ -544,6 +544,92 @@ final class GitStagingTests: XCTestCase {
         )
     }
 
+    func testManagedWorkspaceWithACleanInitializedSubmoduleIntegratesAndDisposes() throws {
+        let submoduleSource = try addCommittedFixtureSubmodule()
+        defer { try? FileManager.default.removeItem(at: submoduleSource) }
+        let workspaceParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingManaged-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: workspaceParent) }
+
+        let workspace = try ManagedGitWorkspace.provision(
+            sessionID: SessionID(),
+            from: Project(name: "Fixture", folderURL: root),
+            plan: ManagedWorkspacePlan(),
+            rootDirectory: workspaceParent
+        )
+        let worktree = URL(fileURLWithPath: workspace.worktreeRoot, isDirectory: true)
+        _ = try GitProcess.run([
+            "-c", "protocol.file.allow=always",
+            "submodule", "update", "--init", "--recursive"
+        ], in: worktree)
+        try "isolated\n".write(
+            to: worktree.appendingPathComponent("managed-submodule.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        _ = try GitProcess.run(["add", "managed-submodule.txt"], in: worktree)
+        _ = try GitProcess.run([
+            "commit", "--quiet", "--message", "managed work with submodule"
+        ], in: worktree)
+
+        let completed = try ManagedGitWorkspace.integrateAndClean(workspace)
+
+        XCTAssertEqual(completed.state, .integrated)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: workspace.worktreeRoot))
+        XCTAssertEqual(
+            try String(contentsOf: root.appendingPathComponent("managed-submodule.txt")),
+            "isolated\n"
+        )
+    }
+
+    func testManagedWorkspaceRefusesDirtySubmoduleHiddenByGitConfiguration() throws {
+        let submoduleSource = try addCommittedFixtureSubmodule()
+        defer { try? FileManager.default.removeItem(at: submoduleSource) }
+        try git("config", "submodule.fixture.ignore", "all")
+        let workspaceParent = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingManaged-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: workspaceParent) }
+
+        let workspace = try ManagedGitWorkspace.provision(
+            sessionID: SessionID(),
+            from: Project(name: "Fixture", folderURL: root),
+            plan: ManagedWorkspacePlan(),
+            rootDirectory: workspaceParent
+        )
+        let worktree = URL(fileURLWithPath: workspace.worktreeRoot, isDirectory: true)
+        _ = try GitProcess.run([
+            "-c", "protocol.file.allow=always",
+            "submodule", "update", "--init", "--recursive"
+        ], in: worktree)
+        try "uncommitted\n".write(
+            to: worktree.appendingPathComponent("Vendor/Fixture/dirty.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "isolated\n".write(
+            to: worktree.appendingPathComponent("managed-submodule.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        _ = try GitProcess.run(["add", "managed-submodule.txt"], in: worktree)
+        _ = try GitProcess.run([
+            "commit", "--quiet", "--message", "managed work with dirty submodule"
+        ], in: worktree)
+        let sourceHead = try output("rev-parse", "HEAD")
+
+        XCTAssertThrowsError(try ManagedGitWorkspace.integrateAndClean(workspace)) { error in
+            guard let failure = error as? ManagedGitWorkspace.Failure,
+                  case .workspaceIsDirty = failure else {
+                return XCTFail("unexpected refusal: \(error)")
+            }
+        }
+        XCTAssertEqual(try output("rev-parse", "HEAD"), sourceHead)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: workspace.worktreeRoot))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: worktree.appendingPathComponent("Vendor/Fixture/dirty.txt").path
+        ))
+    }
+
     func testManagedWorkspacePublishesOnlyAnOpaqueRemoteBranchThenDisposesLocally() async throws {
         let workspaceParent = FileManager.default.temporaryDirectory
             .appendingPathComponent("ThreadingManaged-\(UUID().uuidString)", isDirectory: true)
@@ -770,6 +856,28 @@ final class GitStagingTests: XCTestCase {
 
     private func write(_ contents: String, to name: String) throws {
         try contents.write(to: root.appendingPathComponent(name), atomically: true, encoding: .utf8)
+    }
+
+    private func addCommittedFixtureSubmodule() throws -> URL {
+        let source = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingSubmodule-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        _ = try GitProcess.run(["init", "--quiet", "--initial-branch=main"], in: source)
+        _ = try GitProcess.run(["config", "user.email", "submodule@example.com"], in: source)
+        _ = try GitProcess.run(["config", "user.name", "Submodule Fixture"], in: source)
+        try "fixture\n".write(
+            to: source.appendingPathComponent("fixture.txt"),
+            atomically: true,
+            encoding: .utf8
+        )
+        _ = try GitProcess.run(["add", "fixture.txt"], in: source)
+        _ = try GitProcess.run(["commit", "--quiet", "--message", "submodule seed"], in: source)
+        try git(
+            "-c", "protocol.file.allow=always",
+            "submodule", "add", "--name", "fixture", source.path, "Vendor/Fixture"
+        )
+        try git("commit", "--quiet", "--message", "add fixture submodule")
+        return source
     }
 
     @discardableResult

@@ -383,8 +383,7 @@ enum ManagedGitWorkspace {
 
         // Unlock is tolerant for a retry after a previous cleanup failure: the merge is
         // idempotent, and an already-unlocked worktree is still exactly this recorded path.
-        _ = try? run(["worktree", "unlock", worktree.path], in: source)
-        try run(["worktree", "remove", worktree.path], in: source)
+        try removeCleanWorktree(worktree, from: source)
 
         var completed = workspace
         completed.baseCommit = finalCommit
@@ -454,8 +453,7 @@ enum ManagedGitWorkspace {
             in: worktree
         ) else { throw Failure.historyWasRewritten }
 
-        _ = try? run(["worktree", "unlock", worktree.path], in: source)
-        try run(["worktree", "remove", worktree.path], in: source)
+        try removeCleanWorktree(worktree, from: source)
 
         var completed = workspace
         completed.state = .published
@@ -477,8 +475,7 @@ enum ManagedGitWorkspace {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard finalCommit == workspace.baseCommit else { throw Failure.historyWasRewritten }
 
-        _ = try? run(["worktree", "unlock", worktree.path], in: source)
-        try run(["worktree", "remove", worktree.path], in: source)
+        try removeCleanWorktree(worktree, from: source)
     }
 
     static func keepForReview(_ workspace: ManagedWorkspace) -> ManagedWorkspace {
@@ -557,9 +554,20 @@ enum ManagedGitWorkspace {
     }
 
     private static func isClean(_ directory: URL) throws -> Bool {
-        try run(["status", "--porcelain=v1", "--untracked-files=all"], in: directory)
+        try run([
+            "status", "--porcelain=v1", "--untracked-files=all", "--ignore-submodules=none"
+        ], in: directory)
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .isEmpty
+    }
+
+    /// Git categorically refuses an ordinary worktree removal when a clean submodule is
+    /// initialized. `--force` is safe only after overriding every per-submodule ignore setting;
+    /// re-check immediately before removal so ignored or newly-created nested work is retained.
+    private static func removeCleanWorktree(_ worktree: URL, from source: URL) throws {
+        guard try isClean(worktree) else { throw Failure.workspaceIsDirty }
+        _ = try? run(["worktree", "unlock", worktree.path], in: source)
+        try run(["worktree", "remove", "--force", worktree.path], in: source)
     }
 
     /// `.worktreeinclude` is the opt-in setup contract shared with other worktree tools: it can
