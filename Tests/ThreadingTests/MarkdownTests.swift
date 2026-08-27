@@ -174,6 +174,46 @@ final class MarkdownTests: XCTestCase {
         XCTAssertEqual(text(of: blocks("*italic* too").first), "italic too")
     }
 
+    /// Assistant prose is untrusted. AppKit hands a live link attribute to the registered system
+    /// handler, so only ordinary web navigation may cross from Markdown into an external app.
+    func testOnlyHTTPAndHTTPSMarkdownTargetsBecomeLiveLinks() {
+        let parsed = blocks("""
+        [secure](HTTPS://example.com/a) [web](http://example.com/b) \
+        [file](file:///Users/person/private) [custom](someapp://run) \
+        [script](javascript:alert) [relative](/documentation)
+        """)
+        guard case .paragraph(let attributed) = parsed.first else {
+            return XCTFail("links did not parse as a paragraph")
+        }
+
+        var liveLabels: [String] = []
+        var liveSchemes: [String] = []
+        attributed.enumerateAttribute(
+            .link,
+            in: NSRange(location: 0, length: attributed.length)
+        ) { value, range, _ in
+            guard let url = value as? URL else { return }
+            liveLabels.append(attributed.attributedSubstring(from: range).string)
+            liveSchemes.append(url.scheme?.lowercased() ?? "")
+        }
+
+        XCTAssertEqual(liveLabels, ["secure", "web"])
+        XCTAssertEqual(liveSchemes, ["https", "http"])
+        for refused in ["file", "custom", "script", "relative"] {
+            let range = (attributed.string as NSString).range(of: refused)
+            XCTAssertNotEqual(range.location, NSNotFound)
+            XCTAssertNil(attributed.attribute(.link, at: range.location, effectiveRange: nil))
+            XCTAssertNil(
+                attributed.attribute(.underlineStyle, at: range.location, effectiveRange: nil)
+            )
+            XCTAssertEqual(
+                attributed.attribute(.foregroundColor, at: range.location, effectiveRange: nil)
+                    as? NSColor,
+                style.textColor
+            )
+        }
+    }
+
     /// An unterminated fence still ends: it takes the rest of the document rather than looping
     /// or dropping everything after it. Agents produce these constantly by being cut off.
     func testAnUnterminatedFenceEndsAtTheDocument() {

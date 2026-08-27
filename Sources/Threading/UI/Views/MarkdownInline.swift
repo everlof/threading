@@ -57,15 +57,28 @@ extension Markdown {
             case .link(let label, let url):
                 var attributes: [NSAttributedString.Key: Any] = [
                     .font: baseFont,
-                    .foregroundColor: style.linkColor,
-                    .underlineStyle: NSUnderlineStyle.single.rawValue
+                    .foregroundColor: style.textColor
                 ]
-                if let link = URL(string: url) { attributes[.link] = link }
+                // Assistant Markdown is untrusted document content. AppKit opens a `.link`
+                // attribute through the system handler, so file:, custom-app and executable
+                // schemes must never become actions merely because an agent wrote them.
+                if let link = clickableLinkURL(url) {
+                    attributes[.foregroundColor] = style.linkColor
+                    attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                    attributes[.link] = link
+                }
                 result.append(NSAttributedString(string: label, attributes: attributes))
             }
         }
 
         return result
+    }
+
+    private static func clickableLinkURL(_ value: String) -> URL? {
+        guard let url = URL(string: value),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "https" || scheme == "http" else { return nil }
+        return url
     }
 
     // MARK: - Font Variants

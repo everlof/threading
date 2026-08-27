@@ -1504,7 +1504,9 @@ forwarded to the enclosing conversation rather than being swallowed by a surface
 vertical range. That choice is locked for the complete trackpad gesture and its momentum tail:
 minor diagonal noise cannot retarget an in-flight vertical flick to a nested horizontal surface
 and make the parent conversation appear to stop. Everything else is a selectable label, so
-wrapping and selection come free.
+wrapping and selection come free. Assistant-authored link targets are actions only for `http` and
+`https`: every other URL scheme keeps its visible label but receives neither AppKit's live-link
+attribute nor link styling, so agent prose cannot hand `file:` or a custom-app URL to the system.
 
 Tool calls render through `ToolCallView`: a fixed-width **glyph column** (`$` bash, `→` read,
 `←` write, `✱` grep/glob, `◈` search — the vocabulary a terminal user already knows), the
