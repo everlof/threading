@@ -52,7 +52,13 @@ struct BrowserOrigin: Hashable, Equatable {
 
     var displayName: String {
         guard !host.isEmpty else { return L10n.string("this blank page") }
-        return host + (port.map { ":\($0)" } ?? "")
+        // `URL.host` decodes a percent-encoded Unicode host without necessarily applying IDNA.
+        // Round-trip it as a raw host so the prompt shows punycode rather than a homograph, then
+        // apply the same control-character rule as the full URL below. If Foundation refuses the
+        // round-trip (for example, because the decoded host contains a bidi override), the filter
+        // still removes the deceptive scalar from the original host.
+        let canonicalHost = URL(string: "https://\(host)")?.host ?? host
+        return Self.securityDisplayText(canonicalHost) + (port.map { ":\($0)" } ?? "")
     }
 
     /// The exact URL as the grant prompt shows it.
@@ -80,12 +86,18 @@ struct BrowserOrigin: Hashable, Equatable {
             components.password = nil
             absolute = components.string ?? BrowserOrigin(url: url)?.key ?? ""
         }
-        let readable = String(String.UnicodeScalarView(
-            absolute.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
-        ))
+        let readable = securityDisplayText(absolute)
         guard readable.count > BrowserGrantPromptDefaults.displayedURLCharacters else { return readable }
         return readable.prefix(BrowserGrantPromptDefaults.displayedURLCharacters)
             + BrowserGrantPromptDefaults.truncationMark
+    }
+
+    /// Text entering a browser authorization prompt must not contain scalars that can reorder or
+    /// conceal its security-relevant identity.
+    private static func securityDisplayText(_ value: String) -> String {
+        String(String.UnicodeScalarView(
+            value.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
+        ))
     }
 
     /// Whether this origin is the machine itself, and so needs no grant.

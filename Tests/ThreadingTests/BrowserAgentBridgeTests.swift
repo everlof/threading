@@ -135,6 +135,24 @@ final class BrowserAgentBridgeTests: XCTestCase {
         )
     }
 
+    /// Foundation decodes a percent-encoded Unicode host before `URL.host` but does not always
+    /// apply IDNA to that decoded value. The primary identity in the grant prompt must still show
+    /// the canonical ASCII name, and no decoded bidi control may reach the alert.
+    func testGrantPromptCanonicalisesAndSanitisesPercentEncodedHosts() throws {
+        let homograph = try XCTUnwrap(URL(string: "https://%D0%B0pple.com/"))
+        let homographOrigin = try XCTUnwrap(BrowserOrigin(url: homograph))
+        XCTAssertEqual(homographOrigin.displayName, "xn--pple-43d.com")
+
+        let bidi = try XCTUnwrap(URL(string: "https://example.com%E2%80%AE.evil.com/"))
+        let bidiOrigin = try XCTUnwrap(BrowserOrigin(url: bidi))
+        XCTAssertFalse(
+            bidiOrigin.displayName.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+            }
+        )
+        XCTAssertEqual(bidiOrigin.displayName, "example.com.evil.com")
+    }
+
     /// The grant is keyed on the host, so the prompt has to state the host WebKit will really
     /// reach. `https://example.com:secret@evil.example/pay` is a page on evil.example that reads
     /// as example.com, and it carries a password that has no business being drawn in an alert —
