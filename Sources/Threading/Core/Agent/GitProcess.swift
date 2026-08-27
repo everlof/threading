@@ -8,7 +8,7 @@ import os
 enum GitFailure: LocalizedError, Equatable, Sendable {
     case launchFailed(String)
     case gitFailed(String)
-    case timedOut
+    case timedOut(String?)
     case outputTooLarge
     /// An internal supersession signal. Review generations consume this rather than presenting
     /// it: the useful compact comparison has won the race, so continuing to generate a complete
@@ -31,7 +31,10 @@ enum GitFailure: LocalizedError, Equatable, Sendable {
         switch self {
         case .launchFailed(let message): return message
         case .gitFailed(let message): return message
-        case .timedOut: return L10n.string("git took too long to answer.")
+        case .timedOut(let detail):
+            let summary = L10n.string("git took too long to answer.")
+            guard let detail, !detail.isEmpty else { return summary }
+            return "\(summary)\n\n\(detail)"
         case .outputTooLarge: return L10n.string("This diff is too large to display.")
         case .cancelled: return L10n.string("The git operation was cancelled.")
         case .noCommits: return L10n.string("No commits yet.")
@@ -79,6 +82,7 @@ enum GitProcess {
         maximumOutput: Int = GitReviewDefaults.maximumDiffBytes,
         acceptedExitCodes: Set<Int32> = [0],
         reportsRejectedExit: Bool = true,
+        timeout: TimeInterval = GitReviewDefaults.timeout,
         cancellation: GitProcessCancellation? = nil
     ) throws -> Data {
         let command = arguments.first(where: { !$0.hasPrefix("-") }) ?? "unknown"
@@ -138,7 +142,7 @@ enum GitProcess {
         let inputWriter = stdin?.takeWriteHandle()
         let deadline = ChildProcessDeadline(
             child: child,
-            timeout: GitReviewDefaults.timeout,
+            timeout: timeout,
             terminationGrace: BoundedChildDefaults.terminationGrace
         )
 
@@ -206,20 +210,28 @@ enum GitProcess {
             "git \(arguments.first ?? "", privacy: .private(mask: .hash)) finished in \(elapsed, privacy: .public)ms, \(outputData.count, privacy: .public) bytes"
         )
 
-        if timedOut { throw GitFailure.timedOut }
+        let standardError = String(data: errorCapture.value, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // A foreground write may be running a repository hook. If its deadline expires, the
+        // hook's bounded output suffix is the only useful explanation for what was still running.
+        if timedOut {
+            throw GitFailure.timedOut(timeoutDetail(
+                standardOutput: outputData,
+                standardError: errorCapture.value
+            ))
+        }
         if cancellation?.isCancelled == true { throw GitFailure.cancelled }
         if outputWasOversized { throw GitFailure.outputTooLarge }
         if let outputReadError { throw GitFailure.gitFailed(outputReadError.localizedDescription) }
 
         guard acceptedExitCodes.contains(child.terminationStatus) else {
-            let message = String(data: errorCapture.value, encoding: .utf8)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
             if reportsRejectedExit {
                 ThreadingLogger.git.error(
-                    "git \(arguments.joined(separator: " "), privacy: .private(mask: .hash)) failed: \(message ?? "", privacy: .private(mask: .hash))"
+                    "git \(arguments.joined(separator: " "), privacy: .private(mask: .hash)) failed: \(standardError ?? "", privacy: .private(mask: .hash))"
                 )
             }
-            throw failure(fromStandardError: message)
+            throw failure(fromStandardError: standardError)
         }
 
         performanceResult = "success"
@@ -234,6 +246,26 @@ enum GitProcess {
         guard let message, !message.isEmpty else { return .gitFailed("git failed.") }
         if message.contains(GitWriteDefaults.lockErrorMarker) { return .indexLocked }
         return .gitFailed(message)
+    }
+
+    /// Hooks may write their progress to either stream. Keep both useful tails while preserving
+    /// the same total diagnostic bound as an ordinary rejected git invocation.
+    private static func timeoutDetail(
+        standardOutput: Data,
+        standardError: Data
+    ) -> String? {
+        let perStreamLimit = max(1, GitProcessDefaults.maximumErrorBytes / 2)
+        let messages = [standardOutput, standardError].compactMap { data -> String? in
+            guard !data.isEmpty else { return nil }
+            let suffix = data.suffix(perStreamLimit)
+            let message = String(decoding: suffix, as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return message.isEmpty ? nil : message
+        }
+        guard let first = messages.first else { return nil }
+        return messages.dropFirst().reduce(first) { result, message in
+            message == result ? result : "\(result)\n\(message)"
+        }
     }
 
 }

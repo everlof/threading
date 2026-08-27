@@ -290,6 +290,53 @@ final class GitStagingTests: XCTestCase {
         XCTAssertTrue(try output("diff", "--cached").isEmpty, "the index is clean after committing it")
     }
 
+    func testCommitUsesAForegroundHookDeadline() {
+        XCTAssertGreaterThan(GitWriteDefaults.commitTimeout, GitReviewDefaults.timeout)
+    }
+
+    func testCommitTimeoutReportsTheSlowHooksDiagnostic() throws {
+        try write(Self.edited, to: "app.swift")
+        try git("add", "app.swift")
+
+        let hooks = root.appendingPathComponent("test-hooks", isDirectory: true)
+        try FileManager.default.createDirectory(at: hooks, withIntermediateDirectories: true)
+        let hook = hooks.appendingPathComponent("pre-commit")
+        try """
+        #!/bin/sh
+        echo 'Running project validation...'
+        echo 'Checking generated files...' >&2
+        /bin/sleep 30
+        """.write(to: hook, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: hook.path
+        )
+        try git("config", "core.hooksPath", hooks.path)
+
+        let failure = try performFailure {
+            GitIndexWriter.commit(
+                message: "slow hook",
+                in: self.root,
+                timeout: 0.5,
+                completion: $0
+            )
+        }
+
+        guard case .timedOut(let detail) = failure else {
+            return XCTFail("expected the slow hook to time out, got \(failure)")
+        }
+        XCTAssertTrue(detail?.contains("Running project validation...") == true)
+        XCTAssertTrue(detail?.contains("Checking generated files...") == true)
+        XCTAssertTrue(failure.localizedDescription.contains("Running project validation..."))
+        XCTAssertEqual(try output("log", "--format=%s").split(separator: "\n").count, 1)
+        XCTAssertTrue(try output("diff", "--cached", "--name-only").contains("app.swift"))
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: root.appendingPathComponent(".git/index.lock").path
+            )
+        )
+    }
+
     func testCommittingNothingIsRefusedBeforeGitSeesIt() throws {
         let failure = try performFailure { GitIndexWriter.commit(message: "empty", in: self.root, completion: $0) }
         XCTAssertEqual(failure, .nothingStaged)

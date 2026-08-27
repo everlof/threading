@@ -79,6 +79,7 @@ enum GitIndexWriter {
     static func commit(
         message: String,
         in root: URL,
+        timeout: TimeInterval = GitWriteDefaults.commitTimeout,
         completion: @escaping @MainActor @Sendable (Result<String, Failure>) -> Void
     ) {
         perform(completion) {
@@ -92,10 +93,14 @@ enum GitIndexWriter {
                 throw Failure.nothingStaged
             }
 
-        ThreadingLogger.git.info(
-            "committing \(trimmed.count, privacy: .public) characters of message"
-        )
-            _ = try GitProcess.run(GitWriteCommands.commit(message: trimmed), in: root)
+            ThreadingLogger.git.info(
+                "committing \(trimmed.count, privacy: .public) characters of message"
+            )
+            _ = try GitProcess.run(
+                GitWriteCommands.commit(message: trimmed),
+                in: root,
+                timeout: timeout
+            )
             return GitDiffParser.decode(try GitProcess.run(GitWriteCommands.headSubject(), in: root))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -176,6 +181,10 @@ enum GitWriteCommands {
 // MARK: - Defaults
 
 enum GitWriteDefaults {
+    /// A commit runs repository and global hooks. Keep it bounded, but give foreground
+    /// validation enough time for builds, linters, and dependency-backed checks to finish.
+    static let commitTimeout: TimeInterval = 5 * 60
+
     /// git's own words when another process holds the index.
     static let lockErrorMarker = "index.lock"
 

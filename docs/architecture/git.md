@@ -620,7 +620,11 @@ Reads and writes share `GitProcess`, which is where the pipe handling, the timeo
 oversized-output guard live; the writes drop `--no-optional-locks`, because a write needs the
 lock it is about to take. Losing that lock to the agent's own git is its own failure case
 (`GitFailure.indexLocked`) rather than a generic error: the answer is to try again, not to
-fix anything. The commit composer is a `PromptView`, and the message lives on the controller
+fix anything. Ordinary reads retain the short review deadline. A commit gets a five-minute
+foreground deadline because it runs the user's `pre-commit` and `commit-msg` hooks; when that
+larger bound still expires, the process group is terminated and bounded suffixes from both output
+streams are kept in `GitFailure.timedOut` so the failing hook names itself. The commit composer is a
+`PromptView`, and the message lives on the controller
 rather than in it — staging re-reads the pane, which rebuilds the composer, so a message kept
 in the view would be lost with every stage.
 
