@@ -140,27 +140,6 @@ ALLOWLIST = {
         "configuration selects, so a third segment added without a case would show the pair, not "
         "grant anything."
     ),
-    (
-        "Sources/Threading/Core/Remote/RemoteListenerSet.swift",
-        "RemoteListenerSet.bindLoopback",
-    ): (
-        "`NWEndpoint.Port(rawValue:)` fails only for 0, and this port cannot be 0: it is "
-        "`candidates[index]` from `RemoteListenerConfiguration.portCandidates`, which is "
-        "`RemoteListenerPortPlan.candidates` filtered to `>= RemoteAccessDefaults."
-        "minimumListenerPort` (1024) because this process may not open a privileged port. An "
-        "empty candidate list fails the start with `.portRangeInUse` rather than reaching here. "
-        "The invariant lives in another file, so a follow-up should carry `NWEndpoint.Port` "
-        "through the plan and delete the fallback rather than rely on it staying true."
-    ),
-    (
-        "Sources/Threading/Core/Remote/RemoteListenerSet.swift",
-        "RemoteListenerSet.makeListener",
-    ): (
-        "Same port and same invariant as `bindLoopback`, one step later: the only caller is "
-        "`rebuildRoutableDoors`, which returns early unless `resolvedPort` is set, and "
-        "`resolvedPort` is assigned only from the loopback candidate that reached `.ready`. So "
-        "the value here is a filtered candidate too and is never 0."
-    ),
 }
 
 

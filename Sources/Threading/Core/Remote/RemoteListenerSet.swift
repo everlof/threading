@@ -26,7 +26,9 @@ final class RemoteListenerSet: @unchecked Sendable {
         let listener: NWListener
         let door: RemoteAccessDoor
         let address: RemoteNetworkAddress
-        let port: UInt16
+        /// The bound port as Network.framework's own type. It arrives already valid from
+        /// `RemoteListenerPortPlan`, so nothing below has to reconstruct — or default — one.
+        let port: NWEndpoint.Port
         var isReady = false
         var failure: RemoteDoorUnreachableReason?
 
@@ -36,7 +38,12 @@ final class RemoteListenerSet: @unchecked Sendable {
         /// its presence in the set as proof that the address is covered.
         var isStale: Bool { !isReady && failure != nil }
 
-        init(listener: NWListener, door: RemoteAccessDoor, address: RemoteNetworkAddress, port: UInt16) {
+        init(
+            listener: NWListener,
+            door: RemoteAccessDoor,
+            address: RemoteNetworkAddress,
+            port: NWEndpoint.Port
+        ) {
             self.listener = listener
             self.door = door
             self.address = address
@@ -44,7 +51,7 @@ final class RemoteListenerSet: @unchecked Sendable {
         }
 
         var binding: RemoteListenerBinding {
-            RemoteListenerBinding(door: door, address: address, port: port)
+            RemoteListenerBinding(door: door, address: address, port: port.rawValue)
         }
     }
 
@@ -142,7 +149,7 @@ final class RemoteListenerSet: @unchecked Sendable {
     /// Queue-owned state.
     private var listeners: [RemoteAccessDoor: [RemoteNetworkAddress: DoorListener]] = [:]
     private var configuration = RemoteListenerConfiguration()
-    private var resolvedPort: UInt16?
+    private var resolvedPort: NWEndpoint.Port?
     private var firewall: RemoteFirewallHint = .unknown
     private var pathMonitor: NWPathMonitor?
     private var pendingRebuild = false
@@ -191,7 +198,7 @@ final class RemoteListenerSet: @unchecked Sendable {
             guard let self else { return }
             guard !self.isRunning else {
                 if let port = self.resolvedPort {
-                    completion(.listening(port: port))
+                    completion(.listening(port: port.rawValue))
                 } else {
                     completion(.failed(.loopbackUnavailable))
                 }
@@ -292,7 +299,7 @@ final class RemoteListenerSet: @unchecked Sendable {
     /// Loopback decides the port for every door on purpose. A door listener that cannot take the
     /// resolved port reports itself unreachable rather than moving the port, because a port that
     /// moves when an interface appears is not sticky, and stickiness is the whole point.
-    private func bindLoopback(candidates: [UInt16], index: Int) {
+    private func bindLoopback(candidates: [NWEndpoint.Port], index: Int) {
         guard index < candidates.count else {
             ThreadingLogger.remote.error(
                 "Remote access listener found no free port in its range"
@@ -305,7 +312,7 @@ final class RemoteListenerSet: @unchecked Sendable {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(
             host: NWEndpoint.Host(RemoteAccessDefaults.host),
-            port: NWEndpoint.Port(rawValue: port) ?? .any
+            port: port
         )
         // Reuse recovers a sticky port from a previous run's lingering sockets. It does not let
         // two listeners share the exact same address and port: that still fails with
@@ -334,12 +341,12 @@ final class RemoteListenerSet: @unchecked Sendable {
                 entry.isReady = true
                 self.resolvedPort = port
                 ThreadingLogger.remote.info(
-                    "Remote access server listening on port \(port, privacy: .public)"
+                    "Remote access server listening on port \(port.rawValue, privacy: .public)"
                 )
                 self.rebuildRoutableDoors()
                 self.readFirewallHint()
                 self.publish()
-                self.finishStart(.listening(port: port))
+                self.finishStart(.listening(port: port.rawValue))
             case .waiting(let error) where Self.isAddressInUse(error):
                 self.retryLoopback(entry: entry, candidates: candidates, index: index)
             case .failed(let error):
@@ -365,7 +372,7 @@ final class RemoteListenerSet: @unchecked Sendable {
         listener.start(queue: queue)
     }
 
-    private func retryLoopback(entry: DoorListener, candidates: [UInt16], index: Int) {
+    private func retryLoopback(entry: DoorListener, candidates: [NWEndpoint.Port], index: Int) {
         guard listeners[.loopback]?[Self.loopbackAddress] === entry else { return }
         cancel(entry)
         listeners[.loopback] = nil
@@ -443,7 +450,7 @@ final class RemoteListenerSet: @unchecked Sendable {
     private func makeListener(
         door: RemoteAccessDoor,
         address: RemoteNetworkAddress,
-        port: UInt16,
+        port: NWEndpoint.Port,
         identity: RemoteAccessIdentity?
     ) -> DoorListener? {
         let parameters: NWParameters
@@ -457,7 +464,7 @@ final class RemoteListenerSet: @unchecked Sendable {
         }
         parameters.requiredLocalEndpoint = .hostPort(
             host: NWEndpoint.Host(address.address),
-            port: NWEndpoint.Port(rawValue: port) ?? .any
+            port: port
         )
         parameters.allowLocalEndpointReuse = true
 
@@ -574,7 +581,11 @@ final class RemoteListenerSet: @unchecked Sendable {
         for door in RemoteAccessDoor.allCases {
             doors[door] = state(of: door)
         }
-        let status = RemoteListenerStatus(port: resolvedPort, doors: doors, firewall: firewall)
+        let status = RemoteListenerStatus(
+            port: resolvedPort?.rawValue,
+            doors: doors,
+            firewall: firewall
+        )
         statusStorage.withLock { $0 = status }
         requestedStorage.withLock { current in
             current = RemoteAccessDoor.allCases.flatMap { door in

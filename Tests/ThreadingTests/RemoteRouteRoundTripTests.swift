@@ -388,16 +388,43 @@ final class RemoteRouteRoundTripTests: XCTestCase {
     /// one becomes real path segments rather than an escaped component. Both ends stay safe
     /// because the host refuses a multi-segment id instead of silently accepting a truncated
     /// one — the failure is closed, which is the property worth pinning.
+    ///
+    /// Asserted on a REST matcher and on **both** socket matchers, because the guard has to be
+    /// the same answer everywhere an id is read out of a path. `webSocketSessionID` was the one
+    /// exception: it read `/ws/session/a/b` back as the id `"a/b"` and upgraded the connection
+    /// with it. Nothing built that route and `SessionID(uuidString:)` rejected the result a step
+    /// later, so it cost nothing — but "one matcher answers differently from its four neighbours"
+    /// is the shape a real refusal gets lost in, so the asymmetry is pinned closed here.
     func testAnIdentifierCarryingASlashIsRefusedRatherThanTruncated() throws {
-        let built = try wirePath(link.renameSessionURL(sessionID: "tenant/session"))
+        let renamed = try wirePath(link.renameSessionURL(sessionID: "tenant/session"))
         XCTAssertEqual(
-            built,
-            RemoteRoute.session.prefix + "tenant/session/" + RemoteSessionRouteAction.rename.rawValue,
+            renamed,
+            "/api/session/tenant/session/rename",
             "Foundation does not escape a slash inside a path component"
         )
         XCTAssertNil(
-            RemoteRouter.renameSessionID(forPath: built),
+            RemoteRouter.renameSessionID(forPath: renamed),
             "the host must refuse a multi-segment id rather than read back a truncated one"
+        )
+
+        let socket = try wirePath(try XCTUnwrap(link.webSocketURL(sessionID: "tenant/session")))
+        XCTAssertEqual(
+            socket,
+            "/ws/session/tenant/session",
+            "the socket builder leaves a slash unescaped for the same reason"
+        )
+        XCTAssertNil(
+            RemoteRouter.webSocketSessionID(forPath: socket),
+            "a session upgrade must refuse a multi-segment id, not route the connection to `a/b`"
+        )
+
+        let terminal = try wirePath(
+            try XCTUnwrap(link.terminalWebSocketURL(terminalID: "tenant/terminal"))
+        )
+        XCTAssertEqual(terminal, "/ws/terminal/tenant/terminal")
+        XCTAssertNil(
+            RemoteRouter.webSocketTerminalID(forPath: terminal),
+            "a terminal upgrade must refuse a multi-segment id"
         )
     }
 

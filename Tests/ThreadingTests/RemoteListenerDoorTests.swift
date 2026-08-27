@@ -220,19 +220,68 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
 
     func testThePortPlanTriesTheConfiguredPortAndThenTheFixedRange() {
         XCTAssertEqual(
-            RemoteListenerPortPlan.candidates(preferred: 8760, range: 8760...8763),
+            RemoteListenerPortPlan.candidates(preferred: 8760, range: 8760...8763).map(\.rawValue),
             [8760, 8761, 8762, 8763],
             "the shipped default and the range share their first port, which is not tried twice"
         )
         XCTAssertEqual(
-            RemoteListenerPortPlan.candidates(preferred: 9000, range: 8760...8762),
+            RemoteListenerPortPlan.candidates(preferred: 9000, range: 8760...8762).map(\.rawValue),
             [9000, 8760, 8761, 8762],
             "a moved port is tried first, then the range both ends know"
         )
         XCTAssertEqual(
-            RemoteListenerPortPlan.candidates(preferred: 80, range: 8760...8761),
+            RemoteListenerPortPlan.candidates(preferred: 80, range: 8760...8761).map(\.rawValue),
             [8760, 8761],
             "a privileged port is not a candidate"
+        )
+    }
+
+    /// The plan hands out `NWEndpoint.Port`, so the bind sites cannot default an invalid one.
+    ///
+    /// `NWEndpoint.Port.any` is port 0 and means "let the kernel choose" — a listener nobody can
+    /// be told the address of, which is the ephemeral-port behaviour this plan replaced. Two
+    /// `?? .any` fallbacks in `RemoteListenerSet` used to stand on the filter below while living
+    /// in another file, and carrying the type through deleted them.
+    ///
+    /// The first assertion is the one worth reading, because it corrects the reason those
+    /// fallbacks were believed safe. `NWEndpoint.Port(rawValue:)` is spelled failable, so the
+    /// obvious reading is that it refuses 0 and `?? .any` catches that. It does not: it accepts
+    /// **every** `UInt16` and turns 0 into `.any` itself. Observed by removing the filter and
+    /// watching `preferred: 0` arrive as a port with `rawValue` 0. So the failable init was never
+    /// a guard, the `??` was never reached, and the `>= minimumListenerPort` filter is the entire
+    /// thing standing between a configured 0 and an ephemeral bind. That is why this asserts on
+    /// the filter's output rather than on the conversion refusing anything.
+    func testThePortPlanYieldsOnlyPortsAListenerCanActuallyBind() {
+        XCTAssertEqual(NWEndpoint.Port.any.rawValue, 0, "`.any` is the kernel-chooses port")
+        XCTAssertEqual(
+            NWEndpoint.Port(rawValue: 0)?.rawValue,
+            0,
+            "`NWEndpoint.Port(rawValue:)` started refusing 0 — the filter below is no longer the "
+                + "only guard, and the fallbacks this test replaced could now be written honestly"
+        )
+
+        let candidates = RemoteListenerPortPlan.candidates(preferred: 0, range: 8760...8762)
+        XCTAssertEqual(
+            candidates.map(\.rawValue),
+            [8760, 8761, 8762],
+            "a preferred port of 0 is dropped rather than carried as `.any`"
+        )
+        for candidate in candidates {
+            XCTAssertNotEqual(
+                candidate,
+                .any,
+                "a candidate reached the listener meaning `let the kernel choose`"
+            )
+            XCTAssertGreaterThanOrEqual(
+                candidate.rawValue,
+                1024,
+                "this process is not root, so a privileged port is not a candidate"
+            )
+        }
+
+        XCTAssertTrue(
+            RemoteListenerPortPlan.candidates(preferred: 0, range: 80...443).isEmpty,
+            "a range this build may not open produces no candidate, not a defaulted one"
         )
     }
 
@@ -251,7 +300,7 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         XCTAssertEqual(
             RemoteListenerPortPlan.candidates(
                 preferred: RemoteAccessDefaults.defaultListenerPort
-            ),
+            ).map(\.rawValue),
             RemoteListenerPorts.candidates(preferred: RemoteListenerPorts.defaultPort),
             "the Mac tries a different order from the one the phone walks"
         )
@@ -259,12 +308,12 @@ final class RemoteListenerDoorTests: HostedStoreTestCase {
         // the one where a divergent range would strand a paired phone.
         let moved = RemoteAccessDefaults.listenerPortFallbackRange.upperBound + 1
         XCTAssertEqual(
-            RemoteListenerPortPlan.candidates(preferred: moved),
+            RemoteListenerPortPlan.candidates(preferred: moved).map(\.rawValue),
             RemoteListenerPorts.candidates(preferred: moved)
         )
         // And the one rule that is the Mac's alone survives pointing at the shared list.
         XCTAssertFalse(
-            RemoteListenerPortPlan.candidates(preferred: 80).contains(80),
+            RemoteListenerPortPlan.candidates(preferred: 80).map(\.rawValue).contains(80),
             "a privileged port became a candidate when the order moved to the kit"
         )
     }

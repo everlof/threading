@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import ThreadingRemoteKit
 
 /// One network the remote-access listener may answer on.
@@ -445,7 +446,7 @@ struct RemoteListenerConfiguration: Equatable, Sendable {
     }
 
     /// The ports the listener tries, in order.
-    var portCandidates: [UInt16] {
+    var portCandidates: [NWEndpoint.Port] {
         RemoteListenerPortPlan.candidates(preferred: preferredPort, range: fallbackRange)
     }
 
@@ -467,12 +468,33 @@ struct RemoteListenerConfiguration: Equatable, Sendable {
 /// privileged port is not a port it may try. The kit describes ports both ends talk about; this
 /// describes the ports this build is allowed to open. Filtering after the shared order is the
 /// same answer as filtering inside it, because that order is already de-duplicated.
+///
+/// The list is `NWEndpoint.Port` rather than `UInt16` so the conversion to Network.framework's
+/// type happens **once, here**, beside the filter that is the actual guard. The two bind sites in
+/// `RemoteListenerSet` used to convert instead, with `NWEndpoint.Port(rawValue: port) ?? .any` —
+/// a fallback that reads like it handles an invalid port and does not. `.any` is port 0 and means
+/// "let the kernel choose", which is precisely the ephemeral-port behaviour this plan exists to
+/// replace: a paired phone walks these candidates and would find nothing at the address it kept.
+///
+/// **`NWEndpoint.Port(rawValue:)` is spelled failable but accepts every `UInt16`.** Measured, not
+/// assumed: with the filter below removed, `preferred: 0` came back through the `compactMap` as a
+/// port whose `rawValue` is 0 — `NWEndpoint.Port(rawValue: 0)` is `.any`, not nil. So the old
+/// `?? .any` was unreachable for a blunter reason than "the port is never 0": nothing reaches it,
+/// and a 0 would have passed straight through into an ephemeral bind. The `compactMap` here drops
+/// nothing today for the same reason; it is the honest spelling of a failable init, not a second
+/// guard. `RemoteListenerDoorTests.testThePortPlanYieldsOnlyPortsAListenerCanActuallyBind` pins
+/// both halves, so a platform change makes a test say so.
+///
+/// The filter is therefore the whole guarantee, and it now sits in the same expression as the
+/// conversion it protects. Dropping a candidate is fail-closed: the walk moves to the next one,
+/// and an exhausted list is the named `.portRangeInUse` failure.
 enum RemoteListenerPortPlan {
     static func candidates(
         preferred: UInt16,
         range: ClosedRange<UInt16> = RemoteAccessDefaults.listenerPortFallbackRange
-    ) -> [UInt16] {
+    ) -> [NWEndpoint.Port] {
         RemoteListenerPorts.candidates(preferred: preferred, range: range)
             .filter { $0 >= RemoteAccessDefaults.minimumListenerPort }
+            .compactMap(NWEndpoint.Port.init(rawValue:))
     }
 }

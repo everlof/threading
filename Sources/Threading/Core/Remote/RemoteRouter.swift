@@ -63,11 +63,16 @@ struct RemoteRouter {
     }
 
     /// The session id for a `/ws/session/<id>` upgrade path, else nil.
+    ///
+    /// An id is one path segment. A slash is refused rather than read back as part of the id,
+    /// the same way every other id matcher here refuses one: the alternative is that
+    /// `/ws/session/a/b` upgrades a connection routed to the id `"a/b"`, which is a route
+    /// nothing builds and nothing serves.
     static func webSocketSessionID(forPath path: String) -> String? {
         let prefix = RemoteSocketRoute.session.prefix
         guard path.hasPrefix(prefix) else { return nil }
         let id = String(path.dropFirst(prefix.count))
-        return id.isEmpty ? nil : id
+        return id.isEmpty || id.contains("/") ? nil : id
     }
 
     /// The terminal id for a `/ws/terminal/<id>` upgrade path, else nil.
