@@ -179,10 +179,11 @@ bundle in a pre-workspace, activation-prohibited probe that verifies the embedde
 and first decoded frame using that Xcode's private frameworks. The probe is read-only; it cannot
 prepare, boot, install into or control a device.
 
-The dogfood and iOS UI-evidence runners take the same host-wide advisory CoreSimulator lane before
-reading the catalogue. A second Threading worktree therefore refuses immediately instead of
-cloning or rebooting the adopted device midway through compatibility evidence. The lock is held
-through cleanup and released by the kernel when the owning script exits.
+The dogfood, connectivity-test and iOS UI-evidence runners take the same host-wide advisory
+CoreSimulator lane before reading or driving a device. A second Threading worktree therefore
+refuses immediately instead of cloning, rebooting or testing the adopted device midway through
+another lane. The lock is held through cleanup and released by the kernel when the owning script
+exits.
 
 The runner also gives its own catalogue and fixture-cleanup `simctl` process groups explicit
 deadlines. A CoreSimulator service that stops answering therefore produces failed evidence and a

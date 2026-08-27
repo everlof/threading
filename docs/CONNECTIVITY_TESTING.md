@@ -6,7 +6,8 @@ claim on its own:
 1. **Software contracts** make deadlines, reconnect backoff, single-flight refresh, route races,
    trust, discovery and listener lifecycle deterministic. Run `scripts/test-connectivity.sh
    software` and `scripts/test-connectivity.sh topology`; the client half runs in an iOS
-   Simulator.
+   Simulator. Those simulator phases take the shared host-wide CoreSimulator lane before invoking
+   Xcode, so evidence, dogfood and chaos lanes cannot shut down their device mid-run.
 2. **Two shipping apps under process faults** must launch the ordinary macOS and iOS products,
    pair them in disposable state, and kill either process at named protocol checkpoints. This
    complete lane is not yet automated. `simulator-chaos` covers the real Debug ThreadingMobile

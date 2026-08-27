@@ -11,6 +11,7 @@ shift || true
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
 simulator_destination="${THREADING_CONNECTIVITY_SIMULATOR_DESTINATION:-platform=iOS Simulator,name=iPhone 17 Pro,OS=latest}"
+source "${script_directory}/coresimulator_lane_lock.sh"
 
 usage() {
   cat <<'USAGE'
@@ -33,6 +34,7 @@ USAGE
 }
 
 run_mobile_tests() {
+  threading_acquire_coresimulator_lane "connectivity" || return $?
   xcodebuild \
     -project "${repository_directory}/Threading.xcodeproj" \
     -scheme ThreadingMobile \
