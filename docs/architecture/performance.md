@@ -308,6 +308,13 @@ host's concrete failure wins. Older clients retain the original full response an
 the phone's compatibility fallback; feature negotiation, rather than version guessing, selects the
 new path.
 
+Terminal registration happens at `TerminalSessionDelegate.terminalSessionDidStart`, after the PTY
+has published its running process identity. An earlier attempt from the controller's pre-launch
+edge is necessarily unavailable; treating that attempt as registration lost the only wake-up for
+an already-waiting dormant-session socket, leaving the phone on “Opening chat…” until it navigated
+away or the startup deadline expired. The process-start callback is shared by local, hosted and
+host-fallback launches, so each creates the mirror once at the same authoritative lifecycle edge.
+
 The same changed-entity rule reaches the Mac UI and store. Creation appends one SQLite session row
 and emits `sessionAdded`; coalesced title/turn writes also persist their exact session or project
 row. The common manual-order, top-level addition mutates one sidebar leaf, its ancestor/index

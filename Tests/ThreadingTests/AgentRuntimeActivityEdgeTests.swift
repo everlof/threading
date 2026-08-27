@@ -27,4 +27,17 @@ final class AgentRuntimeActivityEdgeTests: XCTestCase {
         XCTAssertEqual(AgentRuntime.shared.activity(sessionID: session.id), .dormant)
         observations.removeAll()
     }
+
+    func testCheckoutMoveTransfersNativeOutboxExactlyOnce() throws {
+        let runtime = AgentRuntime(currentSessionProjection: CurrentSessionProjection { _ in nil })
+        let sessionID = SessionID()
+        var outbox = ConversationOutbox()
+        _ = outbox.append(ConversationPrompt(text: "first queued prompt"))
+        _ = outbox.append(ConversationPrompt(text: "second queued prompt"))
+
+        runtime.preserveCheckoutMoveOutbox(outbox, for: sessionID)
+
+        XCTAssertEqual(try XCTUnwrap(runtime.takeCheckoutMoveOutbox(sessionID: sessionID)), outbox)
+        XCTAssertNil(runtime.takeCheckoutMoveOutbox(sessionID: sessionID))
+    }
 }

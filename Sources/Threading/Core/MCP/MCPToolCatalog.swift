@@ -393,12 +393,16 @@ enum MCPToolCatalog {
   private static let authoredProject = MCPToolGroup(
     id: "project",
     family: .project,
-    title: "Project icon",
-    summary: "Let agents set the project's sidebar icon.",
+    title: "Project",
+    summary: "Let agents work with this chat's checkout and the project's sidebar identity.",
     symbol: "app.badge",
     tools: [],
     instruction: """
-      set_project_icon sets the sidebar icon of the project this session runs in. Use \
+      set_session_checkout changes the calling chat's actual checkout ownership; it does not \
+      relabel a branch. Call it before doing work in another checkout and finish the current \
+      turn so Threading can settle its checkpoint and resume the same conversation there. \
+      cancel_session_checkout_move withdraws a queued move. set_project_icon sets the sidebar \
+      icon of the project this session runs in. Use \
       it when the user asks for a project icon, or offer it when you come across the \
       project's own mark — its favicon, logo, or owner avatar. Do not replace an icon \
       the user chose without being asked.

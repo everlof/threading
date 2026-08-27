@@ -430,6 +430,53 @@ completion fence, including a Stop that reports work left running. Activity infe
 best-effort fallback for runtimes without hooks, but it creates its own honest record and never
 adopts the preceding turn's refs.
 
+### Checkout ownership moves
+
+A session belongs to a checkout through its `Project`, not through its cached branch string.
+`SessionCheckoutCoordinator` is the only operation that changes that ownership. It resolves the
+source and requested destination through `GitInfo.worktreeLocation`, canonicalizes symlinks, and
+compares both repository and worktree identities. Only an existing worktree root with an attached
+branch in the same repository is eligible. Managed workspaces are excluded on both sides; branch
+names never serve as identity.
+
+The request is first persisted on the session as `PendingCheckoutMove`, including canonical
+identities, authority basis and audit reason. An idle session settles it immediately. For a live
+turn, native `turnFinished` and the terminal Stop hook call the coordinator only after the final
+Git capture. A transient input fence remains after the pending field is cleared and until the
+window has initiated runtime replacement, so neither the native outbox, scheduled delivery nor a
+watch notification can enter the old runtime during the store/event gap. Launch restoration is
+also gated until every persisted move has settled serially.
+
+`ProjectStore.moveSessionsToCheckout` changes membership as one SQLite graph transaction. It
+reuses a project with the same canonical worktree identity or creates the destination project in
+that same transaction, rewrites every affected row position and advances the store generation.
+The in-memory graph and lookup indexes roll back together on refusal. The session value itself is
+moved, preserving its ID and all session-owned state; `AgentWorkTraceStore` then moves the
+rebuildable per-session trace shard and rebuilds both project aggregates so attribution is not
+counted twice. No new empty project can survive a refused transaction.
+
+Claude is the one provider whose conversation files are checkout-scoped. Before the store commit,
+`CheckoutTranscriptCopyTransaction` prepares the transcript and its subagent directory off-main,
+backs up any destination, installs the bundle, and restores it if the graph commit refuses.
+Codex and ACP sessions keep their global provider IDs and require no file copy. For an unlaunched
+Claude side chat, the coordinator moves the smallest connected closure of unlaunched Claude
+parents and children; a side chat that has already launched is independent.
+
+After commit, branch state is read again from the destination and one `SessionCheckoutDidMove`
+event replaces the calling session's runtime. A native outbox is handed across that replacement;
+the provider resume ID is unchanged. The just-finished checkpoint is marked `checkoutChanged`
+and cannot be presented as Last Turn because Threading cannot prove where every external command
+ran across the boundary. The next turn captures normally in the destination. Git Review, files,
+processes, relaunch and agent project scope all resolve through the moved `Project`. Standalone
+terminals retain their own checkout and working directory.
+
+The menu, MCP tools and Tools ▸ Project authority preference are host-owned work-organization
+controls. `explicit_user_request` is allowed without a second prompt under the default
+`allowExplicitRequests`; `agent_initiated` still requires confirmation. `alwaysAsk` confirms both,
+and `allowSameRepository` confirms neither after the same canonical validation. This is not an
+extension component: presentation cannot be allowed to contradict durable ownership, the turn
+fence or the audit decision.
+
 The composer hangs from the pane's **bottom** edge — input below, room above, the shape every
 chat product has taught — and the room above holds a **hero**: the Threading mark over a
 greeting (`ComposerGreeting`). The greeting is deliberately inconsistent: when the calendar
@@ -515,6 +562,14 @@ runtime's logins**, each carrying its runtime's mark and its usage reading (see
 runtime gets a row of its own only where it offers no login to name. Choosing any row sets the
 runtime and the login together and clears the model and effort — both belong to a catalog the
 new login may not publish.
+
+The prompt below those chips also owns pre-launch slash completion. `refreshChips()` projects a
+bounded built-in expectation catalog for the selected runtime and resolved Terminal/Chat surface
+without spawning a CLI or walking project configuration. Terminal rows are handed to the
+runtime's own TUI; Chat rows are only completion hints until the launched native transport has
+published its live catalog. Changing identity or surface replaces the draft catalog immediately.
+The start/reply component hooks may customize the prompt's presentation, but command membership,
+disabled safety policy, live-catalog readiness, and semantic dispatch remain host-owned behavior.
 
 ## Session Names
 

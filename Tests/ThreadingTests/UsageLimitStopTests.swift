@@ -62,6 +62,17 @@ final class UsageLimitStopTests: XCTestCase {
         XCTAssertNil(stop?.resetHint)
     }
 
+    /// Codex workspace plans report depleted shared credits rather than a timed rate-limit
+    /// window. It is still a provider refusal and must park the row instead of looking idle.
+    func testCodexWorkspaceCreditsAreAUsageLimitStop() {
+        let message = "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
+        let stop = UsageLimitStop.recognised(in: message)
+
+        XCTAssertEqual(stop?.message, message)
+        XCTAssertNil(stop?.resetHint)
+        XCTAssertNotNil(UsageLimitStop.recognised(in: "Workspace member credits depleted"))
+    }
+
     func testUnrelatedFailureTextIsNotARefusal() {
         XCTAssertNil(UsageLimitStop.recognised(in: "Request timed out after 60s"))
         XCTAssertNil(UsageLimitStop.recognised(in: "API Error: Connection error"))

@@ -178,6 +178,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "capturesPageBeforeAgentActions",
                 valueType: .boolean
             ),
+            .sessionCheckoutAuthorityPolicy: .init(
+                key: "sessionCheckoutAuthorityPolicy",
+                valueType: .string
+            ),
             .disabledToolGroupIDs: .init(key: "disabledToolGroupIDs", valueType: .stringArray),
             .usesContainedExtensionLauncher: .init(
                 key: "usesContainedExtensionLauncher",
@@ -410,7 +414,7 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
-        XCTAssertEqual(authoredRows.count, 82)
+        XCTAssertEqual(authoredRows.count, 83)
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -465,6 +469,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Convert dropped images agents can't open"
         ])
         XCTAssertEqual(actual["motion"], ["Working indicator", "Chat name transition"])
+        XCTAssertEqual(actual["tools"], ["Agents may move chats between checkouts"])
         XCTAssertEqual(actual["usage-windows"], [
             "Open a window before I start", "I start at", "I stop at", "Days",
             "If the window has not reset", "When a session hits its usage limit"

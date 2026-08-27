@@ -140,6 +140,12 @@ extension AgentCommand {
   static func setProjectIcon(_ value: SetProjectIconArguments) -> Self {
     builtIn(.setProjectIcon, value)
   }
+  static func setSessionCheckout(_ value: SetSessionCheckoutArguments) -> Self {
+    builtIn(.setSessionCheckout, value)
+  }
+  static func cancelSessionCheckoutMove(_ value: EmptyToolArguments = .init()) -> Self {
+    builtIn(.cancelSessionCheckoutMove, value)
+  }
   static func archiveSession(_ value: ArchiveSessionArguments) -> Self {
     builtIn(.archiveSession, value)
   }

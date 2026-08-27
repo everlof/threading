@@ -95,6 +95,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case grantBrowserOriginAccess
     case approveSensitiveBrowserAction
     case approveToolPermission
+    case approveSessionCheckoutMove
     case installUnsignedExtension
     case updateExtensionCapabilities
     case approveAgentExtensionInstall
@@ -275,6 +276,7 @@ enum ConfirmationPrompt: String, CaseIterable {
         case .grantBrowserOriginAccess,
              .approveSensitiveBrowserAction,
              .approveToolPermission,
+             .approveSessionCheckoutMove,
              .installUnsignedExtension,
              .updateExtensionCapabilities,
              .approveAgentExtensionInstall,

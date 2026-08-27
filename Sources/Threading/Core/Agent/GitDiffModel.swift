@@ -248,11 +248,13 @@ enum GitTurnCaptureStatus: String, Codable, Sendable {
     case beforeCaptureFailed
     case finalCaptureFailed
     case incomplete
+    case checkoutChanged
     case notAdmitted
 
     var hasDurableBefore: Bool {
         switch self {
-        case .inProgress, .capturingAfter, .complete, .finalCaptureFailed, .incomplete:
+        case .inProgress, .capturingAfter, .complete, .finalCaptureFailed, .incomplete,
+             .checkoutChanged:
             return true
         case .capturingBefore, .beforeCaptureFailed, .notAdmitted:
             return false
@@ -336,6 +338,7 @@ struct GitTurnCheckpoint: Codable, Equatable, Sendable {
             return beforeRef != nil && beforeTreeHash != nil
                 && afterRef != nil && afterTreeHash != nil
         case .capturingBefore, .beforeCaptureFailed, .finalCaptureFailed, .incomplete,
+             .checkoutChanged,
              .notAdmitted:
             return false
         }

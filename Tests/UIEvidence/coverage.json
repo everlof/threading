@@ -498,6 +498,27 @@
       }
     },
     {
+      "id": "session-menu",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Session action menu",
+      "description": "The shared sidebar, context, and header session menu for a chat whose repository has two branch-attached checkouts.",
+      "states": ["Move to Checkout available", "Light", "Dark"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Natural menu size"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SessionMenuRenderTests.swift",
+        "test": "ThreadingTests/SessionMenuRenderTests/testRendersTheSessionActionMenuStorybook"
+      },
+      "capture": {
+        "glob": "session-menu-*.png"
+      }
+    },
+    {
       "id": "remote-access-settings",
       "kind": "surface",
       "status": "implemented",
@@ -1181,8 +1202,8 @@
         "journey": "File change and relaunch recovery"
       }
     },
-    {
-      "id": "stop-and-continue",
+  {
+    "id": "stop-and-continue",
       "kind": "journey",
       "status": "implemented",
       "priority": "critical",
@@ -1197,12 +1218,40 @@
         "path": "Tests/ThreadingUITests/CodexStopTurnJourneyUITests.swift",
         "test": "ThreadingUITests/CodexStopTurnJourneyUITests/testStoppingCodexTurnLeavesConversationUsable"
       },
-      "capture": {
-        "journey": "Stop and continue"
-      }
+    "capture": {
+      "journey": "Stop and continue"
+    }
+  },
+  {
+    "id": "move-chat-between-checkouts",
+    "kind": "journey",
+    "status": "implemented",
+    "priority": "critical",
+    "title": "Move chat between checkouts",
+    "description": "A running Codex turn queues a sibling-checkout move, crosses its checkpoint barrier, resumes the same provider conversation in the target and scopes Git Review to that checkout.",
+    "states": [
+      "Move pending during active turn",
+      "Conversation resumed in target",
+      "Target checkout in Git Review"
+    ],
+    "matrix": {
+      "providers": [
+        "Codex fixture agent"
+      ],
+      "sizes": [
+        "1400×900 points"
+      ]
     },
-    {
-      "id": "permission-refusal-recovery",
+    "source": {
+      "path": "Tests/ThreadingUITests/CheckoutMoveJourneyUITests.swift",
+      "test": "ThreadingUITests/CheckoutMoveJourneyUITests/testActiveCodexTurnMovesAndResumesInSiblingCheckout"
+    },
+    "capture": {
+      "journey": "Move chat between checkouts"
+    }
+  },
+  {
+    "id": "permission-refusal-recovery",
       "kind": "journey",
       "status": "planned",
       "priority": "critical",

@@ -562,7 +562,6 @@ final class AgentSessionViewController: NSViewController {
 
         isRunning = true
         activityTracker.markRunning()
-        RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)
         session.start(plan: plan)
     }
 
@@ -745,9 +744,6 @@ final class AgentSessionViewController: NSViewController {
         armLaunchSurvivalCheck()
         resetTranscriptFallbackObservation()
         activityTracker.markRunning()
-        if AppSettings.shared.remoteAccessEnabled {
-            RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)
-        }
 
         // The command line, before it runs. A launch that takes the app down with it leaves
         // this as the only account of what was being started.
@@ -1231,6 +1227,15 @@ final class AgentSessionViewController: NSViewController {
 // MARK: - TerminalSessionDelegate
 
 extension AgentSessionViewController: TerminalSessionDelegate {
+
+    /// The PTY is now a real live surface, so remote capture can succeed and wake any phone
+    /// waiting in the host-owned dormant-session startup transaction. Calling this before
+    /// `TerminalSession.start` only observes `.unavailable`; without this process-start edge the
+    /// socket keeps waiting even though the agent is already running.
+    func terminalSessionDidStart(_ session: TerminalSession) {
+        guard AppSettings.shared.remoteAccessEnabled else { return }
+        RemoteSessionMirrorRegistry.shared.beginCapturing(sessionID: sessionID)
+    }
 
     func terminalSession(_ session: TerminalSession, titleChangedTo title: String) {
         RemoteSessionMirrorRegistry.shared.sessionTitleChanged(sessionID, title: title)

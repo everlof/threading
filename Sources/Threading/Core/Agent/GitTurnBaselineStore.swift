@@ -392,11 +392,21 @@ final class GitTurnBaselineStore {
         sessionID: SessionID,
         assistantTurnID: String? = nil,
         providerTurnID: String? = nil,
+        settlePendingCheckoutMove: Bool = true,
         completion: @escaping @MainActor (GitTurnCheckpoint?) -> Void
     ) {
+        let release: @MainActor (GitTurnCheckpoint?) -> Void = { checkpoint in
+            if settlePendingCheckoutMove {
+                SessionCheckoutCoordinator.shared.finishPendingMove(sessionID: sessionID) { _ in
+                    completion(checkpoint)
+                }
+            } else {
+                completion(checkpoint)
+            }
+        }
         guard let checkpointID = activeCheckpointIDs.removeValue(forKey: sessionID),
               var checkpoint = checkpoint(id: checkpointID) else {
-            completion(nil)
+            release(nil)
             return
         }
 
@@ -418,7 +428,7 @@ final class GitTurnBaselineStore {
             failFinalCapture(
                 checkpointID,
                 message: L10n.string("Couldn’t persist this turn’s checkpoint metadata."),
-                completion: completion
+                completion: release
             )
             return
         }
@@ -429,7 +439,7 @@ final class GitTurnBaselineStore {
             failFinalCapture(
                 checkpointID,
                 message: L10n.string("The checkpoint repository is no longer available."),
-                completion: completion
+                completion: release
             )
             return
         }
@@ -440,7 +450,7 @@ final class GitTurnBaselineStore {
             in: root
         ) { [weak self] result in
             guard let self else {
-                completion(nil)
+                release(nil)
                 return
             }
             switch result {
@@ -482,8 +492,22 @@ final class GitTurnBaselineStore {
 
             let completed = self.checkpoint(id: checkpointID)
             self.pruneIfNeeded()
-            completion(completed)
+            release(completed)
         }
+    }
+
+    /// Makes the turn immediately before a checkout ownership change explicitly unavailable.
+    /// The tree pair remains retained for bounded cleanup, but no surface may attribute it to a
+    /// single checkout after external commands could have crossed the ownership boundary.
+    func markLatestTurnCheckoutChanged(sessionID: SessionID) {
+        guard let latest = checkpoints(forSessionID: sessionID).last else { return }
+        update(latest.id) {
+            $0.status = .checkoutChanged
+            $0.failureDescription = L10n.string(
+                "Last Turn is unavailable because this chat moved to another checkout."
+            )
+        }
+        _ = saveAndNotify(sessionID)
     }
 
     /// A prepared native transport refused the send. It never became a turn, so it is excluded

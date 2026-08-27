@@ -1336,6 +1336,10 @@ final class SessionComposerViewController: NSViewController {
         // sessions are Native with nothing to pick. See `AgentCapabilities.terminalUI`.
         surfaceChip.isHidden = !SessionSurfaceTogglePresentation.canSwitchSurface(selectedAgent)
         usesNativeUI = AgentSession.resolvedNativeSurface(usesNativeUI, for: selectedAgent)
+        promptView.composerCapabilities = PreSessionComposerCatalog.capabilities(
+            for: selectedAgent,
+            usesNativeUI: usesNativeUI
+        )
         surfaceChip.configure(
             symbolName: ComposerDefaults.surfaceSymbol,
             title: usesNativeUI ? ComposerDefaults.nativeTitle : selectedAgent.originalUITitle

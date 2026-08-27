@@ -281,6 +281,14 @@ struct AgentCapabilities: OptionSet {
   /// can settle on a mostly empty page. The terminal host may compact that end
   /// without changing shells or alternate/full-screen clients.
   static let inlineTerminalViewport = Self(rawValue: 1 << 31)
+
+  /// The runtime stores one conversation beneath a checkout-derived project slug, so changing
+  /// the checkout that owns a chat also requires copying that conversation record (and any
+  /// unstarted fork dependency) to the destination slug before resume.
+  ///
+  /// Claude only. Codex keeps provider conversation ids in its global rollout store, while ACP
+  /// runtimes resume through provider-owned ids rather than a checkout-shaped transcript path.
+  static let checkoutScopedConversationStorage = Self(rawValue: 1 << 32)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -341,7 +349,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .transcriptModelRecord, .transcriptPermissionModeRecord, .transcriptUsageIndex,
         .liveFastModeControl, .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch,
         .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord,
-        .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn
+        .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
+        .checkoutScopedConversationStorage
       ]
     case .codex:
       return [

@@ -301,7 +301,8 @@ final class SettingsDisclosureRenderTests: XCTestCase {
             AppThemePalette.set(fixture.theme)
 
             let controller = ToolsPreferencesViewController(
-                groups: Array(MCPToolCatalog.allGroups.prefix(4))
+                groups: [MCPToolCatalog.project]
+                    + Array(MCPToolCatalog.allGroups.prefix(3))
             )
             let host = laidOut(controller.view)
             let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))

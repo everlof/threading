@@ -55,9 +55,21 @@ struct ACPProviderProfile {
     /// so an agent that answers with one does so under `_meta`, and an agent with none says `nil`.
     let initializeCommands: ([String: Any]?) -> [[String: Any]]?
 
+    /// Where the opening catalog becomes complete enough to resolve a first slash command.
+    let initialCommandCatalog: ACPInitialCommandCatalog
+
     // MARK: - Host Policy
 
     let commandCatalog: ACPCommandCatalogPolicy
+}
+
+/// The two ACP-sanctioned places current agents publish their opening command catalog.
+enum ACPInitialCommandCatalog: Equatable {
+    /// Grok returns the complete list in its `initialize` response metadata.
+    case initializeResponse
+
+    /// Cursor pushes `available_commands_update` after `session/new` completes.
+    case sessionUpdate
 }
 
 /// How one agent's advertised slash commands are presented in Threading's composer.

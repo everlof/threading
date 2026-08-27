@@ -188,6 +188,13 @@ protocol MCPBuiltInToolExecuting: AnyObject {
     _ arguments: SetProjectIconArguments, for sessionID: SessionID,
     completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
   )
+  func setSessionCheckout(
+    _ arguments: SetSessionCheckoutArguments, for sessionID: SessionID,
+    completion: @escaping @MainActor @Sendable (MCPToolResult) -> Void
+  )
+  func cancelSessionCheckoutMove(
+    _ arguments: EmptyToolArguments, for sessionID: SessionID
+  ) -> MCPToolResult
   func archiveSession(
     _ arguments: ArchiveSessionArguments, for sessionID: SessionID
   ) -> MCPToolResult

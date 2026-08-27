@@ -51,7 +51,8 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("terminalUI", .terminalUI),
             ("transcriptInterruptedMessageRecord", .transcriptInterruptedMessageRecord),
             ("escapeInterruptsTerminalTurn", .escapeInterruptsTerminalTurn),
-            ("inlineTerminalViewport", .inlineTerminalViewport)
+            ("inlineTerminalViewport", .inlineTerminalViewport),
+            ("checkoutScopedConversationStorage", .checkoutScopedConversationStorage)
         ]
 
         var seen: [Int: String] = [:]
@@ -139,6 +140,16 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
         let implemented = Set(TranscriptReplayFormat.allCases.map(\.kind))
         XCTAssertEqual(declared, implemented)
         XCTAssertEqual(declared, [.claude, .codex])
+    }
+
+    func testOnlyClaudeHasCheckoutScopedConversationStorage() {
+        for kind in AgentKind.allCases {
+            XCTAssertEqual(
+                kind.supports(.checkoutScopedConversationStorage),
+                kind == .claude,
+                "\(kind) checkout-scoped storage contract drifted"
+            )
+        }
     }
 
     /// Narrow structured-record facts are readings of the replayable conversation file. They

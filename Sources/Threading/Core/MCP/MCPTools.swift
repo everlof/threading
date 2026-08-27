@@ -1587,6 +1587,28 @@ struct SimulatorPressButtonArguments: Codable, Sendable {
 
 struct EmptyToolArguments: Codable, Sendable {}
 
+struct SetSessionCheckoutArguments: Codable, Sendable {
+  let checkoutPath: String?
+  let authorityBasis: SessionCheckoutAuthorityBasis?
+  let reason: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case checkoutPath = "checkout_path"
+    case authorityBasis = "authority_basis"
+    case reason
+  }
+
+  init(
+    checkoutPath: String?,
+    authorityBasis: SessionCheckoutAuthorityBasis?,
+    reason: String?
+  ) {
+    self.checkoutPath = checkoutPath
+    self.authorityBasis = authorityBasis
+    self.reason = reason
+  }
+}
+
 /// What an agent says when it files its own session away.
 ///
 /// Only a reason, because everything else is already decided by where the call arrived: the URL
@@ -2509,6 +2531,8 @@ enum MCPTools {
   static let panelActivateTab = MCPBuiltInTool.panelActivateTab.rawValue
 
   static let setProjectIcon = MCPBuiltInTool.setProjectIcon.rawValue
+  static let setSessionCheckout = MCPBuiltInTool.setSessionCheckout.rawValue
+  static let cancelSessionCheckoutMove = MCPBuiltInTool.cancelSessionCheckoutMove.rawValue
 
   static let archiveSession = MCPBuiltInTool.archiveSession.rawValue
   static let cancelSessionArchive = MCPBuiltInTool.cancelSessionArchive.rawValue
@@ -5844,6 +5868,80 @@ enum MCPTools {
         ],
         required: []
       )
+    ),
+    MCPToolDefinition(
+      tool: .setSessionCheckout,
+      name: "set_session_checkout",
+      groupID: "project",
+      family: .project,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Move this chat to a checkout",
+      detail: "Queue this conversation to resume in another checkout of the same repository.",
+      symbol: "arrow.right.folder",
+      decodeArguments: { container in
+        try container.decodeIfPresent(SetSessionCheckoutArguments.self, forKey: .arguments)
+          ?? SetSessionCheckoutArguments(checkoutPath: nil, authorityBasis: nil, reason: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.setSessionCheckout(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Move only this calling conversation to an existing, branch-attached checkout of the same \
+        Git repository. checkout_path must be the absolute checkout root; a branch name is never \
+        an identity. Call this before beginning work in another checkout, then end the current \
+        turn. Threading completes the current Git checkpoint, moves the durable chat ownership, \
+        and resumes the same provider conversation there before any queued prompt is released. \
+        Use authority_basis explicit_user_request only when the user's prompt actually requested \
+        the move; otherwise use agent_initiated and explain why in reason.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "checkout_path": MCPPropertySchema(
+            type: .string,
+            description: "Absolute root path of an existing Git checkout."
+          ),
+          "authority_basis": MCPPropertySchema(
+            type: .string,
+            description: "One of: explicit_user_request, agent_initiated."
+          ),
+          "reason": MCPPropertySchema(
+            type: .string,
+            description: "Short factual reason for the move, retained in the audit trail."
+          ),
+        ],
+        required: ["checkout_path", "authority_basis", "reason"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .cancelSessionCheckoutMove,
+      name: "cancel_session_checkout_move",
+      groupID: "project",
+      family: .project,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Cancel checkout move",
+      detail: "Cancel this conversation's queued checkout move before its turn settles.",
+      symbol: "xmark.circle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(EmptyToolArguments.self, forKey: .arguments)
+          ?? EmptyToolArguments()
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        completion(handler.cancelSessionCheckoutMove(arguments, for: sessionID))
+      },
+      description: "Cancel the pending checkout move for this calling conversation.",
+      inputSchema: MCPInputSchema(properties: [:], required: [])
     ),
     MCPToolDefinition(
       tool: .archiveSession,

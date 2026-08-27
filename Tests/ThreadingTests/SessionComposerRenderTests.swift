@@ -122,6 +122,35 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         )
     }
 
+    func testDraftComposerPublishesSlashCompletionsForTheSelectedAgentAndSurface() throws {
+        let composer = SessionComposerViewController()
+        _ = composer.view
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+
+        composer.selectedAgent = .claude
+        composer.usesNativeUI = false
+        composer.refreshChips()
+        XCTAssertTrue(prompt.composerCapabilities.contains { capability in
+            capability.name == "loop"
+                && capability.aliases.contains("proactive")
+                && capability.isEnabled
+        })
+
+        composer.usesNativeUI = true
+        composer.refreshChips()
+        XCTAssertEqual(
+            prompt.composerCapabilities.first { $0.name == "clear" }?.isEnabled,
+            false,
+            "the draft must explain a terminal-owned command before native Chat launches"
+        )
+
+        composer.selectedAgent = .openCode
+        composer.refreshChips()
+        XCTAssertFalse(composer.usesNativeUI, "OpenCode is clamped to its terminal surface")
+        XCTAssertTrue(prompt.composerCapabilities.contains { $0.name == "help" })
+        XCTAssertTrue(prompt.composerCapabilities.allSatisfy(\.isEnabled))
+    }
+
     /// The composer's own reading of the footer contract: the choices lead, what is left to
     /// spend and the surface trail. The send is not on this row — a brief sends from the button
     /// under the box — and the row is the box's all the same, which is the point: it comes from

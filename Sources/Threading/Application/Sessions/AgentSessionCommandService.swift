@@ -11,17 +11,49 @@ final class AgentSessionCommandService {
     private let archiveScheduler: SessionArchiveScheduler
     private let usesAgentTitleInSidebar: () -> Bool
     private let control: WorkspaceControlPlane?
+    private let checkoutCoordinator: SessionCheckoutCoordinator
 
     init(
         projects: ProjectStore,
         archiveScheduler: SessionArchiveScheduler,
         usesAgentTitleInSidebar: @escaping () -> Bool,
-        control: WorkspaceControlPlane? = nil
+        control: WorkspaceControlPlane? = nil,
+        checkoutCoordinator: SessionCheckoutCoordinator = .shared
     ) {
         self.projects = projects
         self.archiveScheduler = archiveScheduler
         self.usesAgentTitleInSidebar = usesAgentTitleInSidebar
         self.control = control
+        self.checkoutCoordinator = checkoutCoordinator
+    }
+
+    func setSessionCheckout(
+        _ arguments: SetSessionCheckoutArguments,
+        for sessionID: SessionID,
+        approval: Bool? = nil
+    ) -> SessionCheckoutMoveRequestResult {
+        let path = arguments.checkoutPath?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let reason = arguments.reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !path.isEmpty, let basis = arguments.authorityBasis, !reason.isEmpty else {
+            return .failed("Provide checkout_path, authority_basis, and reason.")
+        }
+        return checkoutCoordinator.requestMove(
+            sessionID: sessionID,
+            checkoutPath: path,
+            authorityBasis: basis,
+            reason: reason,
+            approval: approval,
+            // This service is reached by a tool executing inside the calling turn. Even if a
+            // provider's activity projection is late, the tool response must return before the
+            // authoritative turn-finished barrier replaces its runtime.
+            waitForCurrentTurnBoundary: true
+        )
+    }
+
+    func cancelSessionCheckoutMove(for sessionID: SessionID) -> MCPToolResult {
+        checkoutCoordinator.cancelPendingMove(sessionID: sessionID)
+            ? .success("This session has no pending checkout move.")
+            : .failure("The pending checkout move could not be cancelled.")
     }
 
     /// Arms an archive for after the current turn. Archiving inside the tool call would stop the

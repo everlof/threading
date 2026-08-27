@@ -142,6 +142,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// Session restore needs both the MCP listener and a visible main window; whichever
     /// arrives second performs it. See `restoreSelectedSessionIfReady`.
     private var mcpServerHasStarted = false
+    /// A durable checkout fence may still be copying Claude's transcript when the MCP listener
+    /// becomes ready. No restore path may launch that conversation against its old project.
+    private var pendingCheckoutMovesHaveSettled = false
     private var componentGalleryWindowController: ComponentGalleryWindowController?
     private var aboutWindowController: AboutWindowController?
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
@@ -510,6 +513,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
         )
         self.mainWindowController = mainWindowController
+        // A checkout move requested by the turn that preceded a crash is a durable input fence.
+        // Settle it only after the window has installed its relaunch observer, but before session
+        // restoration is allowed to start the provider in the old checkout.
+        SessionCheckoutCoordinator.shared.resumePendingMovesAtLaunch { [weak self] in
+            // A committed move publishes its relaunch event onto the main queue. Open the
+            // ordinary restore gate one turn later so those already-enqueued replacements run
+            // first; otherwise startup can launch the same provider once from restore and once
+            // from the checkout observer.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                pendingCheckoutMovesHaveSettled = true
+                restoreSelectedSessionIfReady()
+            }
+        }
         if plan.startsBackgroundServices {
             Task { await MacIssueReportOutbox.shared.flush() }
             issueReportEvents.observe(NSApplication.didBecomeActiveNotification) {
@@ -1110,7 +1127,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // arrive, and what hangs off this gate is every restoration path plus both
         // scheduled-message services.
         guard launchPlan.restoresWorkspace else { return }
-        guard mcpServerHasStarted, !isOnboardingActive else { return }
+        guard mcpServerHasStarted,
+              pendingCheckoutMovesHaveSettled,
+              !isOnboardingActive else { return }
         let plan = launchRestoration.run(
             previousLaunch: EventLog.shared.previousLaunchOutcome,
             escalation: UncleanExitEscalation(decision: launchDecision)
@@ -3314,6 +3333,7 @@ private enum UIScenarioBootstrap {
     private enum Key {
         static let home = "THREADING_UI_SCENARIO_HOME"
         static let project = "THREADING_UI_SCENARIO_PROJECT"
+        static let targetProject = "THREADING_UI_SCENARIO_TARGET_PROJECT"
         static let freshTape = "THREADING_UI_SCENARIO_FRESH_TAPE"
         static let resumeTape = "THREADING_UI_SCENARIO_RESUME_TAPE"
         static let title = "THREADING_UI_SCENARIO_TITLE"
@@ -3378,6 +3398,22 @@ private enum UIScenarioBootstrap {
         ) else {
             return .refused("one or more fixture artifacts are missing or outside scenario home")
         }
+        let targetProject: URL?
+        if environment[Key.targetProject] != nil {
+            guard let target = artifact(
+                Key.targetProject,
+                environment: environment,
+                root: root,
+                expectsDirectory: true,
+                executable: false,
+                fileManager: fileManager
+            ) else {
+                return .refused("the target checkout is missing or outside scenario home")
+            }
+            targetProject = target
+        } else {
+            targetProject = nil
+        }
         let executable = Bundle.main.bundleURL
             .appendingPathComponent("Contents/Helpers/threading-scenario")
             .standardizedFileURL
@@ -3404,6 +3440,10 @@ private enum UIScenarioBootstrap {
 
         guard let storedProject = ProjectStore.shared.addProject(folderURL: project) else {
             return .refused("could not persist the synthetic project")
+        }
+        if let targetProject,
+           ProjectStore.shared.addProject(folderURL: targetProject) == nil {
+            return .refused("could not persist the synthetic target checkout")
         }
         let session: AgentSession
         if let existing = ProjectStore.shared.session(withID: sessionID) {

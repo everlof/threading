@@ -49,6 +49,9 @@ final class CodexStreamSession:
     var onInteractionAvailabilityChange: (() -> Void)?
     var onComposerCapabilitiesChange: (() -> Void)?
     private(set) var composerCapabilities: [ComposerCapability] = []
+    var isComposerCapabilityCatalogReady: Bool {
+        didReportThread && !isSkillsRequestInFlight
+    }
     var sessionTitleSource: AgentTitleSource { .provider }
 
     private(set) var isRunning = false
@@ -598,15 +601,22 @@ final class CodexStreamSession:
         }
 
         if isRoot {
-            let hadActiveTurn = activeTurnID != nil
-            activeTurnID = nil
-            activeTurnKind = .ordinary
-            settleMessagesInFlight()
-            if hadActiveTurn {
-                onInteractionAvailabilityChange?()
-            }
+            settleRootTurnIdentity()
         } else if let threadID = notificationThreadID {
             childTurnsByThread[threadID] = nil
+        }
+    }
+
+    /// Clears the provider identity and message receipts for a root turn that reached any
+    /// terminal wire boundary. Idempotence matters because app-server may emit a non-retrying
+    /// `error` and then the ordinary `turn/completed` for the same turn.
+    private func settleRootTurnIdentity() {
+        let hadActiveTurn = activeTurnID != nil
+        activeTurnID = nil
+        activeTurnKind = .ordinary
+        settleMessagesInFlight()
+        if hadActiveTurn {
+            onInteractionAvailabilityChange?()
         }
     }
 
@@ -863,6 +873,7 @@ final class CodexStreamSession:
             case .listSkills:
                 isSkillsRequestInFlight = false
                 if shouldReloadSkills { requestSkillsIfNeeded() }
+                onInteractionAvailabilityChange?()
             case .compact:
                 isCompactionInFlight = false
                 finishTurnWithTransportError(L10n.format("Compact failed: %@", error))
@@ -913,6 +924,7 @@ final class CodexStreamSession:
             isSkillsRequestInFlight = false
             applySkills(result)
             if shouldReloadSkills { requestSkillsIfNeeded() }
+            onInteractionAvailabilityChange?()
 
         case .compact:
             // Acceptance is not completion. Standard `turn/completed` settles the operation.
@@ -1005,7 +1017,12 @@ final class CodexStreamSession:
         for event in events {
             let completed = completingTurnMetrics(in: event)
             if case .turnFinished(_, let outcome, _) = completed {
+                // A terminal `error` is sufficient on its own, but current app-server versions
+                // may still send `turn/completed` afterwards. One provider turn has exactly one
+                // terminal event in Threading regardless of which notification arrived first.
+                guard !receivedTurnFinished else { continue }
                 let completedCompaction = isCompactionInFlight
+                settleRootTurnIdentity()
                 receivedTurnFinished = true
                 isTurnInFlight = false
                 isCompactionInFlight = false

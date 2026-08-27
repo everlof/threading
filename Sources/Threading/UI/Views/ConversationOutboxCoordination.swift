@@ -85,6 +85,9 @@ extension ConversationViewController {
     /// whose diff baseline was never taken shows the previous turn's changes as its own.
     func flushOutboxIfReady() {
         guard isViewLoaded, stream.canSend, !isPreparingTurn else { return }
+        guard !SessionCheckoutCoordinator.shared.isHoldingInput(sessionID: sessionID) else {
+            return
+        }
         // A tier-4 rule holds the *queue* at the turn boundary — work Threading would hand over
         // on its own. What the user types and sends by hand still goes: the keyboard is the one
         // thing a limit of theirs deliberately does not stop, and the strip says so.

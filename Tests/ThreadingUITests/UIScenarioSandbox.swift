@@ -25,6 +25,7 @@ struct UIScenarioSandbox {
 
     struct CodexScenarioFixture {
         let project: URL
+        let targetProject: URL?
         let freshTape: URL
         let resumeTape: URL
         let title: String
@@ -34,6 +35,10 @@ struct UIScenarioSandbox {
             application.launchEnvironment["CODEX_HOME"] = scenarioRoot
                 .appendingPathComponent(".codex", isDirectory: true).path
             application.launchEnvironment["THREADING_UI_SCENARIO_PROJECT"] = project.path
+            if let targetProject {
+                application.launchEnvironment["THREADING_UI_SCENARIO_TARGET_PROJECT"] =
+                    targetProject.path
+            }
             application.launchEnvironment["THREADING_UI_SCENARIO_FRESH_TAPE"] = freshTape.path
             application.launchEnvironment["THREADING_UI_SCENARIO_RESUME_TAPE"] = resumeTape.path
             application.launchEnvironment["THREADING_UI_SCENARIO_TITLE"] = title
@@ -139,6 +144,32 @@ struct UIScenarioSandbox {
         )
     }
 
+    func prepareCodexCheckoutMoveFixture(
+        fileManager: FileManager = .default
+    ) throws -> CodexScenarioFixture {
+        let base = try prepareCodexFixture(
+            title: "Move checkout fixture",
+            freshTapeName: "codex-checkout-move-fresh.json",
+            resumeTapeName: "codex-checkout-move-resume.json",
+            fileManager: fileManager
+        )
+        let target = root.appendingPathComponent("target", isDirectory: true)
+        try runGit([
+            "worktree", "add", "--quiet", "-b", "fix/checkout-move", target.path,
+        ], in: base.project)
+        try Data("visible only in the moved checkout\n".utf8).write(
+            to: target.appendingPathComponent("target-only.txt"),
+            options: .atomic
+        )
+        return CodexScenarioFixture(
+            project: base.project,
+            targetProject: target,
+            freshTape: base.freshTape,
+            resumeTape: base.resumeTape,
+            title: base.title
+        )
+    }
+
     private func prepareCodexFixture(
         title: String,
         freshTapeName: String,
@@ -191,6 +222,7 @@ struct UIScenarioSandbox {
         )
         return CodexScenarioFixture(
             project: project,
+            targetProject: nil,
             freshTape: freshTape,
             resumeTape: resumeTape,
             title: title

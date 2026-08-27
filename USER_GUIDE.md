@@ -456,6 +456,16 @@ first message can be typed straight away without clicking the field. If a draft 
 the caret lands at the end of it — typing continues the sentence rather than cutting in front
 of it.
 
+Type **/** at the start of that first-message draft to complete the selected agent's commands
+before it launches. The list follows both the agent and the Terminal/Chat choice; keep typing to
+filter, use Up/Down to move, and press Tab or Return to insert without starting the session. A
+single-character typo stays suggestible after the first three letters, so `/look` still offers
+`/loop`. Threading can list built-ins at this point, while commands supplied by an account,
+project, plugin, or skill appear only after the agent starts and reports them. Terminal hands the
+opening command to the agent's own TUI. Chat waits for the live command catalog and then uses the
+same native command handling as every later reply, so `/review`, `/compact`, and disabled
+terminal-only commands cannot accidentally be sent as ordinary model text.
+
 There is no shortcut that starts a session for you. A session carries up to four decisions —
 agent, account, model, and which checkout it runs in — and the menu items that used to create one
 outright answered them with defaults you never saw. The composer asks, and it is replaced
@@ -1302,6 +1312,36 @@ own. And it appears only when there is an agent running, it is between turns, an
 Tools ▸ This session** is switched on — the agent renames the chat by calling a tool, so with
 that group off there is nothing to ask. A name you typed yourself still wins: the agent's name
 is stored underneath it and shows through if you ever clear your own.
+
+### Moving a chat to another checkout
+
+Open a chat's **⋯** menu — from its sidebar row, a right-click, or the session header — and
+choose **Move to Checkout**. Existing sibling checkouts are listed by branch; **Choose Existing
+Checkout…** adopts a worktree that is not in the sidebar yet. The folder must be the root of an
+existing, branch-attached worktree for the same Git repository. A branch name by itself is never
+enough, and detached checkouts and Threading-managed temporary workspaces are refused.
+
+This moves the chat's real project ownership, not its displayed branch label. Its Threading ID,
+provider conversation, name, account, settings, attachments, scheduled messages and earlier Git
+checkpoints stay with it. Files, processes, relaunch, Git Review and agent tools use the new
+checkout afterwards. A standalone terminal does not move with the chat; its working directory is
+independent.
+
+An idle chat moves immediately. If a turn is active, the submenu shows **Pending** and offers
+**Cancel Checkout Move**. Threading waits for that turn's final Git checkpoint, moves the chat,
+then resumes the same conversation in the new checkout before releasing another queued prompt.
+The pending request survives an app restart. Because external commands may have crossed the
+boundary in ways Threading cannot attribute safely, that just-finished **Last Turn** comparison is
+marked unavailable; the next turn gets a normal checkpoint in the new checkout.
+
+Agents have the same operation through `set_session_checkout(checkout_path, authority_basis,
+reason)` and can withdraw it with `cancel_session_checkout_move()`. An agent must call the move
+before it starts working in the other checkout and end its current turn so the boundary can
+settle. Under **Settings ▸ Tools ▸ Project**, **Explicit Requests** is the recommended default:
+a move clearly requested in your prompt proceeds without a duplicate question, while a move the
+agent proposes itself asks first. **Always Ask** asks in both cases; **Same Repository** allows
+either after Threading's same-repository validation. The claimed authority and reason are kept in
+the audit trail.
 
 ### Copying identifiers and paths
 Everything about a chat that is needed *elsewhere* sits in the right-click menu's **Copy ▸**

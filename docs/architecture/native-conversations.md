@@ -119,6 +119,13 @@ markdown, command/MCP/dynamic/file/plan items become the same collapsible tool r
 for `exec --json` fixtures and one-shot surfaces, but it is not the native conversation
 transport.
 
+App-server's `error` notification is also a turn boundary when `willRetry` is explicitly false.
+Depleted workspace credits have been measured ending there without a usable later boundary, so
+waiting only for `turn/completed` leaves the native conversation in Working indefinitely. A
+retrying error remains narration inside the open turn. When app-server emits both terminal
+notifications, `CodexStreamSession` admits the first and suppresses the duplicate, including its
+message-lifecycle receipt, so one provider turn still produces exactly one `turnFinished`.
+
 Codex is also the only current runtime whose retained-conversation surface has reversible
 archive semantics. `ProviderArchiveSync` uses the installed CLI's `archive` / `unarchive`
 commands rather than borrowing a live `CodexStreamSession`, because a filed conversation is
@@ -323,6 +330,22 @@ Claude's raw slash resolver ultimately decides which colliding entry runs. Conve
 unknown non-skill name defaults to a visible user turn: this preserves legacy `.claude/commands`
 and future prompt workflows without requiring Threading to know their names in advance; only a
 small measured set of immediate CLI/session controls renders as a muted command notice.
+
+The new-session composer exists before any provider process, so it cannot consume that live
+catalog yet. `PreSessionComposerCatalog` gives the shared `PromptView` a bounded expectation
+catalog for the selected runtime and surface: documented/measured built-ins complete in the
+draft, including `/loop`/`/proactive`, while account-, project-, plugin-, and skill-defined rows
+wait for live discovery. One insertion, deletion, or substitution keeps a name or alias visible
+after three typed characters, so `/look` can still complete to `/loop`. These expectations never
+grant execution. On native launch, a leading `/` or `$` opening message waits until the
+transport's catalog handshake is authoritative and then re-enters the ordinary
+`ConversationViewController.submit` path. Known commands therefore take their semantic RPC or
+native safety refusal; unknown text still follows the provider's ordinary unknown-command path.
+Ordinary opening prose is not delayed. Grok's ACP catalog is complete in `initialize`; Cursor's
+arrives in `available_commands_update`, with a five-second fallback so an omitted optional
+notification cannot strand the opening message. Codex's built-in slash catalog becomes available
+with the opened thread; when the surface requests checkout skills, readiness includes that first
+`skills/list` response so an opening `$skill` cannot race its metadata.
 
 Codex app-server has no general slash-command catalog. Threading therefore enables only the
 native operations it can map without pretending to emulate the TUI: `/review [instructions]`

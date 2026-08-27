@@ -65,6 +65,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "grantBrowserOriginAccess",
             "approveSensitiveBrowserAction",
             "approveToolPermission",
+            "approveSessionCheckoutMove",
             "installUnsignedExtension",
             "updateExtensionCapabilities",
             "approveAgentExtensionInstall",

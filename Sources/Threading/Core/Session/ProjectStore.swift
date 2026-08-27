@@ -509,6 +509,172 @@ final class ProjectStore {
         return session
     }
 
+    /// Durably records or cancels a validated move request before its calling turn may continue.
+    /// This is intentionally an immediate exact-row write: a coalescing timer would let quitting
+    /// the app forget the fence while the provider has already been told the request succeeded.
+    @discardableResult
+    func setPendingCheckoutMove(
+        _ move: PendingCheckoutMove?,
+        forSessionID sessionID: SessionID
+    ) -> Bool {
+        guard let location = locate(sessionID: sessionID),
+              flushPendingRecordSaves(),
+              prepareForImmediateSave("pending checkout move") else { return false }
+
+        let previous = projects[location.projectIndex].sessions[location.sessionIndex]
+        guard previous.pendingCheckoutMove != move else { return true }
+        projects[location.projectIndex].sessions[location.sessionIndex].pendingCheckoutMove = move
+        let project = projects[location.projectIndex]
+        let session = project.sessions[location.sessionIndex]
+        guard stateManager.saveSession(
+            session,
+            in: project.id,
+            position: location.sessionIndex
+        ) else {
+            recordFailedWritePolicy()
+            projects[location.projectIndex].sessions[location.sessionIndex] = previous
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
+            return false
+        }
+        recordPersistedSession(
+            projectIndex: location.projectIndex,
+            sessionIndex: location.sessionIndex
+        )
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
+        return true
+    }
+
+    /// Atomically changes which checkout project owns a bounded set of related conversations.
+    ///
+    /// Validation belongs to `SessionCheckoutCoordinator`; this method consumes its canonical
+    /// identities and performs only the graph transaction. The destination project is born in
+    /// the same SQLite transaction as the moved rows, so a failed move cannot leave an empty
+    /// checkout behind.
+    func moveSessionsToCheckout(
+        _ sessionIDs: [SessionID],
+        checkoutPath: String,
+        repositoryIdentity: String,
+        worktreeIdentity: String,
+        branch: String
+    ) -> SessionCheckoutStoreMoveResult {
+        var seenIDs: Set<SessionID> = []
+        let uniqueIDs = sessionIDs.filter { seenIDs.insert($0).inserted }
+        let movingIDSet = Set(uniqueIDs)
+        guard !uniqueIDs.isEmpty,
+              uniqueIDs.allSatisfy({ sessionLocationsByID[$0] != nil }) else {
+            return .sessionNotFound
+        }
+        guard flushPendingRecordSaves(),
+              prepareForImmediateSave("session checkout move") else {
+            return .persistenceRefused
+        }
+
+        let destinationIndex = projects.firstIndex { candidate in
+            let canonicalPath = URL(fileURLWithPath: candidate.folderPath, isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath().path
+            guard let location = GitInfo.worktreeLocation(for: canonicalPath) else {
+                return false
+            }
+            return location.repositoryIdentity == repositoryIdentity
+                && location.worktreeIdentity == worktreeIdentity
+        }
+        let alreadyThere = destinationIndex.map { index in
+            uniqueIDs.allSatisfy { sessionLocationsByID[$0]?.projectIndex == index }
+        } ?? false
+        if alreadyThere, let destinationIndex {
+            for id in uniqueIDs {
+                guard let location = locate(sessionID: id) else { continue }
+                projects[location.projectIndex].sessions[location.sessionIndex].branch = branch
+                projects[location.projectIndex].sessions[location.sessionIndex]
+                    .pendingCheckoutMove = nil
+            }
+            guard stateManager.moveSessions(affectedProjects: [
+                (projects[destinationIndex], destinationIndex)
+            ]) else {
+                recordFailedWritePolicy()
+                restorePersistedSnapshot()
+                return .persistenceRefused
+            }
+            recordPersistedSnapshot()
+            let destination = SessionCheckoutStoreDestination(
+                projectID: projects[destinationIndex].id,
+                checkoutPath: projects[destinationIndex].folderPath,
+                branch: branch,
+                createdProject: false
+            )
+            notifyChanged(sidebarImpact: .structure)
+            return .unchanged(destination)
+        }
+
+        let previousProjects = projects
+        let createdProject = destinationIndex == nil
+        let targetIndex: Int
+        if let destinationIndex {
+            targetIndex = destinationIndex
+        } else {
+            var project = Project(
+                name: GitInfo.suggestedProjectName(for: URL(fileURLWithPath: checkoutPath)),
+                folderURL: URL(fileURLWithPath: checkoutPath, isDirectory: true)
+            )
+            project.folderPath = checkoutPath
+            projects.append(project)
+            targetIndex = projects.index(before: projects.endIndex)
+        }
+
+        var moving: [AgentSession] = []
+        var sourceProjectIDs: Set<ProjectID> = []
+        for id in uniqueIDs {
+            guard let location = locate(sessionID: id) else { continue }
+            sourceProjectIDs.insert(projects[location.projectIndex].id)
+            moving.append(projects[location.projectIndex].sessions[location.sessionIndex])
+        }
+        for projectIndex in projects.indices {
+            projects[projectIndex].sessions.removeAll { movingIDSet.contains($0.id) }
+        }
+        for index in moving.indices {
+            moving[index].branch = branch
+            moving[index].pendingCheckoutMove = nil
+        }
+        projects[targetIndex].sessions.append(contentsOf: moving)
+        rebuildLookupIndexes()
+
+        let affectedProjectIDs = sourceProjectIDs.union([projects[targetIndex].id])
+        let affected = projects.enumerated().compactMap { index, project in
+            affectedProjectIDs.contains(project.id) ? (project, index) : nil
+        }
+        guard stateManager.moveSessions(affectedProjects: affected) else {
+            recordFailedWritePolicy()
+            projects = previousProjects
+            rebuildLookupIndexes()
+            restorePersistedSnapshot()
+            notifyChanged(sidebarImpact: .structure)
+            return .persistenceRefused
+        }
+
+        let sourceBySession = Dictionary(uniqueKeysWithValues: uniqueIDs.compactMap { id in
+            previousProjects.first(where: { $0.sessions.contains(where: { $0.id == id }) })
+                .map { (id, $0.id) }
+        })
+        recordPersistedSnapshot()
+        for id in uniqueIDs {
+            if let source = sourceBySession[id], source != projects[targetIndex].id {
+                AgentWorkTraceStore.shared.move(
+                    sessionID: id,
+                    from: source,
+                    to: projects[targetIndex].id
+                )
+            }
+        }
+        let destination = SessionCheckoutStoreDestination(
+            projectID: projects[targetIndex].id,
+            checkoutPath: projects[targetIndex].folderPath,
+            branch: branch,
+            createdProject: createdProject
+        )
+        notifyChanged(sidebarImpact: .structure)
+        return .moved(destination)
+    }
+
     /// Adopts conversations found on disk, so they can be resumed like any other session.
     ///
     /// Each session is created already launched and carrying its identifier: it exists because

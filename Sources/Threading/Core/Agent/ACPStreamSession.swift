@@ -28,6 +28,7 @@ final class ACPStreamSession:
     var onComposerCapabilitiesChange: (() -> Void)?
     var onSessionTitleChange: ((String) -> Void)?
     private(set) var composerCapabilities: [ComposerCapability] = []
+    private(set) var isComposerCapabilityCatalogReady = false
 
     private(set) var isRunning = false
     var canSend: Bool {
@@ -42,6 +43,7 @@ final class ACPStreamSession:
     private let workingDirectory: String
     private let profile: ACPProviderProfile
     private let handshakeTimeout: TimeInterval
+    private let commandCatalogTimeout: TimeInterval
     private let mcpBinding: MCPServerBinding?
     private let plan: () throws -> AgentLaunchPlan
 
@@ -87,6 +89,7 @@ final class ACPStreamSession:
     private var deniedToolCallIDs: Set<String> = []
 
     private var handshakeDeadline: Task<Void, Never>?
+    private var commandCatalogDeadline: Task<Void, Never>?
 
     // MARK: - Initialization
 
@@ -99,6 +102,7 @@ final class ACPStreamSession:
         workingDirectory: String,
         profile: ACPProviderProfile,
         handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
+        commandCatalogTimeout: TimeInterval = ACPDefaults.commandCatalogTimeout,
         mcpBinding: MCPServerBinding? = nil,
         hostPlan: @escaping () -> PTYHostChildPlan? = { nil },
         plan: @escaping () throws -> AgentLaunchPlan
@@ -107,6 +111,7 @@ final class ACPStreamSession:
         self.workingDirectory = workingDirectory
         self.profile = profile
         self.handshakeTimeout = handshakeTimeout
+        self.commandCatalogTimeout = commandCatalogTimeout
         self.mcpBinding = mcpBinding
         self.hostPlan = hostPlan
         self.plan = plan
@@ -243,6 +248,7 @@ final class ACPStreamSession:
         isTerminating = true
         isRunning = false
         cancelHandshakeDeadline()
+        cancelCommandCatalogDeadline()
         if isTurnInFlight, let activeSessionID {
             sendNotification(
                 method: "session/cancel",
@@ -266,6 +272,7 @@ final class ACPStreamSession:
         }
         isRunning = false
         cancelHandshakeDeadline()
+        cancelCommandCatalogDeadline()
         onInteractionAvailabilityChange?()
         return true
     }
@@ -297,6 +304,33 @@ final class ACPStreamSession:
         handshakeDeadline = nil
     }
 
+    /// Cursor publishes its command catalog in a notification after `session/new`. Do not let a
+    /// missing optional notification hold a slash-shaped opening message forever: once the
+    /// measured delivery window has passed, the empty/current catalog is authoritative and the
+    /// ordinary unknown-command path may proceed.
+    private func armCommandCatalogDeadline() {
+        guard !isComposerCapabilityCatalogReady else { return }
+        commandCatalogDeadline?.cancel()
+        let seconds = commandCatalogTimeout
+        commandCatalogDeadline = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self?.commandCatalogDeadlineExpired()
+        }
+    }
+
+    private func cancelCommandCatalogDeadline() {
+        commandCatalogDeadline?.cancel()
+        commandCatalogDeadline = nil
+    }
+
+    private func commandCatalogDeadlineExpired() {
+        guard isRunning, !isComposerCapabilityCatalogReady else { return }
+        commandCatalogDeadline = nil
+        isComposerCapabilityCatalogReady = true
+        onInteractionAvailabilityChange?()
+    }
+
     private func handshakeDeadlineExpired() {
         guard isRunning else { return }
         handshakeDeadline = nil
@@ -312,6 +346,7 @@ final class ACPStreamSession:
 
     private func resetForLaunch(resumeState: ResumeState) {
         cancelHandshakeDeadline()
+        cancelCommandCatalogDeadline()
         launchResumeState = resumeState
         buffer.removeAll(keepingCapacity: true)
         errorBuffer.removeAll(keepingCapacity: true)
@@ -330,6 +365,7 @@ final class ACPStreamSession:
         resetMessageAccumulators()
         toolCalls.removeAll()
         deniedToolCallIDs.removeAll()
+        isComposerCapabilityCatalogReady = false
         replaceComposerCapabilities([])
     }
 
@@ -528,8 +564,12 @@ final class ACPStreamSession:
 
         switch purpose {
         case .initialize:
-            if let commands = profile.initializeCommands(result) {
-                replaceComposerCapabilities(composerCapabilities(from: commands))
+            let capabilities = profile.initializeCommands(result).map(composerCapabilities(from:))
+            switch profile.initialCommandCatalog {
+            case .initializeResponse:
+                acceptInitialComposerCapabilities(capabilities ?? [])
+            case .sessionUpdate:
+                if let capabilities { replaceComposerCapabilities(capabilities) }
             }
             openSession()
 
@@ -546,6 +586,9 @@ final class ACPStreamSession:
                 return
             }
             activeSessionID = providerID
+            if profile.initialCommandCatalog == .sessionUpdate {
+                armCommandCatalogDeadline()
+            }
             onEvent?(.initialised(
                 sessionID: TranscriptID(providerID),
                 model: ACPWireAdapter.currentModel(in: result)
@@ -587,7 +630,13 @@ final class ACPStreamSession:
             onEvent?(.runPlanUpdated(ACPWireAdapter.planSteps(in: update)))
         case "available_commands_update":
             let commands = update["availableCommands"] as? [[String: Any]] ?? []
-            replaceComposerCapabilities(composerCapabilities(from: commands))
+            let capabilities = composerCapabilities(from: commands)
+            if profile.initialCommandCatalog == .sessionUpdate,
+               !isComposerCapabilityCatalogReady {
+                acceptInitialComposerCapabilities(capabilities)
+            } else {
+                replaceComposerCapabilities(capabilities)
+            }
         case "usage_update":
             lastContextTokens = ACPWireAdapter.integer(update["used"])
             lastContextWindow = ACPWireAdapter.integer(update["size"])
@@ -892,6 +941,7 @@ final class ACPStreamSession:
     private func handleTermination(status: Int32) {
         guard process != nil else { return }
         cancelHandshakeDeadline()
+        cancelCommandCatalogDeadline()
         process?.standardOutput.readabilityHandler = nil
         process?.standardError.readabilityHandler = nil
         process = nil
@@ -936,6 +986,16 @@ final class ACPStreamSession:
         guard composerCapabilities != normalization.capabilities else { return }
         composerCapabilities = normalization.capabilities
         onComposerCapabilitiesChange?()
+    }
+
+    /// Installs the catalog before announcing readiness. A capability-change callback may retry
+    /// an opening command synchronously, so it must never observe `ready` with the old list.
+    private func acceptInitialComposerCapabilities(_ capabilities: [ComposerCapability]) {
+        let becameReady = !isComposerCapabilityCatalogReady
+        isComposerCapabilityCatalogReady = true
+        cancelCommandCatalogDeadline()
+        replaceComposerCapabilities(capabilities)
+        if becameReady { onInteractionAvailabilityChange?() }
     }
 }
 
@@ -1000,6 +1060,13 @@ enum ACPDefaults {
     /// standard-error output, so a framing desync produces silence rather than a complaint.
     /// Only the handshake is bounded; `session/prompt` is a model turn and is left unbounded.
     static let handshakeTimeout: TimeInterval = 30
+
+    /// Maximum wait for an ACP agent that publishes commands after the session opens.
+    ///
+    /// Cursor's measured update arrives about 0.7 seconds after `session/new`; five seconds keeps
+    /// that real catalog authoritative without turning an optional notification into a hung
+    /// first message when an older or changed CLI omits it.
+    static let commandCatalogTimeout: TimeInterval = 5
 
     /// The option kinds the protocol itself names, in the order a decision prefers them.
     ///

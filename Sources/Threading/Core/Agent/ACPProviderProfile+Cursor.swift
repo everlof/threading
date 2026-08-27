@@ -35,6 +35,7 @@ extension ACPProviderProfile {
             // `available_commands_update` notification about 0.7 s after the session opens
             // (§10.2) — the standard path the runtime already handles.
             initializeCommands: { _ in nil },
+            initialCommandCatalog: .sessionUpdate,
             commandCatalog: CursorACPComposerCatalog.policy
         )
     }

@@ -465,6 +465,36 @@ final class ProjectDatabase {
         }
     }
 
+    /// Moves standing session rows between checkout projects as one graph mutation.
+    ///
+    /// `projects` contains only the affected source projects and the destination after the move.
+    /// Re-upserting that bounded set makes every position contiguous, creates the destination
+    /// project in the same transaction when necessary, and changes each moved row's foreign key
+    /// without exposing an empty destination or an ownerless session.
+    func moveSessions(
+        affectedProjects projects: [(project: Project, position: Int)]
+    ) throws {
+        try database.transaction {
+            let found = try storeGeneration()
+            if let observedGeneration, observedGeneration != found {
+                throw ProjectDatabaseWriteError.staleGeneration(
+                    observed: observedGeneration,
+                    found: found
+                )
+            }
+
+            for entry in projects {
+                try upsert(entry.project, position: entry.position)
+            }
+            for entry in projects {
+                for (position, session) in entry.project.sessions.enumerated() {
+                    try upsert(session, in: entry.project.id, position: position)
+                }
+            }
+            try advanceGeneration(from: found)
+        }
+    }
+
     /// The sessions that held a live agent when the app last quit, for startup to relaunch.
     ///
     /// Read leniently rather than through `corruptRow`: this is derived navigation state whose

@@ -120,7 +120,8 @@ struct UsageLimitStop: Equatable, Sendable {
 enum UsageLimitDefaults {
     /// What a refusal for a spent limit says, across the forms observed: `You've hit your
     /// session limit · resets 1:20pm (Europe/Rome)`, `Claude AI usage limit reached|…`,
-    /// `5-hour limit reached ∙ resets 3pm`, `You've hit your weekly limit`.
+    /// `5-hour limit reached ∙ resets 3pm`, `You've hit your weekly limit`, and Codex's
+    /// `Your workspace is out of credits`.
     ///
     /// Matched on words rather than on punctuation: the separator alone has been a middle dot,
     /// a bullet operator and a pipe across three CLI versions.
@@ -130,7 +131,9 @@ enum UsageLimitDefaults {
         "weekly limit",
         "hour limit",
         "rate limit",
-        "limit reached"
+        "limit reached",
+        "out of credits",
+        "credits depleted"
     ]
 
     /// Where the provider stops describing the refusal and starts describing the resumption.

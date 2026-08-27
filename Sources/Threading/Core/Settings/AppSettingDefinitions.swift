@@ -42,6 +42,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case disabledAttachmentDetectionAgentKinds
     case includesAttachmentsOutsideProject
     case capturesPageBeforeAgentActions
+    case sessionCheckoutAuthorityPolicy
     case disabledToolGroupIDs
     case usesContainedExtensionLauncher
     case usesMCPStdioBridge
@@ -926,6 +927,16 @@ enum AppSettingDefinitions {
                             "Keep the page as it was before each agent action",
                             ["attachments", "browser"])]
     )
+    static let sessionCheckoutAuthorityPolicy = AppSettingDescriptor<String>(
+        identity: .sessionCheckoutAuthorityPolicy,
+        persistenceKey: "sessionCheckoutAuthorityPolicy",
+        absence: .registered(SessionCheckoutAuthorityPolicy.allowExplicitRequests.rawValue),
+        validation: .allowedStrings(Set(SessionCheckoutAuthorityPolicy.allCases.map(\.rawValue))),
+        presentations: [row(
+            "tools", 0, "Project", "Agents may move chats between checkouts",
+            ["checkout", "worktree", "move chat", "project", "approval"]
+        )]
+    )
     static let disabledToolGroupIDs = AppSettingDescriptor<[String]>(
         identity: .disabledToolGroupIDs,
         persistenceKey: "disabledToolGroupIDs",
@@ -1338,6 +1349,7 @@ enum AppSettingDefinitions {
         .init(attentionAlertSound), .init(terminalBellSound), .init(soundEventChoices),
         .init(silencesAllSounds), .init(disabledAttachmentDetectionAgentKinds),
         .init(includesAttachmentsOutsideProject), .init(capturesPageBeforeAgentActions),
+        .init(sessionCheckoutAuthorityPolicy),
         .init(disabledToolGroupIDs), .init(usesContainedExtensionLauncher),
         .init(usesMCPStdioBridge), .init(ptyHostEnabled),
         .init(prependsCommandLineToolsToPATH),

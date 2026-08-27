@@ -1,0 +1,89 @@
+{
+  "id": "codex-checkout-move-fresh",
+  "provenance": {
+    "protocolVersion": "app-server-1",
+    "providerVersion": "0.147.0",
+    "recordedAt": "2026-08-27T11:30:00Z"
+  },
+  "provider": "codex",
+  "steps": [
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":1,\"method\":\"initialize\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":1,\"result\":{\"userAgent\":\"threading-ui-fixture/1\"}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"method\":\"initialized\"}"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":2,\"method\":\"thread/start\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"fixture-thread-checkout-move\",\"name\":\"Move checkout fixture\",\"model\":\"gpt-5.6\"}}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":3,\"method\":\"skills/list\",\"params\":{\"cwds\":[\"${SCENARIO_ROOT}/project\"]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":3,\"result\":{\"data\":[{\"cwd\":\"${SCENARIO_ROOT}/project\",\"skills\":[],\"errors\":[]}]}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\",\"input\":[{\"type\":\"text\",\"text\":\"Keep working while I move this chat.\"}]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"fixture-turn-checkout-move-1\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\",\"turn\":{\"id\":\"fixture-turn-checkout-move-1\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\",\"turnId\":\"fixture-turn-checkout-move-1\",\"item\":{\"id\":\"fixture-agent-message-checkout-move-1\",\"type\":\"agentMessage\",\"text\":\"Waiting for the checkout move…\"}}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":5,\"method\":\"turn/interrupt\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\",\"turnId\":\"fixture-turn-checkout-move-1\"}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":5,\"result\":{}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\",\"turn\":{\"id\":\"fixture-turn-checkout-move-1\",\"status\":\"interrupted\",\"durationMs\":80}}}\n"
+    },
+    {
+      "afterMilliseconds": 5000,
+      "kind": "exit",
+      "status": 0
+    }
+  ],
+  "title": "Queue a checkout move during an active Codex turn",
+  "transport": "codex-app-server",
+  "version": 1
+}

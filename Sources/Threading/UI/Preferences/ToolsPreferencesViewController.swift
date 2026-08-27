@@ -127,7 +127,11 @@ final class ToolsPreferencesViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        view = NSView()
+        let root = ToolsSettingsRootView()
+        root.onReveal = { [weak self] title in
+            self?.prepareToRevealSettingsRow(title) ?? false
+        }
+        view = root
         render()
         appEvents.observe(MCPExternalToolsDidChange.self) { [weak self] _ in
             self?.render()
@@ -200,7 +204,7 @@ final class ToolsPreferencesViewController: NSViewController {
                 rows.append(contentsOf: group.tools.indices.map {
                     .tool(group: groupIndex, tool: $0)
                 })
-                if group.id == MCPToolCatalog.supervision.id {
+                if hasFooter(group) {
                     rows.append(.groupFooter(groupIndex))
                 }
             }
@@ -259,7 +263,7 @@ final class ToolsPreferencesViewController: NSViewController {
                   displayedGroups.indices.contains(groupIndex) else { return nil }
             let group = displayedGroups[groupIndex]
             let toolRows = expandedGroups.contains(group.id)
-                ? group.tools.count + (group.id == MCPToolCatalog.supervision.id ? 1 : 0)
+                ? group.tools.count + (hasFooter(group) ? 1 : 0)
                 : 0
             return ThemedTableCardDecoration(
                 rows: index...(index + toolRows),
@@ -366,7 +370,7 @@ final class ToolsPreferencesViewController: NSViewController {
             expandedGroups.insert(groupID)
             let rows: [PresentationRow] = group.tools.indices.map {
                 .tool(group: groupIndex, tool: $0)
-            } + (group.id == MCPToolCatalog.supervision.id ? [.groupFooter(groupIndex)] : [])
+            } + (hasFooter(group) ? [.groupFooter(groupIndex)] : [])
             if !rows.isEmpty {
                 let range = (header + 1)..<(header + 1 + rows.count)
                 presentationRows.insert(contentsOf: rows, at: header + 1)
@@ -374,7 +378,7 @@ final class ToolsPreferencesViewController: NSViewController {
             }
         } else {
             expandedGroups.remove(groupID)
-            let count = group.tools.count + (group.id == MCPToolCatalog.supervision.id ? 1 : 0)
+            let count = group.tools.count + (hasFooter(group) ? 1 : 0)
             if count > 0 {
                 let range = (header + 1)..<(header + 1 + count)
                 presentationRows.removeSubrange(range)
@@ -446,6 +450,62 @@ final class ToolsPreferencesViewController: NSViewController {
         label.applyFont(.subheading)
         label.textColor = Design.Text.secondary
         return SettingsUI.fullRow(label)
+    }
+
+    private func hasFooter(_ group: MCPToolGroup) -> Bool {
+        group.id == MCPToolCatalog.supervision.id || group.id == MCPToolCatalog.project.id
+    }
+
+    private func projectFooter() -> NSView {
+        let policies = SessionCheckoutAuthorityPolicy.allCases
+        let control = ThemedSegmentedControl()
+        control.configure(
+            titles: [
+                L10n.string("Always Ask"),
+                L10n.string("Explicit Requests"),
+                L10n.string("Same Repository")
+            ],
+            selectedIndex: policies.firstIndex(
+                of: AppSettings.shared.sessionCheckoutAuthorityPolicy
+            ) ?? 1
+        )
+        control.onSelect = { index in
+            guard policies.indices.contains(index) else { return }
+            AppSettings.shared.sessionCheckoutAuthorityPolicy = policies[index]
+        }
+        control.setAccessibilityIdentifier("settings.tools.project.checkout-move-policy")
+        return SettingsUI.row(
+            title: L10n.string("Agents may move chats between checkouts"),
+            subtitle: L10n.string(
+                "Explicit Requests lets an agent carry out a move the user asked for, while "
+                    + "agent-initiated moves still require approval."
+            ),
+            control: control
+        )
+    }
+
+    /// A catalogue result may name the Project footer while its tool group is folded and its
+    /// virtual row does not exist. Match against the footer's actual built anchor, then unfold
+    /// only that group and ask the table to vend the destination before reveal searches again.
+    private func prepareToRevealSettingsRow(_ title: String) -> Bool {
+        guard SettingsRowAnchor.find(title: title, in: projectFooter()) != nil,
+              let groupIndex = displayedGroups.firstIndex(where: {
+                $0.id == MCPToolCatalog.project.id
+              }) else { return false }
+
+        let group = displayedGroups[groupIndex]
+        if !expandedGroups.contains(group.id) {
+            setGroup(group.id, expanded: true)
+        }
+        guard let row = presentationRows.firstIndex(where: {
+            guard case .groupFooter(let index) = $0 else { return false }
+            return index == groupIndex
+        }) else { return false }
+
+        tableView.scrollRowToVisible(row)
+        _ = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
+        tableView.layoutSubtreeIfNeeded()
+        return true
     }
 
     /// The one place the signed-in Chrome profile can be created, because creating it is the one
@@ -1029,6 +1089,15 @@ final class ToolsPreferencesViewController: NSViewController {
 
 }
 
+/// The Tools page's answer to a settings search naming a row inside a folded virtual group.
+private final class ToolsSettingsRootView: NSView, SettingsRowRevealing {
+    var onReveal: ((String) -> Bool)?
+
+    func prepareToReveal(title: String) -> Bool {
+        onReveal?(title) ?? false
+    }
+}
+
 // MARK: - Virtualized Page
 
 extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDelegate {
@@ -1122,8 +1191,11 @@ extension ToolsPreferencesViewController: NSTableViewDataSource, NSTableViewDele
                 ? 1
                 : ToolsPreferencesDefaults.disabledAlpha
             return SettingsUI.fullRow(content)
-        case .groupFooter:
-            return supervisionFooter()
+        case .groupFooter(let groupIndex):
+            guard displayedGroups.indices.contains(groupIndex) else { return NSView() }
+            return displayedGroups[groupIndex].id == MCPToolCatalog.project.id
+                ? projectFooter()
+                : supervisionFooter()
         case .browserSignInCaption:
             return SettingsUI.caption("Browser Sign-In")
         case .browserSignInProvider:

@@ -265,6 +265,16 @@ protocol ComposerCapabilityProviding: AnyObject {
     var composerCapabilities: [ComposerCapability] { get }
     var onComposerCapabilitiesChange: (() -> Void)? { get set }
 
+    /// Whether the transport has finished its opening command-catalog handshake.
+    ///
+    /// A process being able to buffer ordinary text is not the same fact. The opening composer
+    /// can hand a slash-shaped first message over immediately after launch, while Claude, Codex,
+    /// and ACP are still discovering the actions that decide whether that text is a native
+    /// command, a refused terminal-only operation, or an ordinary prompt. Callers hold only that
+    /// syntax until this answer becomes true, then resolve it against the live catalog exactly
+    /// like every later message.
+    var isComposerCapabilityCatalogReady: Bool { get }
+
     @discardableResult
     func send(
         _ invocation: ComposerInvocation,
@@ -283,6 +293,17 @@ extension ComposerCapabilityProviding {
 /// The leading command token is the only syntax Threading owns. Everything after it remains an
 /// opaque argument string for the provider, including quotes, paths, and further slash tokens.
 enum ComposerCapabilityResolver {
+    /// Whether the leading token uses syntax whose meaning depends on the live catalog.
+    ///
+    /// Kept beside `invocation(in:capabilities:)` so the opening-message gate and the resolver
+    /// cannot disagree about trimming or which prefixes Threading owns.
+    static func hasLeadingTrigger(in text: String) -> Bool {
+        guard let first = text.trimmingCharacters(in: .whitespacesAndNewlines).first else {
+            return false
+        }
+        return ComposerCapability.Trigger(prefix: first) != nil
+    }
+
     static func invocation(
         in text: String,
         capabilities: [ComposerCapability]
@@ -365,12 +386,13 @@ struct ComposerCompletionQuery: Equatable {
                     }
                 }
                 guard !needle.isEmpty else { return true }
-                return searchableValues(for: capability).contains {
+                let contains = searchableValues(for: capability).contains {
                     $0.folding(
                         options: [.caseInsensitive, .diacriticInsensitive],
                         locale: .current
                     ).contains(needle)
                 }
+                return contains || typoMatches(capability, needle: needle)
             }
             .sorted { lhs, rhs in
                 let lhsScore = score(lhs, needle: needle)
@@ -393,11 +415,55 @@ struct ComposerCompletionQuery: Equatable {
         if name.hasPrefix(needle) { return 1 }
         if capability.aliases.contains(where: { folded($0).hasPrefix(needle) }) { return 2 }
         if name.contains(needle) { return 3 }
-        return 4
+        if searchableValues(for: capability).contains(where: { folded($0).contains(needle) }) {
+            return 4
+        }
+        if typoMatches(capability, needle: needle) { return 5 }
+        return 6
     }
 
     private func folded(_ value: String) -> String {
         value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+    }
+
+    /// Keeps a likely command visible through one insertion, deletion, or substitution. This is
+    /// deliberately limited to names and aliases at three characters or more: descriptions are
+    /// search prose, and typo-expanding one- and two-letter fragments would turn `/` completion
+    /// into noise. The two-pointer walk is linear in the provider-bounded name length.
+    private func typoMatches(_ capability: ComposerCapability, needle: String) -> Bool {
+        guard needle.count >= 3 else { return false }
+        return ([capability.name] + capability.aliases).contains {
+            isOneEditAway(folded($0), from: needle)
+        }
+    }
+
+    private func isOneEditAway(_ candidate: String, from needle: String) -> Bool {
+        let candidate = Array(candidate)
+        let needle = Array(needle)
+        guard abs(candidate.count - needle.count) <= 1 else { return false }
+
+        var candidateIndex = 0
+        var needleIndex = 0
+        var edits = 0
+        while candidateIndex < candidate.count, needleIndex < needle.count {
+            if candidate[candidateIndex] == needle[needleIndex] {
+                candidateIndex += 1
+                needleIndex += 1
+                continue
+            }
+            edits += 1
+            guard edits <= 1 else { return false }
+            if candidate.count > needle.count {
+                candidateIndex += 1
+            } else if needle.count > candidate.count {
+                needleIndex += 1
+            } else {
+                candidateIndex += 1
+                needleIndex += 1
+            }
+        }
+        if candidateIndex < candidate.count || needleIndex < needle.count { edits += 1 }
+        return edits == 1
     }
 }
 

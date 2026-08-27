@@ -12,6 +12,7 @@ extension ACPProviderProfile {
             clientCapabilitiesMeta: [:],
             extendedModelID: GrokACPExtensions.modelStateModelID(in:),
             initializeCommands: GrokACPExtensions.availableCommands(in:),
+            initialCommandCatalog: .initializeResponse,
             commandCatalog: GrokACPComposerCatalog.policy
         )
     }

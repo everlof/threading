@@ -182,6 +182,60 @@ final class StreamSessionLifecycleTests: XCTestCase {
         session.terminate()
     }
 
+    func testCodexNonRetryingErrorSettlesTheTurnExactlyOnce() {
+        let finished = expectation(description: "terminal error")
+        let duplicate = expectation(description: "duplicate terminal event")
+        duplicate.isInverted = true
+        var outcomes: [(String?, TurnOutcome)] = []
+
+        let session = CodexStreamSession(sessionID: SessionID()) {
+            self.shellPlan(
+                "read -r initialize; "
+                    + "printf '%s\\n' '{\"id\":1,\"result\":{}}'; "
+                    + "read -r initialized; "
+                    + "read -r open_thread; "
+                    + "printf '%s\\n' '{\"id\":2,\"result\":{\"thread\":{"
+                    + "\"id\":\"thread-1\",\"model\":\"gpt-test\"}}}'; "
+                    + "read -r start_turn; "
+                    + "printf '%s\\n' '{\"id\":3,\"result\":{\"turn\":{"
+                    + "\"id\":\"turn-1\",\"status\":\"inProgress\"}}}'; "
+                    + "printf '%s\\n' '{\"method\":\"turn/started\",\"params\":{"
+                    + "\"threadId\":\"thread-1\",\"turn\":{\"id\":\"turn-1\","
+                    + "\"status\":\"inProgress\"}}}'; "
+                    + "printf '%s\\n' '{\"method\":\"error\",\"params\":{"
+                    + "\"threadId\":\"thread-1\",\"turnId\":\"turn-1\","
+                    + "\"willRetry\":false,\"error\":{"
+                    + "\"message\":\"Your workspace is out of credits.\","
+                    + "\"codexErrorInfo\":\"usageLimitExceeded\"}}}'; "
+                    + "printf '%s\\n' '{\"method\":\"turn/completed\",\"params\":{"
+                    + "\"threadId\":\"thread-1\",\"turn\":{\"id\":\"turn-1\","
+                    + "\"status\":\"failed\",\"error\":{"
+                    + "\"message\":\"Your workspace is out of credits.\"}}}}'; "
+                    + "cat >/dev/null"
+            )
+        }
+        session.onEvent = { event in
+            guard case .turnFinished(let text, let outcome, _) = event else { return }
+            outcomes.append((text, outcome))
+            if outcomes.count == 1 {
+                finished.fulfill()
+            } else {
+                duplicate.fulfill()
+            }
+        }
+
+        session.start()
+        XCTAssertTrue(session.send("Keep working"))
+
+        wait(for: [finished, duplicate], timeout: 1)
+        XCTAssertEqual(outcomes.count, 1)
+        XCTAssertEqual(outcomes.first?.0, "Your workspace is out of credits.")
+        XCTAssertEqual(outcomes.first?.1, .failed)
+        XCTAssertTrue(session.canSend)
+        XCTAssertFalse(session.canInterrupt)
+        session.terminate()
+    }
+
     /// `turn/start` makes sending unavailable before app-server reports the provider's turn ID.
     /// Stop cannot be offered until that second boundary, so it needs its own availability
     /// notification instead of relying on the earlier send-state transition.
@@ -429,7 +483,9 @@ final class StreamSessionLifecycleTests: XCTestCase {
         }
 
         session.start()
+        XCTAssertFalse(session.isComposerCapabilityCatalogReady)
         wait(for: [discovered], timeout: 2)
+        XCTAssertTrue(session.isComposerCapabilityCatalogReady)
 
         let context = try XCTUnwrap(session.composerCapabilities.first { $0.name == "context" })
         XCTAssertEqual(context.description, "Show context usage")
@@ -954,7 +1010,9 @@ final class StreamSessionLifecycleTests: XCTestCase {
         }
 
         session.start()
+        XCTAssertFalse(session.isComposerCapabilityCatalogReady)
         wait(for: [initialized], timeout: 2)
+        XCTAssertTrue(session.isComposerCapabilityCatalogReady)
         let compact = try XCTUnwrap(ComposerCapabilityResolver.invocation(
             in: "/compact",
             capabilities: session.composerCapabilities
@@ -2279,6 +2337,36 @@ final class CodexAppServerEventTests: XCTestCase {
         )
 
         XCTAssertTrue(events.isEmpty)
+    }
+
+    func testOnlyANonRetryingAppServerErrorEndsTheTurn() throws {
+        let error: [String: Any] = [
+            "message": "Your workspace is out of credits.",
+            "codexErrorInfo": "usageLimitExceeded"
+        ]
+        let base: [String: Any] = [
+            "threadId": "root",
+            "turnId": "turn-1",
+            "error": error
+        ]
+
+        XCTAssertTrue(CodexAppServerEvent.streamEvents(
+            method: "error",
+            parameters: base.merging(["willRetry": true]) { _, newer in newer }
+        ).isEmpty)
+
+        let events = CodexAppServerEvent.streamEvents(
+            method: "error",
+            parameters: base.merging(["willRetry": false]) { _, newer in newer },
+            outputTokens: 17,
+            effort: "high"
+        )
+        guard case .turnFinished(let text, let outcome, let metrics) = try XCTUnwrap(events.first)
+        else { return XCTFail("Expected a terminal failure") }
+        XCTAssertEqual(text, "Your workspace is out of credits.")
+        XCTAssertEqual(outcome, .failed)
+        XCTAssertEqual(metrics.outputTokens, 17)
+        XCTAssertEqual(metrics.effort, "high")
     }
 
     func testCodexChildPlanLivesInChildSummaryAndClearsAtCompletion() throws {

@@ -58,6 +58,8 @@ enum MCPBuiltInTool: CaseIterable, Sendable {
   case panelListTabs
   case panelActivateTab
   case setProjectIcon
+  case setSessionCheckout
+  case cancelSessionCheckoutMove
   case archiveSession
   case cancelSessionArchive
   case setSessionName

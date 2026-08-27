@@ -26622,6 +26622,66 @@
         }
       }
     },
+    "Run a prompt repeatedly while the session stays open": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kör en prompt upprepade gånger medan sessionen är öppen"
+          }
+        }
+      }
+    },
+    "Show current context usage": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visa aktuell kontextanvändning"
+          }
+        }
+      }
+    },
+    "Choose or inspect the active model": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Välj eller granska den aktiva modellen"
+          }
+        }
+      }
+    },
+    "Availability is checked when Claude Code starts": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillgängligheten kontrolleras när Claude Code startar"
+          }
+        }
+      }
+    },
+    "Availability is checked when the agent starts": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tillgängligheten kontrolleras när agenten startar"
+          }
+        }
+      }
+    },
+    "Handled by OpenCode's terminal after launch": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hanteras av OpenCodes terminal efter start"
+          }
+        }
+      }
+    },
     "Context compacted.": {
       "localizations": {
         "sv": {
@@ -29296,7 +29356,29 @@
     "This build does not include the tool yet, so there is nothing to install.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Den här versionen innehåller inte verktyget ännu, så det finns inget att installera."}}}},
     "Tools in Threading's terminals": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Verktyg i Threadings terminaler"}}}},
     "Puts Threading's command line tools on the PATH of every terminal and agent it starts, so threading-ptyd works in them without changing your shell profile. Terminals already open keep the PATH they started with.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lägger Threadings kommandoradsverktyg i PATH för varje terminal och agent som appen startar, så att threading-ptyd fungerar i dem utan att du ändrar din skalprofil. Terminaler som redan är öppna behåller den PATH de startade med."}}}},
-    "Turn Off": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stäng av"}}}}
+    "Turn Off": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stäng av"}}}},
+    "Last Turn is unavailable because this chat moved to another checkout.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Senaste svaret är inte tillgängligt eftersom chatten flyttades till en annan checkout."}}}},
+    "Move Chat": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Flytta chatten"}}}},
+    "Move this chat to another checkout?": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Flytta chatten till en annan checkout?"}}}},
+    "The agent wants to resume this conversation in %@. Reason: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Agenten vill återuppta konversationen i %@. Orsak: %@"}}}},
+    "Move this chat to a checkout": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Flytta chatten till en checkout"}}}},
+    "Queue this conversation to resume in another checkout of the same repository.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Köa konversationen för återupptagning i en annan checkout i samma repository."}}}},
+    "Cancel checkout move": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Avbryt checkout-flytt"}}}},
+    "Cancel this conversation's queued checkout move before its turn settles.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Avbryt konversationens köade checkout-flytt innan svaret är slutfört."}}}},
+    "Agents may move chats between checkouts": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Agenter får flytta chattar mellan checkouter"}}}},
+    "Let agents work with this chat's checkout and the project's sidebar identity.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låt agenter arbeta med chattens checkout och projektets identitet i sidofältet."}}}},
+    "Always Ask": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fråga alltid"}}}},
+    "Cancel Checkout Move": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Avbryt checkout-flytt"}}}},
+    "Choose Existing Checkout…": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj befintlig checkout…"}}}},
+    "Choose an existing checkout of this repository.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj en befintlig checkout i detta repository."}}}},
+    "Chosen from the session menu": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Vald från sessionsmenyn"}}}},
+    "Couldn’t Move Chat": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kunde inte flytta chatten"}}}},
+    "Explicit Requests": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uttryckliga önskemål"}}}},
+    "Explicit Requests lets an agent carry out a move the user asked for, while agent-initiated moves still require approval.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uttryckliga önskemål låter en agent genomföra en flytt som användaren bad om, medan agentinitierade flyttar fortfarande kräver godkännande."}}}},
+    "Move to Checkout": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Flytta till checkout"}}}},
+    "Pending: %@": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väntar: %@"}}}},
+    "Same Repository": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Samma repository"}}}},
+    "The checkout move could not be cancelled.": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Checkout-flytten kunde inte avbrytas."}}}}
   },
   "version": "1.0"
 }

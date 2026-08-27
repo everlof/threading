@@ -286,6 +286,25 @@ final class GitTurnCheckpointTests: XCTestCase {
         XCTAssertFalse(interrupted.canPresentDiff)
     }
 
+    func testCheckoutMoveMakesTheJustFinishedLastTurnUnavailable() throws {
+        let session = SessionID()
+        let store = makeStore()
+        _ = try prepare(store, session: session)
+        try write("agent change\n", to: "moved-chat.txt")
+        let completed = try finish(store, session: session)
+        XCTAssertEqual(completed.status, .complete)
+        XCTAssertTrue(completed.canPresentDiff)
+
+        store.markLatestTurnCheckoutChanged(sessionID: session)
+
+        let moved = try XCTUnwrap(store.latestCheckpoint(forSessionID: session))
+        XCTAssertEqual(moved.id, completed.id)
+        XCTAssertEqual(moved.status, .checkoutChanged)
+        XCTAssertTrue(moved.status.hasDurableBefore)
+        XCTAssertFalse(moved.canPresentDiff)
+        XCTAssertNotNil(moved.failureDescription)
+    }
+
     func testFailedNewCaptureNeverReusesOlderCheckpoint() throws {
         let session = SessionID()
         var contextAvailable = true

@@ -421,6 +421,13 @@ something the code behind it would decline.
 session, **in memory only** — a refusal is a fact about a live process, the transcript still says
 so on the next launch, and restoring an offer would be answering a question nobody re-asked.
 
+Codex workspace plans use a second vocabulary for the same stop: "workspace is out of credits"
+and the structured `usageLimitExceeded` error. Its native app-server session turns the explicit
+non-retrying error into a failed terminal event, and `UsageLimitStop` recognises the credits
+wording even though it carries no reset hint. That puts the row in `limitReached` and feeds this
+same store; it must not fall back to idle merely because the provider named shared credits rather
+than a timed limit.
+
 Both producers call the same entry point. `LimitRecoveryCoordinator` calls `refusalStands` from
 both places `noteLimitParked(recoveryArmed: false)` lands — the `flagOnly` branch and `flag()`,
 which is where `waitForReset` degrades to — and from nowhere else, since an armed recovery already

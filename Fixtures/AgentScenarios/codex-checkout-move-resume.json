@@ -1,0 +1,79 @@
+{
+  "id": "codex-checkout-move-resume",
+  "provenance": {
+    "protocolVersion": "app-server-1",
+    "providerVersion": "0.147.0",
+    "recordedAt": "2026-08-27T11:30:00Z"
+  },
+  "provider": "codex",
+  "steps": [
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":1,\"method\":\"initialize\"}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":1,\"result\":{\"userAgent\":\"threading-ui-fixture/1\"}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"method\":\"initialized\"}"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":2,\"method\":\"thread/resume\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\"}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":2,\"result\":{\"thread\":{\"id\":\"fixture-thread-checkout-move\",\"name\":\"Move checkout fixture\",\"model\":\"gpt-5.6\"}}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":3,\"method\":\"skills/list\",\"params\":{\"cwds\":[\"${SCENARIO_ROOT}/target\"]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":3,\"result\":{\"data\":[{\"cwd\":\"${SCENARIO_ROOT}/target\",\"skills\":[],\"errors\":[]}]}}\n"
+    },
+    {
+      "channel": "stdin",
+      "kind": "expectHost",
+      "payload": "{\"id\":4,\"method\":\"turn/start\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\",\"input\":[{\"type\":\"text\",\"text\":\"Reply with exactly: Moved and ready.\"}]}}"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"id\":4,\"result\":{\"turn\":{\"id\":\"fixture-turn-checkout-move-2\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/started\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\",\"turn\":{\"id\":\"fixture-turn-checkout-move-2\",\"status\":\"inProgress\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"item/completed\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\",\"turnId\":\"fixture-turn-checkout-move-2\",\"item\":{\"id\":\"fixture-agent-message-checkout-move-2\",\"type\":\"agentMessage\",\"text\":\"Moved and ready.\"}}}\n"
+    },
+    {
+      "channel": "stdout",
+      "kind": "emitAgent",
+      "payload": "{\"method\":\"turn/completed\",\"params\":{\"threadId\":\"fixture-thread-checkout-move\",\"turn\":{\"id\":\"fixture-turn-checkout-move-2\",\"status\":\"completed\",\"durationMs\":40}}}\n"
+    },
+    {
+      "afterMilliseconds": 5000,
+      "kind": "exit",
+      "status": 0
+    }
+  ],
+  "title": "Resume the same Codex conversation in its moved checkout",
+  "transport": "codex-app-server",
+  "version": 1
+}

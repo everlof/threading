@@ -1460,7 +1460,7 @@ final class GitReviewViewController: NSViewController {
             return hedgingObservedOverlap(L10n.string("Turn Start → Working Tree"), in: checkpoint)
         case .capturingBefore:
             return L10n.string("Capturing turn start…")
-        case .beforeCaptureFailed, .finalCaptureFailed, .incomplete:
+        case .beforeCaptureFailed, .finalCaptureFailed, .incomplete, .checkoutChanged:
             return checkpoint.failureDescription ?? L10n.string("Checkpoint incomplete")
         case .notAdmitted:
             return L10n.string("Turn not admitted")

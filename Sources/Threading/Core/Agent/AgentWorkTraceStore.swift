@@ -395,6 +395,38 @@ final class AgentWorkTraceStore {
         enqueue(.removeSession(sessionID), projectID: projectID)
     }
 
+    /// Transfers one rebuildable session trace between checkout aggregates.
+    func move(sessionID: SessionID, from sourceProjectID: ProjectID, to targetProjectID: ProjectID) {
+        guard sourceProjectID != targetProjectID else { return }
+        removedSessions.remove(sessionID)
+        seenCalls.removeValue(forKey: sessionID)
+        for target in Array(requestedTargets)
+        where target.projectID == sourceProjectID || target.projectID == targetProjectID {
+            removeTarget(target)
+        }
+        projectGenerations[sourceProjectID, default: 0] += 1
+        projectGenerations[targetProjectID, default: 0] += 1
+        worker.move(
+            sessionID: sessionID,
+            from: sourceProjectID,
+            to: targetProjectID
+        ) { [weak self] sourceRevision, targetRevision in
+            guard let self else { return }
+            self.preparedProjects.insert(sourceProjectID)
+            self.preparedProjects.insert(targetProjectID)
+            self.projectRevisions[sourceProjectID] = sourceRevision
+            self.projectRevisions[targetProjectID] = targetRevision
+            NotificationCenter.default.post(AgentWorkDidChange(
+                projectID: sourceProjectID,
+                sessionID: sessionID
+            ))
+            NotificationCenter.default.post(AgentWorkDidChange(
+                projectID: targetProjectID,
+                sessionID: sessionID
+            ))
+        }
+    }
+
     func remove(projectID: ProjectID) {
         removedProjects.insert(projectID)
         preparedProjects.remove(projectID)
@@ -822,6 +854,36 @@ private final class AgentWorkWorker: @unchecked Sendable {
             }
             let revision = memory.revision
             Task { @MainActor in completion(change, revision) }
+        }
+    }
+
+    func move(
+        sessionID: SessionID,
+        from sourceProjectID: ProjectID,
+        to targetProjectID: ProjectID,
+        completion: @escaping @MainActor @Sendable (Int, Int) -> Void
+    ) {
+        queue.async { [self] in
+            let source = memory(for: sourceProjectID)
+            let target = memory(for: targetProjectID)
+            if let trace = source.file.sessions.removeValue(forKey: sessionID) {
+                target.file.sessions[sessionID] = trace
+                source.aggregate = AgentProjectWorkAggregate(traces: source.file.sessions)
+                target.aggregate = AgentProjectWorkAggregate(traces: target.file.sessions)
+                source.rebuildDirectories()
+                target.rebuildDirectories()
+                source.revision += 1
+                target.revision += 1
+                removePersistedSession(
+                    sessionID,
+                    projectID: sourceProjectID,
+                    remaining: source.file
+                )
+                scheduleSave(targetProjectID, sessionID: sessionID)
+            }
+            let sourceRevision = source.revision
+            let targetRevision = target.revision
+            Task { @MainActor in completion(sourceRevision, targetRevision) }
         }
     }
 

@@ -45,11 +45,30 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let store = ProjectStore.shared
-        let project = try XCTUnwrap(store.addProject(
-            folderURL: FileManager.default.temporaryDirectory
-                .appendingPathComponent("session-menu-render-\(UUID().uuidString)", isDirectory: true)
-        ))
-        defer { _ = store.removeProject(id: project.id) }
+        let fixture = FileManager.default.temporaryDirectory
+            .appendingPathComponent("session-menu-render-\(UUID().uuidString)", isDirectory: true)
+        let main = fixture.appendingPathComponent("main", isDirectory: true)
+        let sibling = fixture.appendingPathComponent("sibling", isDirectory: true)
+        try FileManager.default.createDirectory(at: main, withIntermediateDirectories: true)
+        try git(["init", "--initial-branch=main"], in: main)
+        try git(["config", "user.email", "tests@example.com"], in: main)
+        try git(["config", "user.name", "Threading Tests"], in: main)
+        try "menu".write(
+            to: main.appendingPathComponent("README.md"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try git(["add", "."], in: main)
+        try git(["commit", "-m", "menu fixture"], in: main)
+        try git(["worktree", "add", "-b", "menu-sibling", sibling.path], in: main)
+
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let siblingProject = try XCTUnwrap(store.addProject(folderURL: sibling))
+        defer {
+            _ = store.removeProject(id: siblingProject.id)
+            _ = store.removeProject(id: project.id)
+            try? FileManager.default.removeItem(at: fixture)
+        }
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
 
         let sidebar = ProjectSidebarViewController()
@@ -70,6 +89,22 @@ final class SessionMenuRenderTests: HostedStoreTestCase {
 
         XCTAssertEqual(written, Render.appearances.count)
         print("Rendered the session action menu to \(directory.path)")
+    }
+
+    private func git(_ arguments: [String], in directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        environment["GIT_CONFIG_SYSTEM"] = "/dev/null"
+        process.environment = environment
+        try process.run()
+        process.waitUntilExit()
+        XCTAssertEqual(process.terminationStatus, 0)
     }
 
     // MARK: - Anatomy

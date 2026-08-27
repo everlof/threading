@@ -435,3 +435,13 @@ the exact active turn before reporting an interrupted completion. The test prove
 unchanged, the composer becomes ready again, and a second prompt completes in the same process.
 This is the user promise behind cancellation: Stop neither becomes a silent local reset nor leaves
 the retained conversation stranded.
+
+### Move chat between checkouts
+
+`CheckoutMoveJourneyUITests` starts a Codex turn in one synthetic worktree, uses the shipping
+session menu to queue a sibling-checkout move while that turn is still active, and stops the turn
+at its authoritative completion barrier. The fixture then requires `thread/resume` for the same
+provider conversation and requires its skills lookup to use the second worktree. A follow-up turn
+must complete there, and Git Review must show an untracked file that exists only in that target.
+This covers the durable fence, runtime relaunch, canonical project ownership, conversation resume
+and checkout-scoped review as one critical work-attribution promise.

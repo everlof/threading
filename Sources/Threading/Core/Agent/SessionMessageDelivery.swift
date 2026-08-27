@@ -170,6 +170,10 @@ enum SessionMessageDelivery {
     /// same facts `deliver` decides by, so an affordance gated on this cannot offer a send the
     /// delivery then refuses.
     static func isReadyForDelivery(_ sessionID: SessionID) -> Bool {
+        guard ProjectStore.shared.session(withID: sessionID)?.pendingCheckoutMove == nil,
+              !SessionCheckoutCoordinator.shared.isHoldingInput(sessionID: sessionID) else {
+            return false
+        }
         switch surface(for: sessionID) {
         case .chat:
             return true
@@ -208,6 +212,11 @@ enum SessionMessageDelivery {
         origin: ConversationOutbox.Item.Origin = .user,
         completion: @escaping @MainActor (Outcome) -> Void
     ) {
+        guard ProjectStore.shared.session(withID: sessionID)?.pendingCheckoutMove == nil,
+              !SessionCheckoutCoordinator.shared.isHoldingInput(sessionID: sessionID) else {
+            completion(.notTaken)
+            return
+        }
         deliver(
             prompt,
             chat: AgentRuntime.shared.conversationRuntimeSurface(for: sessionID),
@@ -246,7 +255,11 @@ enum SessionMessageDelivery {
         to sessionID: SessionID,
         origin: ConversationOutbox.Item.Origin = .user
     ) -> Outcome {
-        deliver(
+        guard ProjectStore.shared.session(withID: sessionID)?.pendingCheckoutMove == nil,
+              !SessionCheckoutCoordinator.shared.isHoldingInput(sessionID: sessionID) else {
+            return .notTaken
+        }
+        return deliver(
             prompt,
             chat: AgentRuntime.shared.conversationRuntimeSurface(for: sessionID),
             terminal: liveTerminalTarget(for: sessionID),
@@ -298,7 +311,11 @@ enum SessionMessageDelivery {
     }
 
     static func steer(_ text: String, to sessionID: SessionID) -> SteerOutcome {
-        steer(
+        guard ProjectStore.shared.session(withID: sessionID)?.pendingCheckoutMove == nil,
+              !SessionCheckoutCoordinator.shared.isHoldingInput(sessionID: sessionID) else {
+            return .notTaken
+        }
+        return steer(
             ConversationPrompt(text: text),
             chat: AgentRuntime.shared.conversationRuntimeSurface(for: sessionID)
         )

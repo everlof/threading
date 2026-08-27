@@ -1176,6 +1176,19 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             self?.updateSessionTitleItem()
             self?.refreshProjectScriptContext()
         }
+        appEvents.observe(SessionCheckoutDidMove.self) { [weak self] event in
+            guard let self else { return }
+            environment.agentRuntime.preserveCheckoutMoveOutbox(sessionID: event.sessionID)
+            if self.containerViewController.currentSessionID == event.sessionID {
+                self.containerViewController.resumeCurrentSession()
+            } else {
+                environment.agentRuntime.discard(sessionID: event.sessionID)
+                self.containerViewController.launchInBackground(sessionID: event.sessionID)
+            }
+            SessionCheckoutCoordinator.shared.runtimeRelaunchDidStart(
+                sessionID: event.sessionID
+            )
+        }
 
         // A clicked macOS notification lands here. The sidebar owns the chat selection; the
         // destination is then resolved against the session's current durable/live surfaces.

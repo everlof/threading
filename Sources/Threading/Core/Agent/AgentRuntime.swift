@@ -103,6 +103,8 @@ protocol AgentConversationRuntimeSurface:
     func resolveRemotePermission(id: String, decision: RemotePermissionDecision) -> Bool
     func resolveManagerPermission(id: String, decision: ControlPermissionDecision) -> Bool
     func terminate(preservingViewport: Bool)
+    func checkoutMoveOutboxSnapshot() -> ConversationOutbox?
+    func restoreCheckoutMoveOutbox(_ outbox: ConversationOutbox)
 
     /// Hands this conversation's CLI to the background PTY host instead of ending it, answering
     /// whether it did.
@@ -124,6 +126,9 @@ extension AgentConversationRuntimeSurface {
     var isHostBacked: Bool { false }
 
     func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
+
+    func checkoutMoveOutboxSnapshot() -> ConversationOutbox? { nil }
+    func restoreCheckoutMoveOutbox(_ outbox: ConversationOutbox) {}
 }
 
 /// Tracks the live terminal runtimes backing agent sessions.
@@ -169,6 +174,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     // MARK: - Properties
 
     private var controllers: [SessionID: any AgentTerminalRuntimeSurface] = [:]
+    private var checkoutMoveOutboxes: [SessionID: ConversationOutbox] = [:]
 
 #if DEBUG
     /// Per-session launch seams for deterministic whole-app tests.
@@ -938,6 +944,30 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         )
         controller.removeFromPresentation()
         controllers[sessionID] = nil
+    }
+
+    func preserveCheckoutMoveOutbox(sessionID: SessionID) {
+        preserveCheckoutMoveOutbox(
+            conversations[sessionID]?.checkoutMoveOutboxSnapshot(),
+            for: sessionID
+        )
+    }
+
+    /// Stores the queue at the runtime ownership edge so replacement is lossless even though
+    /// the concrete conversation controller is about to be terminated and removed.
+    func preserveCheckoutMoveOutbox(
+        _ snapshot: ConversationOutbox?,
+        for sessionID: SessionID
+    ) {
+        guard let snapshot, !snapshot.isEmpty else {
+            checkoutMoveOutboxes.removeValue(forKey: sessionID)
+            return
+        }
+        checkoutMoveOutboxes[sessionID] = snapshot
+    }
+
+    func takeCheckoutMoveOutbox(sessionID: SessionID) -> ConversationOutbox? {
+        checkoutMoveOutboxes.removeValue(forKey: sessionID)
     }
 
     /// Ends a permanently deleted session and drops its child-agent index without scanning the

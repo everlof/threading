@@ -185,7 +185,13 @@ final class ManagedWorkspaceLifecycleE2ETests: HostedStoreTestCase {
 
         XCTAssertTrue(
             waitForMainRunLoop(timeout: 10) {
+                // The durable archive bit is committed before ProviderArchiveSync invokes its
+                // completion. AppKit can spin a nested run loop while the sidebar removes that
+                // row, so observing the bit alone is not evidence that SessionCoordinator has
+                // crossed its presentation boundary yet. Wait for the complete externally
+                // visible transaction that this end-to-end scenario is intended to prove.
                 store.session(withID: session.id)?.isArchived == true
+                    && container.currentSessionID == nil
             },
             "the real MCP request never reached the archive coordinator"
         )

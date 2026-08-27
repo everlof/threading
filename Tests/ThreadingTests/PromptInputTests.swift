@@ -1550,6 +1550,66 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(invocation.sourceText, "/INSPECT  --path \"Sources/My File.swift\"")
     }
 
+    func testComposerCapabilityResolverDetectsOnlyLeadingCommandSyntax() {
+        XCTAssertTrue(ComposerCapabilityResolver.hasLeadingTrigger(in: "  /loop five minutes"))
+        XCTAssertTrue(ComposerCapabilityResolver.hasLeadingTrigger(in: "\n$release"))
+        XCTAssertFalse(ComposerCapabilityResolver.hasLeadingTrigger(in: "Ask about /loop"))
+        XCTAssertFalse(ComposerCapabilityResolver.hasLeadingTrigger(in: "   \n"))
+    }
+
+    func testPreSessionCatalogCompletesClaudeLoopAndReflectsTheChosenSurface() throws {
+        let terminal = PreSessionComposerCatalog.capabilities(
+            for: .claude,
+            usesNativeUI: false
+        )
+        let native = PreSessionComposerCatalog.capabilities(
+            for: .claude,
+            usesNativeUI: true
+        )
+
+        let query = try XCTUnwrap(ComposerCompletionQuery.parse("/loo", caretUTF16Offset: 4))
+        let loop = try XCTUnwrap(query.suggestions(from: terminal).first)
+        XCTAssertEqual(loop.name, "loop")
+        XCTAssertEqual(loop.aliases, ["proactive"])
+        XCTAssertTrue(loop.isEnabled)
+
+        XCTAssertEqual(native.first { $0.name == "loop" }?.isEnabled, true)
+        XCTAssertEqual(native.first { $0.name == "clear" }?.isEnabled, false)
+        XCTAssertFalse(native.first { $0.name == "clear" }?.unavailableReason?.isEmpty ?? true)
+        XCTAssertEqual(terminal.first { $0.name == "clear" }?.isEnabled, true)
+
+        let typo = try XCTUnwrap(ComposerCompletionQuery.parse("/look", caretUTF16Offset: 5))
+        XCTAssertEqual(typo.suggestions(from: terminal).first?.name, "loop")
+    }
+
+    func testPreSessionCatalogCoversEveryAgentSurfaceWithoutClaimingNativeExecution() {
+        let codexNative = PreSessionComposerCatalog.capabilities(
+            for: .codex,
+            usesNativeUI: true
+        )
+        XCTAssertEqual(codexNative.first { $0.name == "review" }?.isEnabled, true)
+        XCTAssertEqual(codexNative.first { $0.name == "model" }?.isEnabled, false)
+        XCTAssertEqual(
+            PreSessionComposerCatalog.capabilities(for: .codex, usesNativeUI: false)
+                .first { $0.name == "model" }?.isEnabled,
+            true
+        )
+
+        XCTAssertTrue(
+            PreSessionComposerCatalog.capabilities(for: .grok, usesNativeUI: false)
+                .contains { $0.name == "compact" }
+        )
+        XCTAssertEqual(
+            PreSessionComposerCatalog.capabilities(for: .cursor, usesNativeUI: true)
+                .first { $0.name == "loop" }?.isEnabled,
+            false
+        )
+        XCTAssertTrue(
+            PreSessionComposerCatalog.capabilities(for: .openCode, usesNativeUI: false)
+                .contains { $0.name == "compact" && $0.aliases.contains("summarize") }
+        )
+    }
+
     func testSlashCompletionKeepsTheTextViewFocusedAndReturnOnlyInsertsFirst() throws {
         let prompt = PromptView()
         prompt.composerCapabilities = [

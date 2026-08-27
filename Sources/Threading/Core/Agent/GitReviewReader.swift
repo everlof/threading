@@ -1017,6 +1017,7 @@ enum GitReviewReader {
             return (beforeHash, try workingTreeSnapshot(in: root))
 
         case .capturingBefore, .beforeCaptureFailed, .finalCaptureFailed, .incomplete,
+             .checkoutChanged,
              .notAdmitted:
             throw Failure.checkpointIncomplete(
                 checkpoint.failureDescription

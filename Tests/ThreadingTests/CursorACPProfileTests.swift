@@ -296,11 +296,16 @@ final class CursorACPProfileTests: XCTestCase {
         }
 
         session.start()
+        XCTAssertFalse(
+            session.isComposerCapabilityCatalogReady,
+            "Cursor's initialize response does not contain its command catalog"
+        )
         XCTAssertTrue(session.send("Run the shell command: swift test"))
         wait(
             for: [initialized, catalog, title, permission, result, finished],
             timeout: CursorFixture.timeout
         )
+        XCTAssertTrue(session.isComposerCapabilityCatalogReady)
 
         // No `messageId` arrives on any chunk (§10.3), so the two thought fragments have to be
         // joined by the runtime rather than by an identity the wire never sends.

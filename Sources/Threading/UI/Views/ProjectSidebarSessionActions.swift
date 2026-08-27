@@ -884,6 +884,9 @@ extension ProjectSidebarViewController {
         entries.append(sessionOptionsEntry(for: session))
 
         appendGroupSeparator(&entries)
+        if let checkoutMove = checkoutMoveEntry(for: session) {
+            entries.append(checkoutMove)
+        }
         // A session's folder is its project's checkout, so this is the same offer the project
         // row makes, made where the user already is. It leads the identity group because it is
         // the one item here that leaves the app.
@@ -954,6 +957,86 @@ extension ProjectSidebarViewController {
             )
         ))
         return entries
+    }
+
+    /// Checkout ownership is shared by the row, its context menu and the pane header because all
+    /// three consume this builder. Branches are labels only; every action retains the project's
+    /// canonical path and lets `SessionCheckoutCoordinator` revalidate its worktree identity.
+    private func checkoutMoveEntry(for session: AgentSession) -> ThemedMenuEntry? {
+        guard session.managedWorkspace == nil,
+              let source = projectStore.project(forSessionID: session.id),
+              GitInfo.worktreeLocation(for: source.folderPath) != nil else { return nil }
+
+        var submenu: [ThemedMenuEntry] = []
+        if let pending = session.pendingCheckoutMove {
+            let branch = GitInfo.currentBranch(for: pending.checkoutPath)
+                ?? URL(fileURLWithPath: pending.checkoutPath).lastPathComponent
+            submenu.append(.item(ThemedMenuItem(
+                title: L10n.format("Pending: %@", branch),
+                subtitle: pending.checkoutPath,
+                image: ThemedMenuIcon.symbol("clock"),
+                isEnabled: false
+            )))
+            submenu.append(action(
+                L10n.string("Cancel Checkout Move"),
+                symbol: "xmark.circle"
+            ) { [weak self] in
+                guard let self else { return }
+                if !SessionCheckoutCoordinator.shared.cancelPendingMove(sessionID: session.id) {
+                    self.presentProjectNotice(L10n.string("The checkout move could not be cancelled."))
+                }
+            })
+            submenu.append(.separator)
+        }
+
+        let siblings = projectStore.siblingCheckouts(of: source.id).compactMap { sibling in
+            projectStore.project(withID: sibling.projectID).map { ($0, sibling.branch) }
+        }.sorted { $0.1.localizedStandardCompare($1.1) == .orderedAscending }
+        for (project, branch) in siblings {
+            submenu.append(action(branch, symbol: "arrow.right.folder") { [weak self] in
+                self?.requestCheckoutMove(for: session.id, to: project.folderPath)
+            })
+        }
+        if !siblings.isEmpty { submenu.append(.separator) }
+        submenu.append(action(
+            L10n.string("Choose Existing Checkout…"),
+            symbol: "folder.badge.plus"
+        ) { [weak self] in
+            self?.chooseCheckoutForMove(sessionID: session.id)
+        })
+
+        return .item(ThemedMenuItem(
+            title: L10n.string("Move to Checkout"),
+            image: ThemedMenuIcon.symbol("arrow.right.folder"),
+            submenu: submenu
+        ))
+    }
+
+    private func chooseCheckoutForMove(sessionID: SessionID) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.message = L10n.string("Choose an existing checkout of this repository.")
+        panel.begin { [weak self] response in
+            guard response == .OK, let path = panel.url?.path else { return }
+            self?.requestCheckoutMove(for: sessionID, to: path)
+        }
+    }
+
+    private func requestCheckoutMove(for sessionID: SessionID, to path: String) {
+        let result = SessionCheckoutCoordinator.shared.requestMove(
+            sessionID: sessionID,
+            checkoutPath: path,
+            authorityBasis: .explicitUserRequest,
+            reason: L10n.string("Chosen from the session menu"),
+            policy: .allowSameRepository,
+            approval: true
+        )
+        if case .failed(let message) = result {
+            presentProjectNotice(message, title: L10n.string("Couldn’t Move Chat"))
+        }
     }
 
     private func toggleManagerRoleClicked() {

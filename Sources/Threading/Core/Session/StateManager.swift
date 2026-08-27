@@ -326,6 +326,24 @@ final class StateManager {
         }
     }
 
+    /// Commits a checkout-ownership change and every affected row position atomically.
+    @discardableResult
+    func moveSessions(
+        affectedProjects projects: [(project: Project, position: Int)]
+    ) -> Bool {
+        guard writesAreAllowed(for: "session checkout move") else { return false }
+        do {
+            try database().moveSessions(affectedProjects: projects)
+            return true
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to move session checkout: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
     /// Whether this launch has read the record of what was running at the last quit.
     ///
     /// **A launch that never read it must not write over it.** Writing an empty list over a real

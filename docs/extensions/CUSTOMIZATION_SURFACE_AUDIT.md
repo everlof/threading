@@ -32,6 +32,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
+| Chat checkout move controls (session menu, Tools policy, agent approval) | — | host-only | canonical checkout identity, durable ownership transaction, turn/input fence, authority audit and runtime resume | Host-only |
 | Command palette | — | host-only | command identity and availability, focus/dismissal, bounded search, shortcut ownership/conflicts, explicit target collection and last-moment invocation checks | Host-only |
 | Mobile terminal key bar | — | host-only | Direct/Compose resolution, collaboration override, PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
 | Mobile terminal return-to-end control | — | host-only | emulator scroll-end truth, TUI/local ownership, follow-mode transition, motion and accessibility | Host-only |
@@ -110,6 +111,16 @@ contracts. Threading owns persisted project membership, chat-versus-terminal cla
 stable order inside each type, direction persistence and the navigation destination; allowing a
 replacement control to contradict any of those facts would make the same terminal appear to have
 different ownership across surfaces.
+
+Moving a chat between checkouts is the durable half of that same boundary, so its shared session
+menu, Tools policy and approval sheet remain host-only too. Threading owns canonical repository
+and worktree identity, the atomic session/project transaction, the active-turn input fence, the
+authority classification and audit record, provider transcript custody, and the point at which
+the same conversation may resume. A replaceable surface could otherwise display a branch as the
+target while committing another checkout, release input before the turn checkpoint, or claim an
+agent-initiated move was explicitly requested. Extensions may still customize the surrounding
+session row and header through their existing contracts; no new checkout-move component or data
+authority is introduced.
 
 The command palette remains host-only even though extensions may contribute semantic commands to
 its registry. Threading owns the query and keyboard state, the 100-row presentation cap, shortcut

@@ -62,6 +62,7 @@ final class ClaudeStreamSession:
     var onInteractionAvailabilityChange: (() -> Void)?
     var onComposerCapabilitiesChange: (() -> Void)?
     private(set) var composerCapabilities: [ComposerCapability] = []
+    var isComposerCapabilityCatalogReady: Bool { capabilityInitializationFinished }
 
     private(set) var isRunning = false
 

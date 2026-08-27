@@ -79,14 +79,12 @@ enum CodexAppServerEvent {
             let status = turn["status"] as? String
             let error = turn["error"] as? [String: Any]
             let duration = integer(turn["durationMs"]).map { TimeInterval($0) / 1_000 }
-            let message = error?["message"] as? String
-                ?? error?["additionalDetails"] as? String
 
             // Codex is the one provider that names the three outcomes itself: `TurnStatus` is
             // `completed | interrupted | failed | inProgress`, so nothing has to be inferred
             // from an error channel here.
             return [.turnFinished(
-                text: message,
+                text: errorMessage(in: error),
                 outcome: TurnOutcome(codexTurnStatus: status),
                 metrics: TurnMetrics(
                     duration: duration,
@@ -95,9 +93,29 @@ enum CodexAppServerEvent {
                 )
             )]
 
+        case "error":
+            // App-server reports retry attempts and terminal failures through the same
+            // notification. Only the explicit non-retrying shape is a turn boundary. Some
+            // provider refusals (including depleted workspace credits) do not follow it with
+            // `turn/completed`, so waiting exclusively for that notification strands the
+            // conversation in Working.
+            guard parameters["willRetry"] as? Bool == false,
+                  let error = parameters["error"] as? [String: Any]
+            else { return [] }
+            return [.turnFinished(
+                text: errorMessage(in: error),
+                outcome: .failed,
+                metrics: TurnMetrics(outputTokens: outputTokens, effort: effort)
+            )]
+
         default:
             return []
         }
+    }
+
+    private static func errorMessage(in error: [String: Any]?) -> String? {
+        error?["message"] as? String
+            ?? error?["additionalDetails"] as? String
     }
 
     private static func completed(_ item: [String: Any]) -> [StreamEvent] {

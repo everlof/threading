@@ -190,6 +190,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     let stream: ConversationStreamSession
+    private var pendingInitialPrompt: String?
 
     /// The one catalog consumed by the local composer and projected to remote clients. Provider
     /// metadata remains authoritative; Threading contributes only actions it implements itself.
@@ -1528,8 +1529,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         }
         stream.onExit = { [weak self] status in self?.handleExit(status) }
         stream.onInteractionAvailabilityChange = { [weak self] in
-            self?.refreshConversationControls()
             guard let self else { return }
+            self.submitPendingInitialPromptIfReady()
+            self.refreshConversationControls()
             // Availability is the one signal every transport has for "the turn ended", however
             // it ended, so it is where the queue drains rather than off a terminal event some
             // provider might not send. Mode first: `flushOutboxIfReady` no-ops unless the
@@ -1549,6 +1551,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             capabilities.onComposerCapabilitiesChange = { [weak self] in
                 guard let self else { return }
                 self.refreshComposerCapabilitySurfaces()
+                self.submitPendingInitialPromptIfReady()
             }
         }
         refreshComposerCapabilitySurfaces()
@@ -2203,8 +2206,26 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// Sends the composer's opening message as the conversation's first turn.
     ///
     /// A streaming session takes no positional prompt argument, so what the terminal path
-    /// passes on the command line is simply sent down the pipe here instead.
+    /// passes on the command line is sent down the pipe here. Command-shaped text waits for the
+    /// provider's opening catalog, because sending `/review` or `/compact` as ordinary text
+    /// during that handshake would bypass the same semantic dispatch and native safety policy
+    /// used by every later composer submission. Ordinary opening prose remains immediate.
     func sendInitialPrompt(_ text: String) {
+        if ComposerCapabilityResolver.hasLeadingTrigger(in: text),
+           let capabilities = stream as? ComposerCapabilityProviding,
+           !capabilities.isComposerCapabilityCatalogReady {
+            pendingInitialPrompt = text
+            return
+        }
+        _ = submit(text)
+    }
+
+    private func submitPendingInitialPromptIfReady() {
+        guard let text = pendingInitialPrompt else { return }
+        guard stream.isRunning else { return }
+        if let capabilities = stream as? ComposerCapabilityProviding,
+           !capabilities.isComposerCapabilityCatalogReady { return }
+        pendingInitialPrompt = nil
         _ = submit(text)
     }
 
@@ -3838,6 +3859,9 @@ extension AgentRuntime {
             subagentState: subagentState(for: agentSession.id),
             launchPlanProvider: fixtureLaunchPlanProvider(for: agentSession.id)
         ) else { return nil }
+        if let outbox = takeCheckoutMoveOutbox(sessionID: agentSession.id) {
+            conversation.restoreCheckoutMoveOutbox(outbox)
+        }
         precondition(
             registerConversationRuntimeSurface(conversation, for: agentSession.id),
             "A conversation runtime must have one UI adapter"

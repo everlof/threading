@@ -79,14 +79,18 @@ extension MCPServer {
                 self.gitTurnCheckpointStoreProvider().finishTurn(
                     sessionID: sessionID,
                     assistantTurnID: report.turnID,
-                    providerTurnID: report.turnID
+                    providerTurnID: report.turnID,
+                    settlePendingCheckoutMove: false
                 ) { _ in
                     // Stop is the provider's authoritative interactive-turn boundary even when
-                    // it reports work left running. Publish first so the next prompt cannot be
-                    // admitted into the same capture window; later background bytes belong to
-                    // neither adjacent interactive turn unless the provider reports otherwise.
+                    // it reports work left running. Acknowledge before replacing the runtime:
+                    // the reporting curl is a child of that process and must be allowed to exit.
+                    // Keep the lifecycle relay closed until the durable checkout fence settles,
+                    // so no watcher or outbox can admit the next prompt into the old checkout.
                     respond(.accepted)
-                    HookLifecycleRelay.deliver(report)
+                    SessionCheckoutCoordinator.shared.finishPendingMove(sessionID: sessionID) { _ in
+                        HookLifecycleRelay.deliver(report)
+                    }
                 }
             }
             return

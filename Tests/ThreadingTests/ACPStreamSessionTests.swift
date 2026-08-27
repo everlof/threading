@@ -13,6 +13,47 @@ final class ACPStreamSessionTests: XCTestCase {
 
     // MARK: - Handshake
 
+    func testInitializeResponseMakesTheOpeningCommandCatalogAuthoritative() {
+        let agent = makeAgent(openedAgentSteps() + [.idle])
+        let session = makeSession(agent)
+        defer { session.terminate() }
+        let ready = expectation(description: "command catalog ready")
+        var didReportReady = false
+        session.onInteractionAvailabilityChange = {
+            guard session.isComposerCapabilityCatalogReady, !didReportReady else { return }
+            didReportReady = true
+            ready.fulfill()
+        }
+
+        session.start()
+        XCTAssertFalse(session.isComposerCapabilityCatalogReady)
+        wait(for: [ready], timeout: ACPTestDefaults.timeout)
+        XCTAssertTrue(session.isComposerCapabilityCatalogReady)
+    }
+
+    func testMissingSessionUpdateEventuallyMakesTheCurrentCatalogAuthoritative() {
+        let agent = makeAgent(openedAgentSteps() + [.idle])
+        let session = makeSession(
+            agent,
+            profile: FixtureACP.profile(initialCommandCatalog: .sessionUpdate),
+            commandCatalogTimeout: ACPTestDefaults.shortCommandCatalogTimeout
+        )
+        defer { session.terminate() }
+        let ready = expectation(description: "command catalog timeout")
+        var didReportReady = false
+        session.onInteractionAvailabilityChange = {
+            guard session.isComposerCapabilityCatalogReady, !didReportReady else { return }
+            didReportReady = true
+            ready.fulfill()
+        }
+
+        session.start()
+        XCTAssertFalse(session.isComposerCapabilityCatalogReady)
+        wait(for: [ready], timeout: ACPTestDefaults.timeout)
+        XCTAssertTrue(session.isComposerCapabilityCatalogReady)
+        XCTAssertTrue(session.composerCapabilities.isEmpty)
+    }
+
     func testInitializeCarriesHostCapabilitiesAndTheProfileMetaExtension() throws {
         let agent = makeAgent([.awaitClientLine, .exit(0)])
         let session = makeSession(agent)
@@ -862,13 +903,15 @@ final class ACPStreamSessionTests: XCTestCase {
         profile: ACPProviderProfile = FixtureACP.profile(),
         resumeState: ResumeState = .unavailable,
         handshakeTimeout: TimeInterval = ACPDefaults.handshakeTimeout,
+        commandCatalogTimeout: TimeInterval = ACPDefaults.commandCatalogTimeout,
         environmentOverrides: [String: String] = [:]
     ) -> ACPStreamSession {
         ACPStreamSession(
             sessionID: SessionID(),
             workingDirectory: FixtureACP.workingDirectory,
             profile: profile,
-            handshakeTimeout: handshakeTimeout
+            handshakeTimeout: handshakeTimeout,
+            commandCatalogTimeout: commandCatalogTimeout
         ) {
             agent.launchPlan(
                 resumeState: resumeState,
@@ -1327,6 +1370,7 @@ private enum ACPTestDefaults {
     /// it twice on a loaded machine.
     static let shortHandshakeTimeout: TimeInterval = 2
     static let slowHandshakePause: TimeInterval = 0.4
+    static let shortCommandCatalogTimeout: TimeInterval = 0.05
 
     /// Not a variable any launch of ours sets, so a value here can only have come from the plan.
     static let overriddenEnvironmentName = "THREADING_ACP_FIXTURE_ENV"
@@ -1386,7 +1430,10 @@ private enum FixtureACP {
         ]
     }
 
-    static func profile(meta: [String: Any] = [metaKey: metaValue]) -> ACPProviderProfile {
+    static func profile(
+        meta: [String: Any] = [metaKey: metaValue],
+        initialCommandCatalog: ACPInitialCommandCatalog = .initializeResponse
+    ) -> ACPProviderProfile {
         ACPProviderProfile(
             displayName: displayName,
             diagnosticsLabel: diagnosticsLabel,
@@ -1398,6 +1445,7 @@ private enum FixtureACP {
             initializeCommands: { result in
                 (result?["_meta"] as? [String: Any])?["commands"] as? [[String: Any]]
             },
+            initialCommandCatalog: initialCommandCatalog,
             commandCatalog: ACPCommandCatalogPolicy(
                 identifierPrefix: commandPrefix,
                 hostOnlyNames: [refusedCommand],

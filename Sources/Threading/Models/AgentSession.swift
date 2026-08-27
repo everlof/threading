@@ -739,6 +739,10 @@ struct AgentSession: Codable, Identifiable {
   /// the Project folder exactly as Threading always has.
   var managedWorkspace: ManagedWorkspace?
 
+  /// A validated ownership change waiting behind this conversation's current turn fence.
+  /// Stored on the session so quitting the app cannot release a later prompt in the old checkout.
+  var pendingCheckoutMove: PendingCheckoutMove?
+
   /// The surface a session of this runtime is actually shown on, given what was asked for.
   ///
   /// Two clamps, one rule, and both are corrections rather than refusals: the surface is
@@ -830,6 +834,7 @@ struct AgentSession: Codable, Identifiable {
     self.curfewRule = nil
     self.curfewState = nil
     self.managedWorkspace = nil
+    self.pendingCheckoutMove = nil
   }
 
   private enum CodingKeys: String, CodingKey {
@@ -848,6 +853,7 @@ struct AgentSession: Codable, Identifiable {
     case limitRecoveryPolicy
     case curfewRule, curfewState
     case managedWorkspace
+    case pendingCheckoutMove
   }
 
   init(from decoder: Decoder) throws {
@@ -1206,6 +1212,10 @@ struct AgentSession: Codable, Identifiable {
       ManagedWorkspace.self,
       forKey: .managedWorkspace
     )
+    pendingCheckoutMove = try container.decodeIfPresent(
+      PendingCheckoutMove.self,
+      forKey: .pendingCheckoutMove
+    )
   }
 
   func encode(to encoder: Encoder) throws {
@@ -1258,6 +1268,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(curfewRule, forKey: .curfewRule)
     try container.encodeIfPresent(curfewState, forKey: .curfewState)
     try container.encodeIfPresent(managedWorkspace, forKey: .managedWorkspace)
+    try container.encodeIfPresent(pendingCheckoutMove, forKey: .pendingCheckoutMove)
   }
 
   /// Where this conversation's process and project-relative tools run.

@@ -804,6 +804,21 @@ final class AppSettings {
         }
     }
 
+    /// Which same-repository checkout moves an agent may queue without another question.
+    var sessionCheckoutAuthorityPolicy: SessionCheckoutAuthorityPolicy {
+        get {
+            let raw = AppSettingDefinitions.sessionCheckoutAuthorityPolicy.read(from: defaults)
+            return raw.flatMap(SessionCheckoutAuthorityPolicy.init(rawValue:))
+                ?? .allowExplicitRequests
+        }
+        set {
+            AppSettingDefinitions.sessionCheckoutAuthorityPolicy.write(
+                newValue.rawValue,
+                to: defaults
+            )
+        }
+    }
+
     func setAttachmentReferenceDetection(for kind: AgentKind, enabled: Bool) {
         var disabled = disabledAttachmentDetectionAgentKinds
         if enabled {
