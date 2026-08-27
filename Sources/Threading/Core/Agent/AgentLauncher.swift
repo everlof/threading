@@ -731,9 +731,10 @@ enum AgentLauncher {
     /// Deliberately not `--strict-mcp-config`: that would suppress the user's own MCP servers
     /// for every session Threading launches, which is a much larger change than adding one.
     ///
-    /// Threading's MCP server is pre-approved as one app capability. Tools that need finer trust
-    /// boundaries enforce them in the app: in particular, browser access is origin-gated and form
-    /// submissions are confirmed because WKWebView may hold credentials the shell does not.
+    /// The exact Threading tools exposed to this session are pre-approved. Tools that need finer
+    /// trust boundaries enforce them in the app: in particular, browser access is origin-gated
+    /// and form submissions are confirmed because WKWebView may hold credentials the shell does
+    /// not.
     private static func appendMCPFlags(for session: AgentSession, to command: inout ShellCommand) {
         // Which tools are exposed is the user's choice on the Tools settings page. With every
         // group switched off there is nothing to register — and an empty `enabled_tools` list is
@@ -753,7 +754,10 @@ enum AgentLauncher {
             }
 
             command.append(flag: "--mcp-config", value: configPath)
-            command.append(flag: "--allowedTools", value: MCPDefaults.allowedToolsPattern)
+            command.append(
+                flag: "--allowedTools",
+                value: MCPDefaults.allowedToolsArgument(enabledTools)
+            )
 
         case .codex:
             guard let binding = MCPSessionRegistry.binding(

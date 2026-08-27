@@ -212,10 +212,13 @@ outranks everything; see the naming ladder in [`sessions.md`](sessions.md).
 
 Three deliberate choices in the launch line:
 
-- **The display tool is pre-approved** with `--allowedTools mcp__threading__*` for Claude and a
-  tool-specific `approval_mode="approve"` override for Codex, or every image raises a
-  permission prompt and the feature costs more attention than it saves. Other tools are
-  unaffected.
+- **The enabled Threading tools are pre-approved by exact qualified name** in Claude's
+  comma-separated `--allowedTools` value and by a tool-specific `approval_mode="approve"`
+  override for Codex, or every image raises a permission prompt and the feature costs more
+  attention than it saves. A server-name wildcard is not an identity boundary: MCP permits `__`
+  inside a server name, the same delimiter clients use when flattening server and tool names.
+  Threading's permission broker independently auto-allows only closed built-ins admitted by
+  `MCPBuiltInToolRegistry`; unadvertised lookalikes and open-world extension tools still ask.
 - **No `--strict-mcp-config`**, which would suppress the user's own MCP servers for every
   session Threading launches — a far larger change than adding one. The settings-research
   one-shot is the deliberate exception (below): it is our process answering our question, and

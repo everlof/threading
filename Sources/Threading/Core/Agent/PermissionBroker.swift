@@ -517,8 +517,10 @@ enum PermissionPolicy {
 
         case .mcp(let name):
             // Threading's own display tools draw in a panel the user is already looking at, and
-            // are allowlisted for terminal sessions for the same reason.
-            return name.hasPrefix("mcp__\(MCPDefaults.serverName)__")
+            // are allowlisted for terminal sessions for the same reason. Compare the complete
+            // built-in identity: MCP server names may themselves contain the `__` delimiter, so
+            // the server-name prefix is not an identity boundary.
+            return MCPDefaults.isBuiltInAllowedToolName(name)
 
         case .bash, .write, .edit, .multiEdit, .notebookEdit,
              .webFetch, .webSearch, .plan, .unknown:

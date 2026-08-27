@@ -116,23 +116,43 @@ final class PermissionBrokerTests: XCTestCase {
         }
     }
 
-    /// Only *Threading's own* MCP tools are pre-approved — they draw in a panel the user is
-    /// already looking at. Another server's tools are somebody else's code and prompt.
+    /// Only Threading's closed built-in catalogue is pre-approved. A server name may contain
+    /// `__`, so neither a server-name prefix nor a parsed first segment identifies this server;
+    /// the complete qualified tool identity has to be one the built-in registry advertised.
     func testOnlyThisAppsMCPToolsArePreApproved() {
-        XCTAssertTrue(
-            PermissionPolicy.isAutoAllowed(
-                ToolIdentity("mcp__\(MCPDefaults.serverName)__display_image")
+        for tool in MCPBuiltInTool.allCases {
+            let qualified = MCPDefaults.allowedToolName(tool.rawValue)
+            XCTAssertTrue(
+                PermissionPolicy.isAutoAllowed(ToolIdentity(qualified)),
+                "\(qualified) was omitted from the built-in preapproval set"
             )
+        }
+
+        let lookalikes = [
+            "mcp__someone_else__delete_everything",
+            "mcp__\(MCPDefaults.serverName)_evil__delete_everything",
+            "mcp__\(MCPDefaults.serverName)__x__delete_everything",
+            "mcp__\(MCPDefaults.serverName)__invented_future_tool",
+        ]
+        for name in lookalikes {
+            XCTAssertFalse(
+                PermissionPolicy.isAutoAllowed(ToolIdentity(name)),
+                "unadvertised MCP identity \(name) was pre-approved"
+            )
+        }
+    }
+
+    /// Claude receives the same exact identities instead of a server wildcard. Keeping these in
+    /// one comma-separated argument is Claude's documented multi-tool form; contribution IDs are
+    /// validated separately and cannot introduce a comma or whitespace into a qualified name.
+    func testClaudeLaunchPreapprovalListsExactToolIdentities() {
+        let argument = MCPDefaults.allowedToolsArgument(["display_image", "video_frames"])
+
+        XCTAssertEqual(
+            argument,
+            "mcp__threading__display_image,mcp__threading__video_frames"
         )
-        XCTAssertFalse(
-            PermissionPolicy.isAutoAllowed(ToolIdentity("mcp__someone_else__delete_everything"))
-        )
-        XCTAssertFalse(
-            PermissionPolicy.isAutoAllowed(
-                ToolIdentity("mcp__\(MCPDefaults.serverName)_evil__delete_everything")
-            ),
-            "a server name that merely starts with this app's was pre-approved"
-        )
+        XCTAssertFalse(argument.contains("*"))
     }
 
     /// A shell call is judged by what it runs, and anything the policy cannot vouch for prompts.

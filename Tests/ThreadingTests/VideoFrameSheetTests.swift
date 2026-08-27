@@ -403,12 +403,12 @@ final class VideoFrameSheetTests: XCTestCase {
         XCTAssertEqual(object["isError"] as? Bool, false)
     }
 
-    /// Claude pre-approves this server wholesale, so a new tool must not be the one that starts
-    /// asking for permission on every recording.
+    /// Claude pre-approves each enabled tool by exact name, so a new tool must join that launch
+    /// projection rather than become the one that asks on every recording.
     func testTheToolIsCoveredByTheLaunchPreapproval() {
-        XCTAssertTrue(
+        XCTAssertEqual(
+            MCPDefaults.allowedToolsArgument(["video_frames"]),
             MCPDefaults.allowedToolName("video_frames")
-                .hasPrefix(MCPDefaults.allowedToolsPattern.replacingOccurrences(of: "*", with: ""))
         )
     }
 

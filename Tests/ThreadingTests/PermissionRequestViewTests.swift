@@ -126,7 +126,7 @@ final class PermissionRequestViewTests: XCTestCase {
 
     func testPermissionPolicyAllowsOnlyKnownReadOnlyAndOwnedMCPTools() {
         XCTAssertTrue(PermissionPolicy.isAutoAllowed(.read))
-        XCTAssertTrue(PermissionPolicy.isAutoAllowed(.mcp("mcp__threading__show_image")))
+        XCTAssertTrue(PermissionPolicy.isAutoAllowed(.mcp("mcp__threading__display_image")))
         XCTAssertFalse(PermissionPolicy.isAutoAllowed(.bash))
         XCTAssertFalse(PermissionPolicy.isAutoAllowed(.mcp("mcp__external__delete")))
         XCTAssertFalse(PermissionPolicy.isAutoAllowed(.unknown("FutureProviderTool")))

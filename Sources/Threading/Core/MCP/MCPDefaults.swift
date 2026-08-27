@@ -237,13 +237,32 @@ enum MCPDefaults {
     /// `endAdHoc`) already removes one file per directory named here.
     static let bridgeCacheDirectoryName = "bridge-catalogues"
 
-    /// Claude tools are allowlisted wholesale, or every image would raise a permission prompt.
-    static let allowedToolsPattern = "mcp__\(serverName)__*"
-
-    /// The full Claude-side name of one tool, for launches that pre-approve a single tool
-    /// rather than the wholesale pattern above — the scoped research runs.
+    /// The full Claude-side name of one tool.
     static func allowedToolName(_ tool: String) -> String {
         "mcp__\(serverName)__\(tool)"
+    }
+
+    /// Claude's exact preapproval argument for the tools this session will actually receive.
+    ///
+    /// The former `mcp__threading__*` wildcard also matched a user server named
+    /// `threading__anything`, because MCP flattens the server and tool names with the same `__`
+    /// delimiter. Projecting the admitted catalogue closes that ambiguity and keeps launch
+    /// preapproval aligned with `tools/list`.
+    static func allowedToolsArgument(_ tools: [String]) -> String {
+        tools.map(allowedToolName).joined(separator: ",")
+    }
+
+    /// Only closed, admitted built-ins skip Threading's permission card.
+    ///
+    /// External extension tools share this MCP server but remain open-world identities; their
+    /// own permission policy must not come from the server-name prefix. The registry is the
+    /// single built-in inventory, so a missing or duplicate declaration cannot enter this set.
+    private static let builtInAllowedToolNames = Set(
+        MCPBuiltInToolRegistry.descriptors.map { allowedToolName($0.definition.name) }
+    )
+
+    static func isBuiltInAllowedToolName(_ name: String) -> Bool {
+        builtInAllowedToolNames.contains(name)
     }
 
     /// Refused rather than read into memory, since the panel shows one image at a time.
