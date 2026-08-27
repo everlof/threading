@@ -2,6 +2,278 @@ import ThreadingRemoteKit
 import SwiftUI
 import UIKit
 
+// MARK: - Demo scenes
+
+// Debug-only, like every fixture it names: `MobileSessionOpeningFixture` and the demo
+// hosts below do not exist in a shipping build.
+#if DEBUG
+
+/// The root screen `THREADING_MOBILE_DEMO` names.
+///
+/// That variable is how iOS appearance is reviewed: `scripts/ui-evidence-ios.sh` launches the
+/// shipping app once per capture with one id in the environment and photographs whatever comes
+/// up. Nothing rejects an id, and an id nothing matches renders the real app — so a misspelling
+/// photographed the wrong screen and passed review looking entirely plausible.
+///
+/// This used to be an ordered `if / else if` chain that mixed exact comparisons with `hasPrefix`
+/// tests, where a prefix placed above an exact id would have swallowed it with nothing to say so.
+/// Naming the scenes makes the routing one exhaustive `switch` and the ids enumerable
+/// (`MobileDemoFixture`).
+///
+/// Prefix families stay parameterised rather than being flattened into exact cases: `review-files`
+/// and `attachment-detail-pdf` carry a payload after the prefix that the screen reads.
+enum MobileDemoScene: Equatable {
+    /// No demo scene — the shipping root. Reached by an unset variable, by an id nothing matches,
+    /// and deliberately by every fixture whose surface is met from *inside* the real app.
+    case shippingRoot
+
+    case terminal
+    case attentionRequest
+    case conversation
+    case pairing
+    case welcome
+    case settings
+    case connectionProgressLab
+    case appIconSettings
+    case collaborationSettings
+    case advancedConnectionSettings
+    case localDiagnosticsSettings
+    case notificationSettings
+    case terminalKeySettings
+    case terminalKeyEditor
+    case terminalKeyCatalog
+    case terminalKeySnippet
+    case terminalKeyEdit
+    case macAppearanceSettings
+    case diagnostics
+    case sharedLink
+    case shareChatRoles
+    case shareChatBlocked
+    case shareChatLink
+    case sessionSettings
+    case permission
+    case newSession
+    case themedDialogAlert
+    case themedDialogConfirmation
+    /// Git Review. `showsAllFiles` is the `files` the id may carry after `review`.
+    case review(showsAllFiles: Bool)
+    /// One of the session-opening placeholders, which own their own ids.
+    case sessionOpening(MobileSessionOpeningFixture)
+    case browserPrivate
+    case attachments
+    /// One attachment preview. The kind is whatever followed `attachment-detail-`.
+    case attachmentDetail(kind: RemoteAttachmentKind)
+    case workspace
+}
+
+extension MobileDemoScene {
+    /// The one spelling of the environment variable every demo fixture is launched with.
+    static let environmentKey = "THREADING_MOBILE_DEMO"
+
+    /// The ids that all reach the same mirrored terminal. What differs between them is the
+    /// fixture data `RemoteSessionConnection.demoTerminal()` builds, not the screen.
+    static let terminalFixtureIDs: Set<String> = [
+        "terminal-collaboration",
+        "terminal-compose",
+        "terminal-ansi",
+        "terminal-scrollback",
+        "terminal-attachments",
+        "terminal-selection",
+        "terminal-codex-tui",
+        "terminal-claude-tui",
+    ]
+
+    private static let attachmentDetailPrefix = "attachment-detail-"
+
+    /// The scene this process was launched for.
+    static var current: MobileDemoScene {
+        resolve(ProcessInfo.processInfo.environment[environmentKey])
+    }
+
+    /// Resolves an id to its scene.
+    ///
+    /// The cases are kept in the order the previous chain tested them, because order is still
+    /// load-bearing between a prefix and any exact id it could swallow. Nothing below a prefix
+    /// test starts with that prefix today, and `MobileDemoFixture` is what pins it.
+    static func resolve(_ id: String?) -> MobileDemoScene {
+        guard let id else { return .shippingRoot }
+        switch id {
+        case let id where terminalFixtureIDs.contains(id): return .terminal
+        case "attention-request": return .attentionRequest
+        case let id where id.hasPrefix("conversation"): return .conversation
+        case "pairing": return .pairing
+        case let id where id.hasPrefix("welcome"): return .welcome
+        case "settings": return .settings
+        case "connection-progress-lab": return .connectionProgressLab
+        case "app-icon-settings": return .appIconSettings
+        case "collaboration-settings": return .collaborationSettings
+        case "advanced-connection-settings": return .advancedConnectionSettings
+        case "local-diagnostics-settings": return .localDiagnosticsSettings
+        case "notification-settings": return .notificationSettings
+        case "terminal-key-settings": return .terminalKeySettings
+        case "terminal-key-editor": return .terminalKeyEditor
+        case "terminal-key-catalog": return .terminalKeyCatalog
+        case "terminal-key-snippet": return .terminalKeySnippet
+        case "terminal-key-edit": return .terminalKeyEdit
+        case "mac-appearance-settings": return .macAppearanceSettings
+        case "diagnostics": return .diagnostics
+        case "shared-link": return .sharedLink
+        case "share-chat-roles": return .shareChatRoles
+        case "share-chat-blocked": return .shareChatBlocked
+        case "share-chat-link": return .shareChatLink
+        case "session-settings": return .sessionSettings
+        case let id where id.hasPrefix("permission"): return .permission
+        case let id where id.hasPrefix("new-session"): return .newSession
+        case "themed-dialog-alert": return .themedDialogAlert
+        case "themed-dialog-confirmation": return .themedDialogConfirmation
+        case let id where id.hasPrefix("review"):
+            return .review(showsAllFiles: id.contains("files"))
+        case "browser-private": return .browserPrivate
+        case "attachments": return .attachments
+        case let id where id.hasPrefix(attachmentDetailPrefix):
+            return .attachmentDetail(
+                kind: RemoteAttachmentKind(
+                    rawValue: String(id.dropFirst(attachmentDetailPrefix.count))
+                )
+            )
+        case "workspace": return .workspace
+        default:
+            // The chain tested this between `review` and `browser-private`. It reads the same
+            // here: no session-opening id is `browser-private`, `attachments` or `workspace`,
+            // and none begins with `attachment-detail-`.
+            if let opening = MobileSessionOpeningFixture(rawValue: id) {
+                return .sessionOpening(opening)
+            }
+            return .shippingRoot
+        }
+    }
+}
+
+/// Every `THREADING_MOBILE_DEMO` id this repository launches the app with.
+///
+/// `MobileDemoScene` routes prefix families, so it accepts ids beyond this list. The catalogue
+/// answers the narrower question tooling needs — whether an id is one somebody meant to write —
+/// which a screenshot cannot answer, because an unknown id looks exactly like the shipping app
+/// being the fixture on purpose. Adding a fixture id means adding a case here; that is the gate.
+enum MobileDemoFixture: String, CaseIterable {
+    /// The mirrored terminal, one id per captured terminal state.
+    case terminalANSI = "terminal-ansi"
+    case terminalAttachments = "terminal-attachments"
+    case terminalClaudeTUI = "terminal-claude-tui"
+    case terminalCodexTUI = "terminal-codex-tui"
+    case terminalCollaboration = "terminal-collaboration"
+    case terminalCompose = "terminal-compose"
+    case terminalScrollback = "terminal-scrollback"
+    case terminalSelection = "terminal-selection"
+
+    /// The demo conversation. Everything after the prefix is read by the surface it configures.
+    case conversation = "conversation"
+    case conversationAttachments = "conversation-attachments"
+    case conversationAwayFromLatest = "conversation-away-from-latest"
+    case conversationColdStress = "conversation-cold-stress"
+    case conversationCollaboration = "conversation-collaboration"
+    case conversationContentTypes = "conversation-content-types"
+    case conversationKeyboard = "conversation-keyboard"
+    case conversationReconnectStress = "conversation-reconnect-stress"
+    case conversationRichContent = "conversation-rich-content"
+    case conversationScrollStress = "conversation-scroll-stress"
+    case conversationStreaming = "conversation-streaming"
+    case conversationToolExpanded = "conversation-tool-expanded"
+
+    case attentionRequest = "attention-request"
+    case pairing = "pairing"
+
+    /// The welcome screen; the suffix focuses one feature card.
+    case welcome = "welcome"
+    case welcomeBrowser = "welcome-browser"
+    case welcomeUsage = "welcome-usage"
+
+    /// Settings and its pages.
+    case settings = "settings"
+    case appIconSettings = "app-icon-settings"
+    case collaborationSettings = "collaboration-settings"
+    case advancedConnectionSettings = "advanced-connection-settings"
+    case localDiagnosticsSettings = "local-diagnostics-settings"
+    case notificationSettings = "notification-settings"
+    case macAppearanceSettings = "mac-appearance-settings"
+    case connectionProgressLab = "connection-progress-lab"
+    case diagnostics = "diagnostics"
+
+    /// The mobile terminal key bar's editor.
+    case terminalKeySettings = "terminal-key-settings"
+    case terminalKeyEditor = "terminal-key-editor"
+    case terminalKeyCatalog = "terminal-key-catalog"
+    case terminalKeySnippet = "terminal-key-snippet"
+    case terminalKeyEdit = "terminal-key-edit"
+
+    /// Sharing a chat.
+    case sharedLink = "shared-link"
+    case shareChatRoles = "share-chat-roles"
+    case shareChatBlocked = "share-chat-blocked"
+    case shareChatLink = "share-chat-link"
+
+    case sessionSettings = "session-settings"
+
+    /// The permission prompt; `-long` lengthens the fixture inside the same scene.
+    case permission = "permission"
+    case permissionLong = "permission-long"
+
+    /// The new-session draft; the suffix chooses which state it opens in.
+    case newSession = "new-session"
+    case newSessionModelEffortPicker = "new-session-model-effort-picker"
+    case newSessionMultiline = "new-session-multiline"
+    case newSessionStructuredError = "new-session-structured-error"
+
+    case themedDialogAlert = "themed-dialog-alert"
+    case themedDialogConfirmation = "themed-dialog-confirmation"
+
+    /// Git Review; `files` selects the All Files section, `massive` the stress cardinality.
+    case review = "review"
+    case reviewFiles = "review-files"
+    case reviewFilesMassive = "review-files-massive"
+
+    /// The session-opening placeholders (`MobileSessionOpeningFixture`).
+    case sessionOpeningConnecting = "session-opening-connecting"
+    case sessionOpeningResuming = "session-opening-resuming"
+    case sessionOpeningFailed = "session-opening-failed"
+
+    /// The session workspace and what it opens.
+    case workspace = "workspace"
+    case browserPrivate = "browser-private"
+    case attachments = "attachments"
+
+    /// One attachment preview; the suffix is a `RemoteAttachmentKind` raw value.
+    case attachmentDetailHTML = "attachment-detail-html"
+    case attachmentDetailImage = "attachment-detail-image"
+    case attachmentDetailPDF = "attachment-detail-pdf"
+    case attachmentDetailText = "attachment-detail-text"
+
+    // Ids that deliberately resolve to no root scene: the shipping app is the
+    // fixture, and the surface below is reached from inside it.
+
+    /// The usage dashboard, reached through the dashboard's own sheet.
+    case usage = "usage"
+    case usageLimit = "usage-limit"
+    case usageLimitUnavailable = "usage-limit-unavailable"
+    case usageLimitZero = "usage-limit-zero"
+    case usageStale = "usage-stale"
+
+    /// The session list, and one project's slice of it.
+    case sessions = "sessions"
+    case sessionsConnecting = "sessions-connecting"
+    case sessionsOffline = "sessions-offline"
+    case projectSessions = "project-sessions"
+
+    /// The issue report, presented over whatever the root already shows.
+    case report = "report"
+    case reportReceipt = "report-receipt"
+    case reportScreenshot = "report-screenshot"
+
+    /// The root scene this id reaches.
+    var scene: MobileDemoScene { MobileDemoScene.resolve(rawValue) }
+}
+#endif
+
 struct RootView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @State private var issueReportRequest: MobileIssueReportRequest?
@@ -24,198 +296,7 @@ struct RootView: View {
     var body: some View {
         MobileRootBackdrop(ground: theme.ground) {
 #if DEBUG
-            if Self.terminalDemoModes.contains(
-                ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
-            ) {
-                NavigationStack {
-                    TerminalRemoteView(connection: demoTerminal)
-                        .navigationTitle(demoTerminalName)
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                == "attention-request" {
-                AttentionRequestSheet(connection: demoConversation)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
-                .hasPrefix("conversation") == true {
-                NavigationStack {
-                    ConversationRemoteView(connection: demoConversation)
-                        .navigationTitle(demoConversationName)
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "pairing" {
-                PairingView()
-                    .environmentObject(model)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
-                        .hasPrefix("welcome") == true {
-                NavigationStack {
-                    WelcomeView(openSettings: { showsSettings = true })
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "settings" {
-                MobileSettingsView()
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "connection-progress-lab" {
-                NavigationStack {
-                    MobileConnectionProgressLab()
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "app-icon-settings" {
-                NavigationStack {
-                    MobileAppIconSettingsView()
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "collaboration-settings" {
-                NavigationStack {
-                    CollaborationSettingsView()
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "advanced-connection-settings" {
-                NavigationStack {
-                    AdvancedConnectionSettingsView(pool: .evidenceFixture())
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "local-diagnostics-settings" {
-                NavigationStack {
-                    MobileDiagnosticsView()
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "notification-settings" {
-                NotificationSettingsView()
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "terminal-key-settings" {
-                NavigationStack {
-                    TerminalKeyboardAgentList()
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "terminal-key-editor" {
-                NavigationStack {
-                    TerminalKeyboardEditorContent(agentKind: "claude")
-                        .navigationTitle("Claude Code")
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "terminal-key-catalog" {
-                NavigationStack {
-                    TerminalKeyboardEditorDemo(screen: .catalog)
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "terminal-key-snippet" {
-                NavigationStack {
-                    TerminalKeyboardEditorDemo(screen: .snippet)
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "terminal-key-edit" {
-                NavigationStack {
-                    TerminalKeyboardEditorDemo(screen: .edit)
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "mac-appearance-settings" {
-                NavigationStack {
-                    MacAppearanceSettingsView()
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "diagnostics" {
-                RemoteDiagnosticsView()
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "shared-link" {
-                SharedSessionLinkDemoHost(link: ShareChatDemo.link)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "share-chat-roles" {
-                ShareChatDemoHost(isChatRunning: true, choice: nil)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "share-chat-blocked" {
-                ShareChatDemoHost(isChatRunning: false, choice: nil)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "share-chat-link" {
-                ShareChatDemoHost(isChatRunning: true, choice: .collaborateAndApprove)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "session-settings",
-                      let session = model.me?.sessions.first {
-                MobileSessionSettingsView(sessionID: session.id, onAccountMoved: {})
-                    .environmentObject(model)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
-                        .hasPrefix("permission") == true {
-                NavigationStack {
-                    ConversationRemoteView(connection: demoPermission)
-                        .navigationTitle(demoPermissionName)
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
-                        .hasPrefix("new-session") == true {
-                // Met as it is shipped: pushed onto a stack, with a back button where the
-                // sheet's Cancel used to be. Held as the root it had no back button, and the
-                // account disc at the other end pushed the title off centre — a geometry the
-                // real screen never has.
-                SessionDraftDemoHost()
-                    .environmentObject(model)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "themed-dialog-alert" {
-                ThemedDialogDemoView(kind: .alert)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "themed-dialog-confirmation" {
-                ThemedDialogDemoView(kind: .confirmation)
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
-                        .hasPrefix("review") == true {
-                NavigationStack {
-                    RemoteGitReviewView(
-                        session: model.me?.sessions.first ?? Self.workspaceDemoSession,
-                        client: model.client ?? Self.workspaceDemoClient,
-                        initialSection:
-                            ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
-                                .contains("files") == true ? .allFiles : .changed
-                    )
-                }
-            } else if let openingFixture = MobileSessionOpeningFixture.current {
-                NavigationStack {
-                    SessionDetailView(session: openingFixture.session)
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "browser-private" {
-                NavigationStack {
-                    RemoteBrowserFollowView(
-                        session: Self.workspaceDemoSession,
-                        client: Self.workspaceDemoClient,
-                        activity: workspaceDemoActivity,
-                        initialTabID: "browser-private",
-                        initialWorkspace: Self.browserDemoSnapshot,
-                        loadsRemotely: false
-                    )
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                        == "attachments" {
-                NavigationStack {
-                    RemoteAttachmentsView(
-                        session: Self.workspaceDemoSession,
-                        client: Self.workspaceDemoClient,
-                        initialAttachments: Self.attachmentDemoItems,
-                        loadsRemotely: false
-                    )
-                }
-            } else if let attachmentDemo = ProcessInfo.processInfo.environment[
-                "THREADING_MOBILE_DEMO"
-            ], attachmentDemo.hasPrefix("attachment-detail-") {
-                let attachmentKind = String(
-                    attachmentDemo.dropFirst("attachment-detail-".count)
-                )
-                NavigationStack {
-                    RemoteAttachmentPreviewDemo(
-                        kind: RemoteAttachmentKind(rawValue: attachmentKind)
-                    )
-                }
-            } else if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "workspace" {
-                SessionWorkspaceView(
-                    session: Self.workspaceDemoSession,
-                    client: Self.workspaceDemoClient,
-                    activity: workspaceDemoActivity,
-                    initialWorkspace: Self.workspaceDemoSnapshot
-                )
-                .task {
-                    workspaceDemoActivity.receive(RemoteWorkspaceChangedDTO(
-                        kind: .browser,
-                        activityID: UUID().uuidString
-                    ))
-                }
-            } else {
-                standardRoot
-            }
+            demoRoot
 #else
             standardRoot
 #endif
@@ -262,7 +343,7 @@ struct RootView: View {
             default:
                 break
             }
-            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "project-sessions",
                model.navigationPath.isEmpty,
                let projectName = model.me?.sessions.first?.projectName {
@@ -271,6 +352,175 @@ struct RootView: View {
         }
 #endif
     }
+
+#if DEBUG
+    /// The one place `THREADING_MOBILE_DEMO` decides what the root shows.
+    ///
+    /// Exhaustive on purpose: a new `MobileDemoScene` case is a compile error here rather than a
+    /// fixture that silently photographs the shipping app.
+    @ViewBuilder
+    private var demoRoot: some View {
+        switch MobileDemoScene.current {
+        case .terminal:
+            NavigationStack {
+                TerminalRemoteView(connection: demoTerminal)
+                    .navigationTitle(demoTerminalName)
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        case .attentionRequest:
+            AttentionRequestSheet(connection: demoConversation)
+        case .conversation:
+            NavigationStack {
+                ConversationRemoteView(connection: demoConversation)
+                    .navigationTitle(demoConversationName)
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        case .pairing:
+            PairingView()
+                .environmentObject(model)
+        case .welcome:
+            NavigationStack {
+                WelcomeView(openSettings: { showsSettings = true })
+            }
+        case .settings:
+            MobileSettingsView()
+        case .connectionProgressLab:
+            NavigationStack {
+                MobileConnectionProgressLab()
+            }
+        case .appIconSettings:
+            NavigationStack {
+                MobileAppIconSettingsView()
+            }
+        case .collaborationSettings:
+            NavigationStack {
+                CollaborationSettingsView()
+            }
+        case .advancedConnectionSettings:
+            NavigationStack {
+                AdvancedConnectionSettingsView(pool: .evidenceFixture())
+            }
+        case .localDiagnosticsSettings:
+            NavigationStack {
+                MobileDiagnosticsView()
+            }
+        case .notificationSettings:
+            NotificationSettingsView()
+        case .terminalKeySettings:
+            NavigationStack {
+                TerminalKeyboardAgentList()
+            }
+        case .terminalKeyEditor:
+            NavigationStack {
+                TerminalKeyboardEditorContent(agentKind: "claude")
+                    .navigationTitle("Claude Code")
+            }
+        case .terminalKeyCatalog:
+            NavigationStack {
+                TerminalKeyboardEditorDemo(screen: .catalog)
+            }
+        case .terminalKeySnippet:
+            NavigationStack {
+                TerminalKeyboardEditorDemo(screen: .snippet)
+            }
+        case .terminalKeyEdit:
+            NavigationStack {
+                TerminalKeyboardEditorDemo(screen: .edit)
+            }
+        case .macAppearanceSettings:
+            NavigationStack {
+                MacAppearanceSettingsView()
+            }
+        case .diagnostics:
+            RemoteDiagnosticsView()
+        case .sharedLink:
+            SharedSessionLinkDemoHost(link: ShareChatDemo.link)
+        case .shareChatRoles:
+            ShareChatDemoHost(isChatRunning: true, choice: nil)
+        case .shareChatBlocked:
+            ShareChatDemoHost(isChatRunning: false, choice: nil)
+        case .shareChatLink:
+            ShareChatDemoHost(isChatRunning: true, choice: .collaborateAndApprove)
+        case .sessionSettings:
+            // The chain reached this branch only with a session in hand and fell through to the
+            // shipping root without one, because `me` arrives after the first render.
+            if let session = model.me?.sessions.first {
+                MobileSessionSettingsView(sessionID: session.id, onAccountMoved: {})
+                    .environmentObject(model)
+            } else {
+                standardRoot
+            }
+        case .permission:
+            NavigationStack {
+                ConversationRemoteView(connection: demoPermission)
+                    .navigationTitle(demoPermissionName)
+                    .navigationBarTitleDisplayMode(.inline)
+            }
+        case .newSession:
+            // Met as it is shipped: pushed onto a stack, with a back button where the
+            // sheet's Cancel used to be. Held as the root it had no back button, and the
+            // account disc at the other end pushed the title off centre — a geometry the
+            // real screen never has.
+            SessionDraftDemoHost()
+                .environmentObject(model)
+        case .themedDialogAlert:
+            ThemedDialogDemoView(kind: .alert)
+        case .themedDialogConfirmation:
+            ThemedDialogDemoView(kind: .confirmation)
+        case .review(let showsAllFiles):
+            NavigationStack {
+                RemoteGitReviewView(
+                    session: model.me?.sessions.first ?? Self.workspaceDemoSession,
+                    client: model.client ?? Self.workspaceDemoClient,
+                    initialSection: showsAllFiles ? .allFiles : .changed
+                )
+            }
+        case .sessionOpening(let openingFixture):
+            NavigationStack {
+                SessionDetailView(session: openingFixture.session)
+            }
+        case .browserPrivate:
+            NavigationStack {
+                RemoteBrowserFollowView(
+                    session: Self.workspaceDemoSession,
+                    client: Self.workspaceDemoClient,
+                    activity: workspaceDemoActivity,
+                    initialTabID: "browser-private",
+                    initialWorkspace: Self.browserDemoSnapshot,
+                    loadsRemotely: false
+                )
+            }
+        case .attachments:
+            NavigationStack {
+                RemoteAttachmentsView(
+                    session: Self.workspaceDemoSession,
+                    client: Self.workspaceDemoClient,
+                    initialAttachments: Self.attachmentDemoItems,
+                    loadsRemotely: false
+                )
+            }
+        case .attachmentDetail(let kind):
+            NavigationStack {
+                RemoteAttachmentPreviewDemo(kind: kind)
+            }
+        case .workspace:
+            SessionWorkspaceView(
+                session: Self.workspaceDemoSession,
+                client: Self.workspaceDemoClient,
+                activity: workspaceDemoActivity,
+                initialWorkspace: Self.workspaceDemoSnapshot
+            )
+            .task {
+                workspaceDemoActivity.receive(RemoteWorkspaceChangedDTO(
+                    kind: .browser,
+                    activityID: UUID().uuidString
+                ))
+            }
+        case .shippingRoot:
+            standardRoot
+        }
+    }
+#endif
 
     private var theme: RemoteThemePalette {
 #if DEBUG
@@ -293,14 +543,15 @@ struct RootView: View {
            }) {
             return RemoteThemePalette(catalogTheme)
         }
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
-            .hasPrefix("conversation") == true
-            || ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
-                == "attention-request"
-            || ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "permission"
-            || Self.terminalDemoModes.contains(
-                ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
-            ) {
+        // Deliberately not `MobileDemoScene`: the route matches `permission` by prefix while
+        // this matches it exactly, so `permission-long` has always taken the account's theme
+        // rather than the demo conversation's. Preserved, because changing it would move a
+        // published appearance baseline.
+        let demoID = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] ?? ""
+        if demoID.hasPrefix("conversation")
+            || demoID == "attention-request"
+            || demoID == "permission"
+            || MobileDemoScene.terminalFixtureIDs.contains(demoID) {
             return RemoteThemePalette(demoConversation.theme ?? model.me?.theme)
         }
 #endif
@@ -333,17 +584,6 @@ struct RootView: View {
     }
 
 #if DEBUG
-    private static let terminalDemoModes: Set<String> = [
-        "terminal-collaboration",
-        "terminal-compose",
-        "terminal-ansi",
-        "terminal-scrollback",
-        "terminal-attachments",
-        "terminal-selection",
-        "terminal-codex-tui",
-        "terminal-claude-tui",
-    ]
-
     private static let workspaceDemoSession = RemoteSessionSummaryDTO(
         id: "workspace-demo",
         title: "Remote access review",
@@ -439,7 +679,7 @@ struct RootView: View {
 
     @MainActor
     private func openIssueReportDemoIfNeeded() async {
-        let mode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+        let mode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
         guard mode == "report"
                 || mode == "report-receipt"
                 || mode == "report-screenshot" else {
@@ -641,7 +881,7 @@ private struct WelcomeView: View {
     init(openSettings: @escaping () -> Void) {
         self.openSettings = openSettings
 #if DEBUG
-        let demo = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+        let demo = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
         let requestedID = demo?.hasPrefix("welcome-") == true
             ? String(demo!.dropFirst("welcome-".count))
             : nil

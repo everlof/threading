@@ -129,7 +129,7 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
 
     func makeRootViewController() -> UIViewController {
 #if DEBUG
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]?
             .hasPrefix("conversation") == true {
             let connection = RemoteSessionConnection.demoConversation()
             let theme = RemoteThemePalette(connection.theme ?? model.me?.theme)
@@ -320,7 +320,7 @@ private enum MobileUIEvidenceCapture {
     private enum Environment {
         static let run = "THREADING_MOBILE_UI_EVIDENCE_RUN"
         static let identifier = "THREADING_MOBILE_UI_EVIDENCE_ID"
-        static let demo = "THREADING_MOBILE_DEMO"
+        static let demo = MobileDemoScene.environmentKey
         static let keyboardState = "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
         static let captureMode = "THREADING_MOBILE_UI_EVIDENCE_CAPTURE_MODE"
         static let keyboardLayout = "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_LAYOUT"

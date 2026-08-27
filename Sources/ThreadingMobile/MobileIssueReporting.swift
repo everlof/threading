@@ -298,7 +298,7 @@ struct MobileIssueReportView: View {
     /// floating plate—not a translucent page panel—owns everything behind its text.
     @MainActor
     private func presentReceiptEvidenceIfNeeded() async {
-        guard ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+        guard ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "report-receipt" else { return }
         reporterNote = "The receipt looked transparent and the report text remained visible "
             + "beneath it."

@@ -624,7 +624,7 @@ struct SessionDashboard: View {
 #if DEBUG
         // This evidence fixture borrows demo data plumbing, but represents a real failed owner
         // connection. Suppressing the demo disclaimer keeps the captured state truthful.
-        if let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"],
+        if let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey],
            ["sessions-offline", "sessions-connecting"].contains(demoMode) {
             return false
         }
@@ -848,7 +848,7 @@ struct SessionDashboard: View {
             updateConnectionFailurePresentation()
 #if DEBUG
             if model.isDemo,
-               ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+               ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]?
                 .hasPrefix("usage") == true {
                 showsUsage = true
             }

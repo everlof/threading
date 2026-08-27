@@ -1726,7 +1726,7 @@ final class RemoteSessionConnection: ObservableObject {
     }
 
     static func demoTerminal() -> RemoteSessionConnection {
-        let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
+        let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] ?? ""
         let isCodexFixture = demoMode == "terminal-ansi"
             || demoMode == "terminal-attachments"
             || demoMode == "terminal-codex-tui"
@@ -1958,7 +1958,7 @@ final class RemoteSessionConnection: ObservableObject {
 
     static func demoConversation() -> RemoteSessionConnection {
         let environment = ProcessInfo.processInfo.environment
-        let demoMode = environment["THREADING_MOBILE_DEMO"] ?? ""
+        let demoMode = environment[MobileDemoScene.environmentKey] ?? ""
         let isPerformanceFixture = demoMode == "conversation-cold-stress"
             || demoMode == "conversation-reconnect-stress"
             || demoMode == "conversation-scroll-stress"
@@ -2401,7 +2401,7 @@ final class RemoteSessionConnection: ObservableObject {
 
     static func demoPermissionConversation() -> RemoteSessionConnection {
         let connection = demoConversation()
-        let usesLongFixture = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+        let usesLongFixture = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
             == "permission-long"
         connection.conversationStore.replace(with: RemoteConversationSnapshotDTO(
             rows: [

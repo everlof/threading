@@ -319,7 +319,7 @@ final class RemoteAppModel: ObservableObject {
             phase = .connecting
             return
         }
-        if let demoMode = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"],
+        if let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey],
            let link = RemoteConnectionLink(
             string: "https://david-mac.tailnet-demo.ts.net:8443/#preview"
            ) {

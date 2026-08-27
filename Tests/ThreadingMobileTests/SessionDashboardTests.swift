@@ -463,3 +463,182 @@ final class SessionDashboardTests: XCTestCase {
         )
     }
 }
+
+#if DEBUG
+/// The demo router that decides which screen `THREADING_MOBILE_DEMO` opens.
+///
+/// This is the surface iOS appearance is reviewed from: `scripts/ui-evidence-ios.sh` launches the
+/// shipping app once per capture with one id in the environment. An id nothing matches renders
+/// the real app, which photographs cleanly and passes review while showing the wrong screen — so
+/// the mapping is worth spelling out rather than reading back from the code that performs it.
+final class MobileDemoSceneTests: XCTestCase {
+    /// Every catalogue id, and the scene it names, written as literals.
+    ///
+    /// The `switch` is exhaustive so a new fixture id cannot be added without a line here, and
+    /// the ids are literals so a rename of a case is a failure rather than a silent agreement.
+    func testEveryCatalogueIDResolvesToTheSceneItNames() {
+        for fixture in MobileDemoFixture.allCases {
+            let expected: (id: String, scene: MobileDemoScene)
+            switch fixture {
+            case .terminalANSI: expected = ("terminal-ansi", .terminal)
+            case .terminalAttachments: expected = ("terminal-attachments", .terminal)
+            case .terminalClaudeTUI: expected = ("terminal-claude-tui", .terminal)
+            case .terminalCodexTUI: expected = ("terminal-codex-tui", .terminal)
+            case .terminalCollaboration: expected = ("terminal-collaboration", .terminal)
+            case .terminalCompose: expected = ("terminal-compose", .terminal)
+            case .terminalScrollback: expected = ("terminal-scrollback", .terminal)
+            case .terminalSelection: expected = ("terminal-selection", .terminal)
+            case .conversation: expected = ("conversation", .conversation)
+            case .conversationAttachments: expected = ("conversation-attachments", .conversation)
+            case .conversationAwayFromLatest:
+                expected = ("conversation-away-from-latest", .conversation)
+            case .conversationColdStress: expected = ("conversation-cold-stress", .conversation)
+            case .conversationCollaboration:
+                expected = ("conversation-collaboration", .conversation)
+            case .conversationContentTypes: expected = ("conversation-content-types", .conversation)
+            case .conversationKeyboard: expected = ("conversation-keyboard", .conversation)
+            case .conversationReconnectStress:
+                expected = ("conversation-reconnect-stress", .conversation)
+            case .conversationRichContent: expected = ("conversation-rich-content", .conversation)
+            case .conversationScrollStress: expected = ("conversation-scroll-stress", .conversation)
+            case .conversationStreaming: expected = ("conversation-streaming", .conversation)
+            case .conversationToolExpanded: expected = ("conversation-tool-expanded", .conversation)
+            case .attentionRequest: expected = ("attention-request", .attentionRequest)
+            case .pairing: expected = ("pairing", .pairing)
+            case .welcome: expected = ("welcome", .welcome)
+            case .welcomeBrowser: expected = ("welcome-browser", .welcome)
+            case .welcomeUsage: expected = ("welcome-usage", .welcome)
+            case .settings: expected = ("settings", .settings)
+            case .appIconSettings: expected = ("app-icon-settings", .appIconSettings)
+            case .collaborationSettings:
+                expected = ("collaboration-settings", .collaborationSettings)
+            case .advancedConnectionSettings:
+                expected = ("advanced-connection-settings", .advancedConnectionSettings)
+            case .localDiagnosticsSettings:
+                expected = ("local-diagnostics-settings", .localDiagnosticsSettings)
+            case .notificationSettings: expected = ("notification-settings", .notificationSettings)
+            case .macAppearanceSettings:
+                expected = ("mac-appearance-settings", .macAppearanceSettings)
+            case .connectionProgressLab:
+                expected = ("connection-progress-lab", .connectionProgressLab)
+            case .diagnostics: expected = ("diagnostics", .diagnostics)
+            case .terminalKeySettings: expected = ("terminal-key-settings", .terminalKeySettings)
+            case .terminalKeyEditor: expected = ("terminal-key-editor", .terminalKeyEditor)
+            case .terminalKeyCatalog: expected = ("terminal-key-catalog", .terminalKeyCatalog)
+            case .terminalKeySnippet: expected = ("terminal-key-snippet", .terminalKeySnippet)
+            case .terminalKeyEdit: expected = ("terminal-key-edit", .terminalKeyEdit)
+            case .sharedLink: expected = ("shared-link", .sharedLink)
+            case .shareChatRoles: expected = ("share-chat-roles", .shareChatRoles)
+            case .shareChatBlocked: expected = ("share-chat-blocked", .shareChatBlocked)
+            case .shareChatLink: expected = ("share-chat-link", .shareChatLink)
+            case .sessionSettings: expected = ("session-settings", .sessionSettings)
+            case .permission: expected = ("permission", .permission)
+            case .permissionLong: expected = ("permission-long", .permission)
+            case .newSession: expected = ("new-session", .newSession)
+            case .newSessionModelEffortPicker:
+                expected = ("new-session-model-effort-picker", .newSession)
+            case .newSessionMultiline: expected = ("new-session-multiline", .newSession)
+            case .newSessionStructuredError:
+                expected = ("new-session-structured-error", .newSession)
+            case .themedDialogAlert: expected = ("themed-dialog-alert", .themedDialogAlert)
+            case .themedDialogConfirmation:
+                expected = ("themed-dialog-confirmation", .themedDialogConfirmation)
+            case .review: expected = ("review", .review(showsAllFiles: false))
+            case .reviewFiles: expected = ("review-files", .review(showsAllFiles: true))
+            case .reviewFilesMassive:
+                expected = ("review-files-massive", .review(showsAllFiles: true))
+            case .sessionOpeningConnecting:
+                expected = ("session-opening-connecting", .sessionOpening(.connecting))
+            case .sessionOpeningResuming:
+                expected = ("session-opening-resuming", .sessionOpening(.resuming))
+            case .sessionOpeningFailed:
+                expected = ("session-opening-failed", .sessionOpening(.failed))
+            case .workspace: expected = ("workspace", .workspace)
+            case .browserPrivate: expected = ("browser-private", .browserPrivate)
+            case .attachments: expected = ("attachments", .attachments)
+            case .attachmentDetailHTML:
+                expected = ("attachment-detail-html", .attachmentDetail(kind: .html))
+            case .attachmentDetailImage:
+                expected = ("attachment-detail-image", .attachmentDetail(kind: .image))
+            case .attachmentDetailPDF:
+                expected = ("attachment-detail-pdf", .attachmentDetail(kind: .pdf))
+            case .attachmentDetailText:
+                expected = ("attachment-detail-text", .attachmentDetail(kind: .text))
+            case .usage: expected = ("usage", .shippingRoot)
+            case .usageLimit: expected = ("usage-limit", .shippingRoot)
+            case .usageLimitUnavailable: expected = ("usage-limit-unavailable", .shippingRoot)
+            case .usageLimitZero: expected = ("usage-limit-zero", .shippingRoot)
+            case .usageStale: expected = ("usage-stale", .shippingRoot)
+            case .sessions: expected = ("sessions", .shippingRoot)
+            case .sessionsConnecting: expected = ("sessions-connecting", .shippingRoot)
+            case .sessionsOffline: expected = ("sessions-offline", .shippingRoot)
+            case .projectSessions: expected = ("project-sessions", .shippingRoot)
+            case .report: expected = ("report", .shippingRoot)
+            case .reportReceipt: expected = ("report-receipt", .shippingRoot)
+            case .reportScreenshot: expected = ("report-screenshot", .shippingRoot)
+            }
+
+            XCTAssertEqual(fixture.rawValue, expected.id)
+            XCTAssertEqual(MobileDemoScene.resolve(expected.id), expected.scene, expected.id)
+            XCTAssertEqual(fixture.scene, expected.scene, expected.id)
+        }
+    }
+
+    /// An unset variable and an id nobody named both reach the shipping root, which is exactly
+    /// why a mistyped fixture is invisible in a screenshot. The catalogue is what can tell them
+    /// apart, so it must refuse what the router accepts.
+    func testAnUnknownIDIsIndistinguishableFromNoDemoAtTheRootButNotInTheCatalogue() {
+        XCTAssertEqual(MobileDemoScene.resolve(nil), .shippingRoot)
+        XCTAssertEqual(MobileDemoScene.resolve(""), .shippingRoot)
+        XCTAssertEqual(MobileDemoScene.resolve("pairring"), .shippingRoot)
+        XCTAssertEqual(MobileDemoScene.resolve("terminal-key"), .shippingRoot)
+
+        XCTAssertNil(MobileDemoFixture(rawValue: "pairring"))
+        XCTAssertNil(MobileDemoFixture(rawValue: "terminal-key"))
+        XCTAssertEqual(MobileDemoFixture(rawValue: "pairing"), .pairing)
+    }
+
+    /// The prefix families are parameterised ids, not aliases: the router still routes a member
+    /// the catalogue has never heard of, and the part after the prefix survives.
+    func testPrefixFamiliesStillRouteIDsTheCatalogueDoesNotList() {
+        XCTAssertEqual(MobileDemoScene.resolve("conversation-something-new"), .conversation)
+        XCTAssertEqual(MobileDemoScene.resolve("welcome-terminal"), .welcome)
+        XCTAssertEqual(MobileDemoScene.resolve("permission-short"), .permission)
+        XCTAssertEqual(MobileDemoScene.resolve("new-session-anything"), .newSession)
+        XCTAssertEqual(
+            MobileDemoScene.resolve("review-massive"),
+            .review(showsAllFiles: false)
+        )
+        XCTAssertEqual(
+            MobileDemoScene.resolve("attachment-detail-archive"),
+            .attachmentDetail(kind: .archive)
+        )
+        // An unknown suffix is a `RemoteAttachmentKind.unknown`, not a refusal.
+        XCTAssertEqual(
+            MobileDemoScene.resolve("attachment-detail-sketch"),
+            .attachmentDetail(kind: .unknown("sketch"))
+        )
+    }
+
+    /// The eight ids that share the mirrored terminal screen, spelled out.
+    func testTheTerminalFamilyIsTheEightIDsThatShareOneScreen() {
+        XCTAssertEqual(MobileDemoScene.terminalFixtureIDs, [
+            "terminal-ansi",
+            "terminal-attachments",
+            "terminal-claude-tui",
+            "terminal-codex-tui",
+            "terminal-collaboration",
+            "terminal-compose",
+            "terminal-scrollback",
+            "terminal-selection",
+        ])
+        // `terminal-key-*` sits beside them and must not be swallowed by the family.
+        XCTAssertEqual(MobileDemoScene.resolve("terminal-key-editor"), .terminalKeyEditor)
+    }
+
+    /// The variable is spelled once, and every reader in the app goes through it.
+    func testTheEnvironmentVariableIsSpelledOnce() {
+        XCTAssertEqual(MobileDemoScene.environmentKey, "THREADING_MOBILE_DEMO")
+    }
+}
+#endif

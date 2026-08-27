@@ -204,7 +204,7 @@ private struct SessionDraftComposerScreen: View {
 #if DEBUG
         // The picker evidence state carries one bounded overflow page so the real shipping
         // popover proves both its no-scroll geometry and the pager's full-size touch targets.
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
             == "new-session-model-effort-picker" {
             return resolved + Self.pickerEvidenceOverflowModels
         }
@@ -327,18 +327,18 @@ private struct SessionDraftComposerScreen: View {
             applyCatalogDefaults()
             hintAnimated = true
 #if DEBUG
-            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "new-session-multiline" {
                 prompt = "Review the keyboard lifecycle, compare the open and dismissed layouts, and summarize any remaining spacing regressions before you make changes."
             }
-            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "new-session-model-effort-picker" {
                 if selectedModel?.reasoning.contains(where: { $0.id == "ultra" }) == true {
                     reasoningID = "ultra"
                 }
                 runPickerIsPresented = true
             }
-            if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "new-session-structured-error" {
                 errorMessage = RemoteClientError.server(
                     status: 422,

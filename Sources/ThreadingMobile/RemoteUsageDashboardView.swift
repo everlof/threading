@@ -239,9 +239,9 @@ struct RemoteUsageDashboardView: View {
         self.isDemo = isDemo
 #if DEBUG
         let environment = ProcessInfo.processInfo.environment
-        demoShowsStaleSnapshot = environment["THREADING_MOBILE_DEMO"] == "usage-stale"
+        demoShowsStaleSnapshot = environment[MobileDemoScene.environmentKey] == "usage-stale"
             || environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?.contains("usage-stale") == true
-        demoStartsAtLimitHistory = environment["THREADING_MOBILE_DEMO"]?
+        demoStartsAtLimitHistory = environment[MobileDemoScene.environmentKey]?
             .hasPrefix("usage-limit") == true
 #else
         demoShowsStaleSnapshot = false
@@ -1331,7 +1331,7 @@ enum RemoteUsageDemo {
         in series: [RemoteUsageLimitSeriesSummaryDTO]
     ) -> String? {
 #if DEBUG
-        let value = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] ?? ""
+        let value = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] ?? ""
         if value == "usage-limit-zero" {
             return series.first(where: { $0.bankedResetCount == 0 })?.id ?? series.first?.id
         }

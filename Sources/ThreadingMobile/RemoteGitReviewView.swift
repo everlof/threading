@@ -392,7 +392,7 @@ struct RemoteGitReviewView: View {
         isLoadingFiles = true
 #if DEBUG
         if isReviewDemo {
-            let isMassive = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            let isMassive = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "review-files-massive"
             repositoryFiles = RemoteRepositoryFilesDTO(
                 paths: isMassive
@@ -465,14 +465,14 @@ struct RemoteGitReviewView: View {
 
 #if DEBUG
     private var isReviewDemo: Bool {
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+        ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]?
             .hasPrefix("review") == true
     }
 
     private static func demoSnapshot(
         mode: RemoteGitReviewMode
     ) -> RemoteGitReviewSnapshotDTO {
-        let isMassive = ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]?
+        let isMassive = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]?
             .contains("massive") == true
         let first = RemoteGitFileDiffDTO(
             path: "Sources/ThreadingMobile/RemoteGitReviewView.swift",

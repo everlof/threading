@@ -16,7 +16,7 @@ enum MobileSessionOpeningFixture: String {
     case failed = "session-opening-failed"
 
     static var current: MobileSessionOpeningFixture? {
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+        ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
             .flatMap(MobileSessionOpeningFixture.init(rawValue:))
     }
 
@@ -866,7 +866,7 @@ struct TerminalRemoteView: View {
 
     private var inputPreference: MobileTerminalInputPreference {
 #if DEBUG
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "terminal-compose" {
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-compose" {
             return .compose
         }
 #endif
@@ -1072,7 +1072,7 @@ struct TerminalRemoteView: View {
         // Evidence fixtures share one demo session inside a single cloned simulator. The Compose
         // fixture forces presentation only; persisting it would turn every later Direct fixture
         // into Compose and make the keyboard-open evidence test the wrong surface.
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "terminal-compose" {
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-compose" {
             return
         }
 #endif
@@ -1141,7 +1141,7 @@ struct TerminalRemoteView: View {
 
     private var isSelectionQuoteEvidence: Bool {
 #if DEBUG
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "terminal-selection"
+        ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-selection"
 #else
         false
 #endif
@@ -2118,7 +2118,7 @@ private struct LegacyConversationRemoteView: View {
 
     private var initiallyFocusesComposer: Bool {
 #if DEBUG
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+        ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
             == "conversation-keyboard"
 #else
         false

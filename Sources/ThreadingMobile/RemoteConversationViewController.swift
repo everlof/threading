@@ -107,7 +107,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         }
 #if DEBUG
         let fixtureViewport: (progress: Double?, followsBottom: Bool)? =
-            ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "conversation-away-from-latest"
                 ? (0.32, false)
                 : nil
@@ -1161,7 +1161,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private var fixtureDraft: String? {
 #if DEBUG
         let environment = ProcessInfo.processInfo.environment
-        let mode = environment["THREADING_MOBILE_DEMO"]
+        let mode = environment[MobileDemoScene.environmentKey]
         if mode == "conversation-cold-stress"
             || mode == "conversation-reconnect-stress"
             || mode == "conversation-scroll-stress" {
@@ -1223,7 +1223,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 
     private var initiallyFocusesComposer: Bool {
 #if DEBUG
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"] == "conversation-keyboard"
+        ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "conversation-keyboard"
 #else
         false
 #endif

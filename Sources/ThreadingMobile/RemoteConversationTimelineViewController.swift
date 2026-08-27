@@ -518,7 +518,7 @@ final class RemoteConversationTimelineViewController: UIViewController {
         self.initialViewport = initialViewport
         self.onViewportChange = onViewportChange
 #if DEBUG
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_DEMO"]
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
             == "conversation-tool-expanded" {
             expandedRows = ["content-tool-error"]
         }
