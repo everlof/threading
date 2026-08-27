@@ -205,37 +205,34 @@ final class ProjectDatabase {
     }
 
     func load() throws -> ProjectsStateLoad {
+        typealias SessionColumn = ProjectDatabaseSchema.SessionLoadColumn
+        typealias ProjectColumn = ProjectDatabaseSchema.ProjectLoadColumn
+
         var projects: [Project] = []
         var sessionsByProject: [ProjectID: [AgentSession]] = [:]
         var pendingSessionRows: [StoredSessionRow] = []
         pendingSessionRows.reserveCapacity(Self.sessionDecodeWaveSize)
 
-        let sessions = try database.prepare(
-            """
-            SELECT id, project_id, kind, last_active_at, data
-            FROM session
-            ORDER BY project_id, position
-            """
-        )
+        let sessions = try database.prepare(ProjectDatabaseSchema.selectSessions)
         defer { sessions.finalize() }
         while try sessions.step() {
-            let rawID = sessions.text(0)
+            let rawID = sessions.text(SessionColumn.id.read)
             guard let rawID, let rowID = SessionID(uuidString: rawID) else {
                 throw corruptRow("session", id: rawID, reason: "invalid row identifier")
             }
-            guard let rawProjectID = sessions.text(1),
-                  let projectID = ProjectID(uuidString: rawProjectID) else {
+            let rawProjectID = sessions.text(SessionColumn.projectID.read)
+            guard let rawProjectID, let projectID = ProjectID(uuidString: rawProjectID) else {
                 throw corruptRow(
                     "session",
                     id: rawID,
-                    reason: "invalid project identifier '\(sessions.text(1) ?? "NULL")'"
+                    reason: "invalid project identifier '\(rawProjectID ?? "NULL")'"
                 )
             }
-            guard let storedKind = sessions.text(2) else {
+            guard let storedKind = sessions.text(SessionColumn.kind.read) else {
                 throw corruptRow("session", id: rawID, reason: "missing indexed provider kind")
             }
-            let storedLastActiveAt = sessions.double(3)
-            guard let payload = sessions.data(4) else {
+            let storedLastActiveAt = sessions.double(SessionColumn.lastActiveAt.read)
+            guard let payload = sessions.data(SessionColumn.data.read) else {
                 throw corruptRow("session", id: rawID, reason: "missing JSON payload")
             }
 
@@ -257,23 +254,21 @@ final class ProjectDatabase {
         }
         try appendDecodedSessions(pendingSessionRows, to: &sessionsByProject)
 
-        let rows = try database.prepare(
-            "SELECT id, name, folder_path, data FROM project ORDER BY position"
-        )
+        let rows = try database.prepare(ProjectDatabaseSchema.selectProjects)
         defer { rows.finalize() }
         var loadedProjectIDs: Set<ProjectID> = []
         while try rows.step() {
-            let rawID = rows.text(0)
+            let rawID = rows.text(ProjectColumn.id.read)
             guard let rawID, let id = ProjectID(uuidString: rawID) else {
                 throw corruptRow("project", id: rawID, reason: "invalid row identifier")
             }
-            guard let storedName = rows.text(1) else {
+            guard let storedName = rows.text(ProjectColumn.name.read) else {
                 throw corruptRow("project", id: rawID, reason: "missing indexed name")
             }
-            guard let storedPath = rows.text(2) else {
+            guard let storedPath = rows.text(ProjectColumn.folderPath.read) else {
                 throw corruptRow("project", id: rawID, reason: "missing indexed path")
             }
-            guard let payload = rows.data(3) else {
+            guard let payload = rows.data(ProjectColumn.data.read) else {
                 throw corruptRow("project", id: rawID, reason: "missing JSON payload")
             }
 
@@ -635,12 +630,13 @@ final class ProjectDatabase {
                 "Only session actors can be stored by this schema version"
             )
         }
+        typealias Column = ProjectDatabaseSchema.ControlGrantParameter
         try database.prepare(ProjectDatabaseSchema.upsertControlGrant)
-            .bind(1, grant.id.uuidString)
-            .bind(2, actorSessionID.uuidString)
-            .bind(3, grant.conferredAt.timeIntervalSince1970)
-            .bind(4, grant.revokedAt?.timeIntervalSince1970)
-            .bind(5, try Self.encodeValidated(grant))
+            .bind(Column.id.binding, grant.id.uuidString)
+            .bind(Column.actorSessionID.binding, actorSessionID.uuidString)
+            .bind(Column.conferredAt.binding, grant.conferredAt.timeIntervalSince1970)
+            .bind(Column.revokedAt.binding, grant.revokedAt?.timeIntervalSince1970)
+            .bind(Column.data.binding, try Self.encodeValidated(grant))
             .run()
     }
 
@@ -697,13 +693,14 @@ final class ProjectDatabase {
     }
 
     func saveSupervision(_ supervision: Supervision) throws {
+        typealias Column = ProjectDatabaseSchema.SupervisionParameter
         try database.prepare(ProjectDatabaseSchema.upsertSupervision)
-            .bind(1, supervision.id.uuidString)
-            .bind(2, supervision.managerID.uuidString)
-            .bind(3, supervision.childID.uuidString)
-            .bind(4, supervision.assignedAt.timeIntervalSince1970)
-            .bind(5, supervision.state.rawValue)
-            .bind(6, try Self.encodeValidated(supervision))
+            .bind(Column.id.binding, supervision.id.uuidString)
+            .bind(Column.managerSessionID.binding, supervision.managerID.uuidString)
+            .bind(Column.childSessionID.binding, supervision.childID.uuidString)
+            .bind(Column.assignedAt.binding, supervision.assignedAt.timeIntervalSince1970)
+            .bind(Column.state.binding, supervision.state.rawValue)
+            .bind(Column.data.binding, try Self.encodeValidated(supervision))
             .run()
     }
 
@@ -734,12 +731,13 @@ final class ProjectDatabase {
     /// is inserted by `ControlGrantStore` before this call when the cap is crossed.
     func saveSupervisionEvent(_ event: SupervisionEvent) throws {
         try database.transaction {
+            typealias Column = ProjectDatabaseSchema.SupervisionEventParameter
             try database.prepare(ProjectDatabaseSchema.insertSupervisionEvent)
-                .bind(1, event.id.uuidString.lowercased())
-                .bind(2, event.supervisionID.uuidString)
-                .bind(3, event.at.timeIntervalSince1970)
-                .bind(4, event.kind.rawValue)
-                .bind(5, try Self.encodeValidated(event))
+                .bind(Column.id.binding, event.id.uuidString.lowercased())
+                .bind(Column.supervisionID.binding, event.supervisionID.uuidString)
+                .bind(Column.at.binding, event.at.timeIntervalSince1970)
+                .bind(Column.kind.binding, event.kind.rawValue)
+                .bind(Column.data.binding, try Self.encodeValidated(event))
                 .run()
             try database.prepare(ProjectDatabaseSchema.pruneSupervisionEvents)
                 .bind(1, event.supervisionID.uuidString)
@@ -755,34 +753,28 @@ final class ProjectDatabase {
     /// boundary (`SessionReadReceiptStore`), so launch does not pay for it unless activity is
     /// projected, and subsequent list rows are dictionary lookups rather than one query each.
     func sessionReadReceiptStates() throws -> [SessionID: SessionReadReceiptState] {
-        let statement = try database.prepare(
-            """
-            SELECT attention.session_id, attention.generation,
-                   receipt.participant_id, receipt.generation
-            FROM \(ProjectDatabaseSchema.sessionAttentionTable) AS attention
-            LEFT JOIN \(ProjectDatabaseSchema.sessionReadReceiptTable) AS receipt
-              ON receipt.session_id = attention.session_id
-            ORDER BY attention.session_id
-            """
-        )
+        typealias Column = ProjectDatabaseSchema.ReceiptStateColumn
+
+        let statement = try database.prepare(ProjectDatabaseSchema.selectReceiptStates)
         defer { statement.finalize() }
 
         var result: [SessionID: SessionReadReceiptState] = [:]
         while try statement.step() {
-            guard let rawSessionID = statement.text(0),
+            guard let rawSessionID = statement.text(Column.attentionSessionID.read),
                   let sessionID = SessionID(uuidString: rawSessionID) else {
                 // Presentation metadata is not authoritative project data. A malformed row may
                 // lose a dot; it may not quarantine the conversations it sits beside.
                 continue
             }
-            let completionGeneration = statement.int(1)
+            let completionGeneration = statement.int(Column.attentionGeneration.read)
             guard completionGeneration >= 0 else { continue }
             var state = result[sessionID] ?? SessionReadReceiptState(
                 sessionID: sessionID,
                 completionGeneration: completionGeneration
             )
-            if let participantID = statement.text(2), !participantID.isEmpty {
-                let seenGeneration = statement.int(3)
+            if let participantID = statement.text(Column.receiptParticipantID.read),
+               !participantID.isEmpty {
+                let seenGeneration = statement.int(Column.receiptGeneration.read)
                 if seenGeneration >= 0, seenGeneration <= completionGeneration {
                     state.seenGenerationByParticipant[participantID] = seenGeneration
                 }
@@ -814,11 +806,12 @@ final class ProjectDatabase {
                 .bind(1, state.sessionID.uuidString)
                 .bind(2, state.completionGeneration)
                 .run()
+            typealias Column = ProjectDatabaseSchema.SessionReadReceiptParameter
             for (participantID, generation) in state.seenGenerationByParticipant {
                 try database.prepare(ProjectDatabaseSchema.upsertSessionReadReceipt)
-                    .bind(1, state.sessionID.uuidString)
-                    .bind(2, participantID)
-                    .bind(3, generation)
+                    .bind(Column.sessionID.binding, state.sessionID.uuidString)
+                    .bind(Column.participantID.binding, participantID)
+                    .bind(Column.generation.binding, generation)
                     .run()
             }
             return true
@@ -833,23 +826,25 @@ final class ProjectDatabase {
         var payload = project
         payload.sessions = []
 
+        typealias Column = ProjectDatabaseSchema.ProjectParameter
         try database.prepare(ProjectDatabaseSchema.upsertProject)
-            .bind(1, project.id.uuidString)
-            .bind(2, position)
-            .bind(3, project.name)
-            .bind(4, project.folderPath)
-            .bind(5, try Self.encodeValidated(payload))
+            .bind(Column.id.binding, project.id.uuidString)
+            .bind(Column.position.binding, position)
+            .bind(Column.name.binding, project.name)
+            .bind(Column.folderPath.binding, project.folderPath)
+            .bind(Column.data.binding, try Self.encodeValidated(payload))
             .run()
     }
 
     private func upsert(_ session: AgentSession, in projectID: ProjectID, position: Int) throws {
+        typealias Column = ProjectDatabaseSchema.SessionParameter
         try database.prepare(ProjectDatabaseSchema.upsertSession)
-            .bind(1, session.id.uuidString)
-            .bind(2, projectID.uuidString)
-            .bind(3, position)
-            .bind(4, session.kind.rawValue)
-            .bind(5, session.lastActiveAt.timeIntervalSince1970)
-            .bind(6, try Self.encodeValidated(session))
+            .bind(Column.id.binding, session.id.uuidString)
+            .bind(Column.projectID.binding, projectID.uuidString)
+            .bind(Column.position.binding, position)
+            .bind(Column.kind.binding, session.kind.rawValue)
+            .bind(Column.lastActiveAt.binding, session.lastActiveAt.timeIntervalSince1970)
+            .bind(Column.data.binding, try Self.encodeValidated(session))
             .run()
     }
 
@@ -1158,6 +1153,61 @@ final class ProjectDatabase {
     }
 }
 
+// MARK: - Column Lists
+
+/// One statement's columns, declared once in the order the statement writes them.
+///
+/// SQL column order and the integer a call site hands to `bind`/`text` used to agree by eye and
+/// nothing else. Reordering a `SELECT` list or an `INSERT` column list therefore rebound every
+/// column after the change *silently*, because SQLite is perfectly willing to give column 2 to
+/// whoever asks for column 2 whatever it holds — a wrong `TEXT` reaches the model as a plausible
+/// value rather than as an error. Deriving the statement's own column list from the same
+/// declaration that supplies the indices removes the seam the two could drift across.
+///
+/// The conformance is per *statement*, not per table: `SELECT id, project_id, kind …` and
+/// `INSERT INTO session (id, project_id, position …)` are different lists over the same table,
+/// and each owns its own numbering.
+protocol SQLColumnList: RawRepresentable, CaseIterable where RawValue == Int32 {
+
+    /// The column exactly as the statement spells it, qualifier and all.
+    var columnName: String { get }
+}
+
+extension SQLColumnList {
+
+    /// The columns as SQL writes them: `id, project_id, kind`.
+    static var list: String { ordered.map(\.columnName).joined(separator: ", ") }
+
+    /// Ordered by raw value rather than by `allCases` alone, so a case given an explicit number
+    /// cannot disagree with the line it happens to be written on.
+    static var ordered: [Self] { allCases.sorted { $0.rawValue < $1.rawValue } }
+}
+
+/// Columns a statement projects. SQLite numbers result columns from zero.
+protocol SQLResultColumns: SQLColumnList {}
+
+extension SQLResultColumns {
+
+    /// The index `SQLiteDatabase.Statement.text(_:)` and its siblings expect — 0-based.
+    var read: Int32 { rawValue }
+}
+
+/// Columns a statement binds a value for. SQLite numbers bind parameters from one.
+///
+/// Deliberately a different protocol from `SQLResultColumns` rather than one type carrying both
+/// numbers: the two index spaces are off by one, so making the compiler refuse a read index in a
+/// bind slot is worth more than the shared declaration would be.
+protocol SQLBoundColumns: SQLColumnList {}
+
+extension SQLBoundColumns {
+
+    /// The index `SQLiteDatabase.Statement.bind(_:_:)` expects — 1-based.
+    var binding: Int32 { rawValue + 1 }
+
+    /// One `?` per column, for the statement's `VALUES` list.
+    static var placeholders: String { ordered.map { _ in "?" }.joined(separator: ", ") }
+}
+
 // MARK: - Schema
 
 enum ProjectDatabaseSchema {
@@ -1186,6 +1236,205 @@ enum ProjectDatabaseSchema {
     static let supervisionEventTable = "supervision_event"
     static let sessionAttentionTable = "session_attention"
     static let sessionReadReceiptTable = "session_read_receipt"
+
+    // MARK: Column Lists
+
+    /// The session columns `selectSessions` projects. `position` is absent on purpose: it orders
+    /// the rows and is never read back, because the array order *is* the position.
+    enum SessionLoadColumn: Int32, CaseIterable, SQLResultColumns {
+        case id = 0
+        case projectID
+        case kind
+        case lastActiveAt
+        case data
+
+        var columnName: String {
+            switch self {
+            case .id: return "id"
+            case .projectID: return "project_id"
+            case .kind: return "kind"
+            case .lastActiveAt: return "last_active_at"
+            case .data: return "data"
+            }
+        }
+    }
+
+    /// The project columns `selectProjects` projects.
+    enum ProjectLoadColumn: Int32, CaseIterable, SQLResultColumns {
+        case id = 0
+        case name
+        case folderPath
+        case data
+
+        var columnName: String {
+            switch self {
+            case .id: return "id"
+            case .name: return "name"
+            case .folderPath: return "folder_path"
+            case .data: return "data"
+            }
+        }
+    }
+
+    /// The columns `selectReceiptStates` projects. Both halves of the join carry a `generation`
+    /// and both carry an identifier, so the names are qualified — and a swap between the two
+    /// pairs would read as valid data rather than as a failure.
+    enum ReceiptStateColumn: Int32, CaseIterable, SQLResultColumns {
+        case attentionSessionID = 0
+        case attentionGeneration
+        case receiptParticipantID
+        case receiptGeneration
+
+        var columnName: String {
+            switch self {
+            case .attentionSessionID: return "attention.session_id"
+            case .attentionGeneration: return "attention.generation"
+            case .receiptParticipantID: return "receipt.participant_id"
+            case .receiptGeneration: return "receipt.generation"
+            }
+        }
+    }
+
+    /// The parameters `upsertProject` binds.
+    enum ProjectParameter: Int32, CaseIterable, SQLBoundColumns {
+        case id = 0
+        case position
+        case name
+        case folderPath
+        case data
+
+        var columnName: String {
+            switch self {
+            case .id: return "id"
+            case .position: return "position"
+            case .name: return "name"
+            case .folderPath: return "folder_path"
+            case .data: return "data"
+            }
+        }
+    }
+
+    /// The parameters `upsertSession` binds.
+    enum SessionParameter: Int32, CaseIterable, SQLBoundColumns {
+        case id = 0
+        case projectID
+        case position
+        case kind
+        case lastActiveAt
+        case data
+
+        var columnName: String {
+            switch self {
+            case .id: return "id"
+            case .projectID: return "project_id"
+            case .position: return "position"
+            case .kind: return "kind"
+            case .lastActiveAt: return "last_active_at"
+            case .data: return "data"
+            }
+        }
+    }
+
+    /// The parameters `upsertControlGrant` binds.
+    enum ControlGrantParameter: Int32, CaseIterable, SQLBoundColumns {
+        case id = 0
+        case actorSessionID
+        case conferredAt
+        case revokedAt
+        case data
+
+        var columnName: String {
+            switch self {
+            case .id: return "id"
+            case .actorSessionID: return "actor_session_id"
+            case .conferredAt: return "conferred_at"
+            case .revokedAt: return "revoked_at"
+            case .data: return "data"
+            }
+        }
+    }
+
+    /// The parameters `upsertSupervision` binds.
+    enum SupervisionParameter: Int32, CaseIterable, SQLBoundColumns {
+        case id = 0
+        case managerSessionID
+        case childSessionID
+        case assignedAt
+        case state
+        case data
+
+        var columnName: String {
+            switch self {
+            case .id: return "id"
+            case .managerSessionID: return "manager_session_id"
+            case .childSessionID: return "child_session_id"
+            case .assignedAt: return "assigned_at"
+            case .state: return "state"
+            case .data: return "data"
+            }
+        }
+    }
+
+    /// The parameters `insertSupervisionEvent` binds.
+    enum SupervisionEventParameter: Int32, CaseIterable, SQLBoundColumns {
+        case id = 0
+        case supervisionID
+        case at
+        case kind
+        case data
+
+        var columnName: String {
+            switch self {
+            case .id: return "id"
+            case .supervisionID: return "supervision_id"
+            case .at: return "at"
+            case .kind: return "kind"
+            case .data: return "data"
+            }
+        }
+    }
+
+    /// The parameters `upsertSessionReadReceipt` binds. The first two are the compound key and
+    /// both are `TEXT`, so binding them the other way round would store a receipt nobody can
+    /// find rather than fail.
+    enum SessionReadReceiptParameter: Int32, CaseIterable, SQLBoundColumns {
+        case sessionID = 0
+        case participantID
+        case generation
+
+        var columnName: String {
+            switch self {
+            case .sessionID: return "session_id"
+            case .participantID: return "participant_id"
+            case .generation: return "generation"
+            }
+        }
+    }
+
+    // MARK: Queries
+
+    /// The authoritative session rows, ordered so each project's sessions arrive in their stored
+    /// order. The projection comes from `SessionLoadColumn`, which is also what `load()` reads
+    /// the columns back by, so the list and the indices cannot be changed apart.
+    static let selectSessions = """
+        SELECT \(SessionLoadColumn.list)
+        FROM session
+        ORDER BY project_id, position
+        """
+
+    /// The authoritative project rows, in sidebar order.
+    static let selectProjects =
+        "SELECT \(ProjectLoadColumn.list) FROM project ORDER BY position"
+
+    /// Every conversation's completion generation with each participant's position in it. A left
+    /// join, because a conversation nobody has read yet still has a completion generation.
+    static let selectReceiptStates = """
+        SELECT \(ReceiptStateColumn.list)
+        FROM \(sessionAttentionTable) AS attention
+        LEFT JOIN \(sessionReadReceiptTable) AS receipt
+          ON receipt.session_id = attention.session_id
+        ORDER BY attention.session_id
+        """
 
     /// Columns exist to be ordered by, filtered on, or joined; everything else is in `data`.
     /// `kind` and `last_active_at` are duplicated out of the payload on purpose — they are what
@@ -1218,8 +1467,8 @@ enum ProjectDatabaseSchema {
         """
 
     static let upsertProject = """
-        INSERT INTO project (id, position, name, folder_path, data)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO project (\(ProjectParameter.list))
+        VALUES (\(ProjectParameter.placeholders))
         ON CONFLICT(id) DO UPDATE SET
             position = excluded.position,
             name = excluded.name,
@@ -1228,8 +1477,8 @@ enum ProjectDatabaseSchema {
         """
 
     static let upsertSession = """
-        INSERT INTO session (id, project_id, position, kind, last_active_at, data)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO session (\(SessionParameter.list))
+        VALUES (\(SessionParameter.placeholders))
         ON CONFLICT(id) DO UPDATE SET
             project_id = excluded.project_id,
             position = excluded.position,
@@ -1366,14 +1615,14 @@ enum ProjectDatabaseSchema {
         """
 
     static let upsertSessionReadReceipt = """
-        INSERT INTO session_read_receipt (session_id, participant_id, generation)
-        VALUES (?, ?, ?)
+        INSERT INTO session_read_receipt (\(SessionReadReceiptParameter.list))
+        VALUES (\(SessionReadReceiptParameter.placeholders))
         ON CONFLICT(session_id, participant_id) DO UPDATE SET generation = excluded.generation
         """
 
     static let upsertControlGrant = """
-        INSERT INTO control_grant (id, actor_session_id, conferred_at, revoked_at, data)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO control_grant (\(ControlGrantParameter.list))
+        VALUES (\(ControlGrantParameter.placeholders))
         ON CONFLICT(id) DO UPDATE SET
             actor_session_id = excluded.actor_session_id,
             conferred_at = excluded.conferred_at,
@@ -1383,8 +1632,8 @@ enum ProjectDatabaseSchema {
 
     static let upsertSupervision = """
         INSERT INTO supervision (
-            id, manager_session_id, child_session_id, assigned_at, state, data
-        ) VALUES (?, ?, ?, ?, ?, ?)
+            \(SupervisionParameter.list)
+        ) VALUES (\(SupervisionParameter.placeholders))
         ON CONFLICT(id) DO UPDATE SET
             manager_session_id = excluded.manager_session_id,
             child_session_id = excluded.child_session_id,
@@ -1394,8 +1643,8 @@ enum ProjectDatabaseSchema {
         """
 
     static let insertSupervisionEvent = """
-        INSERT INTO supervision_event (id, supervision_id, at, kind, data)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO supervision_event (\(SupervisionEventParameter.list))
+        VALUES (\(SupervisionEventParameter.placeholders))
         """
 
     static let pruneSupervisionEvents = """

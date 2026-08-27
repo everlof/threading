@@ -97,6 +97,231 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertFalse(try statement.step())
     }
 
+    // MARK: - Column Lists
+
+    /// Every statement whose parameters or results are read by number is built from the same
+    /// declaration that supplies those numbers, so the two cannot be reordered apart. That is
+    /// only worth anything while the declaration still says what the stored rows are — so the
+    /// statements are pinned here as text, written out by hand rather than rebuilt from the
+    /// enums under test, which would agree with any reordering and prove nothing.
+    ///
+    /// A failure here is not a style complaint. Reordering a `SELECT` list moves every read
+    /// after the change onto the neighbouring column, and SQLite reports nothing: a wrong
+    /// `TEXT` arrives as a plausible value. This is the assertion that turns that into a
+    /// failing test.
+    func testTheStatementsSpellTheirColumnsInTheStoredOrder() {
+        XCTAssertEqual(
+            ProjectDatabaseSchema.selectSessions,
+            """
+            SELECT id, project_id, kind, last_active_at, data
+            FROM session
+            ORDER BY project_id, position
+            """
+        )
+        XCTAssertEqual(
+            ProjectDatabaseSchema.selectProjects,
+            "SELECT id, name, folder_path, data FROM project ORDER BY position"
+        )
+        XCTAssertEqual(
+            ProjectDatabaseSchema.selectReceiptStates,
+            """
+            SELECT attention.session_id, attention.generation, receipt.participant_id, \
+            receipt.generation
+            FROM session_attention AS attention
+            LEFT JOIN session_read_receipt AS receipt
+              ON receipt.session_id = attention.session_id
+            ORDER BY attention.session_id
+            """
+        )
+        XCTAssertEqual(
+            ProjectDatabaseSchema.upsertProject,
+            """
+            INSERT INTO project (id, position, name, folder_path, data)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                position = excluded.position,
+                name = excluded.name,
+                folder_path = excluded.folder_path,
+                data = excluded.data
+            """
+        )
+        XCTAssertEqual(
+            ProjectDatabaseSchema.upsertSession,
+            """
+            INSERT INTO session (id, project_id, position, kind, last_active_at, data)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                project_id = excluded.project_id,
+                position = excluded.position,
+                kind = excluded.kind,
+                last_active_at = excluded.last_active_at,
+                data = excluded.data
+            """
+        )
+        XCTAssertEqual(
+            ProjectDatabaseSchema.upsertControlGrant,
+            """
+            INSERT INTO control_grant (id, actor_session_id, conferred_at, revoked_at, data)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                actor_session_id = excluded.actor_session_id,
+                conferred_at = excluded.conferred_at,
+                revoked_at = excluded.revoked_at,
+                data = excluded.data
+            """
+        )
+        XCTAssertEqual(
+            ProjectDatabaseSchema.upsertSupervision,
+            """
+            INSERT INTO supervision (
+                id, manager_session_id, child_session_id, assigned_at, state, data
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                manager_session_id = excluded.manager_session_id,
+                child_session_id = excluded.child_session_id,
+                assigned_at = excluded.assigned_at,
+                state = excluded.state,
+                data = excluded.data
+            """
+        )
+        XCTAssertEqual(
+            ProjectDatabaseSchema.insertSupervisionEvent,
+            """
+            INSERT INTO supervision_event (id, supervision_id, at, kind, data)
+            VALUES (?, ?, ?, ?, ?)
+            """
+        )
+        XCTAssertEqual(
+            ProjectDatabaseSchema.upsertSessionReadReceipt,
+            """
+            INSERT INTO session_read_receipt (session_id, participant_id, generation)
+            VALUES (?, ?, ?)
+            ON CONFLICT(session_id, participant_id) DO UPDATE SET generation = excluded.generation
+            """
+        )
+    }
+
+    /// The two index spaces are off by one — SQLite numbers result columns from zero and bind
+    /// parameters from one — which is the mistake the declarations exist to stop anyone making
+    /// by hand. Switched rather than iterated, so adding a column is a compilation failure here
+    /// instead of an untested position.
+    func testResultColumnsAreZeroBasedAndBoundParametersAreOneBased() {
+        for column in ProjectDatabaseSchema.SessionLoadColumn.allCases {
+            switch column {
+            case .id: XCTAssertEqual(column.read, 0)
+            case .projectID: XCTAssertEqual(column.read, 1)
+            case .kind: XCTAssertEqual(column.read, 2)
+            case .lastActiveAt: XCTAssertEqual(column.read, 3)
+            case .data: XCTAssertEqual(column.read, 4)
+            }
+        }
+        for column in ProjectDatabaseSchema.ProjectLoadColumn.allCases {
+            switch column {
+            case .id: XCTAssertEqual(column.read, 0)
+            case .name: XCTAssertEqual(column.read, 1)
+            case .folderPath: XCTAssertEqual(column.read, 2)
+            case .data: XCTAssertEqual(column.read, 3)
+            }
+        }
+        for column in ProjectDatabaseSchema.ReceiptStateColumn.allCases {
+            switch column {
+            case .attentionSessionID: XCTAssertEqual(column.read, 0)
+            case .attentionGeneration: XCTAssertEqual(column.read, 1)
+            case .receiptParticipantID: XCTAssertEqual(column.read, 2)
+            case .receiptGeneration: XCTAssertEqual(column.read, 3)
+            }
+        }
+        for column in ProjectDatabaseSchema.ProjectParameter.allCases {
+            switch column {
+            case .id: XCTAssertEqual(column.binding, 1)
+            case .position: XCTAssertEqual(column.binding, 2)
+            case .name: XCTAssertEqual(column.binding, 3)
+            case .folderPath: XCTAssertEqual(column.binding, 4)
+            case .data: XCTAssertEqual(column.binding, 5)
+            }
+        }
+        for column in ProjectDatabaseSchema.SessionParameter.allCases {
+            switch column {
+            case .id: XCTAssertEqual(column.binding, 1)
+            case .projectID: XCTAssertEqual(column.binding, 2)
+            case .position: XCTAssertEqual(column.binding, 3)
+            case .kind: XCTAssertEqual(column.binding, 4)
+            case .lastActiveAt: XCTAssertEqual(column.binding, 5)
+            case .data: XCTAssertEqual(column.binding, 6)
+            }
+        }
+        for column in ProjectDatabaseSchema.ControlGrantParameter.allCases {
+            switch column {
+            case .id: XCTAssertEqual(column.binding, 1)
+            case .actorSessionID: XCTAssertEqual(column.binding, 2)
+            case .conferredAt: XCTAssertEqual(column.binding, 3)
+            case .revokedAt: XCTAssertEqual(column.binding, 4)
+            case .data: XCTAssertEqual(column.binding, 5)
+            }
+        }
+        for column in ProjectDatabaseSchema.SupervisionParameter.allCases {
+            switch column {
+            case .id: XCTAssertEqual(column.binding, 1)
+            case .managerSessionID: XCTAssertEqual(column.binding, 2)
+            case .childSessionID: XCTAssertEqual(column.binding, 3)
+            case .assignedAt: XCTAssertEqual(column.binding, 4)
+            case .state: XCTAssertEqual(column.binding, 5)
+            case .data: XCTAssertEqual(column.binding, 6)
+            }
+        }
+        for column in ProjectDatabaseSchema.SupervisionEventParameter.allCases {
+            switch column {
+            case .id: XCTAssertEqual(column.binding, 1)
+            case .supervisionID: XCTAssertEqual(column.binding, 2)
+            case .at: XCTAssertEqual(column.binding, 3)
+            case .kind: XCTAssertEqual(column.binding, 4)
+            case .data: XCTAssertEqual(column.binding, 5)
+            }
+        }
+        for column in ProjectDatabaseSchema.SessionReadReceiptParameter.allCases {
+            switch column {
+            case .sessionID: XCTAssertEqual(column.binding, 1)
+            case .participantID: XCTAssertEqual(column.binding, 2)
+            case .generation: XCTAssertEqual(column.binding, 3)
+            }
+        }
+    }
+
+    /// Reads the written row back by column *name*, which the round-trip tests cannot do: they
+    /// go out through the bind list and back in through the select list, so a pair of columns
+    /// swapped in both directions round-trips perfectly while the store holds a project path
+    /// under `name`. This is the assertion that the columns hold what they are called.
+    func testStoredColumnsHoldWhatTheirNamesSay() throws {
+        let database = try makeDatabase()
+        var session = AgentSession(kind: .codex, title: "Chat")
+        session.lastActiveAt = Date(timeIntervalSince1970: 1_700_000_000)
+        let project = makeProject("alpha", sessions: [session])
+        try database.save(ProjectsState(projects: [project]))
+
+        let raw = try SQLiteDatabase(path: directory.appendingPathComponent("test.db").path)
+
+        let sessionRow = try raw.prepare(
+            "SELECT project_id, position, kind, last_active_at FROM session WHERE id = ?"
+        )
+        defer { sessionRow.finalize() }
+        sessionRow.bind(1, session.id.uuidString)
+        XCTAssertTrue(try sessionRow.step())
+        XCTAssertEqual(sessionRow.text(0), project.id.uuidString)
+        XCTAssertEqual(sessionRow.int(1), 0)
+        XCTAssertEqual(sessionRow.text(2), "codex")
+        XCTAssertEqual(sessionRow.double(3), 1_700_000_000, accuracy: 0.000_001)
+
+        let projectRow = try raw.prepare(
+            "SELECT position, name, folder_path FROM project WHERE id = ?"
+        )
+        defer { projectRow.finalize() }
+        projectRow.bind(1, project.id.uuidString)
+        XCTAssertTrue(try projectRow.step())
+        XCTAssertEqual(projectRow.int(0), 0)
+        XCTAssertEqual(projectRow.text(1), "alpha")
+        XCTAssertEqual(projectRow.text(2), "/tmp/alpha")
+    }
+
     // MARK: - Round Trip
 
     func testEmptyDatabaseIsEmpty() throws {
@@ -1080,44 +1305,48 @@ final class ProjectDatabaseTests: XCTestCase {
     private func insert(project: Project, into database: SQLiteDatabase) throws {
         var payload = project
         payload.sessions = []
+        typealias Column = ProjectDatabaseSchema.ProjectParameter
         try database.prepare(ProjectDatabaseSchema.upsertProject)
-            .bind(1, project.id.uuidString)
-            .bind(2, 0)
-            .bind(3, project.name)
-            .bind(4, project.folderPath)
-            .bind(5, try encoded(payload))
+            .bind(Column.id.binding, project.id.uuidString)
+            .bind(Column.position.binding, 0)
+            .bind(Column.name.binding, project.name)
+            .bind(Column.folderPath.binding, project.folderPath)
+            .bind(Column.data.binding, try encoded(payload))
             .run()
 
         for (position, session) in project.sessions.enumerated() {
+            typealias Column = ProjectDatabaseSchema.SessionParameter
             try database.prepare(ProjectDatabaseSchema.upsertSession)
-                .bind(1, session.id.uuidString)
-                .bind(2, project.id.uuidString)
-                .bind(3, position)
-                .bind(4, session.kind.rawValue)
-                .bind(5, session.lastActiveAt.timeIntervalSince1970)
-                .bind(6, try encoded(session))
+                .bind(Column.id.binding, session.id.uuidString)
+                .bind(Column.projectID.binding, project.id.uuidString)
+                .bind(Column.position.binding, position)
+                .bind(Column.kind.binding, session.kind.rawValue)
+                .bind(Column.lastActiveAt.binding, session.lastActiveAt.timeIntervalSince1970)
+                .bind(Column.data.binding, try encoded(session))
                 .run()
         }
     }
 
     private func insert(supervision: Supervision, into database: SQLiteDatabase) throws {
+        typealias Column = ProjectDatabaseSchema.SupervisionParameter
         try database.prepare(ProjectDatabaseSchema.upsertSupervision)
-            .bind(1, supervision.id.uuidString)
-            .bind(2, supervision.managerID.uuidString)
-            .bind(3, supervision.childID.uuidString)
-            .bind(4, supervision.assignedAt.timeIntervalSince1970)
-            .bind(5, supervision.state.rawValue)
-            .bind(6, try encoded(supervision))
+            .bind(Column.id.binding, supervision.id.uuidString)
+            .bind(Column.managerSessionID.binding, supervision.managerID.uuidString)
+            .bind(Column.childSessionID.binding, supervision.childID.uuidString)
+            .bind(Column.assignedAt.binding, supervision.assignedAt.timeIntervalSince1970)
+            .bind(Column.state.binding, supervision.state.rawValue)
+            .bind(Column.data.binding, try encoded(supervision))
             .run()
     }
 
     private func insert(event: SupervisionEvent, into database: SQLiteDatabase) throws {
+        typealias Column = ProjectDatabaseSchema.SupervisionEventParameter
         try database.prepare(ProjectDatabaseSchema.insertSupervisionEvent)
-            .bind(1, event.id.uuidString.lowercased())
-            .bind(2, event.supervisionID.uuidString)
-            .bind(3, event.at.timeIntervalSince1970)
-            .bind(4, event.kind.rawValue)
-            .bind(5, try encoded(event))
+            .bind(Column.id.binding, event.id.uuidString.lowercased())
+            .bind(Column.supervisionID.binding, event.supervisionID.uuidString)
+            .bind(Column.at.binding, event.at.timeIntervalSince1970)
+            .bind(Column.kind.binding, event.kind.rawValue)
+            .bind(Column.data.binding, try encoded(event))
             .run()
     }
 
