@@ -259,7 +259,9 @@ final class MediaDocumentPerformanceTests: XCTestCase {
         repeat {
             let page = try await broker.page(
                 for: ExtensionFileQuery(
-                    projectID: "perf",
+                    // The broker parses this into a `ProjectID`, so the fixture has to spell a
+                    // real UUID even though `PerfRootProvider` answers every project alike.
+                    projectID: "3f2a6c10-0000-4000-8000-000000000001",
                     fileExtensions: ["json"],
                     maximumResults: 200,
                     cursor: cursor
@@ -371,6 +373,6 @@ private final class PerfRootProvider: ExtensionProjectFileRootProviding {
         self.root = root
     }
 
-    func projectCheckoutRoot(projectID: String) -> URL? { root }
-    func sessionWorkspaceRoot(projectID: String, sessionID: String) -> URL? { nil }
+    func projectCheckoutRoot(projectID: ProjectID) -> URL? { root }
+    func sessionWorkspaceRoot(projectID: ProjectID, sessionID: SessionID) -> URL? { nil }
 }

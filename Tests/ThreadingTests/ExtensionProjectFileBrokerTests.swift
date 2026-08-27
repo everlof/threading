@@ -19,6 +19,15 @@ final class ExtensionProjectFileBrokerTests: XCTestCase {
     private let generation = "generation-1"
     private let identifier = "codes.threading.animations"
 
+    /// The identifiers a real extension holds are the UUIDs the snapshot published, so the
+    /// fixtures are UUIDs too. They are written out in full rather than generated: an id
+    /// derived from the same value the code parses would agree with any change to the parse.
+    private static let projectA = "a1111111-1111-4111-8111-111111111111"
+    private static let projectB = "b2222222-2222-4222-8222-222222222222"
+    private static let unknownProject = "c3333333-3333-4333-8333-333333333333"
+    private static let sessionOne = "d4444444-4444-4444-8444-444444444444"
+    private static let sessionTwo = "e5555555-5555-4555-8555-555555555555"
+
     override func setUp() async throws {
         try await super.setUp()
         let base = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -33,8 +42,16 @@ final class ExtensionProjectFileBrokerTests: XCTestCase {
             )
         }
         provider = StubRootProvider(
-            projects: ["project-a": root, "project-b": outside],
-            workspaces: ["project-a/session-1": workspace]
+            projects: [
+                Self.id(Self.projectA): root,
+                Self.id(Self.projectB): outside
+            ],
+            workspaces: [
+                .init(
+                    project: Self.id(Self.projectA),
+                    session: Self.sessionID(Self.sessionOne)
+                ): workspace
+            ]
         )
         broker.rootProvider = provider
     }
@@ -174,7 +191,7 @@ final class ExtensionProjectFileBrokerTests: XCTestCase {
         try write("animations/hero.json", LottieFixture.spinningDot(), in: workspace)
 
         let page = try await broker.page(
-            for: query(scope: .sessionWorkspace(sessionID: "session-1")),
+            for: query(scope: .sessionWorkspace(sessionID: Self.sessionOne)),
             extensionIdentifier: identifier,
             generation: generation
         )
@@ -183,8 +200,8 @@ final class ExtensionProjectFileBrokerTests: XCTestCase {
         await assertThrows(.unknownSessionWorkspace) {
             _ = try await self.broker.page(
                 for: self.query(
-                    projectID: "project-b",
-                    scope: .sessionWorkspace(sessionID: "session-1")
+                    projectID: Self.projectB,
+                    scope: .sessionWorkspace(sessionID: Self.sessionOne)
                 ),
                 extensionIdentifier: self.identifier,
                 generation: self.generation
@@ -195,7 +212,7 @@ final class ExtensionProjectFileBrokerTests: XCTestCase {
     func testAnUnknownProjectIsRefused() async {
         await assertThrows(.unknownProject) {
             _ = try await self.broker.page(
-                for: self.query(projectID: "project-z"),
+                for: self.query(projectID: Self.unknownProject),
                 extensionIdentifier: self.identifier,
                 generation: self.generation
             )
@@ -207,17 +224,19 @@ final class ExtensionProjectFileBrokerTests: XCTestCase {
     func testTwoSessionWorkspacesUnderOneProjectAnswerSeparately() async throws {
         let second = workspace.deletingLastPathComponent().appendingPathComponent("worktree-2")
         try FileManager.default.createDirectory(at: second, withIntermediateDirectories: true)
-        provider.workspaces["project-a/session-2"] = second
+        provider.workspaces[
+            .init(project: Self.id(Self.projectA), session: Self.sessionID(Self.sessionTwo))
+        ] = second
         try write("animations/one.json", LottieFixture.spinningDot(), in: workspace)
         try write("animations/two.json", LottieFixture.spinningDot(), in: second)
 
         let first = try await broker.page(
-            for: query(scope: .sessionWorkspace(sessionID: "session-1")),
+            for: query(scope: .sessionWorkspace(sessionID: Self.sessionOne)),
             extensionIdentifier: identifier,
             generation: generation
         )
         let other = try await broker.page(
-            for: query(scope: .sessionWorkspace(sessionID: "session-2")),
+            for: query(scope: .sessionWorkspace(sessionID: Self.sessionTwo)),
             extensionIdentifier: identifier,
             generation: generation
         )
@@ -225,15 +244,108 @@ final class ExtensionProjectFileBrokerTests: XCTestCase {
         XCTAssertEqual(other.handles.map(\.name), ["two.json"])
     }
 
+    // MARK: - Identifiers
+
+    /// The project and the session arrive as two adjacent UUID strings and decide a filesystem
+    /// root. They are parsed at the broker, so an id that is not a UUID is refused there — the
+    /// resolver is never asked, rather than being asked and happening to miss.
+    func testAnIdentifierThatIsNotAUUIDIsRefusedBeforeAnyRootIsResolved() async {
+        // An empty id is `validate()`'s refusal, not this one, so it is not in this list.
+        for malformed in [
+            "project-a",
+            "a1111111111141118111111111111111",
+            "{a1111111-1111-4111-8111-111111111111}",
+            "a1111111-1111-4111-8111-111111111111 ",
+            "a1111111-1111-4111-8111-111111111111/../../etc"
+        ] {
+            await assertThrows(.unknownProject) {
+                _ = try await self.broker.page(
+                    for: self.query(projectID: malformed),
+                    extensionIdentifier: self.identifier,
+                    generation: self.generation
+                )
+            }
+        }
+        XCTAssertEqual(
+            provider.checkoutQueries,
+            [],
+            "a malformed project id reached the root resolver instead of stopping at the parse"
+        )
+    }
+
+    /// A malformed session id stays the workspace's refusal rather than becoming the project's:
+    /// the project is checked first, exactly as it was when the miss came from a lookup.
+    func testAnUnparseableSessionIsRefusedAsAWorkspaceWithoutAskingForOne() async {
+        await assertThrows(.unknownSessionWorkspace) {
+            _ = try await self.broker.page(
+                for: self.query(scope: .sessionWorkspace(sessionID: "session-1")),
+                extensionIdentifier: self.identifier,
+                generation: self.generation
+            )
+        }
+        XCTAssertEqual(
+            provider.checkoutQueries,
+            [Self.id(Self.projectA)],
+            "the project check did not run before the session id was parsed"
+        )
+        XCTAssertEqual(
+            provider.workspaceQueries,
+            [],
+            "a malformed session id reached the workspace resolver"
+        )
+    }
+
+    /// `UUID(uuidString:)` accepts either case and normalizes, which is what the lowercased
+    /// string comparison this replaced did. An extension holding the uppercase spelling of an
+    /// id keeps resolving; nothing about the swap narrowed what the wire may send.
+    func testUppercaseIdentifiersResolveTheSameRootsAsLowercase() async throws {
+        try write("animations/hero.json", LottieFixture.spinningDot(), in: workspace)
+
+        let page = try await broker.page(
+            for: query(
+                projectID: "A1111111-1111-4111-8111-111111111111",
+                scope: .sessionWorkspace(sessionID: "D4444444-4444-4444-8444-444444444444")
+            ),
+            extensionIdentifier: identifier,
+            generation: generation
+        )
+
+        XCTAssertEqual(page.handles.map(\.name), ["hero.json"])
+        XCTAssertEqual(
+            provider.workspaceQueries,
+            [.init(
+                project: Self.id(Self.projectA),
+                session: Self.sessionID(Self.sessionOne)
+            )],
+            "an uppercase id did not parse to the same identity as its lowercase spelling"
+        )
+    }
+
+    /// The two identifiers used to be interchangeable `String`s. Swapping them at a call site
+    /// compiled; the lookup then missed, so it failed closed. It still does — and the resolver
+    /// now cannot be handed them the wrong way round at all.
+    func testASwappedProjectAndSessionPairResolvesNothing() async {
+        await assertThrows(.unknownProject) {
+            _ = try await self.broker.page(
+                for: self.query(
+                    projectID: Self.sessionOne,
+                    scope: .sessionWorkspace(sessionID: Self.projectA)
+                ),
+                extensionIdentifier: self.identifier,
+                generation: self.generation
+            )
+        }
+    }
+
     // MARK: - Queries
 
     func testAQueryWithoutAUsableFilterIsRefused() async {
         for invalid in [
-            ExtensionFileQuery(projectID: "project-a", fileExtensions: []),
-            ExtensionFileQuery(projectID: "project-a", fileExtensions: ["*.json"]),
-            ExtensionFileQuery(projectID: "project-a", fileExtensions: [".json"]),
+            ExtensionFileQuery(projectID: Self.projectA, fileExtensions: []),
+            ExtensionFileQuery(projectID: Self.projectA, fileExtensions: ["*.json"]),
+            ExtensionFileQuery(projectID: Self.projectA, fileExtensions: [".json"]),
             ExtensionFileQuery(
-                projectID: "project-a",
+                projectID: Self.projectA,
                 fileExtensions: ["json"],
                 maximumResults: 10_000
             )
@@ -320,8 +432,22 @@ final class ExtensionProjectFileBrokerTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    private static func id(_ value: String) -> ProjectID {
+        guard let id = ProjectID(uuidString: value) else {
+            preconditionFailure("fixture project id is not a UUID: \(value)")
+        }
+        return id
+    }
+
+    private static func sessionID(_ value: String) -> SessionID {
+        guard let id = SessionID(uuidString: value) else {
+            preconditionFailure("fixture session id is not a UUID: \(value)")
+        }
+        return id
+    }
+
     private func query(
-        projectID: String = "project-a",
+        projectID: String = ExtensionProjectFileBrokerTests.projectA,
         scope: ExtensionFileScope = .projectCheckout,
         fileExtensions: [String] = ["json"],
         maximumResults: Int = 200,
@@ -364,19 +490,34 @@ final class ExtensionProjectFileBrokerTests: XCTestCase {
 
 @MainActor
 private final class StubRootProvider: ExtensionProjectFileRootProviding {
-    var projects: [String: URL]
-    var workspaces: [String: URL]
+    /// A workspace belongs to one project *and* one session. Keyed by both, so the stub cannot
+    /// answer a pair it was never given — which is the rule the broker is being tested for.
+    struct WorkspaceKey: Hashable {
+        let project: ProjectID
+        let session: SessionID
+    }
 
-    init(projects: [String: URL], workspaces: [String: URL]) {
+    var projects: [ProjectID: URL]
+    var workspaces: [WorkspaceKey: URL]
+
+    /// What the broker actually asked for, so a test can assert a refusal happened *before* the
+    /// resolver rather than inside it.
+    private(set) var checkoutQueries: [ProjectID] = []
+    private(set) var workspaceQueries: [WorkspaceKey] = []
+
+    init(projects: [ProjectID: URL], workspaces: [WorkspaceKey: URL]) {
         self.projects = projects
         self.workspaces = workspaces
     }
 
-    func projectCheckoutRoot(projectID: String) -> URL? {
-        projects[projectID]
+    func projectCheckoutRoot(projectID: ProjectID) -> URL? {
+        checkoutQueries.append(projectID)
+        return projects[projectID]
     }
 
-    func sessionWorkspaceRoot(projectID: String, sessionID: String) -> URL? {
-        workspaces["\(projectID)/\(sessionID)"]
+    func sessionWorkspaceRoot(projectID: ProjectID, sessionID: SessionID) -> URL? {
+        let key = WorkspaceKey(project: projectID, session: sessionID)
+        workspaceQueries.append(key)
+        return workspaces[key]
     }
 }

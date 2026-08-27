@@ -106,8 +106,8 @@ final class LiveExtensionHostSnapshotProvider:
 
     // MARK: - Project file roots
 
-    func projectCheckoutRoot(projectID: String) -> URL? {
-        guard let project = project(withIdentifier: projectID) else { return nil }
+    func projectCheckoutRoot(projectID: ProjectID) -> URL? {
+        guard let project = ProjectStore.shared.project(withID: projectID) else { return nil }
         return URL(fileURLWithPath: project.folderPath)
     }
 
@@ -116,21 +116,15 @@ final class LiveExtensionHostSnapshotProvider:
     ///
     /// The project check is the rule, not a convenience: a query naming project A and a session in
     /// project B is refused rather than answered from B's workspace, and the broker never infers a
-    /// workspace from whatever is selected.
-    func sessionWorkspaceRoot(projectID: String, sessionID: String) -> URL? {
-        guard let project = project(withIdentifier: projectID),
-              let session = project.sessions.first(where: {
-                  $0.id.uuidString.lowercased() == sessionID.lowercased()
-              }) else {
+    /// workspace from whatever is selected. That is why the session is looked for inside the named
+    /// project rather than through `ProjectStore.session(withID:)`, which would find it wherever
+    /// it lives.
+    func sessionWorkspaceRoot(projectID: ProjectID, sessionID: SessionID) -> URL? {
+        guard let project = ProjectStore.shared.project(withID: projectID),
+              let session = project.sessions.first(where: { $0.id == sessionID }) else {
             return nil
         }
         return URL(fileURLWithPath: session.workingDirectory(in: project))
-    }
-
-    private func project(withIdentifier identifier: String) -> Project? {
-        ProjectStore.shared.projects.first {
-            $0.id.uuidString.lowercased() == identifier.lowercased()
-        }
     }
 
     func sessionRuntimeSnapshot(

@@ -7,10 +7,15 @@ import ThreadingExtensionKit
 /// A protocol rather than a direct `ProjectStore` reach so the broker stays testable and so the
 /// one rule that matters is stated in one place: a session workspace resolves **only** for a
 /// session that belongs to the named project, and the broker never asks what is selected.
+///
+/// The identifiers are typed rather than `String` because the two are adjacent UUIDs that decide
+/// a filesystem root: as strings, a call site naming them the wrong way round compiled. The
+/// strings are parsed once, in `ExtensionProjectFileBroker.page(for:…)`, where they arrive from
+/// the wire; nothing below that seam ever sees an unparsed identifier.
 @MainActor
 protocol ExtensionProjectFileRootProviding: AnyObject {
-    func projectCheckoutRoot(projectID: String) -> URL?
-    func sessionWorkspaceRoot(projectID: String, sessionID: String) -> URL?
+    func projectCheckoutRoot(projectID: ProjectID) -> URL?
+    func sessionWorkspaceRoot(projectID: ProjectID, sessionID: SessionID) -> URL?
 }
 
 enum ExtensionProjectFileError: Error, Equatable, LocalizedError {
@@ -101,23 +106,36 @@ final class ExtensionProjectFileBroker {
         try query.validate()
         guard let rootProvider else { throw ExtensionProjectFileError.unavailable }
 
+        // The one place the wire's identifier strings are parsed. An id that is not a UUID is
+        // refused here rather than deep inside a lookup that happens to miss, and the resolver
+        // below is reached only with typed values — so the project and the session can no longer
+        // be handed over the wrong way round.
+        //
+        // `UUID(uuidString:)` accepts either case and normalizes, which is exactly what the
+        // lowercased string comparison this replaced did, so an extension holding an uppercase
+        // spelling keeps resolving.
+        guard let projectID = ProjectID(uuidString: query.projectID) else {
+            throw ExtensionProjectFileError.unknownProject
+        }
+
         let root: URL
         switch query.scope {
         case .projectCheckout:
-            guard let resolved = rootProvider.projectCheckoutRoot(
-                projectID: query.projectID
-            ) else {
+            guard let resolved = rootProvider.projectCheckoutRoot(projectID: projectID) else {
                 throw ExtensionProjectFileError.unknownProject
             }
             root = resolved
-        case .sessionWorkspace(let sessionID):
-            guard rootProvider.projectCheckoutRoot(projectID: query.projectID) != nil else {
+        case .sessionWorkspace(let rawSessionID):
+            guard rootProvider.projectCheckoutRoot(projectID: projectID) != nil else {
                 throw ExtensionProjectFileError.unknownProject
             }
-            guard let resolved = rootProvider.sessionWorkspaceRoot(
-                projectID: query.projectID,
-                sessionID: sessionID
-            ) else {
+            // The session id is parsed after the project check so an unparseable one is still
+            // the workspace's refusal rather than the project's, exactly as a lookup miss was.
+            guard let sessionID = SessionID(uuidString: rawSessionID),
+                  let resolved = rootProvider.sessionWorkspaceRoot(
+                      projectID: projectID,
+                      sessionID: sessionID
+                  ) else {
                 throw ExtensionProjectFileError.unknownSessionWorkspace
             }
             root = resolved
