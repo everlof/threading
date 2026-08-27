@@ -232,8 +232,8 @@ struct ScheduledMessage: Codable, Sendable, Equatable, Identifiable {
         /// Keeps trying for as long as the app runs, and stays visible while it does.
         case waiting(String)
 
-        /// Its moment passed while the app was not running. Never sent automatically; the
-        /// next launch asks what to do with it. See `docs/architecture/scheduled-messages.md`.
+        /// Its moment passed while the app was not watching — closed or asleep. Never sent
+        /// automatically; the user decides what to do with it.
         case missed
 
         /// Tried, and could not be delivered for a reason that will not resolve itself.

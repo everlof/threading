@@ -196,27 +196,33 @@ that check; a conversation merely looking idle after Threading relaunches is not
 finished while Threading was away. The record waits for a later observed authoritative turn end.
 
 **Two notification centres, and the second is not optional.**
-`NSWorkspace.didWakeNotification` is posted on `NSWorkspace.shared.notificationCenter`, never on
-`.default`. A scheduler observing only the default centre compiles, runs, and silently never
-re-evaluates after sleep — which is the single case the class exists for.
-`ScheduledMessageSchedulerTests` posts the wake on the workspace centre precisely so that mistake
-fails a test rather than a user's morning.
+`NSWorkspace.willSleepNotification` and `didWakeNotification` are posted on
+`NSWorkspace.shared.notificationCenter`, never on `.default`. The sleep edge stops evaluation;
+the wake edge marks every unclaimed clock send whose moment passed as missed before ordinary
+evaluation resumes. `ScheduledMessageSchedulerTests` posts both edges on the workspace centre so
+a late unattended send fails a test rather than a user's morning.
 
 **Started behind the relaunch's two gates**, from `restoreSelectedSessionIfReady` rather than
 `applicationDidFinishLaunching`: a scheduled start reads the MCP port for `--mcp-config`, and one
 firing into the window onboarding is still deferring gets a PTY in a pane nobody will see.
 
-## Nothing is sent for a time the app missed while it was closed
+## Nothing is sent for a time the app missed while it was closed or asleep
 
 There is **no grace window and no automatic late delivery**. Threading is not a server. Anything
-whose moment passed while it was not running becomes `.missed`, is reported once
+whose moment passed while it was closed or the workspace was asleep becomes `.missed`, is reported once
 (`ScheduledMessagesWereMissed`), and waits for the user — the strip shows it with **Send now**
 beside it. The rule is one sentence: *the app does not send what the clock passed while it was not
 watching.*
 
 A separate `.waiting(reason)` covers the other half — due *while* the app is running but not yet
 deliverable. Those keep trying for as long as the app runs and stay visible while they do;
-undelivered at quit, they join the next launch's missed set.
+undelivered at quit or sleep, they join the missed set too. A claimed record is already being
+performed rather than waiting, so the inactivity sweep does not reclassify it underneath its
+performer.
+
+The scheduler's one timer is installed in the main run loop's common modes. Menu tracking and a
+modal sheet are still awake, watched time, so they may delay a due send only within the stated
+five-minute heartbeat rather than suppressing the timer until the default mode returns.
 
 Finish-triggered messages have no clock moment to mark missed. They survive relaunch without
 being released by a dormant snapshot, and remain armed until Threading observes a later matching

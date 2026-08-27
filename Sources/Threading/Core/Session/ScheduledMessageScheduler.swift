@@ -16,9 +16,9 @@ import AppKit
 /// the comparison happen often enough, not to measure anything.
 ///
 /// **Two notification centres, and the second one is not optional.**
-/// `NSWorkspace.didWakeNotification` is posted on `NSWorkspace.shared.notificationCenter`, never
-/// on `.default`. A scheduler that observed only the default centre would compile, run, and
-/// silently never re-evaluate after sleep — which is the single case this whole class exists for.
+/// Workspace sleep and wake notifications are posted on `NSWorkspace.shared.notificationCenter`,
+/// never on `.default`. A scheduler that observed only the default centre would compile, run,
+/// and silently deliver a clock send late after sleep.
 @MainActor
 final class ScheduledMessageScheduler {
 
@@ -40,6 +40,7 @@ final class ScheduledMessageScheduler {
     private var workspaceObservations: AppEventObservations?
     private var timer: Timer?
     private var hasStarted = false
+    private var isWorkspaceSleeping = false
 
     /// When each `waiting` send first found its surface busy, so politeness can be bounded
     /// without the record on disk growing a field only this class would read.
@@ -124,8 +125,11 @@ final class ScheduledMessageScheduler {
         self.observations = observations
 
         let workspaceObservations = AppEventObservations(center: workspaceCenter)
+        workspaceObservations.observe(NSWorkspace.willSleepNotification) { [weak self] in
+            self?.workspaceWillSleep()
+        }
         workspaceObservations.observe(NSWorkspace.didWakeNotification) { [weak self] in
-            self?.evaluate()
+            self?.catchUpAfterWake()
         }
         self.workspaceObservations = workspaceObservations
 
@@ -139,10 +143,27 @@ final class ScheduledMessageScheduler {
     /// server, and the one rule is that it never sends what the clock passed while it was not
     /// watching. The whole batch is announced once so the window can ask about them together.
     func catchUpAfterLaunch() {
-        let missed = store.markMissed(before: now())
+        reportMissedClockMessages(
+            before: now(),
+            eventMessage: "Scheduled sends missed while quit"
+        )
+    }
+
+    private func catchUpAfterWake() {
+        reportMissedClockMessages(
+            before: now(),
+            eventMessage: "Scheduled sends missed during sleep"
+        )
+        isWorkspaceSleeping = false
+        evaluate()
+    }
+
+    private func reportMissedClockMessages(before moment: Date, eventMessage: String) {
+        let missed = store.markMissed(before: moment)
         guard !missed.isEmpty else { return }
 
-        EventLog.shared.record(.composer, "Scheduled sends missed while quit", [
+        for message in missed { waitingSince.removeValue(forKey: message.id) }
+        EventLog.shared.record(.composer, eventMessage, [
             "count": String(missed.count)
         ])
         center.post(ScheduledMessagesWereMissed(ids: missed.map(\.id)))
@@ -150,7 +171,7 @@ final class ScheduledMessageScheduler {
 
     /// Announces everything due right now, and re-arms for whatever is next.
     func evaluate() {
-        guard hasStarted else { return }
+        guard hasStarted, !isWorkspaceSleeping else { return }
 
         let moment = now()
         for message in store.due(at: moment) {
@@ -244,6 +265,12 @@ final class ScheduledMessageScheduler {
         evaluate()
     }
 
+    private func workspaceWillSleep() {
+        isWorkspaceSleeping = true
+        timer?.invalidate()
+        timer = nil
+    }
+
     /// Points one timer at the next moment anything is waiting for.
     ///
     /// One timer rather than one per send, and re-armed from scratch on every change: a timer
@@ -254,7 +281,7 @@ final class ScheduledMessageScheduler {
 
         rememberFinishTurnsInFlight()
 
-        guard hasStarted, store.hasClockWorkPending else { return }
+        guard hasStarted, !isWorkspaceSleeping, store.hasClockWorkPending else { return }
 
         let moment = now()
         let interval: TimeInterval
@@ -268,12 +295,17 @@ final class ScheduledMessageScheduler {
         }
 
         let capped = min(interval, ScheduledSchedulerDefaults.heartbeat)
-        timer = Timer.scheduledTimer(withTimeInterval: capped, repeats: false) { [weak self] _ in
+        let nextTimer = Timer(timeInterval: capped, repeats: false) { [weak self] _ in
             MainActor.assumeIsolated { self?.evaluate() }
         }
         // A long wait need not be punctual to the second, and letting the system coalesce it
         // keeps a scheduled send from being a reason the CPU wakes.
-        timer?.tolerance = capped * ScheduledSchedulerDefaults.toleranceFraction
+        nextTimer.tolerance = capped * ScheduledSchedulerDefaults.toleranceFraction
+        timer = nextTimer
+        // Menu tracking and modal sheets are still time the app is awake and watching. Common
+        // modes keep the five-minute bound valid through both rather than deferring the timer
+        // until the default run-loop mode returns.
+        RunLoop.main.add(nextTimer, forMode: .common)
     }
 
     /// Seeds the edge receipt when a condition is added during a turn or the scheduler starts

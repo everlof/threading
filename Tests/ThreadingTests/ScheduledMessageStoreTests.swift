@@ -343,6 +343,15 @@ final class ScheduledMessageStoreTests: XCTestCase {
         XCTAssertTrue(store.markMissed(before: now.addingTimeInterval(7_200)).isEmpty)
     }
 
+    func testAClaimedSendIsNotReclassifiedWhileItsPerformerOwnsIt() throws {
+        let store = makeStore()
+        let message = try store.add(message(dueIn: 60), now: now).get()
+        XCTAssertNotNil(store.claim(message.id))
+
+        XCTAssertTrue(store.markMissed(before: now.addingTimeInterval(3_600)).isEmpty)
+        XCTAssertEqual(store[message.id]?.state, .armed)
+    }
+
     func testWallClockMomentsAreReDerivedButResetAnchoredOnesAreNot() {
         let store = makeStore()
         let calendar = Calendar(identifier: .gregorian)

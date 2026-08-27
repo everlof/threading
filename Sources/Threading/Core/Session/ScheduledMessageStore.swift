@@ -330,16 +330,17 @@ final class ScheduledMessageStore {
 
     // MARK: - Time
 
-    /// Everything armed whose moment passed while nobody was watching.
+    /// Everything owed whose clock moment passed while nobody was watching.
     ///
     /// **Never sent automatically.** There is no grace window: the app is not a server, and the
-    /// one rule is that it does not send something the clock passed while it was not running.
-    /// The next launch asks, item by item.
+    /// one rule is that it does not send something the clock passed while it was closed or asleep.
+    /// An already-claimed delivery is performing rather than waiting and is left to its owner.
     @discardableResult
     func markMissed(before now: Date) -> [ScheduledMessage] {
         var updated = messages
         var missed: [ScheduledMessage] = []
-        for index in updated.indices where updated[index].state.isArmed {
+        for index in updated.indices where updated[index].state.isOwed {
+            guard !claimed.contains(updated[index].id) else { continue }
             guard updated[index].dueAt != nil else { continue }
             guard updated[index].isDue(at: now) else { continue }
             updated[index].state = .missed

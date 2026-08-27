@@ -101,7 +101,7 @@ struct ScheduledMessageDidBecomeDue: AppEvent {
     let id: ScheduledMessageID
 }
 
-/// Sends whose moment passed while the app was not running, gathered for one review.
+/// Sends whose moment passed while the app was closed or asleep, gathered for one review.
 struct ScheduledMessagesWereMissed: AppEvent {
     static let name = Notification.Name("scheduledMessagesWereMissed")
     let ids: [ScheduledMessageID]

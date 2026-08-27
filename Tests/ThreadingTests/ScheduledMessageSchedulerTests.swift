@@ -8,9 +8,9 @@ import XCTest
 ///
 /// The scheduler is driven with an injected clock, an injected store and two injected
 /// notification centres, so none of this waits on a real timer or touches the running app's own
-/// event traffic. The second centre is not a nicety: `NSWorkspace.didWakeNotification` is posted
-/// on the workspace's centre and never on `.default`, and a scheduler wired to one centre would
-/// compile and silently never wake up.
+/// event traffic. The second centre is not a nicety: workspace sleep and wake notifications are
+/// posted there and never on `.default`, and a scheduler wired to one centre would compile while
+/// silently losing the inactivity boundary.
 @MainActor
 final class ScheduledMessageSchedulerTests: XCTestCase {
 
@@ -369,25 +369,24 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         XCTAssertEqual(candidates.map(\.id), Array(project.sessions.suffix(3).map(\.id)))
     }
 
-    func testWakingFromSleepIsWhatCatchesATimerThatSleptThroughItsMoment() {
+    func testWakingFromSleepMarksTheMomentMissedInsteadOfSendingItLate() {
         let recorder = DueRecorder(center: center)
         let message = schedule(dueIn: 3_600)
         let scheduler = makeScheduler()
         scheduler.start()
 
-        // The machine slept through the timer and woke an hour late. Nothing fired it; the wake
-        // is the only thing that will.
+        workspaceCenter.post(name: NSWorkspace.willSleepNotification, object: nil)
         clock = start.addingTimeInterval(7_200)
+        // If activation is delivered before the wake edge, the sleep receipt must still prevent
+        // an unattended late send.
+        center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        XCTAssertTrue(recorder.ids.isEmpty)
+
         workspaceCenter.post(name: NSWorkspace.didWakeNotification, object: nil)
 
-        XCTAssertEqual(
-            recorder.ids,
-            [message.id],
-            """
-            If this fails, the scheduler is observing the default centre for a notification only \
-            NSWorkspace's own centre posts — which compiles, runs, and never fires.
-            """
-        )
+        XCTAssertTrue(recorder.ids.isEmpty, "A sleeping timer must never become a late send")
+        XCTAssertEqual(recorder.missed, [[message.id]])
+        XCTAssertEqual(store[message.id]?.state, .missed)
     }
 
     func testBecomingActiveAlsoReEvaluates() {
@@ -421,6 +420,19 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
             not watching — it asks. Announcing this as due would deliver it.
             """
         )
+        XCTAssertEqual(store[message.id]?.state, .missed)
+    }
+
+    func testAWaitingDeliveryAlsoBecomesMissedAcrossRelaunch() {
+        let recorder = DueRecorder(center: center)
+        let message = schedule(dueIn: 60)
+        XCTAssertTrue(store.setState(.waiting("The destination was busy"), for: message.id))
+
+        clock = start.addingTimeInterval(2 * 86_400)
+        makeScheduler().start()
+
+        XCTAssertEqual(recorder.missed, [[message.id]])
+        XCTAssertTrue(recorder.ids.isEmpty)
         XCTAssertEqual(store[message.id]?.state, .missed)
     }
 
