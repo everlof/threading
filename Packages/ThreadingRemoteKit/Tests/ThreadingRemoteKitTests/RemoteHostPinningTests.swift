@@ -88,6 +88,10 @@ final class RemoteHostPinningTests: XCTestCase {
         XCTAssertNil(RemoteHostFingerprint(digest: Data()))
         XCTAssertNil(RemoteHostFingerprint(hex: "abcd"))
         XCTAssertNil(RemoteHostFingerprint(hex: String(repeating: "z", count: 64)))
+        XCTAssertNil(
+            RemoteHostFingerprint(hex: String(repeating: "a", count: 62) + "é"),
+            "a 64-byte non-ASCII advertisement must be refused without indexing past its end"
+        )
     }
 
     // MARK: - Pin

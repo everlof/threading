@@ -102,17 +102,27 @@ public struct RemoteHostFingerprint: Equatable, Hashable, Sendable {
     /// Reads the wire spelling. Upper case is accepted because hex is case-insensitive; the
     /// canonical form this build writes is lower case.
     public init?(hex: String) {
-        guard hex.utf8.count == RemoteHostPinningDefaults.digestByteCount * 2 else { return nil }
+        let digits = Array(hex.utf8)
+        guard digits.count == RemoteHostPinningDefaults.digestByteCount * 2 else { return nil }
         var bytes = Data()
         bytes.reserveCapacity(RemoteHostPinningDefaults.digestByteCount)
-        var index = hex.startIndex
-        while index < hex.endIndex {
-            let next = hex.index(index, offsetBy: 2)
-            guard let byte = UInt8(hex[index..<next], radix: 16) else { return nil }
-            bytes.append(byte)
-            index = next
+        for index in stride(from: 0, to: digits.count, by: 2) {
+            guard let high = Self.hexNibble(digits[index]),
+                  let low = Self.hexNibble(digits[index + 1]) else { return nil }
+            bytes.append(high << 4 | low)
         }
         self.init(digest: bytes)
+    }
+
+    /// One ASCII hex digit. The wire length is byte-based, so parsing the same byte view keeps a
+    /// non-ASCII advertisement from making a character index step beyond the end of its string.
+    private static func hexNibble(_ digit: UInt8) -> UInt8? {
+        switch digit {
+        case 48...57: digit - 48
+        case 65...70: digit - 55
+        case 97...102: digit - 87
+        default: nil
+        }
     }
 
     /// The wire spelling: lower-case hex of the whole digest, 64 characters.
