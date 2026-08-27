@@ -2430,10 +2430,12 @@ final class RemoteSessionMirrorRegistry {
                         authorization: authorization
                     )
                 }
-                connection.sendText(encode(RemoteSessionsChangedDTO(
-                    session: visible,
-                    removedSessionID: visible == nil ? sessionID.uuidString : nil
-                )))
+                guard let delta = Self.sessionMutationDelta(
+                    sessionID: sessionID,
+                    visibleSummary: visible,
+                    authorization: authorization
+                ) else { continue }
+                connection.sendText(encode(delta))
             }
         }
     }
@@ -2467,6 +2469,20 @@ final class RemoteSessionMirrorRegistry {
         return RemoteSessionsChangedDTO(
             session: nil,
             removedSessionID: sessionID.uuidString
+        )
+    }
+
+    /// An add, reorder, visibility change, or row update must not reveal that an out-of-scope
+    /// identity changed. In-scope disappearance still names the row so a client can remove it.
+    static func sessionMutationDelta(
+        sessionID: SessionID,
+        visibleSummary: RemoteSessionSummaryDTO?,
+        authorization: RemoteAuthorization
+    ) -> RemoteSessionsChangedDTO? {
+        guard authorization.scope.covers(sessionID) else { return nil }
+        return RemoteSessionsChangedDTO(
+            session: visibleSummary,
+            removedSessionID: visibleSummary == nil ? sessionID.uuidString : nil
         )
     }
 

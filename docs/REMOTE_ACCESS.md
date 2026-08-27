@@ -1548,6 +1548,8 @@ feature lock.
   [Sending a file from the phone](#sending-a-file-from-the-phone) for its bounds. View-only and
   guest links cannot change host state, read checkout
   files, or receive browser pixels. Permanent deletion remains a Mac-only action.
+  Catalogue event deltas apply the same scope before emitting anything: an out-of-scope row
+  change sends neither a summary nor the changed conversation's identifier or activity timing.
   Archiving a live session immediately disconnects any remote viewer already attached to it.
 - Authentication failures are rate-limited globally and per device, and slow WebSocket consumers
   are dropped instead of being allowed to back-pressure an agent's terminal.

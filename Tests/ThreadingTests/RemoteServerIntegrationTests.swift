@@ -4197,6 +4197,35 @@ final class RemoteAccessTransportPolicyTests: XCTestCase {
         ))
     }
 
+    func testSessionMutationDeltaDoesNotSignalAnOutOfScopeIdentity() {
+        let changedSessionID = SessionID()
+        let otherSessionID = SessionID()
+        let exactSession = RemoteAuthorization(
+            shareID: "exact",
+            capability: .view,
+            scope: .session(changedSessionID)
+        )
+        let otherSession = RemoteAuthorization(
+            shareID: "other",
+            capability: .view,
+            scope: .session(otherSessionID)
+        )
+
+        XCTAssertEqual(
+            RemoteSessionMirrorRegistry.sessionMutationDelta(
+                sessionID: changedSessionID,
+                visibleSummary: nil,
+                authorization: exactSession
+            )?.removedSessionID,
+            changedSessionID.uuidString
+        )
+        XCTAssertNil(RemoteSessionMirrorRegistry.sessionMutationDelta(
+            sessionID: changedSessionID,
+            visibleSummary: nil,
+            authorization: otherSession
+        ))
+    }
+
     func testPromptReplayCacheRejectsConflictsExpiresAndStaysBounded() {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         var cache = RemotePromptReplayCache(maximumEntries: 2, lifetime: 10)
