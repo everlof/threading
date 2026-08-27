@@ -298,6 +298,13 @@ the phone joins those to the top-level agent/account catalogue only for the sele
 not copy an account or usage array onto every session row, and the settings sheet builds account
 menus only when opened.
 
+Structural refreshes are bounded on both sides. The Mac builds one short-lived common catalogue
+projection for paired owners and layers each device's share metadata onto it, invalidating the
+projection immediately for known row, structure, account and theme changes and expiring it after
+one second. Thus a coalesced iPhone refresh from several connected devices does not ask the main
+actor to repeat the same all-session walk for every client. A one-chat or one-terminal guest uses
+the store's exact identity index and never enters that owner cache.
+
 Chat Settings is deliberately host-owned under the customization-surface gate. Threading keeps
 account discovery and credentials, transcript migration, recovery execution, usage provenance,
 confirmation, and compatibility fallback. The iOS extension composition engine has no contract

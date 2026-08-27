@@ -263,6 +263,19 @@ structural invalidations are coalesced for 350 ms. The event socket has one boun
 recovery task (1–60 seconds), is torn down in the background, and is never accompanied by
 healthy-state REST polling.
 
+The host also bounds the structural fan-out itself. Paired owners reuse one common catalogue
+projection for requests arriving within one second; device-specific share metadata is layered on
+afterward. Known row, structure, account and theme mutations invalidate that projection
+immediately, and the lifetime starts only after a cold projection finishes so a large build cannot
+expire itself. Exact-session and exact-terminal guests use the store's identity indexes instead of
+walking every project. This is an ephemeral freshness cache, not another durable source of truth.
+
+The reproducible owner-fan-out fixture is
+`scripts/profile_threading.sh remote-catalogue-stress 1000`. On the 32-client connection cap, the
+same Debug fixture fell from 32 main-actor projections and 16,876.973 ms to one projection and
+705.818 ms (23.9x). The metric covers `meResponse` projection and per-device response assembly; it
+does not claim to measure HTTP transport or JSON transfer time.
+
 Standalone project terminals add one bounded summary per durable terminal to initial and
 structural catalogues. Their dashboard group is lazy and keeps no socket, emulator, polling task
 or timer per row. Selecting one opens exactly one terminal socket and one bounded replay. Starting
@@ -958,6 +971,9 @@ scripts/profile_threading.sh ios-simulator-sample 15
 
 # Host-side projection/encoding plus mobile decode, pagination, reconnect, delta and resync.
 scripts/profile_threading.sh remote-conversation-stress 5000
+
+# One shared owner projection across the maximum 32 concurrent clients.
+scripts/profile_threading.sh remote-catalogue-stress 1000
 
 # Deterministic iOS cold open, mounted 5,000-row reconnect, then deep scrolling.
 scripts/profile_threading.sh ios-conversation-stress 12 5000

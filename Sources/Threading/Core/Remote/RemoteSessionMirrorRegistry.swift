@@ -22,6 +22,13 @@ private enum RemoteSessionStartupDefaults {
     static let maximumWait: Duration = .seconds(60)
 }
 
+private enum RemoteCatalogueCacheDefaults {
+    /// A structural invalidation is already coalesced for 350 ms on iOS. One second lets every
+    /// authenticated owner request share the same host projection without turning the catalogue
+    /// into durable state or hiding a later mutation for an unbounded interval.
+    static let lifetime: Duration = .seconds(1)
+}
+
 /// Bridges a live session to its remote subscribers: taps the PTY byte stream, keeps a ring for
 /// late joiners, fans output out to every watcher, and routes remote input back in.
 ///
@@ -48,6 +55,9 @@ final class RemoteSessionMirrorRegistry {
     /// relaunch and a test can hand this registry milliseconds — or zero, which is the
     /// release-immediately behaviour the grace replaced.
     private let viewportLeaseGrace: @MainActor () -> Duration
+    private let catalogueCacheLifetime: Duration
+    private let catalogueCacheNow: @MainActor () -> ContinuousClock.Instant
+    private let allSessionsCatalogueDidBuild: @MainActor () -> Void
     /// The Mac terminal selected in the local pane. It does not displace a phone that is still
     /// actively rendering, but it makes a departed phone's reconnect hold ineligible.
     private var locallyVisibleSessionID: SessionID?
@@ -62,7 +72,12 @@ final class RemoteSessionMirrorRegistry {
         sessionStartupMaximumWait: Duration = RemoteSessionStartupDefaults.maximumWait,
         viewportLeaseGrace: @escaping @MainActor () -> Duration = {
             .seconds(AppSettings.shared.remoteViewportLeaseGraceSeconds)
-        }
+        },
+        catalogueCacheLifetime: Duration = RemoteCatalogueCacheDefaults.lifetime,
+        catalogueCacheNow: @escaping @MainActor () -> ContinuousClock.Instant = {
+            ContinuousClock.now
+        },
+        allSessionsCatalogueDidBuild: @escaping @MainActor () -> Void = {}
     ) {
         self.terminalApplication = terminalApplication
         self.terminalHydrationOutputQuietDelay = terminalHydrationOutputQuietDelay
@@ -71,6 +86,9 @@ final class RemoteSessionMirrorRegistry {
         self.terminalHydrationMaximumDelay = terminalHydrationMaximumDelay
         self.sessionStartupMaximumWait = sessionStartupMaximumWait
         self.viewportLeaseGrace = viewportLeaseGrace
+        self.catalogueCacheLifetime = catalogueCacheLifetime
+        self.catalogueCacheNow = catalogueCacheNow
+        self.allSessionsCatalogueDidBuild = allSessionsCatalogueDidBuild
         // A remote surface is a view of this app, so theme changes are live state rather than a
         // reconnect-only preference. Broadcast broadly and resolve per session: assignments can
         // change one terminal, while profile and app-theme changes can affect many.
@@ -121,6 +139,28 @@ final class RemoteSessionMirrorRegistry {
     }
 
     // MARK: - State
+
+    private struct MeCatalogue {
+        let sessions: [RemoteSessionSummaryDTO]
+        let terminals: [RemoteProjectTerminalSummaryDTO]
+        let host: RemoteHostDTO
+        let theme: RemoteThemeDTO
+        let themeCatalog: RemoteThemeCatalogDTO?
+        let archivedSessions: [RemoteSessionSummaryDTO]?
+        let newSessionCatalog: RemoteNewSessionCatalogDTO?
+        let features: [String]?
+    }
+
+    private struct CachedMeCatalogue {
+        let value: MeCatalogue
+        let expiresAt: ContinuousClock.Instant
+    }
+
+    /// Owner devices all receive the same expensive catalogue projection. The boolean separates
+    /// the ordinary interactive owner from any deliberately read-only owner authorization a test
+    /// or future caller constructs. Exact-session guests use indexed lookup and never enter this
+    /// all-session cache.
+    private var allSessionsCatalogueCache: [Bool: CachedMeCatalogue] = [:]
 
     private struct Mirror {
         var ring: RemoteRingBuffer
@@ -282,32 +322,7 @@ final class RemoteSessionMirrorRegistry {
 
     /// The `/api/me` payload: the share, and the live sessions it reaches.
     func meResponse(for authorization: RemoteAuthorization) -> RemoteMeDTO {
-        let sessions = ProjectStore.shared.projects
-            .flatMap { project in
-                project.sessions
-                    .filter {
-                        RemoteSessionAccess.isVisible($0)
-                            && authorization.scope.covers($0.id)
-                    }
-                    .map {
-                        summary(
-                            for: $0,
-                            projectName: project.name,
-                            projectLimitRecovery: project.limitRecoveryPolicy,
-                            authorization: authorization
-                        )
-                    }
-            }
-            .sorted(by: summaryOrder)
-
-        let terminals = ProjectStore.shared.projects
-            .flatMap(\.terminals)
-            .filter { authorization.scope.covers($0.id) }
-            .map { terminal in
-                let project = ProjectStore.shared.homeProject(forTerminalID: terminal.id)
-                return terminalSummary(for: terminal, projectName: project?.name ?? "")
-            }
-            .sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
+        let catalogue = meCatalogue(for: authorization)
 
         let scopeName: RemoteShareScope
         switch authorization.scope {
@@ -315,20 +330,6 @@ final class RemoteSessionMirrorRegistry {
         case .session: scopeName = .session
         case .projectTerminal: scopeName = .terminal
         }
-
-        let ownsSessionLifecycle = canManageSessions(authorization)
-        let archived = ownsSessionLifecycle
-            ? ProjectStore.shared.archivedSessions()
-                .map {
-                    summary(
-                        for: $0.session,
-                        projectName: $0.project.name,
-                        projectLimitRecovery: $0.project.limitRecoveryPolicy,
-                        authorization: authorization
-                    )
-                }
-                .sorted(by: summaryOrder)
-            : nil
 
         return RemoteMeDTO(
             serverProtocol: RemoteProtocolInfo(),
@@ -341,17 +342,164 @@ final class RemoteSessionMirrorRegistry {
                 memberID: authorization.member?.id,
                 displayName: authorization.member?.displayName
             ),
+            sessions: catalogue.sessions,
+            terminals: catalogue.terminals,
+            host: catalogue.host,
+            theme: catalogue.theme,
+            themeCatalog: catalogue.themeCatalog,
+            archivedSessions: catalogue.archivedSessions,
+            newSessionCatalog: catalogue.newSessionCatalog,
+            features: catalogue.features
+        )
+    }
+
+    private func meCatalogue(for authorization: RemoteAuthorization) -> MeCatalogue {
+        switch authorization.scope {
+        case .allSessions:
+            return allSessionsCatalogue(for: authorization)
+        case .session(let sessionID):
+            guard let session = ProjectStore.shared.session(withID: sessionID),
+                  let project = ProjectStore.shared.project(forSessionID: sessionID),
+                  RemoteSessionAccess.isVisible(session) else {
+                return makeMeCatalogue(
+                    sessions: [],
+                    terminals: [],
+                    archivedSessions: nil,
+                    newSessionCatalog: nil,
+                    authorization: authorization
+                )
+            }
+            return makeMeCatalogue(
+                sessions: [summary(
+                    for: session,
+                    projectName: project.name,
+                    projectLimitRecovery: project.limitRecoveryPolicy,
+                    authorization: authorization
+                )],
+                terminals: [],
+                archivedSessions: nil,
+                newSessionCatalog: nil,
+                authorization: authorization
+            )
+        case .projectTerminal(let terminalID):
+            guard let terminal = ProjectStore.shared.terminal(withID: terminalID) else {
+                return makeMeCatalogue(
+                    sessions: [],
+                    terminals: [],
+                    archivedSessions: nil,
+                    newSessionCatalog: nil,
+                    authorization: authorization
+                )
+            }
+            let project = ProjectStore.shared.homeProject(forTerminalID: terminalID)
+            return makeMeCatalogue(
+                sessions: [],
+                terminals: [terminalSummary(
+                    for: terminal,
+                    projectName: project?.name ?? ""
+                )],
+                archivedSessions: nil,
+                newSessionCatalog: nil,
+                authorization: authorization
+            )
+        }
+    }
+
+    private func allSessionsCatalogue(
+        for authorization: RemoteAuthorization
+    ) -> MeCatalogue {
+        let managesSessions = canManageSessions(authorization)
+        let now = catalogueCacheNow()
+        if authorization.principal == .ownerDevice,
+           let cached = allSessionsCatalogueCache[managesSessions],
+           cached.expiresAt > now {
+            return cached.value
+        }
+
+        allSessionsCatalogueDidBuild()
+        let value = buildAllSessionsCatalogue(
+            authorization: authorization,
+            managesSessions: managesSessions
+        )
+        if authorization.principal == .ownerDevice {
+            allSessionsCatalogueCache[managesSessions] = CachedMeCatalogue(
+                value: value,
+                // Start freshness after projection. A 5,000-row cold build can itself exceed
+                // the cache lifetime; expiring from its start would make every queued owner
+                // rebuild it again, recreating the fan-out this cache bounds.
+                expiresAt: catalogueCacheNow() + catalogueCacheLifetime
+            )
+        }
+        return value
+    }
+
+    private func buildAllSessionsCatalogue(
+        authorization: RemoteAuthorization,
+        managesSessions: Bool
+    ) -> MeCatalogue {
+        let sessions = ProjectStore.shared.projects
+            .flatMap { project in
+                project.sessions
+                    .filter { RemoteSessionAccess.isVisible($0) }
+                    .map {
+                        summary(
+                            for: $0,
+                            projectName: project.name,
+                            projectLimitRecovery: project.limitRecoveryPolicy,
+                            authorization: authorization
+                        )
+                    }
+            }
+            .sorted(by: summaryOrder)
+        let terminals = ProjectStore.shared.projects
+            .flatMap { project in
+                project.terminals.map {
+                    terminalSummary(for: $0, projectName: project.name)
+                }
+            }
+            .sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
+        let archived = managesSessions
+            ? ProjectStore.shared.archivedSessions()
+                .map {
+                    summary(
+                        for: $0.session,
+                        projectName: $0.project.name,
+                        projectLimitRecovery: $0.project.limitRecoveryPolicy,
+                        authorization: authorization
+                    )
+                }
+                .sorted(by: summaryOrder)
+            : nil
+        return makeMeCatalogue(
+            sessions: sessions,
+            terminals: terminals,
+            archivedSessions: archived,
+            newSessionCatalog: managesSessions ? newSessionCatalog() : nil,
+            authorization: authorization
+        )
+    }
+
+    private func makeMeCatalogue(
+        sessions: [RemoteSessionSummaryDTO],
+        terminals: [RemoteProjectTerminalSummaryDTO],
+        archivedSessions: [RemoteSessionSummaryDTO]?,
+        newSessionCatalog: RemoteNewSessionCatalogDTO?,
+        authorization: RemoteAuthorization
+    ) -> MeCatalogue {
+        MeCatalogue(
             sessions: sessions,
             terminals: terminals,
             host: RemoteAccessCoordinator.shared.hostIdentity(for: authorization),
             theme: RemoteThemeBridge.appTheme(),
-            themeCatalog: canManageThemes(authorization)
-                ? RemoteThemeBridge.catalog()
-                : nil,
-            archivedSessions: archived,
-            newSessionCatalog: ownsSessionLifecycle ? newSessionCatalog() : nil,
+            themeCatalog: canManageThemes(authorization) ? RemoteThemeBridge.catalog() : nil,
+            archivedSessions: archivedSessions,
+            newSessionCatalog: newSessionCatalog,
             features: restFeatures(for: authorization)
         )
+    }
+
+    private func invalidateMeCatalogue() {
+        allSessionsCatalogueCache.removeAll(keepingCapacity: true)
     }
 
     /// One already-authorised catalogue row for an O(changed) mutation response.
@@ -1350,6 +1498,7 @@ final class RemoteSessionMirrorRegistry {
 
     /// Releases idle capture as well as subscribers when the master switch is turned off.
     func remoteAccessStopped() {
+        invalidateMeCatalogue()
         for transaction in terminalHydrations.values { transaction.cancel() }
         terminalHydrations.removeAll()
         // Turning the master switch off is an authorization change, so every held grid ends now
@@ -2363,6 +2512,7 @@ final class RemoteSessionMirrorRegistry {
 
     /// Pushes chrome and the per-session terminal palette to already-open clients.
     private func broadcastThemes() {
+        invalidateMeCatalogue()
         let appMessage = encode(RemoteAppThemeUpdateDTO(theme: RemoteThemeBridge.appTheme()))
         for connection in themeEventSubscribers.values {
             connection.sendText(appMessage)
@@ -2379,6 +2529,7 @@ final class RemoteSessionMirrorRegistry {
     /// remain an invalidation because they can change ordering, projects, archives and creation
     /// choices together; every client then re-fetches its own scoped snapshot.
     private func broadcastSessionsChanged(_ change: ProjectsDidChange) {
+        invalidateMeCatalogue()
         switch change.sidebarImpact {
         case .structure, .projectStructure:
             let message = encode(RemoteSessionsChangedDTO())
@@ -2442,6 +2593,7 @@ final class RemoteSessionMirrorRegistry {
 
     /// Pushes one identity-specific catalogue row for an activity or read-receipt edge.
     private func broadcastSessionRow(_ sessionID: SessionID) {
+        invalidateMeCatalogue()
         guard let session = ProjectStore.shared.session(withID: sessionID),
               let project = ProjectStore.shared.project(forSessionID: sessionID) else { return }
         for connection in themeEventSubscribers.values {

@@ -33,6 +33,7 @@
 #   scripts/profile_threading.sh full [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh full+ [seconds] [process-name-or-pid]
 #   scripts/profile_threading.sh ios-simulator-sample [seconds] [booted|simulator-UDID]
+#   scripts/profile_threading.sh remote-catalogue-stress [sessions]
 #   scripts/profile_threading.sh remote-conversation-stress [rows]
 #   scripts/profile_threading.sh ios-conversation-stress [seconds] [rows] [booted|simulator-UDID]
 #   scripts/profile_threading.sh cross-device-conversation-stress [seconds] [rows] [booted|simulator-UDID]
@@ -609,6 +610,76 @@ run_remote_conversation_stress() {
     '^THREADING_PERF remote-conversation-streaming-burst .* updates=250 .* stable_row_generation_ms=' \
     "${log}" || {
     echo "The remote-conversation fixture did not exercise the bounded streaming path." >&2
+    return 1
+  }
+}
+
+run_remote_catalogue_stress() {
+  local output_directory="$1"
+  local session_override="${2:-}"
+  local jobs="${THREADING_PROFILE_BUILD_JOBS:-2}"
+  local derived_data="${output_directory}/derived-data"
+  local log="${output_directory}/remote-catalogue-stress.log"
+  local overriding_xcconfig
+  if [[ -n "${session_override}" ]] \
+      && { [[ ! "${session_override}" =~ ^[0-9]+$ ]] \
+        || (( 10#${session_override} <= 0 )); }; then
+    echo "Remote catalogue stress sessions must be a positive integer." >&2
+    return 2
+  fi
+
+  overriding_xcconfig="$(
+    /usr/bin/defaults read com.apple.dt.Xcode OverridingXCConfigPath 2>/dev/null || true
+  )"
+  if [[ "${overriding_xcconfig}" == *"/InjectionNext/"* ]]; then
+    echo "Quit the InjectionNext-supervised Xcode session before profiling." >&2
+    return 2
+  fi
+  echo "Running deterministic owner catalogue fan-out sweep…"
+
+  (
+    cd "${repository_directory}"
+    xcodebuild \
+      -project Threading.xcodeproj \
+      -scheme Threading \
+      -testPlan Threading-Fast \
+      -destination "platform=macOS" \
+      -configuration Debug \
+      -derivedDataPath "${derived_data}" \
+      -jobs "${jobs}" \
+      -quiet \
+      build-for-testing
+
+    local build_directory
+    build_directory="$(
+      xcodebuild \
+        -project Threading.xcodeproj \
+        -scheme Threading \
+        -configuration Debug \
+        -destination "platform=macOS" \
+        -derivedDataPath "${derived_data}" \
+        -showBuildSettings \
+        -json \
+        | /usr/bin/plutil -extract 0.buildSettings.TARGET_BUILD_DIR raw -o - -
+    )"
+    local app="${build_directory}/Threading.app"
+    local test_bundle="${app}/Contents/PlugIns/ThreadingTests.xctest"
+    [[ -d "${test_bundle}" ]] || {
+      echo "Built test bundle not found at ${test_bundle}." >&2
+      return 1
+    }
+
+    THREADING_REMOTE_CATALOGUE_STRESS=1 \
+    THREADING_REMOTE_CATALOGUE_STRESS_SESSIONS="${session_override}" \
+    DYLD_LIBRARY_PATH="${app}/Contents/MacOS" \
+    DYLD_FRAMEWORK_PATH="${app}/Contents/Frameworks" \
+      xcrun xctest \
+        -XCTest ThreadingTests.RemoteCatalogueScalingTests/testStressOwnerCatalogueFanoutWhenEnabled \
+        "${test_bundle}"
+  ) 2>&1 | tee "${log}"
+
+  rg -q '^THREADING_PERF remote-catalogue-fanout ' "${log}" || {
+    echo "The remote-catalogue fixture produced no fan-out metric." >&2
     return 1
   }
 }
@@ -2370,6 +2441,12 @@ case "${command}" in
     ios_app="${output_directory}/derived-data/Build/Products/Release-iphonesimulator/ThreadingMobile.app"
     capture_ios_simulator_sample \
       "${seconds}" "${simulator_udid}" "${ios_app}" "${output_directory}"
+    ;;
+
+  remote-catalogue-stress)
+    sessions="${2:-}"
+    output_directory="$(new_run_directory remote-catalogue-stress)"
+    run_remote_catalogue_stress "${output_directory}" "${sessions}"
     ;;
 
   remote-conversation-stress)
