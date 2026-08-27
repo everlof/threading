@@ -6,6 +6,8 @@ import ImageIO
 import ThreadingSimulatorKit
 import VideoToolbox
 
+/// VideoToolbox state is owned by `stateQueue`. The output callback touches only the immutable
+/// Core Image context and its retained frame context, never the queue-owned session properties.
 final class SimulatorFrameDecoder: @unchecked Sendable {
     private final class FrameContext {
         let frame: SimulatorBridgeMediaFrame
@@ -21,37 +23,47 @@ final class SimulatorFrameDecoder: @unchecked Sendable {
     }
 
     private let context = CIContext(options: [.cacheIntermediates: false])
+    private let stateQueue = DispatchQueue(label: "codes.threading.simulator-frame-decoder")
     private var h264Format: CMVideoFormatDescription?
     private var h264Session: VTDecompressionSession?
+    private var isInvalidated = false
 
     func decode(
         _ frame: SimulatorBridgeMediaFrame,
         completion: @escaping @Sendable (Result<SimulatorLiveFrame, Error>) -> Void
     ) {
-        switch frame.codec {
-        case .jpeg:
-            guard let source = CGImageSourceCreateWithData(frame.bytes as CFData, nil),
-                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
-                completion(.failure(SimulatorLiveStreamError.invalidFrame))
+        stateQueue.sync {
+            guard !isInvalidated else {
+                completion(.failure(SimulatorLiveStreamError.disconnected))
                 return
             }
-            completion(.success(SimulatorLiveFrame(
-                sequence: frame.sequence,
-                image: image,
-                codec: .jpeg,
-                presentationTimeNanoseconds: frame.presentationTimeNanoseconds
-            )))
+            switch frame.codec {
+            case .jpeg:
+                guard let source = CGImageSourceCreateWithData(frame.bytes as CFData, nil),
+                      let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+                    completion(.failure(SimulatorLiveStreamError.invalidFrame))
+                    return
+                }
+                completion(.success(SimulatorLiveFrame(
+                    sequence: frame.sequence,
+                    image: image,
+                    codec: .jpeg,
+                    presentationTimeNanoseconds: frame.presentationTimeNanoseconds
+                )))
 
-        case .h264:
-            do { try decodeH264(frame, completion: completion) }
-            catch { completion(.failure(error)) }
+            case .h264:
+                do { try decodeH264(frame, completion: completion) }
+                catch { completion(.failure(error)) }
+            }
         }
     }
 
     func invalidate() {
-        if let h264Session { VTDecompressionSessionInvalidate(h264Session) }
-        h264Session = nil
-        h264Format = nil
+        stateQueue.sync {
+            guard !isInvalidated else { return }
+            isInvalidated = true
+            retireH264Session()
+        }
     }
 
     deinit { invalidate() }
@@ -142,7 +154,7 @@ final class SimulatorFrameDecoder: @unchecked Sendable {
             }
         }
         guard status == noErr, let format else { throw SimulatorLiveStreamError.invalidFrame }
-        if let h264Session { VTDecompressionSessionInvalidate(h264Session) }
+        retireH264Session()
         var callback = VTDecompressionOutputCallbackRecord(
             decompressionOutputCallback: Self.outputCallback,
             decompressionOutputRefCon: Unmanaged.passUnretained(self).toOpaque()
@@ -161,6 +173,17 @@ final class SimulatorFrameDecoder: @unchecked Sendable {
         let session else { throw SimulatorLiveStreamError.invalidFrame }
         h264Format = format
         h264Session = session
+    }
+
+    /// Waits for every retained frame context to leave VideoToolbox before invalidating the
+    /// session or allowing this decoder to deinitialize.
+    private func retireH264Session() {
+        if let h264Session {
+            _ = VTDecompressionSessionWaitForAsynchronousFrames(h264Session)
+            VTDecompressionSessionInvalidate(h264Session)
+        }
+        h264Session = nil
+        h264Format = nil
     }
 
     private static let outputCallback: VTDecompressionOutputCallback = {

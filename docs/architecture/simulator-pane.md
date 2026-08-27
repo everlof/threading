@@ -75,8 +75,11 @@ The default live codec is real-time H.264 through VideoToolbox at 30 fps with tw
 JPEG is negotiated as a compatibility fallback. The helper permits one unacknowledged frame and
 one replaceable pending frame. A slow consumer therefore gets the newest state rather than a
 queue, and a hidden tab stops its capture timer and drops an encode already in flight. Decode and
-conversion stay off main. The app admits at most four live helpers across all sessions, while the
-public one-frame-per-second screenshot fallback remains available for unsupported Xcode versions.
+conversion stay off main. One decoder-owned serial queue orders frame submission, H.264
+reconfiguration and teardown; teardown waits for asynchronous VideoToolbox callbacks before it
+invalidates the session, so a stream stop cannot race an in-flight decode or strand its retained
+frame context. The app admits at most four live helpers across all sessions, while the public
+one-frame-per-second screenshot fallback remains available for unsupported Xcode versions.
 
 ## Device and session ownership
 
