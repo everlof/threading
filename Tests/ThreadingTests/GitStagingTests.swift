@@ -630,6 +630,46 @@ final class GitStagingTests: XCTestCase {
         ))
     }
 
+    func testManagedPublicationDisablesInheritedSubmoduleRecursion() async throws {
+        let submoduleSource = try addCommittedFixtureSubmodule()
+        let remote = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingRemote-\(UUID().uuidString).git", isDirectory: true)
+        defer {
+            try? FileManager.default.removeItem(at: submoduleSource)
+            try? FileManager.default.removeItem(at: remote)
+        }
+
+        _ = try GitProcess.run(
+            ["init", "--quiet", "--bare", remote.path],
+            in: remote.deletingLastPathComponent()
+        )
+        try git("remote", "add", "origin", remote.path)
+        try git("config", "submodule.recurse", "true")
+        try git("config", "push.recurseSubmodules", "on-demand")
+
+        let commit = try output("rev-parse", "HEAD")
+        let branch = "threading/recursive-fixture"
+
+        XCTAssertThrowsError(try GitProcess.run(
+            ["push", "origin", "\(commit):refs/heads/threading/recursive-control"],
+            in: root
+        ), "the fixture must reproduce Git applying the detached refspec inside the submodule")
+
+        try await ChangeRequestGit.pushDetached(commit: commit, to: branch, in: root)
+
+        XCTAssertEqual(
+            GitDiffParser.decode(try GitProcess.run(
+                ["--git-dir", remote.path, "rev-parse", "refs/heads/\(branch)"],
+                in: remote.deletingLastPathComponent()
+            )).trimmingCharacters(in: .whitespacesAndNewlines),
+            commit
+        )
+        XCTAssertThrowsError(try GitProcess.run(
+            ["--git-dir", submoduleSource.path, "rev-parse", "refs/heads/\(branch)"],
+            in: submoduleSource.deletingLastPathComponent()
+        ), "publication authorization covers only the outer repository")
+    }
+
     func testManagedWorkspacePublishesOnlyAnOpaqueRemoteBranchThenDisposesLocally() async throws {
         let workspaceParent = FileManager.default.temporaryDirectory
             .appendingPathComponent("ThreadingManaged-\(UUID().uuidString)", isDirectory: true)

@@ -16,8 +16,13 @@ enum GitReviewCommands {
     private static let logMetadataPretty =
         "--pretty=format:%x01%H%x00%H%x00%s%x00%an%x00%at%x00%P%x00%x02"
 
-    /// Prepended to every invocation: literal paths, and never taking `index.lock` for a read.
-    static let common = ["-c", "core.quotepath=false", "--no-optional-locks"]
+    /// Prepended to every invocation: literal paths, never inheriting recursive publication,
+    /// and never taking `index.lock` for a read. The push override is inert for other commands.
+    static let common = [
+        "-c", "core.quotepath=false",
+        "-c", "push.recurseSubmodules=no",
+        "--no-optional-locks"
+    ]
 
     /// Flags shared by everything that produces a unified diff.
     static let diffFlags = [

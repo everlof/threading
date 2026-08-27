@@ -270,6 +270,11 @@ the review is ambiguous and is never retried automatically. Browser fallback is 
 for unattended completion, so a missing native credential fails before the push and retains the
 worktree as `needsAttention`.
 
+Every Git invocation explicitly sets `push.recurseSubmodules=no`. It is inert for reads and local
+operations, while ensuring create, update and leased-delete publication pushes can touch only the
+outer repository ref that the person authorized. Threading never inherits `submodule.recurse` or
+publishes a nested repository merely because the checkout containing it is being published.
+
 Once the receipt exists, a repeated finish is idempotent and cleanup validates that the managed
 `HEAD` is still the published commit. If the person archives during the network operation, the
 receipt is kept but the checkout is deliberately retained. Archive Undo recreates a disposed
