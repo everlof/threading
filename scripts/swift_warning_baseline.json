@@ -1,0 +1,758 @@
+{
+  "schemaVersion": 1,
+  "description": "Per-file ceilings for Swift compiler warnings emitted by the canonical cold CI builds. Lower counts are accepted; increases require an intentional baseline update.",
+  "files": {
+    "Sources/Threading/Core/Agent/ClaudeKeychainCredentials.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/Core/Agent/SettingsSearchResearch.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/Core/Extensions/ExtensionProjectFileBroker.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 4
+    },
+    "Sources/Threading/Core/MCP/MCPSessionRegistry.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 7
+    },
+    "Sources/Threading/Core/PTYHost/PTYHostAvailability.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/Core/PTYHost/PTYHostBackgroundSessions.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 3
+    },
+    "Sources/Threading/Core/PTYHost/PTYHostReattach.swift": {
+      "warnings": 10,
+      "swift6LanguageMode": 4
+    },
+    "Sources/Threading/Core/Remote/RemoteAccessProcessActivity.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 2
+    },
+    "Sources/Threading/Core/Remote/RemoteIdentityImport.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/Core/Remote/RemoteListenerSet.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/Core/Session/TerminalSession.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Design/Design.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Design/MediaInspector.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 4
+    },
+    "Sources/Threading/UI/Design/RevealHighlightView.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/UI/Design/ThemedScrollView.swift": {
+      "warnings": 22,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Design/ThemedTables.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Design/Toast.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/UI/Views/ComposerHandoffAnimator.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Views/ConversationViewController.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Views/ProjectRowView.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Views/RecoveryModeView.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/UI/Views/SessionAttachmentsViewController.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/UI/Windows/MainWindowController.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Windows/MainWindowFrame.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Sources/ThreadingMobile/RemoteConversationViewController.swift": {
+      "warnings": 12,
+      "swift6LanguageMode": 12
+    },
+    "Sources/ThreadingMobile/SessionWorkspaceDrawer.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/ComposerClipboardTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/MobileConnectionDiagnosticsTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/MobileSessionChromeTests.swift": {
+      "warnings": 12,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/MobileSessionNavigationTransitionTests.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/RemoteAttachmentPreviewFailureTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/RemoteConversationStoreTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/RemoteHostDiscoveryTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/RemoteTerminalScrollTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/RemoteTerminalSelectionTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/RemoteTerminalTapTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AccountEnablementTests.swift": {
+      "warnings": 8,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AccountLimitsSectionTests.swift": {
+      "warnings": 17,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ActiveTurnSleepInhibitorTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 5
+    },
+    "Tests/ThreadingTests/AgentActivityBeamTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AgentCLIUpdatePresentationTests.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AgentPermissionModeTests.swift": {
+      "warnings": 14,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AgentSessionCommandServiceTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AgentTerminalScrollbackRenderTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AgentWorkHydrationTests.swift": {
+      "warnings": 925,
+      "swift6LanguageMode": 925
+    },
+    "Tests/ThreadingTests/AppDataResetTests.swift": {
+      "warnings": 12,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AppSettingDefinitionTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AppThemeRenderTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AppThemeTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/AppUpdaterTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AquaChromeTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/AttentionAlertSoundTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/BrowserAgentBridgeTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/BrowserAutoCaptureRingTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/BrowserBaselineStoreTests.swift": {
+      "warnings": 9,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/BrowserCredentialStoreTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/BrowserOffScreenCaptureTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ChangedFilesCardTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ChartTooltipGeometryTests.swift": {
+      "warnings": 17,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/CheckoutBranchFollowerTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ClaudeRemoteControlTests.swift": {
+      "warnings": 8,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/CompareToolTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/ComposerHandoffTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ControlGrantStoreTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ControlRowTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/ConversationMinimapMotionTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/CurfewSettingsSectionTests.swift": {
+      "warnings": 6,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/CurfewSurfaceTests.swift": {
+      "warnings": 18,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/CustomLimitParkTests.swift": {
+      "warnings": 10,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/CustomLimitSettingsTests.swift": {
+      "warnings": 13,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/DefaultsQuarantineTests.swift": {
+      "warnings": 9,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/DiffInkTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/DiffSkeletonViewTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/DrawerHostTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/DroppedFilePromiseTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ExtensionAppearanceTests.swift": {
+      "warnings": 21,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ExtensionAuthoringCommandServiceTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ExtensionBundleLoaderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ExtensionHostRouteTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ExtensionNetworkBrokerTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ExtensionPackageStoreTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ExtensionRendererTests.swift": {
+      "warnings": 6,
+      "swift6LanguageMode": 5
+    },
+    "Tests/ThreadingTests/FloatingScrollTargetMotionTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/GitHubIssueSubmitterTests.swift": {
+      "warnings": 6,
+      "swift6LanguageMode": 6
+    },
+    "Tests/ThreadingTests/GitRepositoryFileAccessTests.swift": {
+      "warnings": 31,
+      "swift6LanguageMode": 10
+    },
+    "Tests/ThreadingTests/GitReviewViewTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/GitStagingTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 3
+    },
+    "Tests/ThreadingTests/HostedStoreTestCase.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/ImageAnnotationTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/IssueReportingRenderTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/KeyboardShortcutTests.swift": {
+      "warnings": 6,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/LabelLegibilityTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/LaunchLedgerTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/LimitEscapeSuggestionTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/MCPBridgeLaunchIntegrationTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/MCPSessionRegistryTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/MainWindowNavigationTests.swift": {
+      "warnings": 8,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/MainWindowSizingTests.swift": {
+      "warnings": 6,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/MediaDocumentPerformanceTests.swift": {
+      "warnings": 6,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/MediaDocumentSeamTests.swift": {
+      "warnings": 11,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ModelEffortPickerRenderTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/MotionPreviewTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/OpeningMessageCoalescingTests.swift": {
+      "warnings": 14,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/PTYHostClientTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/PTYHostDetachSessionTests.swift": {
+      "warnings": 8,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/PTYHostPipeSessionTests.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/PTYHostReattachDaemonTests.swift": {
+      "warnings": 17,
+      "swift6LanguageMode": 3
+    },
+    "Tests/ThreadingTests/PTYHostReattachInputDaemonTests.swift": {
+      "warnings": 17,
+      "swift6LanguageMode": 3
+    },
+    "Tests/ThreadingTests/PTYHostReattachTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/PTYHostSessionDaemonTests.swift": {
+      "warnings": 16,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/PTYHostSessionTests.swift": {
+      "warnings": 8,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/PTYHostTerminalRenderTests.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/PermissionBrokerTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/PrivacyPreferencesTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ProjectScriptConfirmationRenderTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ProjectScriptTests.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ProjectStoreMutationTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/PromptInputTests.swift": {
+      "warnings": 9,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/RecoveryModeStartupTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/RemoteAccessSettingsRenderTests.swift": {
+      "warnings": 13,
+      "swift6LanguageMode": 8
+    },
+    "Tests/ThreadingTests/RemoteGuestInvitationTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/RemoteIdentityStoreTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 3
+    },
+    "Tests/ThreadingTests/RemoteListenerDoorTests.swift": {
+      "warnings": 47,
+      "swift6LanguageMode": 22
+    },
+    "Tests/ThreadingTests/RemoteListenerTLSTests.swift": {
+      "warnings": 32,
+      "swift6LanguageMode": 3
+    },
+    "Tests/ThreadingTests/RemoteServerIntegrationTests.swift": {
+      "warnings": 60,
+      "swift6LanguageMode": 3
+    },
+    "Tests/ThreadingTests/RemoteServiceDiscoveryTests.swift": {
+      "warnings": 32,
+      "swift6LanguageMode": 4
+    },
+    "Tests/ThreadingTests/RemoteTransportInjectionTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/RowExtensionCommandMenuTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ScheduledAttachmentStoreTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ScheduledMessageSchedulerTests.swift": {
+      "warnings": 17,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ScheduledMessageStoreTests.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ScheduledStartEditingTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ScratchpadWorkspaceTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionArchiveSchedulerTests.swift": {
+      "warnings": 13,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/SessionAttachmentComparisonTests.swift": {
+      "warnings": 12,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/SessionAttachmentMediaTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionAttachmentStoreTests.swift": {
+      "warnings": 18,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/SessionAttachmentVideoTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionAttachmentsLayoutTests.swift": {
+      "warnings": 20,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionCheckoutCoordinatorTests.swift": {
+      "warnings": 28,
+      "swift6LanguageMode": 3
+    },
+    "Tests/ThreadingTests/SessionComposerRenderTests.swift": {
+      "warnings": 24,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionContinuityPruningTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionCurfewCenterTests.swift": {
+      "warnings": 41,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionCurfewModelTests.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionCurfewStoreTests.swift": {
+      "warnings": 26,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionImportActivityTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionMessageDeliveryTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionNameToolTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionReferenceTests.swift": {
+      "warnings": 8,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionRowActionsTests.swift": {
+      "warnings": 26,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionSnoozeTests.swift": {
+      "warnings": 24,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/SessionWatchCenterTests.swift": {
+      "warnings": 13,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SettingsAnchorResolutionTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SidebarArrangementMenuTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SidebarBrandViewTests.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/SidebarCompactTreeTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/SidebarRowAnimationTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/SidebarSelectedRowBeamTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/SidebarStyleTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/SidebarWidthDensityTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/SilenceGateTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/SingleInstanceLockTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SoundChoiceTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SoundCustomizeRenderTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SoundCustomizeSheetTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SoundMenuRenderTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SoundMenuTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/StartupSessionRelaunchTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/StorageCleanupLedgerTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SystemGrantForecastTests.swift": {
+      "warnings": 9,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/TerminalCopyOnSelectTests.swift": {
+      "warnings": 20,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/TerminalDropPasteTests.swift": {
+      "warnings": 14,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ThemeDerivedContentTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ThemeLeakSweepTests.swift": {
+      "warnings": 10,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ThemeResolutionTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ThemedChartPlaceholderTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ThemedControlTests.swift": {
+      "warnings": 22,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/ThemedIndicatorsTests.swift": {
+      "warnings": 10,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ThemedMenuAccessoryTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/ThemedTabStripViewTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/TitlebarDoubleClickTests.swift": {
+      "warnings": 14,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ToastTests.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/UsageAlertLedgerTests.swift": {
+      "warnings": 10,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/UsageBarTravelTests.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/UsageWindowSettingsRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/WindowChromeComponentTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/WindowChromeStyleTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/WindowChromeTakeoverTests.swift": {
+      "warnings": 10,
+      "swift6LanguageMode": 0
+    }
+  }
+}

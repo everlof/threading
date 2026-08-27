@@ -480,6 +480,10 @@ The canonical non-interactive CI/release gate builds `ThreadingMobile` for a gen
 destination and then runs its complete test target through `scripts/test-mobile.sh`. That runner
 and the `all` push gate share the host-wide CoreSimulator lock. Override its concrete destination
 with `THREADING_MOBILE_TEST_DESTINATION` when the default iPhone simulator is unavailable.
+All CI Xcode lanes share a fresh DerivedData directory and ratchet compiler warnings per source
+file, with a separate ceiling for diagnostics that become errors in Swift 6 language mode. See the
+[shipping contract](docs/architecture/reliability-and-type-safety.md#shipping-contract) before
+changing `scripts/swift_warning_baseline.json`.
 
 The same hook runs `scripts/check_secrets.sh` over the range being pushed first, and that half
 is **not** covered by `THREADING_SKIP_TESTS`: it costs under a second, and it is the only gate

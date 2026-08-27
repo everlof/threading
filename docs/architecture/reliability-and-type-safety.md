@@ -194,10 +194,26 @@ weeks later as a record that will not decode.
 
 `scripts/ci.sh` is the canonical non-interactive gate: structural policy, localization and theme
 boundaries, the secret scan, SwiftLint, a generic-simulator build of the shipping iPhone app,
-every local contract/runtime package, and the off-screen Mac app test plan under complete
-concurrency checking. The generic destination type-checks the mobile target without booting a
-CoreSimulator device, so this build does not take the simulator lane lock. GitHub Actions and
+the complete iPhone test target, every local contract/runtime package, and the off-screen Mac app
+test plan under complete concurrency checking. The generic destination type-checks both simulator
+architectures without booting a device; the complete mobile target then runs through
+`scripts/test-mobile.sh`, which owns the host-wide simulator lane lock. GitHub Actions and
 `scripts/release.sh` call the same entry point so local, CI, and shipping definitions cannot drift.
+
+Those three Xcode lanes share a fresh DerivedData directory under CI's exact temporary scratch
+directory. Their compiler output is checked against `scripts/swift_warning_baseline.json`: every
+repository Swift source file has its own ceiling for total warnings and a second ceiling for the
+diagnostics Swift identifies as errors in Swift 6 language mode. A decrease in one file cannot buy
+room for an increase in another, a newly warning file starts with a ceiling of zero, and removing
+warnings needs no baseline edit. This makes the current Swift 5 language mode debt monotonic while
+complete strict-concurrency checking remains enabled.
+
+Changing the baseline is an explicit review action, not an automatic CI repair. Capture the three
+successful canonical lanes from a cold DerivedData directory, inspect the diagnostics, then run
+`scripts/check_swift_warning_ratchet.py --write-baseline <mobile-build.log>
+<mobile-tests.log> <mac-tests.log>`. The checker refuses incomplete logs and ignores diagnostics
+outside the repository; commit the resulting deterministic per-file diff only when the increase is
+intentional.
 
 ### The secret scan is the one gate that fails closed forever
 

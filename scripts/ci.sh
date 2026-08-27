@@ -9,9 +9,27 @@ set -euo pipefail
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
+ci_scratch="$(mktemp -d "${TMPDIR:-/tmp}/threading-ci.XXXXXX")"
+ci_derived_data="${ci_scratch}/DerivedData"
+swift_warning_logs=()
+
+cleanup() {
+    if [[ -d "${ci_scratch}" ]]; then
+        find "${ci_scratch}" -depth -delete
+    fi
+}
+trap cleanup EXIT
 
 say() { printf '\n==> %s\n' "$1"; }
 fail() { printf 'error: %s\n' "$1" >&2; exit 1; }
+
+capture_swift_warnings() {
+    local lane_name="$1"
+    shift
+    local log_path="${ci_scratch}/${lane_name}.log"
+    swift_warning_logs+=("${log_path}")
+    "$@" 2>&1 | tee "${log_path}"
+}
 
 say "Checking repository boundaries"
 "${script_directory}/check_architecture_boundaries.sh"
@@ -39,17 +57,19 @@ swiftlint lint \
     "${repository_directory}/Sources"
 
 say "Building ThreadingMobile (generic iOS Simulator)"
-xcodebuild \
+capture_swift_warnings mobile-build xcodebuild \
     -project "${repository_directory}/Threading.xcodeproj" \
     -scheme ThreadingMobile \
     -configuration Debug \
     -destination 'generic/platform=iOS Simulator' \
+    -derivedDataPath "${ci_derived_data}" \
     build \
     SWIFT_STRICT_CONCURRENCY=complete \
     COMPILER_INDEX_STORE_ENABLE=NO
 
 say "Testing ThreadingMobile (complete iOS Simulator target)"
-"${script_directory}/test-mobile.sh" \
+capture_swift_warnings mobile-tests "${script_directory}/test-mobile.sh" \
+    -derivedDataPath "${ci_derived_data}" \
     SWIFT_STRICT_CONCURRENCY=complete \
     COMPILER_INDEX_STORE_ENABLE=NO
 
@@ -83,6 +103,9 @@ python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_report_in
 say "Testing mobile test gate configuration"
 python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_test_gate.py"
 
+say "Testing Swift warning ratchet"
+python3 -m unittest "${repository_directory}/scripts/tests/test_swift_warning_ratchet.py"
+
 say "Testing agent feedback audit"
 python3 "${repository_directory}/scripts/tests/test_agent_feedback_audit.py"
 
@@ -96,6 +119,12 @@ say "Testing ThreadingControlPlane"
 npm --prefix "${repository_directory}/Service/ThreadingControlPlane" test
 
 say "Testing Threading (off-screen plan, complete concurrency checking)"
-"${script_directory}/test.sh" fast \
+capture_swift_warnings mac-tests "${script_directory}/test.sh" fast \
+    -derivedDataPath "${ci_derived_data}" \
     SWIFT_STRICT_CONCURRENCY=complete \
     COMPILER_INDEX_STORE_ENABLE=NO
+
+say "Checking Swift warning ceilings"
+python3 "${script_directory}/check_swift_warning_ratchet.py" \
+    --root "${repository_directory}" \
+    "${swift_warning_logs[@]}"
