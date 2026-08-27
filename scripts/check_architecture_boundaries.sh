@@ -29,6 +29,12 @@ if ! python3 "${script_directory}/check_module_boundaries.py" "${repository_dire
   failed=1
 fi
 
+if ! python3 "${script_directory}/check_failopen_defaults.py" "${repository_directory}"; then
+  echo "architecture-boundary: an unrecognised raw value must not become a specific case —" >&2
+  echo "  give the type an explicit unknown case, or project it with an exhaustive switch" >&2
+  failed=1
+fi
+
 # Run as scripts, not through `-m unittest`. This phase's interpreter is Xcode's own
 # (`Developer/usr/bin/python3`, 3.9.6), which is prepended to PATH ahead of any Homebrew
 # install, and `-m unittest` there rejects an *absolute* file path — "No module named
@@ -42,6 +48,11 @@ fi
 
 if ! python3 "${script_directory}/tests/test_dependency_boundaries.py"; then
   echo "architecture-boundary: dependency boundary checker regression tests failed" >&2
+  failed=1
+fi
+
+if ! python3 "${script_directory}/tests/test_failopen_defaults.py"; then
+  echo "architecture-boundary: fail-open default checker regression tests failed" >&2
   failed=1
 fi
 

@@ -40,6 +40,17 @@ its values, while malformed structure and invalid known values still fail closed
 
 An invalid value must not accidentally become a permissive or destructive default.
 
+`scripts/check_failopen_defaults.py` enforces the narrowest mechanical form of that, and fails the
+build on it: `Enum(rawValue: x) ?? .case` anywhere in the app, the phone app or a first-party
+package. Give the type an explicit `unknown` case the way `RemoteLosslessStringToken` does, or
+project it with an exhaustive `switch` that has no `default:` — the first keeps an unrecognised
+value unrecognised, the second makes a new case upstream a compile error at the projection rather
+than a silent downgrade to whichever case the author had in mind. A site that must keep its
+fallback is allowlisted in the checker by path and enclosing declaration, with a reason that says
+why an unrecognised value is safe as that case; an unreachable fallback names the invariant that
+makes it unreachable, and the checker refuses both a perfunctory reason and an entry that no
+longer matches a site.
+
 - Distinguish missing, valid, unsupported-version, and corrupt persisted data. Corrupt data is
   quarantined; it is never interpreted as an empty store and overwritten.
 - Decode wire envelopes into `Codable` value types. Arbitrary tool-owned JSON uses `JSONValue`,

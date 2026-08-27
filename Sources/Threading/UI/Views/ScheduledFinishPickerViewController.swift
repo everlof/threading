@@ -12,12 +12,7 @@ struct ScheduledFinishCandidate: Equatable, Sendable, Identifiable {
     let title: String
     let projectName: String
     let agentName: String
-    let agentKindRawValue: String
-
-    @MainActor
-    var agentKind: AgentKind {
-        AgentKind(rawValue: agentKindRawValue) ?? .claude
-    }
+    let agentKind: AgentKind
 
     nonisolated func matches(_ query: String) -> Bool {
         title.localizedCaseInsensitiveContains(query)
@@ -63,7 +58,7 @@ enum ScheduledFinishCandidates {
                     title: session.displayTitle,
                     projectName: project.name,
                     agentName: agentName,
-                    agentKindRawValue: session.kind.rawValue
+                    agentKind: session.kind
                 ))
             }
         }

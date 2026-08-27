@@ -134,6 +134,25 @@ extension AppCommand {
         case .projectScript(let localID):
             hostOrigin = .projectScript(localID: localID)
         }
+        // Projected case by case rather than through the raw strings. The mirror exists so this
+        // contract owns its own vocabulary; spelling the projection out is what makes a new case
+        // on the declaring side a compile error here instead of the nearest existing value.
+        let hostScope: HostCommandDescriptor.Scope
+        switch scope {
+        case .application:
+            hostScope = .application
+        case .project:
+            hostScope = .project
+        case .session:
+            hostScope = .session
+        }
+        let hostRisk: HostCommandDescriptor.Risk
+        switch risk {
+        case .ordinary:
+            hostRisk = .ordinary
+        case .destructive:
+            hostRisk = .destructive
+        }
         return HostCommandDescriptor(
             id: id,
             title: title,
@@ -141,8 +160,8 @@ extension AppCommand {
             group: group.rawValue,
             shortcut: shortcut,
             origin: hostOrigin,
-            scope: HostCommandDescriptor.Scope(rawValue: scope.rawValue) ?? .application,
-            risk: HostCommandDescriptor.Risk(rawValue: risk.rawValue) ?? .ordinary,
+            scope: hostScope,
+            risk: hostRisk,
             availability: availability,
             nextInput: nextInput,
             shortcutEditable: isEditable

@@ -309,6 +309,37 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         XCTAssertEqual(candidates.first?.agentName, "Claude Code · work")
     }
 
+    /// A candidate used to carry its provider as a raw `String` and re-derive it with
+    /// `AgentKind(rawValue:) ?? .claude`. The type now holds an `AgentKind`, so a value that
+    /// cannot name a provider is unrepresentable rather than silently becoming Claude.
+    ///
+    /// That guarantee is the compiler's, not this test's — and this test would have passed
+    /// before the change too, because the one construction path fed `session.kind.rawValue`
+    /// straight back in and always round-tripped. What it pins is the behaviour the fallback
+    /// would have hidden had any other path ever produced an unrecognised string: every
+    /// provider reports itself, for every case the enum has.
+    func testFinishCandidateReportsItsOwnProviderRatherThanFallingBackToClaude() {
+        var project = Project(
+            name: "Providers",
+            folderURL: URL(fileURLWithPath: NSTemporaryDirectory())
+        )
+        project.sessions = AgentKind.allCases.map {
+            AgentSession(kind: $0, title: "Turn in flight on \($0.displayName)")
+        }
+
+        let candidates = ScheduledFinishCandidates.make(
+            projects: [project],
+            activity: { _ in .working },
+            reportsOwnTurns: { _ in true }
+        )
+
+        // Driven from `allCases`, so a provider added later is covered without editing this.
+        XCTAssertEqual(candidates.map(\.agentKind), AgentKind.allCases)
+        for (session, candidate) in zip(project.sessions, candidates) {
+            XCTAssertEqual(candidate.agentKind, session.kind)
+        }
+    }
+
     func testFinishPickerScansStoredSessionsAsValuesAndBuildsOnlyLiveCandidates() {
         var project = Project(
             name: "Stress",
@@ -683,7 +714,7 @@ final class ScheduledFinishPickerTests: XCTestCase {
             title: title,
             projectName: project,
             agentName: kind.displayName,
-            agentKindRawValue: kind.rawValue
+            agentKind: kind
         )
     }
 
