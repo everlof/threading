@@ -476,6 +476,9 @@ is one line; the logic is `scripts/pre_push.sh`, which is versioned and reviewab
 pushes skip the gate. Bypass deliberately with `THREADING_SKIP_TESTS=1 git push` — prefer it over
 `--no-verify`, which also skips Git LFS.
 
+The canonical non-interactive CI/release gate also builds `ThreadingMobile` for a generic iOS
+Simulator destination, so both shipping apps are type-checked without booting or locking a device.
+
 The same hook runs `scripts/check_secrets.sh` over the range being pushed first, and that half
 is **not** covered by `THREADING_SKIP_TESTS`: it costs under a second, and it is the only gate
 whose failure cannot be repaired by a later commit, because a credential pushed to a public

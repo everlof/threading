@@ -38,6 +38,16 @@ swiftlint lint \
     --config "${repository_directory}/.swiftlint.yml" \
     "${repository_directory}/Sources"
 
+say "Building ThreadingMobile (generic iOS Simulator)"
+xcodebuild \
+    -project "${repository_directory}/Threading.xcodeproj" \
+    -scheme ThreadingMobile \
+    -configuration Debug \
+    -destination 'generic/platform=iOS Simulator' \
+    build \
+    SWIFT_STRICT_CONCURRENCY=complete \
+    COMPILER_INDEX_STORE_ENABLE=NO
+
 for package in ThreadingExtensionKit ThreadingRemoteKit ThreadingWasmRuntime ThreadingScenarioKit ThreadingPeerTransport ThreadingSimulatorKit; do
     say "Testing ${package}"
     swift test --package-path "${repository_directory}/Packages/${package}"

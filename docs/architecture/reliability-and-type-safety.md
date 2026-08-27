@@ -193,9 +193,11 @@ weeks later as a record that will not decode.
 ## Shipping contract
 
 `scripts/ci.sh` is the canonical non-interactive gate: structural policy, localization and theme
-boundaries, the secret scan, SwiftLint, every local contract/runtime package, and the off-screen
-app test plan under complete concurrency checking. GitHub Actions and `scripts/release.sh` call
-the same entry point so local, CI, and shipping definitions cannot drift.
+boundaries, the secret scan, SwiftLint, a generic-simulator build of the shipping iPhone app,
+every local contract/runtime package, and the off-screen Mac app test plan under complete
+concurrency checking. The generic destination type-checks the mobile target without booting a
+CoreSimulator device, so this build does not take the simulator lane lock. GitHub Actions and
+`scripts/release.sh` call the same entry point so local, CI, and shipping definitions cannot drift.
 
 ### The secret scan is the one gate that fails closed forever
 
