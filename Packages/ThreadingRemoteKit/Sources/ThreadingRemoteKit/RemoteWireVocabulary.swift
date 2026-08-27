@@ -572,7 +572,11 @@ public enum RemoteConversationRowKind: RemoteLosslessStringToken {
 // MARK: - Routes
 
 /// Fixed path components shared by the remote client and host router.
-public enum RemoteSessionRouteAction: String, Codable, Equatable, Hashable, Sendable {
+///
+/// `CaseIterable` so the cross-boundary round-trip test can walk every action: a new case that
+/// nobody wired into both ends becomes a compile error in that test's exhaustive switch rather
+/// than an untested route.
+public enum RemoteSessionRouteAction: String, CaseIterable, Codable, Equatable, Hashable, Sendable {
     case resume
     case theme
     case rename
@@ -597,10 +601,79 @@ public enum RemoteSessionRouteAction: String, Codable, Equatable, Hashable, Send
     case extensionPanelResource = "extension-panel-resource"
 }
 
-public enum RemoteTerminalRouteAction: String, Codable, Equatable, Hashable, Sendable {
+public enum RemoteTerminalRouteAction: String, CaseIterable, Codable, Equatable, Hashable, Sendable {
     case resume
     case share
     case unshare
+}
+
+/// Every top-level REST route on the remote door.
+///
+/// The route strings used to be spelled twice — once as literals the client appended onto its
+/// base URL, once as rooted path constants the host matched — so a rename could pass both
+/// suites and still break the phone. One owner makes that fail closed: the client builds from
+/// `rawValue`, the host matches `absolutePath` or `prefix`, and neither can move alone.
+///
+/// The raw value carries no leading slash because that is the form a client appends; the host's
+/// rooted spelling is derived rather than stored, so the two cannot disagree.
+public enum RemoteRoute: String, CaseIterable, Sendable {
+    case me = "api/me"
+    case usage = "api/usage"
+    case usageLimit = "api/usage/limit"
+    case session = "api/session"
+    case terminal = "api/terminal"
+    case theme = "api/theme"
+    case notifications = "api/notifications"
+    case diagnostics = "api/diagnostics"
+    case localDiagnosticsCapture = "api/local-diagnostics/capture"
+    case invitationAcceptance = "api/invitations/accept"
+    case hostedDeviceCredential = "api/hosted-device-credential"
+    case settings = "api/settings"
+
+    /// The rooted path a host matches an incoming request against.
+    public var absolutePath: String { "/" + rawValue }
+
+    /// The rooted path plus its separator, for a route that owns a subtree — `/api/session/…`.
+    public var prefix: String { absolutePath + "/" }
+}
+
+/// Every websocket route on the remote door, in the same one-owner shape as `RemoteRoute`.
+public enum RemoteSocketRoute: String, CaseIterable, Sendable {
+    case events = "ws/events"
+    case session = "ws/session"
+    case terminal = "ws/terminal"
+
+    /// The rooted path a host matches an incoming upgrade against.
+    public var absolutePath: String { "/" + rawValue }
+
+    /// The rooted path plus its separator, for the two routes that address an id underneath.
+    public var prefix: String { absolutePath + "/" }
+
+    /// The component form a client builds with, since `URL.appendingPathComponent` takes one
+    /// segment at a time and each id appended after these must stay separately escaped.
+    public var pathComponents: [String] { rawValue.split(separator: "/").map(String.init) }
+}
+
+/// The request headers the remote protocol defines.
+///
+/// Lowercase because that is what the host stores: `MCPConnection` lowercases every header name
+/// as it parses, so a client may send any casing and the comparison still holds. Naming them
+/// here keeps a client from inventing a sixth spelling of a header the host never reads.
+public enum RemoteHeader: String, CaseIterable, Sendable {
+    case device = "x-threading-device"
+    case client = "x-threading-client"
+    case requestID = "x-threading-request-id"
+    case protocolVersion = "x-threading-protocol"
+    case protocolMinimum = "x-threading-protocol-min"
+}
+
+/// What a client calls itself in `RemoteHeader.client`.
+///
+/// Lowercase for the same reason as the headers: the host lowercases the value before comparing
+/// it, so this is the normalized form both ends can agree on without a third spelling.
+public enum RemoteClientKind: String, CaseIterable, Sendable {
+    case iOS = "threading-ios"
+    case web = "threading-web"
 }
 
 // MARK: - Collaboration

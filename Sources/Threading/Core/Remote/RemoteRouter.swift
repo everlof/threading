@@ -64,7 +64,7 @@ struct RemoteRouter {
 
     /// The session id for a `/ws/session/<id>` upgrade path, else nil.
     static func webSocketSessionID(forPath path: String) -> String? {
-        let prefix = "/ws/session/"
+        let prefix = RemoteSocketRoute.session.prefix
         guard path.hasPrefix(prefix) else { return nil }
         let id = String(path.dropFirst(prefix.count))
         return id.isEmpty ? nil : id
@@ -72,24 +72,26 @@ struct RemoteRouter {
 
     /// The terminal id for a `/ws/terminal/<id>` upgrade path, else nil.
     static func webSocketTerminalID(forPath path: String) -> String? {
-        let prefix = "/ws/terminal/"
+        let prefix = RemoteSocketRoute.terminal.prefix
         guard path.hasPrefix(prefix) else { return nil }
         let id = String(path.dropFirst(prefix.count))
         return id.isEmpty || id.contains("/") ? nil : id
     }
 
-    static let apiSessionsPath = "/api/me"
-    static let usagePath = "/api/usage"
-    static let usageLimitPath = "/api/usage/limit"
-    static let createSessionPath = "/api/session"
-    static let notificationRegistrationPath = "/api/notifications"
-    static let diagnosticUploadPath = "/api/diagnostics"
-    static let mobileDiagnosticsCaptureUploadPath = "/api/local-diagnostics/capture"
-    static let invitationAcceptancePath = "/api/invitations/accept"
-    static let hostedDeviceCredentialPath = "/api/hosted-device-credential"
-    static let appThemePath = "/api/theme"
-    private static let appSettingPrefix = "/api/settings/"
-    static let themeEventsPath = "/ws/events"
+    // Spelled once, in `ThreadingRemoteKit`: the client appends the same `RemoteRoute` raw
+    // values onto its base URL, so a rename cannot move one end without the other.
+    static let apiSessionsPath = RemoteRoute.me.absolutePath
+    static let usagePath = RemoteRoute.usage.absolutePath
+    static let usageLimitPath = RemoteRoute.usageLimit.absolutePath
+    static let createSessionPath = RemoteRoute.session.absolutePath
+    static let notificationRegistrationPath = RemoteRoute.notifications.absolutePath
+    static let diagnosticUploadPath = RemoteRoute.diagnostics.absolutePath
+    static let mobileDiagnosticsCaptureUploadPath = RemoteRoute.localDiagnosticsCapture.absolutePath
+    static let invitationAcceptancePath = RemoteRoute.invitationAcceptance.absolutePath
+    static let hostedDeviceCredentialPath = RemoteRoute.hostedDeviceCredential.absolutePath
+    static let appThemePath = RemoteRoute.theme.absolutePath
+    private static let appSettingPrefix = RemoteRoute.settings.prefix
+    static let themeEventsPath = RemoteSocketRoute.events.absolutePath
     /// Stored in `RemoteConnection.routedSessionID` to avoid a second upgrade-state field.
     static let themeEventsRouteID = "__theme_events__"
 
@@ -166,7 +168,7 @@ struct RemoteRouter {
     }
 
     static func gitReviewRoute(forPath path: String) -> GitReviewRoute? {
-        let prefix = "/api/session/"
+        let prefix = RemoteRoute.session.prefix
         let marker = "/\(RemoteSessionRouteAction.gitReview.rawValue)/"
         guard path.hasPrefix(prefix),
               let markerRange = path.range(of: marker, options: .backwards) else {
@@ -236,7 +238,7 @@ struct RemoteRouter {
         forPath path: String,
         action: RemoteSessionRouteAction
     ) -> String? {
-        let prefix = "/api/session/"
+        let prefix = RemoteRoute.session.prefix
         let suffix = "/\(action.rawValue)"
         guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
         let id = path.dropFirst(prefix.count).dropLast(suffix.count)
@@ -247,7 +249,7 @@ struct RemoteRouter {
         forPath path: String,
         action: RemoteTerminalRouteAction
     ) -> String? {
-        let prefix = "/api/terminal/"
+        let prefix = RemoteRoute.terminal.prefix
         let suffix = "/\(action.rawValue)"
         guard path.hasPrefix(prefix), path.hasSuffix(suffix) else { return nil }
         let id = path.dropFirst(prefix.count).dropLast(suffix.count)
@@ -268,14 +270,14 @@ struct RemoteRouter {
         return token.isEmpty ? nil : token
     }
 
-    static let deviceHeader = "x-threading-device"
-    static let clientHeader = "x-threading-client"
-    static let requestIDHeader = "x-threading-request-id"
+    static let deviceHeader = RemoteHeader.device.rawValue
+    static let clientHeader = RemoteHeader.client.rawValue
+    static let requestIDHeader = RemoteHeader.requestID.rawValue
 
     /// Headers a client uses to declare the protocol version pair it speaks, so the server can
     /// answer a mismatch with a clear "please update" rather than a broken response.
-    static let protocolHeader = "x-threading-protocol"
-    static let protocolMinimumHeader = "x-threading-protocol-min"
+    static let protocolHeader = RemoteHeader.protocolVersion.rawValue
+    static let protocolMinimumHeader = RemoteHeader.protocolMinimum.rawValue
 
     /// Applies the headers that matter for a server behind a public tunnel: no sniffing, no
     /// framing, no referrer leakage, and — for the page itself — a restrictive CSP that keeps

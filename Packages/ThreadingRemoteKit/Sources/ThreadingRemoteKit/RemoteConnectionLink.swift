@@ -221,11 +221,11 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     }
 
     public var meURL: URL {
-        baseURL.appendingPathComponent("api/me")
+        routeURL(.me)
     }
 
     public var usageURL: URL {
-        baseURL.appendingPathComponent("api/usage")
+        routeURL(.usage)
     }
 
     public func usageURL(cursor: String?, limit: Int? = nil) -> URL {
@@ -238,7 +238,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     }
 
     public func usageLimitURL(seriesID: String, days: Int) -> URL {
-        let endpoint = usageURL.appendingPathComponent("limit")
+        let endpoint = routeURL(.usageLimit)
         var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false)
         components?.queryItems = [
             URLQueryItem(name: "series", value: seriesID),
@@ -248,38 +248,35 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     }
 
     public var appThemeURL: URL {
-        baseURL.appendingPathComponent("api/theme")
+        routeURL(.theme)
     }
 
     public var createSessionURL: URL {
-        baseURL.appendingPathComponent("api/session")
+        routeURL(.session)
     }
 
     public var notificationRegistrationURL: URL {
-        baseURL.appendingPathComponent("api/notifications")
+        routeURL(.notifications)
     }
 
     public var diagnosticUploadURL: URL {
-        baseURL.appendingPathComponent("api/diagnostics")
+        routeURL(.diagnostics)
     }
 
     public var mobileDiagnosticsCaptureUploadURL: URL {
-        baseURL.appendingPathComponent("api/local-diagnostics/capture")
+        routeURL(.localDiagnosticsCapture)
     }
 
     public var invitationAcceptanceURL: URL {
-        baseURL.appendingPathComponent("api/invitations/accept")
+        routeURL(.invitationAcceptance)
     }
 
     public var hostedDeviceCredentialURL: URL {
-        baseURL.appendingPathComponent("api/hosted-device-credential")
+        routeURL(.hostedDeviceCredential)
     }
 
     public func resumeURL(sessionID: String) -> URL {
-        baseURL
-            .appendingPathComponent("api/session")
-            .appendingPathComponent(sessionID)
-            .appendingPathComponent("resume")
+        sessionActionURL(sessionID: sessionID, action: .resume)
     }
 
     public func resumeTerminalURL(terminalID: String) -> URL {
@@ -295,10 +292,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     }
 
     public func sessionThemeURL(sessionID: String) -> URL {
-        baseURL
-            .appendingPathComponent("api/session")
-            .appendingPathComponent(sessionID)
-            .appendingPathComponent("theme")
+        sessionActionURL(sessionID: sessionID, action: .theme)
     }
 
     public func renameSessionURL(sessionID: String) -> URL {
@@ -432,23 +426,28 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
     }
 
     public var eventsWebSocketURL: URL? {
-        webSocketURL(pathComponents: ["ws", "events"])
+        webSocketURL(.events)
     }
 
     public func webSocketURL(sessionID: String) -> URL? {
-        webSocketURL(pathComponents: ["ws", "session", sessionID])
+        webSocketURL(.session, id: sessionID)
     }
 
     public func terminalWebSocketURL(terminalID: String) -> URL? {
-        webSocketURL(pathComponents: ["ws", "terminal", terminalID])
+        webSocketURL(.terminal, id: terminalID)
+    }
+
+    /// Every REST URL starts here, so a route exists in exactly one place on this side of the
+    /// wire and `RemoteRoute` is the only thing that can move it.
+    private func routeURL(_ route: RemoteRoute) -> URL {
+        baseURL.appendingPathComponent(route.rawValue)
     }
 
     private func sessionActionURL(
         sessionID: String,
         action: RemoteSessionRouteAction
     ) -> URL {
-        baseURL
-            .appendingPathComponent("api/session")
+        routeURL(.session)
             .appendingPathComponent(sessionID)
             .appendingPathComponent(action.rawValue)
     }
@@ -457,21 +456,28 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         terminalID: String,
         action: RemoteTerminalRouteAction
     ) -> URL {
-        baseURL
-            .appendingPathComponent("api/terminal")
+        routeURL(.terminal)
             .appendingPathComponent(terminalID)
             .appendingPathComponent(action.rawValue)
     }
 
-    private func webSocketURL(pathComponents: [String]) -> URL? {
-        let url = pathComponents.reduce(baseURL) { partial, component in
+    /// The id is appended as its own component rather than interpolated into the route, so a
+    /// space or other reserved character in it is percent-escaped rather than reshaping the path.
+    ///
+    /// A slash is the exception: `appendingPathComponent` does **not** escape one, so an id
+    /// containing `/` really does become extra path segments. The host is what refuses that —
+    /// `RemoteRouter.webSocketTerminalID(forPath:)` returns nil for an id containing a slash —
+    /// so the guard is on the matching end, not here.
+    private func webSocketURL(_ route: RemoteSocketRoute, id: String? = nil) -> URL? {
+        let components = route.pathComponents + (id.map { [$0] } ?? [])
+        let url = components.reduce(baseURL) { partial, component in
             partial.appendingPathComponent(component)
         }
-        var components = URLComponents(
+        var urlComponents = URLComponents(
             url: url,
             resolvingAgainstBaseURL: false
         )
-        components?.scheme = baseURL.scheme?.lowercased() == "https" ? "wss" : "ws"
-        return components?.url
+        urlComponents?.scheme = baseURL.scheme?.lowercased() == "https" ? "wss" : "ws"
+        return urlComponents?.url
     }
 }

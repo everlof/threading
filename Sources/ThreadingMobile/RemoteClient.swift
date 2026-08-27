@@ -874,7 +874,7 @@ struct RemoteClient {
     ) async throws {
         var request = request(url: link.resumeURL(sessionID: sessionID))
         request.httpMethod = "POST"
-        request.setValue(requestID, forHTTPHeaderField: "X-Threading-Request-ID")
+        request.setValue(requestID, forHTTPHeaderField: RemoteHeader.requestID.rawValue)
         let (data, response) = try await dataReplayingNetworkFailure(for: request)
         _ = try validate(data: data, response: response, accepted: 200...299)
     }
@@ -885,7 +885,7 @@ struct RemoteClient {
     ) async throws {
         var request = request(url: link.resumeTerminalURL(terminalID: terminalID))
         request.httpMethod = "POST"
-        request.setValue(requestID, forHTTPHeaderField: "X-Threading-Request-ID")
+        request.setValue(requestID, forHTTPHeaderField: RemoteHeader.requestID.rawValue)
         let (data, response) = try await dataReplayingNetworkFailure(for: request)
         _ = try validate(data: data, response: response, accepted: 200...299)
     }
@@ -1308,16 +1308,24 @@ struct RemoteClient {
     static var socketSessionDelegate: URLSessionDelegate? { socketSession.delegate }
     static var reportSessionDelegate: URLSessionDelegate? { reportSession.delegate }
 
+    /// Protocol header names come from the shared `RemoteHeader` vocabulary, so the phone and
+    /// the host cannot drift apart on a rename. Those raw values are lowercase while this client
+    /// historically spelled them in title case; field names are case-insensitive by RFC 9110, the
+    /// host lowercases every name as it parses and looks them up lowercased, and HTTP/2 requires
+    /// lowercase names in transit anyway — so only the bytes change, never the meaning.
     private func request(url: URL) -> URLRequest {
         var request = URLRequest(url: url)
         request.setValue("Bearer \(link.token)", forHTTPHeaderField: "Authorization")
-        request.setValue(String(RemoteProtocol.current), forHTTPHeaderField: "X-Threading-Protocol")
+        request.setValue(
+            String(RemoteProtocol.current),
+            forHTTPHeaderField: RemoteHeader.protocolVersion.rawValue
+        )
         request.setValue(
             String(RemoteProtocol.minimumSupported),
-            forHTTPHeaderField: "X-Threading-Protocol-Min"
+            forHTTPHeaderField: RemoteHeader.protocolMinimum.rawValue
         )
-        request.setValue("Threading-iOS", forHTTPHeaderField: "X-Threading-Client")
-        request.setValue(RemoteDeviceIdentity.current, forHTTPHeaderField: "X-Threading-Device")
+        request.setValue(RemoteClientKind.iOS.rawValue, forHTTPHeaderField: RemoteHeader.client.rawValue)
+        request.setValue(RemoteDeviceIdentity.current, forHTTPHeaderField: RemoteHeader.device.rawValue)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         if let requestTimeout { request.timeoutInterval = requestTimeout }
         return request
@@ -1349,7 +1357,7 @@ struct RemoteClient {
         request.httpMethod = "POST"
         request.httpBody = try Self.encodeMutationBody(body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(requestID, forHTTPHeaderField: "X-Threading-Request-ID")
+        request.setValue(requestID, forHTTPHeaderField: RemoteHeader.requestID.rawValue)
         let (data, response) = try await dataReplayingNetworkFailure(for: request)
         _ = try validate(data: data, response: response, accepted: 200...299)
         return try JSONDecoder().decode(Response.self, from: data)

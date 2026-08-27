@@ -1270,7 +1270,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     ) {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
         guard authorization.canManageHost,
-              request.header(RemoteRouter.clientHeader)?.lowercased() == "threading-ios",
+              request.header(RemoteRouter.clientHeader)?.lowercased() == RemoteClientKind.iOS.rawValue,
               request.body.count <= MobileDiagnosticsCaptureStore.maximumEncodedCaptureBytes,
               let deviceID = RemoteInboundPolicy.normalizedDeviceID(
                 request.header(RemoteRouter.deviceHeader)
@@ -1369,8 +1369,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         forClientHeader header: String?
     ) -> RemoteDiagnosticSource? {
         switch header?.lowercased() {
-        case "threading-ios": return .iOSClient
-        case "threading-web": return .browserClient
+        case RemoteClientKind.iOS.rawValue: return .iOSClient
+        case RemoteClientKind.web.rawValue: return .browserClient
         default: return nil
         }
     }
@@ -1438,7 +1438,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                       // durable record as well.
                       persistsOwnerDevice:
                         request.header(RemoteRouter.clientHeader)?.lowercased()
-                          == "threading-ios"
+                          == RemoteClientKind.iOS.rawValue
                   ) else {
                 self?.queue.async { [weak self] in
                     self?.recordFailedAuth(reason: "invalid invitation", device: deviceID)

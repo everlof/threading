@@ -474,6 +474,19 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
     // MARK: - Probing
 
+    // The header names below — and every `headers:` dictionary the tests pass through these two
+    // helpers — are spelled `X-Threading-…` in title case on purpose. **Do not rewire them onto
+    // `RemoteHeader`.**
+    //
+    // A shipped iPhone in the field sends title case; the current client sends the lowercase
+    // spelling `RemoteHeader` defines. Both are in the wild, and HTTP header names are
+    // case-insensitive, so the host has to keep accepting either. These literals are the only
+    // coverage proving it still accepts the casing from a client we do not control — derive them
+    // from the enum and that regression test silently becomes a tautology.
+    //
+    // The enum-derived half of this lives in `RemoteRouteRoundTripTests`, which asserts both
+    // casings reach the same host decision. Keep the two halves apart.
+
     private struct Probe { let status: Int; let headers: [AnyHashable: Any]; let body: Data }
 
     @discardableResult
