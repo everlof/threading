@@ -14,14 +14,15 @@ struct MobileModelEffortPicker: View {
         let name: String
         let representedValue: String?
         let supportedEffortIDs: Set<String>
+        /// The highest level this model offers. Ultra for one provider, Max for another: the
+        /// ceiling is a property of the row, not of one named column.
+        let topEffortID: String?
     }
 
     private struct EffortColumn: Identifiable {
         let id: String
         let name: String
         let representedValue: String?
-
-        var isUltra: Bool { representedValue?.lowercased() == "ultra" }
 
         /// Providers do not all send their shared levels in the same order. The matrix must
         /// preserve the familiar left-to-right increase in effort instead of reflecting which
@@ -63,14 +64,20 @@ struct MobileModelEffortPicker: View {
         /// The matrix itself never becomes a two-axis scroll surface.
         // Keep the numeric picker measurements as computed accessors so InjectionNext can
         // replace them after launch; a stored static constant is already initialized by then.
-        static var modelsPerPage: Int { 6 }
+        static var modelsPerPage: Int { 5 }
         static var providerEffortsPerPage: Int { 6 }
         static var modelWidth: CGFloat { 94 }
         static var headerHeight: CGFloat { 30 }
         static var rowHeight: CGFloat { MobileDesign.Size.minimumTapTarget }
         static var cellGap: CGFloat { 4 }
-        static var beacon: CGFloat { 7 }
-        static var selectedBeacon: CGFloat { 11 }
+        /// Every level sits on one ramp from the lowest to the model's ceiling: the beacon grows
+        /// from `beaconMinimum` to `beaconMaximum`, its ink crosses from tertiary to accent, and
+        /// the column's wash deepens to `washMaximum`. Selection adds `selectionGrowth`.
+        static var beaconMinimum: CGFloat { 5 }
+        static var beaconMaximum: CGFloat { 10 }
+        static var selectionGrowth: CGFloat { 3 }
+        static var washMaximum: Double { 0.14 }
+        static var automaticRingWidth: CGFloat { 1.5 }
         static let automaticEffortID = "threading.mobile.model-effort.automatic"
     }
 
@@ -103,17 +110,6 @@ struct MobileModelEffortPicker: View {
         selectedEffortID: String,
         onChoose: @escaping (_ model: String?, _ effort: String?) -> Void
     ) {
-        let rows = models.map { model in
-            let isDefault = model.id == defaultModelID
-            return ModelRow(
-                id: model.id,
-                name: isDefault
-                    ? MobileL10n.string("%@ · Default", model.name)
-                    : model.name,
-                representedValue: isDefault ? nil : model.id,
-                supportedEffortIDs: Set(model.reasoning.map(\.id))
-            )
-        }
         var seen: Set<String> = []
         var efforts = [EffortColumn(
             id: Metrics.automaticEffortID,
@@ -136,6 +132,23 @@ struct MobileModelEffortPicker: View {
                     : lhs.element.canonicalRank < rhs.element.canonicalRank
             }.map(\.element)
             efforts = [automatic] + orderedProviderEfforts
+        }
+        let rankByEffortID = Dictionary(
+            efforts.map { ($0.id, $0.canonicalRank) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let rows = models.map { model in
+            let isDefault = model.id == defaultModelID
+            let supported = model.reasoning.map(\.id)
+            return ModelRow(
+                id: model.id,
+                name: model.name,
+                representedValue: isDefault ? nil : model.id,
+                supportedEffortIDs: Set(supported),
+                topEffortID: supported.max { lhs, rhs in
+                    (rankByEffortID[lhs] ?? -1) < (rankByEffortID[rhs] ?? -1)
+                }
+            )
         }
 
         self.rows = rows
@@ -208,14 +221,22 @@ struct MobileModelEffortPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-            Text("Model × effort")
+            Text(titleText)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(theme.secondaryLabel)
+                .foregroundStyle(scrubbedCell == nil ? theme.secondaryLabel : theme.label)
+                .lineLimit(1)
+                .contentTransition(.identity)
 
             matrix
         }
         .padding(MobileDesign.Spacing.inset)
         .background(theme.floatingSurface)
+        // The popover is tone-on-tone with the composer bar it opens over; the themed dialog's
+        // border gives the edge back without a second surface colour.
+        .overlay {
+            RoundedRectangle(cornerRadius: theme.panelRadius, style: .continuous)
+                .strokeBorder(theme.border, lineWidth: max(theme.borderWidth, 1))
+        }
         .frame(minWidth: 350, idealWidth: 380, maxWidth: 420)
         .accessibilityElement(children: .contain)
         #if DEBUG
@@ -226,6 +247,26 @@ struct MobileModelEffortPicker: View {
         }
         .id(injectionRevision)
         #endif
+    }
+
+    /// A finger hides the cell it is on, so the title reads the scrubbed combination and the
+    /// axis labels light up; the summary is only shown once the choice is committed otherwise.
+    private var titleText: String {
+        guard let cell = scrubbedCell, isAvailable(cell) else {
+            return MobileL10n.string("Model × effort")
+        }
+        return "\(visibleRows[cell.row].name) · \(visibleEfforts[cell.column].name)"
+    }
+
+    private func isScrubbedRow(_ model: ModelRow) -> Bool {
+        scrubbedCell.map { visibleRows.indices.contains($0.row) && visibleRows[$0.row].id == model.id }
+            ?? false
+    }
+
+    private func isScrubbedColumn(_ effort: EffortColumn) -> Bool {
+        scrubbedCell.map {
+            visibleEfforts.indices.contains($0.column) && visibleEfforts[$0.column].id == effort.id
+        } ?? false
     }
 
     private var matrix: some View {
@@ -246,11 +287,38 @@ struct MobileModelEffortPicker: View {
             .background {
                 RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
                     .fill(theme.panel)
+                    .overlay {
+                        // The ceiling's wash fills the whole panel rather than one cell, so
+                        // reaching a model's top level is felt on the surface being held.
+                        RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
+                            .fill(
+                                RadialGradient(
+                                    colors: [
+                                        theme.accent.opacity(activeCellIsCeiling ? 0.22 : 0),
+                                        theme.accentMuted.opacity(activeCellIsCeiling ? 0.10 : 0),
+                                        .clear,
+                                    ],
+                                    center: .center,
+                                    startRadius: 8,
+                                    endRadius: 260
+                                )
+                            )
+                    }
             }
             .overlay {
                 RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
                     .stroke(theme.border, lineWidth: theme.borderWidth)
             }
+            .mobileUltraBeam(
+                active: activeCellIsCeiling,
+                radius: theme.controlRadius,
+                reducesMotion: reduceMotion,
+                freezesForEvidence: freezesForEvidence
+            )
+            .animation(
+                reduceMotion ? nil : .easeInOut(duration: MobileDesign.Motion.controlResponse),
+                value: activeCellIsCeiling
+            )
 
             if modelPageCount > 1 || effortPageCount > 1 {
                 pageControls
@@ -262,8 +330,44 @@ struct MobileModelEffortPicker: View {
         }
     }
 
+    /// Every page is the same height. A short last page leaves blank rows rather than pulling
+    /// the page controls up under the finger that just tapped them.
     private var matrixHeight: CGFloat {
-        Metrics.headerHeight + CGFloat(visibleRows.count) * Metrics.rowHeight
+        let rowsOnAPage = rows.count > Metrics.modelsPerPage
+            ? Metrics.modelsPerPage
+            : visibleRows.count
+        return Metrics.headerHeight + CGFloat(rowsOnAPage) * Metrics.rowHeight
+    }
+
+    /// The cell a finger is on, else the committed one; the beam and the wash follow it.
+    private var activeCell: MatrixCell? {
+        if let scrubbedCell { return scrubbedCell }
+        guard let row = visibleRows.firstIndex(where: { $0.id == effectiveSelectedModelID }),
+              let column = visibleEfforts.firstIndex(where: { $0.id == effectiveSelectedEffortID })
+        else { return nil }
+        return MatrixCell(row: row, column: column)
+    }
+
+    private var activeCellIsCeiling: Bool {
+        guard let cell = activeCell, isAvailable(cell) else { return false }
+        return isCeiling(model: visibleRows[cell.row], effort: visibleEfforts[cell.column])
+    }
+
+    private func isCeiling(model: ModelRow, effort: EffortColumn) -> Bool {
+        effort.representedValue != nil && effort.id == model.topEffortID
+    }
+
+    /// Where a level sits between the catalogue's lowest and highest provider level, 0…1.
+    /// Auto has no place on the ramp; unknown levels count as the top.
+    private func rampFraction(_ effort: EffortColumn) -> Double {
+        let ranks = effortCatalog.compactMap { column -> Int? in
+            column.representedValue == nil ? nil : column.canonicalRank
+        }
+        guard effort.representedValue != nil,
+              let lowest = ranks.min(), let highest = ranks.max(), highest > lowest
+        else { return effort.representedValue == nil ? 0 : 1 }
+        let rank = min(effort.canonicalRank, highest)
+        return Double(rank - lowest) / Double(highest - lowest)
     }
 
     private func matrixContent(modelWidth: CGFloat, effortWidth: CGFloat) -> some View {
@@ -289,6 +393,14 @@ struct MobileModelEffortPicker: View {
                         .frame(height: max(theme.borderWidth, 1))
                 }
             }
+            if rows.count > Metrics.modelsPerPage, visibleRows.count < Metrics.modelsPerPage {
+                Color.clear
+                    .frame(
+                        height: CGFloat(Metrics.modelsPerPage - visibleRows.count)
+                            * Metrics.rowHeight
+                    )
+                    .accessibilityHidden(true)
+            }
         }
     }
 
@@ -301,7 +413,16 @@ struct MobileModelEffortPicker: View {
                 .frame(width: modelWidth, alignment: .leading)
             ForEach(visibleEfforts) { effort in
                 Text(effort.compactName)
-                    .foregroundStyle(effort.isUltra ? theme.accent : theme.tertiaryLabel)
+                    .foregroundStyle(
+                        isScrubbedColumn(effort)
+                            ? theme.accent
+                            : theme.tertiaryLabel
+                    )
+                    .overlay {
+                        Text(effort.compactName)
+                            .foregroundStyle(theme.accent)
+                            .opacity(isScrubbedColumn(effort) ? 0 : rampFraction(effort) * 0.85)
+                    }
                     .lineLimit(1)
                     .minimumScaleFactor(0.72)
                     .allowsTightening(true)
@@ -320,24 +441,25 @@ struct MobileModelEffortPicker: View {
     }
 
     private func modelLabel(_ model: ModelRow, width: CGFloat) -> some View {
-        Text(model.name)
-            .font(
-                effectiveSelectedModelID == model.id
-                    ? .caption.weight(.semibold)
-                    : .caption
-            )
-            .foregroundStyle(
-                effectiveSelectedModelID == model.id ? theme.label : theme.secondaryLabel
-            )
-            .lineLimit(1)
-            .truncationMode(.tail)
+        let selected = effectiveSelectedModelID == model.id
+        let scrubbed = isScrubbedRow(model)
+        return VStack(alignment: .leading, spacing: 1) {
+            Text(model.name)
+                .font(selected ? .caption.weight(.semibold) : .caption)
+                .foregroundStyle(
+                    scrubbed ? theme.accent : (selected ? theme.label : theme.secondaryLabel)
+                )
+                .lineLimit(1)
+                .truncationMode(.tail)
+            if model.representedValue == nil {
+                Text(MobileL10n.string("Default"))
+                    .font(.caption2)
+                    .foregroundStyle(theme.tertiaryLabel)
+                    .lineLimit(1)
+            }
+        }
             .padding(.leading, MobileDesign.Spacing.small)
             .frame(width: width, alignment: .leading)
-            .overlay(alignment: .trailing) {
-                Rectangle()
-                    .fill(theme.divider)
-                    .frame(width: max(theme.borderWidth, 1))
-            }
     }
 
     @ViewBuilder
@@ -356,6 +478,8 @@ struct MobileModelEffortPicker: View {
         let onScrubbedAxis = scrubbedCell.map {
             $0 != cell && ($0.row == cell.row || $0.column == cell.column)
         } ?? false
+        let fraction = rampFraction(effort)
+        let ceiling = isCeiling(model: model, effort: effort)
 
         if available {
             ZStack {
@@ -365,50 +489,22 @@ struct MobileModelEffortPicker: View {
                             ? theme.accent
                             : (onScrubbedAxis ? theme.controlHover.opacity(0.58) : theme.controlResting)
                     )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
-                            .stroke(
-                                selected ? theme.accent : (
-                                    effort.isUltra ? theme.accentMuted : theme.border
-                                ),
-                                lineWidth: selected ? max(theme.borderWidth, 2) : theme.borderWidth
-                            )
-                    }
-
-                if effort.isUltra {
+                if !selected {
+                    // The ramp's wash: each column one step deeper than the one before it, so
+                    // the matrix reads as a gradient of effort before any cell is chosen.
                     RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
-                        .fill(
-                            RadialGradient(
-                                colors: [
-                                    theme.accent.opacity(selected ? 0.62 : 0.20),
-                                    theme.accentMuted.opacity(selected ? 0.54 : 0.16),
-                                    .clear,
-                                ],
-                                center: .center,
-                                startRadius: 1,
-                                endRadius: max(18, width * 0.62)
-                            )
-                        )
-                    MobileUltraOrbit(
-                        active: selected,
-                        reduceMotion: reduceMotion,
-                        freezesForEvidence: freezesForEvidence,
-                        width: min(36, max(20, width - Metrics.cellGap * 2))
-                    )
+                        .fill(theme.accent.opacity(fraction * Metrics.washMaximum))
                 }
-
-                beacon(isUltra: effort.isUltra, selected: selected)
+                RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
+                    .stroke(
+                        selected ? theme.accent : (ceiling ? theme.accentMuted : theme.border),
+                        lineWidth: selected ? max(theme.borderWidth, 2) : theme.borderWidth
+                    )
+                beacon(effort: effort, fraction: fraction, ceiling: ceiling, selected: selected)
             }
             .frame(width: max(1, width - Metrics.cellGap), height: Metrics.rowHeight - 8)
             .scaleEffect(isScrubTarget && !reduceMotion ? 1.07 : 1)
             .zIndex(isScrubTarget ? 1 : 0)
-            .remoteThemeGlow(selected && effort.isUltra ? theme : RemoteThemePalette(nil))
-            .mobileUltraBeam(
-                active: selected && effort.isUltra,
-                radius: theme.controlRadius,
-                reducesMotion: reduceMotion,
-                freezesForEvidence: freezesForEvidence
-            )
             .animation(
                 reduceMotion ? nil : .snappy(
                     duration: MobileDesign.Motion.controlResponse,
@@ -421,17 +517,22 @@ struct MobileModelEffortPicker: View {
             .accessibilityAddTraits(.isButton)
             .accessibilityAddTraits(selected ? [.isSelected] : [])
             .accessibilityAction {
-                commitFeedback.impactOccurred(intensity: effort.isUltra ? 1 : 0.68)
-                commitFeedback.prepare()
-                choose(cell)
+                commit(cell, fraction: fraction)
             }
         } else {
             Circle()
                 .fill(theme.tertiaryLabel.opacity(0.22))
-                .frame(width: Metrics.beacon, height: Metrics.beacon)
+                .frame(width: Metrics.beaconMinimum, height: Metrics.beaconMinimum)
                 .frame(width: width, height: Metrics.rowHeight)
                 .accessibilityHidden(true)
         }
+    }
+
+    /// The commit's haptic climbs the same ramp the beacons do.
+    private func commit(_ cell: MatrixCell, fraction: Double) {
+        commitFeedback.impactOccurred(intensity: 0.5 + 0.5 * fraction)
+        commitFeedback.prepare()
+        choose(cell)
     }
 
     private func scrubGesture(modelWidth: CGFloat, effortWidth: CGFloat) -> some Gesture {
@@ -454,22 +555,36 @@ struct MobileModelEffortPicker: View {
                 ) ?? scrubbedCell
                 scrubbedCell = nil
                 guard let releaseCell else { return }
-                let isUltra = visibleEfforts[releaseCell.column].isUltra
-                commitFeedback.impactOccurred(intensity: isUltra ? 1 : 0.68)
-                commitFeedback.prepare()
-                choose(releaseCell)
+                commit(releaseCell, fraction: rampFraction(visibleEfforts[releaseCell.column]))
             }
     }
 
     @ViewBuilder
-    private func beacon(isUltra: Bool, selected: Bool) -> some View {
-        let diameter = selected ? Metrics.selectedBeacon : Metrics.beacon
-        let ink = selected
-            ? theme.accentForeground
-            : (isUltra ? theme.accent : theme.tertiaryLabel)
-        if isUltra {
+    private func beacon(
+        effort: EffortColumn,
+        fraction: Double,
+        ceiling: Bool,
+        selected: Bool
+    ) -> some View {
+        let growth = selected ? Metrics.selectionGrowth : 0
+        let diameter = Metrics.beaconMinimum
+            + (Metrics.beaconMaximum - Metrics.beaconMinimum) * fraction
+            + growth
+        if effort.representedValue == nil {
+            // Auto chooses nothing itself, so its beacon is a ring the account's setting
+            // shows through.
+            Circle()
+                .strokeBorder(
+                    selected ? theme.accentForeground : theme.tertiaryLabel,
+                    lineWidth: Metrics.automaticRingWidth
+                )
+                .frame(
+                    width: Metrics.beaconMinimum + 2 + growth,
+                    height: Metrics.beaconMinimum + 2 + growth
+                )
+        } else if ceiling {
             RoundedRectangle(cornerRadius: selected ? 2 : 1, style: .continuous)
-                .fill(ink)
+                .fill(selected ? theme.accentForeground : theme.accent)
                 .frame(width: diameter, height: diameter)
                 .rotationEffect(.degrees(45))
                 .overlay {
@@ -481,16 +596,20 @@ struct MobileModelEffortPicker: View {
                     }
                 }
         } else {
-            Circle()
-                .fill(ink)
-                .frame(width: diameter, height: diameter)
-                .overlay {
-                    if selected {
-                        Circle()
-                            .stroke(theme.accentForeground.opacity(0.44), lineWidth: 1)
-                            .padding(-4)
-                    }
+            ZStack {
+                Circle().fill(selected ? theme.accentForeground : theme.tertiaryLabel)
+                if !selected {
+                    Circle().fill(theme.accent.opacity(fraction))
                 }
+            }
+            .frame(width: diameter, height: diameter)
+            .overlay {
+                if selected {
+                    Circle()
+                        .stroke(theme.accentForeground.opacity(0.44), lineWidth: 1)
+                        .padding(-4)
+                }
+            }
         }
     }
 
@@ -608,66 +727,4 @@ struct MobileModelEffortPicker: View {
     }
 }
 
-/// A tiny orbit around Ultra's beacon. Reduce Motion freezes it at a deliberate static pose.
-private struct MobileUltraOrbit: View {
-    @Environment(\.remoteTheme) private var theme
-    let active: Bool
-    let reduceMotion: Bool
-    let freezesForEvidence: Bool
-    let width: CGFloat
-
-    var body: some View {
-        TimelineView(.animation(
-            minimumInterval: 1 / 24,
-            paused: reduceMotion || freezesForEvidence || !active
-        )) { context in
-            let phase = reduceMotion || freezesForEvidence
-                ? 22.0
-                : context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3)
-                    / 3 * 360
-            ZStack {
-                Circle()
-                    .fill(theme.accent.opacity(active ? 0.18 : 0.06))
-                    .frame(width: width * (active ? 1.04 : 0.82))
-                    .scaleEffect(active ? 0.94 + 0.08 * sin(phase * .pi / 180) : 1)
-
-                ForEach([-18.0, 18.0], id: \.self) { tilt in
-                    Capsule()
-                        .stroke(
-                            AngularGradient(
-                                colors: [theme.accentMuted, theme.accent, theme.accentMuted],
-                                center: .center,
-                                angle: .degrees(phase)
-                            ),
-                            lineWidth: active ? 1.45 : 0.8
-                        )
-                        .rotationEffect(.degrees(tilt))
-                }
-                    .frame(width: width, height: min(22, width * 0.62))
-
-                Capsule()
-                    .fill(
-                        LinearGradient(
-                            colors: [.clear, theme.accent.opacity(active ? 0.72 : 0.20), .clear],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .frame(width: width * 0.88, height: 1)
-                    .rotationEffect(.degrees(phase))
-
-                ForEach(0..<3, id: \.self) { index in
-                    Circle()
-                        .fill(index == 0 ? theme.accent : theme.accentMuted)
-                        .frame(width: index == 0 ? 5 : 3, height: index == 0 ? 5 : 3)
-                        .shadow(color: theme.accent.opacity(active ? 0.72 : 0), radius: 3)
-                        .offset(x: width * 0.46)
-                        .rotationEffect(.degrees(phase + Double(index * 120)))
-                }
-            }
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
 #endif
