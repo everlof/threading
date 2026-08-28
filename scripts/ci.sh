@@ -89,34 +89,34 @@ say "Validating recorded agent scenarios"
 "${script_directory}/check_agent_scenarios.sh"
 
 say "Testing UI evidence tooling"
-python3 -m unittest "${repository_directory}/scripts/tests/test_ui_evidence_tools.py"
+python3 "${repository_directory}/scripts/tests/test_ui_evidence_tools.py"
 
 say "Testing connectivity evidence tooling"
-python3 -m unittest "${repository_directory}/scripts/tests/test_connectivity_diagnostics.py"
+python3 "${repository_directory}/scripts/tests/test_connectivity_diagnostics.py"
 
 say "Testing generated diagnostic contract"
-python3 -m unittest "${repository_directory}/scripts/tests/test_generate_diagnostic_contract.py"
+python3 "${repository_directory}/scripts/tests/test_generate_diagnostic_contract.py"
 
 say "Testing mobile report intake configuration"
-python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_report_intake_configuration.py"
+python3 "${repository_directory}/scripts/tests/test_mobile_report_intake_configuration.py"
 
 say "Testing strict concurrency configuration"
-python3 -m unittest "${repository_directory}/scripts/tests/test_strict_concurrency_configuration.py"
+python3 "${repository_directory}/scripts/tests/test_strict_concurrency_configuration.py"
 
 say "Testing mobile test gate configuration"
-python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_test_gate.py"
+python3 "${repository_directory}/scripts/tests/test_mobile_test_gate.py"
 
 say "Testing Swift warning ratchet"
-python3 -m unittest "${repository_directory}/scripts/tests/test_swift_warning_ratchet.py"
+python3 "${repository_directory}/scripts/tests/test_swift_warning_ratchet.py"
 
 say "Testing bundle entitlement verification"
-python3 -m unittest "${repository_directory}/scripts/tests/test_bundle_entitlements.py"
+python3 "${repository_directory}/scripts/tests/test_bundle_entitlements.py"
 
 say "Testing agent feedback audit"
 python3 "${repository_directory}/scripts/tests/test_agent_feedback_audit.py"
 
 say "Testing release tag policy"
-python3 -m unittest "${repository_directory}/scripts/tests/test_release_tag_policy.py"
+python3 "${repository_directory}/scripts/tests/test_release_tag_policy.py"
 
 say "Installing ThreadingControlPlane test dependencies"
 npm --prefix "${repository_directory}/Service/ThreadingControlPlane" ci
