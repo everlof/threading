@@ -88,6 +88,9 @@ swift run \
 say "Validating recorded agent scenarios"
 "${script_directory}/check_agent_scenarios.sh"
 
+say "Testing localization boundary tooling"
+python3 -m unittest "${repository_directory}/scripts/tests/test_localization_boundary_lint.py"
+
 say "Testing UI evidence tooling"
 python3 "${repository_directory}/scripts/tests/test_ui_evidence_tools.py"
 

@@ -10,6 +10,13 @@ therefore has two jobs:
 It is intentionally a source check rather than an Xcode extraction step. The extension SDK and
 several AppKit helpers are not visible to Apple's String(localized:) extractor, while this check
 runs identically from Xcode, CI, and a package-only checkout.
+
+It also keeps the string catalogues deterministic. Xcode's build-time sync (`xcstringstool sync`)
+rewrites a whole `.xcstrings` in its own layout whenever the catalogue's model changes, and marks
+every key the compiler cannot see as stale — which is every key here, because copy reaches the
+compiler through L10n/MobileL10n rather than String(localized:). So every entry is declared
+`manual`, which the sync never touches, and the files are kept in the tool's byte-exact layout.
+A build then rewrites nothing, and a genuine change is a small diff. `--format` restores both.
 """
 
 from __future__ import annotations
@@ -28,6 +35,12 @@ CATALOG_PATH = "Sources/Threading/Resources/Localizable.xcstrings"
 MOBILE_SOURCE_ROOT = "Sources/ThreadingMobile"
 MOBILE_CATALOG_PATH = "Sources/ThreadingMobile/Localizable.xcstrings"
 MOBILE_INFO_CATALOG_PATH = "Sources/ThreadingMobile/ThreadingMobile-InfoPlist.xcstrings"
+# Every catalogue Xcode may rewrite is kept in xcstringstool's layout. The two Localizable
+# catalogues additionally declare every entry manual; the Info.plist one keeps Xcode's own
+# extracted states because its values genuinely come from Info.plist.
+CANONICAL_CATALOG_PATHS = (CATALOG_PATH, MOBILE_CATALOG_PATH, MOBILE_INFO_CATALOG_PATH)
+MANUAL_CATALOG_PATHS = (CATALOG_PATH, MOBILE_CATALOG_PATH)
+FORMAT_COMMAND = "python3 scripts/localization_boundary_lint.py . --format"
 REMOTE_CLIENT_ROOT = "Sources/Threading/Resources/RemoteClient"
 REMOTE_LOCALIZATION_SOURCES = (
     "Sources/Threading/Core/Remote/RemoteGitReviewBridge.swift",
@@ -462,6 +475,103 @@ def audit_file(path: pathlib.Path, root: pathlib.Path) -> tuple[set[str], list[F
     return keys, findings
 
 
+def parse_catalog_document(text: str) -> tuple[dict, list[str]]:
+    """Parses a catalogue, reporting keys that appear more than once.
+
+    `json.loads` silently keeps the last duplicate, which is how two parallel appends of the
+    same key once shipped two different Swedish sentences without anything noticing.
+    """
+    duplicates: list[str] = []
+
+    def pairs_hook(pairs: list[tuple[str, object]]) -> dict:
+        result: dict = {}
+        for key, value in pairs:
+            if key in result:
+                duplicates.append(key)
+            result[key] = value
+        return result
+
+    document = json.loads(text, object_pairs_hook=pairs_hook)
+    if not isinstance(document, dict):
+        raise json.JSONDecodeError("catalog must be a JSON object", text, 0)
+    return document, duplicates
+
+
+def canonical_catalog(document: dict, *, declare_manual: bool) -> dict:
+    strings = document.get("strings")
+    if declare_manual and isinstance(strings, dict):
+        for entry in strings.values():
+            if isinstance(entry, dict):
+                entry["extractionState"] = "manual"
+    return document
+
+
+def canonical_catalog_text(document: dict) -> str:
+    # Byte-identical to what `xcstringstool sync` writes: two-space indent, ` : ` separators,
+    # keys sorted by code point at every level, unescaped UTF-8, no trailing newline.
+    return json.dumps(
+        document,
+        indent=2,
+        ensure_ascii=False,
+        separators=(",", " : "),
+        sort_keys=True,
+    )
+
+
+def canonical_findings(root: pathlib.Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for relative_path in CANONICAL_CATALOG_PATHS:
+        try:
+            text = (root / relative_path).read_text(encoding="utf-8")
+            document, duplicates = parse_catalog_document(text)
+        except (OSError, json.JSONDecodeError):
+            continue  # the content checks report unreadable catalogues
+        for key in sorted(set(duplicates)):
+            findings.append(Finding(
+                relative_path,
+                1,
+                f'duplicate key "{key}"; keep one entry, then run `{FORMAT_COMMAND}`',
+            ))
+        expected = canonical_catalog_text(canonical_catalog(
+            document,
+            declare_manual=relative_path in MANUAL_CATALOG_PATHS,
+        ))
+        if text != expected:
+            findings.append(Finding(
+                relative_path,
+                1,
+                "catalog is not in xcstringstool's canonical layout with every entry manual; "
+                f"run `{FORMAT_COMMAND}`",
+            ))
+    return findings
+
+
+def format_catalogs(root: pathlib.Path) -> int:
+    status = 0
+    for relative_path in CANONICAL_CATALOG_PATHS:
+        path = root / relative_path
+        try:
+            text = path.read_text(encoding="utf-8")
+            document, duplicates = parse_catalog_document(text)
+        except OSError:
+            continue
+        except json.JSONDecodeError as error:
+            print(f"{relative_path}:1: error: cannot parse string catalog: {error}", file=sys.stderr)
+            status = 1
+            continue
+        for key in sorted(set(duplicates)):
+            # The later entry wins, as it did for every reader so far; say so rather than hide it.
+            print(f'{relative_path}: collapsed duplicate key "{key}" to its last entry', file=sys.stderr)
+        expected = canonical_catalog_text(canonical_catalog(
+            document,
+            declare_manual=relative_path in MANUAL_CATALOG_PATHS,
+        ))
+        if text != expected:
+            path.write_text(expected, encoding="utf-8")
+            print(f"{relative_path}: rewritten in canonical layout")
+    return status
+
+
 def load_catalog(root: pathlib.Path) -> tuple[set[str], list[Finding]]:
     path = root / CATALOG_PATH
     try:
@@ -889,9 +999,17 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("repo_root", type=pathlib.Path)
     parser.add_argument("--list-keys", action="store_true")
+    parser.add_argument(
+        "--format",
+        action="store_true",
+        help="rewrite the string catalogues in their canonical layout instead of checking",
+    )
     arguments = parser.parse_args()
 
     root = arguments.repo_root.resolve()
+    if arguments.format:
+        return format_catalogs(root)
+
     used_keys: set[str] = set()
     findings: list[Finding] = []
     for path in swift_files(root):
@@ -913,6 +1031,7 @@ def main() -> int:
         ))
     findings.extend(audit_mobile(root))
     findings.extend(audit_remote_client(root))
+    findings.extend(canonical_findings(root))
 
     for finding in sorted(set(findings)):
         print(f"{finding.path}:{finding.line}: error: {finding.message}", file=sys.stderr)
