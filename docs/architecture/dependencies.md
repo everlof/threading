@@ -549,9 +549,20 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `/Applications/InjectionNext.app` install names, so the script prepares separate
     ad-hoc-signed cache copies with cache-local install names; neither the tool, package nor
     sources enter this repository, `Package.resolved`, either app bundle or a Release build.
-  - `scripts/config/injection-next.xcconfig` exists outside every target configuration. Only the
-    script passes it through `XCODE_XCCONFIG_FILE` to the Xcode process InjectionNext supervises;
-    normal Xcode, command-line builds, hosted tests, profiling, CI and releases retain their
+  - `scripts/config/injection-next.xcconfig` exists outside every target configuration. The
+    script reaches the supervised Xcode with it through the `OverridingXCConfigPath` user default
+    in `com.apple.dt.Xcode`, not through `XCODE_XCCONFIG_FILE`: Swift Build's client fills its
+    `environmentConfigPath` from that variable only in `xcodebuild`, and the IDE passes neither
+    it nor the launch environment into a build request. Three supervised builds on Xcode 26.5
+    carried the variable in Xcode's and `SWBBuildService`'s environment and still linked no
+    client, which is how that was found. The IDE's route is the default that `Xcode3Core` reads —
+    the same `commandLineConfigPath` an `xcodebuild -xcconfig` flag fills — so the script
+    generates a session xcconfig in the tool cache stating both client paths absolutely (the
+    IDE does not resolve the environment either) and including the repository config. Because
+    `xcodebuild` falls back to the same default, the override is owned for exactly one session:
+    installed by `xcode`, refused if another value is already there, and removed by a detached
+    waiter when InjectionNext quits or by `stop`; `status` reports it. Normal Xcode,
+    command-line builds, hosted tests, profiling, CI and releases therefore retain their
     ordinary linker and compilation-cache behavior. The config also gates itself by Debug,
     wrapper extension and platform: the two app targets load their matching client on macOS and
     iOS Simulator, while Release, physical-device builds, tests and the command-line helpers built

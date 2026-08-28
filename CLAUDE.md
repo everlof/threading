@@ -51,8 +51,10 @@ already open, report that prerequisite instead of quitting either app without pe
 `scripts/injection_next.sh` is the only InjectionNext path. It downloads one pinned, signed and
 notarized release to the user's cache, prepares cache-local macOS and iOS Simulator clients,
 applies `scripts/config/injection-next.xcconfig` to that supervised Xcode's Debug app builds
-through `XCODE_XCCONFIG_FILE`, and has InjectionNext launch that Xcode so it can observe compiler
-commands and source saves. To keep both apps live, open the project in two windows inside that one
+through a session-scoped `OverridingXCConfigPath` user default (the IDE ignores
+`XCODE_XCCONFIG_FILE`; `scripts/injection_next.sh stop` removes the default early, and it goes
+on its own when InjectionNext quits), and has InjectionNext launch that Xcode so it can observe
+compiler commands and source saves. To keep both apps live, open the project in two windows inside that one
 Xcode process, then Run `Threading` on My Mac in one and `ThreadingMobile` on an iOS Simulator in
 the other. Do not accept any offer to patch the project or compiler. The wrapper does not enable
 file-watcher mode and does not modify `Threading.xcodeproj`. Xcode and InjectionNext must both be
