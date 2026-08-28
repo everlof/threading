@@ -874,8 +874,8 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
             renders.insert(png)
             if theme.id == AppThemeStyles.cyberpunk.id {
-                let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
-                    URL(fileURLWithPath: $0, isDirectory: true)
+                let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].flatMap { override in
+                    override.isEmpty ? nil : URL(fileURLWithPath: override, isDirectory: true)
                 } ?? FileManager.default.temporaryDirectory.appendingPathComponent(
                     "ThreadingRenders",
                     isDirectory: true

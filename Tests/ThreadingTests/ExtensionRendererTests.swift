@@ -671,8 +671,8 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     XCTAssertGreaterThan(png.count, 10_000)
 
     let directory =
-      ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
-        URL(fileURLWithPath: $0, isDirectory: true)
+      ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].flatMap { override in
+        override.isEmpty ? nil : URL(fileURLWithPath: override, isDirectory: true)
       }
       ?? URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
       .appendingPathComponent("ThreadingRenders", isDirectory: true)
@@ -3035,8 +3035,8 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     NSGraphicsContext.restoreGraphicsState()
 
     let output =
-      ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
-        URL(fileURLWithPath: $0, isDirectory: true)
+      ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].flatMap { override in
+        override.isEmpty ? nil : URL(fileURLWithPath: override, isDirectory: true)
       }
       ?? URL(fileURLWithPath: NSTemporaryDirectory())
       .appendingPathComponent("ThreadingRenders", isDirectory: true)

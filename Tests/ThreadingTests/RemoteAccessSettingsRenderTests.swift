@@ -53,8 +53,8 @@ final class RemoteAccessSettingsRenderTests: XCTestCase {
         }
 
         static var directory: URL? {
-            ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
-                URL(fileURLWithPath: $0, isDirectory: true)
+            ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].flatMap { override in
+                override.isEmpty ? nil : URL(fileURLWithPath: override, isDirectory: true)
             }
         }
     }

@@ -355,7 +355,8 @@ final class MobileAccountDiscRenderTests: XCTestCase {
     /// Kept beside the assertions so a reviewer can look at what passed. `THREADING_RENDER_OUT`
     /// names the folder, as it does for the Mac's render tests; unset, the picture is not written.
     private func save(_ image: UIImage, named name: String) throws {
-        guard let folder = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] else { return }
+        guard let folder = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+              !folder.isEmpty else { return }
         let url = URL(fileURLWithPath: folder).appendingPathComponent("\(name).png")
         try FileManager.default.createDirectory(at: URL(fileURLWithPath: folder), withIntermediateDirectories: true)
         try XCTUnwrap(image.pngData()).write(to: url)

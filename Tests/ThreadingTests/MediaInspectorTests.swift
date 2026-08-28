@@ -889,8 +889,8 @@ final class MediaInspectorTests: XCTestCase {
     }
 
     private func renderDirectory() -> URL {
-        ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].map {
-            URL(fileURLWithPath: $0)
+        ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"].flatMap { override in
+            override.isEmpty ? nil : URL(fileURLWithPath: override)
         } ?? FileManager.default.temporaryDirectory.appendingPathComponent(
             "ThreadingRenders",
             isDirectory: true

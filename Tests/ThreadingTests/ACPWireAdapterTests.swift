@@ -17,7 +17,8 @@ final class ACPWireAdapterTests: XCTestCase {
     func testRendersTheWireCorpus() throws {
         let text = ACPWireCorpus.render()
         XCTAssertFalse(text.isEmpty)
-        guard let root = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] else { return }
+        guard let root = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+              !root.isEmpty else { return }
         let url = URL(fileURLWithPath: root, isDirectory: true)
             .appendingPathComponent("acp-wire-corpus.txt")
         try text.write(to: url, atomically: true, encoding: .utf8)
@@ -720,6 +721,7 @@ enum ACPWireCorpus {
         case .string(let text): return "str(\(text))"
         case .array(let list): return "[" + list.map { canon(json: $0) }.joined(separator: ", ") + "]"
         case .object(let object): return canon(payload: object)
+        case .unconvertible(let describedType): return "unconvertible(\(describedType))"
         }
     }
 

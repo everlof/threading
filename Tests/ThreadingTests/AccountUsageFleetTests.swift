@@ -470,7 +470,8 @@ final class AccountUsageFleetTests: XCTestCase {
     }
 
     private var renderDirectory: URL {
-        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"] {
+        if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !override.isEmpty {
             return URL(fileURLWithPath: override, isDirectory: true)
         }
         return FileManager.default.temporaryDirectory
