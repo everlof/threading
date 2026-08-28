@@ -22,6 +22,34 @@ final class PreferenceStoreTests: XCTestCase {
         XCTAssertFalse(PreferenceStore.shared === UserDefaults.standard)
     }
 
+    /// An origin grant controls access to a browser carrying the user's signed-in state. A bare
+    /// production store is constructed by both the browser coordinator and Tools settings, so its
+    /// default must follow the same redirect as every other recorded choice.
+    @MainActor
+    func testTheDefaultBrowserGrantStoreStaysOutOfTheUsersPreferences() throws {
+        XCTAssertTrue(PreferenceStore.isRedirected)
+        let origin = try XCTUnwrap(BrowserOrigin(url: XCTUnwrap(
+            URL(string: "https://probe-\(UUID().uuidString.lowercased()).invalid/account")
+        )))
+        let store = BrowserAccessStore()
+        let productionStore = BrowserAccessStore(defaults: .standard)
+        XCTAssertFalse(productionStore.isPersistentlyAllowed(origin))
+        defer {
+            store.revoke(origin)
+            // If the default ever regresses, remove only this unique probe and preserve every
+            // real grant around it rather than replacing the developer's complete allowlist.
+            productionStore.revoke(origin)
+        }
+
+        store.allowPersistently(origin)
+
+        XCTAssertTrue(store.isPersistentlyAllowed(origin))
+        XCTAssertFalse(
+            productionStore.isPersistentlyAllowed(origin),
+            "a hosted test wrote its browser grant into the developer's real allowlist"
+        )
+    }
+
     /// **And away from the other suite runs on the same machine.**
     ///
     /// The redirect above answers "not the user's preferences"; this answers "not another test

@@ -167,7 +167,10 @@ final class BrowserAccessStore {
 
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    /// A persistent grant is a user's recorded choice. `PreferenceStore` is the production
+    /// defaults domain in the app and a per-process scratch domain in a hosted test, where
+    /// `.standard` would be the developer's real allowlist.
+    init(defaults: UserDefaults = PreferenceStore.shared) {
         self.defaults = defaults
     }
 

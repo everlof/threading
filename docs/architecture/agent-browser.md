@@ -520,10 +520,12 @@ expects to be asked. The read runs off the main actor, because it can sit on a T
 a person has to physically answer.
 
 **One known limit, written down rather than claimed away.** The provider choice and
-`BrowserAccessStore`'s persistent grants live in `UserDefaults`, so an agent with shell access can
-`defaults write` both. Neither hole is new and neither yields a password — the vault itself is out
-of the shell's reach, and an entry must exist before a provider choice means anything. It matters
-because it set the bar for what could be built on top, which is the next section.
+`BrowserAccessStore`'s persistent grants live in `UserDefaults` through `PreferenceStore`, so an
+agent with shell access can `defaults write` both in production. The indirection keeps hosted tests
+out of the developer's real grants; it is not a security boundary against the user's own shell.
+Neither hole is new and neither yields a password — the vault itself is out of the shell's reach,
+and an entry must exist before a provider choice means anything. It matters because it set the bar
+for what could be built on top, which is the next section.
 
 ### Submitting without being asked every time
 
