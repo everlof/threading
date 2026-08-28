@@ -3434,10 +3434,11 @@ browser actions appear beside the page they affect. It is the same browser tab, 
 cookies and agent routing—not a replay or a screenshot.
 
 **Exact** means Threading retained the provider's decoded native JSON value. **Exact · redacted**
-means the same structure was retained but sensitive values were visibly replaced and listed:
-credential-shaped fields and image bytes are redacted. Ordinary browser text and form values stay
-exact. There is not yet a share-safe audit export, so review and redact a copy before sharing it
-outside the project. Tool output may still contain source code, terminal output, URLs or page data,
+means the same structure was retained but specific values were visibly replaced and listed:
+credential-shaped fields and image bytes are redacted, and so is the rare value whose type JSON
+cannot express, which appears as `<unconvertible:Type>` with reason `unconvertible`. Ordinary
+browser text and form values stay exact. There is not yet a share-safe audit export, so review and
+redact a copy before sharing it outside the project. Tool output may still contain source code, terminal output, URLs or page data,
 so treat the ledger as local project data.
 
 Claude, Codex and Grok Chat expose structured execution events and receive provider-native capture.

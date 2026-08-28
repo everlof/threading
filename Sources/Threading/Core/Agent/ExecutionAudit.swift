@@ -132,6 +132,12 @@ struct ExecutionAuditRecord: Codable, Equatable, Sendable, Identifiable {
             case formValue = "form_value"
             case credential
             case imageBytes = "image_bytes"
+            /// The provider handed the adapter a value JSON cannot express, so the ledger holds
+            /// its type in place of it. Unlike the reasons above this is not a privacy decision:
+            /// it is the one honest thing to say about a member that could not be read. It is
+            /// still a redaction in the sense the fidelity label means — the native shape is
+            /// retained with a specific value replaced, and the path says which.
+            case unconvertible
         }
 
         let path: String
@@ -563,6 +569,20 @@ final class ExecutionAuditStore: @unchecked Sendable {
         let fidelity: ExecutionAuditRecord.Fidelity = sanitized.redactions.isEmpty
             ? suppliedFidelity
             : .exactWithRedactions
+
+        // A provider payload that would not convert is a defect somewhere upstream of the
+        // ledger, and the record alone only shows it to whoever opens that row. Counting it
+        // here puts it where a bug report can find it without one.
+        let unconvertibleCount = sanitized.redactions.filter { $0.reason == .unconvertible }.count
+        if unconvertibleCount > 0 {
+            ThreadingLogger.audit.error(
+                """
+                execution audit: \(unconvertibleCount, privacy: .public) unconvertible \
+                member(s) in \(operation, privacy: .public) for \
+                \(sessionID, privacy: .public)
+                """
+            )
+        }
 
         let record: ExecutionAuditRecord? = queue.sync {
             do {
@@ -1009,6 +1029,12 @@ private enum ExecutionAuditSanitizer {
                     redactions: &redactions
                 )
             })
+
+        case .unconvertible(let describedType):
+            // The adapter already kept the member's place; the ledger names it by path so the
+            // loss is a listed fact rather than something a reader has to notice in the payload.
+            redactions.append(.init(path: path, reason: .unconvertible))
+            return .string(JSONValue.unconvertibleMarker(describedType))
 
         case .string, .integer, .number, .bool, .null:
             return value

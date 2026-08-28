@@ -178,13 +178,15 @@ enum CodexAppServerEvent {
                 input: dictionary(item["arguments"])
             )
 
+        // Per member for both: the row's identity — a file was changed, a plan was set — is
+        // already known from `id` and `type`, and the item is what the row draws *from*. Losing
+        // one member costs a detail; refusing the container removed the row entirely, so the
+        // conversation showed no sign that anything had happened.
         case "fileChange":
-            guard let input = JSONValue.object(from: item) else { return nil }
-            return .toolUse(id: id, tool: .edit, input: input)
+            return .toolUse(id: id, tool: .edit, input: JSONValue.convertingObject(from: item))
 
         case "plan":
-            guard let input = JSONValue.object(from: item) else { return nil }
-            return .toolUse(id: id, tool: .plan, input: input)
+            return .toolUse(id: id, tool: .plan, input: JSONValue.convertingObject(from: item))
 
         default:
             return nil
@@ -223,15 +225,22 @@ enum CodexAppServerEvent {
         "commandExecution", "mcpToolCall", "dynamicToolCall", "fileChange", "plan"
     ]
 
+    /// A tool call's arguments, from either the object the app-server sent or the JSON string it
+    /// sent instead.
+    ///
+    /// Per member. `?? [:]` here was the worst spelling of the all-or-nothing rule in the app:
+    /// an MCP tool row with one unreadable argument drew as a call with *no* arguments, which
+    /// reads as a fact about the call rather than as a failure to decode it. An empty dictionary
+    /// still means "the agent sent nothing"; a marked member means "we could not read this one".
     private static func dictionary(_ value: Any?) -> [String: JSONValue] {
         if let object = value as? [String: Any] {
-            return JSONValue.object(from: object) ?? [:]
+            return JSONValue.convertingObject(from: object)
         }
         guard let text = value as? String,
               let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return [:] }
-        return JSONValue.object(from: object) ?? [:]
+        return JSONValue.convertingObject(from: object)
     }
 
     private static func integer(_ value: Any?) -> Int? {

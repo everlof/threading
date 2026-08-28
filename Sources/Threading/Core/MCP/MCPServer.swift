@@ -588,6 +588,11 @@ final class MCPServer: @unchecked Sendable {
             return
         }
 
+        // Deliberately all-or-nothing, for the same reason as Codex's approval request: the
+        // arguments below are what the broker shows the user, and what the user's answer then
+        // permits. Approving a partially decoded `Bash` call is worse than refusing it, so a
+        // container that will not convert is denied whole — visibly, with a reason the hook
+        // reports — rather than repaired into a request nobody actually consented to.
         let rawInput = hook["tool_input"] ?? [String: Any]()
         guard let foundationInput = rawInput as? [String: Any],
               let input = JSONValue.object(from: foundationInput) else {

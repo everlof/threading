@@ -62,6 +62,28 @@ fidelity, explicit redaction paths, the previous digest and its own digest.
 - **Canonicalized** exists for an explicitly projected source that cannot provide a native value. It
   must never be used to make a normalized provider tool row look exact.
 
+### A member the JSON bridge could not read
+
+A provider payload reaches the adapters as `JSONSerialization` output, so in practice every member
+is already a JSON value. When one is not — an in-process caller putting a `Date`, a `URL` or any
+other Foundation value into the dictionary an adapter is handed — the ledger keeps the rest.
+
+`JSONValue.converting(foundationValue:)` converts member by member and marks what it cannot read as
+the explicit `.unconvertible(Type)` case, carrying the *type's* name and never the value, so the
+marker cannot become a route around this sanitizer. `ExecutionAuditSanitizer` writes it to disk as
+`<unconvertible:Type>` — the same placeholder spelling as a redaction, because on-disk records must
+stay ordinary JSON for the digest chain to verify — and lists its JSON path in `redactions` with
+reason `unconvertible`. That drops the record to **Exact · redacted**, and `append` logs a count so
+the defect is findable without opening the row.
+
+This replaced an all-or-nothing conversion, which was strictly worse: one unreadable member
+discarded the whole `input`, and the adapters spelled that `?? [:]` or `return nil`, so a `Bash`
+call that really ran was filed with no command — or not filed at all. Only the two **permission**
+surfaces still convert all-or-nothing (`CodexStreamSession`'s `item/permissions/requestApproval` and
+the MCP server's `PreToolUse` hook): those arguments are what a person is shown before approving,
+a partially decoded request is exactly the shape that gets approved for something it did not say,
+and both refuse explicitly rather than silently.
+
 Requested and terminal records correlate by source and call id. Intermediate ACP updates do not
 consume that pending call, so the terminal result still receives a duration and the original
 operation/category even if its own update is sparse.

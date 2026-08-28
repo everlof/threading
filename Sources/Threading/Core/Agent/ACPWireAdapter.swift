@@ -183,6 +183,12 @@ enum ACPWireAdapter {
         case .integer(let value): return String(value)
         case .number(let value): return String(value)
         case .bool(let value): return String(value)
+        case .unconvertible(let describedType):
+            // The agent did answer; this client could not read what it said. Say that, rather
+            // than falling through to the protocol's content blocks — those describe the call,
+            // not its result, and substituting them here would present a different answer as
+            // though it were this one.
+            return JSONValue.unconvertibleMarker(describedType)
         case .null, .none: break
         }
 

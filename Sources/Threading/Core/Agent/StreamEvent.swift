@@ -289,10 +289,30 @@ enum JSONValue: Codable, Equatable, Sendable {
     case bool(Bool)
     case null
 
-    /// Bridges the one remaining Foundation-JSON boundary used by transcript replay.
+    /// A Foundation value this model cannot represent, named by the type it had.
     ///
-    /// Conversion is all-or-nothing for containers: an unexpected non-JSON value rejects the
-    /// complete object instead of silently dropping the field that made it invalid.
+    /// Only `converting(foundationValue:)` produces it, and only for something
+    /// `JSONSerialization` never emits — so it marks an in-process caller's mistake rather than
+    /// a provider's malformed line. It exists because the alternative already shipped: the
+    /// container conversion below is all-or-nothing, and its callers spelled that `?? [:]` or
+    /// `return nil`, so **one** member the bridge could not read discarded a whole tool input,
+    /// audit payload or replayed row with nothing left to say anything had been there.
+    ///
+    /// It carries the type's name and never the value. This marker must never become a way for
+    /// content to reach a ledger around `ExecutionAuditSanitizer`.
+    ///
+    /// It is deliberately not symmetric under `Codable`, because there is no JSON for "not
+    /// JSON": it encodes as the `<unconvertible:Type>` placeholder — the spelling the execution
+    /// audit's redactions already use — and decoding reads that back as the string it now is.
+    /// Decoding never produces this case, since JSON text is JSON by definition.
+    case unconvertible(String)
+
+    /// How an unconvertible value is spelled wherever JSON itself is required.
+    static func unconvertibleMarker(_ describedType: String) -> String {
+        "<unconvertible:\(describedType)>"
+    }
+
+    /// The scalar half of the Foundation bridge, shared by both conversions below.
     ///
     /// **`NSNumber` is matched before `Bool`, and the order is the whole point.** A number
     /// `JSONSerialization` parsed is an `NSNumber`, and `NSNumber as? Bool` succeeds for exactly
@@ -301,22 +321,39 @@ enum JSONValue: Codable, Equatable, Sendable {
     /// `CFBooleanGetTypeID` test below is the honest question, because it asks what the number
     /// *is* rather than what it could be read as. A Swift `Bool` still lands there: it bridges to
     /// `__NSCFBoolean`, which that test recognises.
-    init?(foundationValue value: Any) {
+    private static func scalar(foundationValue value: Any) -> JSONValue? {
         switch value {
         case is NSNull:
-            self = .null
+            return .null
         case let value as NSNumber:
             if CFGetTypeID(value) == CFBooleanGetTypeID() {
-                self = .bool(value.boolValue)
-            } else if value.doubleValue.rounded(.towardZero) == value.doubleValue {
-                self = .integer(value.int64Value)
-            } else {
-                self = .number(value.doubleValue)
+                return .bool(value.boolValue)
             }
+            if value.doubleValue.rounded(.towardZero) == value.doubleValue {
+                return .integer(value.int64Value)
+            }
+            return .number(value.doubleValue)
         case let value as Bool:
-            self = .bool(value)
+            return .bool(value)
         case let value as String:
-            self = .string(value)
+            return .string(value)
+        default:
+            return nil
+        }
+    }
+
+    /// The strict bridge: a container is converted whole or not at all.
+    ///
+    /// Reach for this only where a *partial* answer would be worse than no answer — the two
+    /// permission surfaces, which show a person the arguments they are approving and refuse the
+    /// request explicitly rather than ask about half of it. Everywhere else the honest bridge is
+    /// `converting(foundationValue:)`, which keeps what it can and names what it cannot.
+    init?(foundationValue value: Any) {
+        if let scalar = Self.scalar(foundationValue: value) {
+            self = scalar
+            return
+        }
+        switch value {
         case let value as [Any]:
             let converted = value.compactMap(JSONValue.init(foundationValue:))
             guard converted.count == value.count else { return nil }
@@ -329,6 +366,7 @@ enum JSONValue: Codable, Equatable, Sendable {
         }
     }
 
+    /// The strict container bridge. See `init?(foundationValue:)` for when that is the right ask.
     static func object(from value: [String: Any]) -> [String: JSONValue]? {
         var converted: [String: JSONValue] = [:]
         converted.reserveCapacity(value.count)
@@ -337,6 +375,28 @@ enum JSONValue: Codable, Equatable, Sendable {
             converted[key] = item
         }
         return converted
+    }
+
+    /// Bridges a Foundation value member by member, keeping everything that converts and
+    /// marking everything that does not as `.unconvertible`.
+    ///
+    /// Every member keeps its place, so a reader sees a value was there and what type it had.
+    /// This never fails, which is the point: the shape of the record survives.
+    static func converting(foundationValue value: Any) -> JSONValue {
+        if let scalar = Self.scalar(foundationValue: value) { return scalar }
+        switch value {
+        case let value as [Any]:
+            return .array(value.map(JSONValue.converting(foundationValue:)))
+        case let value as [String: Any]:
+            return .object(convertingObject(from: value))
+        default:
+            return .unconvertible(String(describing: type(of: value)))
+        }
+    }
+
+    /// The per-member container bridge. See `converting(foundationValue:)`.
+    static func convertingObject(from value: [String: Any]) -> [String: JSONValue] {
+        value.mapValues(JSONValue.converting(foundationValue:))
     }
 
     init(from decoder: Decoder) throws {
@@ -368,6 +428,8 @@ enum JSONValue: Codable, Equatable, Sendable {
         case .number(let value): try container.encode(value)
         case .bool(let value): try container.encode(value)
         case .null: try container.encodeNil()
+        case .unconvertible(let describedType):
+            try container.encode(Self.unconvertibleMarker(describedType))
         }
     }
 
@@ -397,7 +459,7 @@ enum JSONValue: Codable, Equatable, Sendable {
             return Int(truncatingIfNeeded: value)
         case .number(let value):
             return Int(exactly: value.rounded(.towardZero)) ?? (value < 0 ? .min : .max)
-        case .object, .array, .string, .bool, .null:
+        case .object, .array, .string, .bool, .null, .unconvertible:
             return nil
         }
     }
@@ -418,6 +480,8 @@ enum JSONValue: Codable, Equatable, Sendable {
             return value
         case .null:
             return NSNull()
+        case .unconvertible(let describedType):
+            return Self.unconvertibleMarker(describedType)
         }
     }
 
@@ -642,12 +706,13 @@ extension StreamEvent {
             guard let id = block["id"] as? String, let name = block["name"] as? String else {
                 return nil
             }
+            // Per member, for the reason the Codex replay above is: a transcript row that
+            // vanishes is indistinguishable from a tool the agent never called.
             let rawInput = block["input"] as? [String: Any] ?? [:]
-            guard let input = JSONValue.object(from: rawInput) else { return nil }
             return .toolUse(
                 id: id,
                 tool: ToolIdentity(name),
-                input: input
+                input: JSONValue.convertingObject(from: rawInput)
             )
         default:
             return nil

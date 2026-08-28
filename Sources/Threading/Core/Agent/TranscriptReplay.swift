@@ -435,7 +435,11 @@ enum TranscriptReplay {
 
             let rawInput = payload["input"] ?? payload["arguments"]
             let input = codexToolInput(persistedName: persistedName, value: rawInput)
-            guard let typedInput = JSONValue.object(from: input) else { return nil }
+            // Per member. A replayed rollout is a record of what already happened, so dropping
+            // the whole row is the one answer that cannot be right: the tool call did run, and a
+            // reader comparing the replay against the live conversation would find it missing
+            // with nothing to explain the gap.
+            let typedInput = JSONValue.convertingObject(from: input)
             let name = codexToolName(persistedName: persistedName, value: rawInput)
             return .assistantMessage(blocks: [
                 .toolUse(id: id, tool: ToolIdentity(name), input: typedInput)

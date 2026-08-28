@@ -5,6 +5,14 @@ import Foundation
 /// These adapters do not share the conversation timeline's `ToolIdentity` normalization. The
 /// audit keeps the provider's exact operation spelling and decoded JSON payload; only category is
 /// a deterministic Threading projection used for filtering.
+///
+/// **Every conversion here is per member.** The ledger's job is to be the exact record of what an
+/// agent did, and the strict `JSONValue.object(from:)` answered a payload with one unreadable
+/// member by discarding the payload — so a `Bash` call that ran was filed with no command, or
+/// (worse) not filed at all. Keeping the readable members and marking the rest
+/// `.unconvertible` loses strictly less, and the loss stops being silent: the sanitizer lists
+/// each marker in `redactions` by JSON path, which drops the record's fidelity to
+/// **Exact · redacted** and logs a count.
 enum ClaudeProviderExecutionAdapter {
     static func events(line: String) -> [ProviderExecutionEvent] {
         guard let data = line.data(using: .utf8),
@@ -19,8 +27,8 @@ enum ClaudeProviderExecutionAdapter {
                 guard block["type"] as? String == "tool_use",
                       let id = block["id"] as? String,
                       let operation = block["name"] as? String,
-                      let input = block["input"],
-                      let value = JSONValue(foundationValue: input) else { return nil }
+                      let input = block["input"] else { return nil }
+                let value = JSONValue.converting(foundationValue: input)
                 return ProviderExecutionEvent(
                     category: ExecutionAuditStore.category(for: operation),
                     phase: .requested,
@@ -36,7 +44,10 @@ enum ClaudeProviderExecutionAdapter {
             return blocks.compactMap { block in
                 guard block["type"] as? String == "tool_result",
                       let id = block["tool_use_id"] as? String else { return nil }
-                let output = block["content"].flatMap(JSONValue.init(foundationValue:)) ?? .null
+                // An absent `content` is a null result. A present one that will not convert is
+                // not: `?? .null` here recorded "this tool returned nothing" for a result the
+                // bridge simply could not read.
+                let output = block["content"].map(JSONValue.converting(foundationValue:)) ?? .null
                 return ProviderExecutionEvent(
                     category: .tool,
                     phase: (block["is_error"] as? Bool) == true ? .failed : .completed,
@@ -65,8 +76,8 @@ enum CodexProviderExecutionAdapter {
               let item = parameters["item"] as? [String: Any],
               let type = item["type"] as? String,
               toolTypes.contains(type),
-              let id = item["id"] as? String,
-              let payload = JSONValue(foundationValue: parameters) else { return [] }
+              let id = item["id"] as? String else { return [] }
+        let payload = JSONValue.converting(foundationValue: parameters)
 
         let operation = exactOperation(type: type, item: item)
         let category = category(type: type, operation: operation)
@@ -132,8 +143,8 @@ enum ACPProviderExecutionAdapter {
         phase: ExecutionAuditRecord.Phase,
         asInput: Bool
     ) -> ProviderExecutionEvent? {
-        guard let callID = update["toolCallId"] as? String,
-              let raw = JSONValue(foundationValue: update) else { return nil }
+        guard let callID = update["toolCallId"] as? String else { return nil }
+        let raw = JSONValue.converting(foundationValue: update)
         return ProviderExecutionEvent(
             category: ExecutionAuditStore.category(
                 for: ACPWireAdapter.toolIdentity(kind: kind, title: operation).rawName

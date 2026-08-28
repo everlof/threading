@@ -1079,6 +1079,13 @@ final class CodexStreamSession:
             )
 
         case "item/permissions/requestApproval":
+            // Deliberately all-or-nothing, and the only reason it is safe to be: these arguments
+            // are what a person is shown before answering "allow this?". A partial request is
+            // exactly the shape that gets approved for something it did not say — so a container
+            // that will not convert is refused whole, and the refusal is explicit rather than
+            // silent: the agent gets `-32602` and nothing runs. Everywhere the answer is only
+            // *shown* rather than *approved*, `JSONValue.convertingObject(from:)` is the right
+            // conversion instead.
             guard let input = JSONValue.object(from: parameters) else {
                 sendResponse(
                     id: id,
