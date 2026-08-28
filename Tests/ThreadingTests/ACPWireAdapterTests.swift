@@ -721,7 +721,6 @@ enum ACPWireCorpus {
         case .string(let text): return "str(\(text))"
         case .array(let list): return "[" + list.map { canon(json: $0) }.joined(separator: ", ") + "]"
         case .object(let object): return canon(payload: object)
-        case .unconvertible(let describedType): return "unconvertible(\(describedType))"
         }
     }
 
