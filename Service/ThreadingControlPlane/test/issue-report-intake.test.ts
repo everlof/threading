@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/environment";
 import { diagnosticContractFingerprint } from "../src/issue-report-contract.generated";
 import { ISSUE_REPORT_BOUNDS } from "../src/issue-report-intake";
@@ -99,6 +99,59 @@ describe("private issue-report intake", () => {
       error: { code: "idempotencyConflict" },
     });
     expect(await todayCount()).toBe(afterFirst);
+  });
+
+  it("releases the losing reservation when concurrent exact retries race", async () => {
+    const report = makeReport();
+    const before = await todayCount();
+    let pendingInitialHeads = 2;
+    let releaseInitialHeads: (() => void) | undefined;
+    const initialHeadsComplete = new Promise<void>((resolve) => {
+      releaseInitialHeads = resolve;
+    });
+    const bucket = {
+      async head(key: string): Promise<R2Object | null> {
+        if (pendingInitialHeads > 0) {
+          pendingInitialHeads -= 1;
+          if (pendingInitialHeads === 0) releaseInitialHeads?.();
+          await initialHeadsComplete;
+          return null;
+        }
+        return testEnv.ISSUE_REPORTS.head(key);
+      },
+      put(key: string, value: ArrayBuffer | ArrayBufferView | string, options?: R2PutOptions) {
+        return testEnv.ISSUE_REPORTS.put(key, value, options);
+      },
+    } as R2Bucket;
+    const concurrentEnv = withReportBucket(bucket);
+
+    const responses = await Promise.all([
+      submit(report, concurrentEnv),
+      submit(report, concurrentEnv),
+    ]);
+
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 201]);
+    expect(await todayCount()).toBe(before + 1);
+  });
+
+  it("releases a reservation when report storage fails", async () => {
+    const report = makeReport();
+    const before = await todayCount();
+    const storageFailure = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const bucket = {
+      head(key: string): Promise<R2Object | null> {
+        return testEnv.ISSUE_REPORTS.head(key);
+      },
+      async put(): Promise<R2Object> {
+        throw new Error("simulated R2 failure");
+      },
+    } as unknown as R2Bucket;
+
+    const response = await submit(report, withReportBucket(bucket));
+
+    expect(response.status).toBe(500);
+    expect(await todayCount()).toBe(before);
+    storageFailure.mockRestore();
   });
 
   it("rejects unknown structural fields and content-bearing known diagnostic values", async () => {
@@ -401,12 +454,21 @@ function makeReport(): TestReport {
   };
 }
 
-async function submit(report: TestReport): Promise<Response> {
+async function submit(report: TestReport, targetEnv: Env = testEnv): Promise<Response> {
   return worker.fetch(new Request("https://service.test/v1/reports", {
     method: "POST",
     headers: requestHeaders(report.id),
     body: JSON.stringify(report),
-  }), testEnv);
+  }), targetEnv);
+}
+
+function withReportBucket(bucket: R2Bucket): Env {
+  return new Proxy(testEnv, {
+    get(target, property, receiver) {
+      if (property === "ISSUE_REPORTS") return bucket;
+      return Reflect.get(target, property, receiver);
+    },
+  });
 }
 
 function requestHeaders(reportID: string): HeadersInit {

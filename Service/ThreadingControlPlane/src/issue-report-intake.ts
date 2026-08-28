@@ -136,7 +136,7 @@ export async function handleIssueReport(request: Request, env: Env): Promise<Res
   const key = `reports/v1/${report.id}.json`;
   const existing = await env.ISSUE_REPORTS.head(key);
   if (existing) return existingReceipt(existing, report.id, digest);
-  await reserveDailyCapacity(env);
+  const reservation = await reserveDailyCapacity(env);
 
   const receivedAt = new Date().toISOString();
   const stored = encoder.encode(JSON.stringify({
@@ -145,25 +145,37 @@ export async function handleIssueReport(request: Request, env: Env): Promise<Res
     report,
   }));
   const checksum = await crypto.subtle.digest("SHA-256", stored);
-  const object = await env.ISSUE_REPORTS.put(key, stored, {
-    onlyIf: { etagDoesNotMatch: "*" },
-    httpMetadata: { contentType: "application/json" },
-    customMetadata: {
-      reportID: report.id,
-      reportDigest: digest,
-      receivedAt,
-      schemaVersion: String(report.schemaVersion),
-      source: report.diagnostics.source,
-      trigger: report.trigger,
-      kind: issueReportKind(report.trigger),
-      diagnosticContract: normalization.contractFingerprint,
-    },
-    sha256: checksum,
-  });
+  let object: R2Object | null;
+  try {
+    object = await env.ISSUE_REPORTS.put(key, stored, {
+      onlyIf: { etagDoesNotMatch: "*" },
+      httpMetadata: { contentType: "application/json" },
+      customMetadata: {
+        reportID: report.id,
+        reportDigest: digest,
+        receivedAt,
+        schemaVersion: String(report.schemaVersion),
+        source: report.diagnostics.source,
+        trigger: report.trigger,
+        kind: issueReportKind(report.trigger),
+        diagnosticContract: normalization.contractFingerprint,
+      },
+      sha256: checksum,
+    });
+  } catch (error) {
+    return releaseDailyCapacityAfterFailure(env, reservation, error);
+  }
   if (!object) {
-    const winner = await env.ISSUE_REPORTS.head(key);
-    if (!winner) throw new Error("R2 conditional write failed without an existing object");
-    return existingReceipt(winner, report.id, digest);
+    let duplicateReceipt: Response;
+    try {
+      const winner = await env.ISSUE_REPORTS.head(key);
+      if (!winner) throw new Error("R2 conditional write failed without an existing object");
+      duplicateReceipt = existingReceipt(winner, report.id, digest);
+    } catch (error) {
+      return releaseDailyCapacityAfterFailure(env, reservation, error);
+    }
+    await releaseDailyCapacity(env, reservation);
+    return duplicateReceipt;
   }
 
   console.info("issue_report_received", {
@@ -182,7 +194,11 @@ export function issueReportKind(trigger: string): IssueReportKind {
   return "report";
 }
 
-async function reserveDailyCapacity(env: Env): Promise<void> {
+interface DailyCapacityReservation {
+  day: string;
+}
+
+async function reserveDailyCapacity(env: Env): Promise<DailyCapacityReservation> {
   const day = new Date().toISOString().slice(0, 10);
   const reservation = await env.DB.prepare(
     "INSERT INTO issue_report_daily_quota (day, accepted_count) VALUES (?, 1) "
@@ -192,6 +208,36 @@ async function reserveDailyCapacity(env: Env): Promise<void> {
   if (!reservation) {
     throw new HttpError(429, "reportCapacity", "The report service is temporarily at capacity");
   }
+  return { day };
+}
+
+async function releaseDailyCapacity(
+  env: Env,
+  reservation: DailyCapacityReservation,
+): Promise<void> {
+  const released = await env.DB.prepare(
+    "UPDATE issue_report_daily_quota SET accepted_count = accepted_count - 1 "
+      + "WHERE day = ? AND accepted_count > 0 RETURNING accepted_count",
+  ).bind(reservation.day).first<{ accepted_count: number }>();
+  if (!released) {
+    throw new Error("Daily report capacity reservation was missing during release");
+  }
+}
+
+async function releaseDailyCapacityAfterFailure(
+  env: Env,
+  reservation: DailyCapacityReservation,
+  cause: unknown,
+): Promise<never> {
+  try {
+    await releaseDailyCapacity(env, reservation);
+  } catch (releaseError) {
+    throw new AggregateError(
+      [cause, releaseError],
+      "Report storage failed and its daily capacity reservation could not be released",
+    );
+  }
+  throw cause;
 }
 
 async function enforceReportRateLimit(request: Request, env: Env): Promise<void> {

@@ -15,7 +15,8 @@ issue-report contract and writes normalized JSON into a private R2 bucket. The W
 unauthenticated read, list, update, or delete route for those objects. Developer-only list and
 exact-read routes require a separate Worker secret that is never shipped in an app. A D1 row
 containing only the UTC day and an accepted count caps distributed intake at 2,000 new objects per
-day; exact retries do not consume another slot.
+day. Exact retries do not consume another slot, including concurrent retries whose conditional R2
+write loses the race; a failed R2 write synchronously returns its D1 reservation.
 
 ## Licensing
 
