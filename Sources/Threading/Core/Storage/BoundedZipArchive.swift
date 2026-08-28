@@ -105,8 +105,9 @@ struct BoundedZipArchive {
             guard cursor + 46 + variableLength <= start + size else {
                 throw Failure.invalidArchive
             }
-            let nameData = data.subdata(in: cursor + 46..<cursor + 46 + Int(nameLength))
-            guard let name = String(data: nameData, encoding: .utf8)
+            guard let nameData = data.zipSubdata(
+                in: cursor + 46..<cursor + 46 + Int(nameLength)
+            ), let name = String(data: nameData, encoding: .utf8)
                 ?? String(data: nameData, encoding: .isoLatin1) else {
                 throw Failure.invalidArchive
             }
@@ -195,9 +196,9 @@ struct BoundedZipArchive {
               entry.compressedSize <= bytes.count - payloadStart else {
             throw Failure.invalidArchive
         }
-        let payload = bytes.subdata(
+        guard let payload = bytes.zipSubdata(
             in: payloadStart..<payloadStart + entry.compressedSize
-        )
+        ) else { throw Failure.invalidArchive }
 
         let expanded: Data
         switch entry.method {
@@ -279,15 +280,26 @@ struct BoundedZipArchive {
 
 private extension Data {
     func zipUInt16(at offset: Int) -> UInt16? {
-        guard offset >= 0, offset + 2 <= count else { return nil }
-        return UInt16(self[offset]) | UInt16(self[offset + 1]) << 8
+        guard offset >= 0, count >= 2, offset <= count - 2 else { return nil }
+        let base = index(startIndex, offsetBy: offset)
+        return UInt16(self[base]) | UInt16(self[index(after: base)]) << 8
     }
 
     func zipUInt32(at offset: Int) -> UInt32? {
-        guard offset >= 0, offset + 4 <= count else { return nil }
-        return UInt32(self[offset])
-            | UInt32(self[offset + 1]) << 8
-            | UInt32(self[offset + 2]) << 16
-            | UInt32(self[offset + 3]) << 24
+        guard offset >= 0, count >= 4, offset <= count - 4 else { return nil }
+        let base = index(startIndex, offsetBy: offset)
+        return UInt32(self[base])
+            | UInt32(self[index(base, offsetBy: 1)]) << 8
+            | UInt32(self[index(base, offsetBy: 2)]) << 16
+            | UInt32(self[index(base, offsetBy: 3)]) << 24
+    }
+
+    func zipSubdata(in offsets: Range<Int>) -> Data? {
+        guard offsets.lowerBound >= 0,
+              offsets.upperBound >= offsets.lowerBound,
+              offsets.upperBound <= count else { return nil }
+        let lower = index(startIndex, offsetBy: offsets.lowerBound)
+        let upper = index(startIndex, offsetBy: offsets.upperBound)
+        return subdata(in: lower..<upper)
     }
 }

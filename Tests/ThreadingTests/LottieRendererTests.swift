@@ -328,6 +328,28 @@ final class LottieRendererTests: XCTestCase {
         XCTAssertEqual(document.width, 100)
     }
 
+    func testBoundedZipArchiveReadsAndExpandsADataSlice() throws {
+        let archive = try LottieFixture.dotLottie()
+        var padded = Data(repeating: 0xA5, count: 4)
+        padded.append(archive)
+        let slice = padded.dropFirst(4)
+        XCTAssertNotEqual(slice.startIndex, 0, "the fixture was copied instead of sliced")
+
+        let reader = try BoundedZipArchive(
+            data: slice,
+            limits: BoundedZipArchive.Limits(
+                maximumEntryCount: 256,
+                maximumEntryBytes: 1_024 * 1_024,
+                maximumExpandedBytes: 4 * 1_024 * 1_024
+            )
+        )
+
+        XCTAssertEqual(
+            try reader.data(atPath: "animations/dot.json"),
+            LottieFixture.spinningDot()
+        )
+    }
+
     /// A `.lottie` is a ZIP, so it gets the archive ceilings — and an entry that tries to leave
     /// the archive is refused rather than normalized away.
     func testAnArchiveEntryCannotEscapeTheArchive() throws {
