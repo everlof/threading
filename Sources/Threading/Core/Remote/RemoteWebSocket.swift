@@ -276,6 +276,10 @@ enum RemoteWebSocket {
         private var messageOpcode: Opcode?
         private var buffer = Data()
 
+        /// The bytes retained for the fragmented message in flight. Exposed so the memory bound
+        /// can be asserted directly rather than inferred from a close outcome after allocation.
+        var bufferedByteCount: Int { buffer.count }
+
         init(maximumBytes: Int) { self.maximumBytes = maximumBytes }
 
         enum Outcome: Equatable {
@@ -307,6 +311,16 @@ enum RemoteWebSocket {
                         reason: "New data frame during fragmented message"
                     )
                 }
+                guard Self.fits(
+                    bufferedBytes: 0,
+                    incomingBytes: frame.payload.count,
+                    maximumBytes: maximumBytes
+                ) else {
+                    return .protocolError(
+                        closeCode: CloseCode.messageTooBig,
+                        reason: "Message exceeds maximum"
+                    )
+                }
                 messageOpcode = frame.opcode
                 buffer = frame.payload
 
@@ -317,14 +331,20 @@ enum RemoteWebSocket {
                         reason: "Continuation with no message in progress"
                     )
                 }
+                guard Self.fits(
+                    bufferedBytes: buffer.count,
+                    incomingBytes: frame.payload.count,
+                    maximumBytes: maximumBytes
+                ) else {
+                    return .protocolError(
+                        closeCode: CloseCode.messageTooBig,
+                        reason: "Message exceeds maximum"
+                    )
+                }
                 buffer.append(frame.payload)
 
             default:
                 return .protocolError(closeCode: CloseCode.protocolError, reason: "Unexpected opcode")
-            }
-
-            guard buffer.count <= maximumBytes else {
-                return .protocolError(closeCode: CloseCode.messageTooBig, reason: "Message exceeds maximum")
             }
 
             guard frame.fin else { return .buffered }
@@ -347,6 +367,20 @@ enum RemoteWebSocket {
             default:
                 return .protocolError(closeCode: CloseCode.protocolError, reason: "Unreachable message state")
             }
+        }
+
+        /// Admission arithmetic that cannot overflow: compare the incoming fragment with the
+        /// remaining capacity rather than adding two attacker-controlled lengths.
+        private static func fits(
+            bufferedBytes: Int,
+            incomingBytes: Int,
+            maximumBytes: Int
+        ) -> Bool {
+            guard maximumBytes >= 0,
+                  bufferedBytes >= 0,
+                  bufferedBytes <= maximumBytes,
+                  incomingBytes >= 0 else { return false }
+            return incomingBytes <= maximumBytes - bufferedBytes
         }
 
         /// A close payload is empty or begins with a valid status code followed by UTF-8.

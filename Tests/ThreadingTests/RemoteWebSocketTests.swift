@@ -260,6 +260,54 @@ final class RemoteWebSocketTests: XCTestCase {
             return XCTFail("expected a protocol error")
         }
         XCTAssertEqual(code, RemoteWebSocket.CloseCode.messageTooBig)
+        XCTAssertEqual(reassembler.bufferedByteCount, 0, "the refused opening frame was retained")
+    }
+
+    func testReassemblyRefusesAContinuationBeforeItCrossesTheCap() {
+        var reassembler = RemoteWebSocket.Reassembler(maximumBytes: 4)
+        XCTAssertEqual(
+            reassembler.accept(.init(
+                fin: false,
+                opcode: .text,
+                payload: Data("123".utf8)
+            )),
+            .buffered
+        )
+
+        guard case .protocolError(let code, _) = reassembler.accept(.init(
+            fin: true,
+            opcode: .continuation,
+            payload: Data("45".utf8)
+        )) else {
+            return XCTFail("expected a protocol error")
+        }
+
+        XCTAssertEqual(code, RemoteWebSocket.CloseCode.messageTooBig)
+        XCTAssertEqual(
+            reassembler.bufferedByteCount,
+            3,
+            "the refused fragment entered the buffer before its admission check"
+        )
+    }
+
+    func testFragmentedMessageAtTheCapReassembles() {
+        var reassembler = RemoteWebSocket.Reassembler(maximumBytes: 4)
+        XCTAssertEqual(
+            reassembler.accept(.init(
+                fin: false,
+                opcode: .text,
+                payload: Data("12".utf8)
+            )),
+            .buffered
+        )
+        XCTAssertEqual(
+            reassembler.accept(.init(
+                fin: true,
+                opcode: .continuation,
+                payload: Data("34".utf8)
+            )),
+            .message(.text(Data("1234".utf8)))
+        )
     }
 
     func testTextMessageMustBeValidUTF8() {

@@ -1578,6 +1578,9 @@ feature lock.
   are dropped instead of being allowed to back-pressure an agent's terminal. Inbound WebSocket
   reads are decoded with a cursor and compacted once per network receive; a batch of thousands of
   minimal pre-authentication frames therefore remains linear work on the server's shared queue.
+  A frame and a complete reassembled message are each capped at 1 MiB. Every continuation is
+  compared with the buffer's remaining capacity before `Data.append`, so the transient retained
+  message never exceeds the stated cap; the server admits at most 32 connections.
 - Native REST mutations carry a request id. The Mac coalesces concurrent duplicates and keeps the
   bounded result for five minutes, while rejecting the same id with a different path or semantic
   JSON body. JSON key order and whitespace are normalized before fingerprinting, and iOS emits
