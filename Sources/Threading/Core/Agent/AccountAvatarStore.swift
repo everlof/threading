@@ -255,11 +255,20 @@ enum AccountAvatarStore {
 
     /// GitHub's user search matches only emails made public on a profile — a narrow but
     /// legitimate second chance after Gravatar.
+    ///
+    /// `items` is read per element. Every hit in this response claims the same public email, so
+    /// taking the first *readable* one is the same arbitrary pick among equals that taking the
+    /// first one always was — while refusing the container meant one unreadable hit cost the
+    /// avatar entirely and left the account with a placeholder.
     private static func gitHubAvatarByPublicEmail(_ email: String) -> Data? {
         guard let url = AccountAvatarDefaults.gitHubSearchURL(email: email),
               let data = ProjectIconDiscovery.fetch(url),
               let result = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let first = (result[AccountAvatarDefaults.gitHubItemsKey] as? [[String: Any]])?.first,
+              let first = WireList.objects(
+                  result[AccountAvatarDefaults.gitHubItemsKey],
+                  site: WireListSite.gitHubUserSearchItems,
+                  log: ThreadingLogger.github
+              )?.first,
               let avatar = first[AccountAvatarDefaults.gitHubAvatarKey] as? String,
               let avatarURL = URL(string: avatar)
         else { return nil }

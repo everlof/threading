@@ -487,6 +487,30 @@ final class ACPStreamSessionTests: XCTestCase {
         XCTAssertNil(unrecognised["optionId"])
     }
 
+    /// **The option list is deliberately all-or-nothing**, unlike every other wire array on this
+    /// side, and this pins it as a decision rather than an oversight.
+    ///
+    /// `answerPermission` maps one human "Allow" onto the first option whose `kind` it
+    /// recognises, in the order `ACPDefaults.allowOptionKinds` spells — `allow_once` before
+    /// `allow_always`. An unreadable `allow_once` would therefore not be *missing* from a
+    /// recovered list, it would be replaced by `allow_always`: a person granting one command
+    /// would have granted every future one. Refusing the list whole answers `cancelled`, and
+    /// nothing runs.
+    func testAPermissionOptionListWithAnUnreadableEntryIsRefusedWhole() throws {
+        let outcome = try permissionOutcome(
+            options: [
+                NSNull(),
+                ["optionId": "always", "kind": "allow_always"]
+            ],
+            decision: .allow(reason: "test")
+        )
+        XCTAssertEqual(outcome["outcome"] as? String, "cancelled")
+        XCTAssertNil(
+            outcome["optionId"],
+            "a recovered list would have promoted one Allow into allow_always"
+        )
+    }
+
     func testUnhandledServerRequestAnswersMethodNotFound() throws {
         let agent = makeAgent(openedAgentSteps() + [
             .awaitClientLine,
@@ -1039,8 +1063,11 @@ final class ACPStreamSessionTests: XCTestCase {
         return try XCTUnwrap(results.first)
     }
 
+    /// `options` is `[Any]` rather than `[[String: Any]]` so a fixture can put a JSON `null` in
+    /// the list. It reaches the session as real JSON text over the fake agent's pipe, which is
+    /// the only way an `NSNull` gets into that array at all.
     private func permissionOutcome(
-        options: [[String: Any]],
+        options: [Any],
         decision: PermissionDecision
     ) throws -> [String: Any] {
         let agent = makeAgent(openedAgentSteps() + [

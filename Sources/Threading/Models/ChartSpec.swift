@@ -229,6 +229,12 @@ extension ChartSpec {
             || name == MCPBuiltInTool.displayChart.rawValue
         else { return nil }
 
+        // `series` stays all-or-nothing, and the `count` check further down already says so out
+        // loud: a chart drawn from some of its series is not a smaller chart, it is a different
+        // chart, and the axis, the legend and the comparison the agent was making all change
+        // around the missing one with nothing on the picture to admit it. An element that is not
+        // an object costs the whole spec exactly as an unreadable `name` or `values` does, and
+        // the call stays an ordinary tool row showing the arguments as sent.
         guard let title = input["title"] as? String, !title.isEmpty,
               let categories = input["categories"] as? [String],
               let rawSeries = input["series"] as? [[String: Any]]

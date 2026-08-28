@@ -18,8 +18,16 @@ enum ClaudeProviderExecutionAdapter {
         guard let data = line.data(using: .utf8),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let type = root["type"] as? String,
-              let message = root["message"] as? [String: Any],
-              let blocks = message["content"] as? [[String: Any]] else { return [] }
+              let message = root["message"] as? [String: Any] else { return [] }
+
+        // Per element, like the member conversions below. One `null` in `content` filed *no*
+        // execution events for the line, so every tool call in that message was missing from the
+        // ledger — and a ledger claiming exactness is the last place a silent omission belongs.
+        // Nothing readable is lost by recovering: an element that is not an object could never
+        // have carried a `tool_use` or `tool_result` block.
+        let blocks = WireList.objects(
+            message["content"], site: WireListSite.claudeLedgerContent, log: ThreadingLogger.agent
+        ) ?? []
 
         switch type {
         case "assistant":

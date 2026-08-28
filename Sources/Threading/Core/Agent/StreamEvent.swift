@@ -732,7 +732,11 @@ extension StreamEvent {
 
     private static func transcriptResultText(_ content: Any?) -> String {
         if let text = content as? String { return text }
-        guard let blocks = content as? [[String: Any]] else { return "" }
+        // Per element. One `null` among a tool result's blocks drew the row with no output at
+        // all, which reads as a tool that returned nothing rather than as text we could not read.
+        guard let blocks = WireList.objects(
+            content, site: WireListSite.claudeToolResultContent, log: ThreadingLogger.agent
+        ) else { return "" }
         return blocks
             .compactMap { $0["text"] as? String }
             .joined(separator: "\n")

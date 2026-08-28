@@ -629,7 +629,13 @@ final class ACPStreamSession:
         case "plan":
             onEvent?(.runPlanUpdated(ACPWireAdapter.planSteps(in: update)))
         case "available_commands_update":
-            let commands = update["availableCommands"] as? [[String: Any]] ?? []
+            // Per element: a catalogue that lost one malformed entry is still the catalogue,
+            // and the strict cast withdrew every command over one of them.
+            let commands = WireList.objects(
+                update["availableCommands"],
+                site: WireListSite.acpAvailableCommands,
+                log: ThreadingLogger.agent
+            ) ?? []
             let capabilities = composerCapabilities(from: commands)
             if profile.initialCommandCatalog == .sessionUpdate,
                !isComposerCapabilityCatalogReady {
@@ -856,7 +862,28 @@ final class ACPStreamSession:
             tool: ACPWireAdapter.toolIdentity(kind: state.kind, title: state.title),
             input: input
         )
-        let options = parameters["options"] as? [[String: Any]] ?? []
+        // **Deliberately all-or-nothing**, and the one list on this side where that is the safe
+        // answer. `answerPermission` maps one human "Allow" onto the first option whose `kind`
+        // it recognises, in the order `ACPDefaults.allowOptionKinds` spells — so an unreadable
+        // `allow_once` would not be *missing* from a recovered list, it would be replaced by
+        // `allow_always`, and a person granting one command would have granted all of them.
+        // Refusing the list whole answers `cancelled`, which runs nothing. That follows
+        // `6bb2ebfb`, which kept the Codex approval arguments and the `PreToolUse` hook input
+        // strict for the same reason: a partial request is what gets approved for something it
+        // did not say.
+        let rawOptions = parameters["options"]
+        let options = rawOptions as? [[String: Any]] ?? []
+        if options.isEmpty, let listed = rawOptions as? [Any], !listed.isEmpty {
+            // Not silent: the refusal costs the agent its whole permission request, and without
+            // this the only symptom is a tool that never ran and never said why.
+            let label = profile.diagnosticsLabel
+            ThreadingLogger.agent.error(
+                """
+                \(label, privacy: .public) permission options refused whole: \
+                \(listed.count, privacy: .public) element(s), at least one not an object
+                """
+            )
+        }
 
         PermissionBroker.decide(request) { [weak self] decision in
             self?.answerPermission(

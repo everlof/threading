@@ -199,7 +199,14 @@ enum ClaudeSubagentTranscriptReplay {
             // Older Claude transcripts leave the stop reason null even after the final text
             // block. Ending on a tool call is still incomplete; text-only output is the
             // historical spelling of a completed child.
-            let blocks = message["content"] as? [[String: Any]] ?? []
+            // Per element. This asks whether the child's last message ended on a tool call, and
+            // the strict cast answered "no" for a `content` it simply could not read — so a
+            // child that stopped mid-tool was reported as having completed.
+            let blocks = WireList.objects(
+                message["content"],
+                site: WireListSite.claudeSubagentStatusContent,
+                log: ThreadingLogger.agent
+            ) ?? []
             let endedOnTool = blocks.contains { $0["type"] as? String == "tool_use" }
             return endedOnTool ? .stopped : .completed
         default:
@@ -239,7 +246,13 @@ enum ClaudeSubagentTranscriptReplay {
         }
 
         if type == "assistant" {
-            let content = message["content"] as? [[String: Any]] ?? []
+            // Per element, exactly as the parent replay is: a child's turn that vanishes reads
+            // as a subagent that never answered.
+            let content = WireList.objects(
+                message["content"],
+                site: WireListSite.claudeSubagentContent,
+                log: ThreadingLogger.agent
+            ) ?? []
             let blocks = content.compactMap(StreamEvent.contentBlock).filter(hasVisibleContent)
             return blocks.isEmpty ? nil : .assistantMessage(blocks: blocks)
         }

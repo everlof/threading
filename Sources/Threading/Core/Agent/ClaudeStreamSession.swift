@@ -684,8 +684,15 @@ final class ClaudeStreamSession:
               let data = line.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               object["type"] as? String == "system",
-              object["subtype"] as? String == "init",
-              let names = object["capabilities"] as? [String] else { return }
+              object["subtype"] as? String == "init" else { return }
+        // Per element. The names this client does not recognise are inert either way, so the
+        // strict cast bought nothing and cost everything: one number in the list disabled every
+        // capability the CLI had just said it has, including the interrupt receipt.
+        guard let names = WireList.stringsIfListed(
+            object["capabilities"],
+            site: WireListSite.claudeCapabilities,
+            log: ThreadingLogger.agent
+        ) else { return }
         advertisedCapabilities = Set(names)
     }
 
@@ -1118,8 +1125,16 @@ enum ClaudeCapabilityWire {
         let newCommandsAreSkills: Bool
     }
 
+    /// **Every list read here is per element.** The catalogue is what the composer offers behind
+    /// `/`, and `as? [[String: Any]]` answered one unreadable entry by withdrawing every other
+    /// one — a person then picked from a list that had silently lost its whole contents, which is
+    /// worse than one entry they could not have named anyway. `objectsIfListed`/`stringsIfListed`
+    /// keep the difference between "no list" and "an empty list", so a `["ctx"]` still leaves the
+    /// catalogue alone rather than emptying it.
     static func commands(from payload: [String: Any]?) -> [ClaudeCommandMetadata]? {
-        guard let raw = payload?["commands"] as? [[String: Any]] else { return nil }
+        guard let raw = WireList.objectsIfListed(
+            payload?["commands"], site: WireListSite.claudeCommands, log: ThreadingLogger.agent
+        ) else { return nil }
         return commands(from: raw)
     }
 
@@ -1133,19 +1148,29 @@ enum ClaudeCapabilityWire {
         switch subtype {
         case "init":
             return Update(
-                commandNames: object["slash_commands"] as? [String],
-                skillNames: object["skills"] as? [String],
+                commandNames: WireList.stringsIfListed(
+                    object["slash_commands"],
+                    site: WireListSite.claudeSlashCommands,
+                    log: ThreadingLogger.agent
+                ),
+                skillNames: WireList.stringsIfListed(
+                    object["skills"], site: WireListSite.claudeSkills, log: ThreadingLogger.agent
+                ),
                 commands: nil,
                 replacesCommands: true,
                 newCommandsAreSkills: false
             )
         case "commands_changed":
-            guard let raw = object["commands"] as? [[String: Any]] else { return nil }
+            guard let raw = WireList.objectsIfListed(
+                object["commands"], site: WireListSite.claudeCommands, log: ThreadingLogger.agent
+            ) else { return nil }
             return Update(
                 commandNames: nil,
                 // The current wire has no membership field, but accepting one makes the parser
                 // forward-compatible if Claude adds the explicit subset used by `system/init`.
-                skillNames: object["skills"] as? [String],
+                skillNames: WireList.stringsIfListed(
+                    object["skills"], site: WireListSite.claudeSkills, log: ThreadingLogger.agent
+                ),
                 commands: commands(from: raw),
                 replacesCommands: true,
                 newCommandsAreSkills: true
@@ -1164,7 +1189,11 @@ enum ClaudeCapabilityWire {
                 argumentHint: object["argumentHint"] as? String
                     ?? object["argument_hint"] as? String
                     ?? "",
-                aliases: object["aliases"] as? [String] ?? []
+                aliases: WireList.stringsIfListed(
+                    object["aliases"],
+                    site: WireListSite.claudeCommandAliases,
+                    log: ThreadingLogger.agent
+                ) ?? []
             )
         }
     }

@@ -190,16 +190,49 @@ enum CodexUsageAdapter {
 enum OpenCodeUsageAdapter {
     enum Failure: Error, Equatable {
         case unfamiliarExport
+        /// The export was the shape this adapter knows, but one of its messages was not an
+        /// object — so the bill it describes cannot be totalled. Separate from
+        /// `unfamiliarExport` because the two ask for different things: an unfamiliar export
+        /// means this adapter is looking at the wrong document, while this means it is looking
+        /// at the right one and cannot finish reading it.
+        case unreadableMessage(index: Int)
     }
 
+    /// Reads one OpenCode session export into ledger records.
+    ///
+    /// **Refuses the whole export for one unreadable message, and that is the decision rather
+    /// than an accident of the cast.** Everything else in this sweep recovers, because a
+    /// half-read catalog or content list still says something true about itself. A usage total
+    /// does not: it is a single number a person reads as *the* cost of that session, with no
+    /// place on the figure to say a message was skipped. Silently returning a smaller total
+    /// would present an undercount as fact.
+    ///
+    /// Refusing is not the same as losing the data quietly. `TranscriptUsageService` catches
+    /// this and marks that runtime's coverage `.partial`/`.failed` with a detail line, so the
+    /// Usage page says the reading is incomplete instead of showing a confident wrong number.
+    /// Recovering here would replace a visible gap with an invisible one.
+    ///
+    /// A per-message skip *is* still made for a message that is readable and simply not a
+    /// billable assistant turn — that is the export saying so, not this reader failing to read.
     static func records(
         fromExport data: Data,
         accountID: String = "opencode",
         accountName: String = "OpenCode"
     ) throws -> [UsageLedgerRecord] {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let messages = root["messages"] as? [[String: Any]]
+              let rawMessages = root["messages"] as? [Any]
         else { throw Failure.unfamiliarExport }
+
+        // Named element by element so the refusal can say *which* message stopped it. The plain
+        // `as? [[String: Any]]` this replaced answered nil for a `null` element and for a
+        // missing key alike, so every failure arrived as "unfamiliar export" and there was
+        // nothing in the log to distinguish an OpenCode version bump from one bad row.
+        let messages: [[String: Any]] = try rawMessages.enumerated().map { index, raw in
+            guard let message = raw as? [String: Any] else {
+                throw Failure.unreadableMessage(index: index)
+            }
+            return message
+        }
 
         let rootInfo = root["info"] as? [String: Any]
         let rootDirectory = rootInfo?["directory"] as? String ?? ""

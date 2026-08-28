@@ -216,6 +216,20 @@ OpenCode and OpenRouter rows with `complete`, `partial`, `unavailable` or `faile
 record counts, and a reason where useful. A plausible-looking total can therefore never imply
 whole-machine coverage when one runtime is unreadable.
 
+**A usage adapter refuses an export it cannot finish reading, and coverage is why.** Everywhere
+else that a provider array holds an element this client cannot open, the reader keeps the
+readable elements and names what it dropped — see
+[`native-conversations.md`](native-conversations.md#one-unreadable-element-does-not-cost-the-list).
+A bill is the exception. A half-read catalogue still says something true about itself; a total
+does not, because it is one number a person reads as *the* cost of that session with nowhere on
+the figure to admit a message was skipped. So `OpenCodeUsageAdapter` throws
+`Failure.unreadableMessage(index:)` for a `messages` element that is not an object, and
+`TranscriptUsageService` turns that into a `partial`/`failed` coverage row with a detail line.
+The session's spend is then visibly missing rather than invisibly short. Recovering here would
+trade a gap the dashboard states for an undercount it presents as fact — which is the one
+direction this page must never move. The refusal names the message index so a log line separates
+one bad row from an OpenCode export-format change, which `unfamiliarExport` alone could not.
+
 ### Session receipts
 
 The Session Status Card, Overview ▸ Info and Subagents pane read a second projection of the same

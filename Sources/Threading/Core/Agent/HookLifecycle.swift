@@ -295,8 +295,19 @@ struct HookLifecycleReport {
         // stable across boundaries for as long as the entry is — so unreadable work still reads
         // as carried over rather than as new on every turn. A missing type reads `.standing`,
         // which is the direction that changes nothing.
-        let tasks = payload["background_tasks"] as? [[String: Any]] ?? []
-        self.backgroundWork = tasks.enumerated().map { index, task in
+        //
+        // Read per entry for the same reason the members are read per member: this list is what
+        // says work is *carried over*, so losing all of it to one unreadable neighbour makes
+        // every surviving task read as new again on the next turn — the exact effect the id
+        // fallback above exists to prevent. The wire's own offset is kept rather than the offset
+        // left after compaction, so an entry named by its position is not renamed the moment a
+        // neighbour breaks.
+        let tasks = WireList.indexed(
+            payload["background_tasks"],
+            site: WireListSite.hookBackgroundTasks,
+            log: ThreadingLogger.agent
+        ) ?? []
+        self.backgroundWork = tasks.map { index, task in
             BackgroundTask(
                 id: task["id"] as? String ?? "#\(index)",
                 kind: BackgroundWorkKind(reportedType: task["type"] as? String)

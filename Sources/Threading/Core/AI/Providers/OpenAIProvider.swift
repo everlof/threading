@@ -114,8 +114,16 @@ final class OpenAIProvider: AIProvider {
     }
 
     private func parseResponse(_ data: Data, duration: TimeInterval) async throws -> String {
+        // `choices` is read per element. Only one choice is ever used and the pick among them is
+        // already arbitrary, so the first *readable* one answers the request exactly as well as
+        // the first one did — while refusing the container turned a usable completion into
+        // `invalidResponse` and lost the answer the model had already been paid for.
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = json["choices"] as? [[String: Any]],
+              let choices = WireList.objects(
+                  json["choices"],
+                  site: WireListSite.aiOpenAIResponseChoices,
+                  log: ThreadingLogger.aiResponse
+              ),
               let firstChoice = choices.first,
               let message = firstChoice["message"] as? [String: Any],
               let content = message["content"] as? String else {

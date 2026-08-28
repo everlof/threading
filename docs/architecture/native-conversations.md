@@ -136,6 +136,47 @@ agreement without inventing reversible archive semantics for Claude, Grok, or Op
 complete provider distinctions, merge, and failure rules live in
 [`sessions.md`](sessions.md#the-provider-archive-boundary).
 
+### One unreadable element does not cost the list
+
+`value as? [[String: Any]]` is all-or-nothing, and — unlike the object conversion in `JSONValue`
+— it fires on ordinary provider JSON. `JSONSerialization` renders a JSON `null` as `NSNull`, so
+one `null` anywhere in an array answers `nil` for the **whole** array rather than for the element:
+`["c1", null] as? [[String: Any]]` is `nil`, not `["c1"]`. The same is true of `as? [String]` and
+a number. The consequences were measured through the corpus in
+`ProviderWireTextCorpusTests.swift`: a `null` beside an assistant's text lost the entire turn, a
+`null` beside a tool result lost every result and then the record's text too, and one number in
+`skills` emptied the skill membership so every readable skill was presented as an ordinary
+command.
+
+`WireList` (`WireList.swift`) is the seam, for every provider and not only the conversation path.
+`objects`/`strings`/`values`/`indexed` keep the elements they can read and report what they
+dropped — the site label from `WireListSite` and the counts, never the value — so an agent writing
+lists this client cannot read is findable in the unified log without opening a transcript. The
+logger is passed per call, so an AI provider response reports under `ai.response` and the avatar
+lookup under `github` rather than everything landing in `agent`. `indexed` additionally carries the
+wire's own offsets, because an entry named by its position must not be renamed when a neighbour
+breaks; `values` is the dictionary form, where `as? [String: [String: Any]]` is all-or-nothing
+across keys.
+
+`objectsIfListed`/`stringsIfListed` are the same readers with one extra refusal: they also answer
+nil when *nothing* in the list was readable, because a `{"commands": ["ctx"]}` must not empty a
+composer catalogue that a malformed message never described. So there are three answers, not two —
+nil for "not a list of that kind", `[]` for "an empty list", and, for the `…IfListed` pair, nil for
+"a list with nothing of that kind in it". Recovery is right wherever the elements stand alone:
+content blocks, replayed rows, the command catalogue, the ledger's copy of a message.
+
+**Two sites keep refusing, on purpose.** `ACPStreamSession`'s permission `options` is one:
+`answerPermission` maps a single human "Allow" onto the first option whose `kind` it recognises,
+in `ACPDefaults.allowOptionKinds` order, so an unreadable `allow_once` would not be *missing* from
+a recovered list — it would be replaced by `allow_always`, and somebody granting one command would
+have granted all of them. Refusing the list whole answers `cancelled` and runs nothing, and the
+refusal is logged rather than silent. `ClaudeTranscriptInterruption.statesTheMarker` is the other:
+its whole classification is "one text block and *nothing else*", so recovering would make
+`blocks.count == 1` mean "one block we could read" and report an interrupt nobody pressed. Both
+follow `6bb2ebfb`, which kept the Codex approval arguments and the `PreToolUse` hook input strict
+for the same reason — a partial request is exactly what gets approved for something it did not
+say.
+
 ### ACP, and the one value that names a provider
 
 Grok native rendering uses the public **Agent Client Protocol** exposed by `grok agent stdio`, and

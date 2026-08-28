@@ -56,12 +56,23 @@ enum EditDiff {
             return content.components(separatedBy: "\n").map { DiffLine(kind: .added, text: $0) }
 
         case "MultiEdit":
+            // All-or-nothing, in both directions. A diff is read as *the* change a call will
+            // make — it is what a person approves — so a hunk this reader cannot open must not
+            // simply be left out of the picture: that does not under-report the edit, it
+            // misdescribes it, and there is nothing on the card to say a hunk is missing.
+            // Showing no diff falls back to naming the file, which claims nothing false.
+            //
+            // The inner refusal is the same decision and used to disagree with the outer one:
+            // an unreadable *element* withdrew the whole diff while an unreadable *member*
+            // silently dropped that one hunk and drew the rest.
             guard let edits = input["edits"] as? [[String: Any]] else { return nil }
-            return edits.flatMap { edit -> [DiffLine] in
+            var hunks: [DiffLine] = []
+            for edit in edits {
                 guard let old = edit["old_string"] as? String,
-                      let new = edit["new_string"] as? String else { return [] }
-                return diff(old, new)
+                      let new = edit["new_string"] as? String else { return nil }
+                hunks.append(contentsOf: diff(old, new))
             }
+            return hunks
 
         default:
             return nil

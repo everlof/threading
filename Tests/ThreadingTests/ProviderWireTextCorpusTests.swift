@@ -207,13 +207,26 @@ final class ProviderWireTextCorpusTests: XCTestCase {
         XCTAssertEqual(id, .integer(1))
     }
 
-    /// A capability list with one non-string element is discarded whole.
-    func testClaudeCapabilityListIsAllOrNothing() {
+    /// A capability list with one non-string element keeps the names that are strings.
+    ///
+    /// **This assertion moved.** It was written as the finding — `XCTAssertNil(update?.skillNames)`,
+    /// "one number removes every skill name, not just itself" — and that finding is now fixed:
+    /// `as? [String]` was all-or-nothing, so a single `7` emptied the skill membership and every
+    /// readable skill was presented as an ordinary command. `WireList.stringsIfListed` keeps the
+    /// readable names and counts the dropped one into the log.
+    ///
+    /// The half that did **not** move is the one below it: a list holding no readable name at all
+    /// is still no answer, so a malformed message cannot empty a catalogue it never described.
+    func testClaudeCapabilityListKeepsTheNamesItCanRead() {
         let update = ClaudeCapabilityWire.update(
             from: #"{"type":"system","subtype":"init","slash_commands":["a","b"],"skills":["b",7]}"#
         )
         XCTAssertEqual(update?.commandNames, ["a", "b"])
-        XCTAssertNil(update?.skillNames, "one number removes every skill name, not just itself")
+        XCTAssertEqual(update?.skillNames, ["b"], "the number is dropped, not every skill name")
+
+        XCTAssertNil(ClaudeCapabilityWire.update(
+            from: #"{"type":"system","subtype":"commands_changed","commands":["ctx"]}"#
+        ), "a list of bare strings is not a command catalogue and still leaves it alone")
     }
 }
 

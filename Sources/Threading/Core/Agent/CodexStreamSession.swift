@@ -671,8 +671,18 @@ final class CodexStreamSession:
         }
     }
 
+    /// Reads a `skills/list` result into the composer catalog.
+    ///
+    /// The three containers below answer the same question three different ways, on purpose.
     private func applySkills(_ result: [String: Any]?) {
-        guard let entries = result?["data"] as? [[String: Any]] else {
+        // `data` holds one entry per requested cwd, and only the entry matching *this* checkout
+        // is ever read — so an unreadable entry belongs to some other scope and refusing the
+        // whole response let another checkout's malformed row delete this session's skills. If
+        // our own entry was the unreadable one, the search below finds no match and the response
+        // is still rejected, one line further down.
+        guard let entries = WireList.objects(
+            result?["data"], site: WireListSite.codexSkillScopes, log: ThreadingLogger.agent
+        ) else {
             rejectSkillsResponse("missing data")
             return
         }
@@ -686,12 +696,23 @@ final class CodexStreamSession:
             rejectSkillsResponse("no matching cwd")
             return
         }
-        guard let errors = entry["errors"] as? [[String: Any]], errors.isEmpty else {
+        // Read as `[Any]`, and recovering is *not* an option here: this guard trusts the
+        // catalog only when the scan reported no problems, so an error entry this client cannot
+        // open still has to count as a problem. Skipping it would turn "this scan reported
+        // errors" into "this scan was clean" and invert the check — the one direction that is
+        // never safe. `as? [Any]` asks the honest question ("did the scan list anything?")
+        // where `as? [[String: Any]]` only landed on the safe side by accident, refusing an
+        // unreadable list for being unreadable rather than for being non-empty.
+        guard let errors = entry["errors"] as? [Any], errors.isEmpty else {
             // A partial scan is not authoritative. Keep the last complete snapshot so one broken
             // SKILL.md cannot make unrelated, previously valid skills disappear.
             rejectSkillsResponse("scan errors")
             return
         }
+        // All-or-nothing, matching the loop below: it already rejects the entire response for one
+        // skill whose metadata does not read, because a catalog missing a skill is indistinguishable
+        // from a catalog that never had it — the user reaches for `$name` and is told there is no
+        // such skill. An unreadable element says exactly as much as unreadable metadata does.
         guard let rawSkills = entry["skills"] as? [[String: Any]] else {
             rejectSkillsResponse("missing skills")
             return

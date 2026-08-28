@@ -117,8 +117,16 @@ final class ClaudeProvider: AIProvider {
     }
 
     private func parseResponse(_ data: Data, duration: TimeInterval) async throws -> String {
+        // `content` is read per element, matching the other content-block readers in this
+        // codebase: the blocks stand alone, so one this reader cannot open should cost that
+        // block and not the answer. Refusing the container raised `invalidResponse` for a
+        // response whose text was sitting in the very next element.
         guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let content = json["content"] as? [[String: Any]],
+              let content = WireList.objects(
+                  json["content"],
+                  site: WireListSite.aiClaudeResponseContent,
+                  log: ThreadingLogger.aiResponse
+              ),
               let firstBlock = content.first,
               let text = firstBlock["text"] as? String else {
             ThreadingLogger.aiResponse.error("Claude response: failed to parse JSON")

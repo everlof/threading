@@ -381,7 +381,14 @@ enum TranscriptReplay {
         guard let message = record["message"] as? [String: Any] else { return nil }
 
         if type == "assistant" {
-            let content = message["content"] as? [[String: Any]] ?? []
+            // Per element. `as? [[String: Any]]` here answered one `null` in `content` by
+            // discarding the array, so a whole assistant turn left no trace in the replayed
+            // conversation — a loss that reads as "the agent said nothing".
+            let content = WireList.objects(
+                message["content"],
+                site: WireListSite.claudeAssistantContent,
+                log: ThreadingLogger.agent
+            ) ?? []
             let blocks = content.compactMap(StreamEvent.contentBlock)
             return blocks.isEmpty ? nil : .assistantMessage(blocks: blocks)
         }
@@ -597,7 +604,12 @@ enum TranscriptReplay {
     private static func codexToolOutput(_ value: Any?) -> String {
         if let text = value as? String { return text }
 
-        if let blocks = value as? [[String: Any]] {
+        // Per element, but only where this is a block list at all: a JSON array of scalars is
+        // not tool output written as typed blocks, and it still falls through to the dump below
+        // rather than being answered as an empty string.
+        if let blocks = WireList.objectsIfListed(
+            value, site: WireListSite.codexToolOutput, log: ThreadingLogger.agent
+        ) {
             let text = blocks.compactMap { $0["text"] as? String }.joined()
 
             // The orchestration layer prefixes command output with its own completion and
@@ -640,7 +652,11 @@ enum ClaudeTranscriptUserRecord {
         from message: [String: Any],
         scope: Scope
     ) -> StreamEvent? {
-        if let content = message["content"] as? [[String: Any]] {
+        // Per element. A `null` beside the tool results took every result with it, and the
+        // record then had no text either, so the whole user turn disappeared from the replay.
+        if let content = WireList.objects(
+            message["content"], site: WireListSite.claudeUserContent, log: ThreadingLogger.agent
+        ) {
             let results = content.compactMap(StreamEvent.toolResult)
             if !results.isEmpty { return .toolResults(results) }
         }
@@ -677,7 +693,11 @@ enum ClaudeTranscriptUserRecord {
             return nonempty(text)
         }
 
-        guard let content = message["content"] as? [[String: Any]] else {
+        // Per element, for the reason the caller above is: the text blocks that *are* readable
+        // are what the person typed, and refusing them removed the prompt from the transcript.
+        guard let content = WireList.objects(
+            message["content"], site: WireListSite.claudeUserText, log: ThreadingLogger.agent
+        ) else {
             return nil
         }
         return nonempty(content

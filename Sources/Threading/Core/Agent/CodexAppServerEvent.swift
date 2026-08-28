@@ -58,6 +58,12 @@ enum CodexAppServerEvent {
             return completed(item)
 
         case "turn/plan/updated":
+            // Deliberately all-or-nothing, and `WireList.objects` is deliberately not used:
+            // the loop below already withdraws the whole notification for one unreadable
+            // *member*, for the reason it states, and an unreadable *element* is the same
+            // statement about the same snapshot. A plan is read as "step 3 of 7", so keeping the
+            // readable half would move the denominator and quietly redraw the progress the agent
+            // reported.
             guard let plan = parameters["plan"] as? [[String: Any]] else { return [] }
             var steps: [RunProgress.Step] = []
             steps.reserveCapacity(plan.count)
@@ -140,8 +146,17 @@ enum CodexAppServerEvent {
         }
     }
 
+    /// The text of a user turn the app-server is echoing back.
+    ///
+    /// Recovering rather than refusing, because the blocks stand alone: the loop below already
+    /// keeps only the `text` ones and passes over an image or an attachment without comment, so a
+    /// block this reader cannot open is the same kind of omission it already makes. Refusing the
+    /// container instead produced no `.userMessage` event at all, and a conversation that shows
+    /// the assistant answering a turn nobody appears to have typed is the worse reading.
     private static func userMessage(from item: [String: Any]) -> String? {
-        guard let content = item["content"] as? [[String: Any]] else { return nil }
+        guard let content = WireList.objects(
+            item["content"], site: WireListSite.codexUserMessageContent, log: ThreadingLogger.agent
+        ) else { return nil }
         let text = content.compactMap { input -> String? in
             guard input["type"] as? String == "text" else { return nil }
             return input["text"] as? String
@@ -356,9 +371,25 @@ enum CodexSubagentEvent {
         }
     }
 
+    /// The children a `collabAgentToolCall` names, and whatever it says about each.
+    ///
+    /// Both containers are read per element. `receiverThreadIds` is the only announcement a child
+    /// thread gets, so `as? [String]` here meant one unreadable id cost *every* sibling its
+    /// session — the delegated work then ran with nothing in the UI to say it existed. The states
+    /// map has the same shape of failure one level in: `as? [String: [String: Any]]` is
+    /// all-or-nothing across keys, so a single null value sent every other child to
+    /// `fallbackStatus` and reported a running agent as pending.
     private static func collaborationEvents(from item: [String: Any]) -> [SubagentEvent] {
-        let receiverIDs = item["receiverThreadIds"] as? [String] ?? []
-        let states = item["agentsStates"] as? [String: [String: Any]] ?? [:]
+        let receiverIDs = WireList.strings(
+            item["receiverThreadIds"],
+            site: WireListSite.codexCollaborationReceivers,
+            log: ThreadingLogger.agent
+        ) ?? []
+        let states = WireList.values(
+            item["agentsStates"],
+            site: WireListSite.codexCollaborationStates,
+            log: ThreadingLogger.agent
+        ) ?? [:]
         let parentThreadID = item["senderThreadId"] as? String
         let prompt = item["prompt"] as? String
         let model = item["model"] as? String

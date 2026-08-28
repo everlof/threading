@@ -286,6 +286,13 @@ struct RunProgress: Equatable, Sendable {
         self.init(steps: steps)
     }
 
+    /// The checklist a plan or todo tool call states, or nil when it does not state one.
+    ///
+    /// Both containers stay all-or-nothing. This list is not shown as a list — it is reduced to
+    /// "step 3 of 7" — so every element is part of the denominator, and dropping an unreadable
+    /// one would move the total the agent reported and redraw the progress bar around it. The
+    /// loop below already returns nil for one entry whose status does not read, for the same
+    /// reason; an element that is not an object at all says no less than that.
     static func steps(tool: ToolIdentity, input: [String: Any]) -> [Step]? {
         let items: [[String: Any]]
         let titleKey: String

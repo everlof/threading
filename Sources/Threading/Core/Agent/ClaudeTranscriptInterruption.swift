@@ -128,6 +128,13 @@ enum ClaudeTranscriptInterruption {
     /// One text block and nothing else. A tool result carrying the sentence in its output is a
     /// `tool_result` block, and a prompt that merely quotes it has the quote alongside the rest of
     /// what was typed; neither is this.
+    ///
+    /// **Deliberately all-or-nothing**, unlike every other `content` read on this side. The
+    /// classification *is* "and nothing else": recovering the readable elements would make
+    /// `blocks.count == 1` mean "one block we could read" rather than "one block", so a message
+    /// holding the marker beside something unreadable would be reported as an interrupt the user
+    /// never pressed. Refusing costs an interrupt annotation on a record that is already
+    /// malformed; recovering would invent a fact about what somebody did.
     private nonisolated static func statesTheMarker(_ record: [String: Any]) -> Bool {
         guard let message = record[ClaudeAPIErrorDefaults.messageKey] as? [String: Any],
               let blocks = message[ClaudeAPIErrorDefaults.contentKey] as? [[String: Any]],

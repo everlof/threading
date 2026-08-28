@@ -655,10 +655,17 @@ enum AgentModels {
     /// returns an unknown identifier verbatim, and a raw `claude-…-5[1m]` in a menu is worse
     /// than the service's own word for it. Where both know the model, ours wins so one model
     /// reads the same on the chip, the pill and this row.
+    ///
+    /// The list is read per entry. It is a menu of independent choices, and the `compactMap`
+    /// below already drops an entry with no usable `value` while keeping its neighbours — so
+    /// refusing the container for one unreadable element emptied the *whole* extra-model menu
+    /// instead of shortening it, and a model the login really offers simply became unpickable.
     private static func claudeAdditionalModels(account: AgentAccount?) -> [AgentModelOption] {
-        guard let entries = claudeState(account: account)?[
-            AgentDefaults.claudeAdditionalModelsKey
-        ] as? [[String: Any]] else { return [] }
+        guard let entries = WireList.objects(
+            claudeState(account: account)?[AgentDefaults.claudeAdditionalModelsKey],
+            site: WireListSite.claudeAdditionalModels,
+            log: ThreadingLogger.agent
+        ) else { return [] }
 
         return entries.compactMap { entry in
             guard let identifier = entry["value"] as? String, !identifier.isEmpty else {

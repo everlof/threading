@@ -138,7 +138,14 @@ struct ClaudeTranscriptAPIError: Equatable, Sendable {
 
     private static func messageText(in record: [String: Any]) -> String? {
         guard let message = record[ClaudeAPIErrorDefaults.messageKey] as? [String: Any],
-              let blocks = message[ClaudeAPIErrorDefaults.contentKey] as? [[String: Any]]
+              // Per element. The record still states the failure without its words, so the
+              // strict cast did not hide the stop — it deleted the only sentence explaining it,
+              // which is the whole reason this text is read.
+              let blocks = WireList.objects(
+                message[ClaudeAPIErrorDefaults.contentKey],
+                site: WireListSite.claudeAPIErrorContent,
+                log: ThreadingLogger.agent
+              )
         else { return nil }
 
         let joined = blocks

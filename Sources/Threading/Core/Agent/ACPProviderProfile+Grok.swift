@@ -28,9 +28,16 @@ enum GrokACPExtensions {
         return modelState?["currentModelId"] as? String
     }
 
+    /// Per element, and nil rather than empty where nothing in the list is readable: the caller
+    /// treats an answer here as "the opening catalogue has arrived", so `[]` would mark the
+    /// catalogue ready and empty instead of leaving the deadline to notice it never came.
     static func availableCommands(in result: [String: Any]?) -> [[String: Any]]? {
         let metadata = result?["_meta"] as? [String: Any]
-        return metadata?["availableCommands"] as? [[String: Any]]
+        return WireList.objectsIfListed(
+            metadata?["availableCommands"],
+            site: WireListSite.grokAvailableCommands,
+            log: ThreadingLogger.agent
+        )
     }
 }
 
