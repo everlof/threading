@@ -1870,7 +1870,9 @@ with no AppKit window graph or ambient project/runtime lookup.
 - `Sources/Threading/Resources/RemoteClient`: dependency-free browser client. A browser on the
   LAN or the tailnet meets a certificate interstitial against a pinned self-signed identity;
   **Open in a browser on your tailnet** (`TailscaleServeTransport`) is the opt-in way around that
-  on a tailnet, and the iOS app is unaffected because it pins.
+  on a tailnet, and the iOS app is unaffected because it pins. Its five allowlisted bundle assets
+  are loaded lazily once per server lifetime; browser `no-store` remains a privacy and protocol
+  requirement, not a reason to repeat synchronous disk reads on the connection queue.
 - `ThreadingRemoteKit`: versioned wire DTOs, pairing-link parsing, the fingerprint codec and
   pinning policy (`RemoteHostPinning`), and the discovery vocabulary both ends have to agree on
   (`RemoteServiceDiscovery`: the service type, the TXT keys, and the opaque instance name).

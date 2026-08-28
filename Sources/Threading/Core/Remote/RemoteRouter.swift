@@ -11,8 +11,15 @@ import ThreadingRemoteKit
 struct RemoteRouter {
 
     let bundle: Bundle
+    private let assetCache: StaticAssetCache
 
-    init(bundle: Bundle = .main) { self.bundle = bundle }
+    init(
+        bundle: Bundle = .main,
+        loadAssetData: @escaping (URL) -> Data? = { try? Data(contentsOf: $0) }
+    ) {
+        self.bundle = bundle
+        self.assetCache = StaticAssetCache(bundle: bundle, loadData: loadAssetData)
+    }
 
     // MARK: - Static assets
 
@@ -22,6 +29,55 @@ struct RemoteRouter {
         let file: String
         let contentType: String
         let isDocument: Bool
+    }
+
+    /// The asset schema is fixed at five, while request frequency is unbounded. Keep one
+    /// response per allowlisted path for this server's lifetime so a reload performs dictionary
+    /// lookups rather than synchronous bundle reads. The lock also keeps the router safe outside
+    /// `RemoteAccessServer`'s serial queue without turning this into a process-global bundle cache.
+    private final class StaticAssetCache {
+        private let bundle: Bundle
+        private let loadData: (URL) -> Data?
+        private let lock = NSLock()
+        private var responses: [String: HTTPResponse] = [:]
+
+        init(bundle: Bundle, loadData: @escaping (URL) -> Data?) {
+            self.bundle = bundle
+            self.loadData = loadData
+        }
+
+        func response(forPath path: String, asset: Asset) -> HTTPResponse {
+            lock.withLock {
+                if let response = responses[path] { return response }
+
+                let response: HTTPResponse
+                if let url = bundle.url(
+                    forResource: asset.file,
+                    withExtension: nil,
+                    subdirectory: RemoteRouter.clientDirectory
+                ), let data = loadData(url) {
+                    response = RemoteRouter.harden(
+                        HTTPResponse(
+                            status: 200,
+                            reason: "OK",
+                            contentType: asset.contentType,
+                            body: data
+                        ),
+                        isDocument: asset.isDocument
+                    )
+                } else {
+                    ThreadingLogger.remote.fault(
+                        "Remote client asset missing from the bundle: \(asset.file, privacy: .public)"
+                    )
+                    response = RemoteRouter.harden(
+                        HTTPResponse.status(404, "Not Found"),
+                        isDocument: false
+                    )
+                }
+                responses[path] = response
+                return response
+            }
+        }
     }
 
     private static let assets: [String: Asset] = [
@@ -37,19 +93,7 @@ struct RemoteRouter {
     /// A hardened static response for a known asset path, or nil if the path is not an asset.
     func staticResponse(forPath path: String) -> HTTPResponse? {
         guard let asset = Self.assets[path] else { return nil }
-        guard let url = bundle.url(
-            forResource: asset.file,
-            withExtension: nil,
-            subdirectory: Self.clientDirectory
-        ), let data = try? Data(contentsOf: url) else {
-            ThreadingLogger.remote.fault(
-                "Remote client asset missing from the bundle: \(asset.file, privacy: .public)"
-            )
-            return Self.harden(HTTPResponse.status(404, "Not Found"), isDocument: false)
-        }
-
-        let response = HTTPResponse(status: 200, reason: "OK", contentType: asset.contentType, body: data)
-        return Self.harden(response, isDocument: asset.isDocument)
+        return assetCache.response(forPath: path, asset: asset)
     }
 
     // MARK: - Path classification
