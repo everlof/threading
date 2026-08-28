@@ -2959,8 +2959,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// has nothing left to do in the pane. What it can still answer is the question a page tab
     /// raises when the sidebar has scrolled somewhere else or the row is nested under a collapsed
     /// group: *which of these is the thing I am looking at*.
-    /// - Returns: Whether the active page has a row that could be revealed. When an animated
-    ///   sidebar reveal is needed, keyboard focus is applied from that transition's completion.
+    /// - Returns: Whether the active page has a row that was selected for reveal. Keyboard focus
+    ///   is a best-effort side effect and does not change that answer; when an animated sidebar
+    ///   reveal is needed, it is applied from the transition's completion.
     @discardableResult
     func revealActivePageInSidebar(focusingSidebar: Bool = true) -> Bool {
         let destination: SidebarNodeKey
@@ -2998,7 +2999,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 _ = self?.sidebarViewController.focusSelection()
             }
         } else if focusingSidebar {
-            return sidebarViewController.focusSelection()
+            _ = sidebarViewController.focusSelection()
         }
 
         return true

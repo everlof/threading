@@ -49,6 +49,15 @@ final class SidebarRevealFocusTests: HostedStoreTestCase {
 
         XCTAssertEqual(controller.effectiveWorkspaceNavigatorSelection, .native)
         XCTAssertEqual(AppSettings.shared.workspaceNavigatorSelection, .native)
+
+        // The return value reports the reveal, not whether AppKit accepted the optional focus
+        // request. Detach the already-selected native controller so focus must fail while the
+        // row itself remains a valid reveal destination.
+        controller.sidebarViewController.view.removeFromSuperview()
+        XCTAssertNil(controller.sidebarViewController.view.window)
+        XCTAssertFalse(controller.sidebarViewController.focusSelection())
+        XCTAssertTrue(controller.revealActivePageInSidebar(focusingSidebar: true))
+        XCTAssertEqual(controller.sidebarViewController.selectedRowKey, .project(project.id))
     }
 
     @MainActor
