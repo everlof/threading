@@ -17,6 +17,10 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertEqual(RemoteRESTErrorCode(rawValue: refusal.code), .unknownModel)
     }
 
+    func testStorageExhaustionHasAStableRESTCode() {
+        XCTAssertEqual(RemoteRESTErrorCode.storageExhausted.rawValue, "storageExhausted")
+    }
+
     func testHostedPairingLinkRoundTripsWithoutPuttingSecretsInTheRequestURL() throws {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let link = try XCTUnwrap(HostedPairingLink(

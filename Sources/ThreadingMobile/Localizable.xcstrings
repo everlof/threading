@@ -79,6 +79,9 @@
     "The Mac isn’t ready for that action yet. Try again.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen är inte redo för den åtgärden än. Försök igen." } } }
     },
+    "The Mac is out of storage space. Free up space on the Mac, then try again.": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lagringsutrymmet på Macen är fullt. Frigör utrymme på Macen och försök sedan igen." } } }
+    },
     "The Mac received too many requests. Wait a moment and try again.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen fick för många förfrågningar. Vänta en stund och försök igen." } } }
     },

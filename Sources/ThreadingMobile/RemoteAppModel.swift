@@ -2218,7 +2218,7 @@ final class RemoteAppModel: ObservableObject {
                 // bypassing an authorization or compatibility decision made by the Mac. A
                 // gateway failure can belong to the route in front of it, and the same request
                 // id keeps trying the next route safe even if the Mac did receive it.
-                if case .server(let status, _, _) = error, [502, 503, 504].contains(status) {
+                if error.allowsMutationRouteFailover {
                     lastError = error
                     Self.closeDoor(
                         for: error,

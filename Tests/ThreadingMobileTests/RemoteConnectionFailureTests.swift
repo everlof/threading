@@ -445,6 +445,34 @@ final class RemoteRESTErrorTests: XCTestCase {
         XCTAssertEqual(error.refusalDetail, "missingTranscript")
     }
 
+    func testStructuredPersistenceRefusalStopsMutationRouteFailover() throws {
+        let body = try JSONEncoder().encode(RemoteErrorDTO(code: .persistenceUnavailable))
+        let refusal = RemoteClientError.decodedRefusal(status: 503, data: body)
+
+        XCTAssertFalse(
+            refusal.allowsMutationRouteFailover,
+            "a later route failure must not replace the Mac's authoritative persistence error"
+        )
+        XCTAssertTrue(
+            RemoteClientError.server(status: 503).allowsMutationRouteFailover,
+            "an older status-only gateway response must retain route failover"
+        )
+    }
+
+    func testStorageExhaustionRefusalExplainsTheRequiredRecovery() throws {
+        let body = try JSONEncoder().encode(RemoteErrorDTO(code: .storageExhausted))
+        let error = RemoteClientError.decodedRefusal(status: 503, data: body)
+
+        XCTAssertEqual(error.refusalCode, RemoteRESTErrorCode.storageExhausted.rawValue)
+        XCTAssertEqual(
+            error.localizedDescription,
+            MobileL10n.string(
+                "The Mac is out of storage space. Free up space on the Mac, then try again."
+            )
+        )
+        XCTAssertFalse(error.allowsMutationRouteFailover)
+    }
+
     func testOpenDraftRepairsOnlyWithdrawnProjectAndAgentChoices() {
         let catalog = RemoteNewSessionCatalogDTO(
             projects: [

@@ -347,6 +347,10 @@ and workspace instead of presenting every one as “HTTP 422.” An open iPhone 
 the host catalogue changes and refreshes it after one of those authoritative refusals, preserving
 the prompt and every choice that is still valid. Older hosts with empty error bodies still work
 and retain the status-only message. Authorization and scope failures remain deliberately generic.
+For sequential mutations, only a status-only 502/503/504 may belong to a route gateway and
+continue to the next route. A coded refusal is the Mac's authoritative answer and ends the walk.
+In particular, a project store paused by a full disk answers `storageExhausted`; iPhone tells the
+person to free space on the Mac instead of allowing a later TLS failure to replace that cause.
 
 A session's iPhone **Workspace** gathers **Browser**, **Review**, the read-only repository
 **Files** browser, and **Attachments** under one route so companion surfaces do not accumulate as

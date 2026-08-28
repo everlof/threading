@@ -1371,6 +1371,38 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(try XCTUnwrap(ProjectStore.shared.session(withID: session.id)).usesNativeUI)
     }
 
+    func testStorageExhaustionCrossesTheRESTBoundaryAsItsOwnRefusal() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-storage-refusal-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .claude,
+            usesNativeUI: false,
+            title: "Storage refusal"
+        ))
+        sessionAccess.persistenceBlockReasonOverride = .storageExhausted
+        sessionAccess.pinnedMutationResultOverride = .persistenceRefused
+
+        let response = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/pinned",
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(
+                RemoteSetSessionPinnedRequestDTO(isPinned: true)
+            )
+        ))
+
+        XCTAssertEqual(response.status, 503)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: response.body),
+            RemoteErrorDTO(code: .storageExhausted)
+        )
+    }
+
     func testOwnerCanMoveAChatAccountAndSetItsLimitRecovery() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "remote-session-controls-\(UUID().uuidString)",
@@ -3904,9 +3936,15 @@ private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteS
     private(set) var pinnedMutations: [PinnedMutation] = []
     private(set) var surfaceMutations: [SurfaceMutation] = []
     private(set) var limitRecoveryMutations: [LimitRecoveryMutation] = []
+    var persistenceBlockReasonOverride: ProjectStorePersistenceBlock?
+    var pinnedMutationResultOverride: ProjectMutationResult?
 
     init(store: ProjectStore) {
         self.store = store
+    }
+
+    var persistenceBlockReason: ProjectStorePersistenceBlock? {
+        persistenceBlockReasonOverride ?? store.persistenceBlockReason
     }
 
     func session(withID sessionID: SessionID) -> AgentSession? {
@@ -3934,6 +3972,7 @@ private final class RecordingRemoteSessionAccess: RemoteSessionQuerying, RemoteS
 
     func setPinned(_ pinned: Bool, for sessionID: SessionID) -> ProjectMutationResult {
         pinnedMutations.append(PinnedMutation(sessionID: sessionID, isPinned: pinned))
+        if let pinnedMutationResultOverride { return pinnedMutationResultOverride }
         return store.setPinned(pinned, for: sessionID)
     }
 

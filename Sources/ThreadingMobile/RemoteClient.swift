@@ -107,6 +107,15 @@ enum RemoteClientError: LocalizedError {
         return detail
     }
 
+    /// A status-only 502/503/504 can have come from a route's gateway. Once the Mac supplies a
+    /// bounded refusal code, that answer is authoritative and must not be replaced by a later
+    /// route's transport failure.
+    var allowsMutationRouteFailover: Bool {
+        guard case .server(let status, let code, _) = self,
+              code == nil else { return false }
+        return [502, 503, 504].contains(status)
+    }
+
     var requiresLaunchCatalogRefresh: Bool {
         guard let refusalCode else { return false }
         return Self.launchCatalogRefusalCodes.contains(refusalCode)
@@ -182,6 +191,10 @@ enum RemoteClientError: LocalizedError {
             return MobileL10n.string("The Mac couldn’t return that result safely.")
         case .hostNotReady:
             return MobileL10n.string("The Mac isn’t ready for that action yet. Try again.")
+        case .storageExhausted:
+            return MobileL10n.string(
+                "The Mac is out of storage space. Free up space on the Mac, then try again."
+            )
         case .persistenceUnavailable:
             return MobileL10n.string("The Mac couldn’t save that change. Try again.")
         case .unknownTheme:

@@ -64,7 +64,9 @@ commit an insert-and-delete probe in `app_state`, and reload the complete author
 Only all four steps restore writes in-process. A second `SQLITE_FULL` leaves the recoverable pause
 standing; any other probe failure escalates to ordinary fail-closed recovery. The Start Session
 path reports the refusal while retaining the brief, so its button and Command-Return route cannot
-fail silently.
+fail silently. Remote project mutations preserve the same typed cause as
+`RemoteRESTErrorCode.storageExhausted`, allowing the iPhone to direct recovery to the Mac's disk
+instead of reporting a generic persistence or route failure.
 
 **A constraint refusal is local to the attempted operation.** SQLite applies a statement and its
 surrounding store transaction atomically, so `SQLITE_CONSTRAINT` means the proposed state violated

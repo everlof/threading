@@ -16,6 +16,11 @@ protocol RemoteSessionQuerying: Sendable {
 /// The durable project-graph changes admitted by the remote lifecycle routes.
 @MainActor
 protocol RemoteSessionMutating: Sendable {
+    /// The typed reason a durable mutation is currently blocked, if the store already knows it.
+    /// A failed mutation remains authoritative on its own; this value only preserves the
+    /// actionable storage-exhaustion cause across the remote wire.
+    var persistenceBlockReason: ProjectStorePersistenceBlock? { get }
+
     func renameSession(id sessionID: SessionID, to title: String?) -> ProjectMutationResult
     func setPinned(_ pinned: Bool, for sessionID: SessionID) -> ProjectMutationResult
     func setUsesNativeUI(

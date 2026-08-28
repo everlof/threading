@@ -45,7 +45,7 @@ enum ProjectMutationResult: Equatable {
 /// Storage exhaustion is separate because it has a verified in-process recovery path. Every
 /// other failed write remains fail-closed, and a failed load stays distinct because the visible
 /// in-memory graph is not authoritative.
-enum ProjectStorePersistenceBlock: Equatable {
+enum ProjectStorePersistenceBlock: Equatable, Sendable {
     case recoveryMode
     case failedLoad
     case storageExhausted

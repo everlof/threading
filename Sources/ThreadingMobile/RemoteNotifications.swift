@@ -1240,8 +1240,7 @@ final class RemoteNotificationManager: ObservableObject {
                     level: .warning,
                     fields: failedFields
                 )
-                if case .server(let status, _, _) = error,
-                   [502, 503, 504].contains(status) {
+                if error.allowsMutationRouteFailover {
                     lastError = error
                     continue
                 }

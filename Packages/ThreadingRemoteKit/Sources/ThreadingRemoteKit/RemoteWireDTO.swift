@@ -3147,6 +3147,7 @@ public enum RemoteRESTErrorCode: String, Codable, CaseIterable, Sendable {
     case unknownSetting
     case settingNotMutable
     case invalidSettingValue
+    case storageExhausted
     case persistenceUnavailable
     case unsupportedValue
     case archiveAlreadyChanging

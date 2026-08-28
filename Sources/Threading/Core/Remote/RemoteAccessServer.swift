@@ -1642,11 +1642,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(
-                    503,
-                    "Persistence Unavailable",
-                    code: .persistenceUnavailable
-                )))
+                respond(.respond(self.persistenceRefusalResponse()))
                 return
             case .unsupportedValue:
                 respond(.respond(RemoteRouter.error(
@@ -1702,11 +1698,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(
-                    503,
-                    "Persistence Unavailable",
-                    code: .persistenceUnavailable
-                )))
+                respond(.respond(self.persistenceRefusalResponse()))
                 return
             case .unsupportedValue:
                 respond(.respond(RemoteRouter.error(
@@ -1761,11 +1753,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(
-                    503,
-                    "Persistence Unavailable",
-                    code: .persistenceUnavailable
-                )))
+                respond(.respond(self.persistenceRefusalResponse()))
                 return
             case .unsupportedValue:
                 respond(.respond(RemoteRouter.error(
@@ -1825,13 +1813,15 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                         self.services.mirrors.meResponse(for: authorization)
                     )))
                 case .failure(let failure):
+                    if case .persistenceUnavailable = failure {
+                        respond(.respond(self.persistenceRefusalResponse()))
+                        return
+                    }
                     let status: Int
                     if case .alreadyChanging = failure {
                         status = 409
                     } else if case .sessionNotFound = failure {
                         status = 404
-                    } else if case .persistenceUnavailable = failure {
-                        status = 503
                     } else {
                         status = 500
                     }
@@ -1965,11 +1955,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 )))
                 return
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(
-                    503,
-                    "Persistence Unavailable",
-                    code: .persistenceUnavailable
-                )))
+                respond(.respond(self.persistenceRefusalResponse()))
                 return
             }
             self.services.eventLog.recordRemoteEvent("Session UI changed remotely", [
@@ -2121,13 +2107,27 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     code: .unsupportedRecovery
                 )))
             case .persistenceRefused:
-                respond(.respond(RemoteRouter.error(
-                    503,
-                    "Persistence Unavailable",
-                    code: .persistenceUnavailable
-                )))
+                respond(.respond(self.persistenceRefusalResponse()))
             }
         }
+    }
+
+    /// HTTP status is only the broad transport class. Preserve the ProjectStore cause as the
+    /// stable REST code so a client can distinguish a full disk from an arbitrary failed write.
+    @MainActor
+    private func persistenceRefusalResponse() -> HTTPResponse {
+        if services.sessionMutations.persistenceBlockReason == .storageExhausted {
+            return RemoteRouter.error(
+                503,
+                "Storage Exhausted",
+                code: .storageExhausted
+            )
+        }
+        return RemoteRouter.error(
+            503,
+            "Persistence Unavailable",
+            code: .persistenceUnavailable
+        )
     }
 
     @MainActor
