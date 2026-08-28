@@ -216,7 +216,69 @@ final class PTYHostSessionDaemonTests: XCTestCase {
         )
     }
 
+    /// A resize is not only a `winsize` the child can poll; it is a `SIGWINCH` the child must
+    /// receive. The sibling test polls `stty size` and passes on a child that never learns —
+    /// which is what shipped: the daemon spawns on a dispatch queue whose worker thread blocks
+    /// every signal, the mask survives `fork` and `exec`, and an agent's TUI stayed on its spawn
+    /// grid while the pane moved. This child traps the signal, and the trap is the assertion.
+    func testAResizeRaisesSIGWINCHInTheChild() throws {
+        let socketPath = try startDaemon()
+        let log = directory.appendingPathComponent("winch.log", isDirectory: false)
+
+        let session = makeSession()
+        session.hostTransportFactory = { events in
+            let client = PTYHostClient(socketPath: socketPath, build: "test", events: events)
+            try client.connect()
+            return client
+        }
+        session.start(plan: AgentLaunchPlan(
+            executable: "/bin/sh",
+            arguments: ["-c", Self.winchTrappingScript(log: log)],
+            resumeState: .unavailable
+        ))
+        XCTAssertTrue(session.isHostBacked, "the launch did not reach the daemon")
+        XCTAssertTrue(
+            pump(until: { self.logLines(in: log).contains("ready") }, timeout: Fixture.childTimeout),
+            "the child never armed its trap"
+        )
+
+        let spawnedAt = session.terminalView.terminalDimensions
+        session.terminalView.frame = Fixture.widerFrame
+        session.terminalView.layoutSubtreeIfNeeded()
+        let wanted = session.terminalView.terminalDimensions
+        XCTAssertNotEqual(
+            "\(wanted.rows) \(wanted.cols)",
+            "\(spawnedAt.rows) \(spawnedAt.cols)",
+            "the emulator has to have moved, or no resize is raised"
+        )
+
+        XCTAssertTrue(
+            pump(until: { self.logLines(in: log).contains("WINCH") }, timeout: Fixture.childTimeout),
+            """
+            the resize reached the pty but never the child: SIGWINCH is blocked in the mask the \
+            daemon's spawn inherited from its dispatch thread
+            """
+        )
+    }
+
     // MARK: - Helpers
+
+    /// Says when its trap is armed, then writes a line for every `SIGWINCH` it receives.
+    ///
+    /// The `read -t 1` is what lets the trap run: a shell delivers a trapped signal after the
+    /// builtin it interrupted returns, and a shell blocked in an external command would not.
+    private static func winchTrappingScript(log: URL) -> String {
+        "trap 'printf \"WINCH\\n\" >> \(log.path)' WINCH; printf 'ready\\n' >> \(log.path); "
+            + "i=0; while [ \"$i\" -lt \(Fixture.sizePollIterations) ]; do "
+            + "if read -t 1 line; then :; fi; i=$((i + 1)); done"
+    }
+
+    /// Every line the child has written to `log`.
+    private func logLines(in log: URL) -> [String] {
+        guard let text = try? String(contentsOf: log, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n").map(String.init)
+    }
+
 
     /// Polls its own window size into `log` and echoes whatever it is sent.
     ///

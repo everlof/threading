@@ -91,10 +91,9 @@ enum PTYSpawn {
         if pid < 0 { return .failure(.forkFailed(errno)) }
 
         if pid == 0 {
-            // The daemon ignores SIGPIPE and libdispatch masks signals of its own; an ignored
-            // disposition survives `exec`, so a child that inherited them would be a terminal
-            // where ^C does nothing. Every disposition a terminal cares about goes back to the
-            // default first.
+            // The daemon ignores SIGPIPE; an ignored disposition survives `exec`, so a child
+            // that inherited it would be a terminal where ^C does nothing. Every disposition a
+            // terminal cares about goes back to the default first.
             _ = signal(SIGHUP, SIG_DFL)
             _ = signal(SIGINT, SIG_DFL)
             _ = signal(SIGQUIT, SIG_DFL)
@@ -103,6 +102,18 @@ enum PTYSpawn {
             _ = signal(SIGTSTP, SIG_DFL)
             _ = signal(SIGTTIN, SIG_DFL)
             _ = signal(SIGTTOU, SIG_DFL)
+
+            // The mask too, which the dispositions do not cover. This fork happens on the
+            // server's dispatch queue, and a libdispatch worker thread blocks every signal; a
+            // thread's mask survives `fork` and `exec` exactly as a disposition does. A child
+            // left with it never receives the `SIGWINCH` a resize raises — Node does not
+            // unblock the signals it handles — so an agent's TUI stays on its spawn grid while
+            // the pane moves, and `SIGTERM` needs the `SIGKILL` escalation to end it. The
+            // measured symptom was a Claude painting 82 rows into a 77-row emulator: every
+            // frame scrolled and its bottom rows interleaved. `sigprocmask` is async-signal-safe.
+            var unblocked = sigset_t()
+            sigemptyset(&unblocked)
+            _ = sigprocmask(SIG_SETMASK, &unblocked, nil)
 
             // A working directory that cannot be entered ends the child rather than starting it
             // somewhere else. The app names the directory because the session is *of* that
@@ -346,6 +357,12 @@ extension PTYSpawn {
         var defaulted = sigset_t()
         sigfillset(&defaulted)
         _ = posix_spawnattr_setsigdefault(&attributes, &defaulted)
+        // Default dispositions *and* an empty mask: `posix_spawn` inherits the calling thread's
+        // mask like `fork` does, and this runs on a libdispatch worker whose mask blocks every
+        // signal. See the `forkpty` path for what a child left with that mask cannot receive.
+        var unblocked = sigset_t()
+        sigemptyset(&unblocked)
+        _ = posix_spawnattr_setsigmask(&attributes, &unblocked)
         // A pgid of zero means "lead your own group", so the child's group id is its pid and
         // `kill(-pid, …)` reaches it and every grandchild it starts. `CLOEXEC_DEFAULT` means it
         // inherits exactly the three descriptors named above and nothing else the daemon
@@ -353,7 +370,10 @@ extension PTYSpawn {
         guard posix_spawnattr_setpgroup(&attributes, PTYHostDefaults.leadOwnGroup) == 0,
               posix_spawnattr_setflags(
                   &attributes,
-                  Int16(POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF)
+                  Int16(
+                      POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETPGROUP
+                          | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
+                  )
               ) == 0 else {
             [input, output, errors].forEach { $0.closeBoth() }
             return .failure(.forkFailed(errno))

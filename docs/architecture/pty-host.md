@@ -329,7 +329,17 @@ does not identify a process. The spawning connection becomes bound and attached.
 id is its pid; the daemon never has to track a group separately. Between fork and exec the child
 does only async-signal-safe work: it puts every terminal-relevant signal disposition back to the
 default (an ignored disposition survives `exec`, and a child that inherited the daemon's ignored
-`SIGPIPE` would be a terminal where ^C does nothing), enters the working directory, and execs. A
+`SIGPIPE` would be a terminal where ^C does nothing), **empties the signal mask**, enters the
+working directory, and execs. The mask is the half a disposition reset does not cover, and it was
+the one that shipped wrong: the spawn runs on the server's dispatch queue, a libdispatch worker
+thread blocks every signal, and a thread's mask survives `fork` and `exec`. Node never unblocks the
+signals it handles, so a child left with that mask never receives the `SIGWINCH` a `resize` raises
+— the pty's `winsize` changes, `stty size` agrees, and the agent's TUI goes on painting its spawn
+grid while the pane moves. Measured on a relaunch: Claude spawned at 213×82, the pane settled at
+203×77, and every frame's bottom rows scrolled and interleaved with the previous frame's. The same
+mask kept `SIGTERM` out, which is why ending a hosted child took the `SIGKILL` escalation. The
+pipes path sets `POSIX_SPAWN_SETSIGMASK` for the same reason. The regression test traps `SIGWINCH`
+in the child rather than polling its size, because the size was never the part that failed. A
 working directory that cannot be entered **ends the child** with status 126 rather than starting it
 somewhere else: an agent writing files into whatever `/` happens to be is worse than a launch that
 failed and said so.
