@@ -879,10 +879,14 @@ These were measured rather than assumed, each having first been wrong:
   and a first open takes `openingFraction` of the window (floored at `defaultWidth`, capped at
   `widestOpening`) instead of one fixed number.
 
-The web view **allows network** and blocks only navigation. A CSP would be theatre: the agent
-already has a shell, so anything it could exfiltrate through a page it could exfiltrate more
-easily with `curl`. Blocking link navigation is a usability fix — a 380pt browser with no
-back button is a trap — not a security control. Links go to `NSWorkspace` instead.
+The web view **allows network** and blocks only top-level navigation. A CSP would be theatre: the
+agent already has a shell, so anything it could exfiltrate through a page it could exfiltrate
+more easily with `curl`. Blocking link navigation is a usability fix — a 380pt browser with no
+back button is a trap — not a security control. The host's initial document load is the only
+`.other` action admitted in the main frame; later script, form and new-window navigation is
+cancelled. User-activated links go to `NSWorkspace` only when the shared agent-authored URL
+policy accepts `http` or `https`, so HTML and native Markdown cannot drift on which external
+schemes an agent may invoke. Embedded frames retain their own navigation.
 
 Documents load with `baseURL: nil`, giving an opaque origin: CDN scripts still load (measured),
 but the page cannot read local files or same-origin data. A `color-scheme` meta is prepended

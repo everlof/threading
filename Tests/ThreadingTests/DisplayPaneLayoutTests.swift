@@ -141,6 +141,126 @@ final class DisplayPaneLayoutTests: HostedStoreTestCase {
         XCTAssertEqual(descendants(of: pane.view).compactMap { $0 as? WKWebView }.count, 1)
     }
 
+    /// Agent HTML gets one top-level navigation: the opaque document load the host initiated.
+    /// Later script, form and custom-scheme actions cannot replace the trusted document surface
+    /// or ask another installed application to handle agent-authored input.
+    func testDocumentNavigationAllowsOnlyItsInitialLoadAndExternalWebLinks() throws {
+        let https = try XCTUnwrap(URL(string: "HTTPS://example.com/report"))
+        let http = try XCTUnwrap(URL(string: "http://example.com/report"))
+        let file = try XCTUnwrap(URL(string: "file:///Users/person/private"))
+        let custom = try XCTUnwrap(URL(string: "someapp://run"))
+
+        XCTAssertEqual(
+            DisplayDocumentNavigationPolicy.decision(
+                navigationType: .other,
+                url: URL(string: "about:blank"),
+                targetsMainFrame: true,
+                allowsInitialDocumentLoad: true
+            ),
+            .allowInitialDocumentLoad
+        )
+        XCTAssertEqual(
+            DisplayDocumentNavigationPolicy.decision(
+                navigationType: .other,
+                url: https,
+                targetsMainFrame: true,
+                allowsInitialDocumentLoad: false
+            ),
+            .cancel
+        )
+        XCTAssertEqual(
+            DisplayDocumentNavigationPolicy.decision(
+                navigationType: .formSubmitted,
+                url: https,
+                targetsMainFrame: true,
+                allowsInitialDocumentLoad: false
+            ),
+            .cancel
+        )
+        XCTAssertEqual(
+            DisplayDocumentNavigationPolicy.decision(
+                navigationType: .other,
+                url: https,
+                targetsMainFrame: nil,
+                allowsInitialDocumentLoad: false
+            ),
+            .cancel
+        )
+        XCTAssertEqual(
+            DisplayDocumentNavigationPolicy.decision(
+                navigationType: .other,
+                url: https,
+                targetsMainFrame: false,
+                allowsInitialDocumentLoad: false
+            ),
+            .allow
+        )
+
+        XCTAssertEqual(
+            DisplayDocumentNavigationPolicy.decision(
+                navigationType: .linkActivated,
+                url: https,
+                targetsMainFrame: true,
+                allowsInitialDocumentLoad: false
+            ),
+            .openExternal(https)
+        )
+        XCTAssertEqual(
+            DisplayDocumentNavigationPolicy.decision(
+                navigationType: .linkActivated,
+                url: http,
+                targetsMainFrame: false,
+                allowsInitialDocumentLoad: false
+            ),
+            .openExternal(http)
+        )
+        for refused in [file, custom] {
+            XCTAssertEqual(
+                DisplayDocumentNavigationPolicy.decision(
+                    navigationType: .linkActivated,
+                    url: refused,
+                    targetsMainFrame: true,
+                    allowsInitialDocumentLoad: false
+                ),
+                .cancel
+            )
+        }
+        XCTAssertEqual(
+            DisplayDocumentNavigationPolicy.decision(
+                navigationType: .linkActivated,
+                url: nil,
+                targetsMainFrame: true,
+                allowsInitialDocumentLoad: false
+            ),
+            .cancel
+        )
+    }
+
+    /// Exercise the actual delegate seam as well as its decision table. The host's first `.other`
+    /// load must render, while a second `.other` action authored by that document must not replace
+    /// it — both actions otherwise look alike at the WebKit API boundary.
+    func testDocumentRendererRefusesScriptNavigationAfterItsInitialLoad() async throws {
+        let pane = paneShowing(DisplayContent(
+            body: .html("""
+                <body data-threading-marker="original">
+                <script>setTimeout(() => { window.location = 'about:blank' }, 20)</script>
+                </body>
+                """),
+            title: "Document",
+            subtitle: "Document"
+        ))
+        let webView = try XCTUnwrap(
+            descendants(of: pane.view).compactMap { $0 as? WKWebView }.first
+        )
+
+        try await Task.sleep(nanoseconds: 250_000_000)
+        let marker = try await webView.evaluateJavaScript(
+            "document.body.dataset.threadingMarker || ''"
+        )
+
+        XCTAssertEqual(marker as? String, "original")
+    }
+
     // MARK: - The Picture Does Not Size the Pane
 
     /// `NSImageView` reports the picture's own dimensions as its intrinsic content size, so the

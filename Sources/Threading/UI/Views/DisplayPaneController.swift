@@ -167,6 +167,10 @@ final class DisplayPaneController: NSViewController {
   /// an empty pane pay ~46 ms for a renderer and a blank page it did not use.
   private var documentWebView: WKWebView?
   private var documentWebViewHasContent = false
+  /// `loadHTMLString` enters the navigation delegate as `.other`, just like script navigation.
+  /// Arm exactly the host load we issue; its policy callback consumes this permission before any
+  /// script in the document can run.
+  private var allowsInitialDocumentNavigation = false
   private lazy var hostedView: NSView = {
     let hosted = NSView()
     hosted.translatesAutoresizingMaskIntoConstraints = false
@@ -2169,6 +2173,8 @@ final class DisplayPaneController: NSViewController {
         let webView = installDocumentWebViewIfNeeded()
         webView.isHidden = false
         documentWebViewHasContent = true
+        webView.stopLoading()
+        allowsInitialDocumentNavigation = true
         webView.loadHTMLString(Self.themed(html), baseURL: nil)
       case .chart(let spec):
         // The chart draws its own caption *and* its own actions, so both of the panel's stand
@@ -2359,6 +2365,8 @@ final class DisplayPaneController: NSViewController {
     documentWebView.isHidden = true
     guard documentWebViewHasContent else { return }
     documentWebViewHasContent = false
+    documentWebView.stopLoading()
+    allowsInitialDocumentNavigation = true
     documentWebView.loadHTMLString("", baseURL: nil)
   }
 
@@ -2890,23 +2898,33 @@ extension DisplayPaneController: WKNavigationDelegate {
   /// Keeps the panel showing the document it was given.
   ///
   /// Following a link would leave a 380pt-wide renderer with no back button, no address bar
-  /// and no way home — so links are handed to the real browser instead, which has all three.
-  /// (An agent who wants a navigable page uses the browser tab, not a document.) Subresources
-  /// do not come through here, so scripts, styles and images still load.
+  /// and no way home — so ordinary web links are handed to the real browser instead, which has
+  /// all three. Every other top-level navigation is refused. (An agent who wants a navigable page
+  /// uses the browser tab, not a document.) Subresources do not come through here, and embedded
+  /// frames keep their own navigation, so scripts, styles, images and framed content still load.
   func webView(
     _ webView: WKWebView,
     decidePolicyFor navigationAction: WKNavigationAction,
     decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
   ) {
-    guard navigationAction.navigationType == .linkActivated,
-      let url = navigationAction.request.url
-    else {
+    let decision = DisplayDocumentNavigationPolicy.decision(
+      navigationType: navigationAction.navigationType,
+      url: navigationAction.request.url,
+      targetsMainFrame: navigationAction.targetFrame?.isMainFrame,
+      allowsInitialDocumentLoad: allowsInitialDocumentNavigation
+    )
+    switch decision {
+    case .allow:
       decisionHandler(.allow)
-      return
+    case .allowInitialDocumentLoad:
+      allowsInitialDocumentNavigation = false
+      decisionHandler(.allow)
+    case .openExternal(let url):
+      NSWorkspace.shared.open(url)
+      decisionHandler(.cancel)
+    case .cancel:
+      decisionHandler(.cancel)
     }
-
-    NSWorkspace.shared.open(url)
-    decisionHandler(.cancel)
   }
 
   /// A page whose renderer died leaves the panel blank with no explanation, so it is
@@ -2915,6 +2933,43 @@ extension DisplayPaneController: WKNavigationDelegate {
   func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
     ThreadingLogger.mcp.warning("Display panel web content process terminated; re-rendering")
     render()
+  }
+}
+
+/// Separates WebKit's opaque action objects from the policy they carry, so every navigation shape
+/// can be tested without launching an application or depending on a live web content process.
+enum DisplayDocumentNavigationPolicy {
+  enum Decision: Equatable {
+    case allow
+    case allowInitialDocumentLoad
+    case openExternal(URL)
+    case cancel
+  }
+
+  static func decision(
+    navigationType: WKNavigationType,
+    url: URL?,
+    targetsMainFrame: Bool?,
+    allowsInitialDocumentLoad: Bool
+  ) -> Decision {
+    if navigationType == .linkActivated {
+      guard let url, let accepted = AgentAuthoredURLPolicy.externalWebURL(url) else {
+        return .cancel
+      }
+      return .openExternal(accepted)
+    }
+
+    // A frame inside the document is content, not a replacement for the document. A nil target
+    // is a new browsing context (for example `window.open`) and therefore does not pass here.
+    if targetsMainFrame == false { return .allow }
+
+    if navigationType == .other,
+      targetsMainFrame == true,
+      allowsInitialDocumentLoad
+    {
+      return .allowInitialDocumentLoad
+    }
+    return .cancel
   }
 }
 

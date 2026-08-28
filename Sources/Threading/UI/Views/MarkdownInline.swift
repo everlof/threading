@@ -110,7 +110,7 @@ extension Markdown {
                 // Assistant Markdown is untrusted document content. AppKit opens a `.link`
                 // attribute through the system handler, so file:, custom-app and executable
                 // schemes must never become actions merely because an agent wrote them.
-                if let link = clickableLinkURL(url) {
+                if let link = AgentAuthoredURLPolicy.externalWebURL(url) {
                     attributes[.foregroundColor] = style.linkColor
                     attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
                     attributes[.link] = link
@@ -118,13 +118,6 @@ extension Markdown {
                 result.append(NSAttributedString(string: label, attributes: attributes))
             }
         }
-    }
-
-    private static func clickableLinkURL(_ value: String) -> URL? {
-        guard let url = URL(string: value),
-              let scheme = url.scheme?.lowercased(),
-              scheme == "https" || scheme == "http" else { return nil }
-        return url
     }
 
     // MARK: - Font Variants
