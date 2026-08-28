@@ -44,7 +44,8 @@ enum ShellAliasReader {
         let name = body[body.startIndex..<equalsIndex].trimmingCharacters(in: .whitespaces)
         guard !name.isEmpty, name.allSatisfy(isAliasNameCharacter) else { return nil }
 
-        let definition = unquoted(String(body[body.index(after: equalsIndex)...]))
+        let rawDefinition = String(body[body.index(after: equalsIndex)...])
+        let definition = unquoted(withoutTrailingShellComment(rawDefinition))
 
         // Only aliases that redirect the account are relevant.
         for environmentKey in AliasDefaults.accountEnvironmentKeys {
@@ -79,6 +80,37 @@ enum ShellAliasReader {
         guard let first = trimmed.first, first == "\"" || first == "'",
               trimmed.count >= 2, trimmed.last == first else { return trimmed }
         return String(trimmed.dropFirst().dropLast())
+    }
+
+    /// Removes shell commentary without treating a quoted or escaped hash as syntax.
+    private static func withoutTrailingShellComment(_ value: String) -> String {
+        var quote: Character?
+        var escaped = false
+
+        for index in value.indices {
+            let character = value[index]
+            if escaped {
+                escaped = false
+                continue
+            }
+            if character == "\\", quote != "'" {
+                escaped = true
+                continue
+            }
+            if let activeQuote = quote {
+                if character == activeQuote { quote = nil }
+                continue
+            }
+            if character == "\"" || character == "'" {
+                quote = character
+                continue
+            }
+            if character == "#" {
+                return String(value[..<index])
+            }
+        }
+
+        return value
     }
 
     /// Expands the `$HOME` and `~` forms that appear in hand-written aliases.
