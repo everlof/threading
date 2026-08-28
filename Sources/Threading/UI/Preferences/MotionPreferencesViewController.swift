@@ -79,10 +79,7 @@ final class MotionPreferencesViewController: NSViewController {
         orbStylePopUp.target = self
         orbStylePopUp.action = #selector(orbStyleChanged)
         orbStylePopUp.setAccessibilityIdentifier(Identifier.orbStyle)
-        orbStylePopUp.translatesAutoresizingMaskIntoConstraints = false
-        orbStylePopUp.widthAnchor.constraint(
-            equalToConstant: SettingsUIDefaults.controlWidth
-        ).isActive = true
+        SettingsUI.preferControlWidth(orbStylePopUp)
         orbPreview.prepareForWorking(style: orbStyle)
 
         for style in ChatNameMorphStyle.allCases {
@@ -101,10 +98,7 @@ final class MotionPreferencesViewController: NSViewController {
         nameStylePopUp.target = self
         nameStylePopUp.action = #selector(nameStyleChanged)
         nameStylePopUp.setAccessibilityIdentifier(Identifier.nameStyle)
-        nameStylePopUp.translatesAutoresizingMaskIntoConstraints = false
-        nameStylePopUp.widthAnchor.constraint(
-            equalToConstant: SettingsUIDefaults.controlWidth
-        ).isActive = true
+        SettingsUI.preferControlWidth(nameStylePopUp)
 
         namePreview.applyFont(.emphasizedBody)
         namePreview.morphStyleOverride = nameStyle

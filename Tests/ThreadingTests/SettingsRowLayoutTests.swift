@@ -245,6 +245,28 @@ final class SettingsRowLayoutTests: XCTestCase {
                                     "the control was squeezed by the labels beside it")
     }
 
+    /// The standard form measure is spacing, not a minimum page width. At the constrained
+    /// evidence width the row keeps the pop-up's intrinsic readable content but spends the
+    /// extra width before it can move the card outside the pane.
+    func testPreferredControlWidthYieldsInsideAConstrainedRow() {
+        let control = popUp()
+        SettingsUI.preferControlWidth(control)
+        let built = row(width: 420, control: control)
+        let frame = control.convert(control.bounds, to: built)
+
+        XCTAssertLessThan(
+            control.frame.width,
+            SettingsUIDefaults.controlWidth,
+            "the regular control measure remained a required minimum"
+        )
+        XCTAssertGreaterThanOrEqual(control.frame.width, control.intrinsicContentSize.width - 0.5)
+        XCTAssertLessThanOrEqual(
+            frame.maxX,
+            built.bounds.maxX - Design.Spacing.inset + 0.5,
+            "the preferred measure pushed the control outside the row"
+        )
+    }
+
     /// Some controls need the standard 220-point measure while their explanation is a sentence,
     /// not a label. The stacked contract gives each the width it needs instead of satisfying the
     /// card edges with an unreadably narrow text column.

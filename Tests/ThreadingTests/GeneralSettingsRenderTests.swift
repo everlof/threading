@@ -436,6 +436,11 @@ final class GeneralSettingsRenderTests: XCTestCase {
         host.addSubview(view)
 
         NSLayoutConstraint.activate([
+            // A detached fixture's frame is only an initial size. State both capture dimensions
+            // as constraints so content cannot turn the 420-point evidence into a wide page that
+            // is merely photographed through the old frame.
+            host.widthAnchor.constraint(equalToConstant: width),
+            host.heightAnchor.constraint(equalToConstant: height),
             view.topAnchor.constraint(equalTo: host.topAnchor),
             view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
             view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
@@ -443,6 +448,13 @@ final class GeneralSettingsRenderTests: XCTestCase {
         ])
 
         host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(host.bounds.width, width, accuracy: 0.5, "the fixture widened its capture")
+        XCTAssertEqual(
+            host.bounds.height,
+            height,
+            accuracy: 0.5,
+            "the fixture changed its capture height"
+        )
         return host
     }
 

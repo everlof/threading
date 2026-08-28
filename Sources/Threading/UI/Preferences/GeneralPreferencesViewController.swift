@@ -132,8 +132,7 @@ final class GeneralPreferencesViewController: NSViewController {
         defaultAgentPopUp.selectItem(at: AgentKind.allCases.firstIndex(of: AppSettings.shared.defaultAgentKind) ?? 0)
         defaultAgentPopUp.target = self
         defaultAgentPopUp.action = #selector(defaultAgentChanged)
-        defaultAgentPopUp.translatesAutoresizingMaskIntoConstraints = false
-        defaultAgentPopUp.widthAnchor.constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(defaultAgentPopUp)
 
         configureStartupSpeedPopUp(
             claudeStartupSpeedPopUp,
@@ -247,18 +246,14 @@ final class GeneralPreferencesViewController: NSViewController {
         rebuildPermissionModePopUp(for: AppSettings.shared.defaultAgentKind)
         permissionModePopUp.target = self
         permissionModePopUp.action = #selector(permissionModeChanged)
-        permissionModePopUp.translatesAutoresizingMaskIntoConstraints = false
-        permissionModePopUp.widthAnchor
-            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(permissionModePopUp)
 
         remoteControlPopUp.selectItem(
             at: ClaudeRemoteControl.allCases.firstIndex(of: AppSettings.shared.claudeRemoteControl) ?? 0
         )
         remoteControlPopUp.target = self
         remoteControlPopUp.action = #selector(remoteControlChanged)
-        remoteControlPopUp.translatesAutoresizingMaskIntoConstraints = false
-        remoteControlPopUp.widthAnchor
-            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(remoteControlPopUp)
 
         shellField.applyFont(.body)
         shellField.placeholderString = TerminalDefaults.defaultShell
@@ -309,9 +304,7 @@ final class GeneralPreferencesViewController: NSViewController {
         popUp.target = self
         popUp.action = #selector(startupSpeedChanged)
         popUp.setAccessibilityIdentifier(accessibilityIdentifier)
-        popUp.translatesAutoresizingMaskIntoConstraints = false
-        popUp.widthAnchor
-            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(popUp)
     }
 
     /// Which builds this person is willing to receive.
@@ -333,9 +326,7 @@ final class GeneralPreferencesViewController: NSViewController {
         updateChannelPopUp.target = self
         updateChannelPopUp.action = #selector(updateChannelChanged)
         updateChannelPopUp.setAccessibilityIdentifier("settings.general.update-channel")
-        updateChannelPopUp.translatesAutoresizingMaskIntoConstraints = false
-        updateChannelPopUp.widthAnchor
-            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(updateChannelPopUp)
     }
 
     /// The three launch-restore controls.
@@ -401,9 +392,7 @@ final class GeneralPreferencesViewController: NSViewController {
         popUp.target = self
         popUp.action = action
         popUp.setAccessibilityIdentifier(accessibilityIdentifier)
-        popUp.translatesAutoresizingMaskIntoConstraints = false
-        popUp.widthAnchor
-            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(popUp)
     }
 
     /// The window and the limit belong to one policy, so they are dimmed rather than hidden under
@@ -838,9 +827,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private func configureAlertSoundPopUp() {
         alertSoundPopUp.target = self
         alertSoundPopUp.action = #selector(alertSoundChoiceChanged)
-        alertSoundPopUp.translatesAutoresizingMaskIntoConstraints = false
-        alertSoundPopUp.widthAnchor
-            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(alertSoundPopUp)
         alertSoundPopUp.setAccessibilityIdentifier("settings.general.alert-sound")
         rebuildAlertSoundMenu()
     }
@@ -942,9 +929,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private func configureBellSoundPopUp() {
         bellSoundPopUp.target = self
         bellSoundPopUp.action = #selector(bellSoundChanged)
-        bellSoundPopUp.translatesAutoresizingMaskIntoConstraints = false
-        bellSoundPopUp.widthAnchor
-            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(bellSoundPopUp)
         bellSoundPopUp.setAccessibilityIdentifier("settings.general.bell-sound")
         rebuildBellSoundMenu()
     }

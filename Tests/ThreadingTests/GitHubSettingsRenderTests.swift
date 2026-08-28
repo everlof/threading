@@ -120,12 +120,20 @@ final class GitHubSettingsRenderTests: XCTestCase {
             // against a pane the page had chosen. See CLAUDE.md, "a detached fixture with a
             // frame constrains nothing".
             host.widthAnchor.constraint(equalToConstant: width),
+            host.heightAnchor.constraint(equalToConstant: height),
             view.topAnchor.constraint(equalTo: host.topAnchor),
             view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             view.trailingAnchor.constraint(equalTo: host.trailingAnchor),
             view.bottomAnchor.constraint(equalTo: host.bottomAnchor)
         ])
         host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(host.bounds.width, width, accuracy: 0.5, "the fixture widened its capture")
+        XCTAssertEqual(
+            host.bounds.height,
+            height,
+            accuracy: 0.5,
+            "the fixture changed its capture height"
+        )
         return host
     }
 

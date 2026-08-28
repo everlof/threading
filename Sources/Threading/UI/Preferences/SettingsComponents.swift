@@ -876,8 +876,7 @@ enum SettingsUI {
         let popUp = ThemedPopUp()
         popUp.target = target
         popUp.action = action
-        popUp.translatesAutoresizingMaskIntoConstraints = false
-        popUp.widthAnchor.constraint(equalToConstant: width).isActive = true
+        preferControlWidth(popUp, width: width)
         return popUp
     }
 
@@ -886,9 +885,33 @@ enum SettingsUI {
         field.applyFont(.body)
         field.target = target
         field.action = action
-        field.translatesAutoresizingMaskIntoConstraints = false
-        field.widthAnchor.constraint(equalToConstant: width).isActive = true
+        preferControlWidth(field, width: width)
         return field
+    }
+
+    /// Gives a form control its regular measure without making that measure the page's minimum.
+    ///
+    /// Settings deliberately supports a squeezed canvas. A required 220-point control beside a
+    /// readable label made the control wider than the row, and Auto Layout answered the conflict
+    /// by widening the scroll document past its clip view. The row then looked cropped even
+    /// though all of its own edges were constrained. The measure is a preference one point below
+    /// ordinary content compression: controls keep their intrinsic readable width, but the extra
+    /// air yields before the row or page can escape the pane.
+    static func preferControlWidth(
+        _ control: NSView,
+        width: CGFloat = SettingsUIDefaults.controlWidth
+    ) {
+        control.translatesAutoresizingMaskIntoConstraints = false
+        let preferred = control.widthAnchor.constraint(equalToConstant: width)
+        preferred.priority = NSLayoutConstraint.Priority(
+            NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
+        )
+        // A pop-up's intrinsic width includes its complete selected title. That title is useful
+        // room at the regular measure, not a second minimum: the closed control truncates it and
+        // the menu still presents every choice in full. Keep the label column's readable floor
+        // one point above both width claims.
+        control.setContentCompressionResistancePriority(preferred.priority, for: .horizontal)
+        preferred.isActive = true
     }
 
     /// A quiet push button in the app's flat style.

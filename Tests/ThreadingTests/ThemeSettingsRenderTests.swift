@@ -104,6 +104,52 @@ final class ThemeSettingsRenderTests: XCTestCase {
         XCTAssertGreaterThan(controller.view.frame.height, 200)
     }
 
+    /// The 420-point image is a supported canvas, not a crop of the regular one. Required form
+    /// and palette widths used to enlarge the scroll document behind its clip view, so every
+    /// trailing control and line of prose was visibly cut even though the render itself stayed
+    /// exactly 420 points wide.
+    @MainActor
+    func testNarrowPageKeepsItsDocumentAndControlsInsideTheClipView() throws {
+        let controller = ThemePreferencesViewController()
+        let host = laidOut(controller.view, width: Render.widths[0], height: Render.height)
+
+        XCTAssertEqual(host.bounds.width, Render.widths[0], accuracy: 0.5)
+        XCTAssertEqual(controller.view.frame.width, Render.widths[0], accuracy: 0.5)
+
+        let scrollView = try XCTUnwrap(
+            descendants(in: controller.view)
+                .compactMap { $0 as? NSScrollView }
+                .first { $0.documentView is SettingsFlippedView }
+        )
+        let document = try XCTUnwrap(scrollView.documentView)
+        XCTAssertEqual(
+            scrollView.frame.width,
+            controller.view.bounds.width,
+            accuracy: 0.5,
+            "the Settings body widened past its controller and was clipped there"
+        )
+        XCTAssertEqual(
+            document.frame.width,
+            scrollView.contentView.bounds.width,
+            accuracy: 0.5,
+            "fixed Settings content widened the document behind its clip view"
+        )
+
+        let controls = descendants(in: document).filter {
+            $0 is ThemedPopUp || $0 is ThemedButton || $0 is ThemedTextField
+        }
+        XCTAssertFalse(controls.isEmpty, "the real page exposed no form controls")
+        for control in controls where !control.isHidden {
+            let frame = control.convert(control.bounds, to: controller.view)
+            XCTAssertGreaterThanOrEqual(frame.minX, controller.view.bounds.minX - 0.5)
+            XCTAssertLessThanOrEqual(
+                frame.maxX,
+                controller.view.bounds.maxX + 0.5,
+                "\(type(of: control)) escaped the narrow Settings controller"
+            )
+        }
+    }
+
     @MainActor
     func testHistoricalFontFallbackNoticeExplainsTheActualResolution() {
         let fallback = ThemePreferencesViewController.historicalFontFallbackMessage(
@@ -569,6 +615,11 @@ final class ThemeSettingsRenderTests: XCTestCase {
     }
 
     @MainActor
+    private func descendants(in view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap(descendants(in:))
+    }
+
+    @MainActor
     private func pageImage(width: CGFloat, appearance name: NSAppearance.Name) -> Data? {
         let appearance = NSAppearance(named: name)
 
@@ -594,15 +645,21 @@ final class ThemeSettingsRenderTests: XCTestCase {
         view.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(view)
 
-        NSLayoutConstraint.activate([
+        var constraints = [
+            // A detached fixture's frame is not a layout constraint. Without this, content can
+            // widen the host while the PNG still captures the original 420-point bounds — the
+            // exact false crop this fixture is supposed to detect.
+            host.widthAnchor.constraint(equalToConstant: width),
             view.topAnchor.constraint(equalTo: host.topAnchor),
             view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             view.trailingAnchor.constraint(equalTo: host.trailingAnchor)
-        ])
+        ]
 
-        if height != nil {
-            view.bottomAnchor.constraint(equalTo: host.bottomAnchor).isActive = true
+        if let height {
+            constraints.append(host.heightAnchor.constraint(equalToConstant: height))
+            constraints.append(view.bottomAnchor.constraint(equalTo: host.bottomAnchor))
         }
+        NSLayoutConstraint.activate(constraints)
 
         host.layoutSubtreeIfNeeded()
 

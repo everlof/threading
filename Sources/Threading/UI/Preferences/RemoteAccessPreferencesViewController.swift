@@ -287,20 +287,16 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         inputControlDefault.setAccessibilityIdentifier(
             "settings.remote-access.input-control-default"
         )
-        inputControlDefault.translatesAutoresizingMaskIntoConstraints = false
         // The measure the run *wants*, not a contract. Required, it was 380 points of a 300-point
         // row, and the sentence beside it was pinned to what was left: a subtitle one character
         // wide, wrapping down the card for eleven lines. The content pane stops at 320 points, so
         // that is a pane somebody can actually drag to. A truncated run of two choices is
         // legible; a column of single letters is not. This is where a squeeze is answered — a
         // floor on the words instead would only push this control out of the card.
-        let wide = inputControlDefault.widthAnchor.constraint(
-            equalToConstant: SettingsUIDefaults.wideSegmentedControlWidth
+        SettingsUI.preferControlWidth(
+            inputControlDefault,
+            width: SettingsUIDefaults.wideSegmentedControlWidth
         )
-        wide.priority = NSLayoutConstraint.Priority(
-            NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
-        )
-        wide.isActive = true
 
         for policy in PhoneReportWorkspacePolicy.allCases {
             phoneReportWorkspacePopUp.addItem(

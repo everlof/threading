@@ -498,6 +498,11 @@ changes came from looking at a render rather than from reasoning about a control
 (`SettingsUIDefaults.pageWidth`, which `showSettingsPage` caps it at) and at a squeezed one,
 light and dark — the same fixture-to-PNG idea as the conversation and git-review renders, for
 the same reason: no assertion anyone would write catches "these twenty chips read as a smear".
+The squeezed fixture constrains its detached host to the requested width; setting only its frame
+would let Auto Layout widen the host while the PNG still photographed the old bounds. Form-control
+widths and palette-column widths are preferred regular measures, not page minimums: at 420 points
+closed pop-ups truncate their selected title, and the ANSI labels stack above their eight-chip rows
+so the measured chip pitch survives without pushing the scroll document beyond its clip view.
 
 **A theme's glow is one or two layer shadows, and a shadow spills past the panel that casts it** — so a
 clipping ancestor whose edge coincides with a panel's edge cuts the halo off flat on that

@@ -58,9 +58,7 @@ final class GitHubPreferencesViewController: NSViewController {
         clientIDField.placeholderString = L10n.string("Iv1.…")
         clientIDField.target = self
         clientIDField.action = #selector(clientIDChanged)
-        clientIDField.translatesAutoresizingMaskIntoConstraints = false
-        clientIDField.widthAnchor
-            .constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(clientIDField)
         clientIDField.setAccessibilityIdentifier("settings.github.client-id")
 
         connectionGlyph.applyFont(.body)

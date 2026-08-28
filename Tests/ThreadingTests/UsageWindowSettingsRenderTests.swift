@@ -381,6 +381,11 @@ final class UsageWindowSettingsRenderTests: XCTestCase {
         host.addSubview(view)
 
         NSLayoutConstraint.activate([
+            // A detached fixture's frame is only an initial size. Constrain the capture itself,
+            // or the squeezed evidence can grow back to the page's preferred width while the PNG
+            // still records the old 420-point bounds.
+            host.widthAnchor.constraint(equalToConstant: width),
+            host.heightAnchor.constraint(equalToConstant: height),
             view.topAnchor.constraint(equalTo: host.topAnchor),
             view.bottomAnchor.constraint(equalTo: host.bottomAnchor),
             view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
@@ -388,6 +393,13 @@ final class UsageWindowSettingsRenderTests: XCTestCase {
         ])
 
         host.layoutSubtreeIfNeeded()
+        XCTAssertEqual(host.bounds.width, width, accuracy: 0.5, "the fixture widened its capture")
+        XCTAssertEqual(
+            host.bounds.height,
+            height,
+            accuracy: 0.5,
+            "the fixture changed its capture height"
+        )
         return host
     }
 

@@ -111,8 +111,7 @@ final class AccountSetupCardViewController: NSViewController, NSTextFieldDelegat
         field.delegate = self
         field.setAccessibilityLabel(AccountSetupStrings.loginName)
         field.setAccessibilityIdentifier("account-setup.name")
-        field.translatesAutoresizingMaskIntoConstraints = false
-        field.widthAnchor.constraint(equalToConstant: SettingsUIDefaults.controlWidth).isActive = true
+        SettingsUI.preferControlWidth(field)
         nameField = field
 
         let name = SettingsUI.row(

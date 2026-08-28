@@ -61,6 +61,10 @@ final class ThemeColorEditor: NSView {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = Design.Spacing.medium
+        // `leading` alignment gives the colour grid its fitting width. Cap that fitting width at
+        // the card instead of letting it enlarge the Settings scroll document; the grid's own
+        // preferred columns yield evenly when the supported 420-point canvas is narrower.
+        content.trailingAnchor.constraint(lessThanOrEqualTo: stack.trailingAnchor).isActive = true
         return stack
     }
 
@@ -71,6 +75,8 @@ final class ThemeColorEditor: NSView {
             let name = NSTextField(labelWithString: key.displayName)
             name.applyFont(.subheading)
             name.textColor = Design.Text.secondary
+            name.lineBreakMode = .byTruncatingTail
+            name.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
             let hex = NSTextField(labelWithString: "")
             hex.applyFont(.compactCode)
@@ -82,12 +88,19 @@ final class ThemeColorEditor: NSView {
             column.alignment = .leading
             column.spacing = Design.Spacing.tight
 
-            // A fixed column, so the four chips sit on a regular pitch. Sized to their own
-            // labels they landed wherever "Background" happened to end, and four evenly
+            // A preferred column, so the five chips sit on a regular pitch. Sized to their own
+            // labels they landed wherever "Background" happened to end, and five evenly
             // coloured squares at irregular intervals read as a mistake rather than a row.
             column.translatesAutoresizingMaskIntoConstraints = false
-            column.widthAnchor.constraint(equalToConstant: ThemeEditorLayout.mainColumnWidth)
-                .isActive = true
+            let preferredWidth = column.widthAnchor.constraint(
+                equalToConstant: ThemeEditorLayout.mainColumnWidth
+            )
+            preferredWidth.priority = ThemeEditorLayout.preferredWidthPriority
+            NSLayoutConstraint.activate([
+                preferredWidth,
+                name.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor),
+                hex.trailingAnchor.constraint(lessThanOrEqualTo: column.trailingAnchor)
+            ])
             return column
         }
 
@@ -95,6 +108,11 @@ final class ThemeColorEditor: NSView {
         row.orientation = .horizontal
         row.alignment = .top
         row.spacing = Design.Spacing.small
+        // A narrow page spends the same amount from every role column, preserving the grid
+        // instead of arbitrarily crushing whichever label Auto Layout encounters first.
+        for column in columns.dropFirst() {
+            column.widthAnchor.constraint(equalTo: columns[0].widthAnchor).isActive = true
+        }
         return row
     }
 
@@ -102,24 +120,26 @@ final class ThemeColorEditor: NSView {
     /// word does, the row labels carry the only distinction the colours cannot make
     /// themselves, and eight headings wide enough for "Magenta" would set the grid's spacing
     /// for it. The full name and hex live in each chip's tooltip.
+    ///
+    /// Each label stands above its chips. Beside them it consumed another 60 points, making the
+    /// grid wider than the 300 points left inside a card on the supported 420-point canvas. The
+    /// chips themselves remain eight aligned columns at their measured ten-point pitch; only the
+    /// furniture moves out of that horizontal measure.
     private func ansiGrid() -> NSView {
         let rows = [("Normal", ThemeColorKey.normal), ("Bright", ThemeColorKey.bright)]
             .map { title, keys -> NSView in
                 let label = NSTextField(labelWithString: title)
                 label.applyFont(.subheading)
                 label.textColor = Design.Text.secondary
-                label.translatesAutoresizingMaskIntoConstraints = false
-                label.widthAnchor.constraint(equalToConstant: ThemeEditorLayout.rowLabelWidth)
-                    .isActive = true
 
                 let chips = NSStackView(views: keys.map(makeSwatch))
                 chips.orientation = .horizontal
                 chips.spacing = ThemeEditorLayout.swatchGap
 
                 let row = NSStackView(views: [label, chips])
-                row.orientation = .horizontal
-                row.alignment = .centerY
-                row.spacing = Design.Spacing.small
+                row.orientation = .vertical
+                row.alignment = .leading
+                row.spacing = Design.Spacing.tight
                 return row
             }
 
@@ -149,7 +169,11 @@ enum ThemeEditorLayout {
     /// Ten, not four. At four the chips merged into one band of colour and the two ANSI rows
     /// read as a single smear rather than as a grid with columns.
     static let swatchGap: CGFloat = Design.Spacing.medium
-    static let rowLabelWidth: CGFloat = 52
+    /// Grid measures are wishes, below ordinary content compression for the same reason as the
+    /// shared Settings controls: the scroll document must never grow past its clip view.
+    static let preferredWidthPriority = NSLayoutConstraint.Priority(
+        NSLayoutConstraint.Priority.defaultHigh.rawValue - 1
+    )
     static let hexFontSize: CGFloat = 10
     /// Wide enough for "Background", so every main colour keeps the same pitch — and no wider,
     /// since five of these are what decides how narrow the palette card can go before the ANSI
