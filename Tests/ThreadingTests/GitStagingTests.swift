@@ -679,6 +679,7 @@ final class GitStagingTests: XCTestCase {
 
     func testManagedPublicationDisablesInheritedSubmoduleRecursion() async throws {
         let submoduleSource = try addCommittedFixtureSubmodule()
+        let submoduleCheckout = root.appendingPathComponent("Vendor/Fixture", isDirectory: true)
         let remote = FileManager.default.temporaryDirectory
             .appendingPathComponent("ThreadingRemote-\(UUID().uuidString).git", isDirectory: true)
         defer {
@@ -693,6 +694,18 @@ final class GitStagingTests: XCTestCase {
         try git("remote", "add", "origin", remote.path)
         try git("config", "submodule.recurse", "true")
         try git("config", "push.recurseSubmodules", "on-demand")
+
+        // Advance only the checkout. Its origin deliberately lacks this commit, so an inherited
+        // recursive push has real work to attempt and applies the outer detached refspec inside
+        // the submodule. Keeping the source at its seed makes the control independent of whatever
+        // commits happen to exist in the outer fixture.
+        _ = try GitProcess.run(["config", "user.email", "submodule@example.com"], in: submoduleCheckout)
+        _ = try GitProcess.run(["config", "user.name", "Submodule Fixture"], in: submoduleCheckout)
+        _ = try GitProcess.run([
+            "commit", "--quiet", "--allow-empty", "--message", "unpublished submodule commit"
+        ], in: submoduleCheckout)
+        try git("add", "Vendor/Fixture")
+        try git("commit", "--quiet", "--message", "point at unpublished submodule commit")
 
         let commit = try output("rev-parse", "HEAD")
         let branch = "threading/recursive-fixture"
