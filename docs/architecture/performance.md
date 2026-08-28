@@ -2594,6 +2594,249 @@ Keep the workload and before/after artifacts with an optimization. Do not virtua
 intuition alone: the spans are intentionally arranged so a change can name the cost it removed
 and reveal the cost it merely moved elsewhere.
 
+## Provider wire parsing stress target
+
+`ProviderWireParsingPerformanceTests` measures what one streamed provider chunk costs to read.
+Every ACP agent message chunk, every Codex delta, every tool call and every tool result reaches
+the app as one newline-delimited JSON line and is parsed on the main actor before anything is
+drawn. It is the highest-frequency data path in the product and it had no stress target; the
+numbers below are the first ones for it.
+
+The fixture exists because a recommendation was resting on numbers nobody could re-run. When
+`2536faf9` converted `ACPWireAdapter` to typed `JSONValue` reading, the figures quoted with it —
+1.14 µs before and 5.86 µs after for a streamed chunk, 3.55 µs for today's whole line against
+2.66 µs for `JSONDecoder` straight from the line — came from a standalone `swiftc` replica of the
+code shapes, since deleted. The conclusion drawn from them, *convert at the transport rather than
+at the leaf*, is a real architectural choice, so it needed a real measurement.
+
+### The scaling contract
+
+| Axis | Value |
+|---|---|
+| Cardinality | one JSON line: expected 130 B – 2 KB, stress 48–72 KB, bounded above only by what an agent sends |
+| Frequency | one per streamed token for message deltas, several per tool call — frame-rate class |
+| Must be | O(line bytes); never O(bytes × fields), and never proportional to conversation length |
+| Owner | `JSONRPCLineEnvelope.parse` → `ACPWireAdapter` / `CodexAppServerEvent`, all on the main actor |
+
+Parsing is on the main actor because the delta it produces is drawn immediately; at these sizes
+moving it off would buy a hop rather than a saving. That makes the per-line cost a frame-budget
+question — a 120 Hz frame is 8.3 ms — and it is why the two large payloads below matter more than
+the per-token one.
+
+### The fixture
+
+Nine payloads, generated as **JSON text** and parsed: an ACP `agent_message_chunk`, an ACP
+`tool_call` carrying tool-owned `rawInput`, an ACP `plan` of six entries, an ACP
+`tool_call_update` whose `rawOutput` is a 48 KB string, an ACP `tool_call_update` whose
+`rawOutput` is a 320-member structured object, and the Codex counterparts
+(`item/agentMessage/delta`, `item/started`, `turn/plan/updated`, and a completed
+`commandExecution` with 48 KB of aggregated output).
+
+Text rather than Swift literals, for the reason `3277a3a0` records: a corpus written as literals
+never runs `JSONSerialization` at all, so it cannot see an `NSNumber` read as a `Bool`. The tool
+call here carries `offset: 0`, `limit: 1` and `replace_all: false` on purpose, and the fixture
+asserts that the shipping reader answers `.integer(0)` / `.integer(1)` / `.bool(false)` where the
+pre-`3277a3a0` reader in the same test answers `.bool(false)` / `.bool(true)` / `.bool(false)`.
+
+Every arm is production code. `LegacyACPWireReader` in the test file is `ACPWireAdapter` as it
+stood at `2536faf9^`, copied verbatim out of git history along with the `JSONValue` bridge as it
+stood at `3277a3a0^`, so the before/after arm compares two readers that both shipped rather than
+two sketches of them. `ACPStreamSession` is deliberately outside the measurement: driving it needs
+a real child process on a real pipe, and run-loop latency would swamp a microsecond-scale reading.
+What it adds over these numbers is the `sessionUpdate` string switch.
+
+| Arm | What it is |
+|---|---|
+| `jsonobject` | `JSONSerialization.jsonObject(with:)` plus the cast to `[String: Any]` |
+| `envelope` | `JSONRPCLineEnvelope.parse(_:)` — the shipped entry point, from the `String` the framer produces |
+| `fields` | `ACPWireAdapter.fields(of:)` alone: the conversion `2536faf9` added at the leaf |
+| `adapter-typed` / `adapter-legacy` | the shipped reader for that update kind, and the reader it replaced |
+| `whole-line-typed` / `whole-line-legacy` | envelope plus reader, timed as one operation |
+| `audit-event` | `ACPProviderExecutionAdapter.event(…)`, the execution ledger's own conversion |
+| `codable-typed` | `JSONDecoder` from the line's `Data` into a discriminated `Decodable` model |
+| `codable-jsonvalue` | `JSONDecoder` from the line's `Data` into `JSONValue` |
+| `serialize-then-jsonvalue` | `JSONSerialization` then `JSONValue.object(from:)` — same destination as the arm above |
+
+Defaults (300 iterations, 60 for the large payloads) run in the `fast` plan with generous shape
+ceilings, so the path stays covered on an ordinary run. `THREADING_WIRE_STRESS=1` raises them to
+20,000 / 2,000 and adds the sweep that produced the tables. Because a test plan sanitizes the
+environment it launches with, the sweep runs through the bundle directly:
+
+```bash
+xcodebuild -project Threading.xcodeproj -scheme Threading -configuration Debug \
+  -derivedDataPath <dd> build-for-testing
+THREADING_WIRE_STRESS=1 \
+  DYLD_LIBRARY_PATH="<dd>/Build/Products/Debug/Threading.app/Contents/MacOS" \
+  DYLD_FRAMEWORK_PATH="<dd>/Build/Products/Debug/Threading.app/Contents/Frameworks" \
+  xcrun xctest -XCTest ThreadingTests.ProviderWireParsingPerformanceTests \
+    "<dd>/Build/Products/Debug/Threading.app/Contents/PlugIns/ThreadingTests.xctest"
+```
+
+A Release sweep needs one more setting than the Debug one: the bundle does
+`@testable import Threading`, and a stock Release build has `ENABLE_TESTABILITY` off, so
+`build-for-testing` fails with *unable to resolve Swift module dependency to a compatible module:
+'Threading'* for every dependency at once. Pass `ENABLE_TESTABILITY=YES` on the `xcodebuild` line
+and swap `Debug` for `Release` above. Note that `-enable-testing` inhibits some internal-linkage
+optimisation, so a Release-plus-testability number is a slight over-estimate of what ships.
+
+Fixture manufacture is timed separately (`fixture_ms`, 5.14 ms for all nine payloads) and is not
+in any arm. The empty measured loop including its two clock reads (`timer_floor_us`) is 0.041 µs
+or below — one 41.67 ns tick — so the sub-microsecond readings are at the clock's floor and
+should be read as "under a tick", not as exact.
+
+### Measured, 2026-08-28, Debug, Apple M1 Max (10 cores, 64 GB), macOS 26.5 / Xcode 26.5
+
+`HEAD` was `d09fde33`, but this is a shared checkout and four of the five subject files carried
+another session's uncommitted edits at the time
+(`ACPWireAdapter.swift` `6b06044c1dc6`, `StreamEvent.swift` `898caf22d78b`,
+`CodexAppServerEvent.swift` `1c5842a25283`, `ProviderExecutionAdapters.swift` `70452c923254`;
+`JSONRPCLineEnvelope.swift` `f920b9c3fdac` was clean). N = 20,000 for the small payloads and
+2,000 for the large ones. **Medians and p95; the maxima are not reported** because other build
+jobs were running on the machine throughout and they reach hundreds of milliseconds, which is
+scheduling noise rather than a property of the code. Debug matches every other baseline in this
+document; a matched Release sweep was attempted and is still owed, because the shared checkout did
+not compile during the window this was measured in.
+
+**What one line costs today.** `whole-line-typed`, median (p95):
+
+| Payload | Bytes | envelope | adapter | whole line | + audit |
+|---|---:|---:|---:|---:|---:|
+| `acp-text-chunk` | 253 | 5.00 µs | 6.46 µs | **12.67 µs** (13.54) | — |
+| `acp-tool-call` | 580 | 7.54 µs | 40.25 µs | **50.38 µs** (54.29) | 16.33 µs |
+| `acp-plan` | 585 | 7.63 µs | 39.13 µs | **48.46 µs** (51.79) | — |
+| `acp-tool-result-large` | 64,016 | 163.38 µs | 19.21 µs | **182.08 µs** (192.67) | 16.58 µs |
+| `acp-tool-result-structured` | 71,823 | 369.88 µs | 3.74 ms | **4.14 ms** (4.30) | 1.60 ms |
+| `codex-text-delta` | 126 | 3.83 µs | 0.38 µs | **4.25 µs** (4.50) | — |
+| `codex-item-started` | 185 | 4.33 µs | 2.42 µs | **7.08 µs** (7.50) | — |
+| `codex-plan` | 399 | 6.04 µs | 7.21 µs | **13.79 µs** (15.46) | — |
+| `codex-item-completed-large` | 59,125 | 151.21 µs | 3.04 µs | **156.04 µs** (190.88) | — |
+
+A streamed token is cheap: 12.7 µs for ACP and 4.3 µs for Codex, about 0.15% and 0.05% of a
+120 Hz frame. Serialization is linear with a fixed overhead — 13.8 ns/byte for the 253 B chunk
+against 2.5 ns/byte for the 64 KB result — and the fixture asserts that ratio so a quadratic
+parse fails rather than being noticed later.
+
+The number that is not cheap is the last ACP row. **A structured tool result costs 4.14 ms to
+read, plus 1.60 ms to record, on the main actor** — 69% of a 120 Hz frame for one line, and
+15× the cost of the same payload's *bytes* through `JSONSerialization` (369.88 µs).
+
+**Leaf against cast.** The reader only, on the identical parsed dictionary:
+
+| Payload | pre-`2536faf9` | shipped | Reader | Whole line |
+|---|---:|---:|---:|---:|
+| `acp-text-chunk` | 0.92 µs | 6.46 µs | 7.0× | 6.67 → 12.67 µs (1.9×) |
+| `acp-tool-call` | 10.96 µs | 40.25 µs | 3.7× | 20.46 → 50.38 µs (2.5×) |
+| `acp-plan` | 8.08 µs | 39.13 µs | 4.8× | 16.83 → 48.46 µs (2.9×) |
+| `acp-tool-result-large` | 0.50 µs | 19.21 µs | 38× | 164.92 → 182.08 µs (1.1×) |
+| `acp-tool-result-structured` | 858.50 µs | 3.74 ms | 4.4× | 1.23 → 4.14 ms (3.4×) |
+
+The reported 1.14 → 5.86 µs was **real and close**: measured through the shipped code the same
+read is 0.92 → 6.46 µs. The mechanism is `fields(of:)`, which converts *every* member of an
+update before any reader looks at one of them — a chunk whose only interesting member is
+`content` still pays for `sessionUpdate` and `messageId`, and `fields` alone (6.04 µs) is 94% of
+the typed read.
+
+What the replica could not show is the denominator. A reader is a minority of a line: the text
+chunk's whole line only doubled, and the 64 KB result barely moved because `JSONSerialization`
+owns it. The one place the conversion dominates is the structured payload, where it triples the
+line.
+
+**Transport-level `Codable`.** Median, against today's whole line:
+
+| Payload | today | `codable-typed` | `codable-jsonvalue` | `serialize-then-jsonvalue` |
+|---|---:|---:|---:|---:|
+| `acp-text-chunk` | 12.67 µs | **6.04 µs** | 118.88 µs | 17.46 µs |
+| `acp-plan` | 48.46 µs | **12.33 µs** | 368.33 µs | 46.88 µs |
+| `acp-tool-call` | 50.38 µs | 61.79 µs | 207.83 µs | 33.71 µs |
+| `acp-tool-result-large` | 182.08 µs | **64.96 µs** | 282.29 µs | 185.75 µs |
+| `acp-tool-result-structured` | 4.14 ms | 15.44 ms | 16.34 ms | **2.48 ms** |
+| `codex-text-delta` | 4.25 µs | 3.46 µs | 59.58 µs | 9.00 µs |
+| `codex-item-started` | 7.08 µs | 6.25 µs | 101.63 µs | 14.58 µs |
+| `codex-plan` | 13.79 µs | 10.50 µs † | 261.67 µs | 36.17 µs |
+| `codex-item-completed-large` | 156.04 µs | **47.75 µs** | 148.00 µs | 160.71 µs |
+
+† That one cell comes from the baseline block of the same run rather than the stress block: the
+runner spliced its own "Test Case … passed" line through the middle of a multi-line `print` and
+took the row with it. The fixture now emits one `print` per row for that reason.
+
+The claim splits, and the split is the useful part. Where a payload is typed all the way down —
+a message chunk, a plan, a large string result — decoding it straight into a `Decodable` model is
+**2–4× cheaper** than parsing to `[String: Any]` and reading it. Where a payload carries
+**tool-owned JSON**, which has to land in `JSONValue` because its schema belongs to the tool, the
+same route is *worse*: the tool call goes 50.38 → 61.79 µs and the structured result 4.14 →
+15.44 ms. Tool calls and tool results are exactly the payloads this adapter exists for.
+
+The replica's 2.66 against 3.55 µs was measured on the easy case and generalised. The direction
+holds for a message chunk (here 6.04 against 12.67) and reverses for everything with a tool in it.
+
+### `JSONValue`'s `Decodable` conformance is the expensive part, and it already ships
+
+`codable-jsonvalue` is 7–10× *slower* than reaching the identical typed tree through
+`JSONSerialization` and `JSONValue.object(from:)`: 118.88 against 17.46 µs for a 253 B line,
+368.33 against 46.88 µs for a plan, 59.58 against 9.00 µs for a Codex delta. The cause is in
+`JSONValue.init(from:)`, which asks `try? container.decode(Bool.self)`, then `Int64`, then
+`Double`, then `String`, then `[JSONValue]` before falling through to the object — so every string
+leaf throws and catches four `DecodingError`s, each capturing a coding path, and every object leaf
+throws five.
+
+This is not a property of the experiment. `ClaudeWireContentBlock` in `StreamEvent.swift` decodes
+a tool call's `input` and `content` through exactly this initializer, `CodexStreamEvent`'s
+`arguments(from:)` does it to a nested argument string, and `MCPServer` decodes a request's
+`rawParameters` the same way. The Claude conversation path pays this on every tool call today.
+
+Two cheap repairs, neither taken here because this task was a measurement: order the attempts by
+what JSON actually contains (`String` first, containers last), which removes three throws from the
+common leaf; or stop routing bulk provider JSON through `JSONDecoder` at all, since the
+`JSONSerialization` route to the same value is already the faster one.
+
+### Reading a structured tool result converts it three times
+
+`fields` on the structured payload is 2.03 ms and `adapter-typed` is 3.74 ms, so the reader adds
+1.7 ms on top of the conversion. It is not reading — it is converting back.
+`ACPWireAdapter.toolResultText` takes its `.object` branch and calls
+`JSONRPCLineEnvelope.encodedText(payload["rawOutput"]?.foundationValue)`, which turns the
+`JSONValue` tree back into Foundation objects and re-serializes them pretty-printed and
+sorted. The line is therefore parsed to Foundation, converted to `JSONValue`, converted back to
+Foundation, and serialized again. The pre-`2536faf9` reader went from Foundation straight to text
+and cost 858.50 µs for the whole read.
+
+That round trip is deliberate — the comment on it says the rendered text must not change with the
+representation — but it was chosen without a number beside it, and the number is 1.7 ms on the
+main actor per structured tool result.
+
+### The same payload is converted twice per tool call
+
+`ACPToolCallState.init` converts the update through `fields(of:)`, and then
+`ACPProviderExecutionAdapter.event` converts the *whole update again* through
+`JSONValue(foundationValue:)` for the audit record. On an ordinary tool call that second pass is
+16.33 µs against the read's 40.25 µs; on the structured result it is 1.60 ms, comparable to
+`fields` itself. Both conversions produce the same tree from the same dictionary.
+
+### What this means for transport against leaf
+
+The recommendation is half right, and it points at the wrong lever.
+
+- **Converting at the transport is worth doing, but not with `JSONDecoder`.** The measured
+  cheapest way to get one typed tree from a line is `JSONSerialization` plus
+  `JSONValue.object(from:)` — 17.46 µs for a chunk, 2.48 ms for the structured payload, against
+  118.88 µs and 16.34 ms for the `Codable` route. A transport that converted once and handed
+  `[String: JSONValue]` to both `ACPWireAdapter` and the audit adapter would delete the duplicate
+  conversion above and every per-entry-point `fields(of:)` call, and the structured payload's
+  whole line would fall from 4.14 ms toward the 2.48 ms the conversion itself costs.
+- **A discriminated `Decodable` model is not a general answer.** It wins on payloads that are
+  typed all the way down and loses on exactly the ones carrying tool-owned JSON, because those
+  end up in `JSONValue` either way and `JSONValue` decodes badly.
+- **The per-token path was never the problem.** 12.7 µs of a 8.3 ms frame does not justify
+  restructuring a transport. The 4.14 ms structured tool result does, and none of the four
+  numbers the original note reported would have found it, because none of its payloads were
+  large.
+
+Do not act on any of this by reordering the leaf back to `as?` casts. The typed reader is why an
+unrecognised content-block kind, plan status or stop reason is a named `unknown` instead of a
+`nil` three types away, and the boolean bug `3277a3a0` fixed was found by the corpus this fixture
+inherits. The cost to remove is the *repetition* — three conversions of one payload — not the
+conversion.
+
 ## Subagent transcript stress target
 
 `ConversationRenderTests.testStressSubagentTranscriptWhenEnabled` sends either a generated
