@@ -100,6 +100,9 @@ python3 -m unittest "${repository_directory}/scripts/tests/test_generate_diagnos
 say "Testing mobile report intake configuration"
 python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_report_intake_configuration.py"
 
+say "Testing strict concurrency configuration"
+python3 -m unittest "${repository_directory}/scripts/tests/test_strict_concurrency_configuration.py"
+
 say "Testing mobile test gate configuration"
 python3 -m unittest "${repository_directory}/scripts/tests/test_mobile_test_gate.py"
 

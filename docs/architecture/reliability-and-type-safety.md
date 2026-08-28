@@ -207,6 +207,8 @@ diagnostics Swift identifies as errors in Swift 6 language mode. A decrease in o
 room for an increase in another, a newly warning file starts with a ceiling of zero, and removing
 warnings needs no baseline edit. This makes the current Swift 5 language mode debt monotonic while
 complete strict-concurrency checking remains enabled.
+`test_strict_concurrency_configuration.py` enumerates every native target's Debug and Release
+configurations so a helper added outside the app and test targets cannot silently opt out.
 
 Changing the baseline is an explicit review action, not an automatic CI repair. Capture the three
 successful canonical lanes from a cold DerivedData directory, inspect the diagnostics, then run

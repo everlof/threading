@@ -72,6 +72,7 @@ HELPERS.each do |helper|
     settings['PRODUCT_BUNDLE_IDENTIFIER'] = helper[:bundle_id]
     settings['MACOSX_DEPLOYMENT_TARGET'] = '13.0'
     settings['SWIFT_VERSION'] = '5.0'
+    settings['SWIFT_STRICT_CONCURRENCY'] = 'complete'
     settings['CODE_SIGN_ENTITLEMENTS'] = helper[:entitlements]
     settings['CODE_SIGN_STYLE'] = 'Automatic'
     # Required. App Sandbox cannot resolve a container without a CFBundleIdentifier, and a bare
