@@ -201,7 +201,10 @@ final class RemoteConnection: @unchecked Sendable {
     private func processHTTP() {
         guard !isHandling else { return }
 
-        switch MCPConnection.parseRequest(from: buffer) {
+        switch MCPConnection.parseRequest(
+            from: buffer,
+            maximumBodyBytes: RemoteAccessDefaults.maximumRequestBytes
+        ) {
         case .incomplete:
             return
         case .malformed(let status, let reason):

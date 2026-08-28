@@ -185,7 +185,10 @@ final class MCPConnection: @unchecked Sendable {
         let request: HTTPRequest
         let consumed: Int
 
-        switch Self.parseRequest(from: buffer) {
+        switch Self.parseRequest(
+            from: buffer,
+            maximumBodyBytes: MCPDefaults.maximumRequestBytes
+        ) {
         case .incomplete:
             return
 
@@ -261,8 +264,10 @@ final class MCPConnection: @unchecked Sendable {
     /// client this server does not understand, and guessing "empty" is the framing hazard above.
     private static let bodyBearingMethods: Set<String> = ["POST", "PUT", "PATCH"]
 
-    /// Parses one request, returning it with the number of bytes it consumed.
-    static func parseRequest(from buffer: Data) -> ParseOutcome {
+    /// Parses one request, returning it with the number of bytes it consumed. The transport
+    /// supplies its own body limit so this shared framing code cannot couple independent servers'
+    /// admission policies.
+    static func parseRequest(from buffer: Data, maximumBodyBytes: Int) -> ParseOutcome {
         guard let headerRange = buffer.range(of: headerTerminator) else { return .incomplete }
 
         let headData = buffer[buffer.startIndex..<headerRange.lowerBound]
@@ -310,7 +315,7 @@ final class MCPConnection: @unchecked Sendable {
                 // precedes its start is a programmer error rather than a runtime one.
                 return .malformed(status: 400, reason: "Bad Request")
             }
-            guard length <= MCPDefaults.maximumRequestBytes else {
+            guard length <= maximumBodyBytes else {
                 return .malformed(status: 413, reason: "Payload Too Large")
             }
             contentLength = length

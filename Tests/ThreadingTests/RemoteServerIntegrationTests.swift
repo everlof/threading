@@ -2616,7 +2616,10 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
 
     func testBearerSchemeIsCaseInsensitive() {
         let raw = "GET /api/me HTTP/1.1\r\nAuthorization: bearer goodtoken\r\n\r\n"
-        guard case .request(let request, _) = MCPConnection.parseRequest(from: Data(raw.utf8)) else {
+        guard case .request(let request, _) = MCPConnection.parseRequest(
+            from: Data(raw.utf8),
+            maximumBodyBytes: RemoteAccessDefaults.maximumRequestBytes
+        ) else {
             return XCTFail("expected a parsed request")
         }
         XCTAssertEqual(RemoteRouter.bearerToken(from: request), "goodtoken")

@@ -146,7 +146,10 @@ final class ExtensionHostDescriptorConnection: @unchecked Sendable {
         let request: HTTPRequest
         let consumed: Int
 
-        switch MCPConnection.parseRequest(from: buffer) {
+        switch MCPConnection.parseRequest(
+            from: buffer,
+            maximumBodyBytes: Self.maximumRequestBytes
+        ) {
         case .incomplete:
             return
 

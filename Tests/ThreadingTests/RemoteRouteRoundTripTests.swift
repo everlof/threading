@@ -62,7 +62,10 @@ final class RemoteRouteRoundTripTests: XCTestCase {
             "",
             "",
         ].joined(separator: "\r\n")
-        switch MCPConnection.parseRequest(from: Data(raw.utf8)) {
+        switch MCPConnection.parseRequest(
+            from: Data(raw.utf8),
+            maximumBodyBytes: RemoteAccessDefaults.maximumRequestBytes
+        ) {
         case .request(let request, _):
             return request
         case .incomplete:

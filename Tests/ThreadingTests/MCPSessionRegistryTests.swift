@@ -7,8 +7,14 @@ final class MCPSessionRegistryTests: XCTestCase {
 
   // MARK: - HTTP Framing
 
-  private func outcome(_ raw: String) -> MCPConnection.ParseOutcome {
-    MCPConnection.parseRequest(from: Data(raw.utf8))
+  private func outcome(
+    _ raw: String,
+    maximumBodyBytes: Int = MCPDefaults.maximumRequestBytes
+  ) -> MCPConnection.ParseOutcome {
+    MCPConnection.parseRequest(
+      from: Data(raw.utf8),
+      maximumBodyBytes: maximumBodyBytes
+    )
   }
 
   private func request(_ raw: String) throws -> HTTPRequest {
@@ -18,8 +24,14 @@ final class MCPSessionRegistryTests: XCTestCase {
     return request
   }
 
-  private func malformedStatus(_ raw: String) -> Int? {
-    guard case .malformed(let status, _) = outcome(raw) else { return nil }
+  private func malformedStatus(
+    _ raw: String,
+    maximumBodyBytes: Int = MCPDefaults.maximumRequestBytes
+  ) -> Int? {
+    guard case .malformed(let status, _) = outcome(
+      raw,
+      maximumBodyBytes: maximumBodyBytes
+    ) else { return nil }
     return status
   }
 
@@ -93,6 +105,19 @@ final class MCPSessionRegistryTests: XCTestCase {
         "POST /mcp HTTP/1.1\r\nContent-Length: \(MCPDefaults.maximumRequestBytes + 1)\r\n\r\n"
       ),
       413
+    )
+  }
+
+  func testTheCallerOwnsTheParserBodyLimit() {
+    let raw = "POST /mcp HTTP/1.1\r\nContent-Length: 5\r\n\r\n12345"
+
+    guard case .request = outcome(raw, maximumBodyBytes: 5) else {
+      return XCTFail("a body exactly at the caller's limit was refused")
+    }
+    XCTAssertEqual(
+      malformedStatus(raw, maximumBodyBytes: 4),
+      413,
+      "the parser ignored the caller's smaller body limit"
     )
   }
 

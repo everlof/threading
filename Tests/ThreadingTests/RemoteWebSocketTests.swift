@@ -39,7 +39,10 @@ final class RemoteWebSocketTests: XCTestCase {
             + "Connection: Upgrade\r\n"
             + "Sec-WebSocket-Version: 13\r\n"
             + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"
-        guard case .request(let request, _) = MCPConnection.parseRequest(from: Data(raw.utf8)) else {
+        guard case .request(let request, _) = MCPConnection.parseRequest(
+            from: Data(raw.utf8),
+            maximumBodyBytes: RemoteAccessDefaults.maximumRequestBytes
+        ) else {
             return XCTFail("expected a parsed request")
         }
 
@@ -53,7 +56,10 @@ final class RemoteWebSocketTests: XCTestCase {
 
     func testUpgradeResponseIsRefusedForANonUpgradeRequest() throws {
         let raw = "GET /ws/session/abc HTTP/1.1\r\nHost: x\r\n\r\n"
-        guard case .request(let request, _) = MCPConnection.parseRequest(from: Data(raw.utf8)) else {
+        guard case .request(let request, _) = MCPConnection.parseRequest(
+            from: Data(raw.utf8),
+            maximumBodyBytes: RemoteAccessDefaults.maximumRequestBytes
+        ) else {
             return XCTFail("expected a parsed request")
         }
         XCTAssertNil(RemoteWebSocket.upgradeResponseData(for: request))
@@ -65,7 +71,10 @@ final class RemoteWebSocketTests: XCTestCase {
             + "Connection: Upgrade\r\n"
             + "Sec-WebSocket-Version: 13\r\n"
             + "Sec-WebSocket-Key: bm90LTE2LWJ5dGVz\r\n\r\n"
-        guard case .request(let request, _) = MCPConnection.parseRequest(from: Data(raw.utf8)) else {
+        guard case .request(let request, _) = MCPConnection.parseRequest(
+            from: Data(raw.utf8),
+            maximumBodyBytes: RemoteAccessDefaults.maximumRequestBytes
+        ) else {
             return XCTFail("expected a parsed request")
         }
         XCTAssertNil(RemoteWebSocket.upgradeResponseData(for: request))
