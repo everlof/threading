@@ -1512,7 +1512,10 @@ re-scan their content and merge their font trait into nested links, code spans a
 emphasis, rather than printing the child's syntax as styled prose. That recursion stops at
 `MarkdownDefaults.maximumInlineNestingDepth`; provider-authored content beyond the ceiling remains
 literal so one pathological line cannot grow the display stack or repeated grapheme allocations
-without bound.
+without bound. Provider reasoning is still a distinct thinking row, but it passes through this
+same bounded renderer with `MarkdownStyle.thinking`: Markdown structure is honoured while every
+ink tier remains tertiary, so a provider's `**summary**` reads as quiet emphasis rather than raw
+punctuation or answer-strength prose.
 
 Tool calls render through `ToolCallView`: a fixed-width **glyph column** (`$` bash, `→` read,
 `←` write, `✱` grep/glob, `◈` search — the vocabulary a terminal user already knows), the

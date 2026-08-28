@@ -364,6 +364,24 @@ final class MarkdownTests: XCTestCase {
         }
     }
 
+    /// Reasoning is structurally Markdown without becoming answer-strength prose: provider
+    /// markers disappear and convey emphasis, while every run keeps the quiet thinking ink.
+    func testThinkingMarkdownParsesMarkersWithTertiaryInk() throws {
+        let parsed = Markdown.parse("**Inspect** `routing.swift`", style: .thinking)
+        guard case .paragraph(let attributed) = parsed.first else {
+            return XCTFail("thinking Markdown did not produce a paragraph")
+        }
+
+        XCTAssertEqual(attributed.string, "Inspect routing.swift")
+        XCTAssertTrue(try fontTraits(in: attributed, matching: "Inspect").contains(.boldFontMask))
+        attributed.enumerateAttribute(
+            .foregroundColor,
+            in: NSRange(location: 0, length: attributed.length)
+        ) { value, _, _ in
+            XCTAssertEqual(value as? NSColor, Design.Text.tertiary)
+        }
+    }
+
     /// An unterminated fence still ends: it takes the rest of the document rather than looping
     /// or dropping everything after it. Agents produce these constantly by being cut off.
     func testAnUnterminatedFenceEndsAtTheDocument() {

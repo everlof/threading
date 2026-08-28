@@ -489,28 +489,56 @@ final class AppThemeTests: HostedStoreTestCase {
         )
     }
 
-    /// The transcript's plain-text rows — thinking, a notice, the streaming reply — are set in
-    /// the conversation's font and record their role. The streaming label is the one the user
-    /// is watching when it matters: set in chrome, the reply changed face the instant it
-    /// finished and became rendered markdown.
+    /// Transcript text resolves in the conversation's font. Plain notice/streaming rows record
+    /// their role for the sweep; thinking is parsed Markdown, so it rebuilds its attributed runs
+    /// on the same event instead of printing the provider's markers or freezing the old face.
     func testConversationRowsAreSetInTheConversationFontAndFollowTheSweep() throws {
         defer { clearFontOverrides() }
         UserDefaults.standard.set(Self.conversationTestFamily, forKey: "conversationFontFamily")
 
         let streaming = ConversationRowView.streaming("Working")
-        let thinking = try XCTUnwrap(ConversationRowView.thinking("Reasoning") as? NSTextField)
+        let thinking = try XCTUnwrap(
+            ConversationRowView.thinking("**Reasoning**") as? MarkdownView
+        )
         let notice = try XCTUnwrap(
             ConversationRowView.notice("Truncated", kind: .muted) as? NSTextField
         )
-        for label in [streaming, thinking, notice] {
+        for label in [streaming, notice] {
             XCTAssertEqual(label.font?.familyName, Self.conversationTestFamily)
             XCTAssertEqual(label.recordedFontSurfaceForTesting, .conversation)
         }
 
-        // And recorded means the sweep can take the decision again.
+        let renderedThinking = try XCTUnwrap(
+            Self.textFields(in: thinking).first { $0.stringValue == "Reasoning" }
+        )
+        let thinkingFont = try XCTUnwrap(
+            renderedThinking.attributedStringValue.attribute(
+                .font,
+                at: 0,
+                effectiveRange: nil
+            ) as? NSFont
+        )
+        XCTAssertEqual(thinkingFont.familyName, Self.conversationTestFamily)
+        XCTAssertTrue(thinkingFont.fontDescriptor.symbolicTraits.contains(.bold))
+        XCTAssertFalse(renderedThinking.stringValue.contains("**"))
+
+        // Both mechanisms take the decision again when the setting changes.
         clearFontOverrides()
         streaming.reapplyRecordedFontForTesting()
         XCTAssertNotEqual(streaming.font?.familyName, Self.conversationTestFamily)
+        NotificationCenter.default.post(AppThemeDidChange(themeID: AppThemeLibrary.current.id))
+
+        let restyledThinking = try XCTUnwrap(
+            Self.textFields(in: thinking).first { $0.stringValue == "Reasoning" }
+        )
+        let restyledFont = try XCTUnwrap(
+            restyledThinking.attributedStringValue.attribute(
+                .font,
+                at: 0,
+                effectiveRange: nil
+            ) as? NSFont
+        )
+        XCTAssertNotEqual(restyledFont.familyName, Self.conversationTestFamily)
     }
 
     /// A `# Heading` scales from the body through `Typography`, which re-enters the four
@@ -2831,6 +2859,15 @@ final class AppThemeTests: HostedStoreTestCase {
         return view.subviews.lazy.compactMap {
             self.descendant(in: $0, accessibilityIdentifier: accessibilityIdentifier)
         }.first
+    }
+
+    private static func textFields(in root: NSView) -> [NSTextField] {
+        var fields: [NSTextField] = []
+        if let field = root as? NSTextField { fields.append(field) }
+        for child in root.subviews {
+            fields.append(contentsOf: textFields(in: child))
+        }
+        return fields
     }
 
     private func adaptiveFixture() throws -> AppTheme {

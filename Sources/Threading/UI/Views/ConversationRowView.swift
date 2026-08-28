@@ -166,7 +166,7 @@ enum ConversationRowView {
 
     /// Reasoning, quieter than the reply it precedes — an aside, not the answer.
     static func thinking(_ text: String) -> NSView {
-        label(text, role: .body, color: Design.Text.tertiary)
+        MarkdownView(markdown: text, style: .thinking)
     }
 
     /// The durable end marker for a turn that did not produce an ordinary completed answer.

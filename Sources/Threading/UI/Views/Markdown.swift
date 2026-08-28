@@ -39,6 +39,23 @@ struct MarkdownStyle {
             fontSurface: .conversation
         )
     }
+
+    /// Provider reasoning uses the same Markdown vocabulary as the reply, but remains an aside.
+    /// Parsing and presentation are separate decisions: markers carry structure while every ink
+    /// role stays tertiary, so a bold summary does not compete with the answer it precedes.
+    @MainActor
+    static var thinking: MarkdownStyle {
+        MarkdownStyle(
+            font: Design.Typography.body(surface: .conversation),
+            textColor: Design.Text.tertiary,
+            secondaryColor: Design.Text.tertiary,
+            codeFont: Design.Typography.inlineCode(),
+            codeColor: Design.Text.tertiary,
+            codeBackground: Design.Surface.panel,
+            linkColor: Design.Text.tertiary,
+            fontSurface: .conversation
+        )
+    }
 }
 
 // MARK: - Markdown Block
