@@ -2727,9 +2727,9 @@ large tranche, but the remaining user/fold/final-answer rows still formed one `N
 constraint chain. Hiding or detaching intermediate rows could not bound that live chain.
 
 `conversation.replay.render` brackets the production transcript-to-native-view pass. It records
-only aggregate event, model-row, materialized-row, presentation-row, measured-height and
-folded-turn counts, so traces and Points of Interest captures can correlate the same semantic
-interval with AppKit stacks without recording conversation content.
+only aggregate event, model-row, materialized-row, presentation-row and folded-turn counts, so
+traces and Points of Interest captures can correlate the same semantic interval with AppKit
+stacks without recording conversation content.
 
 - replay rebuilds the minimap, conversation controls, and remote snapshot once at its boundary,
   rather than once for every prefix of the transcript;
@@ -2738,9 +2738,10 @@ interval with AppKit stacks without recording conversation content.
 - replay mutates the timeline and presentation model, then reloads the table once. Fold expansion
   inserts identities and collapse removes them; neither path retains an off-screen constraint tree;
 - AppKit owns automatic row-height estimation/caching; the controller invalidates affected rows
-  and clears its measured-identity mirror when the readable width changes. Tool, user-message and
-  turn disclosure state is held outside recyclable views. Exact jumps therefore do not require a
-  target view to exist and correct after the landing.
+  and uses one readable-width scalar to invalidate all of AppKit's heights when wrapping changes.
+  It retains no per-identity height mirror. Tool, user-message and turn disclosure state is held
+  outside recyclable views. Exact jumps therefore do not require a target view to exist and
+  correct after the landing.
 
 On the 100-turn mixed Debug case, 600 model rows become 399 presentation rows but only eight live
 row views and 179 descendants. Model reduction measured 31 ms, presentation/reload 938 ms and final
@@ -2755,8 +2756,8 @@ bounded AppKit: presentation construction took 1.30 s while model reduction took
 streaming updates took 204 ms. Every replayed tool result searched the growing presentation array
 for a table row that cannot exist until replay's final reload. Every streaming delta repeated the
 same search even though the placeholder is the tail row. Replay height invalidation now stops after
-clearing its diagnostic cache, timeline rows use the existing identity index, and streaming uses
-the tail directly.
+the replay guard without maintaining a diagnostic cache, timeline rows use the existing identity
+index, and streaming uses the tail directly.
 
 A fresh-process Debug massive sweep after removing those scans measured:
 
@@ -2848,7 +2849,9 @@ turn bookkeeping. At the 1,000 + 500 edge, geometry was 0.02 ms, correction 0.63
   their in-place wrapper;
 - every newly laid-out host checked that its presentation identity still existed with a linear
   scan. A cold viewport therefore paid roughly 21 × 4,500 identity comparisons at the combined
-  edge. The measurement callback now validates its captured table row and identity directly.
+  edge. The intermediate fix validated a captured table row directly; the final fix removed the
+  diagnostic measured-height mirror and its layout callback entirely, since AppKit is the only
+  height-cache owner.
 
 The last change removed the history cliff. Repeated fresh processes plus the final clean sweep
 measured:

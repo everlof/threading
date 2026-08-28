@@ -192,7 +192,6 @@ extension ConversationViewController {
             if case .toolFold(let indices) = presentationItems[position].content,
                let first = indices.first {
                 expandedToolGroups.remove(first)
-                rowHeightCache[.toolFold(firstIndex: first)] = nil
             }
             presentationItems.remove(at: position)
         }
@@ -285,7 +284,6 @@ extension ConversationViewController {
                 return hiddenSet.contains(index)
             }
         }
-        rowHeightCache[.fold(turnStart: turnStart)] = nil
         reloadConversationRows()
     }
 
@@ -317,7 +315,6 @@ extension ConversationViewController {
             )
             presentationRowsByTimelineIndex[index - 1] = nil
             pendingToolViews[index - 1] = nil
-            rowHeightCache[.timeline(index - 1)] = nil
             reloadPresentationRow(at: position)
             return
         }
@@ -384,7 +381,6 @@ extension ConversationViewController {
                 return hidden.contains(index)
             }
         }
-        rowHeightCache[.toolFold(firstIndex: first)] = nil
         reloadConversationRows()
     }
 
@@ -627,7 +623,6 @@ extension ConversationViewController {
         }
 
         streamingLabel.stringValue = text
-        rowHeightCache[.streaming] = nil
         notePresentationHeightChanged(.streaming)
         scrollToBottom()
     }
@@ -636,7 +631,6 @@ extension ConversationViewController {
     func clearStreaming() {
         if let position = presentationItems.firstIndex(where: { $0.id == .streaming }) {
             presentationItems.remove(at: position)
-            rowHeightCache[.streaming] = nil
             notifyPresentationRowsRemoved(at: IndexSet(integer: position))
         }
         streamingLabel = nil
@@ -741,14 +735,7 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
             content,
             topInset: topInset,
             bottomInset: bottomInset,
-            onRelease: releaseHandler(for: item, content: content),
-            onMeasuredHeight: { [weak self] height in
-                guard let self,
-                      self.presentationItems.indices.contains(tableRow),
-                      self.presentationItems[tableRow].id == item.id,
-                      height > 0 else { return }
-                self.rowHeightCache[item.id] = height
-            }
+            onRelease: releaseHandler(for: item, content: content)
         )
         return host
     }
@@ -774,15 +761,13 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
             max(0, column - Design.Spacing.inset * 2)
         )
         guard width > 0 else { return }
-        if rowHeightCacheWidth == 0 {
-            rowHeightCacheWidth = width
+        if automaticHeightWidth == 0 {
+            automaticHeightWidth = width
             return
         }
-        guard abs(width - rowHeightCacheWidth) > 0.5 else { return }
-        rowHeightCacheWidth = width
-        let hadCachedHeights = !rowHeightCache.isEmpty
-        rowHeightCache.removeAll(keepingCapacity: true)
-        if hadCachedHeights, tableView.numberOfRows > 0 {
+        guard abs(width - automaticHeightWidth) > 0.5 else { return }
+        automaticHeightWidth = width
+        if tableView.numberOfRows > 0 {
             tableView.noteHeightOfRows(
                 withIndexesChanged: IndexSet(integersIn: 0..<tableView.numberOfRows)
             )
@@ -800,7 +785,6 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
 
     private func reloadPresentationRow(at row: Int) {
         guard presentationItems.indices.contains(row) else { return }
-        rowHeightCache[presentationItems[row].id] = nil
         guard isViewLoaded, !isReplaying, row < tableView.numberOfRows else { return }
         tableView.reloadData(
             forRowIndexes: IndexSet(integer: row),
@@ -842,7 +826,6 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
     }
 
     func notePresentationHeightChanged(_ id: PresentationID) {
-        rowHeightCache[id] = nil
         // Replay has no materialized table row to invalidate and finishes with one full reload.
         // Searching the growing presentation for every replayed tool result made transcript
         // construction quadratic even though the virtualized AppKit working set stayed bounded.
@@ -994,11 +977,10 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
 }
 
 /// Reusable shell around a conversation row. The host, not the content, is what AppKit recycles;
-/// replacing its child releases offscreen Markdown and tool constraint trees while preserving a
-/// stable measured height for the presentation identity.
+/// replacing its child releases offscreen Markdown and tool constraint trees while AppKit keeps
+/// automatic height ownership for the presentation table.
 final class ConversationVirtualRowHost: NSTableCellView {
     private var releaseContent: (() -> Void)?
-    private var onMeasuredHeight: ((CGFloat) -> Void)?
 
     /// The width of the column this cell sits in, which has to be *stated* — see
     /// `setColumnWidth`. Held on the cell rather than the content so it survives recycling.
@@ -1065,12 +1047,10 @@ final class ConversationVirtualRowHost: NSTableCellView {
         _ content: NSView,
         topInset: CGFloat,
         bottomInset: CGFloat,
-        onRelease: (() -> Void)?,
-        onMeasuredHeight: @escaping (CGFloat) -> Void
+        onRelease: (() -> Void)?
     ) {
         releaseInstalledContent()
         releaseContent = onRelease
-        self.onMeasuredHeight = onMeasuredHeight
 
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
@@ -1107,11 +1087,6 @@ final class ConversationVirtualRowHost: NSTableCellView {
         ])
     }
 
-    override func layout() {
-        super.layout()
-        if bounds.height > 0 { onMeasuredHeight?(bounds.height) }
-    }
-
     override func prepareForReuse() {
         super.prepareForReuse()
         releaseInstalledContent()
@@ -1120,7 +1095,6 @@ final class ConversationVirtualRowHost: NSTableCellView {
     private func releaseInstalledContent() {
         releaseContent?()
         releaseContent = nil
-        onMeasuredHeight = nil
         subviews.forEach { $0.removeFromSuperview() }
     }
 }
@@ -1205,7 +1179,6 @@ extension ConversationViewController {
     private func removePresentationItem(_ id: PresentationID) {
         guard let position = presentationItems.firstIndex(where: { $0.id == id }) else { return }
         presentationItems.remove(at: position)
-        rowHeightCache[id] = nil
         // A permission may have later timeline rows below it. Rebuild their index map once at
         // this user-driven boundary instead of leaving navigation pointed one row too low.
         reloadConversationRows()

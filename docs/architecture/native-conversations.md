@@ -860,10 +860,9 @@ chain.
 
 Cold tool rows stop at their collapsed header. A result label or edit `DiffView` is constructed on
 first expansion, reused while that materialized row closes and reopens, and released with the row
-host. The table's measured-height callback validates the table row and stable presentation identity
-captured when the host was configured; scanning the full presentation for each of a viewport's
-measurements made an exact jump grow with transcript depth even though its native view count did
-not.
+host. AppKit alone owns measured row heights. The controller keeps only the last readable-width
+scalar needed to invalidate those heights after wrapping changes; it does not mirror measured
+identities or run a diagnostic callback on every row layout.
 
 The extension composition seam is similarly pay-for-play. A user, assistant or tool row whose
 customization resolution is empty keeps its native subtree directly instead of receiving a
@@ -874,10 +873,10 @@ wrapped even when empty because they are rare retained interactions which must a
 customization without reconstructing or losing their decision authority.
 
 Replay also has no table row to invalidate until its one final reload. A result arriving during
-reduction therefore clears only the diagnostic height mirror; searching the growing presentation
-for a non-existent materialized row made generated 1,000-turn histories quadratic. Live timeline
-rows resolve through the identity index, and the streaming placeholder resolves directly at the
-tail, where it remains until the authoritative completed message replaces it. Those lookup rules
+reduction therefore returns before any table-row lookup; searching the growing presentation for a
+non-existent materialized row made generated 1,000-turn histories quadratic. Live timeline rows
+resolve through the identity index, and the streaming placeholder resolves directly at the tail,
+where it remains until the authoritative completed message replaces it. Those lookup rules
 keep result attachment and token updates independent of transcript depth without changing row
 lifetime or exact navigation.
 

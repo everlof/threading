@@ -809,11 +809,10 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// for live result delivery and diagnostics, not as the transcript's ownership graph.
     var rowViews: [Int: NSView] = [:]
 
-    /// A diagnostic mirror of the identities AppKit has measured at the current readable width.
-    /// `NSTableView` owns the automatic-height cache used for layout; unknown rows use its
-    /// estimate during a deep jump and the landing is corrected after the target materializes.
-    var rowHeightCache: [PresentationID: CGFloat] = [:]
-    var rowHeightCacheWidth: CGFloat = 0
+    /// The readable width at which AppKit last owned valid automatic row heights. One scalar is
+    /// enough to invalidate its cache after wrapping changes; mirroring each measured identity
+    /// retained unbounded diagnostic state and added a dictionary write to every row layout.
+    var automaticHeightWidth: CGFloat = 0
 
     /// Disclosure state belongs outside recyclable views, so scrolling a row away and back does
     /// not collapse something the user opened.
@@ -2112,7 +2111,6 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 "rows": String(self.timeline.rows.count),
                 "materialized_rows": String(self.rowViews.count),
                 "presentation_rows": String(self.presentationItems.count),
-                "cached_heights": String(self.rowHeightCache.count),
                 "folded_turns": String(self.foldedTurnStarts.count)
             ])
             self.replaySubagentHistoryAndStart()

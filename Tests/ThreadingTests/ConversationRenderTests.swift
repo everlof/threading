@@ -1650,7 +1650,6 @@ final class ConversationRenderTests: XCTestCase {
         let totalRows = controllers.reduce(0) { $0 + $1.timeline.rows.count }
         let materializedRows = controllers.reduce(0) { $0 + $1.rowViews.count }
         let presentedRows = controllers.reduce(0) { $0 + $1.presentationItems.count }
-        let cachedHeights = controllers.reduce(0) { $0 + $1.rowHeightCache.count }
         let descendants = controllers.reduce(0) { $0 + Self.descendantCount(in: $1.view) }
         detachCurrent()
         XCTAssertEqual(host.children.count, 0)
@@ -1694,7 +1693,7 @@ final class ConversationRenderTests: XCTestCase {
             "THREADING_PERF conversation-residency "
                 + "shape=\(shape.rawValue) sessions=\(sessionCount) turns=\(turns) "
                 + "rows=\(totalRows) materialized=\(materializedRows) "
-                + "presented=\(presentedRows) cached_heights=\(cachedHeights) "
+                + "presented=\(presentedRows) "
                 + "descendants=\(descendants) "
                 + "build_total_ms=\(Self.milliseconds(buildDurations.reduce(0, +))) "
                 + "build_p95_ms=\(Self.milliseconds(Self.percentile(buildDurations, 0.95))) "
@@ -1785,7 +1784,6 @@ final class ConversationRenderTests: XCTestCase {
         let rowCount = controller.timeline.rows.count
         let materializedRowCount = controller.rowViews.count
         let presentedCount = controller.presentationItems.count
-        let cachedHeightCount = controller.rowHeightCache.count
         let descendantCount = Self.descendantCount(in: controller.view)
         XCTAssertEqual(controller.minimapTurnCount, turns)
         print(
@@ -1793,7 +1791,6 @@ final class ConversationRenderTests: XCTestCase {
                 + "shape=\(shape.rawValue) turns=\(turns) events=\(events.count) "
                 + "rows=\(rowCount) materialized=\(materializedRowCount) "
                 + "presented=\(presentedCount) minimap_turns=\(controller.minimapTurnCount) "
-                + "cached_heights=\(cachedHeightCount) "
                 + "descendants=\(descendantCount) "
                 + "model_ms=\(Self.milliseconds(modelElapsed)) "
                 + "presentation_ms="

@@ -688,8 +688,7 @@ extension SubagentTranscriptViewController: NSTableViewDataSource, NSTableViewDe
             bottomInset: bottomInset,
             onRelease: { [weak self] in
                 self?.materializedPresentationIDs.remove(item.id)
-            },
-            onMeasuredHeight: { _ in }
+            }
         )
 #if DEBUG
         let installEnded = DispatchTime.now().uptimeNanoseconds
