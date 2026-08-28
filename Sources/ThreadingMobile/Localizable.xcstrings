@@ -717,6 +717,17 @@
         }
       }
     },
+    "1.5× speed, increased usage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1,5× hastighet, ökad förbrukning"
+          }
+        }
+      }
+    },
     "15–30 seconds" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3610,6 +3621,17 @@
         }
       }
     },
+    "Follows the Conversation Speed setting on the Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Följer inställningen för konversationshastighet på Mac-datorn"
+          }
+        }
+      }
+    },
     "For your own Mac, open Threading → Settings → Remote Access and scan the pairing code. You can also paste a one-chat link someone shared with you. Owner pairing can manage your Mac; a shared-chat link never can." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5135,6 +5157,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inga tillgängliga"
+          }
+        }
+      }
+    },
+    "Normal speed and usage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Normal hastighet och förbrukning"
           }
         }
       }
@@ -10162,6 +10195,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använt"
+          }
+        }
+      }
+    },
+    "Uses the agent's setting on the Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använder agentens inställning på Mac-datorn"
           }
         }
       }
