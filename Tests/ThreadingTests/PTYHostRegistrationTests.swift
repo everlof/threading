@@ -775,12 +775,12 @@ final class PTYHostRegistrationTests: XCTestCase {
 
         monitor.begin(PTYHostUpgradeRequest(socketPath: "/tmp/stale.sock", ownBuild: "new"))
         XCTAssertFalse(
-            admission.permitsHostedSpawn,
+            admission.current.permitsHostedSpawn,
             "existing sessions may drain, but a new spawn must not extend the stale generation"
         )
 
         monitor.hostMayHaveDrained()
-        XCTAssertTrue(admission.permitsHostedSpawn)
+        XCTAssertTrue(admission.current.permitsHostedSpawn)
     }
 
     /// "Nobody has asked yet" and "we asked and the answer was no" are different refusals, and
@@ -1047,12 +1047,12 @@ final class PTYHostRegistrationTests: XCTestCase {
         ))
         XCTAssertEqual(refresh.requests.count, 1)
         XCTAssertEqual(scheduler.pendingCount, 1)
-        XCTAssertFalse(admission.permitsHostedSpawn)
+        XCTAssertFalse(admission.current.permitsHostedSpawn)
 
         scheduler.runNext()
         XCTAssertEqual(refresh.requests.count, 2)
         XCTAssertEqual(scheduler.pendingCount, 0)
-        XCTAssertTrue(admission.permitsHostedSpawn)
+        XCTAssertTrue(admission.current.permitsHostedSpawn)
     }
 
     // MARK: - The shipped plist

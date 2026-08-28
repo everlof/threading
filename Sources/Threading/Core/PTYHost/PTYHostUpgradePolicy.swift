@@ -209,14 +209,14 @@ final class PTYHostNewSessionAdmission: @unchecked Sendable {
             case .withheld: return "upgradePending"
             }
         }
+
+        var permitsHostedSpawn: Bool { self == .allowed }
     }
 
     static let shared = PTYHostNewSessionAdmission()
 
     private let lock = NSLock()
     private var state: State = .allowed
-
-    var permitsHostedSpawn: Bool { current == .allowed }
 
     /// What the last survey settled on, or `.unresolved` before the first one answers.
     var current: State {

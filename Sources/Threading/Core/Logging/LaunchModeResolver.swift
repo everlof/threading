@@ -131,9 +131,6 @@ struct LaunchPlan: Equatable, Sendable {
     /// Whether ten interactive minutes under this launch may clear a crash-loop count.
     let armsStabilityCheckpoint: Bool
 
-    /// Whether `ProjectStore` may write.
-    let allowsStateWrites: Bool
-
     /// Whether the quit path records what was running, for the next launch to bring back.
     let recordsRunningSessionsOnQuit: Bool
 
@@ -168,7 +165,6 @@ struct LaunchPlan: Equatable, Sendable {
         // and letting it clear the count would mean sitting in recovery for ten minutes erases
         // the evidence of the loop.
         armsStabilityCheckpoint = !recovery
-        allowsStateWrites = !recovery
         recordsRunningSessionsOnQuit = !recovery
     }
 }

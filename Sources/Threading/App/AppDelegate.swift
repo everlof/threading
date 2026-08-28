@@ -114,18 +114,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     }
 
     private let processMainEntryNanoseconds: UInt64
-    private let environment: AppEnvironment
+    /// Kept lazy so `ProjectStore.shared` is first constructed after `RecoveryMode.enter` fixes
+    /// the write policy for this launch. Building the live environment in `init` made every
+    /// recovery launch open the store under the normal-launch default.
+    private lazy var environment: AppEnvironment = .live
     private var runsStartupProfile = false
 
     override init() {
         processMainEntryNanoseconds = DispatchTime.now().uptimeNanoseconds
-        environment = .live
         super.init()
     }
 
     init(processMainEntryNanoseconds: UInt64) {
         self.processMainEntryNanoseconds = processMainEntryNanoseconds
-        environment = .live
         super.init()
     }
 
@@ -783,10 +784,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // conversation: deletion is lease-protected and never needs the disposed worktree.
         ManagedWorkspaceRemoteCleanupCoordinator.shared.start()
 
-        MCPServer.shared.start { [weak self] in
-            LaunchLedger.shared.record(.mcpListenerStarted)
-            self?.mcpServerHasStarted = true
-            self?.restoreSelectedSessionIfReady()
+        if plan.startsMCPListener {
+            MCPServer.shared.start { [weak self] in
+                LaunchLedger.shared.record(.mcpListenerStarted)
+                self?.mcpServerHasStarted = true
+                self?.restoreSelectedSessionIfReady()
+            }
         }
 
         // Remote access is a separate loopback server behind a tunnel, independent of the MCP

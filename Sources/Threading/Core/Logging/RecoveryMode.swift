@@ -7,9 +7,11 @@ import Foundation
 ///
 /// **The plan is the primary carrier, not this.** `LaunchPlan` is what
 /// `applicationDidFinishLaunching` reads at each step, and the surfaces that a test needs to
-/// exercise take the fact through their initializer with this as the default. What is left is
-/// the last line before a process starts — three `launch()`-shaped entry points that no
-/// composition root reaches — plus the menu validator, and those ask here.
+/// exercise take the fact through their initializer with this as the default. `ProjectStore` is
+/// the composition-root exception: the plan needs the loaded store to decide onboarding, so the
+/// app keeps its environment lazy and constructs the store from this resolution after `enter`.
+/// What is left is the last line before a process starts — three `launch()`-shaped entry points
+/// that no composition root reaches — plus the menu validator, and those ask here.
 ///
 /// Set exactly once, from the launch sequence. A second `enter` is refused and logged rather
 /// than obeyed: the mode a launch came up in is a fact about the launch, and a process that

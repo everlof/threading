@@ -159,7 +159,6 @@ final class LaunchModeResolverTests: XCTestCase {
         XCTAssertTrue(plan.showsOnboarding)
         XCTAssertTrue(plan.restoresWorkspace)
         XCTAssertTrue(plan.armsStabilityCheckpoint)
-        XCTAssertTrue(plan.allowsStateWrites)
         XCTAssertTrue(plan.recordsRunningSessionsOnQuit)
     }
 
@@ -174,7 +173,6 @@ final class LaunchModeResolverTests: XCTestCase {
         XCTAssertFalse(plan.startsMCPListener)
         XCTAssertFalse(plan.startsBackgroundServices)
         XCTAssertFalse(plan.restoresWorkspace)
-        XCTAssertFalse(plan.allowsStateWrites)
         XCTAssertTrue(plan.isRecovery)
     }
 
@@ -232,6 +230,5 @@ final class LaunchModeResolverTests: XCTestCase {
         XCTAssertTrue(plan.startsMCPListener)
         XCTAssertTrue(plan.startsBackgroundServices)
         XCTAssertTrue(plan.restoresWorkspace)
-        XCTAssertTrue(plan.allowsStateWrites)
     }
 }

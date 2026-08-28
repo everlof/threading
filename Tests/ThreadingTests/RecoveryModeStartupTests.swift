@@ -102,7 +102,9 @@ final class RecoveryModeStartupTests: XCTestCase {
         )
         seed.flushPendingSave()
 
-        let store = ProjectStore(stateManager: manager, refusesWrites: true)
+        let store = RecoveryMode.withResolution(recovery) {
+            ProjectStore(stateManager: manager)
+        }
         XCTAssertEqual(store.projects.count, 1, "recovery must still be able to show the projects")
 
         // Everything a person can do to the store from a recovery window: browse, and have the

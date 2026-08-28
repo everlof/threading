@@ -86,7 +86,7 @@ enum PTYHostPolicy {
         // that names the wrong condition is worse than no cause, because it sends the next person
         // to look at registration.
         let admission = newSessionAdmission.current
-        guard admission == .allowed else {
+        guard admission.permitsHostedSpawn else {
             eventLog.record(.session, "Session runs its PTY in-process", [
                 "session": identity.historyFileStem,
                 "cause": admission.token

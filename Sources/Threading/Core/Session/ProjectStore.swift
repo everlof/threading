@@ -75,6 +75,8 @@ final class ProjectStore {
 
     // MARK: - Singleton
 
+    /// AppDelegate's live environment stays lazy until after `RecoveryMode.enter`, because this
+    /// initializer must know the launch's write policy before `load()` can migrate anything.
     static let shared = ProjectStore()
 
     // MARK: - Properties
