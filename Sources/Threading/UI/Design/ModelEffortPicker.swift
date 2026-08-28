@@ -382,11 +382,12 @@ final class ModelEffortMatrixControl: ThemedControl {
                 width: Layout.effortWidth,
                 height: Layout.headerHeight
             )
+            let onActiveColumn = activeCell?.column == column
             drawText(
                 presentation.efforts[column].name,
                 in: rect,
-                font: Design.Typography.caption(),
-                color: presentation.efforts[column].isUltra
+                font: onActiveColumn ? Design.Typography.control() : Design.Typography.caption(),
+                color: onActiveColumn || presentation.efforts[column].isUltra
                     ? Design.Surface.accent
                     : Design.Text.tertiary,
                 alignment: .center
@@ -398,6 +399,7 @@ final class ModelEffortMatrixControl: ThemedControl {
 
     private func drawModel(_ row: Int, in rect: NSRect) {
         let selected = presentation.models[row].id == presentation.selectedModelID
+        let onActiveRow = activeCell?.row == row
         let showsHide = hoveredModelRow == row && canHideModel(at: row)
         drawText(
             presentation.models[row].name,
@@ -407,8 +409,12 @@ final class ModelEffortMatrixControl: ThemedControl {
                 width: Layout.modelWidth - Design.Spacing.medium - (showsHide ? 26 : 0),
                 height: rect.height
             ),
-            font: selected ? Design.Typography.control() : Design.Typography.controlRegular(),
-            color: selected ? Design.Text.label : Design.Text.secondary,
+            font: selected || onActiveRow
+                ? Design.Typography.control()
+                : Design.Typography.controlRegular(),
+            color: onActiveRow
+                ? Design.Surface.accent
+                : (selected ? Design.Text.label : Design.Text.secondary),
             alignment: .left
         )
         if showsHide { drawHideModelButton(row: row) }
@@ -589,6 +595,15 @@ final class ModelEffortMatrixControl: ThemedControl {
             width: rect.width,
             height: height
         ))
+    }
+
+    /// The cell being considered right now: the pointer's, else the keyboard's while the
+    /// control holds focus. Its row label and column header read it back in accent, so a
+    /// combination is legible without tracing across the matrix.
+    private var activeCell: Cell? {
+        if let hoveredCell { return hoveredCell }
+        guard window?.firstResponder === self else { return nil }
+        return focusedCell
     }
 
     private func cellRect(row: Int, column: Int) -> NSRect {
