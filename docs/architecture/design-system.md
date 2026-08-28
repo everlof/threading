@@ -857,7 +857,7 @@ state the user is in — the navigator's error arriving behind its own progress 
 band with three behind it looked exactly like a band that was the last thing that happened, and
 the only way to learn otherwise was to read one, watch it leave, and be handed a second — by
 which point the user who turned away as the first landed has already turned away from all of
-them. Each waiting receipt now stands behind the band as `ToastStackEdgeView`: the *same card*,
+them. Each waiting receipt now stands behind the band as `ToastWaitingCardView`: the *same card*,
 one `stackStep` up and one `stackInset` in on either side, so all that shows of it is its top
 edge. Not a dimmed copy — what is behind the band is a receipt exactly like it, and the depth
 comes from the offset plus the front band's own glow falling across it. Stepped in on **both**
@@ -1453,17 +1453,18 @@ The vocabulary these encode, which new work should follow:
   was passing through. Releasing moves nothing: a centred block gives its width back from both
   sides at once, and the height it gives back is the height the travel has just arrived at.
 
-**One silhouette per strip.** `TabAppearance` states a tab's geometry and type scale in one
-place, because the app draws tabs in two views that cannot share a class: the pane's strip reads
-the chrome's roles, while a surface over the terminal inks itself from the backdrop
-(`BackdropOverlay`) — which is what the header's page name does today. They differ by that alone and had drifted in everything
-else — a 13pt semibold pill beside a 12pt regular rounded rect — which is how one navigation
-idea came to look like two. The toolbar's controls join them: `ToolbarButtonView` and the usage
-pill draw at `Design.Radius.control` rather than a pill radius, because these buttons are square
-and a pill radius on a square is a *circle*, so the strip held a rounded rect, a pill and three
-circles at once. `ToolbarChromeRenderTests` draws the strips on a near-black and a near-white
-backdrop, since a relationship between neighbouring shapes is visible in a picture and in no
-assertion anyone would write.
+**One silhouette per strip.** `ThemedTabItemView` owns a tab's geometry, interaction and type roles
+in one class. The pane strip and toolbar page tab differ only in their `InkSource`: ordinary chrome
+roles on a pane, resolved backdrop ink over the terminal. `Design.Size.tabHeight` states the shared
+horizontal height, and `PaneHeaderView.bandHeight` derives the surrounding band from it rather than
+restating another tab measure. Before that unification they had drifted into a 13pt semibold pill
+beside a 12pt regular rounded rect, which is how one navigation idea came to look like two. The
+toolbar's `ToolbarButtonGroupView` groups `ThemedIconButton`s beside the usage pill; those controls
+draw at `Design.Radius.control` rather than a pill radius, because a pill radius on a square is a
+*circle*, so the strip otherwise holds a rounded rect, a pill and three circles at once.
+`ToolbarChromeRenderTests` draws the strips on a near-black and a near-white backdrop, since a
+relationship between neighbouring shapes is visible in a picture and in no assertion anyone would
+write.
 
 **Height is part of that silhouette, and the radius rule alone missed it.** The usage pill kept
 its own 20 points — the number a 12pt ring and one line of text add up to — between a 28pt page
