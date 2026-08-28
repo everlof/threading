@@ -7,6 +7,7 @@ export const BOUNDS = {
   maximumSessionLifetimeSeconds: 5 * 60,
   maximumIceServers: 8,
   maximumURLsPerIceServer: 4,
+  maximumIceCredentialBytes: 1024,
   maximumSessionDescriptionBytes: 256 * 1024,
   maximumCandidateBytes: 16 * 1024,
   maximumCandidateMidBytes: 256,
@@ -223,7 +224,8 @@ function validateIceServers(value: unknown): asserts value is IceServer[] {
         || !/^(stun|stuns|turn|turns):/i.test(url)) throw new ProtocolError("ice-url");
     }
     for (const secret of [server.username, server.credential]) {
-      if (secret !== undefined && (typeof secret !== "string" || byteCount(secret) > 1024)) {
+      if (secret !== undefined && (typeof secret !== "string"
+        || byteCount(secret) > BOUNDS.maximumIceCredentialBytes)) {
         throw new ProtocolError("ice-credential");
       }
     }

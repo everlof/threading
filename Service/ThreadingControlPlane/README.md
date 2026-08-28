@@ -97,8 +97,9 @@ validation throttle guidance.
 
 Create a Cloudflare Realtime TURN key;
 the long-lived key and API token stay in Worker secrets. Clients receive only generated TURN
-credentials. If TURN credential provisioning is temporarily unavailable, rendezvous continues
-with Cloudflare STUN so direct paths remain available.
+credentials whose routes and signaling byte bounds the Worker has validated. If TURN credential
+provisioning is temporarily unavailable or malformed, rendezvous continues with Cloudflare STUN
+so direct paths remain available.
 
 Create a separate APNs token key for `codes.threading.mobile`; its `.p8` exists only as a Worker
 secret. `POST /v1/push` requires the Mac's rotating host credential and validates the device

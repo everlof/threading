@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/environment";
+import { BOUNDS } from "../src/protocol";
 import { generateIceServers } from "../src/turn";
 
 const fallbackSTUN = {
@@ -92,8 +93,41 @@ describe("TURN credential provisioning", () => {
     } as Env);
 
     expect(result).toEqual([fallbackSTUN]);
+    expect(warning).toHaveBeenCalledWith("turn_credential_failed", {
+      reason: "invalidResponse",
+    });
     expect(JSON.stringify(result)).not.toContain("must-not-return");
     expect(JSON.stringify(warning.mock.calls)).not.toContain("must-not-return");
+  });
+
+  it.each([
+    ["username", "u".repeat(BOUNDS.maximumIceCredentialBytes + 1), "short-secret-value"],
+    ["credential", "short-user-value", "🔑".repeat(BOUNDS.maximumIceCredentialBytes / 4 + 1)],
+  ])("falls back when the upstream %s exceeds the signaling byte bound", async (
+    _field,
+    username,
+    credential,
+  ) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({
+      iceServers: [{
+        urls: ["turn:turn.cloudflare.com:3478?transport=udp"],
+        username,
+        credential,
+      }],
+    }, { status: 201 }));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const result = await generateIceServers({
+      TURN_KEY_ID: "turn-key-id",
+      TURN_KEY_API_TOKEN: "turn-api-token",
+    } as Env);
+
+    expect(result).toEqual([fallbackSTUN]);
+    expect(warning).toHaveBeenCalledWith("turn_credential_failed", {
+      reason: "invalidResponse",
+    });
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(username);
+    expect(JSON.stringify(warning.mock.calls)).not.toContain(credential);
   });
 
   it("falls back to STUN when Cloudflare rejects credential generation", async () => {
