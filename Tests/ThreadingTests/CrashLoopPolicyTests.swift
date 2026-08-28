@@ -255,6 +255,18 @@ final class CrashLoopPolicyTests: XCTestCase {
         XCTAssertEqual(decision, .recommendStoppingAutomaticWork(consecutive: 3))
     }
 
+    func testARecoveryCrashStillStopsAutomaticWorkAfterAForcedNormalCrash() {
+        let decision = decide([
+            launch("a", minute: 0, ending: .unclean),
+            launch("b", minute: 1, ending: .unclean),
+            launch("c", minute: 2, mode: .recovery, ending: nil),
+            launch("d", minute: 3, mode: .recovery, ending: .intentional(.recoveryRelaunch)),
+            launch("e", minute: 4, ending: .unclean)
+        ])
+
+        XCTAssertEqual(decision, .recommendStoppingAutomaticWork(consecutive: 4))
+    }
+
     /// **A recovery launch the user left on purpose is skipped, not counted.** Pressing "Try
     /// Normal Launch Once" ends recovery deliberately, so the forced-normal launch that follows
     /// is an ordinary launch: if *it* dies, the streak is three crashes and the answer is recovery

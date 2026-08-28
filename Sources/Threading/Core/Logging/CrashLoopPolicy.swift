@@ -144,8 +144,10 @@ enum CrashLoopPolicy {
 
             if consecutive == 0 {
                 lastCheckpoint = launch.lastCheckpoint
-                recoveryDied = launch.mode == .recovery
             }
+            // A failed recovery belongs to the whole streak even after a forced-normal launch
+            // overtakes it. A recovery the user left intentionally was skipped by the guard above.
+            recoveryDied = recoveryDied || launch.mode == .recovery
             consecutive += 1
             newerCounted = launch
         }
