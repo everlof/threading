@@ -3464,9 +3464,17 @@ final class SubagentSummaryViewTests: XCTestCase {
                 .contains { $0.title == agent.descriptor.displayName },
             "The side pane no longer exposes the child navigator"
         )
-        XCTAssertFalse(
-            transcriptDescendants.contains { $0 is MarkdownView },
-            "A long reply was rebuilt as one eager Markdown constraint tree"
+        let eagerMarkdownViews = transcriptDescendants.compactMap { $0 as? MarkdownView }
+        XCTAssertEqual(
+            eagerMarkdownViews.count,
+            1,
+            "Only the bounded reasoning row should own a Markdown document view"
+        )
+        XCTAssertTrue(
+            descendants(of: try XCTUnwrap(eagerMarkdownViews.first))
+                .compactMap { $0 as? NSTextField }
+                .contains { $0.stringValue.contains("I should inspect the admission path first") },
+            "The long assistant reply was rebuilt as an eager Markdown document view"
         )
         XCTAssertTrue(
             transcriptDescendants.compactMap { $0 as? NSTextField }
