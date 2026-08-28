@@ -13,13 +13,14 @@ final class WindowLayoutResetTests: XCTestCase {
 
     // MARK: - Fixture
 
-    /// The five values a reset clears, named here as the test's own list. Deliberately a second
+    /// The six values a reset clears, named here as the test's own list. Deliberately a second
     /// spelling: if a key moves and only one of the two changes, this fails, which is the whole
     /// point of a reset having a test at all.
     private let preferenceKeys = [
         "ThreadingSidebarWidth",
         "ThreadingDisplayPaneWidth",
-        "ThreadingShowsStatusCard"
+        "ThreadingShowsStatusCard",
+        "attachments.listHeight"
     ]
     private let standardKeys = ["ThreadingShellDrawerHeight"]
     private nonisolated var frameKey: String {
@@ -49,6 +50,7 @@ final class WindowLayoutResetTests: XCTestCase {
         DisplayPaneWidth.stored = DisplayPaneDefaults.minWidth + 40
         StatusCardVisibility.isEnabled = false
         ShellDrawerHeight.stored = ShellDrawerDefaults.minimumHeight + 40
+        AttachmentsListHeight.record(240)
         UserDefaults.standard.set("0 0 800 600 0 0 1440 900 ", forKey: frameKey)
     }
 
@@ -103,6 +105,7 @@ final class WindowLayoutResetTests: XCTestCase {
             ShellDrawerHeight.stored,
             ShellDrawerDefaults.defaultHeight + ThemedTabStripView.bandHeight
         )
+        XCTAssertNil(AttachmentsListHeight.stored)
     }
 
     /// A reset is geometry only. It must not reach a behavioural setting or a theme — the two
@@ -125,5 +128,6 @@ final class WindowLayoutResetTests: XCTestCase {
         WindowLayoutReset.perform()
 
         XCTAssertNil(SidebarWidth.stored)
+        XCTAssertNil(AttachmentsListHeight.stored)
     }
 }
