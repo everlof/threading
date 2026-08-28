@@ -14,7 +14,8 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 SCHEMA_VERSION = 1
 SWIFT_WARNING = re.compile(
-    r"^(?P<path>.+?\.swift):[0-9]+:[0-9]+: warning: (?P<message>.+)$"
+    r"^(?P<path>.+?\.swift):(?P<line>[0-9]+):(?P<column>[0-9]+): "
+    r"warning: (?P<message>.+)$"
 )
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 SUCCESS_MARKERS = (
@@ -58,6 +59,10 @@ def parse_logs(
     counts: Dict[str, WarningCounts] = {}
     all_logs_succeeded = True
     for log_path in log_paths:
+        # Swift batch compilation can print the same source diagnostic once for every primary
+        # file in a frontend invocation. That repetition varies with batch partitioning and CPU
+        # count, so it is not warning debt. Keep one exact source diagnostic per Xcode lane.
+        seen_diagnostics = set()
         text = log_path.read_text(encoding="utf-8", errors="replace")
         all_logs_succeeded = all_logs_succeeded and any(
             marker in text for marker in SUCCESS_MARKERS
@@ -70,6 +75,15 @@ def parse_logs(
             relative_path = repository_relative(match.group("path"), repository)
             if relative_path is None:
                 continue
+            identity = (
+                relative_path,
+                match.group("line"),
+                match.group("column"),
+                match.group("message"),
+            )
+            if identity in seen_diagnostics:
+                continue
+            seen_diagnostics.add(identity)
             counts.setdefault(relative_path, WarningCounts()).add(match.group("message"))
     return counts, all_logs_succeeded
 

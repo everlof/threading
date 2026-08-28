@@ -206,7 +206,11 @@ repository Swift source file has its own ceiling for total warnings and a second
 diagnostics Swift identifies as errors in Swift 6 language mode. A decrease in one file cannot buy
 room for an increase in another, a newly warning file starts with a ceiling of zero, and removing
 warnings needs no baseline edit. This makes the current Swift 5 language mode debt monotonic while
-complete strict-concurrency checking remains enabled.
+complete strict-concurrency checking remains enabled. Within one Xcode lane, repeated emissions of
+the exact same path, location and message count once: Swift batch compilation can otherwise print
+one diagnostic for every primary file in a frontend invocation, making the result depend on batch
+partitioning and machine concurrency rather than source debt. The same diagnostic in a different
+lane still counts there because the platform or target compilation is an independent contract.
 `test_strict_concurrency_configuration.py` enumerates every native target's Debug and Release
 configurations so a helper added outside the app and test targets cannot silently opt out.
 

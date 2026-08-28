@@ -50,6 +50,26 @@ class SwiftWarningRatchetTests(unittest.TestCase):
         self.assertEqual(counts["Sources/App/Feature.swift"].swift6_language_mode, 1)
         self.assertEqual(set(counts), {"Sources/App/Feature.swift"})
 
+    def test_parser_counts_repeated_batch_diagnostic_once_per_lane(self) -> None:
+        diagnostic = (
+            f"{self.root}/Tests/AppTests/FeatureTests.swift:8:2: warning: send risk; "
+            "this is an error in the Swift 6 language mode\n"
+        )
+        first_lane = self.write_log(diagnostic * 25 + "** BUILD SUCCEEDED **\n")
+        second_lane = self.root / "second-lane.log"
+        second_lane.write_text(
+            diagnostic * 3 + "** TEST SUCCEEDED **\n",
+            encoding="utf-8",
+        )
+
+        one_lane, _ = ratchet.parse_logs([first_lane], self.root)
+        both_lanes, _ = ratchet.parse_logs([first_lane, second_lane], self.root)
+
+        self.assertEqual(one_lane["Tests/AppTests/FeatureTests.swift"].warnings, 1)
+        self.assertEqual(one_lane["Tests/AppTests/FeatureTests.swift"].swift6_language_mode, 1)
+        self.assertEqual(both_lanes["Tests/AppTests/FeatureTests.swift"].warnings, 2)
+        self.assertEqual(both_lanes["Tests/AppTests/FeatureTests.swift"].swift6_language_mode, 2)
+
     def test_per_file_ceiling_cannot_be_borrowed_by_another_file(self) -> None:
         baseline = {
             "Sources/App/Feature.swift": ratchet.WarningCounts(2, 1),
