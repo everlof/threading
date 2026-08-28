@@ -133,6 +133,15 @@ process first (it belongs to the old account and is still writing the file), and
 touches a token — the official CLI authenticates under whichever account, so this is
 portability, not credential reuse.
 
+Replacing a transcript that already exists in the target account is crash-recoverable. Before
+the first same-volume rename, `TranscriptCopyTransaction` writes one private recovery record under
+Threading's Application Support containing the exact destination, candidate and previous-copy
+paths. The next launch reads that one record before any conversation can start: an absent target
+with a surviving previous copy is restored, a record left before the first rename is cleared, and
+an already promoted copy with ambiguous store-commit state is preserved and reported rather than
+guessed at. There is deliberately one fixed record instead of a scan through provider transcript
+trees, so launch work is constant and a later move cannot overwrite unresolved recovery evidence.
+
 The paired iPhone does not implement a second migration. Its owner-only Chat Settings route sends
 one catalog account handle to the Mac, and the application composition root invokes this same
 `SessionMigration.move` transaction before reconciling the visible pane. Guest shares never

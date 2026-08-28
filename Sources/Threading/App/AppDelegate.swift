@@ -452,6 +452,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
         ])
 
+        // The transcript recovery record is one fixed app-owned file, so this does no provider
+        // directory scan. Run it after the journal can report an ambiguous promotion and before
+        // anything can resume a conversation against a destination it may need to restore.
+        TranscriptCopyRecovery.runLaunchRecovery()
+
         // After the journal, so the sweep has somewhere to report to; before anything can start
         // a conversation, because it decides by pid and a pid is only unambiguous while nothing
         // new has been spawned. Only this instance runs it: it is below both the hosted-test

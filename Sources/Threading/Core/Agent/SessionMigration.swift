@@ -6,15 +6,255 @@ enum TranscriptCopyTransactionError: Error, Equatable {
     case rollbackFailed(recoveryPath: String, detail: String)
 }
 
+/// The one durable breadcrumb for an account-to-account transcript replacement.
+///
+/// A replacement has two same-volume renames but a process can die between them, after the
+/// standing destination has become a hidden `.previous` file and before the candidate takes its
+/// place. Searching every provider transcript directory at launch would make recovery scale with
+/// every conversation the user has ever had. Instead the transaction records the three exact
+/// paths in one private, app-owned file *before* it moves the destination. Migrations are
+/// synchronous on the main actor, so one slot represents all possible in-flight work; an
+/// unresolved record refuses a later migration rather than being overwritten.
+@MainActor
+enum TranscriptCopyRecovery {
+    enum Outcome {
+        case notNeeded
+        case restoredPrevious(destination: URL)
+        case clearedPrepared(destination: URL)
+        case needsAttention(destination: URL?, detail: String)
+    }
+
+    enum RecoveryError: LocalizedError, Equatable {
+        case pendingRecovery
+        case invalidScratchPaths
+
+        var errorDescription: String? {
+            switch self {
+            case .pendingRecovery:
+                return "A previous conversation move still needs recovery."
+            case .invalidScratchPaths:
+                return "The conversation move recovery paths were invalid."
+            }
+        }
+    }
+
+    private struct Record: Codable {
+        static let currentVersion = 1
+
+        let version: Int
+        let nonce: String
+        let destinationPath: String
+        let candidatePath: String
+        let backupPath: String
+    }
+
+    static var liveJournalURL: URL {
+        let support = StateManager.isHostedTest
+            ? StateManager.hostedTestDirectory()
+            : AppDataLocations.supportDirectory
+        return support
+            .appendingPathComponent("MigrationRecovery", isDirectory: true)
+            .appendingPathComponent("PendingTranscriptCopy.json", isDirectory: false)
+    }
+
+    /// Writes the record before the first destructive rename.
+    static func begin(
+        destination: URL,
+        candidate: URL,
+        backup: URL,
+        nonce: String,
+        journalURL: URL,
+        fileManager: FileManager
+    ) throws {
+        guard !fileManager.fileExists(atPath: journalURL.path) else {
+            throw RecoveryError.pendingRecovery
+        }
+
+        let record = Record(
+            version: Record.currentVersion,
+            nonce: nonce,
+            destinationPath: destination.path,
+            candidatePath: candidate.path,
+            backupPath: backup.path
+        )
+        guard validatedURLs(for: record) != nil else {
+            throw RecoveryError.invalidScratchPaths
+        }
+
+        let directory = journalURL.deletingLastPathComponent()
+        do {
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: directory.path
+            )
+            try JSONEncoder().encode(record).write(to: journalURL, options: .atomic)
+            try fileManager.setAttributes(
+                [.posixPermissions: 0o600],
+                ofItemAtPath: journalURL.path
+            )
+        } catch {
+            try? fileManager.removeItem(at: journalURL)
+            throw error
+        }
+    }
+
+    /// Repairs the only filesystem state that is unambiguous after a crash.
+    ///
+    /// An absent destination plus its recorded backup means the process died in the two-rename
+    /// window, so the old destination is restored. A destination with no backup means the crash
+    /// happened before the first rename or after cleanup, and only stale scratch remains. When
+    /// both destination and backup exist, the candidate was promoted but the durable graph commit
+    /// may or may not have happened; recovery preserves both and reports instead of guessing.
+    static func recoverPending(
+        journalURL: URL = liveJournalURL,
+        fileManager: FileManager = .default
+    ) -> Outcome {
+        guard fileManager.fileExists(atPath: journalURL.path) else { return .notNeeded }
+
+        let record: Record
+        do {
+            record = try JSONDecoder().decode(Record.self, from: Data(contentsOf: journalURL))
+        } catch {
+            return .needsAttention(
+                destination: nil,
+                detail: "The recovery record could not be read: \(error.localizedDescription)"
+            )
+        }
+        guard let urls = validatedURLs(for: record) else {
+            return .needsAttention(
+                destination: nil,
+                detail: "The recovery record contains invalid scratch paths."
+            )
+        }
+
+        let destinationExists = fileManager.fileExists(atPath: urls.destination.path)
+        let backupExists = fileManager.fileExists(atPath: urls.backup.path)
+
+        if !destinationExists, backupExists {
+            do {
+                try fileManager.moveItem(at: urls.backup, to: urls.destination)
+                try removeIfPresent(urls.candidate, fileManager: fileManager)
+                try fileManager.removeItem(at: journalURL)
+                return .restoredPrevious(destination: urls.destination)
+            } catch {
+                return .needsAttention(
+                    destination: urls.destination,
+                    detail: "The previous target copy could not be restored: \(error.localizedDescription)"
+                )
+            }
+        }
+
+        if destinationExists, !backupExists {
+            do {
+                try removeIfPresent(urls.candidate, fileManager: fileManager)
+                try fileManager.removeItem(at: journalURL)
+                return .clearedPrepared(destination: urls.destination)
+            } catch {
+                return .needsAttention(
+                    destination: urls.destination,
+                    detail: "Prepared migration scratch could not be retired: \(error.localizedDescription)"
+                )
+            }
+        }
+
+        if destinationExists, backupExists {
+            return .needsAttention(
+                destination: urls.destination,
+                detail: "Both the promoted and previous target copies remain; commit state is ambiguous."
+            )
+        }
+        return .needsAttention(
+            destination: urls.destination,
+            detail: "Neither the target transcript nor its recorded previous copy exists."
+        )
+    }
+
+    /// Reports launch recovery after the event journal is available.
+    static func runLaunchRecovery() {
+        switch recoverPending() {
+        case .notNeeded:
+            return
+        case .restoredPrevious(let destination):
+            ThreadingLogger.agent.notice(
+                "Restored a target transcript after an interrupted migration: \(destination.path, privacy: .private(mask: .hash))"
+            )
+            EventLog.shared.record(.session, "Recovered interrupted transcript migration", [
+                "outcome": "restored_previous"
+            ])
+        case .clearedPrepared(let destination):
+            ThreadingLogger.agent.notice(
+                "Retired a stale prepared transcript migration: \(destination.path, privacy: .private(mask: .hash))"
+            )
+            EventLog.shared.record(.session, "Reconciled interrupted transcript migration", [
+                "outcome": "cleared_prepared"
+            ])
+        case .needsAttention(let destination, let detail):
+            ThreadingLogger.agent.error(
+                "Transcript migration recovery needs attention destination=\(destination?.path ?? "unknown", privacy: .private(mask: .hash)) detail=\(detail, privacy: .private(mask: .hash))"
+            )
+            EventLog.shared.record(.session, "Transcript migration recovery needs attention", [
+                "outcome": "needs_attention",
+                "recovery_record": liveJournalURL.path
+            ])
+        }
+    }
+
+    static func retire(journalURL: URL, fileManager: FileManager) {
+        do {
+            try removeIfPresent(journalURL, fileManager: fileManager)
+        } catch {
+            ThreadingLogger.agent.error(
+                "Could not retire transcript migration recovery record: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+        }
+    }
+
+    private static func validatedURLs(for record: Record) -> (
+        destination: URL,
+        candidate: URL,
+        backup: URL
+    )? {
+        guard record.version == Record.currentVersion,
+              record.destinationPath.hasPrefix("/"),
+              record.candidatePath.hasPrefix("/"),
+              record.backupPath.hasPrefix("/"),
+              let uuid = UUID(uuidString: record.nonce),
+              uuid.uuidString.lowercased() == record.nonce else { return nil }
+
+        let destination = URL(fileURLWithPath: record.destinationPath).standardizedFileURL
+        let candidate = URL(fileURLWithPath: record.candidatePath).standardizedFileURL
+        let backup = URL(fileURLWithPath: record.backupPath).standardizedFileURL
+        let parent = destination.deletingLastPathComponent()
+        let stem = ".threading-move-\(record.nonce)"
+        guard candidate.deletingLastPathComponent() == parent,
+              backup.deletingLastPathComponent() == parent,
+              candidate.lastPathComponent == "\(stem).candidate",
+              backup.lastPathComponent == "\(stem).previous" else { return nil }
+        return (destination, candidate, backup)
+    }
+
+    private static func removeIfPresent(_ url: URL, fileManager: FileManager) throws {
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        try fileManager.removeItem(at: url)
+    }
+}
+
 /// Installs a transcript copy without destroying an older target-account copy unless the caller's
 /// durable record update commits too. Candidate and backup live beside the destination, so their
 /// promotions are same-volume renames rather than partial cross-volume copies.
+@MainActor
 enum TranscriptCopyTransaction {
     @discardableResult
     static func install(
         source: URL,
         destination: URL,
         fileManager: FileManager = .default,
+        recoveryJournalURL: URL = TranscriptCopyRecovery.liveJournalURL,
         commit: () -> Bool
     ) throws -> Int {
         let values = try source.resourceValues(forKeys: [
@@ -30,6 +270,7 @@ enum TranscriptCopyTransaction {
         let backup = parent.appendingPathComponent(".threading-move-\(nonce).previous")
         var movedStandingDestination = false
         var installedCandidate = false
+        var recordedRecovery = false
         defer { try? fileManager.removeItem(at: staging) }
 
         try fileManager.createDirectory(at: parent, withIntermediateDirectories: true)
@@ -38,7 +279,25 @@ enum TranscriptCopyTransaction {
             throw CocoaError(.fileReadUnknown)
         }
         if fileManager.fileExists(atPath: destination.path) {
-            try fileManager.moveItem(at: destination, to: backup)
+            try TranscriptCopyRecovery.begin(
+                destination: destination,
+                candidate: staging,
+                backup: backup,
+                nonce: nonce,
+                journalURL: recoveryJournalURL,
+                fileManager: fileManager
+            )
+            recordedRecovery = true
+            do {
+                try fileManager.moveItem(at: destination, to: backup)
+            } catch {
+                TranscriptCopyRecovery.retire(
+                    journalURL: recoveryJournalURL,
+                    fileManager: fileManager
+                )
+                recordedRecovery = false
+                throw error
+            }
             movedStandingDestination = true
         }
         do {
@@ -49,6 +308,11 @@ enum TranscriptCopyTransaction {
                 do {
                     try fileManager.moveItem(at: backup, to: destination)
                     movedStandingDestination = false
+                    TranscriptCopyRecovery.retire(
+                        journalURL: recoveryJournalURL,
+                        fileManager: fileManager
+                    )
+                    recordedRecovery = false
                 } catch {
                     throw TranscriptCopyTransactionError.rollbackFailed(
                         recoveryPath: backup.path,
@@ -69,6 +333,13 @@ enum TranscriptCopyTransaction {
                     try fileManager.moveItem(at: backup, to: destination)
                     movedStandingDestination = false
                 }
+                if recordedRecovery {
+                    TranscriptCopyRecovery.retire(
+                        journalURL: recoveryJournalURL,
+                        fileManager: fileManager
+                    )
+                    recordedRecovery = false
+                }
             } catch {
                 // The backup is deliberately retained at the reported path. A cleanup defer that
                 // erased it would convert an already reported refusal into target-account loss.
@@ -83,6 +354,12 @@ enum TranscriptCopyTransaction {
         if movedStandingDestination {
             do {
                 try fileManager.removeItem(at: backup)
+                if recordedRecovery {
+                    TranscriptCopyRecovery.retire(
+                        journalURL: recoveryJournalURL,
+                        fileManager: fileManager
+                    )
+                }
             } catch {
                 ThreadingLogger.agent.error(
                     "Could not retire previous migrated transcript: \(backup.path, privacy: .private(mask: .hash))"

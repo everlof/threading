@@ -18,6 +18,7 @@ final class SessionMigrationTransactionTests: XCTestCase {
         try super.tearDownWithError()
     }
 
+    @MainActor
     func testCommitPromotesTheCandidateAndRetiresThePreviousTargetCopy() throws {
         let source = root.appendingPathComponent("source/session.jsonl")
         let destination = root.appendingPathComponent("target/session.jsonl")
@@ -27,7 +28,8 @@ final class SessionMigrationTransactionTests: XCTestCase {
 
         let copiedByteCount = try TranscriptCopyTransaction.install(
             source: source,
-            destination: destination
+            destination: destination,
+            recoveryJournalURL: recoveryJournal
         ) {
             commits += 1
             return true
@@ -38,8 +40,10 @@ final class SessionMigrationTransactionTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "new complete transcript")
         XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "new complete transcript")
         XCTAssertTrue(try scratchFiles(beside: destination).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryJournal.path))
     }
 
+    @MainActor
     func testRefusedCommitRestoresThePreviousTargetCopyExactly() throws {
         let source = root.appendingPathComponent("source/session.jsonl")
         let destination = root.appendingPathComponent("target/session.jsonl")
@@ -47,7 +51,11 @@ final class SessionMigrationTransactionTests: XCTestCase {
         try write("standing target transcript", to: destination)
 
         XCTAssertThrowsError(
-            try TranscriptCopyTransaction.install(source: source, destination: destination) {
+            try TranscriptCopyTransaction.install(
+                source: source,
+                destination: destination,
+                recoveryJournalURL: recoveryJournal
+            ) {
                 false
             }
         ) { error in
@@ -60,15 +68,21 @@ final class SessionMigrationTransactionTests: XCTestCase {
         )
         XCTAssertEqual(try String(contentsOf: source, encoding: .utf8), "candidate transcript")
         XCTAssertTrue(try scratchFiles(beside: destination).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryJournal.path))
     }
 
+    @MainActor
     func testRefusedCommitRemovesACandidateWhenNoTargetCopyExisted() throws {
         let source = root.appendingPathComponent("source/session.jsonl")
         let destination = root.appendingPathComponent("target/session.jsonl")
         try write("candidate transcript", to: source)
 
         XCTAssertThrowsError(
-            try TranscriptCopyTransaction.install(source: source, destination: destination) {
+            try TranscriptCopyTransaction.install(
+                source: source,
+                destination: destination,
+                recoveryJournalURL: recoveryJournal
+            ) {
                 false
             }
         ) { error in
@@ -77,8 +91,124 @@ final class SessionMigrationTransactionTests: XCTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: destination.path))
         XCTAssertTrue(try scratchFiles(beside: destination).isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryJournal.path))
     }
 
+    @MainActor
+    func testLaunchRecoveryRestoresAHiddenPreviousCopy() throws {
+        let destination = root.appendingPathComponent("target/session.jsonl")
+        let nonce = UUID().uuidString.lowercased()
+        let candidate = scratchURL(nonce: nonce, suffix: "candidate", beside: destination)
+        let backup = scratchURL(nonce: nonce, suffix: "previous", beside: destination)
+        try write("standing target transcript", to: destination)
+        try write("candidate transcript", to: candidate)
+        try TranscriptCopyRecovery.begin(
+            destination: destination,
+            candidate: candidate,
+            backup: backup,
+            nonce: nonce,
+            journalURL: recoveryJournal,
+            fileManager: .default
+        )
+        try FileManager.default.moveItem(at: destination, to: backup)
+
+        let outcome = TranscriptCopyRecovery.recoverPending(journalURL: recoveryJournal)
+
+        guard case .restoredPrevious(let restored) = outcome else {
+            return XCTFail("expected the previous target to be restored, got \(outcome)")
+        }
+        XCTAssertEqual(restored, destination)
+        XCTAssertEqual(
+            try String(contentsOf: destination, encoding: .utf8),
+            "standing target transcript"
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: candidate.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryJournal.path))
+    }
+
+    @MainActor
+    func testLaunchRecoveryClearsARecordWrittenBeforeTheFirstRename() throws {
+        let destination = root.appendingPathComponent("target/session.jsonl")
+        let nonce = UUID().uuidString.lowercased()
+        let candidate = scratchURL(nonce: nonce, suffix: "candidate", beside: destination)
+        let backup = scratchURL(nonce: nonce, suffix: "previous", beside: destination)
+        try write("standing target transcript", to: destination)
+        try write("candidate transcript", to: candidate)
+        try TranscriptCopyRecovery.begin(
+            destination: destination,
+            candidate: candidate,
+            backup: backup,
+            nonce: nonce,
+            journalURL: recoveryJournal,
+            fileManager: .default
+        )
+
+        let outcome = TranscriptCopyRecovery.recoverPending(journalURL: recoveryJournal)
+
+        guard case .clearedPrepared(let preserved) = outcome else {
+            return XCTFail("expected prepared scratch to be cleared, got \(outcome)")
+        }
+        XCTAssertEqual(preserved, destination)
+        XCTAssertEqual(
+            try String(contentsOf: destination, encoding: .utf8),
+            "standing target transcript"
+        )
+        XCTAssertFalse(FileManager.default.fileExists(atPath: candidate.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: recoveryJournal.path))
+    }
+
+    @MainActor
+    func testLaunchRecoveryReportsAnAmbiguousPromotedCopyWithoutGuessing() throws {
+        let destination = root.appendingPathComponent("target/session.jsonl")
+        let nonce = UUID().uuidString.lowercased()
+        let candidate = scratchURL(nonce: nonce, suffix: "candidate", beside: destination)
+        let backup = scratchURL(nonce: nonce, suffix: "previous", beside: destination)
+        try write("standing target transcript", to: destination)
+        try write("candidate transcript", to: candidate)
+        try TranscriptCopyRecovery.begin(
+            destination: destination,
+            candidate: candidate,
+            backup: backup,
+            nonce: nonce,
+            journalURL: recoveryJournal,
+            fileManager: .default
+        )
+        try FileManager.default.moveItem(at: destination, to: backup)
+        try FileManager.default.moveItem(at: candidate, to: destination)
+
+        let outcome = TranscriptCopyRecovery.recoverPending(journalURL: recoveryJournal)
+
+        guard case .needsAttention(let reported, _) = outcome else {
+            return XCTFail("expected an ambiguous promotion to be reported, got \(outcome)")
+        }
+        XCTAssertEqual(reported, destination)
+        XCTAssertEqual(
+            try String(contentsOf: destination, encoding: .utf8),
+            "candidate transcript"
+        )
+        XCTAssertEqual(
+            try String(contentsOf: backup, encoding: .utf8),
+            "standing target transcript"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recoveryJournal.path))
+        XCTAssertThrowsError(
+            try TranscriptCopyRecovery.begin(
+                destination: destination,
+                candidate: candidate,
+                backup: backup,
+                nonce: nonce,
+                journalURL: recoveryJournal,
+                fileManager: .default
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? TranscriptCopyRecovery.RecoveryError,
+                .pendingRecovery
+            )
+        }
+    }
+
+    @MainActor
     func testContainmentUsesComponentsAndFollowsSymlinks() throws {
         let account = root.appendingPathComponent("config", isDirectory: true)
         let inside = account.appendingPathComponent("sessions/2026/session.jsonl")
@@ -112,5 +242,14 @@ final class SessionMigrationTransactionTests: XCTestCase {
             at: destination.deletingLastPathComponent(),
             includingPropertiesForKeys: nil
         ).filter { $0.lastPathComponent.hasPrefix(".threading-move-") }
+    }
+
+    private var recoveryJournal: URL {
+        root.appendingPathComponent("recovery/PendingTranscriptCopy.json")
+    }
+
+    private func scratchURL(nonce: String, suffix: String, beside destination: URL) -> URL {
+        destination.deletingLastPathComponent()
+            .appendingPathComponent(".threading-move-\(nonce).\(suffix)")
     }
 }
