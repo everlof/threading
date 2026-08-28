@@ -212,7 +212,11 @@ final class GitReviewCommandsTests: XCTestCase {
     func testCommonFlagsNeverTakeLocks() {
         XCTAssertEqual(
             GitReviewCommands.common,
-            ["-c", "core.quotepath=false", "--no-optional-locks"]
+            [
+                "-c", "core.quotepath=false",
+                "-c", "push.recurseSubmodules=no",
+                "--no-optional-locks"
+            ]
         )
     }
 
