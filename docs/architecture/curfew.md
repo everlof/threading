@@ -130,8 +130,10 @@ not none**, the chain pure and the store passed as a parameter:
 - **Settings**: `QuietHours` — two minutes-of-day, `end <= start` crossing midnight (the ordinary
   case), all arithmetic through `Calendar.nextDate(after:matching:)` so the two nights a year that
   are 23 or 25 hours long keep their wall-clock ends and a 02:30 start that does not exist opens at
-  03:00. The resolved curfew is the window containing `now`, else the next one — a window that has
-  not opened is still the deadline the session is running towards.
+  03:00. When two distinct endpoints both fall in the skipped hour and collapse to that same first
+  real moment, the configured span is kept from there rather than dropping the night's window.
+  The resolved curfew is the window containing `now`, else the next one — a window that has not
+  opened is still the deadline the session is running towards.
 
 Writers store **nil where the answer matches what would have been inherited** (`chooseLimitRecovery`'s
 rule), so a chat keeps following its checkout and Settings. Quiet hours produce a new instance

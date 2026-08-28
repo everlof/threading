@@ -294,6 +294,26 @@ final class SessionCurfewModelTests: XCTestCase {
         XCTAssertEqual(window.end, date(2026, 3, 29, 8, 0, in: calendar))
     }
 
+    /// Both readings are in Stockholm's missing hour. Foundation resolves each to 03:00; that
+    /// collision must shorten neither the configured half hour nor the list of nightly windows.
+    func testAWindowWhoseTwoEndsCollapseInTheSpringForwardGapKeepsItsSpan() throws {
+        let calendar = calendar()
+        let hours = nightly(from: 2 * 60, to: 2 * 60 + 30)
+        let before = date(2026, 3, 29, 0, 30, in: calendar)
+        let inside = date(2026, 3, 29, 3, 15, in: calendar)
+
+        let standing = try XCTUnwrap(hours.window(containing: inside, calendar: calendar))
+
+        XCTAssertEqual(standing.start, date(2026, 3, 29, 3, 0, in: calendar))
+        XCTAssertEqual(standing.end, date(2026, 3, 29, 3, 30, in: calendar))
+        XCTAssertEqual(standing.duration, 30 * 60, accuracy: 1)
+        XCTAssertEqual(
+            hours.nextWindow(after: before, calendar: calendar),
+            standing,
+            "the transition-night window must remain armable before it opens"
+        )
+    }
+
     // MARK: - Quiet Hours: The Next Window
 
     func testTheNextWindowIsTodaysWhileItIsStillAhead() {

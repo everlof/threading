@@ -90,12 +90,31 @@ struct QuietHours: Codable, Equatable, Sendable {
         }
         // `end <= start` is the midnight-crossing case, and equality is a whole day rather than
         // an empty window: "from 04:00 to 04:00" is a session held around the clock.
-        let endDay = endMinute <= startMinute
+        let crossesMidnight = endMinute <= startMinute
+        let endDay = crossesMidnight
             ? calendar.date(byAdding: .day, value: 1, to: date)
             : date
         guard let endDay,
-              let end = Self.moment(endMinute, onDayOf: endDay, calendar: calendar),
-              end > start else { return nil }
+              let wallClockEnd = Self.moment(endMinute, onDayOf: endDay, calendar: calendar) else {
+            return nil
+        }
+
+        let end: Date
+        if wallClockEnd > start {
+            end = wallClockEnd
+        } else if !crossesMidnight,
+                  wallClockEnd == start,
+                  endMinute > startMinute {
+            // Two different readings inside a spring-forward gap both resolve to the first real
+            // moment after it. Preserve the configured span in that one degenerate case instead
+            // of silently dropping the night's window. Other transition windows keep their
+            // chosen wall-clock end above, even when their elapsed duration is 23 or 25 hours.
+            end = start.addingTimeInterval(
+                TimeInterval(endMinute - startMinute) * QuietHoursDefaults.secondsPerMinute
+            )
+        } else {
+            return nil
+        }
         return DateInterval(start: start, end: end)
     }
 
@@ -132,6 +151,9 @@ enum QuietHoursDefaults {
     /// How far before a day's first moment the search for a time of day begins. See
     /// `QuietHours.moment(_:onDayOf:calendar:)`.
     static let searchLeadIn: TimeInterval = -1
+
+    /// Converts the stored minute-of-day span into elapsed time for a collapsed skipped hour.
+    static let secondsPerMinute: TimeInterval = 60
 }
 
 // MARK: - Curfew Preferences
