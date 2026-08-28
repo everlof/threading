@@ -1507,6 +1507,13 @@ and make the parent conversation appear to stop. Everything else is a selectable
 wrapping and selection come free. Assistant-authored link targets are actions only for `http` and
 `https`: every other URL scheme keeps its visible label but receives neither AppKit's live-link
 attribute nor link styling, so agent prose cannot hand `file:` or a custom-app URL to the system.
+Inline `*` and `_` runs follow CommonMark's left/right-flanking rules: arithmetic and intraword
+identifiers remain literal, while `_emphasis_` and `**strong**` still style. Emphasis containers
+re-scan their content and merge their font trait into nested links, code spans and opposite
+emphasis, rather than printing the child's syntax as styled prose. That recursion stops at
+`MarkdownDefaults.maximumInlineNestingDepth`; provider-authored content beyond the ceiling remains
+literal so one pathological line cannot grow the display stack or repeated grapheme allocations
+without bound.
 
 Tool calls render through `ToolCallView`: a fixed-width **glyph column** (`$` bash, `→` read,
 `←` write, `✱` grep/glob, `◈` search — the vocabulary a terminal user already knows), the

@@ -51,6 +51,36 @@ final class MarkdownTests: XCTestCase {
         }
     }
 
+    private func paragraph(_ text: String) -> NSAttributedString {
+        guard case .paragraph(let value) = blocks(text).first else {
+            XCTFail("inline fixture did not produce a paragraph")
+            return NSAttributedString()
+        }
+        return value
+    }
+
+    private func fontTraits(
+        in value: NSAttributedString,
+        matching text: String
+    ) throws -> NSFontTraitMask {
+        let range = try attributedRange(in: value, matching: text)
+        let font = try XCTUnwrap(
+            value.attribute(.font, at: range.location, effectiveRange: nil) as? NSFont
+        )
+        return NSFontManager.shared.traits(of: font)
+    }
+
+    private func attributedRange(
+        in value: NSAttributedString,
+        matching text: String
+    ) throws -> NSRange {
+        let range = (value.string as NSString).range(of: text)
+        return try XCTUnwrap(
+            range.location == NSNotFound ? nil : range,
+            "missing inline fixture text: \(text)"
+        )
+    }
+
     // MARK: - Precedence
 
     /// The ordering that matters most. Inside a fence the text is content, not syntax: a shell
@@ -172,6 +202,126 @@ final class MarkdownTests: XCTestCase {
     func testInlineMarkupBecomesStyleRatherThanText() {
         XCTAssertEqual(text(of: blocks("**bold** and `code`").first), "bold and code")
         XCTAssertEqual(text(of: blocks("*italic* too").first), "italic too")
+    }
+
+    /// Delimiters face content before they become syntax. Coding prose is dense with identifiers,
+    /// multiplication and globs; none may borrow a later marker and style everything between.
+    func testEmphasisUsesFlankingRulesAroundIdentifiersAndArithmetic() throws {
+        let attributed = paragraph(
+            "call process_arguments then max_retries; 2 * 3 * 4; *styled* and _also_"
+        )
+
+        XCTAssertEqual(
+            attributed.string,
+            "call process_arguments then max_retries; 2 * 3 * 4; styled and also"
+        )
+        XCTAssertFalse(
+            try fontTraits(in: attributed, matching: "process_arguments")
+                .contains(.italicFontMask)
+        )
+        XCTAssertFalse(
+            try fontTraits(in: attributed, matching: "3")
+                .contains(.italicFontMask)
+        )
+        XCTAssertTrue(
+            try fontTraits(in: attributed, matching: "styled")
+                .contains(.italicFontMask)
+        )
+        XCTAssertTrue(
+            try fontTraits(in: attributed, matching: "also")
+                .contains(.italicFontMask)
+        )
+
+        let transcript = paragraph(
+            "Not shoal_ar — **MES dale_gorse tide** — then copse_br"
+        )
+        XCTAssertEqual(
+            transcript.string,
+            "Not shoal_ar — MES dale_gorse tide — then copse_br"
+        )
+        XCTAssertFalse(
+            try fontTraits(in: transcript, matching: "shoal_ar").contains(.italicFontMask)
+        )
+        XCTAssertTrue(
+            try fontTraits(in: transcript, matching: "dale_gorse").contains(.boldFontMask)
+        )
+    }
+
+    /// Strong and emphasis are containers, not terminal text tokens. Their children keep live
+    /// links and code styling while inheriting the outer font traits.
+    func testInlineContainersRecurseAndMergeTheirTraits() throws {
+        let link = paragraph("**[PR 12](https://example.com/pull/12)** shipped")
+        XCTAssertEqual(link.string, "PR 12 shipped")
+        let linkRange = try attributedRange(in: link, matching: "PR 12")
+        XCTAssertEqual(
+            link.attribute(.link, at: linkRange.location, effectiveRange: nil) as? URL,
+            URL(string: "https://example.com/pull/12")
+        )
+        XCTAssertTrue(
+            try fontTraits(in: link, matching: "PR 12").contains(.boldFontMask)
+        )
+        let refused = paragraph("**[local](file:///Users/person/private)**")
+        let refusedRange = try attributedRange(in: refused, matching: "local")
+        XCTAssertNil(
+            refused.attribute(.link, at: refusedRange.location, effectiveRange: nil),
+            "nesting bypassed the Markdown URL-scheme policy"
+        )
+
+        let code = paragraph("*italic with `file_name.py` inside*")
+        XCTAssertEqual(code.string, "italic with file_name.py inside")
+        let codeRange = try attributedRange(in: code, matching: "file_name.py")
+        XCTAssertEqual(
+            code.attribute(.backgroundColor, at: codeRange.location, effectiveRange: nil)
+                as? NSColor,
+            style.codeBackground
+        )
+        XCTAssertTrue(
+            try fontTraits(in: code, matching: "file_name.py").contains(.italicFontMask)
+        )
+
+        let nested = paragraph("**bold with *italic* inside**")
+        XCTAssertEqual(nested.string, "bold with italic inside")
+        let nestedTraits = try fontTraits(in: nested, matching: "italic")
+        XCTAssertTrue(nestedTraits.contains(.boldFontMask))
+        XCTAssertTrue(nestedTraits.contains(.italicFontMask))
+
+        let adjacent = paragraph("**one****two** and ***both***")
+        XCTAssertEqual(adjacent.string, "onetwo and both")
+        XCTAssertTrue(
+            try fontTraits(in: adjacent, matching: "one").contains(.boldFontMask)
+        )
+        XCTAssertTrue(
+            try fontTraits(in: adjacent, matching: "two").contains(.boldFontMask)
+        )
+        let combinedTraits = try fontTraits(in: adjacent, matching: "both")
+        XCTAssertTrue(combinedTraits.contains(.boldFontMask))
+        XCTAssertTrue(combinedTraits.contains(.italicFontMask))
+    }
+
+    /// The opposite delimiter widths nest too: the inner `**` run must not close the outer `*`.
+    func testStrongCanNestInsideEmphasis() throws {
+        let attributed = paragraph("*italic with **bold** inside*")
+
+        XCTAssertEqual(attributed.string, "italic with bold inside")
+        let traits = try fontTraits(in: attributed, matching: "bold")
+        XCTAssertTrue(traits.contains(.boldFontMask))
+        XCTAssertTrue(traits.contains(.italicFontMask))
+    }
+
+    /// Provider text is unbounded. Past the supported nesting depth, remaining delimiters are
+    /// rendered literally instead of allocating another scanner and growing the call stack.
+    func testInlineNestingHasABoundedLiteralFallback() {
+        var source = "leaf"
+        for depth in 0..<(MarkdownDefaults.maximumInlineNestingDepth + 8) {
+            source = depth.isMultiple(of: 2) ? "**\(source)**" : "_\(source)_"
+        }
+
+        let attributed = paragraph(source)
+        XCTAssertTrue(attributed.string.contains("leaf"))
+        XCTAssertTrue(
+            attributed.string.contains("*") || attributed.string.contains("_"),
+            "the nesting ceiling did not leave its bounded literal remainder"
+        )
     }
 
     /// Assistant prose is untrusted. AppKit hands a live link attribute to the registered system

@@ -24,39 +24,87 @@ extension Markdown {
         }
 
         let result = NSMutableAttributedString()
+        appendInline(
+            text,
+            to: result,
+            style: style,
+            baseFont: baseFont,
+            traits: InlineFontTraits(),
+            depth: 0
+        )
+        return result
+    }
+
+    /// Recurses only inside emphasis. Blocks stay deliberately small, while inline containers
+    /// can carry the code spans and links coding agents routinely put inside a highlighted run.
+    private static func appendInline(
+        _ text: String,
+        to result: NSMutableAttributedString,
+        style: MarkdownStyle,
+        baseFont: NSFont,
+        traits: InlineFontTraits,
+        depth: Int
+    ) {
+        // Transcript text is provider input. Preserve ordinary nesting while bounding both the
+        // call stack and the repeated Character arrays a deliberately pathological line could
+        // otherwise force. At the ceiling the remaining syntax is honest literal text.
+        guard depth < MarkdownDefaults.maximumInlineNestingDepth else {
+            result.append(NSAttributedString(string: text, attributes: [
+                .font: applying(traits, to: baseFont),
+                .foregroundColor: style.textColor
+            ]))
+            return
+        }
 
         var scanner = InlineScanner(text: Array(text))
-
         while let token = scanner.next() {
             switch token {
             case .text(let value):
                 result.append(NSAttributedString(string: value, attributes: [
-                    .font: baseFont,
+                    .font: applying(traits, to: baseFont),
                     .foregroundColor: style.textColor
                 ]))
 
             case .code(let value):
                 result.append(NSAttributedString(string: value, attributes: [
-                    .font: style.codeFont,
+                    .font: applying(traits, to: style.codeFont),
                     .foregroundColor: style.codeColor,
                     .backgroundColor: style.codeBackground
                 ]))
 
             case .strong(let value):
-                result.append(NSAttributedString(string: value, attributes: [
-                    .font: bold(baseFont),
-                    .foregroundColor: style.textColor
-                ]))
+                appendInline(
+                    value,
+                    to: result,
+                    style: style,
+                    baseFont: baseFont,
+                    traits: traits.adding(bold: true),
+                    depth: depth + 1
+                )
 
             case .emphasis(let value):
-                result.append(NSAttributedString(string: value, attributes: [
-                    .font: italic(baseFont),
-                    .foregroundColor: style.textColor
-                ]))
+                appendInline(
+                    value,
+                    to: result,
+                    style: style,
+                    baseFont: baseFont,
+                    traits: traits.adding(italic: true),
+                    depth: depth + 1
+                )
+
+            case .strongEmphasis(let value):
+                appendInline(
+                    value,
+                    to: result,
+                    style: style,
+                    baseFont: baseFont,
+                    traits: traits.adding(bold: true, italic: true),
+                    depth: depth + 1
+                )
 
             case .link(let label, let url):
                 var attributes: [NSAttributedString.Key: Any] = [
-                    .font: baseFont,
+                    .font: applying(traits, to: baseFont),
                     .foregroundColor: style.textColor
                 ]
                 // Assistant Markdown is untrusted document content. AppKit opens a `.link`
@@ -70,8 +118,6 @@ extension Markdown {
                 result.append(NSAttributedString(string: label, attributes: attributes))
             }
         }
-
-        return result
     }
 
     private static func clickableLinkURL(_ value: String) -> URL? {
@@ -97,6 +143,22 @@ extension Markdown {
     private static func italic(_ base: NSFont) -> NSFont {
         NSFontManager.shared.convert(base, toHaveTrait: .italicFontMask)
     }
+
+    private static func applying(_ traits: InlineFontTraits, to base: NSFont) -> NSFont {
+        var font = base
+        if traits.bold { font = bold(font) }
+        if traits.italic { font = italic(font) }
+        return font
+    }
+}
+
+private struct InlineFontTraits {
+    var bold = false
+    var italic = false
+
+    func adding(bold: Bool = false, italic: Bool = false) -> InlineFontTraits {
+        InlineFontTraits(bold: self.bold || bold, italic: self.italic || italic)
+    }
 }
 
 // MARK: - Inline Scanner
@@ -109,6 +171,7 @@ private struct InlineScanner {
         case code(String)
         case strong(String)
         case emphasis(String)
+        case strongEmphasis(String)
         case link(label: String, url: String)
     }
 
@@ -128,8 +191,18 @@ private struct InlineScanner {
 
         case "*", "_":
             let marker = characters[index]
-            if let strong = fenced(by: "\(marker)\(marker)") { return .strong(strong) }
-            if let emphasis = delimited(by: marker) { return .emphasis(emphasis) }
+            let runLength = delimiterRunLength(at: index, marker: marker)
+            if runLength == 3,
+               let combined = emphasis(by: marker, width: 3) {
+                return .strongEmphasis(combined)
+            }
+            if runLength >= 2,
+               let strong = emphasis(by: marker, width: 2) {
+                return .strong(strong)
+            }
+            if let emphasis = emphasis(by: marker, width: 1) {
+                return .emphasis(emphasis)
+            }
 
         case "[":
             if let link = link() { return link }
@@ -156,22 +229,101 @@ private struct InlineScanner {
         return content
     }
 
-    /// A run between two two-character fences, e.g. `**bold**`. Consumes both.
-    private mutating func fenced(by fence: String) -> String? {
-        let markers = Array(fence)
-        guard index + markers.count < characters.count else { return nil }
+    /// A flanking emphasis run. `_` inside an identifier and `*` surrounded by arithmetic
+    /// spaces are ordinary characters; a delimiter must face content on the side it opens or
+    /// closes. Runs of a different width are skipped so `*italic **bold** italic*` can recurse
+    /// without the inner strong opener prematurely closing the outer run.
+    private mutating func emphasis(by marker: Character, width: Int) -> String? {
+        let openingRun = delimiterRunLength(at: index, marker: marker)
+        guard openingRun >= width,
+              canOpenDelimiter(at: index, marker: marker, runLength: openingRun),
+              index + width < characters.count else { return nil }
 
-        var cursor = index + markers.count
-        while cursor + markers.count <= characters.count {
-            if Array(characters[cursor..<(cursor + markers.count)]) == markers {
-                let content = String(characters[(index + markers.count)..<cursor])
+        var cursor = index + width
+        while cursor < characters.count {
+            if characters[cursor] == "`",
+               let closeCode = characters[(cursor + 1)...].firstIndex(of: "`") {
+                cursor = closeCode + 1
+                continue
+            }
+
+            if characters[cursor] == "[", let end = linkEnd(startingAt: cursor) {
+                cursor = end
+                continue
+            }
+
+            guard characters[cursor] == marker else {
+                cursor += 1
+                continue
+            }
+
+            let closingRun = delimiterRunLength(at: cursor, marker: marker)
+            let matchesWidth = width == 1 ? closingRun == 1 : closingRun >= width
+            if matchesWidth,
+               canCloseDelimiter(at: cursor, marker: marker, runLength: closingRun) {
+                let content = String(characters[(index + width)..<cursor])
                 guard !content.isEmpty else { return nil }
-                index = cursor + markers.count
+                index = cursor + width
                 return content
             }
-            cursor += 1
+            cursor += closingRun
         }
         return nil
+    }
+
+    private func delimiterRunLength(at start: Int, marker: Character) -> Int {
+        var cursor = start
+        while cursor < characters.count, characters[cursor] == marker {
+            cursor += 1
+        }
+        return cursor - start
+    }
+
+    /// CommonMark's left/right-flanking rules, including the extra intraword guard for `_`.
+    private func canOpenDelimiter(at start: Int, marker: Character, runLength: Int) -> Bool {
+        let before = start > 0 ? characters[start - 1] : nil
+        let afterIndex = start + runLength
+        let after = afterIndex < characters.count ? characters[afterIndex] : nil
+        let leftFlanking = !isWhitespace(after)
+            && (!isPunctuation(after) || isWhitespace(before) || isPunctuation(before))
+        let rightFlanking = !isWhitespace(before)
+            && (!isPunctuation(before) || isWhitespace(after) || isPunctuation(after))
+        return marker == "_"
+            ? leftFlanking && (!rightFlanking || isPunctuation(before))
+            : leftFlanking
+    }
+
+    private func canCloseDelimiter(at start: Int, marker: Character, runLength: Int) -> Bool {
+        let before = start > 0 ? characters[start - 1] : nil
+        let afterIndex = start + runLength
+        let after = afterIndex < characters.count ? characters[afterIndex] : nil
+        let leftFlanking = !isWhitespace(after)
+            && (!isPunctuation(after) || isWhitespace(before) || isPunctuation(before))
+        let rightFlanking = !isWhitespace(before)
+            && (!isPunctuation(before) || isWhitespace(after) || isPunctuation(after))
+        return marker == "_"
+            ? rightFlanking && (!leftFlanking || isPunctuation(after))
+            : rightFlanking
+    }
+
+    /// A line boundary behaves like whitespace in the delimiter rules.
+    private func isWhitespace(_ character: Character?) -> Bool {
+        guard let character else { return true }
+        return character.unicodeScalars.allSatisfy { $0.properties.isWhitespace }
+    }
+
+    private func isPunctuation(_ character: Character?) -> Bool {
+        guard let character else { return false }
+        return character.unicodeScalars.contains { scalar in
+            switch scalar.properties.generalCategory {
+            case .connectorPunctuation, .dashPunctuation, .openPunctuation, .closePunctuation,
+                 .initialPunctuation, .finalPunctuation, .otherPunctuation, .mathSymbol,
+                 .currencySymbol, .modifierSymbol, .otherSymbol:
+                true
+            default:
+                false
+            }
+        }
     }
 
     /// `[label](url)`. Both brackets must close on the same line to count.
@@ -179,12 +331,24 @@ private struct InlineScanner {
         guard let closeBracket = characters[index...].firstIndex(of: "]"),
               closeBracket + 1 < characters.count,
               characters[closeBracket + 1] == "(",
-              let closeParen = characters[(closeBracket + 1)...].firstIndex(of: ")") else { return nil }
+              let closeParen = characters[(closeBracket + 1)...].firstIndex(of: ")") else {
+            return nil
+        }
 
         let label = String(characters[(index + 1)..<closeBracket])
         let url = String(characters[(closeBracket + 2)..<closeParen])
         index = closeParen + 1
         return .link(label: label, url: url)
+    }
+
+    private func linkEnd(startingAt start: Int) -> Int? {
+        guard let closeBracket = characters[start...].firstIndex(of: "]"),
+              closeBracket + 1 < characters.count,
+              characters[closeBracket + 1] == "(",
+              let closeParen = characters[(closeBracket + 1)...].firstIndex(of: ")") else {
+            return nil
+        }
+        return closeParen + 1
     }
 
     /// Plain text up to the next character that could begin markup.
@@ -223,4 +387,6 @@ enum MarkdownDefaults {
     static let maximumListItemsPerPage = 64
     static let maximumTableRowsPerPage = 48
     static let maximumTableColumnsPerPage = 8
+    /// Recursion and repeated grapheme materialization allowed within one provider-authored line.
+    static let maximumInlineNestingDepth = 32
 }
