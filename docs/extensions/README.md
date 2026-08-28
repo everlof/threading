@@ -428,6 +428,10 @@ Tool metadata is declared in `threading-extension.json` under `mcpTools` with th
 capability. This lets Threading inspect the name, description, and JSON input schema without
 executing code. Global MCP names are generated as
 `ext__<reverse-DNS namespace>__<local tool id>`, with dots encoded as double underscores.
+The manifest accepts at most 32 tools; titles are limited to 120 characters and descriptions to
+500. The disabled-install confirmation names every accepted tool and its local id and description.
+Extension tools are not part of Threading's exact built-in pre-approval set, so their calls remain
+subject to the normal tool-permission policy after the extension is enabled.
 
 The process repeats the definitions in `ExtensionRegistration`. Runtime definitions must match
 the manifest exactly; a process cannot silently broaden an inspected schema after the user

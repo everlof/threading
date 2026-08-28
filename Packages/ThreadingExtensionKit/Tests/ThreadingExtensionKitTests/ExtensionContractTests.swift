@@ -2162,6 +2162,60 @@ final class ExtensionContractTests: XCTestCase {
         )
     }
 
+    func testMCPToolDisclosureMetadataAndCountAreBounded() throws {
+        func manifest(tools: [ExtensionMCPTool]) -> ExtensionManifest {
+            ExtensionManifest(
+                identifier: "codes.threading.example",
+                name: "Example",
+                version: "1.0.0",
+                runtime: .native,
+                executable: "bin/example",
+                capabilities: [.mcpTools],
+                mcpTools: tools
+            )
+        }
+
+        let largestAccepted = ExtensionMCPTool(
+            id: "accepted",
+            title: String(repeating: "T", count: ExtensionMCPTool.maximumTitleLength),
+            description: String(
+                repeating: "D",
+                count: ExtensionMCPTool.maximumDescriptionLength
+            )
+        )
+        XCTAssertNoThrow(try manifest(tools: [largestAccepted]).validate())
+
+        let oversized = ExtensionMCPTool(
+            id: "oversized",
+            title: String(repeating: "T", count: ExtensionMCPTool.maximumTitleLength + 1),
+            description: String(
+                repeating: "D",
+                count: ExtensionMCPTool.maximumDescriptionLength + 1
+            )
+        )
+        XCTAssertThrowsError(try manifest(tools: [oversized]).validate()) { error in
+            XCTAssertEqual(
+                (error as? ExtensionValidationError)?.issues.map(\.path),
+                ["mcpTools[0].title", "mcpTools[0].description"]
+            )
+        }
+
+        let tooMany = (0...ExtensionMCPTool.maximumCount).map { index in
+            ExtensionMCPTool(
+                id: "tool-\(index)",
+                title: "Tool \(index)",
+                description: "Run tool \(index)."
+            )
+        }
+        XCTAssertThrowsError(try manifest(tools: tooMany).validate()) { error in
+            XCTAssertTrue(
+                (error as? ExtensionValidationError)?.issues.contains {
+                    $0.path == "mcpTools"
+                } == true
+            )
+        }
+    }
+
     func testRuntimeCannotBroadenDeclaredMCPToolSchema() {
         let declared = ExtensionMCPTool(
             id: "lookup",

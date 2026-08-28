@@ -2111,6 +2111,57 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertTrue(proposal.message.contains("left disabled"))
     }
 
+    func testInstallProposalDisclosesEveryAgentFacingToolInStableOrder() throws {
+        let root = temporaryDirectory("tool-install-proposal")
+        let manifest = ExtensionManifest(
+            identifier: "com.example.tools",
+            name: "Toolbox",
+            version: "1.0.0",
+            runtime: .webAssembly,
+            executable: "bin/toolbox.wasm",
+            capabilities: [.mcpTools],
+            mcpTools: [
+                .init(
+                    id: "publish",
+                    title: "Publish Build",
+                    description: "Publish the selected build."
+                ),
+                .init(
+                    id: "lookup",
+                    title: "Lookup Value",
+                    description: "Look up one cached value."
+                )
+            ]
+        )
+        let proposal = ExtensionInstallProposal(bundle: ThreadingExtensionBundle(
+            rootURL: root,
+            executableURL: root.appendingPathComponent("bin/toolbox.wasm"),
+            sourceURL: nil,
+            manifest: manifest
+        ))
+
+        XCTAssertEqual(proposal.mcpTools.map(\.id), ["lookup", "publish"])
+        XCTAssertTrue(proposal.mcpToolDisclosure.contains(
+            "Lookup Value [lookup] — Look up one cached value."
+        ))
+        XCTAssertTrue(proposal.mcpToolDisclosure.contains(
+            "Publish Build [publish] — Publish the selected build."
+        ))
+        let lookupRange = try XCTUnwrap(
+            proposal.mcpToolDisclosure.range(of: "Lookup Value")
+        )
+        let publishRange = try XCTUnwrap(
+            proposal.mcpToolDisclosure.range(of: "Publish Build")
+        )
+        XCTAssertLessThan(
+            lookupRange.lowerBound,
+            publishRange.lowerBound
+        )
+        XCTAssertTrue(proposal.message.contains("exact names, local ids, and descriptions"))
+        XCTAssertTrue(proposal.message.contains("Extension tools are not pre-approved"))
+        XCTAssertTrue(proposal.message.contains("tool-permission policy"))
+    }
+
     func testFirstPartyInstallProposalExplainsTheAppCopyAndNeverPromisesGitExecution() throws {
         let root = temporaryDirectory("first-party-install-proposal")
         let manifest = ExtensionManifest(

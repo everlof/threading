@@ -177,6 +177,12 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
                 issues.append(.init(path: "\(path).id", message: "duplicates '\(tool.id)'"))
             }
         }
+        if mcpTools.count > ExtensionMCPTool.maximumCount {
+            issues.append(.init(
+                path: "mcpTools",
+                message: "must contain at most \(ExtensionMCPTool.maximumCount) tools"
+            ))
+        }
         if !mcpTools.isEmpty, !capabilities.contains(.mcpTools) {
             issues.append(.init(
                 path: "capabilities",

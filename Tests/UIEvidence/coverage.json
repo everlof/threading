@@ -1173,6 +1173,27 @@
       }
     },
     {
+      "id": "extension-install-confirmation",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Extension agent-tool installation consent",
+      "description": "The real disabled-install confirmation names every statically inspected agent-facing tool and explains that extension tools are not pre-approved.",
+      "states": ["Two declared agent-facing tools"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["Shipping themed confirmation sheet"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/ExtensionInstallConfirmationRenderTests.swift",
+        "test": "ThreadingTests/ExtensionInstallConfirmationRenderTests/testRendersAgentFacingToolDisclosureInTheShippingInstallSheet"
+      },
+      "capture": {
+        "glob": "extension-install-confirmation-*.png"
+      }
+    },
+    {
       "id": "project-script-confirmation",
       "kind": "surface",
       "status": "implemented",

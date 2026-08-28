@@ -58,12 +58,9 @@ extension AgentToolCoordinator {
                     return
                 }
                 let proposal = ExtensionInstallProposal(bundle: bundle)
-                let request = ConfirmationRequest(
-                    prompt: .approveAgentExtensionInstall,
-                    title: proposal.title,
-                    message: proposal.message,
-                    confirmTitle: proposal.acceptTitle,
-                    style: .informational
+                let request = ExtensionInstallConfirmation.request(
+                    for: proposal,
+                    prompt: .approveAgentExtensionInstall
                 )
 
                 ConfirmationAlert.ask(request, in: self.windowProvider()) { approved in

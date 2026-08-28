@@ -14,6 +14,7 @@ struct ExtensionInstallProposal: Equatable {
     let runtime: ExtensionRuntime
     let dataVersion: Int
     let capabilities: [String]
+    let mcpTools: [ExtensionMCPTool]
     let networkGrants: [ExtensionNetworkGrant]
     let companions: [ExtensionCompanion]
     let includesSource: Bool
@@ -34,6 +35,7 @@ struct ExtensionInstallProposal: Equatable {
         runtime = manifest.runtime
         dataVersion = manifest.dataVersion
         capabilities = manifest.capabilities.map(\.rawValue).sorted()
+        mcpTools = manifest.mcpTools.sorted { $0.id < $1.id }
         networkGrants = manifest.networkGrants.sorted { $0.host < $1.host }
         companions = manifest.companions.sorted { $0.id < $1.id }
         includesSource = bundle.sourceURL != nil
@@ -44,6 +46,12 @@ struct ExtensionInstallProposal: Equatable {
 
     var title: String {
         "Install “\(name)”?"
+    }
+
+    var mcpToolDisclosure: String {
+        mcpTools.map { tool in
+            "• \(tool.title) [\(tool.id)] — \(tool.description)"
+        }.joined(separator: "\n\n")
     }
 
     var message: String {
@@ -69,6 +77,14 @@ struct ExtensionInstallProposal: Equatable {
         } else {
             paragraphs.append(
                 "It requests:\n" + capabilities.map { "  • \($0)" }.joined(separator: "\n")
+            )
+        }
+        if !mcpTools.isEmpty {
+            paragraphs.append(
+                "It declares \(mcpTools.count) agent-facing tool(s). Their exact names, local "
+                    + "ids, and descriptions are shown below and are shared with Claude and "
+                    + "Codex while the extension is enabled. Extension tools are not "
+                    + "pre-approved; each call is subject to Threading's tool-permission policy."
             )
         }
         if !networkGrants.isEmpty {

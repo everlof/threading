@@ -61,6 +61,12 @@ public enum ExtensionJSONValue: Codable, Equatable, Sendable {
 /// after the runtime definition matches this manifest declaration, so enabling an extension
 /// cannot silently broaden the schema the user inspected.
 public struct ExtensionMCPTool: Codable, Equatable, Sendable {
+    /// The install proposal renders every accepted declaration, so these bounds are also the
+    /// maximum package-supplied disclosure the confirmation sheet must lay out.
+    public static let maximumCount = 32
+    public static let maximumTitleLength = 120
+    public static let maximumDescriptionLength = 500
+
     public let id: String
     public let title: String
     public let description: String
@@ -98,9 +104,19 @@ public struct ExtensionMCPTool: Codable, Equatable, Sendable {
         }
         if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append(.init(path: "\(path).title", message: "must not be empty"))
+        } else if title.count > Self.maximumTitleLength {
+            issues.append(.init(
+                path: "\(path).title",
+                message: "must contain at most \(Self.maximumTitleLength) characters"
+            ))
         }
         if description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             issues.append(.init(path: "\(path).description", message: "must not be empty"))
+        } else if description.count > Self.maximumDescriptionLength {
+            issues.append(.init(
+                path: "\(path).description",
+                message: "must contain at most \(Self.maximumDescriptionLength) characters"
+            ))
         }
 
         guard case .object(let schema) = inputSchema,

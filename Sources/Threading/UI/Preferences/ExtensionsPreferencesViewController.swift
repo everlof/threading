@@ -759,12 +759,9 @@ final class ExtensionsPreferencesViewController: NSViewController {
         installSource: ExtensionInstallSource,
         isFirstParty: Bool
     ) {
-        let request = ConfirmationRequest(
-            prompt: .installUnsignedExtension,
-            title: proposal.title,
-            message: proposal.message,
-            confirmTitle: proposal.acceptTitle,
-            style: .informational
+        let request = ExtensionInstallConfirmation.request(
+            for: proposal,
+            prompt: .installUnsignedExtension
         )
 
         ConfirmationAlert.ask(request, in: view.window) { [weak self] approved in
