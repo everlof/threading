@@ -117,10 +117,14 @@ final class ProjectDatabase {
 
     // MARK: - Initialization
 
-    init(url: URL) throws {
+    init(
+        url: URL,
+        transactionCommitPreflight: (() throws -> Void)? = nil
+    ) throws {
         database = try SQLiteDatabase(
             path: url.path,
-            maximumSchemaVersion: ProjectDatabaseSchema.version
+            maximumSchemaVersion: ProjectDatabaseSchema.version,
+            transactionCommitPreflight: transactionCommitPreflight
         )
         try migrate()
     }
@@ -350,7 +354,7 @@ final class ProjectDatabase {
     /// delete what has gone. Not a truncate-and-rewrite — that would be the JSON document with
     /// extra steps, and would churn the write-ahead log for a renamed tab.
     func save(_ state: ProjectsState) throws {
-        try database.transaction {
+        try graphTransaction {
             // Inside the transaction, so the check and the reconcile it authorises cannot be
             // separated by another writer's commit.
             let found = try storeGeneration()
@@ -377,7 +381,7 @@ final class ProjectDatabase {
             try deleteRows(in: "session", keeping: liveSessions)
             try deleteRows(in: "project", keeping: liveProjects)
             try setSelectedSessionID(state.selectedSessionID)
-            try advanceGeneration(from: found)
+            return try writeAdvancedGeneration(from: found)
         }
     }
 
@@ -397,7 +401,7 @@ final class ProjectDatabase {
         to projectID: ProjectID,
         position: Int
     ) throws {
-        try database.transaction {
+        try graphTransaction {
             let found = try storeGeneration()
             if let observedGeneration, observedGeneration != found {
                 throw ProjectDatabaseWriteError.staleGeneration(
@@ -406,7 +410,7 @@ final class ProjectDatabase {
                 )
             }
             try upsert(session, in: projectID, position: position)
-            try advanceGeneration(from: found)
+            return try writeAdvancedGeneration(from: found)
         }
     }
 
@@ -441,7 +445,7 @@ final class ProjectDatabase {
         at position: Int,
         selectedSessionID: SessionID?
     ) throws {
-        try database.transaction {
+        try graphTransaction {
             try database.prepare("DELETE FROM session WHERE id = ? AND project_id = ?")
                 .bind(1, sessionID.uuidString)
                 .bind(2, projectID.uuidString)
@@ -456,7 +460,7 @@ final class ProjectDatabase {
             try setSelectedSessionID(selectedSessionID)
             // Membership changed, so a whole-graph writer holding the older picture must be
             // refused rather than allowed to resurrect this row.
-            try advanceGeneration(from: try storeGeneration())
+            return try writeAdvancedGeneration(from: try storeGeneration())
         }
     }
 
@@ -469,7 +473,7 @@ final class ProjectDatabase {
     func moveSessions(
         affectedProjects projects: [(project: Project, position: Int)]
     ) throws {
-        try database.transaction {
+        try graphTransaction {
             let found = try storeGeneration()
             if let observedGeneration, observedGeneration != found {
                 throw ProjectDatabaseWriteError.staleGeneration(
@@ -486,7 +490,7 @@ final class ProjectDatabase {
                     try upsert(session, in: entry.project.id, position: position)
                 }
             }
-            try advanceGeneration(from: found)
+            return try writeAdvancedGeneration(from: found)
         }
     }
 
@@ -899,14 +903,22 @@ final class ProjectDatabase {
         return Int(raw) ?? 0
     }
 
-    /// Records that this writer changed which rows exist, and that it is now up to date.
-    private func advanceGeneration(from current: Int) throws {
+    /// Commits a graph mutation and publishes its generation in memory only after SQLite accepts
+    /// the transaction. A failed COMMIT rolls the row back, so publishing from inside `body`
+    /// would leave this connection permanently ahead of the healthy on-disk store.
+    private func graphTransaction(_ body: () throws -> Int) throws {
+        let committedGeneration = try database.transaction(body)
+        observedGeneration = committedGeneration
+    }
+
+    /// Writes the next generation as part of a graph transaction without publishing it yet.
+    private func writeAdvancedGeneration(from current: Int) throws -> Int {
         let next = current &+ 1
         try database.prepare(ProjectDatabaseSchema.upsertAppState)
             .bind(1, ProjectDatabaseSchema.storeGenerationKey)
             .bind(2, String(next))
             .run()
-        observedGeneration = next
+        return next
     }
 
     private func selectedSessionID() throws -> SessionID? {

@@ -330,6 +330,35 @@ final class ProjectDatabaseTests: XCTestCase {
         XCTAssertTrue(try database.load().state.projects.isEmpty)
     }
 
+    func testFailedGraphCommitKeepsTheConnectionGenerationAligned() throws {
+        enum Expected: Error { case commitRefused }
+
+        var refuseNextCommit = false
+        let database = try ProjectDatabase(
+            url: directory.appendingPathComponent("failed-generation-commit.db"),
+            transactionCommitPreflight: {
+                guard refuseNextCommit else { return }
+                refuseNextCommit = false
+                throw Expected.commitRefused
+            }
+        )
+        defer { database.close() }
+        _ = try database.load()
+
+        refuseNextCommit = true
+        XCTAssertThrowsError(
+            try database.save(ProjectsState(projects: [makeProject("Rejected")]))
+        ) { error in
+            guard case Expected.commitRefused = error else {
+                return XCTFail("expected the injected commit refusal, got \(error)")
+            }
+        }
+
+        let accepted = makeProject("Accepted")
+        try database.save(ProjectsState(projects: [accepted]))
+        XCTAssertEqual(try database.load().state.projects.map(\.id), [accepted.id])
+    }
+
     /// SQLite's *extended* result codes are defined as expressions over the primary ones —
     /// `#define SQLITE_IOERR_WRITE (SQLITE_IOERR | (3<<8))` — and Swift's clang importer brings in
     /// plain integer macros only. `SQLITE_FULL` is `13` and arrives; `SQLITE_IOERR_WRITE` does not

@@ -310,6 +310,9 @@ Two changes, because either alone leaves the failure reachable.
   has moved. `removeSession` advances it too, being the other write that changes membership;
   `saveProject` and `saveSelectedSessionID` do not, because neither adds or removes a row and
   charging an expansion toggle for a counter write was the cost those paths exist to avoid.
+  The transaction returns its candidate generation and the connection publishes that value only
+  after `COMMIT`; a failed commit rolls back both the rows and the in-memory claim instead of
+  poisoning every later write as stale.
 
 A refusal is **not** `requireRecovery()`. Nothing is corrupt — the store is intact and this writer
 is merely behind it — so quarantining would take a launch's writes away over a guard that already

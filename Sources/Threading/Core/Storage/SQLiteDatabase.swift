@@ -76,13 +76,19 @@ final class SQLiteDatabase {
     // MARK: - Properties
 
     private var handle: OpaquePointer?
+    private let transactionCommitPreflight: (() throws -> Void)?
 
     /// SQLite must copy a bound string: Swift's buffer is gone by the time the statement runs.
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     // MARK: - Initialization
 
-    init(path: String, maximumSchemaVersion: Int? = nil) throws {
+    init(
+        path: String,
+        maximumSchemaVersion: Int? = nil,
+        transactionCommitPreflight: (() throws -> Void)? = nil
+    ) throws {
+        self.transactionCommitPreflight = transactionCommitPreflight
         var handle: OpaquePointer?
         let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX
 
@@ -165,6 +171,10 @@ final class SQLiteDatabase {
         try execute("BEGIN IMMEDIATE")
         do {
             let value = try body()
+            // The injectable preflight exercises the boundary after every body mutation but
+            // before COMMIT. Production supplies none; tests use it to prove owners do not
+            // publish transactional state until SQLite has accepted the commit.
+            try transactionCommitPreflight?()
             try execute("COMMIT")
             return value
         } catch {
