@@ -40,6 +40,7 @@ final class SessionInfoRenderTests: XCTestCase {
         ]
 
         static let size = NSSize(width: 420, height: 760)
+        static let narrowSize = NSSize(width: 312, height: 760)
     }
 
     // MARK: - Stories
@@ -67,7 +68,22 @@ final class SessionInfoRenderTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(written, Render.themes.count * Render.appearances.count)
+        AppThemePalette.set(.system)
+        let narrow = try XCTUnwrap(
+            panelImage(
+                appearance: .darkAqua,
+                snapshot: Self.runningFixture,
+                isRunning: true,
+                size: Render.narrowSize
+            ),
+            "Failed to render the info panel at its narrow shipping width"
+        )
+        try narrow.write(
+            to: directory.appendingPathComponent("info-panel-system-dark-narrow.png")
+        )
+        written += 1
+
+        XCTAssertEqual(written, Render.themes.count * Render.appearances.count + 1)
         print("Rendered info panel storybook to \(directory.path)")
     }
 
@@ -251,7 +267,8 @@ final class SessionInfoRenderTests: XCTestCase {
     private func panelImage(
         appearance name: NSAppearance.Name,
         snapshot: SessionInfoSnapshot,
-        isRunning: Bool
+        isRunning: Bool,
+        size: NSSize = Render.size
     ) -> Data? {
         let appearance = NSAppearance(named: name)
 
@@ -267,7 +284,7 @@ final class SessionInfoRenderTests: XCTestCase {
             controller.usageSource = { Self.usageFixture }
 
             let host = ThemedSurfaceView()
-            host.frame = NSRect(origin: .zero, size: Render.size)
+            host.frame = NSRect(origin: .zero, size: size)
             host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
             host.appearance = appearance
 
