@@ -96,6 +96,11 @@ struct SessionDraftView: View {
 }
 
 /// The one motion from draft to chat.
+enum SessionDraftMetrics {
+    /// One caption line under the folded composer: the run it is set up for.
+    static var foldedSummaryHeight: CGFloat { 18 }
+}
+
 enum SessionDraftMotion {
     /// How long the drafting screen takes to become the session's screen.
     static let startDuration: TimeInterval = 0.35
@@ -161,6 +166,8 @@ private struct SessionDraftComposerScreen: View {
     @State private var isImportingAttachmentFiles = false
     @State private var clipboardOffersFiles = false
     @State private var presentedAttachmentEvidence = false
+    @State private var speedChooserIsPresented = false
+    @State private var permissionChooserIsPresented = false
     @FocusState private var promptIsFocused: Bool
 
     /// What the empty prompt suggests. One is drawn per draft, so the set has to be large
@@ -518,7 +525,28 @@ private struct SessionDraftComposerScreen: View {
     /// harness drives and what a tap on the prompt changes; the keyboard's own announcement
     /// only brings the fold forward to the moment the keyboard starts to go.
     private var showsChoices: Bool {
-        promptIsFocused && !keyboardIsLeaving && !isSubmitting
+        ((promptIsFocused && !keyboardIsLeaving) || anyChooserIsPresented) && !isSubmitting
+    }
+
+    /// A chooser drops the keyboard for the room it needs, but it is still the composer being
+    /// edited: the strip it was opened from stays unfolded beneath it, and the prompt takes the
+    /// keyboard back when it closes, so choosing a model does not end the writing.
+    private var showsFoldedSummary: Bool {
+        !showsChoices && !isSubmitting
+    }
+
+    private var anyChooserIsPresented: Bool {
+        runPickerIsPresented || speedChooserIsPresented || permissionChooserIsPresented
+    }
+
+    /// What the folded composer says instead of nothing: the run it is set up for, in one
+    /// quiet line. Tapping it is tapping the composer.
+    private var foldedSummary: String {
+        var parts = [runSummary]
+        if selectedModel?.supportsFastMode == true { parts.append(selectedSpeedName) }
+        if !(selectedAgent?.permissionModes ?? []).isEmpty { parts.append(selectedPermissionName) }
+        if selectedAgent?.supportsConversation == true { parts.append(selectedSurfaceTitle) }
+        return parts.joined(separator: " · ")
     }
 
     private var composer: some View {
@@ -556,6 +584,26 @@ private struct SessionDraftComposerScreen: View {
                 .clipped()
                 .allowsHitTesting(showsChoices)
                 .accessibilityHidden(!showsChoices)
+            // The folded composer says what it is set up for rather than nothing. Not while
+            // starting: the strip folds for the handoff too, and a line appearing for that
+            // third of a second would read as a glitch.
+            Text(foldedSummary)
+                .font(.caption)
+                .foregroundStyle(theme.tertiaryLabel)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: showsFoldedSummary ? SessionDraftMetrics.foldedSummaryHeight : 0)
+                .padding(.top, showsFoldedSummary ? MobileDesign.Spacing.tight : 0)
+                .opacity(showsFoldedSummary ? 1 : 0)
+                .clipped()
+                .contentShape(Rectangle())
+                .onTapGesture { promptIsFocused = true }
+                .allowsHitTesting(showsFoldedSummary)
+                .accessibilityHidden(!showsFoldedSummary)
+        }
+        .onChange(of: anyChooserIsPresented) { _, presented in
+            if !presented { promptIsFocused = true }
         }
         .padding(.horizontal, MobileDesign.Spacing.composerHorizontal)
         .padding(.top, MobileDesign.Spacing.small)
@@ -591,10 +639,14 @@ private struct SessionDraftComposerScreen: View {
                 pasteFiles: stageClipboardFiles
             )
             .mobileUIEvidenceKeyboardFocus($promptIsFocused)
-            if prompt.isEmpty {
+            // Drawn here rather than by the editor: the field's own placeholder takes the
+            // system's colour, not the theme's, and disappears behind a prompt that is only
+            // whitespace — a stray newline left the phone's composer saying nothing at all.
+            if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(promptPlaceholder)
                     .font(.body)
                     .foregroundStyle(theme.tertiaryLabel)
+                    .lineLimit(1)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -829,6 +881,9 @@ private struct SessionDraftComposerScreen: View {
     /// remains the simpler independent three-way choice beside it.
     private var runMenu: some View {
         Button {
+            // A chooser needs the height the keyboard is standing on; the prompt regains focus
+            // as soon as the reader taps back into it.
+            promptIsFocused = false
             runPickerIsPresented = true
         } label: {
             DraftMenuLabel(symbol: "cpu", title: runSummary)
@@ -869,31 +924,9 @@ private struct SessionDraftComposerScreen: View {
     }
 
     private var speedMenu: some View {
-        Menu {
-            Button {
-                speedID = ""
-            } label: {
-                Label(
-                    "Inherit",
-                    systemImage: speedID.isEmpty ? "checkmark" : "arrow.triangle.branch"
-                )
-            }
-            Button {
-                speedID = "standard"
-            } label: {
-                Label(
-                    "Standard",
-                    systemImage: speedID == "standard" ? "checkmark" : "gauge.with.dots.needle.50percent"
-                )
-            }
-            Button {
-                speedID = "fast"
-            } label: {
-                Label(
-                    "Fast",
-                    systemImage: speedID == "fast" ? "checkmark" : "bolt.fill"
-                )
-            }
+        Button {
+            promptIsFocused = false
+            speedChooserIsPresented = true
         } label: {
             DraftMenuLabel(
                 symbol: selectedSpeedSymbol,
@@ -901,10 +934,56 @@ private struct SessionDraftComposerScreen: View {
                 isSet: !speedID.isEmpty
             )
         }
+        .buttonStyle(.plain)
         .id("speed-\(speedID)")
         .disabled(isSubmitting)
         .accessibilityLabel(MobileL10n.string("Speed"))
         .accessibilityValue(selectedSpeedName)
+        .popover(
+            isPresented: $speedChooserIsPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            MobileDraftChooser(
+                title: MobileL10n.string("Speed"),
+                choices: speedChoices,
+                selectedID: speedID,
+                onChoose: { choice in
+                    speedID = choice
+                    speedChooserIsPresented = false
+                }
+            )
+            .mobileTheme(theme)
+            .presentationBackground(theme.floatingSurface)
+            .presentationCornerRadius(theme.panelRadius)
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    private var speedChoices: [MobileDraftChoice] {
+        [
+            MobileDraftChoice(
+                id: "",
+                name: MobileL10n.string("Inherit"),
+                detail: MobileL10n.string("Follows the Conversation Speed setting on the Mac"),
+                symbol: MobilePermissionModeGlyph.inheritSymbol,
+                rank: nil
+            ),
+            MobileDraftChoice(
+                id: "standard",
+                name: MobileL10n.string("Standard"),
+                detail: MobileL10n.string("Normal speed and usage"),
+                symbol: "gauge.with.dots.needle.50percent",
+                rank: 0
+            ),
+            MobileDraftChoice(
+                id: "fast",
+                name: MobileL10n.string("Fast"),
+                detail: MobileL10n.string("1.5× speed, increased usage"),
+                symbol: "bolt.fill",
+                rank: 1
+            ),
+        ]
     }
 
     private var selectedSpeedName: String {
@@ -926,28 +1005,63 @@ private struct SessionDraftComposerScreen: View {
     }
 
     private var permissionMenu: some View {
-        Menu {
-            Button {
-                permissionID = ""
-            } label: {
-                Label("Inherit", systemImage: permissionID.isEmpty ? "checkmark" : "circle")
-            }
-            ForEach(selectedAgent?.permissionModes ?? []) { mode in
-                Button {
-                    permissionID = mode.id
-                } label: {
-                    Label(
-                        mode.name,
-                        systemImage: mode.id == permissionID ? "checkmark" : "hand.raised"
-                    )
-                }
-            }
+        Button {
+            promptIsFocused = false
+            permissionChooserIsPresented = true
         } label: {
-            DraftIconMenuLabel(symbol: "hand.raised", isSet: !permissionID.isEmpty)
+            DraftIconMenuLabel(symbol: selectedPermissionSymbol, isSet: !permissionID.isEmpty)
         }
+        .buttonStyle(.plain)
         .disabled(isSubmitting)
         .accessibilityLabel(MobileL10n.string("Permissions"))
         .accessibilityValue(selectedPermissionName)
+        .popover(
+            isPresented: $permissionChooserIsPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            MobileDraftChooser(
+                title: MobileL10n.string("Permissions"),
+                choices: permissionChoices,
+                selectedID: permissionID,
+                onChoose: { choice in
+                    permissionID = choice
+                    permissionChooserIsPresented = false
+                }
+            )
+            .mobileTheme(theme)
+            .presentationBackground(theme.floatingSurface)
+            .presentationCornerRadius(theme.panelRadius)
+            .presentationCompactAdaptation(.popover)
+        }
+    }
+
+    /// Inherit first, then the agent's modes in the order the Mac sends them, which is the
+    /// shared vocabulary's own: from asking before anything to checking nothing.
+    private var permissionChoices: [MobileDraftChoice] {
+        [MobileDraftChoice(
+            id: "",
+            name: MobileL10n.string("Inherit"),
+            detail: MobileL10n.string("Uses the agent's setting on the Mac"),
+            symbol: MobilePermissionModeGlyph.inheritSymbol,
+            rank: nil
+        )] + (selectedAgent?.permissionModes ?? []).map { mode in
+            MobileDraftChoice(
+                id: mode.id,
+                name: mode.name,
+                detail: mode.detail,
+                symbol: MobilePermissionModeGlyph.symbol(for: mode.id),
+                rank: MobilePermissionModeGlyph.rank(for: mode.id)
+            )
+        }
+    }
+
+    /// The chip's glyph follows the value: an open lock says Bypass where a raised hand said
+    /// only "permissions".
+    private var selectedPermissionSymbol: String {
+        permissionID.isEmpty
+            ? MobilePermissionModeGlyph.unsetSymbol
+            : MobilePermissionModeGlyph.symbol(for: permissionID)
     }
 
     private var selectedPermissionName: String {

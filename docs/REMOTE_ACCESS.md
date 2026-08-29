@@ -286,6 +286,22 @@ account/window's current inventory and nearest expiry; zero is distinct from una
 historical banked-reset marker means a credit was observed being used rather than merely being
 available. One-chat guest links cannot discover or read this whole-host data.
 
+**The sheet has two scopes, and names the one it is in.** It used to stack an all-accounts card,
+every login's windows, one login's history and the fleet's consumption in one scroll, with nothing
+to say which numbers were whose. A segmented **Accounts | Totals** control now leads, with a caption
+under it that states the scope every time. *Accounts* is per login — a horizontal rail of logins
+(a login is an account on one runtime, so the same name can appear twice with different runtimes
+under it), then only the selected login's windows and its limit history, whose window picker is
+restricted to that login. Opened from a chat — the chat menu's usage row or Chat Settings — the
+rail starts on that chat's login (`MobileUsageAccountFocus`, matched by runtime and account, then
+by account name alone since a runtime's display name can differ between the catalogue and the
+usage index); from the session list it starts on the first. *Totals* is across all logins and
+follows the shape of a raw-cost report: the figure with its footnote and the period beside it, each
+provider's share as a bar in its series colour, the days as stacked provider areas under a
+Cost/Tokens toggle, a strip of token totals each with the one line that gives it scale, the Mac's
+bounded breakdown by model, project, account or provider, and cost quality. Every place the phone
+shows usage — the list's options menu, the chat menu, Chat Settings — opens this one sheet.
+
 An open chat's **… ▸ Chat Settings** puts its operational controls beside that chat. **Account**
 shows the current login and its normalized usage, and can move a live conversation to another
 login for the same agent after warning that the running process will stop. **When the Limit Is
@@ -366,6 +382,19 @@ runtime's mark ringed by the session's login's usage fraction, joined from the c
 turn and how close it is to its limit. It is the same disc the draft's bar wears to choose that
 account, so starting a chat keeps the control where it was; a share or an older host with no
 usage to report gets the mark alone.
+
+**That menu leads with the same reading it is opened by, drawn rather than spelled out.** Its
+first row is the login, and its glyph is `MobileAccountUsageGauge` — the disc's own rings
+(`MobileAccountUsageRings`, shared by both so one reading cannot be drawn two ways) rendered
+through `ImageRenderer` into the one thing a `UIMenu` row will accept a picture in. The row used
+to read "7d 34% · Next reset in 5 hours", and the person reading it asked why a percentage was
+being spelled out under a control that draws it; the words now say only when the nearest window
+still ahead comes back, which is the part no ring can show. Two hosts keep the percentages in
+words: one that reports no reset time, and an older one that sends a summary with no window to
+ring, because a row left with a name and nothing else has lost its reason to be there
+(`MobileSessionChrome.usageMenuDetail`). VoiceOver hears the full reading either way, from the
+row's value and from the disc that opens the menu. Tapping the row opens the usage dashboard on
+that login.
 A swipe in from the right edge opens Workspace without the menu, and the menu still appears for
 any of the three permissions that used to reveal a button of its own — a share that may recolour
 a terminal without managing the session still gets it.
@@ -609,6 +638,50 @@ screen seed. The phone keeps a four-second failure escape. Compatibility remains
 older phone ignores the feature and marker; a current phone connected to an older host retains its
 one-second input-silence fallback.
 
+**A reconnect keeps the old screen until the new one has arrived whole.** Backgrounding drops the
+socket, and the reconnect on return receives the Mac's authoritative ring again, so the mounted
+SwiftTerm must be reset before that replay replaces its state. Resetting at connect time is what
+produced the resume sequence *old text → blank → "Opening chat…" → new text*. A terminal that has
+already drawn something (`hasPresentedTerminalOutput`) now holds the reset and the replay in the
+connection's buffer and delivers them together the moment hydration completes — the boundary
+above, or its timers — so the last screen becomes the new one in a single frame. While the hold
+lasts, the terminal surface stays on display dimmed and softened under a small "Reconnecting…"
+plate rather than hidden behind a full loader; a first opening, with nothing to keep, shows the
+loader on the terminal's ground as before. The hold is also released early if the SwiftTerm view
+attaches mid-reconnect (nothing to keep yet) and dropped if the connection ends first (the next one
+asks for the ring again). Separately, the session socket reconnects the moment the app becomes
+active instead of serving out a backoff that was counting while the app was suspended.
+`RemoteTerminalViewportLeaseTests` proves both the hold and the untouched first-open reset.
+
+**What the terminal shows while its content is not yet the truth is three rules, held in one
+resolver.** They were right by accident once and lost in a view change, so
+`TerminalSurfacePresentation.resolve` is where they live and `MobileTerminalPresentationTests`
+holds every row: opening a chat that has a picture of its last screen shows the picture softened,
+with the loader over it once the wait has lasted half a second; opening one with no picture shows
+the loader at once; returning to a live screen — a reconnect, or the lock from leaving the app —
+keeps the live screen softened, again with the loader only after that beat. A live screen outranks
+a stale picture, and nothing is shown over a screen that is not loading. The picture is
+`MobileTerminalSnapshotCache`: the terminal container keeps a quarter-resolution image of itself
+as it leaves its window (a pop, a surface switch), a handful of chats, dropped under memory
+pressure and never persisted, so a cold launch shows the loader.
+
+The lock starts as the app *loses the front* (`willResignActive`), not when the reconnect begins:
+on return iOS first shows its own snapshot of the app, and a lock applied on `didEnterBackground`
+raced that snapshot and let sharp old text flash. The switcher card is therefore the softened
+screen too — and the loader plate is shown only while the scene is active, so the card is the
+softened screen alone. A resign that never became a background — a paste prompt, Control Center,
+a notification pull — releases the lock the moment the app is back, nothing having happened to
+the socket. A real background is judged by its length on `didBecomeActive`: longer than thirty
+seconds reconnects outright, because the Mac has almost certainly dropped a socket the phone's
+side still thinks alive; shorter asks with one ping and a one-second deadline, so a quick app
+switch does not replay for nothing. A reconnect that was already waiting starts at once, and
+hydration completing releases the lock. A reconnect also keeps what the last hello established
+(server features, atomic-submission and input-control support, the roster) until the next hello
+replaces it: clearing them at connect time computed every terminal into the `.none` input mode
+for the reconnect, which resigned the keyboard and unmounted the line composer someone was typing
+in. `RemoteTerminalViewportLeaseTests` proves the prompt release and the long-background
+reconnect that keeps the screen.
+
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
 links were still lying around unused. That was a privacy gap and a debugging one: two clients
@@ -737,6 +810,19 @@ click (the single-tap recognizer fires on it regardless), and the second tap ans
 instead of repeating the click. With the keyboard already up, or nothing tracking, a double tap
 keeps its old meanings — the program's click and word selection respectively.
 `RemoteTerminalTapTests` pins all of it.
+
+**The keyboard comes back if the chat was left while writing, and recently.** An interactive
+terminal took the keyboard on every creation, and a return from the background kept whatever iOS
+had restored — two rules that read as none. `TerminalKeyBridge.keyboardWantedUp` is what the
+person asked for: raised whenever the terminal or the line composer takes the keyboard, lowered
+only by the bar's own dismiss; a pop, a sheet, an input-mode switch or the app going away hide
+the keyboard without touching it. The chat's continuity record keeps that answer and when it was
+given (`terminalKeyboardWasUp`, `terminalKeyboardLeftAt` — disposable, position-like fields)
+when the chat is left or the app resigns. `MobileTerminalKeyboardMemory` decides on reopening: the
+keyboard comes up only if it was wanted less than thirty minutes ago, into the terminal or the
+composer as before; otherwise a chat opens with the keyboard down. Returning from the background
+needs no memory: the terminal is no longer rebuilt on reconnect, so iOS restores the responder it
+had. `MobileTerminalPresentationTests` pins the recall.
 
 **Selecting text had to survive the thing being selected.** SwiftTerm's iOS view cleared the
 selection on every line feed whenever the program tracked the mouse — which on the phone is

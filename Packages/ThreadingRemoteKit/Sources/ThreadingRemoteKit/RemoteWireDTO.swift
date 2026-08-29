@@ -766,6 +766,14 @@ public struct RemoteAccountUsageWindowDTO: Codable, Equatable, Identifiable, Sen
 public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
+    /// The login's own address, where the Mac knows one.
+    ///
+    /// `name` is usually derived *from* this — `AccountName.derived(fromEmail:)` reads
+    /// `everlof@gmail.com` as "Everlof" — so a client showing both must check they differ. Nil
+    /// for a host predating this field, for a CLI that records no address, and for the standard
+    /// login of a CLI that only hashes it. Owner-only: the account catalogue is absent from
+    /// every guest scope.
+    public let email: String?
     public let emoji: String?
     /// For example `5h 43% · 7d 73%`.
     public let usageSummary: String?
@@ -782,6 +790,7 @@ public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable
     public init(
         id: String,
         name: String,
+        email: String? = nil,
         emoji: String? = nil,
         usageSummary: String? = nil,
         usageFraction: Double? = nil,
@@ -792,6 +801,7 @@ public struct RemoteAccountChoiceDTO: Codable, Equatable, Identifiable, Sendable
     ) {
         self.id = id
         self.name = name
+        self.email = email
         self.emoji = emoji
         self.usageSummary = usageSummary
         self.usageFraction = usageFraction

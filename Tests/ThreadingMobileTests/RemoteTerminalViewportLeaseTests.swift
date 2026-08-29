@@ -363,7 +363,83 @@ final class RemoteTerminalViewportLeaseTests: XCTestCase {
         XCTAssertEqual(view.themeApplicationCount, 1)
     }
 
+    /// A paste prompt or Control Center resigns active without the socket ever dropping: the
+    /// lock goes on (the switcher card is softened) and comes off the moment the app is back,
+    /// with no reconnect and no replay.
+    @MainActor
+    func testAPromptThatNeverBackgroundsReleasesTheLockAtOnce() {
+        let connection = Self.presentedConnection()
+        connection.noteResigningActive()
+        XCTAssertTrue(connection.isAwaitingResume)
+
+        connection.resumeAfterActivation(now: Date())
+
+        XCTAssertFalse(connection.isAwaitingResume)
+        XCTAssertFalse(connection.holdsPreviousScreen)
+        XCTAssertEqual(connection.phase, .connected)
+    }
+
+    /// A long background has almost certainly cost the socket on the Mac's side: the return
+    /// reconnects outright, keeping the last screen on display until the replay has arrived —
+    /// which, against the in-process demo Mac, is before the call returns: the held reset and
+    /// replay reach the terminal as one delivery, and the lock is released behind them.
+    @MainActor
+    func testALongBackgroundReconnectsOutrightKeepingTheScreen() {
+        let connection = Self.presentedConnection()
+        var deliveries: [Data] = []
+        connection.onTerminalOutput = { deliveries.append($0) }
+        let left = Date(timeIntervalSince1970: 1_800_000_000)
+        connection.noteResigningActive()
+        connection.noteEnteringBackground(at: left)
+        XCTAssertTrue(connection.isAwaitingResume)
+
+        connection.resumeAfterActivation(now: left.addingTimeInterval(120))
+
+        // The held frame first, opening with the reset; what the Mac paints after the viewport
+        // — the demo's whole seed, a real Mac's post-resize repaint — is live output behind it.
+        XCTAssertFalse(deliveries.isEmpty, "the reconnect reached the terminal")
+        XCTAssertEqual(deliveries.first?.prefix(2), Data([0x1b, 0x63]), "behind one reset")
+        XCTAssertGreaterThan(deliveries.reduce(0) { $0 + $1.count }, 2, "and a screen followed")
+        XCTAssertEqual(connection.phase, .connected)
+        XCTAssertFalse(connection.isTerminalHydrating)
+        XCTAssertFalse(connection.holdsPreviousScreen)
+        XCTAssertFalse(connection.isAwaitingResume, "released once the replay was in")
+    }
+
+    /// A short background asks the socket before replacing anything. The demo Mac has no socket
+    /// to ask, so the lock is released as the answer nothing could change; a real socket is
+    /// pinged with a one-second deadline.
+    @MainActor
+    func testAShortBackgroundReplaysNothingOnItsOwn() {
+        let connection = Self.presentedConnection()
+        var deliveries: [Data] = []
+        connection.onTerminalOutput = { deliveries.append($0) }
+        let left = Date(timeIntervalSince1970: 1_800_000_000)
+        connection.noteResigningActive()
+        connection.noteEnteringBackground(at: left)
+
+        connection.resumeAfterActivation(now: left.addingTimeInterval(5))
+
+        XCTAssertTrue(deliveries.isEmpty, "no replay for a background this short")
+        XCTAssertEqual(connection.phase, .connected)
+        XCTAssertFalse(connection.holdsPreviousScreen)
+    }
+
     // MARK: - Private Methods
+
+    /// A connection that has shown a screen: connected, hydrated, with a renderer attached.
+    @MainActor
+    private static func presentedConnection() -> RemoteSessionConnection {
+        let connection = demoConnection(hydrationQuietDelay: .seconds(2))
+        connection.onTerminalOutput = { _ in }
+        connection.connect()
+        connection.updateTerminalViewport(
+            cols: Fixture.entryGrid.cols,
+            rows: Fixture.entryGrid.rows
+        )
+        precondition(!connection.isTerminalHydrating && connection.hasPresentedTerminalOutput)
+        return connection
+    }
 
     @MainActor
     private static func demoConnection(

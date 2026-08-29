@@ -25,6 +25,13 @@ final class MobileSessionContinuityStore: ObservableObject {
         var conversationFollowsBottom = true
         var terminalViewportProgress: Double?
         var terminalInputPreference: MobileTerminalInputPreference?
+        /// Whether the terminal's keyboard was wanted up when the chat was last left, so it
+        /// comes back the same way. Position-like: disposable, and never a user choice in
+        /// itself.
+        var terminalKeyboardWasUp: Bool?
+        /// When that was, so the memory can expire: a keyboard wanted half an hour ago is not
+        /// wanted now.
+        var terminalKeyboardLeftAt: Double?
         var updatedAt = Date()
 
         var hasDraft: Bool { !conversationDraft.isEmpty || !terminalDraft.isEmpty }
@@ -35,6 +42,8 @@ final class MobileSessionContinuityStore: ObservableObject {
                 && conversationFollowsBottom
                 && terminalViewportProgress == nil
                 && terminalInputPreference == nil
+                && terminalKeyboardWasUp == nil
+                && terminalKeyboardLeftAt == nil
         }
     }
 
@@ -155,6 +164,13 @@ final class MobileSessionContinuityStore: ObservableObject {
     ) {
         update(hostID: hostID, sessionID: sessionID) { state in
             state.terminalInputPreference = preference
+        }
+    }
+
+    func setTerminalKeyboardUp(_ isUp: Bool, at now: Date, hostID: String, sessionID: String) {
+        update(hostID: hostID, sessionID: sessionID) { state in
+            state.terminalKeyboardWasUp = isUp
+            state.terminalKeyboardLeftAt = now.timeIntervalSince1970
         }
     }
 

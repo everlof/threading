@@ -20,6 +20,29 @@ private enum MobileUsageSection: Hashable {
     case consumption
 }
 
+/// The two things the screen can be about, and never both at once: one login, or all of them.
+/// The flat page that preceded it stacked an all-accounts card, every login's windows, one
+/// login's history and the fleet's consumption in one scroll, with nothing to say which
+/// numbers were whose.
+private enum MobileUsageScope: Hashable, CaseIterable {
+    case accounts
+    case totals
+
+    var title: String {
+        switch self {
+        case .accounts: return MobileL10n.string("Accounts")
+        case .totals: return MobileL10n.string("Totals")
+        }
+    }
+}
+
+/// The login a caller wants the screen opened on — the chat's, when the screen is reached from
+/// a chat. Matched against the limit series' own runtime and account names.
+struct MobileUsageAccountFocus: Equatable {
+    let runtimeName: String
+    let accountName: String
+}
+
 enum MobileUsageFleetProjection {
     struct Account: Equatable, Identifiable {
         let runtimeName: String
@@ -35,6 +58,26 @@ enum MobileUsageFleetProjection {
         let constrainedCount: Int
         let unknownCount: Int
         let nextReset: Double?
+    }
+
+    /// The login the rail starts on: the focused one where it exists (by runtime and account,
+    /// then by account name alone, since a runtime's display name can differ between the
+    /// catalogue and the usage index), otherwise the first.
+    static func startingAccountID(
+        in accounts: [Account],
+        focus: MobileUsageAccountFocus?
+    ) -> String? {
+        if let focus {
+            if let exact = accounts.first(where: {
+                $0.runtimeName == focus.runtimeName && $0.accountName == focus.accountName
+            }) {
+                return exact.id
+            }
+            if let byName = accounts.first(where: { $0.accountName == focus.accountName }) {
+                return byName.id
+            }
+        }
+        return accounts.first?.id
     }
 
     static func accounts(
@@ -230,13 +273,18 @@ struct RemoteUsageDashboardView: View {
     private let isDemo: Bool
     private let demoShowsStaleSnapshot: Bool
     private let demoStartsAtLimitHistory: Bool
+    private let focus: MobileUsageAccountFocus?
     @State private var overviewDays = 30
     @State private var limitDays = 30
     @State private var metric = MobileUsageMetric.cost
     @State private var actionTask: Task<Void, Never>?
+    @State private var scope = MobileUsageScope.accounts
+    @State private var breakdownKind = RemoteUsageBreakdownKindDTO.models
+    @State private var selectedAccountID: String?
 
-    init(link: RemoteConnectionLink, isDemo: Bool) {
+    init(link: RemoteConnectionLink, isDemo: Bool, focus: MobileUsageAccountFocus? = nil) {
         self.isDemo = isDemo
+        self.focus = focus
 #if DEBUG
         let environment = ProcessInfo.processInfo.environment
         demoShowsStaleSnapshot = environment[MobileDemoScene.environmentKey] == "usage-stale"
@@ -257,12 +305,16 @@ struct RemoteUsageDashboardView: View {
             ScrollViewReader { scrollProxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.large) {
-                        currentCapacity
-                            .id(MobileUsageSection.currentCapacity)
-                        limitContent
-                            .id(MobileUsageSection.limitHistory)
-                        overviewContent
-                            .id(MobileUsageSection.consumption)
+                        scopeHeader
+                        if scope == .accounts {
+                            accountsScope
+                                .id(MobileUsageSection.currentCapacity)
+                            limitContent
+                                .id(MobileUsageSection.limitHistory)
+                        } else {
+                            overviewContent
+                                .id(MobileUsageSection.consumption)
+                        }
                     }
                     .frame(maxWidth: 720)
                     .padding(.horizontal, MobileDesign.Spacing.inset)
@@ -287,6 +339,7 @@ struct RemoteUsageDashboardView: View {
                 }
             }
             .task { await model.load() }
+            .onChange(of: model.limitSeries) { _, _ in syncAccountSelection() }
             .task(id: selectedLimitTaskID) {
                 guard let id = model.selectedLimitID else { return }
                 await model.loadLimit(seriesID: id, days: limitDays)
@@ -303,12 +356,81 @@ struct RemoteUsageDashboardView: View {
         "\(model.selectedLimitID ?? "none")|\(limitDays)"
     }
 
+    private var fleetAccounts: [MobileUsageFleetProjection.Account] {
+        MobileUsageFleetProjection.accounts(from: model.limitSeries)
+    }
+
+    private var selectedAccount: MobileUsageFleetProjection.Account? {
+        let accounts = fleetAccounts
+        let id = selectedAccountID
+            ?? MobileUsageFleetProjection.startingAccountID(in: accounts, focus: focus)
+        return accounts.first { $0.id == id }
+    }
+
+    /// Keeps the rail's selection and the history's series pointing at one login: the focused
+    /// login when the series first arrive, the first login when the selected one disappears,
+    /// and the selected login's first live window whenever the history points elsewhere.
+    private func syncAccountSelection() {
+        let accounts = fleetAccounts
+        if selectedAccountID == nil || !accounts.contains(where: { $0.id == selectedAccountID }) {
+            selectedAccountID = MobileUsageFleetProjection.startingAccountID(
+                in: accounts,
+                focus: focus
+            )
+        }
+        guard let account = accounts.first(where: { $0.id == selectedAccountID }) else { return }
+        if !account.windows.contains(where: { $0.id == model.selectedLimitID }) {
+            model.selectedLimitID = preferredWindow(of: account)?.id
+        }
+    }
+
+    private func preferredWindow(
+        of account: MobileUsageFleetProjection.Account
+    ) -> RemoteUsageLimitSeriesSummaryDTO? {
+        let reference = model.dashboard?.preparedAt ?? Date().timeIntervalSince1970
+        return account.windows.first { ($0.resetsAt ?? .greatestFiniteMagnitude) > reference }
+            ?? account.windows.first
+    }
+
+    private func select(_ account: MobileUsageFleetProjection.Account) {
+        selectedAccountID = account.id
+        model.selectedLimitID = preferredWindow(of: account)?.id
+    }
+
+    private var scopeHeader: some View {
+        VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+            Picker("Scope", selection: $scope) {
+                ForEach(MobileUsageScope.allCases, id: \.self) { option in
+                    Text(option.title).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            HStack(alignment: .firstTextBaseline) {
+                Text(scopeCaption)
+                    .font(.caption)
+                    .foregroundStyle(theme.tertiaryLabel)
+                Spacer(minLength: MobileDesign.Spacing.small)
+                snapshotFreshnessBadge
+            }
+        }
+    }
+
+    /// Names the scope every time, because the same words — a percentage, a reset — mean one
+    /// login on one page and all of them on the other.
+    private var scopeCaption: String {
+        switch scope {
+        case .accounts:
+            return MobileL10n.string("Per login — its windows and history")
+        case .totals:
+            return MobileL10n.string("Across all %lld logins", Int64(fleetAccounts.count))
+        }
+    }
+
     @ViewBuilder
-    private var currentCapacity: some View {
-        let accounts = MobileUsageFleetProjection.accounts(from: model.limitSeries)
+    private var accountsScope: some View {
+        let accounts = fleetAccounts
         if accounts.isEmpty {
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-                sectionTitle("Current capacity")
                 if model.isLoading {
                     loadingCard("Loading current capacity…")
                 } else if let message = model.errorMessage {
@@ -322,35 +444,90 @@ struct RemoteUsageDashboardView: View {
             }
         } else {
             let reference = model.dashboard?.preparedAt ?? Date().timeIntervalSince1970
-            let summary = MobileUsageFleetProjection.summary(
-                for: accounts,
-                referenceTime: reference
-            )
-            VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-                sectionTitle("Current capacity")
-                UsageCard {
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
-                            Text(fleetTitle(summary))
-                                .font(.headline)
-                            Text(fleetStatus(summary))
-                                .font(.caption)
-                                .foregroundStyle(theme.secondaryLabel)
-                        }
-                        Spacer()
-                        if let reset = summary.nextReset {
-                            Text(MobileL10n.string("Next reset %@", relativeDate(reset)))
-                                .font(.caption2)
-                                .foregroundStyle(theme.tertiaryLabel)
-                        }
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
+                accountRail(accounts)
+                if let account = selectedAccount {
+                    VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                        sectionTitle("Current capacity")
+                        capacityCard(account, referenceTime: reference)
                     }
                 }
+            }
+            .onAppear(perform: syncAccountSelection)
+        }
+    }
 
-                ForEach(accounts) { account in
-                    capacityCard(account, referenceTime: reference)
+    /// One chip per login, the selected one in the accent and scrolled into view. A login is an
+    /// account on one runtime, so the same name can appear twice with different runtimes under
+    /// it, which is exactly what the rail has to make legible.
+    private func accountRail(_ accounts: [MobileUsageFleetProjection.Account]) -> some View {
+        let selectedID = selectedAccount?.id
+        return ScrollViewReader { proxy in
+            // The rail runs edge to edge with the page inset as scroll-content margins: a chip
+            // at either end then keeps air around its stroke instead of meeting the clip edge,
+            // which shaved the selected chip's accent border and its corner.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MobileDesign.Spacing.small) {
+                    ForEach(accounts) { account in
+                        accountChip(account, isSelected: account.id == selectedID)
+                            .id(account.id)
+                    }
+                }
+                .padding(.vertical, MobileDesign.Spacing.hairline)
+            }
+            .contentMargins(.horizontal, MobileDesign.Spacing.inset, for: .scrollContent)
+            .padding(.horizontal, -MobileDesign.Spacing.inset)
+            .onAppear {
+                if let selectedID { proxy.scrollTo(selectedID, anchor: .center) }
+            }
+            .onChange(of: selectedID) { _, id in
+                guard let id else { return }
+                withAnimation(.easeOut(duration: MobileDesign.Motion.controlResponse)) {
+                    proxy.scrollTo(id, anchor: .center)
                 }
             }
         }
+    }
+
+    private func accountChip(
+        _ account: MobileUsageFleetProjection.Account,
+        isSelected: Bool
+    ) -> some View {
+        Button {
+            select(account)
+        } label: {
+            HStack(spacing: MobileDesign.Spacing.small) {
+                Image(systemName: "sparkles")
+                    .font(.caption)
+                    .foregroundStyle(isSelected ? theme.accent : theme.secondaryLabel)
+                VStack(alignment: .leading, spacing: MobileDesign.Spacing.hairline / 2) {
+                    Text(account.accountName)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(isSelected ? theme.label : theme.secondaryLabel)
+                    Text(account.runtimeName)
+                        .font(.caption2)
+                        .foregroundStyle(theme.tertiaryLabel)
+                }
+            }
+            .lineLimit(1)
+            .padding(.horizontal, MobileDesign.Spacing.medium)
+            .frame(height: MobileDesign.Size.minimumTapTarget)
+            .background(
+                isSelected ? theme.controlHover : theme.panel,
+                in: RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
+                    .stroke(
+                        isSelected ? theme.accent : theme.border,
+                        lineWidth: isSelected ? max(theme.borderWidth, 1) : theme.borderWidth
+                    )
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(account.accountName), \(account.runtimeName)")
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private func capacityCard(
@@ -466,22 +643,12 @@ struct RemoteUsageDashboardView: View {
 
     @ViewBuilder
     private var overviewContent: some View {
-        sectionTitle("Consumption")
-        HStack(spacing: MobileDesign.Spacing.small) {
-            rangePicker(selection: $overviewDays)
-            Picker("Metric", selection: $metric) {
-                ForEach(MobileUsageMetric.allCases, id: \.self) { option in
-                    Text(option.title).tag(option)
-                }
-            }
-            .pickerStyle(.segmented)
-        }
-
         if let range = model.dashboard?.ranges.first(where: { $0.days == overviewDays }) {
-            overviewHero(range)
-            providerList(range)
-            totals(range)
-            coverage
+            totalsHero(range)
+            dailyChart(range)
+            statsStrip(range)
+            breakdown(range)
+            costQuality(range)
             UsageCard {
                 VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
                     Text("About these numbers")
@@ -496,6 +663,7 @@ struct RemoteUsageDashboardView: View {
                     }
                 }
             }
+            coverage
         } else if model.isLoading {
             loadingCard("Preparing Usage…")
         } else if let message = model.errorMessage {
@@ -510,144 +678,296 @@ struct RemoteUsageDashboardView: View {
         }
     }
 
-    private func overviewHero(_ range: RemoteUsageRangeDTO) -> some View {
+    /// One figure, what it stands for, and the providers behind it — each with its share of
+    /// the figure as a bar in its own colour. The range sits beside the eyebrow, the way a
+    /// period belongs to a total rather than to a chart.
+    private func totalsHero(_ range: RemoteUsageRangeDTO) -> some View {
         let projection = metricProjection(range)
+        let total = metric == .cost ? range.cost.totalUSD : Double(range.tokens.processed)
         return UsageCard {
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(MobileL10n.string(metric == .cost ? "Raw token cost" : "Processed tokens"))
+                        .font(.caption.weight(.semibold))
+                        .textCase(.uppercase)
+                        .kerning(0.6)
+                        .foregroundStyle(theme.secondaryLabel)
+                    Spacer(minLength: MobileDesign.Spacing.small)
+                    rangePicker(selection: $overviewDays)
+                        .fixedSize()
+                }
                 VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(MobileL10n.string(
-                            metric == .cost ? "Measured token cost" : "Processed tokens"
-                        ))
-                            .font(.subheadline)
-                            .foregroundStyle(theme.secondaryLabel)
-                        Spacer()
-                        snapshotFreshnessBadge
-                    }
-                    Text(metricValue(metric == .cost ? range.cost.totalUSD : Double(range.tokens.processed)))
-                        .font(.system(.largeTitle, design: .rounded, weight: .bold))
-                        .minimumScaleFactor(0.7)
+                    Text(metricValue(total))
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.6)
                         .lineLimit(1)
                     Text(qualityLine(range))
                         .font(.caption)
-                        .foregroundStyle(theme.secondaryLabel)
+                        .foregroundStyle(theme.tertiaryLabel)
                 }
-
-                Chart {
-                    ForEach(projection.chartSeries, id: \.id) { series in
-                        ForEach(series.points, id: \.at) { point in
-                            BarMark(
-                                x: .value("Day", Date(timeIntervalSince1970: point.at), unit: .day),
-                                y: .value(metric.title, point.value)
-                            )
-                            .foregroundStyle(seriesColor(series.styleIndex, isOther: series.isOther))
+                if !projection.providers.isEmpty {
+                    Divider().overlay(theme.divider)
+                    VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
+                        ForEach(projection.providers, id: \.id) { provider in
+                            VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Label {
+                                        Text(provider.name).lineLimit(1)
+                                    } icon: {
+                                        Circle()
+                                            .fill(seriesColor(provider.styleIndex, isOther: false))
+                                            .frame(width: 8, height: 8)
+                                    }
+                                    .font(.subheadline.weight(.semibold))
+                                    Spacer(minLength: MobileDesign.Spacing.small)
+                                    Text(metricValue(
+                                        metric == .cost
+                                            ? provider.costUSD
+                                            : Double(provider.tokens.processed)
+                                    ))
+                                    .font(.subheadline.weight(.semibold))
+                                    .monospacedDigit()
+                                }
+                                ProgressView(value: providerShare(provider, total: total))
+                                    .tint(seriesColor(provider.styleIndex, isOther: false))
+                                Text(providerDetail(provider, total: total))
+                                    .font(.caption)
+                                    .foregroundStyle(theme.secondaryLabel)
+                            }
                         }
                     }
                 }
+            }
+        }
+    }
+
+    /// The days of the period as stacked areas, one per provider, under the metric toggle.
+    private func dailyChart(_ range: RemoteUsageRangeDTO) -> some View {
+        let projection = metricProjection(range)
+        let legend = projection.chartSeries.map { series in
+            (title: series.title ?? MobileL10n.string("Other"),
+             color: seriesColor(series.styleIndex, isOther: series.isOther))
+        }
+        return UsageCard {
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(MobileL10n.string(metric == .cost ? "Daily cost" : "Daily tokens"))
+                        .font(.headline)
+                    Spacer(minLength: MobileDesign.Spacing.small)
+                    Picker("Metric", selection: $metric) {
+                        ForEach(MobileUsageMetric.allCases, id: \.self) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                }
+                Chart {
+                    ForEach(projection.chartSeries, id: \.id) { series in
+                        ForEach(series.points, id: \.at) { point in
+                            AreaMark(
+                                x: .value("Day", Date(timeIntervalSince1970: point.at), unit: .day),
+                                y: .value(metric.title, point.value)
+                            )
+                            .foregroundStyle(by: .value("Provider", series.title ?? MobileL10n.string("Other")))
+                            .interpolationMethod(.monotone)
+                            LineMark(
+                                x: .value("Day", Date(timeIntervalSince1970: point.at), unit: .day),
+                                y: .value(metric.title, point.value)
+                            )
+                            .foregroundStyle(by: .value("Provider", series.title ?? MobileL10n.string("Other")))
+                            .interpolationMethod(.monotone)
+                            .lineStyle(StrokeStyle(lineWidth: 1.5))
+                        }
+                    }
+                }
+                .chartForegroundStyleScale(
+                    domain: legend.map(\.title),
+                    range: legend.map(\.color)
+                )
+                .chartLegend(.hidden)
                 .chartXAxis {
-                    AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                    AxisMarks(values: .automatic(desiredCount: 3)) { _ in
                         AxisGridLine().foregroundStyle(theme.divider)
                         AxisValueLabel(format: .dateTime.month(.abbreviated).day())
+                            .foregroundStyle(theme.tertiaryLabel)
                     }
                 }
                 .chartYAxis(.hidden)
-                .frame(height: 210)
+                .frame(height: 180)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Daily \(metric.title.lowercased()) chart")
                 .accessibilityValue(chartSummary(projection))
-
-                LazyVGrid(
-                    columns: [GridItem(.adaptive(minimum: 108), spacing: 8)],
-                    alignment: .leading,
-                    spacing: 8
-                ) {
-                    ForEach(projection.chartSeries, id: \.id) { series in
+                HStack(spacing: MobileDesign.Spacing.medium) {
+                    ForEach(legend, id: \.title) { entry in
                         Label {
-                            Text(series.title ?? MobileL10n.string("Other"))
-                                .lineLimit(1)
+                            Text(entry.title).lineLimit(1)
                         } icon: {
-                            Circle()
-                                .fill(seriesColor(series.styleIndex, isOther: series.isOther))
-                                .frame(width: 7, height: 7)
+                            Circle().fill(entry.color).frame(width: 7, height: 7)
                         }
                         .font(.caption)
                         .foregroundStyle(theme.secondaryLabel)
                     }
-                }
-
-                HStack {
-                    Label("\(range.records) requests", systemImage: "arrow.trianglehead.2.clockwise")
-                    Spacer()
+                    Spacer(minLength: 0)
                     Text("\(range.activeDayCount) active days")
+                        .font(.caption)
+                        .foregroundStyle(theme.tertiaryLabel)
                 }
-                .font(.caption)
-                .foregroundStyle(theme.secondaryLabel)
             }
         }
     }
 
-    private func providerList(_ range: RemoteUsageRangeDTO) -> some View {
-        let projection = metricProjection(range)
-        let total = metric == .cost ? range.cost.totalUSD : Double(range.tokens.processed)
-        return VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-            Text("Providers")
-                .font(.headline)
-                .padding(.horizontal, MobileDesign.Spacing.small)
-            UsageCard {
-                LazyVStack(spacing: 0) {
-                    ForEach(Array(projection.providers.enumerated()), id: \.element.id) { index, provider in
-                        if index > 0 { Divider().overlay(theme.divider) }
-                        VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+    /// The token totals as a strip the thumb runs along, each with the one line that gives
+    /// its number a scale.
+    private func statsStrip(_ range: RemoteUsageRangeDTO) -> some View {
+        let tokens = range.tokens
+        let observedInput = Double(tokens.cachedInput + tokens.uncachedInput)
+        let cards: [(title: String, value: String, detail: String?)] = [
+            (MobileL10n.string("Processed tokens"), compact(Double(tokens.processed)),
+             range.activeDayCount > 0
+                 ? MobileL10n.string("%@ per active day",
+                                     compact(Double(tokens.processed) / Double(range.activeDayCount)))
+                 : nil),
+            (MobileL10n.string("Cached input"), compact(Double(tokens.cachedInput)),
+             observedInput > 0
+                 ? MobileL10n.string("%@ of observed input",
+                                     percent(Double(tokens.cachedInput) / observedInput))
+                 : nil),
+            (MobileL10n.string("Uncached input"), compact(Double(tokens.uncachedInput)),
+             MobileL10n.string("%@ cache writes", compact(Double(tokens.cacheWrite)))),
+            (MobileL10n.string("Output"), compact(Double(tokens.output)),
+             MobileL10n.string("Includes %@ reasoning", compact(Double(tokens.reasoning)))),
+            (MobileL10n.string("Cache savings"), compactCurrency(range.cost.cacheSavingsUSD),
+             range.cost.totalUSD > 0
+                 ? MobileL10n.string("%@× the raw token cost",
+                                     String(format: "%.1f", range.cost.cacheSavingsUSD / range.cost.totalUSD))
+                 : nil),
+        ]
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: MobileDesign.Spacing.small) {
+                ForEach(cards, id: \.title) { card in
+                    UsageMetricCard(title: card.title, value: card.value, detail: card.detail)
+                        .frame(width: 156)
+                }
+            }
+            .padding(.horizontal, MobileDesign.Spacing.hairline)
+        }
+        .scrollClipDisabled()
+    }
+
+    /// Where the figure went, by model, project or account, in the Mac's own bounded rows.
+    @ViewBuilder
+    private func breakdown(_ range: RemoteUsageRangeDTO) -> some View {
+        let available = range.breakdowns
+        if !available.isEmpty {
+            let current = available.first { $0.kind == breakdownKind } ?? available[0]
+            let total = metric == .cost ? range.cost.totalUSD : Double(range.tokens.processed)
+            VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                HStack(alignment: .firstTextBaseline) {
+                    sectionTitle("Breakdown")
+                    Spacer(minLength: MobileDesign.Spacing.small)
+                    if available.count > 1 {
+                        Picker("Breakdown", selection: $breakdownKind) {
+                            ForEach(available, id: \.kind) { breakdown in
+                                Text(breakdownTitle(breakdown.kind)).tag(breakdown.kind)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                    }
+                }
+                UsageCard {
+                    LazyVStack(spacing: 0) {
+                        HStack {
+                            Text(breakdownTitle(current.kind))
+                            Spacer()
+                            Text(metric.title)
+                                .frame(width: 88, alignment: .trailing)
+                            Text(MobileL10n.string("Share"))
+                                .frame(width: 56, alignment: .trailing)
+                        }
+                        .font(.caption)
+                        .foregroundStyle(theme.tertiaryLabel)
+                        .padding(.bottom, MobileDesign.Spacing.small)
+                        ForEach(Array(current.rows.enumerated()), id: \.offset) { index, row in
+                            if index > 0 { Divider().overlay(theme.divider) }
+                            let value = metric == .cost ? row.costUSD : Double(row.tokens)
                             HStack {
-                                Label {
-                                    Text(provider.name).lineLimit(1)
-                                } icon: {
-                                    Circle()
-                                        .fill(seriesColor(provider.styleIndex, isOther: false))
-                                        .frame(width: 8, height: 8)
-                                }
+                                Text(row.title)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                Spacer(minLength: MobileDesign.Spacing.small)
+                                Text(metricValue(value))
+                                    .monospacedDigit()
+                                    .frame(width: 88, alignment: .trailing)
+                                Text(total > 0 ? percent(value / total) : MobileUsageDefaults.unknownValue)
+                                    .monospacedDigit()
+                                    .foregroundStyle(theme.secondaryLabel)
+                                    .frame(width: 56, alignment: .trailing)
+                            }
+                            .font(.subheadline)
+                            .padding(.vertical, MobileDesign.Spacing.small)
+                        }
+                        if current.omittedRowCount > 0 {
+                            Divider().overlay(theme.divider)
+                            HStack {
+                                Text(MobileL10n.string("+%lld more", Int64(current.omittedRowCount)))
                                 Spacer()
                                 Text(metricValue(
-                                    metric == .cost
-                                        ? provider.costUSD
-                                        : Double(provider.tokens.processed)
+                                    metric == .cost ? current.omittedCostUSD : Double(current.omittedTokens)
                                 ))
                                 .monospacedDigit()
                             }
-                            ProgressView(value: providerShare(provider, total: total))
-                                .tint(seriesColor(provider.styleIndex, isOther: false))
-                            Text(providerDetail(provider, total: total))
-                                .font(.caption)
-                                .foregroundStyle(theme.secondaryLabel)
+                            .font(.caption)
+                            .foregroundStyle(theme.tertiaryLabel)
+                            .padding(.top, MobileDesign.Spacing.small)
                         }
-                        .padding(.vertical, MobileDesign.Spacing.medium)
                     }
                 }
             }
         }
     }
 
-    private func totals(_ range: RemoteUsageRangeDTO) -> some View {
-        let values: [(String, String)] = [
-            (MobileL10n.string("Processed tokens"), compact(Double(range.tokens.processed))),
-            (MobileL10n.string("Cached input"), compact(Double(range.tokens.cachedInput))),
-            (MobileL10n.string("Uncached input"), compact(Double(range.tokens.uncachedInput))),
-            (MobileL10n.string("Cache writes"), compact(Double(range.tokens.cacheWrite))),
-            (MobileL10n.string("Output"), compact(Double(range.tokens.output))),
-            (MobileL10n.string("Reasoning"), compact(Double(range.tokens.reasoning))),
+    private func breakdownTitle(_ kind: RemoteUsageBreakdownKindDTO) -> String {
+        switch kind {
+        case .models: return MobileL10n.string("Models")
+        case .projects: return MobileL10n.string("Projects")
+        case .accounts: return MobileL10n.string("Accounts")
+        case .providers: return MobileL10n.string("Providers")
+        }
+    }
+
+    /// How much of the figure is measured, how much estimated, and what the cache saved.
+    private func costQuality(_ range: RemoteUsageRangeDTO) -> some View {
+        let total = range.cost.totalUSD
+        let rows: [(String, String)] = [
+            (MobileL10n.string("Provider reported"),
+             total > 0 ? percent(range.cost.providerReportedUSD / total) : MobileUsageDefaults.unknownValue),
+            (MobileL10n.string("Model priced"),
+             total > 0 ? percent(range.cost.catalogPricedUSD / total) : MobileUsageDefaults.unknownValue),
+            (MobileL10n.string("Unpriced"),
+             range.tokens.processed > 0
+                 ? percent(Double(range.cost.unpricedTokens) / Double(range.tokens.processed))
+                 : MobileUsageDefaults.unknownValue),
             (MobileL10n.string("Cache savings"), compactCurrency(range.cost.cacheSavingsUSD)),
-            (MobileL10n.string("Unpriced tokens"), compact(Double(range.cost.unpricedTokens))),
         ]
         return VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-            Text("Totals")
-                .font(.headline)
-                .padding(.horizontal, MobileDesign.Spacing.small)
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 142), spacing: MobileDesign.Spacing.small)],
-                spacing: MobileDesign.Spacing.small
-            ) {
-                ForEach(values, id: \.0) { value in
-                    UsageMetricCard(title: value.0, value: value.1, detail: nil)
+            sectionTitle("Cost quality")
+            UsageCard {
+                LazyVStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { index, row in
+                        if index > 0 { Divider().overlay(theme.divider) }
+                        HStack {
+                            Text(row.0)
+                                .foregroundStyle(theme.secondaryLabel)
+                            Spacer()
+                            Text(row.1)
+                                .monospacedDigit()
+                        }
+                        .font(.subheadline)
+                        .padding(.vertical, MobileDesign.Spacing.small)
+                    }
                 }
             }
         }
@@ -711,29 +1031,21 @@ struct RemoteUsageDashboardView: View {
             sectionTitle("Limit history")
             UsageCard {
                 VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
-                    Menu {
-                        ForEach(model.limitSeries) { series in
-                            Button {
-                                model.selectedLimitID = series.id
-                            } label: {
-                                if series.id == model.selectedLimitID {
-                                    Label(series.title, systemImage: "checkmark")
-                                } else {
-                                    Text(series.title)
-                                }
+                    if let account = selectedAccount, account.windows.count > 1 {
+                        Picker("Window", selection: Binding(
+                            get: { model.selectedLimitID ?? "" },
+                            set: { model.selectedLimitID = $0 }
+                        )) {
+                            ForEach(account.windows) { window in
+                                Text(window.windowLabel).tag(window.id)
                             }
                         }
-                    } label: {
-                        if let selected = model.limitSeries.first(where: {
-                            $0.id == model.selectedLimitID
-                        }) {
-                            UsageSeriesSelectionLabel(series: selected)
-                        } else {
-                            Label("Choose account", systemImage: "person.crop.circle")
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        .pickerStyle(.segmented)
+                    } else if let selected = model.limitSeries.first(where: {
+                        $0.id == model.selectedLimitID
+                    }) {
+                        UsageSeriesSelectionLabel(series: selected)
                     }
-                    .tint(theme.accent)
                     rangePicker(selection: $limitDays)
                 }
             }

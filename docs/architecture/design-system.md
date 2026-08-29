@@ -48,6 +48,22 @@ that lookup because their strings have already passed through
 “General” from accidentally borrowing Threading's translation. Stable page IDs, setting IDs,
 command IDs, values, and schemas are never localized.
 
+**The string catalogues are deterministic.** An Xcode build runs `xcstringstool sync`, which
+rewrites a whole `.xcstrings` in its own layout whenever the catalogue's model changes and marks
+every key the compiler cannot see as stale — which is every key here, because copy reaches the
+compiler through `L10n`/`MobileL10n` rather than `String(localized:)`. One Run rewrote 60,000
+lines of both catalogues and appended 15 keys extracted from raw SwiftUI literals without
+Swedish, so the *next* build failed the localization lint. Both `Localizable.xcstrings` files
+therefore declare every entry `extractionState: manual` (the sync never touches a manual entry;
+stale entries would still compile, but the marking is the churn) and are kept byte-identical to
+what the tool writes: keys sorted by code point, two-space indent, `"key" : value` separators,
+no trailing newline. `scripts/localization_boundary_lint.py` fails the build until a catalogue is
+in that form, reports duplicate keys (JSON readers silently keep the last one, which is how two
+Swedish sentences once shipped for one key), and `--format` restores everything. Add a key by
+editing the JSON any way you like, then run
+`python3 scripts/localization_boundary_lint.py . --format`. A sync over the formatted files was
+verified to change nothing, so a build leaves the working tree exactly as it found it.
+
 The global command palette is a design-system surface, not menu chrome rebuilt in feature code.
 `CommandPaletteViewController` uses `ThemedSearchField`, `ThemedTableView`, `ThemedScrollView` and
 `ThemedSurfaceView`; its table owns the viewport while descriptor values remain lightweight. The

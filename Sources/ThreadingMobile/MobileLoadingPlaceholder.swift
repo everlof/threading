@@ -16,11 +16,15 @@ import SwiftUI
 struct MobileLoadingPlaceholder: View {
     @Environment(\.remoteTheme) private var theme
     private let message: String
+    /// A loader standing over content that is still worth seeing — a terminal reconnecting
+    /// behind it — paints a small plate under its words instead of the whole ground.
+    private let standsOnContent: Bool
 
     /// The message arrives localized. The key belongs at the call site, where the sentence is
     /// chosen, so the localization lint audits it there rather than losing it behind a view.
-    init(_ message: String) {
+    init(_ message: String, standsOnContent: Bool = false) {
         self.message = message
+        self.standsOnContent = standsOnContent
     }
 
     var body: some View {
@@ -33,10 +37,26 @@ struct MobileLoadingPlaceholder: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, MobileDesign.Spacing.large)
         }
+        .padding(standsOnContent ? MobileDesign.Spacing.large : 0)
+        .background {
+            if standsOnContent {
+                RoundedRectangle(cornerRadius: theme.panelRadius, style: .continuous)
+                    .fill(theme.floatingSurface.opacity(0.9))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: theme.panelRadius, style: .continuous)
+                            .stroke(theme.border, lineWidth: theme.borderWidth)
+                    }
+            }
+        }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Bottom only: every screen that shows this puts it last, so the ground reaches the
         // home indicator rather than stopping on a black strip. Letting it ignore the top too
-        // would let the colour rise over a sibling header drawn before it.
-        .background(theme.ground.ignoresSafeArea(edges: .bottom))
+        // would let the colour rise over a sibling header drawn before it. A loader standing
+        // on content paints no ground at all: the content is the ground.
+        .background {
+            if !standsOnContent {
+                theme.ground.ignoresSafeArea(edges: .bottom)
+            }
+        }
     }
 }

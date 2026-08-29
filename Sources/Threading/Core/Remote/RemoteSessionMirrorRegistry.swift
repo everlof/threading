@@ -695,6 +695,7 @@ final class RemoteSessionMirrorRegistry {
                     return RemoteAccountChoiceDTO(
                         id: account.handle.name,
                         name: accountNames[account.id] ?? account.displayName,
+                        email: RemoteAccountBridge.email(for: account),
                         emoji: account.emoji,
                         usageSummary: usage?.compactSummary(metering: model),
                         usageFraction: usage?.bindingWindow(metering: model)?.fraction,

@@ -85,6 +85,15 @@ enum MobileDesign {
         /// three rings sit 17, 14 and 11 points from the disc's centre and clear its 16-point mark.
         static let usageRingGap: CGFloat = 1
         static let usageRingPitch: CGFloat = badgeStroke + usageRingGap
+        /// The same rings as a menu row's glyph. A menu draws its image in the column beside the
+        /// label, at about the size of a symbol on that line: three rings at the disc's pitch
+        /// still clear one another here, and drawing them any larger only has the menu scale
+        /// them back down.
+        static let usageMenuGauge: CGFloat = 20
+        /// A stroke is centred on the circle it follows, so the outermost ring reaches half a
+        /// stroke past the frame. `ImageRenderer` clips to the content it was given; this is the
+        /// room that keeps the outer ring whole.
+        static let usageMenuGaugeInset: CGFloat = badgeStroke / 2
         /// Fixed leading column used by the stacked terminal presence/control/activity rows.
         static let terminalStatusIconColumn: CGFloat = 24
 
@@ -124,6 +133,10 @@ enum MobileDesign {
         /// How far the account chip hangs past the mark's corner. Flush inside the tile it covered
         /// the middle of the mark; hanging it out keeps the mark recognisable underneath.
         static let accountChipOverhang: CGFloat = 3
+        /// The same chip on the chat's toolbar disc. Flush with the disc's corner rather than
+        /// hanging past it: a navigation bar clips its item's own bounds, and every overhang
+        /// tried came back with a flat-bottomed badge. Flush is the whole circle.
+        static let accountChipDiscOverhang: CGFloat = 0
         /// How far the attention dot hangs past the mark's top-trailing corner so that its
         /// centre sits on the tile's edge — the midpoint of the corner arc, not the corner of the
         /// bounding box, which on a rounded tile floats the dot off the ink.
@@ -684,6 +697,18 @@ struct RemoteThemePalette: Equatable {
     var uiNegative: UIColor { uiColor("status_negative", fallback: "#D87878") }
     var uiDiffAdded: UIColor { uiColor("diff_added", fallback: "#55B978") }
     var uiDiffRemoved: UIColor { uiColor("diff_removed", fallback: "#D87878") }
+
+    /// A usage window's colour by how close it is to its limit.
+    ///
+    /// One answer for both drawings of a reading: the toolbar disc rings it in `Color`, the chat
+    /// menu's gauge is rendered from the same view, and a limit means the same thing in each.
+    func usageTint(for fraction: Double?) -> Color {
+        switch MobileUsageSeverity.from(fraction: fraction) {
+        case .normal: return positive
+        case .warning: return warning
+        case .critical: return negative
+        }
+    }
 
     /// Adaptive identity colours for categorical data such as providers or accounts.
     ///

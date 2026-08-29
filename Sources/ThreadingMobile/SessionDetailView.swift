@@ -132,15 +132,109 @@ enum MobileSessionChrome {
     static func showsSessionMenu(canManageSessions: Bool, canChooseTerminalTheme: Bool) -> Bool {
         canManageSessions || canChooseTerminalTheme
     }
+
+    /// The login's address, when it is worth a second line.
+    ///
+    /// Nil when the catalogue sends none, and nil when it *is* the name: `AccountName` derives
+    /// the person from the address and falls back to the address itself when two logins derive
+    /// the same person, so a row can be handed "everlof@gmail.com" as both. Printing it twice
+    /// would look like a bug in the app rather than a fact about the account.
+    static func usageMenuAddress(for account: RemoteAccountChoiceDTO) -> String? {
+        guard let email = account.email?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !email.isEmpty,
+              email.compare(account.name, options: .caseInsensitive) != .orderedSame else {
+            return nil
+        }
+        return email
+    }
+
+    /// The chat menu leads with the account's usage when there is either a gauge to draw or a
+    /// reading to spell out. A login with neither is left to Chat Settings rather than given a
+    /// row that says only its own name.
+    static func showsUsageMenuRow(reading: MobileAccountUsageReading?) -> Bool {
+        guard let reading else { return false }
+        return !reading.rings.isEmpty || reading.summary != nil
+    }
+
+    /// What that row says under the login's name.
+    ///
+    /// The gauge beside it carries the percentages, so the words are spent on the one thing a
+    /// ring cannot show: when the nearest window still ahead comes back. Two cases keep the
+    /// reading in words instead — a host that sends no reset time, and one that sends no window
+    /// to ring — because a row reduced to a name and an undrawable gauge has lost the reason it
+    /// is in the menu.
+    static func usageMenuDetail(
+        reading: MobileAccountUsageReading,
+        windows: [RemoteAccountUsageWindowDTO]?,
+        now: Date = Date()
+    ) -> String {
+        let nextReset = (windows ?? [])
+            .compactMap(\.resetsAt)
+            .map { Date(timeIntervalSince1970: $0) }
+            .filter { $0 > now }
+            .min()
+        guard let nextReset, !reading.rings.isEmpty else {
+            // A gauge with no words at all is a host that sent a fraction and no reading; the
+            // row keeps the dash the rest of the app uses for a value it does not know rather
+            // than an empty second line.
+            return reading.summary ?? MobileUsageDefaults.unknownValue
+        }
+        // Relative to the same instant the window ahead was chosen against, and in the usage
+        // dashboard's own words for the same fact. `Date.formatted(.relative:)` is always
+        // relative to the real clock instead, which is a second reading of "now" in one line.
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return MobileL10n.string(
+            "Next reset %@",
+            formatter.localizedString(for: nextReset, relativeTo: now)
+        )
+    }
+}
+
+/// **Scaffolding.** The shapes the chat menu's account block is being tried in, so all four can
+/// be photographed from one build. Ships as `.reset`; a DEBUG run names another through
+/// `THREADING_MOBILE_USAGE_MENU`. Delete with the three shapes that are not chosen.
+enum MobileUsageMenuShape: String {
+    /// What ships today: the login, and when its nearest window comes back.
+    case reset
+    /// The address joined onto the same line.
+    case address
+    /// The login and its address as their own row, then usage as a second.
+    case split
+    /// The address as the section's heading, over the usage row.
+    case header
+
+    static var current: MobileUsageMenuShape {
+#if DEBUG
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_USAGE_MENU"]
+            .flatMap(MobileUsageMenuShape.init(rawValue:)) ?? .reset
+#else
+        .reset
+#endif
+    }
+}
+
+enum SessionDetailMetrics {
+    /// How the last terminal screen stands under the reconnect loader.
+    static var reconnectDim: Double { 0.55 }
+    static var reconnectBlurRadius: CGFloat { 6 }
+    static var reconnectRevealDuration: TimeInterval { 0.25 }
+    /// How long a reconnect may take before its plate says so. A quick one never shows a
+    /// spinner: the dim is the lock, the plate is "this is taking a moment".
+    static var reconnectPlateDelay: Duration { .milliseconds(500) }
 }
 
 struct SessionDetailView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
+    /// The menu's usage glyph is a rendered picture rather than a symbol, so it is rendered for
+    /// the screen it will be shown on.
+    @Environment(\.displayScale) private var displayScale
     let session: RemoteSessionSummaryDTO
     let openingStrategy: MobileSessionOpeningStrategy
     @StateObject private var workspaceActivity: MobileWorkspaceActivity
     @State private var connection: RemoteSessionConnection?
+    @State private var isShowingUsage = false
     @State private var launchError: String?
     @State private var themeError: String?
     @State private var isChangingTheme = false
@@ -216,7 +310,8 @@ struct SessionDetailView: View {
                         SessionActionsToolbarIcon(
                             activity: workspaceActivity,
                             identity: .resolve(currentSession.agentKind),
-                            reading: sessionUsageReading
+                            reading: sessionUsageReading,
+                            account: currentSession.account
                         )
                     }
                     .accessibilityLabel(
@@ -266,6 +361,12 @@ struct SessionDetailView: View {
             )
             .environmentObject(model)
             .mobileTheme(theme)
+        }
+        .sheet(isPresented: $isShowingUsage) {
+            if let link = model.activeHost?.link {
+                RemoteUsageDashboardView(link: link, isDemo: model.isDemo, focus: usageFocus)
+                    .mobileTheme(theme)
+            }
         }
         .task {
             await open()
@@ -350,6 +451,15 @@ struct SessionDetailView: View {
     /// of the two is reached often enough to spend a permanent slot on.
     @ViewBuilder
     private var sessionMenuContent: some View {
+        // The disc that opens this menu is ringed by the account's usage; the row leads with
+        // that same drawing at glyph size, says when the nearest window comes back, and takes
+        // the reader to the dashboard for the rest.
+        if let account = sessionAccount,
+           let reading = sessionUsageReading,
+           MobileSessionChrome.showsUsageMenuRow(reading: reading) {
+            usageMenuRows(account: account, reading: reading)
+            Divider()
+        }
         if canOpenWorkspace {
             Button(action: openWorkspace) {
                 Label("Workspace", systemImage: "square.grid.2x2")
@@ -490,6 +600,92 @@ struct SessionDetailView: View {
     /// window rings a Fable chat and no other.
     private var sessionUsageReading: MobileAccountUsageReading? {
         MobileAccountUsageReading.resolve(account: sessionAccount, model: currentSession.model)
+    }
+
+    /// The usage screen opens on this chat's login.
+    private var usageFocus: MobileUsageAccountFocus? {
+        guard let account = sessionAccount,
+              let agent = model.me?.newSessionCatalog?.agents.first(where: {
+                  $0.id == currentSession.agentKind
+              }) else { return nil }
+        return MobileUsageAccountFocus(runtimeName: agent.name, accountName: account.name)
+    }
+
+    /// The menu's account block, in whichever shape is being tried.
+    ///
+    /// **Scaffolding.** Four shapes are kept side by side only long enough to photograph them
+    /// and choose one; `MobileUsageMenuShape.current` is `.reset` — what ships — unless a DEBUG
+    /// run names another. Collapse this to the chosen shape before it goes anywhere.
+    @ViewBuilder
+    private func usageMenuRows(
+        account: RemoteAccountChoiceDTO,
+        reading: MobileAccountUsageReading
+    ) -> some View {
+        let detail = MobileSessionChrome.usageMenuDetail(
+            reading: reading,
+            windows: account.usageWindows
+        )
+        let address = MobileSessionChrome.usageMenuAddress(for: account)
+        switch MobileUsageMenuShape.current {
+        case .reset:
+            usageRow(title: account.name, detail: detail, reading: reading)
+        case .address:
+            usageRow(
+                title: account.name,
+                detail: [address, detail]
+                    .compactMap { $0 }
+                    .joined(separator: MobileUsageDefaults.segmentSeparator),
+                reading: reading
+            )
+        case .split:
+            Button {
+                isShowingSessionSettings = true
+            } label: {
+                Text(account.name)
+                Text(address ?? MobileL10n.string("Account"))
+                Image(systemName: "person.crop.circle")
+            }
+            .disabled(!canOpenSessionSettings)
+            usageRow(title: MobileL10n.string("Usage"), detail: detail, reading: reading)
+        case .header:
+            Section(address ?? account.name) {
+                usageRow(title: account.name, detail: detail, reading: reading)
+            }
+        }
+    }
+
+    /// One row: the login, what is left to say in words, and the reading drawn beside them.
+    private func usageRow(
+        title: String,
+        detail: String,
+        reading: MobileAccountUsageReading
+    ) -> some View {
+        Button {
+            isShowingUsage = true
+        } label: {
+            // Title, subtitle, glyph: the menu's own two-line item, which a `Label`
+            // does not become.
+            Text(title)
+            Text(detail)
+            usageMenuGlyph(for: reading)
+        }
+        // The rings carry the percentages now. VoiceOver still hears them, here and on the
+        // disc that opens this menu, because a gauge read aloud is not a reading.
+        .accessibilityLabel(title)
+        .accessibilityValue(reading.summary ?? "")
+    }
+
+    /// The reading as the menu row's glyph: its rings, or the gauge symbol when a host reports
+    /// usage in words alone and there is nothing to ring.
+    private func usageMenuGlyph(for reading: MobileAccountUsageReading) -> Image {
+        guard let gauge = MobileAccountUsageGauge.image(
+            for: reading,
+            theme: theme,
+            scale: displayScale
+        ) else {
+            return Image(systemName: "gauge.with.dots.needle.67percent")
+        }
+        return Image(uiImage: gauge)
     }
 
     /// The catalogue's row for the login this chat runs on, which is where its usage lives —
@@ -709,6 +905,8 @@ private struct SessionActionsToolbarIcon: View {
     @ObservedObject var activity: MobileWorkspaceActivity
     let identity: MobileAgentIdentity
     let reading: MobileAccountUsageReading?
+    /// Only for a chat on an alternate login; see `MobileAccountDisc.account`.
+    let account: RemoteSessionAccountDTO?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.remoteTheme) private var theme
@@ -745,7 +943,7 @@ private struct SessionActionsToolbarIcon: View {
     /// mark is not a symbol, so the breath is a scale phase rather than a symbol effect.
     @ViewBuilder
     private var disc: some View {
-        let disc = MobileAccountDisc(identity: identity, reading: reading)
+        let disc = MobileAccountDisc(identity: identity, reading: reading, account: account)
         if reduceMotion {
             disc
         } else {
@@ -830,7 +1028,10 @@ private struct RemoteNavigationTitle: View {
 
     private var label: String {
         switch connection.phase {
-        case .connecting: return MobileL10n.string("Opening chat…")
+        case .connecting:
+            return connection.hasEverConnected
+                ? MobileL10n.string("Reconnecting…")
+                : MobileL10n.string("Opening chat…")
         case .connected:
             return model.activeHost?.name ?? MobileL10n.string("Connected")
         case .ended(let reason): return reason
@@ -845,6 +1046,10 @@ struct TerminalRemoteView: View {
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @Environment(\.remoteTheme) private var inheritedTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var waitedLongEnough = false
+    @State private var openingSnapshot: UIImage?
     @State private var showsAttentionRequest = false
     @State private var showsKeyboardEditor = false
     @State private var directAttachmentTray: ComposerAttachmentTray?
@@ -873,6 +1078,49 @@ struct TerminalRemoteView: View {
 
     private var theme: RemoteThemePalette {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
+    }
+
+    /// Hydrating after a connect, or locked from the moment the app lost the front until the
+    /// socket proved itself again — one span from the reader's side.
+    private var isCatchingUp: Bool {
+        connection.isTerminalHydrating || connection.isAwaitingResume
+    }
+
+    /// A reconnect keeps the live screen; the lock from leaving the app does too.
+    private var keepsLiveScreen: Bool {
+        connection.holdsPreviousScreen || connection.isAwaitingResume
+    }
+
+    private var presentation: TerminalSurfacePresentation {
+        TerminalSurfacePresentation.resolve(
+            isLoading: isCatchingUp,
+            keepsLiveScreen: keepsLiveScreen,
+            hasSnapshot: openingSnapshot != nil,
+            waitedLongEnough: waitedLongEnough
+        )
+    }
+
+    private var isLockedLive: Bool {
+        if case .lockedLive = presentation { return true }
+        return false
+    }
+
+    /// The loader over a softened screen is owed only once the wait has lasted a beat, and
+    /// only while the person is looking — the switcher card is the softened screen alone.
+    private var wantsLoaderTimer: Bool {
+        presentation.delaysLoader && scenePhase == .active
+    }
+
+    private var terminalOpacity: Double {
+        switch presentation {
+        case .live: return 1
+        case .lockedLive: return SessionDetailMetrics.reconnectDim
+        case .snapshot, .loader: return 0
+        }
+    }
+
+    private var openingStatus: String {
+        MobileSessionChrome.openingStatus(isAvailable: true, routeWalk: model.routeWalkStatus)
     }
 
     private var terminalBackground: Color {
@@ -930,7 +1178,8 @@ struct TerminalRemoteView: View {
                 TerminalLineComposer(
                     connection: connection,
                     bridge: keyBridge,
-                    quotes: $selectionQuotes
+                    quotes: $selectionQuotes,
+                    focusesOnAppear: rememberedTerminalKeyboardUp
                 )
             }
             if allowsDirectInput, !selectionQuotes.isEmpty {
@@ -981,6 +1230,11 @@ struct TerminalRemoteView: View {
         .onAppear(perform: restoreInputPreference)
         .onAppear(perform: configureDirectAttachments)
         .onAppear(perform: seedSelectionQuotesForEvidence)
+        .onAppear { keyBridge.seedKeyboardWanted(rememberedTerminalKeyboardUp) }
+        .onDisappear(perform: rememberTerminalKeyboard)
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
+        ) { _ in rememberTerminalKeyboard() }
         .onChange(of: model.client != nil) { _, _ in
             configureDirectAttachments()
         }
@@ -1041,17 +1295,59 @@ struct TerminalRemoteView: View {
             onFontSizeChange: { terminalFontSize = $0 },
             initialScrollProgress: initialTerminalScrollProgress,
             onScrollProgress: saveTerminalViewport,
-            quoteSelection: inputMode == .none ? nil : addSelectionQuote
+            quoteSelection: inputMode == .none ? nil : addSelectionQuote,
+            focusesOnCreation: rememberedTerminalKeyboardUp
         )
-        .opacity(connection.isTerminalHydrating ? 0 : 1)
+        .opacity(terminalOpacity)
+        .blur(
+            radius: isLockedLive && !reduceMotion ? SessionDetailMetrics.reconnectBlurRadius : 0
+        )
         .overlay {
-            if connection.isTerminalHydrating {
-                MobileLoadingPlaceholder(MobileSessionChrome.openingStatus(
-                    isAvailable: true,
-                    routeWalk: model.routeWalkStatus
-                ))
+            switch presentation {
+            case .live:
+                EmptyView()
+            case .lockedLive(let showsLoader):
+                if showsLoader {
+                    MobileLoadingPlaceholder(MobileL10n.string("Reconnecting…"), standsOnContent: true)
+                }
+            case .snapshot(let showsLoader):
+                ZStack {
+                    if let openingSnapshot {
+                        Image(uiImage: openingSnapshot)
+                            .resizable()
+                            .scaledToFill()
+                            .blur(radius: reduceMotion ? 0 : SessionDetailMetrics.reconnectBlurRadius)
+                            .opacity(SessionDetailMetrics.reconnectDim)
+                            .clipped()
+                    }
+                    if showsLoader {
+                        MobileLoadingPlaceholder(openingStatus, standsOnContent: true)
+                    }
+                }
                 .background(terminalBackground)
+            case .loader:
+                MobileLoadingPlaceholder(openingStatus)
+                    .background(terminalBackground)
             }
+        }
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: SessionDetailMetrics.reconnectRevealDuration),
+            value: presentation
+        )
+        .task(id: wantsLoaderTimer) {
+            guard wantsLoaderTimer else {
+                waitedLongEnough = false
+                return
+            }
+            try? await Task.sleep(for: SessionDetailMetrics.reconnectPlateDelay)
+            guard !Task.isCancelled else { return }
+            waitedLongEnough = true
+        }
+        .onAppear {
+            openingSnapshot = MobileTerminalSnapshotCache.shared.image(for: connection.session.id)
+        }
+        .onChange(of: presentation) { _, now in
+            if now == .live { openingSnapshot = nil }
         }
         .background(terminalBackground)
         // `TerminalViewRepresentable` owns this inset inside its stable-width UIKit host. Keeping
@@ -1076,6 +1372,28 @@ struct TerminalRemoteView: View {
         }
 #endif
         return nil
+    }
+
+    /// The keyboard comes back if this chat was left while writing, and recently; otherwise a
+    /// chat opens with the keyboard down. Returning from the background needs no memory: the
+    /// terminal is not rebuilt, so iOS restores the responder it had.
+    private var rememberedTerminalKeyboardUp: Bool {
+        guard let hostID = model.activeHostID else { return false }
+        let state = continuity.state(hostID: hostID, sessionID: connection.session.id)
+        return MobileTerminalKeyboardMemory.opensKeyboard(
+            wasUp: state.terminalKeyboardWasUp,
+            leftAt: state.terminalKeyboardLeftAt
+        )
+    }
+
+    private func rememberTerminalKeyboard() {
+        guard let hostID = model.activeHostID else { return }
+        continuity.setTerminalKeyboardUp(
+            keyBridge.keyboardWantedUp,
+            at: Date(),
+            hostID: hostID,
+            sessionID: connection.session.id
+        )
     }
 
     private func saveTerminalViewport(_ progress: Double) {
@@ -1108,7 +1426,7 @@ struct TerminalRemoteView: View {
 
     private func toggleInputPreference() {
         guard canChooseInputPreference else { return }
-        keyBridge.dismissKeyboard()
+        keyBridge.dismissKeyboardForModeSwitch()
         let next: MobileTerminalInputPreference = inputPreference == .direct ? .compose : .direct
         selectedInputPreference = next
         saveInputPreference(next)
@@ -1474,6 +1792,9 @@ private struct TerminalLineComposer: View {
     @ObservedObject var connection: RemoteSessionConnection
     @ObservedObject var bridge: TerminalKeyBridge
     @Binding var quotes: [RemoteTerminalSelectionQuote]
+    /// Writing here was writing in this chat: a chat left mid-draft opens with the composer
+    /// focused again, within the keyboard memory's recall.
+    var focusesOnAppear = false
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
     @Environment(\.remoteTheme) private var theme
@@ -1602,6 +1923,10 @@ private struct TerminalLineComposer: View {
         }
         .onAppear(perform: restoreDraft)
         .onAppear(perform: configureAttachments)
+        .onAppear { if focusesOnAppear { draftIsFocused = true } }
+        .onChange(of: draftIsFocused) { _, focused in
+            if focused { bridge.noteKeyboardWanted() }
+        }
         .onAppear(perform: refreshClipboardOffer)
         // A pasteboard written in another app raises no notification here, so returning to the
         // foreground is the moment that has to ask again; the local notification covers a copy

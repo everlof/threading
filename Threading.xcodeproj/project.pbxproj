@@ -57,6 +57,7 @@
 		A20000010000000000000020 /* BorderBeamKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000011 /* BorderBeamKit */; };
 		A39A300DF9F7CA8D21A7B7C3 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 724489E037A877AC092F16DE /* main.swift */; };
 		A61100010000000000000001 /* RemoteUsageDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61100010000000000000002 /* RemoteUsageDashboardTests.swift */; };
+		A61100010000000000000103 /* MobileTerminalPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61100010000000000000104 /* MobileTerminalPresentationTests.swift */; };
 		A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61200010000000000000002 /* RemoteConversationStoreTests.swift */; };
 		A61300010000000000000001 /* SessionDashboardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61300010000000000000002 /* SessionDashboardTests.swift */; };
 		A61400010000000000000001 /* MobileCollaborationPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */; };
@@ -274,6 +275,7 @@
 		A20000010000000000000002 /* ThreadingMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ThreadingMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000010000000000000015 /* Sources/Threading/AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Sources/Threading/AppIcon.icon; sourceTree = "<group>"; };
 		A61100010000000000000002 /* RemoteUsageDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteUsageDashboardTests.swift; sourceTree = "<group>"; };
+		A61100010000000000000104 /* MobileTerminalPresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileTerminalPresentationTests.swift; sourceTree = "<group>"; };
 		A61200010000000000000002 /* RemoteConversationStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteConversationStoreTests.swift; sourceTree = "<group>"; };
 		A61300010000000000000002 /* SessionDashboardTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SessionDashboardTests.swift; sourceTree = "<group>"; };
 		A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileCollaborationPresentationTests.swift; sourceTree = "<group>"; };
@@ -600,6 +602,7 @@
 				A63400010000000000000002 /* RemoteHostDiscoveryTests.swift */,
 				A61200010000000000000002 /* RemoteConversationStoreTests.swift */,
 				A61100010000000000000002 /* RemoteUsageDashboardTests.swift */,
+				A61100010000000000000104 /* MobileTerminalPresentationTests.swift */,
 				A61300010000000000000002 /* SessionDashboardTests.swift */,
 				A61400010000000000000002 /* MobileCollaborationPresentationTests.swift */,
 				A61500010000000000000002 /* MobileSessionChromeTests.swift */,
@@ -1315,6 +1318,7 @@
 				A63400010000000000000001 /* RemoteHostDiscoveryTests.swift in Sources */,
 				A61200010000000000000001 /* RemoteConversationStoreTests.swift in Sources */,
 				A61100010000000000000001 /* RemoteUsageDashboardTests.swift in Sources */,
+				A61100010000000000000103 /* MobileTerminalPresentationTests.swift in Sources */,
 				A61300010000000000000001 /* SessionDashboardTests.swift in Sources */,
 				A61400010000000000000001 /* MobileCollaborationPresentationTests.swift in Sources */,
 				A61500010000000000000001 /* MobileSessionChromeTests.swift in Sources */,

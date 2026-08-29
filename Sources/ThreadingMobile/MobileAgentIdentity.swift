@@ -1,5 +1,6 @@
 import SwiftUI
 import ThreadingRemoteKit
+import UIKit
 
 // MARK: - Mobile Agent Identity
 
@@ -313,6 +314,29 @@ enum MobileUsageDefaults {
     static let bindingRingID = "binding"
     static let segmentSeparator = " · "
     static let unknownValue = "—"
+    /// Quiet until three quarters, alarming only when the window is nearly spent — the Mac's
+    /// `UsageDefaults` thresholds, so one reading is one colour on both.
+    static let warningFraction = 0.75
+    static let criticalFraction = 0.9
+}
+
+/// How close a window is to its limit, as a colour rather than a number.
+///
+/// Named once because two drawings now answer it: the toolbar disc's rings and the chat menu's
+/// gauge are the same reading at two sizes, and a threshold written twice is a threshold that
+/// drifts.
+enum MobileUsageSeverity {
+    case normal
+    case warning
+    case critical
+
+    static func from(fraction: Double?) -> MobileUsageSeverity {
+        switch fraction ?? 0 {
+        case ..<MobileUsageDefaults.warningFraction: return .normal
+        case ..<MobileUsageDefaults.criticalFraction: return .warning
+        default: return .critical
+        }
+    }
 }
 
 // MARK: - Mobile Account Disc
@@ -332,6 +356,19 @@ struct MobileAccountDisc: View {
     /// Nil, or a reading with no rings, draws the mark alone: a share, or a host that does not
     /// report usage.
     let reading: MobileAccountUsageReading?
+    /// The chip a row would wear, for a chat on a login that is not the CLI's default one.
+    ///
+    /// Nil is the ordinary case and the Mac decides it, not this view: `RemoteAccountBridge`
+    /// sends a session's account only when the chat runs somewhere other than the standard
+    /// login, which is exactly when saying *which* login is worth a badge. Passing it here puts
+    /// the disc in the bar under the same rule as the mark in a row.
+    ///
+    /// **Unlike a row's, this chip is drawn inside the disc rather than hanging off it.** A
+    /// navigation bar clips its item at the item's own bounds, so the row's three-point overhang
+    /// came out as a badge with a flat bottom — 13 points of 15, measured off the screen, and 9
+    /// at a wider overhang. Padding the item does not buy the room back; only staying inside the
+    /// frame does. `MobileSessionMark` keeps its overhang, because a row clips nothing.
+    var account: RemoteSessionAccountDTO?
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
@@ -340,44 +377,143 @@ struct MobileAccountDisc: View {
                 .fill(theme.controlResting)
             MobileAgentMarkGlyph(identity: identity)
             if let reading {
-                ForEach(Array(reading.rings.enumerated()), id: \.element.id) { depth, ring in
-                    let tint = usageTint(for: ring.fraction ?? 0)
-                    let inset = CGFloat(depth) * MobileDesign.Size.usageRingPitch
-                    Circle()
-                        .stroke(
-                            tint.opacity(MobileDesign.Opacity.usageRingTrack),
-                            lineWidth: MobileDesign.Size.badgeStroke
-                        )
-                        .padding(inset)
-                    if let fraction = ring.fraction {
-                        Circle()
-                            .trim(from: 0, to: min(max(fraction, 0), 1))
-                            .stroke(
-                                tint,
-                                style: StrokeStyle(
-                                    lineWidth: MobileDesign.Size.badgeStroke,
-                                    lineCap: .round
-                                )
-                            )
-                            .padding(inset)
-                            .rotationEffect(.degrees(-90))
-                    }
-                }
+                MobileAccountUsageRings(reading: reading, theme: theme)
             }
         }
         .frame(
             width: MobileDesign.Size.compactControl,
             height: MobileDesign.Size.compactControl
         )
+        .overlay(alignment: .bottomTrailing) {
+            if let account {
+                MobileAccountChip(account: account)
+                    .offset(
+                        x: MobileAccountDiscChipOverhang.current,
+                        y: MobileAccountDiscChipOverhang.current
+                    )
+            }
+        }
         .contentShape(Circle())
     }
+}
 
-    /// A ring's colour by how close its window is to its limit — the thresholds the draft's
-    /// identity capsule used for its usage text.
-    private func usageTint(for fraction: Double) -> Color {
-        if fraction >= 0.9 { return theme.negative }
-        if fraction >= 0.75 { return theme.warning }
-        return theme.positive
+/// **Scaffolding.** How far the login chip hangs past the toolbar disc, so both candidates can be
+/// photographed from one build. `.rows` is the value a row's tile uses; `.clear` hangs it out far
+/// enough to stay off the usage arcs. Delete with the one that is not chosen.
+enum MobileAccountDiscChipOverhang {
+    static var current: CGFloat {
+#if DEBUG
+        if let value = ProcessInfo.processInfo.environment["THREADING_MOBILE_DISC_CHIP"],
+           let points = Double(value) {
+            return CGFloat(points)
+        }
+        return MobileDesign.Offset.accountChipDiscOverhang
+#else
+        MobileDesign.Offset.accountChipDiscOverhang
+#endif
+    }
+}
+
+// MARK: - Mobile Account Usage Rings
+
+/// One account's reading as rings, and nothing else: no disc under them and no mark inside them.
+///
+/// Split out of `MobileAccountDisc` when the chat menu's usage row wanted the same drawing at
+/// its own size. The rings are the drawing; where they are drawn — around the toolbar's mark,
+/// or into a menu glyph — is the caller's business.
+///
+/// The theme is passed rather than read from the environment because one of those callers is
+/// `ImageRenderer`, which renders outside the view tree and inherits none of it.
+struct MobileAccountUsageRings: View {
+    let reading: MobileAccountUsageReading
+    let theme: RemoteThemePalette
+
+    var body: some View {
+        ZStack {
+            ringLayers
+        }
+    }
+
+    @ViewBuilder
+    private var ringLayers: some View {
+        ForEach(Array(reading.rings.enumerated()), id: \.element.id) { depth, ring in
+            let tint = theme.usageTint(for: ring.fraction)
+            let inset = CGFloat(depth) * MobileDesign.Size.usageRingPitch
+            Circle()
+                .stroke(
+                    tint.opacity(MobileDesign.Opacity.usageRingTrack),
+                    lineWidth: MobileDesign.Size.badgeStroke
+                )
+                .padding(inset)
+            if let fraction = ring.fraction {
+                Circle()
+                    .trim(from: 0, to: min(max(fraction, 0), 1))
+                    .stroke(
+                        tint,
+                        style: StrokeStyle(
+                            lineWidth: MobileDesign.Size.badgeStroke,
+                            lineCap: .round
+                        )
+                    )
+                    .padding(inset)
+                    .rotationEffect(.degrees(-90))
+            }
+        }
+    }
+}
+
+// MARK: - Mobile Account Usage Gauge
+
+/// The rings as a picture, for the one place that cannot hold a view: a menu row.
+///
+/// `UIMenu` builds its own rows out of a title, a subtitle and an image, so a chat menu's usage
+/// row could only ever spell its reading out — "7d 34% · Next reset in 5 hours" — and a person
+/// reading that asked for the percentage as a graphic instead. The image, though, may be any
+/// picture at all. This renders the reading the disc that opened the menu is already ringed by,
+/// so the row is labelled by the same drawing at glyph size and its words are freed for what a
+/// ring cannot say.
+///
+/// Rendered rather than drawn again in Core Graphics: `MobileAccountUsageRings` is the one
+/// definition of what a reading looks like, and a second one would drift from it.
+enum MobileAccountUsageGauge {
+
+    /// What the last picture was drawn from. A `Menu`'s content is built with the body that
+    /// holds it, not when it is opened, so a chat streaming output rebuilds this row many times
+    /// a second while nothing about the reading has changed. One entry is the whole cache: a
+    /// screen has one login, and a reading that moves has replaced the one before it.
+    private struct Drawn: Equatable {
+        let reading: MobileAccountUsageReading
+        let theme: RemoteThemePalette
+        let scale: CGFloat
+    }
+
+    @MainActor private static var lastDrawn: Drawn?
+    @MainActor private static var lastImage: UIImage?
+
+    /// Nil when there is nothing to draw — a reading with no rings, which is a host that reports
+    /// usage in words only. The caller keeps the words in that case.
+    @MainActor
+    static func image(
+        for reading: MobileAccountUsageReading,
+        theme: RemoteThemePalette,
+        scale: CGFloat
+    ) -> UIImage? {
+        guard !reading.rings.isEmpty else { return nil }
+        let drawn = Drawn(reading: reading, theme: theme, scale: scale)
+        if drawn == lastDrawn, let lastImage { return lastImage }
+        let side = MobileDesign.Size.usageMenuGauge
+        let renderer = ImageRenderer(
+            content: MobileAccountUsageRings(reading: reading, theme: theme)
+                .frame(width: side, height: side)
+                .padding(MobileDesign.Size.usageMenuGaugeInset)
+        )
+        renderer.scale = max(scale, 1)
+        // The severity tints are the point of the drawing; a menu would otherwise paint the
+        // whole glyph in its own tint colour and every reading would look alike.
+        let image = renderer.uiImage?.withRenderingMode(.alwaysOriginal)
+        lastDrawn = image == nil ? nil : drawn
+        lastImage = image
+        return image
     }
 }
 
