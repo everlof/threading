@@ -605,6 +605,7 @@ external data reaches eager AppKit work.
 | Resolved | Git Review watched refresh | A build can expose ~9,000 generated files / ~80,000 changed lines and refresh repeatedly. The pane now reconciles stable paths in place, anchors by path + within-row offset, and defers model/height mutations until live scrolling ends. A scroller-thumb drag uses geometry-preserving identity rows and materializes full TextKit only for the resting viewport. |
 | Resolved | Git Review during live resize | The 8,985-file fixture now drives 48 distinct widths through the real layout callback. Complete-index height invalidation averages 6.08 ms, with 6.66 ms p95 and 10.49 ms max, while preserving correct offscreen wrapping estimates and scrollbar extent. |
 | Resolved | Session status card provider, usage and attachment scale | Checkout bursts debounce for 500 ms; provider reads cache the unchanged branch + HEAD for 15 seconds and poll every 30 seconds only while checks are pending. Transcript usage scans and lifetime-cell indexing run off-main; a refresh visits only the selected parent/child identities, remembers 32 recent sessions, and retains six model details. The card itself stays fixed-row. Subagents annotates its existing virtualized rows. Attachment projection bounds before view configuration at three recent rows plus one optional View all route, independent of the session's attachment count. |
+| Resolved | Live run plans in terminal, Chat and remote clients | Terminal hooks and transcript catch-up share one serial off-main reducer and call-id dedupe set. JSONL scanning resumes from a persistent byte cursor, reads bounded passes, and resets only when the file changes identity or truncates; ANSI and emulator rows are never scanned. Provider admission retains at most 256 steps, 4,096 UTF-8 bytes per title, 1,024 per identifier, 512 pending incremental mutations and 4,096 observed mutations per turn; violations withdraw the plan instead of retaining a partial or stale projection. The compact Mac surfaces retain one summary. Full Mac checklists use reusable table rows, while remote clients receive one summary plus revision-bound 64-row pages and iOS materializes them through `LazyVStack`. Turn end sends an authoritative clear rather than retaining a historical plan. |
 | Resolved | Account settings cold discovery | A fresh-process fixture separates real home-directory/login-marker/shell-alias discovery from page construction. Five accounts take 6.61 ms to discover, 12.31 ms to render and 8.14 ms to lay out; the seven-second cache makes subsequent callers lock-cheap. |
 | Resolved | Accounts settings inventory | Provider discovery has no view-layer ceiling. Accounts and their closed limit folds are value rows in one grouped table; a 120-account fixture exceeds 240 rows while materializing less than half the inventory and passing the theme-boundary audit. |
 | Resolved | Usage Windows account fleet | The settings page keeps stable account-row identities. A 120-account fixture scrolls into the fleet, then proves an account-usage or poke event evaluates only the named account instead of rebuilding every row. |
@@ -741,10 +742,21 @@ constraints. Project and extension-settings events refresh the value model and r
 viewport. Extension-contributed fields targeting Archived remain individual rows in the same
 scroll owner rather than becoming a nested page.
 
+Search keeps that boundary. The fixed `ThemedSearchField` snapshots only title and project into
+small `Sendable` records, and a cancellable detached scan returns matching indices to the main
+actor. A query presents every matching identity through the same virtual table instead of
+constructing the folded-away rows; clearing it restores the ten-row fold. Thus query work is
+linear in archive count and value-only, while AppKit construction, layout and retained hierarchy
+remain bounded by the viewport. The expected case is tens to hundreds of conversations; the
+existing 1,000-row stress is the implementation-time gate. Do not move row construction, relative
+date formatting or contributed settings work into the search task.
+
 `SettingsDisclosureRenderTests.testStressArchivedPreferencesWhenEnabled` manufactures its archive
 before the clock starts, then reports controller/view load, model render, first layout, disclosure,
-jump to the end, an unchanged project event at that end, hierarchy size and footprint. It also
-asserts the clip origin is unchanged. Run both themes with
+jump to the end, an unchanged project event at that end, hierarchy size and footprint. Its
+`search_ms` phase scans the same 1,000 value records for a match at the end before AppKit mounts,
+and the test asserts that exact source identity returns. It also asserts the clip origin is
+unchanged. Run both themes with
 `scripts/profile_threading.sh archived-settings-stress`; the workload is part of `full`.
 
 Fresh Debug processes measured:

@@ -81,6 +81,11 @@ reshuffling it is a line move.
   implementable now with no consent surface; the upload backend shares the
   [hosted remote service](hosted-remote-service.md)'s deployment gate, and the whole feature is
   gated on the brand decision it is designed to keep true: nothing leaves without your action.
+- [External event automations](external-event-automations.md) — let incoming email and Sentry
+  issues start accountable read-only agent chats and later managed draft-PR runs. Provider-neutral
+  event envelopes, user-owned rules, automation grants and durable deduplication keep untrusted
+  event content separate from authority. The first useful slice is Mac-online connected-mailbox
+  and Sentry polling; forwarding addresses and public webhooks later share the hosted service gate.
 
 ### Gated — blocked on something named
 

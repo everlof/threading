@@ -46,6 +46,17 @@ struct TranscriptToolCallScan: Equatable, Sendable {
     let endOffset: UInt64
 }
 
+enum TranscriptRunProgressEvent: Sendable {
+    case turnStarted
+    case toolUse(id: String, tool: ToolIdentity, input: [String: JSONValue])
+    case result(ToolResult)
+}
+
+struct TranscriptRunProgressScan: Sendable {
+    let events: [TranscriptRunProgressEvent]
+    let endOffset: UInt64
+}
+
 /// Rebuilds a past conversation from the transcript its agent keeps on disk.
 ///
 /// A resumed session picks up with its full context, but the CLI replays none of it down the
@@ -229,6 +240,46 @@ enum TranscriptReplay {
         return TranscriptToolCallScan(calls: calls, endOffset: endOffset)
     }
 
+    /// Incrementally reads only the records capable of changing a run checklist. User-message
+    /// boundaries are retained so a first scan of a long existing transcript cannot surface the
+    /// previous turn's final plan as the current turn's plan.
+    static func runProgressEvents(
+        at url: URL,
+        kind: AgentKind,
+        from offset: UInt64,
+        limit: Int = ReplayDefaults.workScanCalls
+    ) -> TranscriptRunProgressScan {
+        guard let format = TranscriptReplayFormat(kind: kind) else {
+            return TranscriptRunProgressScan(events: [], endOffset: offset)
+        }
+
+        var events: [TranscriptRunProgressEvent] = []
+        let endOffset = JSONLReader.forEachRecord(
+            at: url,
+            from: offset,
+            limit: ReplayDefaults.scanLimit
+        ) { record in
+            guard let stream = event(from: record, format: format) else { return true }
+            switch stream {
+            case .userMessage:
+                events.append(.turnStarted)
+            case .assistantMessage(let blocks):
+                for block in blocks {
+                    guard case .toolUse(let id, let tool, let input) = block,
+                          tool == .plan || tool == .todoWrite
+                            || tool == .taskCreate || tool == .taskUpdate else { continue }
+                    events.append(.toolUse(id: id, tool: tool, input: input))
+                }
+            case .toolResults(let results):
+                events.append(contentsOf: results.map(TranscriptRunProgressEvent.result))
+            default:
+                break
+            }
+            return events.count < limit
+        }
+        return TranscriptRunProgressScan(events: events, endOffset: endOffset)
+    }
+
     /// The assistant prose in the newest transcript turn, in conversational order.
     ///
     /// Terminal TUIs do not necessarily let the emulator perform wrapping. Codex, for example,
@@ -326,12 +377,14 @@ enum TranscriptReplay {
                   record["isSidechain"] as? Bool != true,
                   let message = record["message"] as? [String: Any],
                   let usage = message["usage"] as? [String: Any] else { return nil }
-            let input = (usage["input_tokens"] as? NSNumber)?.intValue
-            let cacheRead = (usage["cache_read_input_tokens"] as? NSNumber)?.intValue
-            let cacheCreation = (usage["cache_creation_input_tokens"] as? NSNumber)?.intValue
+            let input = contextTerm(usage["input_tokens"])
+            let cacheRead = contextTerm(usage["cache_read_input_tokens"])
+            let cacheCreation = contextTerm(usage["cache_creation_input_tokens"])
             guard input != nil || cacheRead != nil || cacheCreation != nil else { return nil }
-            let output = (usage["output_tokens"] as? NSNumber)?.intValue
-            let tokens = (input ?? 0) + (cacheRead ?? 0) + (cacheCreation ?? 0) + (output ?? 0)
+            let output = contextTerm(usage["output_tokens"])
+            guard let tokens = sum(of: [input, cacheRead, cacheCreation, output]) else {
+                return nil
+            }
             return (tokens, nil)
 
         case .codex:
@@ -339,9 +392,65 @@ enum TranscriptReplay {
                   payload["type"] as? String == "token_count",
                   let info = payload["info"] as? [String: Any],
                   let last = info["last_token_usage"] as? [String: Any],
-                  let tokens = (last["total_tokens"] as? NSNumber)?.intValue else { return nil }
-            return (tokens, (info["model_context_window"] as? NSNumber)?.intValue)
+                  let tokens = contextTerm(last["total_tokens"])?.count else { return nil }
+            return (tokens, contextTerm(info["model_context_window"])?.count)
         }
+    }
+
+    /// One term of a context reading: the key was absent (`nil`), it held a count, or it held a
+    /// number this app cannot hold.
+    private enum ContextTerm {
+        case tokens(Int)
+        case unreadable
+
+        /// The count, where an unreadable term costs only itself — right for the context window
+        /// beside a Codex reading, which is an adjunct and absent often enough already. It is
+        /// the wrong rule for a term of the sum, which `sum(of:)` handles instead.
+        var count: Int? {
+            guard case .tokens(let value) = self else { return nil }
+            return value
+        }
+    }
+
+    /// One `usage` term, read the way `NSNumber.intValue` read it before — a boolean counts as
+    /// one token and a fractional count truncates toward zero, both preserved — except that a
+    /// number outside `Int` is `.unreadable` rather than a wrapped negative.
+    ///
+    /// A value that is not a number at all stays *absent*, which is the answer the `as? NSNumber`
+    /// cast this replaced already gave. A quoted count is a separate finding of its own and is
+    /// deliberately neither fixed nor made worse here.
+    private static func contextTerm(_ value: Any?) -> ContextTerm? {
+        guard let number = value as? NSNumber else { return nil }
+        guard let count = WireInteger.wholeInt(number) else { return .unreadable }
+        return .tokens(count)
+    }
+
+    /// The terms added up, or nil when no number here is worth showing anyone.
+    ///
+    /// **A term that is there and unreadable makes the whole reading unknown, and the addition
+    /// must not be allowed to trap.** This is where the crash was: `int64Value` handed two
+    /// wrapped negatives to Swift's `+` and the overflow trapped the process — reachable by
+    /// opening a conversation whose transcript file holds an oversized `*_tokens` value, and
+    /// repeatable every time it was opened. Overflow-safe addition removes the trap; refusing
+    /// the reading is what makes the answer honest afterwards, because dropping the bad term
+    /// would understate how full the window is with nothing to say it had, and clamping it would
+    /// invent a number the provider never sent. Every caller already treats a missing reading as
+    /// ordinary, so refusing costs one status line and no correctness.
+    private static func sum(of terms: [ContextTerm?]) -> Int? {
+        var total = 0
+        for term in terms {
+            switch term {
+            case nil:
+                continue
+            case .unreadable?:
+                return nil
+            case .tokens(let count)?:
+                let (added, overflowed) = total.addingReportingOverflow(count)
+                guard !overflowed else { return nil }
+                total = added
+            }
+        }
+        return total
     }
 
     /// When a record was written. Shared with import, which asks the same question of the same
@@ -517,6 +626,13 @@ enum TranscriptReplay {
                 if let command = javascriptStringProperty("cmd", in: text) {
                     return ["command": command]
                 }
+            case "update_plan" where persistedName == "exec":
+                // Code mode persists one orchestration call rather than a nested function-call
+                // record. Its argument is still a data literal, so parse only that literal —
+                // never evaluate the surrounding model-authored JavaScript.
+                if let plan = javascriptDataArgument(tool: "update_plan", in: text) {
+                    return plan
+                }
             case "apply_patch", "file_change":
                 // The wrapper assigns the patch to a variable and passes it positionally —
                 // `const patch = "*** Begin Patch…"; text(await tools.apply_patch(patch))` —
@@ -583,6 +699,19 @@ enum TranscriptReplay {
         return try? JSONDecoder().decode(String.self, from: data)
     }
 
+    /// Reads the first data-only object passed to a generated code-mode tool invocation.
+    ///
+    /// The wrapper is model-authored JavaScript and must never be evaluated in the app. This
+    /// deliberately small parser admits only JSON's values plus JavaScript's unquoted object
+    /// keys and trailing commas — exactly the serializer shape measured in Codex rollouts.
+    private static func javascriptDataArgument(
+        tool: String,
+        in source: String
+    ) -> [String: Any]? {
+        var parser = JavaScriptDataLiteralParser(source: source)
+        return parser.objectArgument(toTool: tool)
+    }
+
     private static func firstCapture(_ pattern: String, in text: String) -> String? {
         guard let expression = try? NSRegularExpression(pattern: pattern),
               let match = expression.firstMatch(
@@ -630,6 +759,175 @@ enum TranscriptReplay {
         return text
     }
 
+}
+
+/// A bounded parser for the data-literal subset Codex writes inside code-mode wrappers.
+/// It has no evaluator, identifiers-as-values, property access, calls, interpolation or getters;
+/// unexpected syntax simply falls back to the raw tool input already used by replay.
+private struct JavaScriptDataLiteralParser {
+    private let source: String
+    private var index: String.Index
+    private var remainingValues = 20_000
+    private static let maximumDepth = 32
+
+    init(source: String) {
+        self.source = source
+        self.index = source.startIndex
+    }
+
+    mutating func objectArgument(toTool tool: String) -> [String: Any]? {
+        let escaped = NSRegularExpression.escapedPattern(for: tool)
+        guard let expression = try? NSRegularExpression(
+            pattern: #"tools\."# + escaped + #"\s*\("#
+        ), let match = expression.firstMatch(
+            in: source,
+            range: NSRange(source.startIndex..., in: source)
+        ), let range = Range(match.range, in: source) else { return nil }
+
+        index = range.upperBound
+        guard let value = parseValue(depth: 0) as? [String: Any] else { return nil }
+        skipWhitespace()
+        guard consume(")") else { return nil }
+        return value
+    }
+
+    private mutating func parseValue(depth: Int) -> Any? {
+        guard depth <= Self.maximumDepth, remainingValues > 0 else { return nil }
+        remainingValues -= 1
+        skipWhitespace()
+        guard index < source.endIndex else { return nil }
+
+        switch source[index] {
+        case "{": return parseObject(depth: depth + 1)
+        case "[": return parseArray(depth: depth + 1)
+        case "\"": return parseJSONString()
+        case "-", "0"..."9": return parseNumber()
+        default:
+            if consumeKeyword("true") { return true }
+            if consumeKeyword("false") { return false }
+            if consumeKeyword("null") { return NSNull() }
+            return nil
+        }
+    }
+
+    private mutating func parseObject(depth: Int) -> [String: Any]? {
+        guard consume("{") else { return nil }
+        skipWhitespace()
+        if consume("}") { return [:] }
+
+        var result: [String: Any] = [:]
+        while true {
+            skipWhitespace()
+            guard let key = parseKey() else { return nil }
+            skipWhitespace()
+            guard consume(":"), let value = parseValue(depth: depth) else { return nil }
+            result[key] = value
+            skipWhitespace()
+            if consume("}") { return result }
+            guard consume(",") else { return nil }
+            skipWhitespace()
+            if consume("}") { return result }
+        }
+    }
+
+    private mutating func parseArray(depth: Int) -> [Any]? {
+        guard consume("[") else { return nil }
+        skipWhitespace()
+        if consume("]") { return [] }
+
+        var result: [Any] = []
+        while true {
+            guard let value = parseValue(depth: depth) else { return nil }
+            result.append(value)
+            skipWhitespace()
+            if consume("]") { return result }
+            guard consume(",") else { return nil }
+            skipWhitespace()
+            if consume("]") { return result }
+        }
+    }
+
+    private mutating func parseKey() -> String? {
+        if index < source.endIndex, source[index] == "\"" { return parseJSONString() }
+        guard index < source.endIndex, isIdentifierStart(source[index]) else { return nil }
+        let start = index
+        advance()
+        while index < source.endIndex, isIdentifierContinuation(source[index]) { advance() }
+        return String(source[start..<index])
+    }
+
+    private mutating func parseJSONString() -> String? {
+        guard index < source.endIndex, source[index] == "\"" else { return nil }
+        let start = index
+        advance()
+        var escaped = false
+        while index < source.endIndex {
+            let character = source[index]
+            advance()
+            if escaped {
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "\"" {
+                let literal = String(source[start..<index])
+                guard let data = literal.data(using: .utf8) else { return nil }
+                return try? JSONDecoder().decode(String.self, from: data)
+            }
+        }
+        return nil
+    }
+
+    private mutating func parseNumber() -> Any? {
+        let start = index
+        if consume("-") {}
+        while index < source.endIndex, source[index].isNumber { advance() }
+        if consume(".") {
+            guard index < source.endIndex, source[index].isNumber else { return nil }
+            while index < source.endIndex, source[index].isNumber { advance() }
+        }
+        if index < source.endIndex, (source[index] == "e" || source[index] == "E") {
+            advance()
+            if index < source.endIndex, (source[index] == "+" || source[index] == "-") {
+                advance()
+            }
+            guard index < source.endIndex, source[index].isNumber else { return nil }
+            while index < source.endIndex, source[index].isNumber { advance() }
+        }
+        let text = String(source[start..<index])
+        if !text.contains(".") && !text.contains("e") && !text.contains("E"),
+           let integer = Int(text) { return integer }
+        return Double(text)
+    }
+
+    private mutating func skipWhitespace() {
+        while index < source.endIndex, source[index].isWhitespace { advance() }
+    }
+
+    private mutating func consume(_ character: Character) -> Bool {
+        guard index < source.endIndex, source[index] == character else { return false }
+        advance()
+        return true
+    }
+
+    private mutating func consumeKeyword(_ keyword: String) -> Bool {
+        guard source[index...].hasPrefix(keyword) else { return false }
+        let end = source.index(index, offsetBy: keyword.count)
+        guard end == source.endIndex || !isIdentifierContinuation(source[end]) else { return false }
+        index = end
+        return true
+    }
+
+    private mutating func advance() {
+        index = source.index(after: index)
+    }
+
+    private func isIdentifierStart(_ character: Character) -> Bool {
+        character == "_" || character == "$" || character.isLetter
+    }
+
+    private func isIdentifierContinuation(_ character: Character) -> Bool {
+        isIdentifierStart(character) || character.isNumber
+    }
 }
 
 // MARK: - Claude User Records

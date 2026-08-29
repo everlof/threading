@@ -659,9 +659,11 @@ the leading edge rather than behind a reserved gap, and the orb's own display li
 moment it is hidden. It draws in the theme accent — see the Dependencies note on the `tint`
 fork — so it belongs to the current app theme rather than drawing plain black-on-white.
 
-The checkout's floating status card becomes a **run receipt** over the same interval, and only
-here: a terminal session's CLI already draws that state itself, so the card stays the branch card
-there (see `git.md`). Plans are reduced to provider-neutral `RunProgress`, but the two live
+The native status strip and the terminal's floating status card gain a **run-plan disclosure**
+over the same interval. On Terminal it is a separate compact row below the checkout name, so the
+branch never disappears; on Chat it sits at the trailing edge of the status strip immediately
+above the composer. Both open the same host-owned, anchored `ThemedPopover` checklist and clear
+when the turn settles. Plans are reduced to provider-neutral `RunProgress`, but the live
 protocols reach it differently. Codex app-server's authoritative `turn/plan/updated`
 notification replaces the complete ordered snapshot and uses `pending` / `inProgress` /
 `completed`. Legacy `update_plan` and Claude `TodoWrite` tool calls also carry complete lists.
@@ -671,8 +673,9 @@ stable task id, then applies status changes and deletions incrementally. That is
 reconstruction Claude 2.1.220 uses internally, and because it lives in `ConversationTimeline`
 the JSONL replay path gets identical behavior without a second parser.
 
-One active item becomes `Step n / total`. More than one active Claude task is a task graph, not
-a defensible linear step, so the receipt says `completed / total done · active active` instead.
+The compact disclosure names the active item and its current/total position. More than one active
+Claude task is a task graph, not a defensible linear step, so its summary retains completed and
+active counts instead of inventing an order.
 `ConversationTimeline` reports either form as a change and the controller exposes it to the
 container without handing provider arguments to a view. An explicit empty plan clears the
 fraction; no structured plan means `Working…`, not a guessed one.
@@ -1052,6 +1055,13 @@ returns the existential specifically to Core/Remote, so paging, resync, broadcas
 suppression and prompt delivery cannot grow a dependency on the controller or its view hierarchy.
 The mirror registry and runtime are still singleton-backed and remain active injection debt; this
 edge removes presentation knowledge, not those globals.
+
+Live plans cross that boundary as a revisioned summary and at most 64 exact steps per requested
+page; stale pages cannot attach to a newer plan. The phone keeps the compact current-item strip
+directly below its navigation bar and opens a transient anchored checklist backed by `LazyVStack`.
+That disclosure is deliberately host-owned: a remote provider may supply only normalized step
+titles and statuses, while Threading retains placement, paging, dismissal, theming, and the
+authoritative turn-end clear.
 
 The terminal half uses a separate `RemoteTerminalApplicationCapability`. WebSocket DTO handling,
 authentication, share scope, session visibility, input-control policy, viewport bounds and replay

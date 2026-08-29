@@ -1226,6 +1226,21 @@ Delivery covers both surfaces:
   Native per-chat changes continue to ride `turn/start`, so they take effect on the next turn
   without restarting the app-server.
 
+**An omitted model is the account's default, for Fast as well as for effort.** A phone's draft,
+the report chat and the Mac composer all send no model to mean "whatever this login is configured
+to run" — while showing that model's own Fast control, because the catalogue answers
+`supportsFastMode` per model id. `handleCreateSession` asked the same question with the model it
+was sent, which was nil, and `AgentModels.supportsFastMode` answered for a model called nil:
+*Unsupported Speed*, for a speed the Mac had offered the phone seconds earlier (a Codex draft on
+`gpt-5.6-sol`, model left to the account, Fast picked). The effort check beside it had always
+resolved nil through `defaultModel(for:account:)` first; the Fast check now does the same, so the
+catalogue projection, the create gate, the report launch and every chip agree about an inherited
+model. Only a login naming no model at all still answers "no control", and
+`claudeSupportsFastMode(nil)` keeps meaning that. The refusal was also invisible on the Mac — a
+422 answered the phone and journalled nothing — so every launch-choice refusal now records
+`Remote session refused` with the code, agent and model (never the prompt), which is what turns
+"my chat would not start" into a line that says why.
+
 The reply chip's effective reading follows the same precedence (conversation, app default,
 account/catalog, runtime fallback) — and it now *asks* `AgentModels.effectiveFastMode` rather than
 restating three of its four steps. The two disagreed about the fourth: Claude's fast mode is a
@@ -1513,10 +1528,13 @@ never claim to restore a provider state it cannot reach. The capability check is
 lifecycle code does not rediscover provider identity.
 
 `ProviderArchiveSync` owns all four mutation routes: sidebar/Undo, Settings ▸ Archived, remote
-access, and an agent-requested archive. A Codex action is atomic from the user's perspective: the
-agent is stopped first when needed, the account-routed provider command runs, and only success
-commits `isArchived`. Failure leaves the retained flag unchanged and is surfaced to the initiating
-UI or remote caller. Local-only runtimes pass through the same service and commit immediately.
+access, and an agent-requested archive. A Codex action remains atomic in durable state: the agent
+is stopped first when needed, the account-routed provider command runs, and only success commits
+`isArchived`. Presentation is deliberately optimistic. The macOS sidebar/pane and the iPhone
+catalogue/detail route remove the session at the press edge while that transaction continues; a
+failure restores it, and must not replace a newer selection. Pending identities are ephemeral UI
+state, never a second lifecycle truth. Local-only runtimes pass through the same service and commit
+immediately.
 `AgentAccountRouting` is shared with `AgentLauncher`, so both the default account's explicit
 `env -u CODEX_HOME` and an alternate account's `CODEX_HOME=<path>` remain identical for launch and
 lifecycle commands.
@@ -1549,6 +1567,14 @@ and clears a pane whose current session was filed elsewhere. The synchronized wr
 `ProjectStore.synchronizeArchiveStates` so one activation produces one save and one store change
 notification rather than one of each per session.
 
+The archive has its own chronology. `archivedAt` is captured when an archive request enters the
+synchronizer, not when a possibly slow provider command returns, so several quick presses retain
+their human order even when provider completions cross. Settings and the iPhone archive list sort
+newest archive first by that value; Restore clears it, and re-archiving records a new value. A
+pre-upgrade archived record falls back once to `lastActiveAt`, which is the only chronology that
+old data can honestly provide. The optional remote summary field preserves compatibility with an
+older Mac or phone.
+
 **Archiving implies closing.** The sidebar lists only unarchived sessions, so an archived
 session that kept its agent would be a process nothing lists and nothing can stop — the bug
 this rule closed: the sidebar's Archive once flipped the flag and left the agent running
@@ -1573,12 +1599,12 @@ were doing; and it does not relaunch the agent, because archiving stopped it exa
 does and starting a process is a heavier thing than a click being taken back. The session
 returns dormant, with Resume on its placeholder.
 
-For a provider-backed archive, “took it off screen” is decided when the provider command commits,
-not when that potentially slow command began. A newer sidebar selection owns the pane and an older
-archive completion must not replace it with the empty state. The lifecycle event may already have
-cleared the archived page before the initiating coordinator receives completion; in that case the
-sidebar's still-selected session identity is the evidence Undo uses. If selection already names
-another session at that commit, neither the completion nor its Undo may move focus back.
+For a provider-backed archive, “took it off screen” is captured at the press edge, before the
+potentially slow command begins. A newer sidebar selection owns the pane and an older archive
+completion or failure must not replace it. The lifecycle event may still clear the archived page
+before the initiating coordinator receives completion; the captured presentation resolution is
+the evidence Undo uses. If selection names another session by then, neither completion, failure,
+nor Undo may move focus back.
 
 `ConfirmationPrompt.archiveRunningSession` was removed rather than left switched off: a case
 nobody asks still ships a Settings row for a question that no longer exists. The line the

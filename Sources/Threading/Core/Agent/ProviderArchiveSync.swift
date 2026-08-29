@@ -360,6 +360,10 @@ final class ProviderArchiveSync {
         for sessionID: SessionID,
         completion: @escaping Completion
     ) {
+        // The filing chronology belongs to the action, not to however long process shutdown or
+        // a provider command takes. Several quick archives therefore keep the order in which
+        // they were requested even when their asynchronous provider work completes out of order.
+        let changedAt = Date()
         reconciliationGeneration += 1
         ThreadingLogger.session.info(
             "Provider archive change requested session=\(sessionID.uuidString, privacy: .public) archived=\(archived, privacy: .public)"
@@ -375,7 +379,7 @@ final class ProviderArchiveSync {
 
         guard session.kind.supports(.providerArchive),
               let transcriptID = session.resumeState.transcriptID else {
-            switch store.setArchived(archived, for: sessionID) {
+            switch store.setArchived(archived, for: sessionID, at: changedAt) {
             case .applied, .unchanged:
                 let wasArchived = session.isArchived
                 if archived {
@@ -427,6 +431,7 @@ final class ProviderArchiveSync {
                     sessionID: sessionID,
                     transcriptID: transcriptID,
                     account: account,
+                    changedAt: changedAt,
                     completion: completion
                 )
             }
@@ -437,6 +442,7 @@ final class ProviderArchiveSync {
             sessionID: sessionID,
             transcriptID: transcriptID,
             account: account,
+            changedAt: changedAt,
             completion: completion
         )
     }
@@ -446,6 +452,7 @@ final class ProviderArchiveSync {
         sessionID: SessionID,
         transcriptID: TranscriptID,
         account: AgentAccount,
+        changedAt: Date,
         completion: @escaping Completion
     ) {
         DispatchQueue.global(qos: .utility).async {
@@ -459,6 +466,7 @@ final class ProviderArchiveSync {
                     finishUserChange(
                         sessionID: sessionID,
                         archived: archives,
+                        changedAt: changedAt,
                         completion: completion
                     )
                     return
@@ -468,6 +476,7 @@ final class ProviderArchiveSync {
                     sessionID: sessionID,
                     transcriptID: transcriptID,
                     account: account,
+                    changedAt: changedAt,
                     completion: completion
                 )
             }
@@ -578,6 +587,7 @@ final class ProviderArchiveSync {
         sessionID: SessionID,
         transcriptID: TranscriptID,
         account: AgentAccount,
+        changedAt: Date,
         completion: @escaping Completion
     ) {
         guard let session = store.session(withID: sessionID) else {
@@ -598,6 +608,7 @@ final class ProviderArchiveSync {
                 finishUserChange(
                     sessionID: sessionID,
                     archived: archives,
+                    changedAt: changedAt,
                     completion: completion
                 )
             case .failure(let failure):
@@ -619,10 +630,11 @@ final class ProviderArchiveSync {
     private func finishUserChange(
         sessionID: SessionID,
         archived: Bool,
+        changedAt: Date,
         completion: @escaping Completion
     ) {
         pending.remove(sessionID)
-        switch applySynchronized([sessionID: archived]) {
+        switch applySynchronized([sessionID: archived], at: changedAt) {
         case .applied, .unchanged:
             completion(.success(()))
         case .targetNotFound:
@@ -708,7 +720,10 @@ final class ProviderArchiveSync {
     }
 
     @discardableResult
-    private func applySynchronized(_ states: [SessionID: Bool]) -> ProjectMutationResult {
+    private func applySynchronized(
+        _ states: [SessionID: Bool],
+        at date: Date = Date()
+    ) -> ProjectMutationResult {
         guard !states.isEmpty else { return .unchanged }
         var localChanges: [(SessionID, Bool)] = []
         for (sessionID, archived) in states {
@@ -717,7 +732,7 @@ final class ProviderArchiveSync {
             localChanges.append((sessionID, archived))
         }
 
-        let result = store.synchronizeArchiveStates(states)
+        let result = store.synchronizeArchiveStates(states, at: date)
         guard result == .applied || result == .unchanged else {
             ThreadingLogger.session.error(
                 "Could not persist provider archive reconciliation"

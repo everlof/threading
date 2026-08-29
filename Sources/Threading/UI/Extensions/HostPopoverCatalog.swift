@@ -18,6 +18,7 @@ enum HostPopoverID: String, CaseIterable {
     case sessionCornerCardAttachment = "session.corner-card.attachment-preview"
     case composerModelEffortPicker = "composer.model-effort-picker"
     case designHelp = "design.help"
+    case sessionRunPlan = "session.run-plan"
 
     var exposure: HostPopoverExposure {
         switch self {
@@ -81,6 +82,13 @@ enum HostPopoverID: String, CaseIterable {
                     + "attachment renderers through attachments.preview@1; composing a second "
                     + "extension into this transient action surface would mix those authorities. "
                     + "Its hover timing, local-file actions and dismissal stay host-owned."
+            )
+        case .sessionRunPlan:
+            return .hostOnly(
+                reason: "Provider-authored live plan truth shared by terminal and native session "
+                    + "chrome. Exact ordering, turn-boundary clearing, transcript recovery, "
+                    + "remote paging, accessibility and dismissal remain host-owned; extensions "
+                    + "may add corner-card rows but cannot replace session activity truth."
             )
         }
     }

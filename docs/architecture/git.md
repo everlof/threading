@@ -346,7 +346,19 @@ separate fields.
 
 Pointer targeting is paint on that same TextKit surface, not another row tree. The hovered logical
 source line gets a full-width translucent wash derived from the theme's control-hover role, while
-the `+` action plate stays drawn over the gutter. A one-pixel rule looked like a clipping seam and
+the `+` action plate is drawn in a gutter of its own (`GitReviewDefaults.lineActionGutterWidth`)
+**before** the number column. It used to sit over the number, which removed the one thing a
+reader hovers a line to read, and in hard-print themes its translucent plate overprinted the
+digits. The gutter is paragraph indent rather than characters, so character ranges, find offsets
+and the copied text know nothing about it; `estimatedTableHeight` subtracts it from the columns
+available for wrapping. **A copy from the diff is source, not gutter**: the document draws
+`  14 + ` in front of every line, so `writeSelection(to:types:)` emits only the selected source
+text, line by line — pasting a snippet into a chat or an editor no longer means cleaning every
+line of numbers and signs. **The plate and the right-click answer alike**: both resolve their span
+through `targetSpan(forClickedLine:)`, so a plate pressed inside a five-line selection speaks for
+the five lines rather than throwing the selection away for the hovered one. Both grow the
+selection to whole lines for the menu, and a menu dismissed without a choice puts the selection
+back to what it was — otherwise cancelling left a selection nobody made. A one-pixel rule looked like a clipping seam and
 did not identify the line as the target. Moving the pointer invalidates only the old and new
 logical-line rectangles, including wrapped fragments; it neither mounts per-line views nor redraws
 the complete hunk.
@@ -371,6 +383,35 @@ comparisons retain explicit disclosure because opening one fetches and decodes t
 A manual close is an `expansionOverride` and survives watched refreshes. The mode persists with the tab
 (`PersistedTab.mode`); restore builds the controller but runs no git until the tab is actually
 shown, the browser's deferred-load rule.
+
+**The cap is a bound on what one row draws, not on what the reader may see.** Past
+`fileDisplayCap` the row ends in "Show the remaining N lines" (or "Show 400 more lines"), and the
+pane raises that file's cap by a page (`displayCapByPath`) and replaces the row the way a context
+read does — the tail arrives paged, never mounted whole, and the estimate follows the raised cap.
+A context-expansion read names the control that asked (`GitReviewContextExpansionSite`), so only
+that one says "Expanding…"; the others are disabled for the read's duration rather than claiming
+it. The number column is one width per file (`numberColumns(for:textSize:)`): what
+`lineNumberWidth` fits at the current size, or the file's last line number when that is wider, so a
+four-digit line at the largest size no longer pushes its code a column to the right and hunks in
+one file share a code column. A **write error is a `PaneNoticeView` that stands until dismissed or
+until a later write answers it**; as a one-shot caption it was cleared by the next watched
+refresh, and the in-place refresh keeps an unchanged notice rather than rebuilding the table for it.
+The header's totals keep the file count in front of them ("9 files · +16 −11") — the shape the
+loading state already had. A **split diff needs `splitLayoutMinimumWidth`**; narrower than that
+`effectiveDiffLayout` builds unified rows and keeps the split choice for when there is room, and
+crossing the threshold rebuilds the rows once. The header's revealed actions are Copy Path and the
+launcher's one-press **Open in editor** (its app resolved on first reveal, never at row
+construction); Reveal in Finder stays in the right-click menu. The changed-files rail folds a chain
+of single-child directories into one row, and an opened commit's heading carries its subject over
+hash, author, age and refs.
+
+A bulk **Collapse all / Expand all** drops every exact height before it reloads
+(`toggleAllExpansion`): each cached height described the state being left, so reloading with them
+in place laid collapsed headers out in 300pt slots and expanded bodies in 48pt ones, rows
+overprinting each other until every visible row's measurement caught up. A single file toggle
+settles twice inside its own event, the way the hunk toggle already did — adopt the estimate,
+record the exact height, settle again — because left to the next run-loop pass the collapsed
+header was drawn stretched over its old slot for a frame.
 
 Opening or closing a materialized row swaps its header/body constraints **before** invalidating
 the table's estimated height. Reversing that order briefly asks the still-collapsed header to fill
@@ -492,6 +533,16 @@ only the shared down-arrow appears while the reader is away from its end.
 The fixture and the `git.read.*`, `git.process`, `git.review.render`, and
 `git.review.render-files` spans are documented in [`performance.md`](performance.md).
 
+**Below `GitReviewDefaults.textSizeGroupFoldWidth` the header folds its text-size run, and below
+`navigationGroupFoldWidth` its navigation run, into the `···` menu** (`foldHeaderGroupsIfNeeded`,
+from `viewDidLayout`; `ControlRowView` detaches a hidden member). The display pane can be dragged
+to about 100pt, and at 360pt the six glyphs ran into the totals, which — assigned as attributed
+text with wrapping quietly re-enabled — had broken into one character per line. The counter is
+single-line now, and the folded controls press the same buttons from the menu so the two routes
+cannot drift. The menu's five switches name their state and carry a check while on ("Word wrap",
+"Full files", "Rich previews", "Word diffs", "Hide whitespace"); four used to rename themselves to
+their opposite verb beside one that was checked.
+
 The 2026-08-18 toolbar ownership follow-up adds five fixed controls and two fixed groups; it does
 not add work proportional to files or diff lines. The final Debug build measured the ordinary
 174-file / 400-line forced-scroll fixture at **10.410 ms/frame**. Two sequential warm 8,985-file
@@ -511,6 +562,10 @@ Per-file line indexing stops at `fileDisplayCap`, line text uses the renderer's 
 and the navigation list itself stops at 10,000 entries with an honest `+` counter. A checkout or
 mode refresh invalidates the snapshot and all result identities. This makes every reported match
 revealable without making typing or Return proportional to repository size on AppKit's thread.
+Revealing a match keeps the keyboard in the field with `keepFocus()`, which leaves the caret
+where it is; `focus()` selects the whole query — right for a reopened bar, and, called after every
+incremental reveal, the reason the field once held only one character before the next keystroke
+replaced it.
 
 The publish strip follows the same ownership rule one level down: its repository copy is the
 leading run and its policy chooser, open action, and next transition are the trailing run of one

@@ -157,12 +157,12 @@ final class GitReviewViewController: NSViewController {
         }
         return button
     }()
-    private lazy var navigationButtonGroup = ControlButtonGroupView(buttons: [
+    lazy var navigationButtonGroup = ControlButtonGroupView(buttons: [
         jumpToFileButton,
         diffLayoutButton,
         fileNavigatorButton
     ])
-    private lazy var textSizeButtonGroup = ControlButtonGroupView(buttons: [
+    lazy var textSizeButtonGroup = ControlButtonGroupView(buttons: [
         decreaseTextSizeButton,
         increaseTextSizeButton
     ])
@@ -410,7 +410,17 @@ final class GitReviewViewController: NSViewController {
     var collapsedHunksByPath: [String: Set<GitReviewHunkIdentity>] = [:]
     var contextLinesByPath: [String: Int] = [:]
     var contextExpansionInFlightPaths: Set<String> = []
+    /// Which control asked for the read in flight, so only that one says "Expanding…".
+    var contextExpansionInFlightSites: [String: GitReviewContextExpansionSite] = [:]
     var contextExpansionExhaustedPaths: Set<String> = []
+    /// Per-file display caps raised by "Show more lines"; absent means the pane's cap.
+    var displayCapByPath: [String: Int] = [:]
+    /// The notice the file surface on screen was drawn with, so an unchanged sticky error does
+    /// not force a full table rebuild on every watched refresh.
+    var renderedNoticeText: String?
+    /// The layout the rows on screen were built for, so a pane crossing the split threshold
+    /// rebuilds them once.
+    var renderedDiffLayout: GitReviewDiffLayout?
     /// A context read may finish after the reader has started a trackpad or scroller-thumb
     /// gesture. Keep its one-row geometry replacement out of that transaction, just like a
     /// watched checkout refresh; the durable source-line anchor is resolved when scrolling ends.
@@ -453,6 +463,16 @@ final class GitReviewViewController: NSViewController {
     /// right edge is worse — but a wide window reading long lines wants the other trade.
     var wrapsDiffLines = true
     var diffLayout: GitReviewDiffLayout = .unified
+
+    /// The layout the rows are built with: the chosen one, unless a split would be two columns
+    /// of clipped fragments — below `splitLayoutMinimumWidth` the pane shows unified and keeps
+    /// the split choice for when there is room again.
+    var effectiveDiffLayout: GitReviewDiffLayout {
+        guard diffLayout == .split,
+              isViewLoaded,
+              view.bounds.width >= GitReviewDefaults.splitLayoutMinimumWidth else { return .unified }
+        return .split
+    }
     var showsRichPreviews = true
     var showsWordDiffs = false
     var loadsFullFiles = false
@@ -598,6 +618,7 @@ final class GitReviewViewController: NSViewController {
 
     override func viewDidLayout() {
         super.viewDidLayout()
+        foldHeaderGroupsIfNeeded()
         guard scrollView.documentView === fileTableView else { return }
 
         // The clip is the pane width the eye already sees. `NSClipView` normally propagates that
@@ -729,6 +750,30 @@ final class GitReviewViewController: NSViewController {
         view.addSubview(stickyFileHeaderViewport)
         stickyFileHeaderViewport.addSubview(stickyFileHeaderHost)
         view.addSubview(jumpToEndButton)
+    }
+
+    /// A narrow pane keeps the chip and the totals and lets the glyph runs go: the text-size
+    /// pair first, then navigation. `ControlRowView` detaches a hidden member, and the ··· menu
+    /// carries the folded controls (`GitReviewToolbar`), so nothing becomes unreachable.
+    private func foldHeaderGroupsIfNeeded() {
+        let width = view.bounds.width
+        let foldsTextSize = width < GitReviewDefaults.textSizeGroupFoldWidth
+        let foldsNavigation = width < GitReviewDefaults.navigationGroupFoldWidth
+        if textSizeButtonGroup.isHidden != foldsTextSize {
+            textSizeButtonGroup.isHidden = foldsTextSize
+        }
+        if navigationButtonGroup.isHidden != foldsNavigation {
+            navigationButtonGroup.isHidden = foldsNavigation
+        }
+
+        // Crossing the split threshold changes what the rows are built with; rebuild them once.
+        if let rendered = renderedDiffLayout,
+           rendered != effectiveDiffLayout,
+           scrollView.documentView === fileTableView,
+           !isFileLiveScrolling {
+            measuredFileRowHeights.removeAll(keepingCapacity: true)
+            show(phase, forceRebuild: true)
+        }
     }
 
     /// Hidden members are detached by `ControlRowView`, so the chip becomes the leading edge.
@@ -1552,6 +1597,8 @@ final class GitReviewViewController: NSViewController {
         collapsedHunksByPath.removeAll(keepingCapacity: false)
         contextLinesByPath.removeAll(keepingCapacity: false)
         contextExpansionInFlightPaths.removeAll(keepingCapacity: false)
+        contextExpansionInFlightSites.removeAll(keepingCapacity: false)
+        displayCapByPath.removeAll(keepingCapacity: false)
         contextExpansionExhaustedPaths.removeAll(keepingCapacity: false)
         deferredContextExpansionReloads.removeAll(keepingCapacity: false)
     }

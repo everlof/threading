@@ -32,6 +32,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Session identity | `sidebar.session-identity@1` | replacement | activity precedence and row shell | Implemented |
 | Standalone terminal row | — | host-only | selection, shell/foreground-command status, row actions | Host-only |
 | Work organization controls | — | host-only | project ownership, chat/terminal type membership, stable within-type order, direction persistence | Host-only |
+| Archived conversations browser | — | host-only navigation/filter around existing additive Archived settings slots | archive chronology/search, provider lifecycle truth, Restore/Delete authority, bounded virtual list | Host-only |
 | Chat checkout move controls (session menu, Tools policy, agent approval) | — | host-only | canonical checkout identity, durable ownership transaction, turn/input fence, authority audit and runtime resume | Host-only |
 | Command palette | — | host-only | command identity and availability, focus/dismissal, bounded search, shortcut ownership/conflicts, explicit target collection and last-moment invocation checks | Host-only |
 | Mobile terminal key bar | — | host-only | Direct/Compose resolution, collaboration override, PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
@@ -111,6 +112,12 @@ contracts. Threading owns persisted project membership, chat-versus-terminal cla
 stable order inside each type, direction persistence and the navigation destination; allowing a
 replacement control to contradict any of those facts would make the same terminal appear to have
 different ownership across surfaces.
+
+The Archived browser is the lifecycle side of that same host-only navigation boundary. Threading
+keeps the archive timestamp and ordering, search semantics, provider synchronization, and the
+Restore/Delete actions whose labels promise durable effects. Extensions may continue adding
+individual settings fields to the Archived page through the existing settings registry; they do
+not replace the archive rows, filter, or lifecycle controls.
 
 Moving a chat between checkouts is the durable half of that same boundary, so its shared session
 menu, Tools policy and approval sheet remain host-only too. Threading owns canonical repository

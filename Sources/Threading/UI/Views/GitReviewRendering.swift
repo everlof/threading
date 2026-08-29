@@ -89,8 +89,13 @@ extension GitReviewViewController {
             collapsedHunksByPath.removeAll(keepingCapacity: false)
         }
 
+        // A write error stays until it is dismissed or another write answers it: as a one-shot
+        // caption it was erased by the next watched refresh — during an agent turn, within a
+        // second. A success line is still one-shot.
         let pendingNotice = notice
-        notice = nil
+        if pendingNotice?.isError != true {
+            notice = nil
+        }
 
         // A watched working tree can refresh every couple of seconds while a build is writing
         // files. Replacing the document view here used to destroy and reconstruct every visible
@@ -99,7 +104,7 @@ extension GitReviewViewController {
         // viewport rows alive, and mutate only the stable file identities that differ.
         if keepsPlace,
            !forceRebuild,
-           pendingNotice == nil,
+           pendingNotice?.text == renderedNoticeText,
            mode != .staged,
            scrollView.documentView === fileTableView,
            case .files(let files) = phase,
@@ -113,6 +118,7 @@ extension GitReviewViewController {
             return
         }
 
+        renderedNoticeText = pendingNotice?.text
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         // Detach a table before emptying its render model. Reloading the current document view
         // asks for replacement viewport rows immediately, which would construct the old surface
@@ -362,6 +368,18 @@ extension GitReviewViewController {
     /// commit that landed. In the list rather than in an alert: it is about what the pane is
     /// showing, and a sheet for "try again" would be worse than the problem.
     func makeNotice(_ text: String, isError: Bool) -> NSView {
+        if isError {
+            return PaneNoticeView(
+                tone: .attention,
+                message: text,
+                actions: [],
+                onDismiss: { [weak self] in
+                    guard let self else { return }
+                    self.notice = nil
+                    self.show(self.phase)
+                }
+            )
+        }
         let label = NSTextField(labelWithString: text)
         label.applyFont(.caption)
         label.textColor = isError ? Design.Status.negative : Design.Text.secondary
@@ -383,7 +401,19 @@ extension GitReviewViewController {
         let exactAdded = added.formatted(.number.grouping(.automatic))
         let exactRemoved = removed.formatted(.number.grouping(.automatic))
 
+        // The count led the loading state ("9 files · Loading…") and vanished once the totals
+        // arrived; one shape in both states, and the number the status card also carries.
+        let fileCount = files == 1
+            ? L10n.string("1 file")
+            : L10n.format("%lld files", Int64(files))
         let text = NSMutableAttributedString()
+        text.append(NSAttributedString(
+            string: fileCount + GitReviewUIDefaults.subtitleSeparator,
+            attributes: [
+                .foregroundColor: Design.Text.tertiary,
+                .font: Design.Typography.caption()
+            ]
+        ))
         text.append(NSAttributedString(string: "+\(compactAdded)", attributes: [
             .foregroundColor: Design.Diff.added,
             .font: Design.Typography.caption()
@@ -396,6 +426,9 @@ extension GitReviewViewController {
         // what was measured. Assigning only the attributed value leaves the old width.
         counterLabel.stringValue = text.string
         counterLabel.attributedStringValue = text
+        // Attributed text turns wrapping back on; squeezed at 360pt the totals broke into one
+        // character per line. See `NSTextField.label(attributed:)`.
+        counterLabel.usesSingleLineMode = true
         counterLabel.toolTip = "+\(exactAdded) −\(exactRemoved)"
         counterLabel.setAccessibilityLabel(
             L10n.format(
@@ -416,6 +449,7 @@ extension GitReviewViewController {
             .foregroundColor: Design.Text.tertiary,
             .font: Design.Typography.caption()
         ])
+        counterLabel.usesSingleLineMode = true
         counterLabel.toolTip = text
         counterLabel.setAccessibilityLabel(text)
         counterLabel.isHidden = false
@@ -441,6 +475,7 @@ extension GitReviewViewController {
         }
 
         renderedFiles = files
+        renderedDiffLayout = effectiveDiffLayout
         filePreludeViews = prelude
         jumpToFileButton.isEnabled = !files.isEmpty
         fileNavigatorButton.isEnabled = !files.isEmpty
@@ -941,15 +976,36 @@ extension GitReviewViewController {
         historyTableView.reloadData()
     }
 
+    /// The opened commit's own line: subject as the heading, then the facts the history row
+    /// already carried — hash, author, age — which the detail page used to drop.
     func makeDetailHeader(_ commit: GitCommitSummary) -> NSView {
-        let label = NSTextField(labelWithString: "\(commit.shortHash)  \(commit.subject)")
-        label.applyFont(.caption)
-        label.textColor = Design.Text.secondary
-        label.lineBreakMode = .byTruncatingTail
-        label.usesSingleLineMode = true
-        label.toolTip = "\(commit.subject) — \(commit.author)"
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
+        let subject = NSTextField(labelWithString: commit.subject)
+        subject.applyFont(.control)
+        subject.textColor = Design.Text.label
+        subject.lineBreakMode = .byTruncatingTail
+        subject.usesSingleLineMode = true
+        subject.toolTip = commit.subject
+
+        let facts = [
+            commit.shortHash,
+            commit.author,
+            GitReviewCommitRow.relativeDescription(for: commit.date)
+        ] + commit.refs.prefix(GitReviewCommitRowDefaults.maximumRefs)
+        let byline = NSTextField(labelWithString: facts.joined(
+            separator: GitReviewUIDefaults.subtitleSeparator
+        ))
+        byline.applyFont(.caption)
+        byline.textColor = Design.Text.secondary
+        byline.lineBreakMode = .byTruncatingTail
+        byline.usesSingleLineMode = true
+        byline.setAccessibilityIdentifier("git-review.commit.byline")
+
+        let stack = NSStackView(views: [subject, byline])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.hairline
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
     }
 
     func addRow(_ view: NSView) {
@@ -1039,12 +1095,13 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             return GitReviewFileRow.estimatedTableHeight(
                 for: file,
                 expanded: expanded,
-                wraps: diffLayout == .unified && wrapsDiffLines,
+                wraps: effectiveDiffLayout == .unified && wrapsDiffLines,
                 width: cardWidth,
                 textSize: reviewTextSize,
                 contextLines: contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines,
                 contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path),
-                collapsedHunks: collapsedHunksByPath[file.path] ?? []
+                collapsedHunks: collapsedHunksByPath[file.path] ?? [],
+                displayCap: displayCapByPath[file.path] ?? GitReviewDefaults.fileDisplayCap
             )
         }
         guard abs(measured.width - cardWidth) <= 0.5 else {
@@ -1063,12 +1120,13 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             return GitReviewFileRow.estimatedTableHeight(
                 for: file,
                 expanded: expanded,
-                wraps: diffLayout == .unified && wrapsDiffLines,
+                wraps: effectiveDiffLayout == .unified && wrapsDiffLines,
                 width: cardWidth,
                 textSize: reviewTextSize,
                 contextLines: contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines,
                 contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path),
-                collapsedHunks: collapsedHunksByPath[file.path] ?? []
+                collapsedHunks: collapsedHunksByPath[file.path] ?? [],
+                displayCap: displayCapByPath[file.path] ?? GitReviewDefaults.fileDisplayCap
             )
         }
         return measured.height
@@ -1199,7 +1257,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             attribution: turnAttribution?.mark(for: file.path) ?? .none,
             staging: contentIsPending ? nil : staging,
             wraps: wrapsDiffLines,
-            diffLayout: diffLayout,
+            diffLayout: effectiveDiffLayout,
             showsRichPreviews: showsRichPreviews,
             showsWordDiffs: showsWordDiffs,
             textSize: reviewTextSize,
@@ -1217,9 +1275,10 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             }(),
             fileURL: renderedFileRoot?.appendingPathComponent(file.path),
             contextLines: contextLinesByPath[file.path] ?? GitReviewDefaults.contextLines,
-            contextExpansionIsPending: contextExpansionInFlightPaths.contains(file.path),
+            contextExpansionPendingSite: contextExpansionInFlightSites[file.path],
             contextExpansionIsExhausted: contextExpansionExhaustedPaths.contains(file.path),
-            collapsedHunks: collapsedHunksByPath[file.path] ?? []
+            collapsedHunks: collapsedHunksByPath[file.path] ?? [],
+            displayCap: displayCapByPath[file.path] ?? GitReviewDefaults.fileDisplayCap
         )
         row.onToggle = { [weak self] expanded in
             self?.expansionOverrides[file.path] = expanded
@@ -1231,9 +1290,12 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             let tableRow = self.fileTableView.row(for: row)
             guard tableRow >= 0 else { return }
             guard tableRow < self.fileTableView.numberOfRows else { return }
-            self.fileTableView.noteHeightOfRows(
-                withIndexesChanged: IndexSet(integer: tableRow)
-            )
+            // The same two-pass settle the hunk toggle does, and neither pass animates. Left to
+            // the next run-loop pass, the collapsed header was drawn stretched over its old
+            // expanded slot (name at the top, counts and Stage centred 300pt below) and a
+            // re-opened body was crammed into a 48pt row — one frame of both, on every click.
+            self.settleFileRowHeight(IndexSet(integer: tableRow))
+            self.recordFileHeight(file, row: row)
         }
         row.onHeightChange = { [weak self, weak row] in
             self?.recordFileHeight(file, row: row)
@@ -1250,31 +1312,19 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             self.measuredFileRowHeights[file.path] = nil
             let tableRow = self.fileTableView.row(for: row)
             guard tableRow >= 0, tableRow < self.fileTableView.numberOfRows else { return }
-            self.fileTableView.noteHeightOfRows(
-                withIndexesChanged: IndexSet(integer: tableRow)
-            )
-
             // `isHidden`, the table's model estimate and TextKit's exact height used to become
             // three separately displayed layouts. Settle the mounted viewport twice inside this
             // one non-animated event: once at the updated estimate, then once at the exact fitted
             // height. Offscreen rows remain value estimates and no complete-index work is added.
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Design.Motion.immediate
-                context.allowsImplicitAnimation = false
-                self.fileTableView.layoutSubtreeIfNeeded()
-            }
+            self.settleFileRowHeight(IndexSet(integer: tableRow))
             self.recordFileHeight(file, row: row)
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = Design.Motion.immediate
-                context.allowsImplicitAnimation = false
-                self.fileTableView.layoutSubtreeIfNeeded()
-            }
         }
         row.onStageFile = { [weak self] in self?.stageFile(file) }
         row.onStageHunk = { [weak self] index in self?.stageHunk(at: index, of: file) }
-        row.onExpandContext = { [weak self, weak row] sourceLine in
-            self?.expandContext(for: file, from: row, preserving: sourceLine)
+        row.onExpandContext = { [weak self, weak row] site, sourceLine in
+            self?.expandContext(for: file, from: row, site: site, preserving: sourceLine)
         }
+        row.onShowMoreLines = { [weak self] in self?.showMoreLines(of: file) }
         // Asked of the handoff rather than of the runtime's conversation cache: Git Review is a
         // pane, and a pane is open beside terminal sessions too. Resolved per row build so a
         // session that launches while the pane is up gains the actions on its next refresh.
@@ -1320,9 +1370,18 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         return row
     }
 
+    /// Raises one file's cap by a page and replaces its row, keeping the reader's place the way
+    /// a context read does. Bounded per click; a generated file is paged, never mounted whole.
+    private func showMoreLines(of file: GitFileDiff) {
+        let current = displayCapByPath[file.path] ?? GitReviewDefaults.fileDisplayCap
+        displayCapByPath[file.path] = current + GitReviewDefaults.fileDisplayCap
+        reloadContextExpansionRow(path: file.path, preserving: nil)
+    }
+
     private func expandContext(
         for file: GitFileDiff,
         from row: GitReviewFileRow?,
+        site: GitReviewContextExpansionSite,
         preserving sourceLine: GitReviewSourceLineAnchor?
     ) {
         guard !contextExpansionInFlightPaths.contains(file.path),
@@ -1343,12 +1402,14 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
 
         let expectedGeneration = generation
         contextExpansionInFlightPaths.insert(file.path)
+        contextExpansionInFlightSites[file.path] = site
         reloadContextExpansionRow(path: file.path, preserving: sourceLine, expectedRow: row)
 
         let completion: @MainActor @Sendable (Result<[GitFileDiff], GitFailure>) -> Void = {
             [weak self] result in
             guard let self, self.generation == expectedGeneration else { return }
             self.contextExpansionInFlightPaths.remove(file.path)
+            self.contextExpansionInFlightSites[file.path] = nil
             switch result {
             case .success(let files):
                 guard let expanded = files.first(where: { $0.path == file.path }) ?? files.first,
@@ -1384,6 +1445,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
         guard let request = currentDiffRequest else {
             contextExpansionInFlightPaths.remove(file.path)
+            contextExpansionInFlightSites[file.path] = nil
             reloadContextExpansionRow(path: file.path, preserving: sourceLine)
             return
         }
@@ -1533,7 +1595,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             ) as? GitReviewVirtualRowHost,
                   let row = host.installedContent as? GitReviewFileRow else { return }
             row.revealFindMatch(match)
-            self.findBar.focus()
+            self.findBar.keepFocus()
         }
     }
 
@@ -1543,6 +1605,19 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
     ) {
         DispatchQueue.main.async { [weak self, weak row] in
             self?.recordFileHeight(file, row: row)
+        }
+    }
+
+    /// Applies a row-height change to the virtual table and settles the mounted viewport in
+    /// the same event, with no animation. `noteHeightOfRows` otherwise tweens the row's slot
+    /// under content that has already changed shape: a collapsed header drawn stretched over its
+    /// old expanded slot, an opened body crammed into a 48pt one — a frame of each, per click.
+    func settleFileRowHeight(_ rows: IndexSet) {
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Design.Motion.immediate
+            context.allowsImplicitAnimation = false
+            fileTableView.noteHeightOfRows(withIndexesChanged: rows)
+            fileTableView.layoutSubtreeIfNeeded()
         }
     }
 
@@ -1569,9 +1644,7 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             return
         }
         measuredFileRowHeights[file.path] = measured
-        fileTableView.noteHeightOfRows(
-            withIndexesChanged: IndexSet(integer: tableRow)
-        )
+        settleFileRowHeight(IndexSet(integer: tableRow))
         updateScrollControls()
     }
 

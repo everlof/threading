@@ -2047,6 +2047,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         usesNativeUI: Bool,
         managedWorkspacePlan: ManagedWorkspacePlan?,
         role: SessionRole = .chat,
+        openingAttachmentPaths: [String] = [],
         prompt: String
     ) -> AgentSession? {
         sessionCoordinator.startRemoteSession(
@@ -2060,6 +2061,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             usesNativeUI: usesNativeUI,
             managedWorkspacePlan: managedWorkspacePlan,
             role: role,
+            openingAttachmentPaths: openingAttachmentPaths,
             prompt: prompt
         )
     }
@@ -3174,9 +3176,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         )
     }
 
-    /// Creates and selects a durable project terminal before sending a repository command.
-    /// The receipt means the validated command reached that visible PTY; completion remains a
-    /// fact printed by the terminal's host-owned exit-status suffix, not guessed here.
+    /// Creates a durable project terminal, gives its first process the repository command, then
+    /// selects it so the launch and all output are visible. The receipt means the validated
+    /// command was accepted for that PTY launch; completion remains a fact printed by the
+    /// terminal's host-owned exit-status suffix, not guessed here.
     func runProjectScript(
         _ invocation: ProjectScriptInvocation
     ) -> ProjectScriptExecutionReceipt? {
@@ -3194,9 +3197,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             to: L10n.format("Script: %@", invocation.script.name)
         )
 
+        let controller = ProjectTerminalRuntime.shared.makeController(for: terminal)
+        guard let receipt = controller.prepareProjectScript(invocation) else {
+            environment.projectStore.removeTerminal(id: terminal.id)
+            return nil
+        }
         sidebarViewController.select(terminalID: terminal.id)
-        guard let controller = ProjectTerminalRuntime.shared.controller(for: terminal.id),
-              let receipt = controller.runProjectScript(invocation) else {
+        guard controller.isRunning else {
             environment.projectStore.removeTerminal(id: terminal.id)
             return nil
         }
@@ -3227,10 +3234,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             : L10n.string("Agent Updates")
         environment.projectStore.renameTerminal(id: terminal.id, to: title)
 
-        sidebarViewController.select(terminalID: terminal.id)
         let plan = AgentCLIUpdateExecutionPlan(updates: updates)
-        guard let controller = ProjectTerminalRuntime.shared.controller(for: terminal.id),
-              let receipt = controller.runAgentCLIUpdates(plan) else {
+        let controller = ProjectTerminalRuntime.shared.makeController(for: terminal)
+        guard let receipt = controller.prepareAgentCLIUpdates(plan) else {
+            environment.projectStore.removeTerminal(id: terminal.id)
+            return nil
+        }
+        sidebarViewController.select(terminalID: terminal.id)
+        guard controller.isRunning else {
             environment.projectStore.removeTerminal(id: terminal.id)
             return nil
         }

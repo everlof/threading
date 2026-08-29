@@ -206,19 +206,29 @@ enum ControlSendOutcome: Equatable, Sendable {
     case refused(ControlRefusal)
 }
 
-/// What became of an ask to be told when another session settles.
+/// The next activity boundary a session watch has captured.
+///
+/// The edge is chosen from the target's current state while the watch is installed on the main
+/// actor. A caller can therefore keep fail-closed current-state coverage by re-arming after every
+/// notice: a busy target next reports settlement, and a settled target next reports a start.
+enum ControlWatchEdge: Equatable, Sendable {
+    case turnStarted
+    case turnSettled
+}
+
+/// What became of an ask to be told when another session changes activity phase.
 enum ControlWatchOutcome: Equatable, Sendable {
-    /// Armed. One notice arrives when the target next settles, exits, or stops at its limit.
-    /// `expiresAfter == nil` means there is no wall-clock expiry; the watch still dies with
-    /// this run of Threading and remains bounded by `maximumPerWatcher`.
-    case armed(on: ControlSessionOverview, expiresAfter: TimeInterval?)
+    /// Armed on the opposite edge from the target's state at registration time.
+    /// `expiresAfter == nil` means there is no wall-clock expiry; the watch still dies with this
+    /// run of Threading and remains bounded by `maximumPerWatcher`.
+    case armed(
+        on: ControlSessionOverview,
+        awaiting: ControlWatchEdge,
+        expiresAfter: TimeInterval?
+    )
     /// This caller already watches that session; the ask changed nothing and the one notice
     /// still arrives. Coalesced rather than doubled, so a repeated ask cannot buy two notices.
-    case alreadyWatching(on: ControlSessionOverview)
-    /// The target has no turn in flight now, so there is nothing to be told about: the caller
-    /// should read its state instead of waiting for an edge that has already gone by. Not a
-    /// refusal — nothing was wrong with the ask, the answer is simply already available.
-    case targetAlreadySettled(ControlSessionOverview)
+    case alreadyWatching(on: ControlSessionOverview, awaiting: ControlWatchEdge)
     case refused(ControlRefusal)
 }
 

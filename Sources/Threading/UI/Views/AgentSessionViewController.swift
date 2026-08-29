@@ -38,6 +38,12 @@ final class AgentSessionViewController: NSViewController {
 
     var activity: SessionActivity { activityTracker.activity }
 
+    /// Structured provider-owned checklist for the current terminal turn.
+    private(set) var runProgress: RunProgress?
+    private let runProgressMonitor = TerminalRunProgressMonitor()
+    private var runProgressRefreshWorkItem: DispatchWorkItem?
+    private var runProgressGeneration = 0
+
     /// Whether this session is the one on screen. Clears any pending attention.
     var isVisible: Bool {
         get { activityTracker.isVisible }
@@ -192,9 +198,11 @@ final class AgentSessionViewController: NSViewController {
             let turnBegan = !self.activityHadTurnInFlight && activity.hasTurnInFlight
             self.activityHadTurnInFlight = activity.hasTurnInFlight
             if turnBegan {
+                self.beginRunProgressTurn()
                 ProjectStore.shared.noteTurnStarted(sessionID: self.sessionID)
             }
             if turnFinished {
+                self.clearRunProgress(resetTranscriptCursor: false)
                 self.noteTurnFinishedForAttachmentDetection()
             }
             self.delegate?.agentSessionDidChangeState(self)
@@ -881,6 +889,49 @@ final class AgentSessionViewController: NSViewController {
         delegate?.agentSessionDidChangeState(self)
     }
 
+    /// Applies a plan mutation delivered by the session's observational hook.
+    func applyRunProgress(_ report: HookRunProgressReport) {
+        let generation = runProgressGeneration
+        runProgressMonitor.apply(report) { [weak self] progress in
+            self?.publishRunProgress(progress, generation: generation)
+        }
+    }
+
+    private func publishRunProgress(_ progress: RunProgress?, generation: Int) {
+        guard generation == runProgressGeneration,
+              activityTracker.activity.hasTurnInFlight,
+              runProgress != progress else { return }
+        runProgress = progress
+        delegate?.agentSessionDidChangeState(self)
+    }
+
+    private func beginRunProgressTurn() {
+        runProgressGeneration &+= 1
+        let generation = runProgressGeneration
+        runProgressRefreshWorkItem?.cancel()
+        runProgressMonitor.beginTurn { [weak self] progress in
+            self?.publishRunProgress(progress, generation: generation)
+        }
+        scheduleRunProgressTranscriptRefresh()
+    }
+
+    private func clearRunProgress(resetTranscriptCursor: Bool) {
+        runProgressGeneration &+= 1
+        runProgressRefreshWorkItem?.cancel()
+        runProgressRefreshWorkItem = nil
+        let hadProgress = runProgress != nil
+        runProgress = nil
+        if resetTranscriptCursor {
+            runProgressMonitor.clear { _ in }
+        } else {
+            runProgressMonitor.endTurn { _ in }
+        }
+        if hadProgress {
+            delegate?.agentSessionDidChangeState(self)
+            RemoteSessionMirrorRegistry.shared.sessionRunProgressChanged(sessionID)
+        }
+    }
+
     /// Adopts the exact rollout path Codex included in a lifecycle report.
     ///
     /// The provider session id in the same report is preferred; a resumed session's stored id is
@@ -908,6 +959,52 @@ final class AgentSessionViewController: NSViewController {
 
         codexTranscriptURL = url
         scheduleCodexInterruptionRefresh()
+        scheduleRunProgressTranscriptRefresh()
+    }
+
+    /// Coalesces terminal repaint bursts into one resumable, off-main transcript pass.
+    private func scheduleRunProgressTranscriptRefresh(after delay: TimeInterval = 0.25) {
+        guard activityTracker.activity.hasTurnInFlight,
+              TranscriptReplayFormat(kind: agentKind) != nil else { return }
+
+        runProgressRefreshWorkItem?.cancel()
+        let generation = runProgressGeneration
+        let item = DispatchWorkItem { [weak self] in
+            guard let self,
+                  generation == self.runProgressGeneration,
+                  self.activityTracker.activity.hasTurnInFlight else { return }
+            self.runProgressRefreshWorkItem = nil
+
+            if let url = self.attachmentTranscriptURL() {
+                self.scanRunProgressTranscript(at: url, generation: generation)
+                return
+            }
+            guard let lookup = self.attachmentTranscriptLookup() else { return }
+            Task { @MainActor [weak self] in
+                let url = await Task.detached(priority: .utility) { lookup() }.value
+                guard let self, let url,
+                      generation == self.runProgressGeneration else { return }
+                if self.agentKind.supports(.lifecycleReportedTranscriptPath) {
+                    self.codexTranscriptURL = url
+                }
+                self.scanRunProgressTranscript(at: url, generation: generation)
+            }
+        }
+        runProgressRefreshWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    private func scanRunProgressTranscript(at url: URL, generation: Int) {
+        runProgressMonitor.scan(at: url, kind: agentKind) { [weak self] result in
+            guard let self, generation == self.runProgressGeneration else { return }
+            if result.hasMore {
+                self.scheduleRunProgressTranscriptRefresh(after: 0.01)
+            } else {
+                // A first hydration can cross several bounded chunks. Publishing the middle of
+                // an older turn would flash a stale checklist before the newest boundary lands.
+                self.publishRunProgress(result.progress, generation: generation)
+            }
+        }
     }
 
     /// A completed terminal turn has an intact provider message even when its TUI painted that
@@ -1100,6 +1197,7 @@ final class AgentSessionViewController: NSViewController {
         claudeBoundaryRefreshWorkItem?.cancel()
         claudeBoundaryRefreshWorkItem = nil
         claudeTranscriptURL = nil
+        clearRunProgress(resetTranscriptCursor: true)
     }
 
     /// Persists the identifier needed to resume a fresh conversation. Codex and OpenCode assign
@@ -1276,6 +1374,7 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         scheduleProviderTitleRefresh()
         scheduleCodexInterruptionRefresh()
         scheduleClaudeBoundaryRefresh()
+        scheduleRunProgressTranscriptRefresh()
 
         // Grok and OpenCode do not create a record for a blank TUI. Output after the initial
         // discovery window may mean the first prompt landed; retry at a bounded cadence until

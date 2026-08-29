@@ -363,6 +363,8 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     public let isPinned: Bool
     /// Included so archived results can use the same row model as the active dashboard.
     public let isArchived: Bool
+    /// Unix time of the current archive action. Optional for hosts predating archive chronology.
+    public let archivedAt: Double?
     /// Optional so clients and hosts can roll forward independently.
     public let snoozedAt: Double?
     public let snoozedUntil: Double?
@@ -403,6 +405,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         lastActiveAt: Double? = nil,
         isPinned: Bool = false,
         isArchived: Bool = false,
+        archivedAt: Double? = nil,
         snoozedAt: Double? = nil,
         snoozedUntil: Double? = nil,
         wokeReason: String? = nil,
@@ -427,6 +430,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.lastActiveAt = lastActiveAt
         self.isPinned = isPinned
         self.isArchived = isArchived
+        self.archivedAt = archivedAt
         self.snoozedAt = snoozedAt
         self.snoozedUntil = snoozedUntil
         self.wokeReason = wokeReason
@@ -444,7 +448,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
 
     private enum CodingKeys: String, CodingKey {
         case id, title, agentKind, surface, state, projectName, isAvailable, lastActiveAt
-        case isPinned, isArchived, isShared
+        case isPinned, isArchived, archivedAt, isShared
         case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
         case inheritedTerminalTheme, account, accountID, limitRecovery, model
@@ -463,6 +467,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         lastActiveAt = try container.decodeIfPresent(Double.self, forKey: .lastActiveAt)
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        archivedAt = try container.decodeIfPresent(Double.self, forKey: .archivedAt)
         snoozedAt = try container.decodeIfPresent(Double.self, forKey: .snoozedAt)
         snoozedUntil = try container.decodeIfPresent(Double.self, forKey: .snoozedUntil)
         wokeReason = try container.decodeIfPresent(String.self, forKey: .wokeReason)
@@ -1160,6 +1165,9 @@ public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     /// page, for the gallery's ledger. A phone paired with a Mac that does not say so draws the
     /// kind's glyph in each cell and asks for no bytes.
     case attachmentThumbnails = "attachment-thumbnails"
+    /// A report sent from the paired iPhone can create a session with readable opening text and
+    /// one bounded screenshot that the Mac takes into attachment custody before launch.
+    case reportSessionOpening = "report-session-opening"
 }
 
 /// The size a thumbnail is asked at, and the most a Mac will answer with.
@@ -1787,6 +1795,46 @@ public struct RemoteRevokeSharesRequestDTO: Codable, Equatable, Sendable {
     public init() {}
 }
 
+/// The one content-bearing item a phone report may hand to a newly created Mac session.
+///
+/// JPEG is fixed rather than declared by the client, and the byte ceiling is the public-report
+/// preview ceiling. The same reviewed preview can therefore go to either destination without a
+/// second image policy or a filename controlled by the network.
+public struct RemoteReportScreenshotDTO: Codable, Equatable, Sendable {
+    public let jpegBase64: String
+
+    public init(jpegBase64: String) {
+        self.jpegBase64 = jpegBase64
+    }
+}
+
+public enum RemoteReportScreenshotPolicy {
+    public static func jpegData(from screenshot: RemoteReportScreenshotDTO) -> Data? {
+        guard let data = Data(base64Encoded: screenshot.jpegBase64, options: []),
+              data.count >= 3,
+              data.count <= PublicIssueReportPolicy.maximumScreenshotPreviewBytes,
+              data.starts(with: [0xff, 0xd8, 0xff]) else {
+            return nil
+        }
+        return data
+    }
+}
+
+/// An all-or-nothing report opening understood by current Mac hosts.
+///
+/// The request's legacy `prompt` is empty when this value is present. A Mac predating this DTO
+/// ignores the unknown field and refuses that empty prompt instead of launching a session that
+/// silently lost the screenshot or received its base64 as prose.
+public struct RemoteReportSessionOpeningDTO: Codable, Equatable, Sendable {
+    public let prompt: String
+    public let screenshot: RemoteReportScreenshotDTO?
+
+    public init(prompt: String, screenshot: RemoteReportScreenshotDTO? = nil) {
+        self.prompt = prompt
+        self.screenshot = screenshot
+    }
+}
+
 public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     public let projectID: String
     public let agentKind: String
@@ -1804,6 +1852,8 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     /// `RemoteSessionRole.chat` or `.manager`. Absent is a chat, which is what every client
     /// asked for before this field existed.
     public let role: RemoteSessionRole?
+    /// A paired-iPhone report's atomic opening. When present, `prompt` must be empty.
+    public let reportOpening: RemoteReportSessionOpeningDTO?
     /// New clients ask for the one changed row. Absent keeps the original full-catalogue response
     /// for older clients whose decoder requires `me`.
     public let compactResponse: Bool?
@@ -1820,6 +1870,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         surface: RemoteSessionSurface,
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
         role: RemoteSessionRole? = nil,
+        reportOpening: RemoteReportSessionOpeningDTO? = nil,
         compactResponse: Bool? = nil,
         prompt: String
     ) {
@@ -1833,6 +1884,7 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         self.surface = surface
         self.managedWorkspace = managedWorkspace
         self.role = role
+        self.reportOpening = reportOpening
         self.compactResponse = compactResponse
         self.prompt = prompt
     }
@@ -2391,6 +2443,75 @@ public enum RemoteWebSocketFeature: String, Codable, CaseIterable, Sendable {
     /// A direct terminal client may place uploaded files in the session workspace and insert
     /// their quoted paths into the PTY without submitting the current TUI line.
     case terminalAttachmentInsertion
+    /// The host publishes provider-owned run-plan summaries and serves checklist rows in pages.
+    case runPlanProgress
+}
+
+// MARK: - Run plan progress
+
+public enum RemoteRunPlanStepStatus: String, Codable, Equatable, Sendable {
+    case pending
+    case inProgress
+    case completed
+}
+
+public struct RemoteRunPlanStepDTO: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let providerID: String?
+    public let title: String
+    public let status: RemoteRunPlanStepStatus
+
+    public init(id: String, providerID: String? = nil, title: String, status: RemoteRunPlanStepStatus) {
+        self.id = id
+        self.providerID = providerID
+        self.title = title
+        self.status = status
+    }
+}
+
+public struct RemoteRunPlanSummaryDTO: Codable, Equatable, Sendable {
+    public let activeTitle: String?
+    public let current: Int
+    public let completed: Int
+    public let active: Int
+    public let total: Int
+
+    public init(activeTitle: String?, current: Int, completed: Int, active: Int, total: Int) {
+        self.activeTitle = activeTitle
+        self.current = current
+        self.completed = completed
+        self.active = active
+        self.total = total
+    }
+}
+
+/// A nil summary is the authoritative turn-end clear.
+public struct RemoteRunPlanUpdateDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let revision: Int
+    public let plan: RemoteRunPlanSummaryDTO?
+
+    public init(revision: Int, plan: RemoteRunPlanSummaryDTO?) {
+        self.type = "runPlan"
+        self.revision = revision
+        self.plan = plan
+    }
+}
+
+public struct RemoteRunPlanPageDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let revision: Int
+    public let offset: Int
+    public let total: Int
+    public let steps: [RemoteRunPlanStepDTO]
+
+    public init(revision: Int, offset: Int, total: Int, steps: [RemoteRunPlanStepDTO]) {
+        self.type = "runPlanPage"
+        self.revision = revision
+        self.offset = offset
+        self.total = total
+        self.steps = steps
+    }
 }
 
 /// A live theme change while a session is already open.
@@ -3134,6 +3255,7 @@ public enum RemoteRESTErrorCode: String, Codable, CaseIterable, Sendable {
     case unsupportedSurface
     case unknownRole
     case unsupportedWorkspace
+    case invalidReportOpening
 
     case invalidDeviceToken
     case localDiagnosticsDisabled
@@ -3556,6 +3678,8 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
     public let rows: Int?
     public let beforeRowID: String?
     public let limit: Int?
+    public let offset: Int?
+    public let revision: Int?
     /// Stable human recipient for an app-owned attention request. It is never parsed from `text`.
     public let recipientID: String?
     /// Idempotency key for a prompt submission. Kept separate from `id`, which names permission
@@ -3587,6 +3711,8 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         rows: Int? = nil,
         beforeRowID: String? = nil,
         limit: Int? = nil,
+        offset: Int? = nil,
+        revision: Int? = nil,
         recipientID: String? = nil,
         requestID: String? = nil,
         contextAttachments: [RemoteConversationContextAttachmentDTO]? = nil,
@@ -3608,6 +3734,8 @@ public struct RemoteClientMessage: Codable, Equatable, Sendable {
         self.rows = rows
         self.beforeRowID = beforeRowID
         self.limit = limit
+        self.offset = offset
+        self.revision = revision
         self.recipientID = recipientID
         self.requestID = requestID
         self.contextAttachments = contextAttachments

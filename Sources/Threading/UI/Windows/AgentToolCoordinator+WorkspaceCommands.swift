@@ -139,7 +139,7 @@ extension AgentToolCoordinator {
             timeout: timeout,
             from: .agentSession(sessionID)
         ) {
-        case .armed(let target, let expiresAfter):
+        case .armed(let target, let awaiting, let expiresAfter):
             let lifetime: String
             if let expiresAfter {
                 lifetime = "It expires after \(Self.minutesDescription(for: expiresAfter)) "
@@ -148,22 +148,25 @@ extension AgentToolCoordinator {
                 lifetime = "It has no wall-clock expiry and lasts only as long as this run "
                     + "of Threading."
             }
+            let boundary = switch awaiting {
+            case .turnStarted:
+                "It is currently settled; when its next turn starts"
+            case .turnSettled:
+                "It has a turn in flight; when that turn settles — or it exits or stops at its usage limit"
+            }
             return .success("""
-                Watching “\(target.title)”. When its current turn settles — or it exits, or \
-                stops at its usage limit — you receive one message saying so, and that message \
-                spends this session's turn. The watch says nothing before then and is spent on \
-                that one notice. \(lifetime)
+                Watching “\(target.title)”. \(boundary), you receive one message saying so, \
+                and that message spends this session's turn. The watch is spent on that one \
+                notice; re-arm it afterwards to watch the opposite edge. \(lifetime)
                 """)
-        case .alreadyWatching(let target):
+        case .alreadyWatching(let target, let awaiting):
+            let boundary = switch awaiting {
+            case .turnStarted: "its next turn starts"
+            case .turnSettled: "its current turn settles"
+            }
             return .success("""
                 Already watching “\(target.title)” — this changed nothing, and the one notice \
-                already armed still arrives when that session settles.
-                """)
-        case .targetAlreadySettled(let target):
-            return .failure("""
-                “\(target.title)” has already settled — there is no turn in flight to be told \
-                about. Read list_sessions, or just look: the answer you are waiting on is \
-                already there. Arm a watch only while a session is working.
+                already armed still arrives when \(boundary).
                 """)
         case .refused(let refusal):
             return .failure(Self.words(for: refusal))

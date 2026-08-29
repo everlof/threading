@@ -497,7 +497,12 @@ remote stays addressable by sha. See
 into `Packages/Vendor/LabelMorph` and `Packages/Vendor/ThinkingOrbs` and publishes them to their real GitHub
 remotes — even when the outer push targets a local throwaway path, and even though the main repo
 has no remote configured. To exercise the hook, pipe fabricated ref lines into
-`scripts/pre_push.sh` directly.
+`scripts/pre_push.sh` directly. The sole scripted publication exception is
+`scripts/publish_local_release.sh`: it names the tested commit's outer `master` and one annotated
+tag as explicit refspecs and disables recursion in both configuration and the push option. Do not generalize its
+push primitive into a convenience command. Before either ref moves it runs both `scripts/test.sh
+all` and `scripts/ci.sh`, then proves the clean checkout still points at the commit those gates
+tested; the locally invoked publisher skips only that duplicate quality-gate run.
 
 **Fast is defined by "orders a window on screen", not by "is UI".** Almost every UI test here —
 all the `*RenderTests`, the themed component tests, the pane header/footer tests — builds an

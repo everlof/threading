@@ -6213,7 +6213,7 @@ enum MCPTools {
         openWorldHint: true
       ),
       title: "Watch a session",
-      detail: "One notice when a sibling settles, exits, or hits its limit.",
+      detail: "One notice when a sibling starts or settles.",
       symbol: "eye",
       decodeArguments: { container in
         try container.decodeIfPresent(WatchSessionArguments.self, forKey: .arguments)
@@ -6224,17 +6224,19 @@ enum MCPTools {
         completion(handler.watchSession(arguments, for: sessionID))
       },
       description: """
-        Wait for another chat/session in this project to settle, so work here can continue \
-        after its current turn finishes, its agent exits, or it stops at its usage limit. Use it \
-        instead of calling list_sessions again and again while you wait for a sibling's result.
+        Watch the next activity edge of another chat/session in this project without polling. If \
+        it has a turn in flight, the notice arrives when that turn finishes, its agent exits, or \
+        it stops at its usage limit. If it is already settled, the notice arrives when its next \
+        turn starts.
 
         The notice arrives as a message in this conversation, which means it spends a turn of \
         this session's own usage when it lands. It is one notice: the watch is spent when it \
-        fires, and arming it again is another call. A session that has *already* settled is \
-        refused rather than watched — read list_sessions for its state instead, since the edge \
-        you asked about has gone by. The watch lives with this run of Threading. It has no \
-        wall-clock expiry unless timeout_minutes is supplied; a supplied timeout expires with \
-        a notice saying so.
+        fires, and arming it again is another call. Re-arm after every notice when waiting for a \
+        group: a settled sibling is then guarded against restarting while the others finish. \
+        Registration snapshots the target's current state and installs the opposite-edge watch \
+        as one main-actor operation, so an edge cannot occur between the check and the guard. \
+        The watch lives with this run of Threading. It has no wall-clock expiry unless \
+        timeout_minutes is supplied; a supplied timeout expires with a notice saying so.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -6248,7 +6250,7 @@ enum MCPTools {
             type: .number,
             description: """
               Optional positive finite number of minutes to wait. Omit it to keep the watch \
-              until that turn settles or this run of Threading ends.
+              until the captured activity edge occurs or this run of Threading ends.
               """
           )
         ],

@@ -397,6 +397,17 @@
         }
       }
     },
+    "%@ (allowed)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (tillåten)"
+          }
+        }
+      }
+    },
     "%@ Help" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1167,6 +1178,17 @@
         }
       }
     },
+    "%@ · %lld of %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ · %lld av %lld"
+          }
+        }
+      }
+    },
     "%@ · %lld requests" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1636,6 +1658,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%d okända"
+          }
+        }
+      }
+    },
+    "%lld %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld %@"
           }
         }
       }
@@ -2124,6 +2157,17 @@
         }
       }
     },
+    "%lld more not loaded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld till har inte lästs in"
+          }
+        }
+      }
+    },
     "%lld more page matches" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2197,6 +2241,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld av %lld"
+          }
+        }
+      }
+    },
+    "%lld of %lld complete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld av %lld klara"
           }
         }
       }
@@ -2483,6 +2538,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld kortkommandon"
+          }
+        }
+      }
+    },
+    "%lld skipped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld överhoppade"
           }
         }
       }
@@ -2850,6 +2916,17 @@
         }
       }
     },
+    "1 more line is not shown." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 rad till visas inte."
+          }
+        }
+      }
+    },
     "1 older conversation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2894,6 +2971,17 @@
         }
       }
     },
+    "1 running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 körs"
+          }
+        }
+      }
+    },
     "1 saved annotation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2923,6 +3011,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 mindre katalog"
+          }
+        }
+      }
+    },
+    "1 timed out" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 tog för lång tid"
           }
         }
       }
@@ -3103,6 +3202,17 @@
         }
       }
     },
+    "2 skipped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2 hoppades över"
+          }
+        }
+      }
+    },
     "2.31 GB · +92 MB" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3253,6 +3363,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "57,0 GiB totalt"
+          }
+        }
+      }
+    },
+    "6 passed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "6 godkända"
           }
         }
       }
@@ -3594,6 +3715,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "En gräns här är din, före leverantörens. I dag säger den till när ett fönster når gränsen du satt – inget hålls tillbaka och ingen chatt stoppas, och procentandelen du får höra är alltid den som fönstret självt visar."
+          }
+        }
+      }
+    },
+    "A live plan summary whose full-row button opens the reusable checklist." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En sammanfattning av en aktiv plan vars knapp över hela raden öppnar den återanvändbara checklistan."
           }
         }
       }
@@ -4665,6 +4797,17 @@
         }
       }
     },
+    "Activate the pending plugin changes in this session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera de väntande tilläggsändringarna i den här sessionen"
+          }
+        }
+      }
+    },
     "Activated the navigator grid item." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4672,6 +4815,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Navigatorrutnätsobjektet aktiverades."
+          }
+        }
+      }
+    },
+    "Active" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktiv"
           }
         }
       }
@@ -4962,6 +5116,17 @@
         }
       }
     },
+    "Add another working directory to the session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till ytterligare en arbetskatalog i sessionen"
+          }
+        }
+      }
+    },
     "Add attachment to chat" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5156,6 +5321,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till…"
+          }
+        }
+      }
+    },
+    "Adjust the mouse wheel scroll speed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Justera rullhjulets rullhastighet"
           }
         }
       }
@@ -5985,6 +6161,17 @@
         }
       }
     },
+    "Allowlist the read-only calls that keep prompting you" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåtelselista de skrivskyddade anropen som ständigt frågar dig"
+          }
+        }
+      }
+    },
     "Alpha" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6601,6 +6788,17 @@
         }
       }
     },
+    "Approve one retry of a recent auto-review denial" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Godkänn ett nytt försök efter ett nekat automatiskt granskningsanrop"
+          }
+        }
+      }
+    },
     "Approve this Mac in the Tailscale admin console, then retry." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6667,6 +6865,17 @@
         }
       }
     },
+    "Archive this session and exit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arkivera den här sessionen och avsluta"
+          }
+        }
+      }
+    },
     "Archive “%@”?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6685,6 +6894,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arkiverat"
+          }
+        }
+      }
+    },
+    "Archived conversation search" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök bland arkiverade konversationer"
           }
         }
       }
@@ -6817,6 +7037,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fråga igen"
+          }
+        }
+      }
+    },
+    "Ask a quick side question without interrupting the main thread" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ställ en snabb sidofråga utan att avbryta huvudtråden"
           }
         }
       }
@@ -7800,6 +8031,17 @@
         }
       }
     },
+    "Branch the conversation from this point" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förgrena konversationen härifrån"
+          }
+        }
+      }
+    },
     "Breakdown" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7961,6 +8203,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bläddra bland färdigheter som är tillgängliga i den här konversationen"
+          }
+        }
+      }
+    },
+    "Browse the installed plugins" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bläddra bland de installerade tilläggen"
+          }
+        }
+      }
+    },
+    "Browse the running and completed workflows" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bläddra bland pågående och avslutade arbetsflöden"
           }
         }
       }
@@ -9472,6 +9736,17 @@
         }
       }
     },
+    "Choose a communication style for Codex" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj en kommunikationsstil för Codex"
+          }
+        }
+      }
+    },
     "Choose a directory containing threading-extension.json." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9545,6 +9820,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj ett ljud. Allt efter 30 sekunder klipps bort."
+          }
+        }
+      }
+    },
+    "Choose a syntax highlighting theme" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj ett tema för syntaxmarkering"
           }
         }
       }
@@ -9670,6 +9956,17 @@
         }
       }
     },
+    "Choose or hide the terminal pet" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj eller dölj terminalens husdjur"
+          }
+        }
+      }
+    },
     "Choose or inspect the active model" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9692,6 +9989,17 @@
         }
       }
     },
+    "Choose the default environment for cloud agents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj standardmiljön för molnagenter"
+          }
+        }
+      }
+    },
     "Choose the folder to keep the scratchpad in." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9699,6 +10007,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj mappen som kladdblocket ska ligga i."
+          }
+        }
+      }
+    },
+    "Choose the model and reasoning effort" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj modell och resonemangsnivå"
           }
         }
       }
@@ -9725,6 +10044,17 @@
         }
       }
     },
+    "Choose the terminal UI renderer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj renderare för terminalgränssnittet"
+          }
+        }
+      }
+    },
     "Choose two files to compare" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9732,6 +10062,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj två filer att jämföra"
+          }
+        }
+      }
+    },
+    "Choose what Codex is allowed to do" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj vad Codex får göra"
+          }
+        }
+      }
+    },
+    "Choose what appears in the status line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj vad som visas i statusraden"
+          }
+        }
+      }
+    },
+    "Choose what appears in the terminal title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Välj vad som visas i terminalens titel"
           }
         }
       }
@@ -9934,6 +10297,17 @@
         }
       }
     },
+    "Clean the changed code up for reuse and simplicity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Städa den ändrade koden för återanvändning och enkelhet"
+          }
+        }
+      }
+    },
     "Cleanup complete" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10062,6 +10436,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rensa den aktiva sidans webbläsardata efter explicit användarbekräftelse."
+          }
+        }
+      }
+    },
+    "Clear the terminal and start a new chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rensa terminalen och börja en ny chatt"
           }
         }
       }
@@ -11221,6 +11606,17 @@
         }
       }
     },
+    "Complete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klar"
+          }
+        }
+      }
+    },
     "Complete %@'s sign-in there to reconnect this login." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11239,6 +11635,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Slutför %@s inloggning där. Threading verifierar inloggningen när webbläsarflödet återvänder."
+          }
+        }
+      }
+    },
+    "Complete provider outcomes wrap as units; press the receipt like its card row." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fullständiga leverantörsresultat radbryts som enheter; tryck på kvittot som på dess kortrad."
           }
         }
       }
@@ -11360,6 +11767,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Konfiguration"
+          }
+        }
+      }
+    },
+    "Configure the sandbox for shell commands" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurera sandlådan för skalkommandon"
+          }
+        }
+      }
+    },
+    "Configure usage credits, or ask your admin for them" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurera användningskrediter, eller be din administratör om dem"
+          }
+        }
+      }
+    },
+    "Configure what Codex remembers and when" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurera vad Codex minns och när"
           }
         }
       }
@@ -11650,6 +12090,28 @@
         }
       }
     },
+    "Continue this session in Claude Desktop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fortsätt den här sessionen i Claude Desktop"
+          }
+        }
+      }
+    },
+    "Continue this session in the desktop app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fortsätt den här sessionen i skrivbordsappen"
+          }
+        }
+      }
+    },
     "Continue with %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11734,6 +12196,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Styra %@?"
+          }
+        }
+      }
+    },
+    "Control this session from your phone or claude.ai/code" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Styr den här sessionen från din telefon eller claude.ai/code"
           }
         }
       }
@@ -11965,6 +12438,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera diagramdata"
+          }
+        }
+      }
+    },
+    "Copy Claude's last response to the clipboard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera Claudes senaste svar till urklipp"
           }
         }
       }
@@ -12211,6 +12695,17 @@
         }
       }
     },
+    "Copy the last response, code block or quote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera det senaste svaret, kodblocket eller citatet"
+          }
+        }
+      }
+    },
     "Copy the numbers behind the chart" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12229,6 +12724,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera hela meddelandet"
+          }
+        }
+      }
+    },
+    "Copy this conversation into a background session and keep working here" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera konversationen till en bakgrundssession och fortsätt arbeta här"
           }
         }
       }
@@ -12823,6 +13329,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skapa en tema"
+          }
+        }
+      }
+    },
+    "Create and manage scheduled cloud agents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapa och hantera schemalagda molnagenter"
+          }
+        }
+      }
+    },
+    "Create and manage subagents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapa och hantera underagenter"
           }
         }
       }
@@ -14664,6 +15192,17 @@
         }
       }
     },
+    "Dump the JS heap to the desktop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dumpa JS-heapen till skrivbordet"
+          }
+        }
+      }
+    },
     "Duplicate" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14803,6 +15342,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Redigera markeringar"
+          }
+        }
+      }
+    },
+    "Edit the CLAUDE.md files and memory settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redigera CLAUDE.md-filerna och minnesinställningarna"
           }
         }
       }
@@ -15166,6 +15716,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ange exakta procenttal för aviseringar, användningsgränser, rullande fönster eller reserverad användning."
+          }
+        }
+      }
+    },
+    "Enter plan mode, or view this session's plan" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gå in i planläge, eller visa sessionens plan"
           }
         }
       }
@@ -15555,6 +16116,17 @@
         }
       }
     },
+    "Exercise a change end to end and observe what it really does" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör igenom en ändring hela vägen och se vad den faktiskt gör"
+          }
+        }
+      }
+    },
     "Exit code: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15749,6 +16321,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Exportera jämförelsen som en sida vem som helst kan öppna."
+          }
+        }
+      }
+    },
+    "Export this conversation to a file or the clipboard" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportera konversationen till en fil eller till urklipp"
           }
         }
       }
@@ -16281,6 +16864,17 @@
         }
       }
     },
+    "Fan out web searches, verify the claims, write a cited report" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprid ut webbsökningar, kontrollera påståendena, skriv en källhänvisad rapport"
+          }
+        }
+      }
+    },
     "Fast" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16640,6 +17234,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hitta ikon automatiskt"
+          }
+        }
+      }
+    },
+    "Find and verify bugs in your branch, in the cloud" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hitta och bekräfta buggar i din gren, i molnet"
           }
         }
       }
@@ -17161,6 +17766,17 @@
         }
       }
     },
+    "Fork the current chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förgrena den aktuella chatten"
+          }
+        }
+      }
+    },
     "Format:" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17212,6 +17828,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ramverk"
+          }
+        }
+      }
+    },
+    "Free up context by summarizing the conversation so far" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Frigör kontext genom att sammanfatta konversationen hittills"
           }
         }
       }
@@ -17278,6 +17905,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Från din GitHub-apps inställningssida. Enhetsflödesinloggning behöver ingen klienthemlighet. Aktivera “Device flow” på appen och installera den på kodförråden den ska se."
+          }
+        }
+      }
+    },
+    "Full files" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hela filer"
           }
         }
       }
@@ -17876,6 +18514,28 @@
         }
       }
     },
+    "Grant Claude access to your Design projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ge Claude åtkomst till dina Design-projekt"
+          }
+        }
+      }
+    },
+    "Grant or revoke Claude's access to your Design projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ge eller återkalla Claudes åtkomst till dina Design-projekt"
+          }
+        }
+      }
+    },
     "Grants a grace to cross the gap, and holds while the pointer rests here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17997,6 +18657,17 @@
         }
       }
     },
+    "Guidance for charts and dashboards that read as one system" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vägledning för diagram och instrumentpaneler som läses som ett system"
+          }
+        }
+      }
+    },
     "HEAD → Index" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18092,6 +18763,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rubriker för ensamma grenar"
+          }
+        }
+      }
+    },
+    "Health-check the Claude Code setup and fix what is broken" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hälsokontrollera Claude Code-uppsättningen och laga det som är trasigt"
           }
         }
       }
@@ -18954,6 +19636,17 @@
         }
       }
     },
+    "Import setup, projects and recent chats from Claude Code" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importera uppsättning, projekt och senaste chattar från Claude Code"
+          }
+        }
+      }
+    },
     "Imported Classic Skin" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19060,6 +19753,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inkludera filer utanför projektet"
+          }
+        }
+      }
+    },
+    "Include the IDE's selection, open files and context" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta med utvecklingsmiljöns markering, öppna filer och sammanhang"
           }
         }
       }
@@ -19306,6 +20010,17 @@
         }
       }
     },
+    "Inspect the current state" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska det aktuella läget"
+          }
+        }
+      }
+    },
     "Inspecting and starting %@…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19434,6 +20149,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installera och starta app"
+          }
+        }
+      }
+    },
+    "Install the Claude Slack app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installera Claudes Slack-app"
           }
         }
       }
@@ -20406,6 +21132,17 @@
         }
       }
     },
+    "Launch and drive this project's app to see a change working" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta och styr projektets app för att se en ändring fungera"
+          }
+        }
+      }
+    },
     "Launch restore is switched off." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20435,6 +21172,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Layoutförskjutning · %@ · %lld ställen"
+          }
+        }
+      }
+    },
+    "Learn Claude Code features through short interactive lessons" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lär dig Claude Codes funktioner genom korta interaktiva lektioner"
           }
         }
       }
@@ -20483,6 +21231,17 @@
         }
       }
     },
+    "Leave Codex" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lämna Codex"
+          }
+        }
+      }
+    },
     "Leave One Running" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20490,6 +21249,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Låt en fortsätta"
+          }
+        }
+      }
+    },
+    "Leave the CLI" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lämna kommandoradsverktyget"
           }
         }
       }
@@ -20523,6 +21293,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kvar från borttagna arbetsytor"
+          }
+        }
+      }
+    },
+    "Let Claude consult a stronger model at key moments" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt Claude rådfråga en starkare modell i avgörande stunder"
           }
         }
       }
@@ -20710,6 +21491,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Låt en agent namnge sin egen session och arkivera den när arbetet är klart."
+          }
+        }
+      }
+    },
+    "Let the sandbox read one more directory" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt sandlådan läsa ytterligare en katalog"
           }
         }
       }
@@ -21033,6 +21825,39 @@
         }
       }
     },
+    "List the available skills" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lista de tillgängliga färdigheterna"
+          }
+        }
+      }
+    },
+    "List the background terminals" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lista bakgrundsterminalerna"
+          }
+        }
+      }
+    },
+    "List the configured MCP tools" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lista de konfigurerade MCP-verktygen"
+          }
+        }
+      }
+    },
     "List themes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21062,6 +21887,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lista, skapa, aktivera och stäng delade eller privata live webbläsarflikar."
+          }
+        }
+      }
+    },
+    "Listen to Claude FM" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lyssna på Claude FM"
           }
         }
       }
@@ -21330,6 +22166,17 @@
         }
       }
     },
+    "Log out of Codex" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logga ut från Codex"
+          }
+        }
+      }
+    },
     "Login name" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21513,6 +22360,61 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hantera webbläsarflikar"
+          }
+        }
+      }
+    },
+    "Manage the Claude Code plugins" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hantera Claude Codes tillägg"
+          }
+        }
+      }
+    },
+    "Manage the IDE integrations and show their status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hantera integrationerna med utvecklingsmiljöer och visa deras status"
+          }
+        }
+      }
+    },
+    "Manage the MCP servers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hantera MCP-servrarna"
+          }
+        }
+      }
+    },
+    "Manage the allow and deny rules for tools" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hantera tillåt- och neka-reglerna för verktyg"
+          }
+        }
+      }
+    },
+    "Manage the connected apps" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hantera de anslutna apparna"
           }
         }
       }
@@ -21920,6 +22822,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Mellan"
+          }
+        }
+      }
+    },
+    "Mention a file in the prompt" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nämn en fil i prompten"
           }
         }
       }
@@ -22360,6 +23273,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Flytta chatten till en annan checkout?"
+          }
+        }
+      }
+    },
+    "Move this session to another working directory" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flytta den här sessionen till en annan arbetskatalog"
           }
         }
       }
@@ -23460,6 +24384,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inga appar hittades"
+          }
+        }
+      }
+    },
+    "No archived conversations match your search." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga arkiverade konversationer matchar din sökning."
           }
         }
       }
@@ -25895,6 +26830,17 @@
         }
       }
     },
+    "Open checks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna kontroller"
+          }
+        }
+      }
+    },
     "Open checks in Git Review" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26060,6 +27006,17 @@
         }
       }
     },
+    "Open in editor" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna i redigerare"
+          }
+        }
+      }
+    },
     "Open in external app" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26159,6 +27116,17 @@
         }
       }
     },
+    "Open the Claude in Chrome settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna inställningarna för Claude i Chrome"
+          }
+        }
+      }
+    },
     "Open the day's window when your day starts, not when you get to it." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26166,6 +27134,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppna dagens fönster när din dag börjar, inte när du hinner dit."
+          }
+        }
+      }
+    },
+    "Open the settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna inställningarna"
+          }
+        }
+      }
+    },
+    "Open your keyboard shortcuts file" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna din fil med tangentbordsgenvägar"
           }
         }
       }
@@ -26287,6 +27277,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Opus · 1M"
+          }
+        }
+      }
+    },
+    "Order Claude Code stickers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beställ Claude Code-dekaler"
           }
         }
       }
@@ -26885,6 +27886,17 @@
         }
       }
     },
+    "Permanently delete this session and exit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radera den här sessionen permanent och avsluta"
+          }
+        }
+      }
+    },
     "Permission" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26936,6 +27948,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Välj ett fönster och vad som ska hända när det når dit."
+          }
+        }
+      }
+    },
+    "Pick up skills added or changed on disk" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läs in färdigheter som lagts till eller ändrats på disk"
           }
         }
       }
@@ -27024,6 +28047,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Planera"
+          }
+        }
+      }
+    },
+    "Plan a large change, then run it across isolated worktree agents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Planera en stor ändring och kör den sedan över isolerade worktree-agenter"
+          }
+        }
+      }
+    },
+    "Plan steps" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plansteg"
           }
         }
       }
@@ -28436,6 +29481,17 @@
         }
       }
     },
+    "Push a React design system to claude.ai/design" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Publicera ett React-designsystem till claude.ai/design"
+          }
+        }
+      }
+    },
     "Push branch" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29569,6 +30625,17 @@
         }
       }
     },
+    "Reference for the Claude API and the Anthropic SDKs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Referens för Claude API och Anthropics SDK:er"
+          }
+        }
+      }
+    },
     "Refresh" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29763,6 +30830,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ladda om sidan för att hämta dess utloggade tillstånd."
+          }
+        }
+      }
+    },
+    "Remap the terminal shortcuts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändra terminalens kortkommandon"
           }
         }
       }
@@ -30196,6 +31274,17 @@
         }
       }
     },
+    "Rename the current thread" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Byt namn på den aktuella tråden"
+          }
+        }
+      }
+    },
     "Rename this conversation" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30225,6 +31314,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Byt namn på, ta bort eller dela projektets baslinjer"
+          }
+        }
+      }
+    },
+    "Renamed to /usage-credits" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Heter numera /usage-credits"
           }
         }
       }
@@ -30324,6 +31424,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ändrade ordningen i kön."
+          }
+        }
+      }
+    },
+    "Repair the loading path" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reparera inläsningsflödet"
           }
         }
       }
@@ -30445,6 +31556,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rapportera ett problem…"
+          }
+        }
+      }
+    },
+    "Report a bug or share this conversation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rapportera ett fel eller dela den här konversationen"
+          }
+        }
+      }
+    },
+    "Report on how your Claude Code sessions have gone" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rapportera hur dina Claude Code-sessioner har gått"
           }
         }
       }
@@ -31054,6 +32187,17 @@
         }
       }
     },
+    "Restore the code, the conversation, or both to an earlier point" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återställ koden, konversationen eller båda till en tidigare punkt"
+          }
+        }
+      }
+    },
     "Restore this account's default icon and name" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31116,6 +32260,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fortsätt konversation"
+          }
+        }
+      }
+    },
+    "Resume a saved chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återuppta en sparad chatt"
+          }
+        }
+      }
+    },
+    "Resume an earlier conversation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återuppta en tidigare konversation"
           }
         }
       }
@@ -31318,6 +32484,28 @@
         }
       }
     },
+    "Review the branch's pending changes for security problems" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska grenens väntande ändringar efter säkerhetsproblem"
+          }
+        }
+      }
+    },
+    "Review the current diff or a pull request for bugs and cleanups" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Granska aktuell diff eller en pull request efter buggar och upprensningar"
+          }
+        }
+      }
+    },
     "Review uncommitted changes, or follow custom review instructions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31472,6 +32660,17 @@
         }
       }
     },
+    "Revoke Claude's access to your Design projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återkalla Claudes åtkomst till dina Design-projekt"
+          }
+        }
+      }
+    },
     "Revoke Manager Role" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31512,6 +32711,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återkallad"
+          }
+        }
+      }
+    },
+    "Rich previews" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rika förhandsvisningar"
           }
         }
       }
@@ -31626,6 +32836,17 @@
         }
       }
     },
+    "Run a prompt or command again on an interval" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör en prompt eller ett kommando igen med jämna mellanrum"
+          }
+        }
+      }
+    },
     "Run a prompt repeatedly while the session stays open" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31699,6 +32920,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Köra ”%@”?"
+          }
+        }
+      }
+    },
+    "RunPlanDisclosureView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "RunPlanDisclosureView"
           }
         }
       }
@@ -32561,6 +33793,17 @@
         }
       }
     },
+    "Search archived conversations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök bland arkiverade konversationer"
+          }
+        }
+      }
+    },
     "Search commands" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33034,6 +34277,17 @@
         }
       }
     },
+    "Send a subagent off with your full context" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka i väg en underagent med hela ditt sammanhang"
+          }
+        }
+      }
+    },
     "Send a wrap-up before the curfew" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33041,6 +34295,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka en avslutning före spärrtiden"
+          }
+        }
+      }
+    },
+    "Send feedback to Anthropic or report a bug" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka återkoppling till Anthropic eller rapportera ett fel"
           }
         }
       }
@@ -33078,6 +34343,17 @@
         }
       }
     },
+    "Send logs to the Codex maintainers" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka loggar till Codex underhållare"
+          }
+        }
+      }
+    },
     "Send now" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33096,6 +34372,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skicka ett begärt resultat från den här konversationen till den avsedda deltagaren."
+          }
+        }
+      }
+    },
+    "Send this session to the background and free the terminal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka den här sessionen till bakgrunden och frigör terminalen"
+          }
+        }
+      }
+    },
+    "Send this session to the cloud, or bring one back" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka den här sessionen till molnet, eller hämta hem en"
           }
         }
       }
@@ -33661,6 +34959,17 @@
         }
       }
     },
+    "Set a goal Claude checks before it stops" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sätt ett mål som Claude kontrollerar innan den stannar"
+          }
+        }
+      }
+    },
     "Set app theme" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33705,6 +35014,28 @@
         }
       }
     },
+    "Set one setting by key" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange en inställning med nyckel"
+          }
+        }
+      }
+    },
+    "Set or view the goal for a long-running task" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange eller visa målet för en långvarig uppgift"
+          }
+        }
+      }
+    },
     "Set project icon" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33716,6 +35047,28 @@
         }
       }
     },
+    "Set the effort level for model usage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange ansträngningsnivån för modellanvändningen"
+          }
+        }
+      }
+    },
+    "Set the prompt bar color for this session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ange promptradens färg för den här sessionen"
+          }
+        }
+      }
+    },
     "Set the theme" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33723,6 +35076,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ställ in temat"
+          }
+        }
+      }
+    },
+    "Set up Claude Code on the web with your GitHub account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sätt upp Claude Code på webben med ditt GitHub-konto"
+          }
+        }
+      }
+    },
+    "Set up Claude GitHub Actions for a repository" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sätt upp Claude GitHub Actions för ett arkiv"
+          }
+        }
+      }
+    },
+    "Set up the elevated agent sandbox" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sätt upp den utökade agentsandlådan"
+          }
+        }
+      }
+    },
+    "Set up the status line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sätt upp statusraden"
           }
         }
       }
@@ -33866,6 +35263,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dela terminal…"
+          }
+        }
+      }
+    },
+    "Share a free week of Claude Code with friends" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dela en gratisvecka med Claude Code till vänner"
           }
         }
       }
@@ -34020,6 +35428,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa"
+          }
+        }
+      }
+    },
+    "Show %lld more lines" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa %lld rader till"
           }
         }
       }
@@ -34244,6 +35663,17 @@
         }
       }
     },
+    "Show help and the available commands" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa hjälpen och de tillgängliga kommandona"
+          }
+        }
+      }
+    },
     "Show hidden models (%d)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34262,6 +35692,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa bild"
+          }
+        }
+      }
+    },
+    "Show just your prompt, the summary and the response" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa bara din prompt, sammanfattningen och svaret"
           }
         }
       }
@@ -34387,6 +35828,83 @@
         }
       }
     },
+    "Show plan" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa plan"
+          }
+        }
+      }
+    },
+    "Show session cost, plan usage and what is filling your limits" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa sessionens kostnad, planens användning och vad som fyller dina gränser"
+          }
+        }
+      }
+    },
+    "Show the QR code for the Claude mobile app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa QR-koden för Claudes mobilapp"
+          }
+        }
+      }
+    },
+    "Show the config layers behind each setting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa konfigurationslagren bakom varje inställning"
+          }
+        }
+      }
+    },
+    "Show the git diff, including untracked files" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa git-diffen, inklusive ospårade filer"
+          }
+        }
+      }
+    },
+    "Show the remaining %lld lines" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa de återstående %lld raderna"
+          }
+        }
+      }
+    },
+    "Show the version, model, account and tool status" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa version, modell, konto och verktygsstatus"
+          }
+        }
+      }
+    },
     "Show this folder in Finder" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34405,6 +35923,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa den här gränsen på verktygsfältets användningsknapp"
+          }
+        }
+      }
+    },
+    "Show this session's configuration and token usage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa sessionens konfiguration och tokenanvändning"
+          }
+        }
+      }
+    },
+    "Show what is using the context window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa vad som använder kontextfönstret"
           }
         }
       }
@@ -34607,6 +36147,17 @@
         }
       }
     },
+    "Sign in with your Anthropic account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logga in med ditt Anthropic-konto"
+          }
+        }
+      }
+    },
     "Sign out failed. Try again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34614,6 +36165,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Utloggningen misslyckades. Försök igen."
+          }
+        }
+      }
+    },
+    "Sign out of your Anthropic account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logga ut från ditt Anthropic-konto"
           }
         }
       }
@@ -35443,6 +37005,28 @@
         }
       }
     },
+    "Start a new chat without leaving Codex" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Börja en ny chatt utan att lämna Codex"
+          }
+        }
+      }
+    },
+    "Start a side conversation in an ephemeral fork" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starta en sidokonversation i en tillfällig förgrening"
+          }
+        }
+      }
+    },
     "Start from Scratch…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35472,6 +37056,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Starta nu"
+          }
+        }
+      }
+    },
+    "Start over with empty context; this session stays resumable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Börja om med tom kontext; den här sessionen går fortfarande att återuppta"
           }
         }
       }
@@ -35905,6 +37500,17 @@
         }
       }
     },
+    "Stop every background terminal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa alla bakgrundsterminaler"
+          }
+        }
+      }
+    },
     "Stop here and continue when the usage window resets" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35945,6 +37551,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stoppa agenten"
+          }
+        }
+      }
+    },
+    "Stop this background session and keep its transcript" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppa den här bakgrundssessionen och behåll dess transkript"
           }
         }
       }
@@ -36389,6 +38006,17 @@
         }
       }
     },
+    "Switch between this session's subagents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Växla mellan sessionens underagenter"
+          }
+        }
+      }
+    },
     "Switch data" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36407,6 +38035,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Byt konversationsgränssnitt"
+          }
+        }
+      }
+    },
+    "Switch to Plan mode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Byt till planläge"
           }
         }
       }
@@ -40976,6 +42615,17 @@
         }
       }
     },
+    "ThemedStatusReceiptButton" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ThemedStatusReceiptButton"
+          }
+        }
+      }
+    },
     "ThemedSurface, ThemeRedraw & recorded layers" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43352,6 +45002,17 @@
         }
       }
     },
+    "Toggle raw scrollback for copy-friendly selection" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Växla rå rullningshistorik för kopieringsvänlig markering"
+          }
+        }
+      }
+    },
     "Token breakdown" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43726,6 +45387,17 @@
         }
       }
     },
+    "Turn Vim mode on or off for the composer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slå på eller av Vim-läget i skrivfältet"
+          }
+        }
+      }
+    },
     "Turn cost by part" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43733,6 +45405,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Turkostnad per del"
+          }
+        }
+      }
+    },
+    "Turn fast mode on or off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slå på eller av snabbläget"
           }
         }
       }
@@ -43821,6 +45504,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Slå på ett sätt in först."
+          }
+        }
+      }
+    },
+    "Turn on debug logging and help diagnose the problem" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slå på felsökningsloggning och hjälp till att ställa diagnos"
+          }
+        }
+      }
+    },
+    "Turn the experimental features on or off" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slå på eller av de experimentella funktionerna"
           }
         }
       }
@@ -44452,6 +46157,17 @@
         }
       }
     },
+    "Upgrade to Max for higher limits and more Opus" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppgradera till Max för högre gränser och mer Opus"
+          }
+        }
+      }
+    },
     "Usage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44837,6 +46553,17 @@
         }
       }
     },
+    "Use skills to improve how Codex handles specific tasks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd färdigheter för att förbättra hur Codex hanterar vissa uppgifter"
+          }
+        }
+      }
+    },
     "Use the repaired “%@”?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -44991,6 +46718,17 @@
         }
       }
     },
+    "Verify every surface" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verifiera varje yta"
+          }
+        }
+      }
+    },
     "Version" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45079,6 +46817,17 @@
         }
       }
     },
+    "View account usage, or use a usage limit reset" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa kontots användning, eller använd en återställning av användningsgränsen"
+          }
+        }
+      }
+    },
     "View all %lld attachments" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45097,6 +46846,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa alla bilagor"
+          }
+        }
+      }
+    },
+    "View and manage everything running in the background" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa och hantera allt som körs i bakgrunden"
+          }
+        }
+      }
+    },
+    "View and manage the lifecycle hooks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa och hantera livscykelhookarna"
+          }
+        }
+      }
+    },
+    "View and update your privacy settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa och uppdatera dina integritetsinställningar"
           }
         }
       }
@@ -45130,6 +46912,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Endast visning"
+          }
+        }
+      }
+    },
+    "View the hook configuration for tool events" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa hookkonfigurationen för verktygshändelser"
+          }
+        }
+      }
+    },
+    "View the release notes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa versionsinformationen"
+          }
+        }
+      }
+    },
+    "View uncommitted changes and per-turn diffs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa incheckade ändringar som saknas och diffar per tur"
           }
         }
       }
@@ -45493,6 +47308,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Bevaka en session"
+          }
+        }
+      }
+    },
+    "Watch the current pull request and fix what breaks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bevaka den aktuella pull requesten och laga det som går sönder"
           }
         }
       }
@@ -46256,6 +48082,28 @@
         }
       }
     },
+    "Word diffs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Orddiffar"
+          }
+        }
+      }
+    },
+    "Word wrap" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Radbrytning"
+          }
+        }
+      }
+    },
     "Work or Personal" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46476,6 +48324,28 @@
         }
       }
     },
+    "Write a CLAUDE.md documenting this codebase" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv en CLAUDE.md som dokumenterar den här kodbasen"
+          }
+        }
+      }
+    },
+    "Write a guide that helps teammates ramp on Claude Code" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv en guide som hjälper kollegor att komma i gång med Claude Code"
+          }
+        }
+      }
+    },
     "Write a multi-line prompt; Return submits" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46487,6 +48357,17 @@
         }
       }
     },
+    "Write a one-line recap of the session now" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv en enradig sammanfattning av sessionen nu"
+          }
+        }
+      }
+    },
     "Write a title or some details first." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46494,6 +48375,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skriv en rubrik eller några detaljer först."
+          }
+        }
+      }
+    },
+    "Write an AGENTS.md with instructions for Codex" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv en AGENTS.md med instruktioner för Codex"
           }
         }
       }
@@ -46516,6 +48408,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skriv uppdraget: vad som ska köras, på vilka konton och när det ska sluta"
+          }
+        }
+      }
+    },
+    "Write the per-project skill that says how to run this app" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv den projektspecifika färdigheten som säger hur appen körs"
           }
         }
       }
@@ -46938,6 +48841,17 @@
         }
       }
     },
+    "action required" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "åtgärd krävs"
+          }
+        }
+      }
+    },
     "actions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47312,6 +49226,28 @@
         }
       }
     },
+    "cancelled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "avbruten"
+          }
+        }
+      }
+    },
+    "cancelling" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "avbryter"
+          }
+        }
+      }
+    },
     "capabilities" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47653,6 +49589,17 @@
         }
       }
     },
+    "created" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "skapad"
+          }
+        }
+      }
+    },
     "created %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47935,6 +49882,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "radera"
+          }
+        }
+      }
+    },
+    "error" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "fel"
           }
         }
       }
@@ -48346,6 +50304,17 @@
         }
       }
     },
+    "in progress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "pågår"
+          }
+        }
+      }
+    },
     "in use — written %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48676,6 +50645,17 @@
         }
       }
     },
+    "manual action" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "manuell åtgärd"
+          }
+        }
+      }
+    },
     "matches %lld baseline candidates and %lld current ones, so nothing is claimed about it" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48786,6 +50766,17 @@
         }
       }
     },
+    "more results not loaded" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "fler resultat har inte lästs in"
+          }
+        }
+      }
+    },
     "moved %@%lld, %@%lld pixels" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -48837,6 +50828,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "behöver åtgärd"
+          }
+        }
+      }
+    },
+    "neutral" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "neutral"
           }
         }
       }
@@ -49259,6 +51261,28 @@
         }
       }
     },
+    "passed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "godkänd"
+          }
+        }
+      }
+    },
+    "pending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "väntar"
+          }
+        }
+      }
+    },
     "per-event sounds" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49336,6 +51360,17 @@
         }
       }
     },
+    "preparing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "förbereds"
+          }
+        }
+      }
+    },
     "prepend" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49409,6 +51444,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "pull requests"
+          }
+        }
+      }
+    },
+    "queued" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "köad"
           }
         }
       }
@@ -49629,6 +51675,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "begär en användarapproverad nedladdning från"
+          }
+        }
+      }
+    },
+    "requested" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "begärd"
           }
         }
       }
@@ -49864,6 +51921,17 @@
         }
       }
     },
+    "scheduled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "schemalagd"
+          }
+        }
+      }
+    },
     "screen recording" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50040,6 +52108,17 @@
         }
       }
     },
+    "skipped" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "överhoppad"
+          }
+        }
+      }
+    },
     "sound" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50139,6 +52218,17 @@
         }
       }
     },
+    "startup failed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "starten misslyckades"
+          }
+        }
+      }
+    },
     "stays for review" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50212,6 +52302,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "föreslå filer till den inbyggda väljaren på"
+          }
+        }
+      }
+    },
+    "summary incomplete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ofullständig sammanfattning"
           }
         }
       }
@@ -50524,6 +52625,17 @@
         }
       }
     },
+    "timed out" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "tidsgränsen nåddes"
+          }
+        }
+      }
+    },
     "token" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50623,6 +52735,17 @@
         }
       }
     },
+    "unknown (%@)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "okänd (%@)"
+          }
+        }
+      }
+    },
     "unset" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50685,6 +52808,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "vänta på"
+          }
+        }
+      }
+    },
+    "waiting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "väntar"
+          }
+        }
+      }
+    },
+    "waiting for callback" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "väntar på återanrop"
+          }
+        }
+      }
+    },
+    "waiting for resource" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "väntar på resurs"
           }
         }
       }

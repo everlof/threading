@@ -192,6 +192,9 @@ enum TextPromptAlert {
         supportingView: NSView? = nil
     ) -> ThemedAlert {
         let alert = ThemedAlert()
+        // A question, not a warning: the default style drew a caution triangle beside "Comment
+        // on Runner.swift:14" and every rename, as though the input were an error to fix.
+        alert.alertStyle = .informational
         alert.messageText = request.title
         if let message = request.message {
             alert.informativeText = message

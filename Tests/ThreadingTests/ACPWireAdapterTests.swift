@@ -84,7 +84,7 @@ final class ACPWireAdapterTests: XCTestCase {
         XCTAssertEqual(both.size, 200_000)
     }
 
-    func testPlanStepsKeepsRecognisedStatusesAndDropsTheRest() {
+    func testPlanStepsRequireACompleteRecognisedSnapshot() {
         XCTAssertEqual(ACPWireAdapter.planSteps(in: json("{}")).count, 0)
         XCTAssertEqual(ACPWireAdapter.planSteps(in: json(#"{"entries":[]}"#)).count, 0)
         XCTAssertEqual(ACPWireAdapter.planSteps(in: json(#"{"entries":"nope"}"#)).count, 0)
@@ -100,14 +100,17 @@ final class ACPWireAdapterTests: XCTestCase {
           {"content":7,"status":"pending"}
         ]}
         """))
-        XCTAssertEqual(steps.count, 3)
-        XCTAssertEqual(steps[0].title, "Read the file")
-        XCTAssertEqual(steps[0].status, .pending)
-        XCTAssertNil(steps[0].id)
-        XCTAssertEqual(steps[1].title, "Edit it")
-        XCTAssertEqual(steps[1].status, .inProgress)
-        XCTAssertEqual(steps[2].title, "Done")
-        XCTAssertEqual(steps[2].status, .completed)
+        XCTAssertTrue(steps.isEmpty)
+
+        let complete = ACPWireAdapter.planSteps(in: json("""
+        {"entries":[
+          {"content":"Read the file","status":"pending"},
+          {"content":"Edit it","status":"in_progress"},
+          {"content":"Done","status":"completed"}
+        ]}
+        """))
+        XCTAssertEqual(complete.map(\.title), ["Read the file", "Edit it", "Done"])
+        XCTAssertEqual(complete.map(\.status), [.pending, .inProgress, .completed])
     }
 
     // MARK: - Command Catalog

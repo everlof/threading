@@ -177,6 +177,22 @@ enum CodexHookInstaller {
             + " >/dev/null 2>&1; true \(MCPDefaults.hookMarker)"
     }
 
+    /// The command one structured run-progress hook runs. Like lifecycle it is account-shared,
+    /// token-routed, fully observational, and drains stdin even for an unrelated Codex process.
+    static func command(for phase: HookRunProgressPhase) -> String {
+        let endpoint = "\(MCPDefaults.runProgressPathPrefix)"
+            + "$\(MCPDefaults.sessionTokenEnvironmentKey)"
+            + "?\(MCPDefaults.runProgressPhaseParameter)=\(phase.rawValue)"
+        return "\(Key.payloadVariable)=$(cat);"
+            + " [ -n \"$\(MCPDefaults.sessionTokenEnvironmentKey)\" ] &&"
+            + " " + MCPDefaults.hookPostCommand(
+                payloadVariable: Key.payloadVariable,
+                endpointSuffix: endpoint,
+                timeout: MCPDefaults.runProgressTimeout
+            )
+            + " >/dev/null 2>&1; true \(MCPDefaults.hookMarker)"
+    }
+
     /// The command the `PreToolUse` hook runs, which asks Threading whether a tool may proceed.
     ///
     /// Unlike the lifecycle hooks this one **blocks and speaks**: curl's stdout is the hook's
@@ -235,6 +251,19 @@ enum CodexHookInstaller {
                 installed[name, default: []].append(entry(
                     command: command(for: event),
                     timeout: timeout,
+                    matcher: registration.toolMatcher
+                ))
+            }
+        }
+
+        for phase in HookRunProgressPhase.allCases {
+            let registration = phase.codexRegistration
+            guard registration.isSupported else { continue }
+            for name in registration.eventNames {
+                if installed[name] == nil { installed[name] = foreignEntries(in: hooks[name]) }
+                installed[name, default: []].append(entry(
+                    command: command(for: phase),
+                    timeout: MCPDefaults.runProgressTimeout,
                     matcher: registration.toolMatcher
                 ))
             }

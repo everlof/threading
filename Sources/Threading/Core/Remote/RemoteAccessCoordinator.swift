@@ -1677,7 +1677,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     func setEnabled(_ enabled: Bool) {
         appSettings.remoteAccessEnabled = enabled
-        if enabled { start() } else { stop() }
+        if appSettings.remoteAccessEnabled { start() } else { stop() }
     }
 
     /// Selects the `tailscale` door, and rebuilds the listeners for it.
@@ -1754,6 +1754,10 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     // MARK: - Start
 
     private func start() {
+        // This is the last runtime boundary, not a UI assumption. Distributed builds clamp the
+        // stored switch off, including when installed over a dev build that had it enabled; a
+        // future caller added inside this type still cannot open a listener on those channels.
+        guard appSettings.remoteAccessEnabled else { return }
         switch status {
         case .disabled:
             break

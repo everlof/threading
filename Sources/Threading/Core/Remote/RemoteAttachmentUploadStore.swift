@@ -47,6 +47,15 @@ struct RemoteStagedAttachmentUpload: Equatable {
     }
 }
 
+/// One report screenshot already lent to session creation.
+///
+/// The server keeps the id only so it can discard the staging duplicate after the application
+/// has either taken custody or refused the launch. The path is never returned to the phone.
+struct RemoteClaimedReportScreenshot {
+    let uploadID: String
+    let url: URL
+}
+
 // MARK: - Store
 
 /// Bytes in flight between a paired client's composer and a prompt that names them.
@@ -114,6 +123,52 @@ struct RemoteAttachmentUploadStore {
             return append(chunk, toUploadWithID: id, request: request, deviceID: deviceID, now: now)
         }
         return begin(chunk, request: request, sessionID: sessionID, deviceID: deviceID, now: now)
+    }
+
+    /// Stages and immediately claims the small JPEG carried by an atomic report-session create.
+    ///
+    /// Unlike an ordinary composer upload, there is no client-visible upload id and no interval
+    /// in which a draft may name it. Session creation is the prompt that claims these bytes, so
+    /// the store makes the loan before the main-actor launch transaction begins. Nil leaves no
+    /// staged file behind.
+    mutating func stageAndClaimReportScreenshot(
+        _ jpegData: Data,
+        deviceID: String
+    ) -> RemoteClaimedReportScreenshot? {
+        let screenshot = RemoteReportScreenshotDTO(jpegBase64: jpegData.base64EncodedString())
+        guard RemoteReportScreenshotPolicy.jpegData(from: screenshot) == jpegData else {
+            return nil
+        }
+
+        let stagingScope = "report-opening-\(UUID().uuidString.lowercased())"
+        let request = RemoteAttachmentUploadRequestDTO(
+            name: "report-screenshot.jpg",
+            mediaType: UTType.jpeg.identifier,
+            totalBytes: jpegData.count,
+            chunkIndex: 0,
+            chunkCount: 1,
+            chunk: screenshot.jpegBase64
+        )
+        guard let accepted = accept(
+            request,
+            sessionID: stagingScope,
+            deviceID: deviceID
+        ), accepted.isComplete else {
+            return nil
+        }
+        guard let claimed = claim(
+            ids: [accepted.uploadID],
+            sessionID: stagingScope,
+            deviceID: deviceID
+        )?.first else {
+            _ = discard(
+                id: accepted.uploadID,
+                sessionID: stagingScope,
+                deviceID: deviceID
+            )
+            return nil
+        }
+        return RemoteClaimedReportScreenshot(uploadID: accepted.uploadID, url: claimed)
     }
 
     /// Lends the completed uploads a prompt named, in the order it named them.

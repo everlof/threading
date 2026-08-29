@@ -79,7 +79,7 @@ final class WorkspaceControlPlaneTests: XCTestCase {
         armWatch: @escaping (
             SessionID, SessionID, TimeInterval?
         ) -> SessionWatchCenter.WatchArmOutcome = { _, _, timeout in
-            .armed(expiresAfter: timeout)
+            .armed(awaiting: .turnSettled, expiresAfter: timeout)
         }
     ) -> WorkspaceControlPlane {
         WorkspaceControlPlane(
@@ -667,7 +667,7 @@ final class WorkspaceControlPlaneTests: XCTestCase {
         var asked: [(watcher: SessionID, target: SessionID, timeout: TimeInterval?)] = []
         let plane = makePlane(workspace, armWatch: { watcher, target, timeout in
             asked.append((watcher, target, timeout))
-            return .armed(expiresAfter: timeout)
+            return .armed(awaiting: .turnSettled, expiresAfter: timeout)
         })
 
         XCTAssertEqual(plane.watch(workspace.stranger.id, from: caller), .refused(.targetUnknown))
@@ -692,23 +692,22 @@ final class WorkspaceControlPlaneTests: XCTestCase {
                 .watch(workspace.peer.id, from: caller)
         }
 
-        guard case .armed(let on, let expiresAfter) =
-            watch(when: .armed(expiresAfter: nil))
+        guard case .armed(let on, let awaiting, let expiresAfter) =
+            watch(when: .armed(awaiting: .turnSettled, expiresAfter: nil))
         else {
             return XCTFail("Expected an armed watch")
         }
         XCTAssertEqual(on.id, workspace.peer.id)
+        XCTAssertEqual(awaiting, .turnSettled)
         XCTAssertNil(expiresAfter)
 
-        guard case .alreadyWatching(let already) = watch(when: .alreadyWatching) else {
+        guard case .alreadyWatching(let already, let alreadyAwaiting) =
+            watch(when: .alreadyWatching(awaiting: .turnStarted))
+        else {
             return XCTFail("A coalesced watch names the session it is already watching")
         }
         XCTAssertEqual(already.id, workspace.peer.id)
-
-        guard case .targetAlreadySettled(let settled) = watch(when: .targetAlreadySettled) else {
-            return XCTFail("An already-settled target is answered, not armed")
-        }
-        XCTAssertEqual(settled.id, workspace.peer.id)
+        XCTAssertEqual(alreadyAwaiting, .turnStarted)
 
         XCTAssertEqual(
             watch(when: .watcherAtCapacity(limit: ControlWatchDefaults.maximumPerWatcher)),
@@ -726,7 +725,7 @@ final class WorkspaceControlPlaneTests: XCTestCase {
         var asked: [(watcher: SessionID, target: SessionID, timeout: TimeInterval?)] = []
         let plane = makePlane(workspace, armWatch: { watcher, target, timeout in
             asked.append((watcher, target, timeout))
-            return .armed(expiresAfter: timeout)
+            return .armed(awaiting: .turnSettled, expiresAfter: timeout)
         })
 
         let timeout: TimeInterval = 90 * 60

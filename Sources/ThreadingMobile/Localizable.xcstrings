@@ -392,6 +392,17 @@
         }
       }
     },
+    "%@, step %lld of %lld" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@, steg %lld av %lld"
+          }
+        }
+      }
+    },
     "%@× the raw token cost" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -592,6 +603,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld av %lld"
+          }
+        }
+      }
+    },
+    "%lld of %lld complete" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld av %lld klara"
           }
         }
       }
@@ -1131,6 +1153,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Åtgärder för %@"
+          }
+        }
+      }
+    },
+    "Active" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktiv"
           }
         }
       }
@@ -1780,6 +1813,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Instruera managern…"
+          }
+        }
+      }
+    },
+    "Bring the prototype up to code…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Få prototypen upp till standard…"
           }
         }
       }
@@ -3093,6 +3137,17 @@
         }
       }
     },
+    "Cut the launch time in half…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Halvera starttiden…"
+          }
+        }
+      }
+    },
     "Daily %@ chart" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3199,6 +3254,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Radera"
+          }
+        }
+      }
+    },
+    "Delete the code nobody will miss…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta bort koden ingen kommer sakna…"
           }
         }
       }
@@ -3577,6 +3643,17 @@
         }
       }
     },
+    "Explain why this works at all…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förklara varför det här ens fungerar…"
+          }
+        }
+      }
+    },
     "Extension" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3654,6 +3731,17 @@
         }
       }
     },
+    "Find out why CI went red…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta reda på varför CI blev rött…"
+          }
+        }
+      }
+    },
     "Find the bug hiding in plain sight…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3661,6 +3749,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hitta buggen som gömmer sig helt öppet…"
+          }
+        }
+      }
+    },
+    "Find the off-by-one…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hitta off-by-one-felet…"
+          }
+        }
+      }
+    },
+    "Find where the leak starts…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hitta var läckan börjar…"
           }
         }
       }
@@ -4270,6 +4380,17 @@
         }
       }
     },
+    "Kill the race, keep the speed…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Döda kapplöpningen, behåll farten…"
+          }
+        }
+      }
+    },
     "Know when your code needs you" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4710,6 +4831,17 @@
         }
       }
     },
+    "Make the error message useful…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gör felmeddelandet användbart…"
+          }
+        }
+      }
+    },
     "Make the impossible state impossible…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4717,6 +4849,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gör det omöjliga tillståndet omöjligt…"
+          }
+        }
+      }
+    },
+    "Make the retry actually retry…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Få omförsöket att försöka på riktigt…"
+          }
+        }
+      }
+    },
+    "Make the slow path the fast path…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gör den långsamma vägen snabb…"
           }
         }
       }
@@ -4941,6 +5095,17 @@
         }
       }
     },
+    "Move the work off the main thread…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flytta arbetet bort från huvudtråden…"
+          }
+        }
+      }
+    },
     "Move “%@” to %@?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4948,6 +5113,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Flytta “%@” till %@?"
+          }
+        }
+      }
+    },
+    "Name the magic numbers…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Namnge de magiska talen…"
           }
         }
       }
@@ -5997,6 +6173,17 @@
         }
       }
     },
+    "Pending" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar"
+          }
+        }
+      }
+    },
     "People in open chats" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6125,6 +6312,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fästa"
+          }
+        }
+      }
+    },
+    "Plan" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Plan"
           }
         }
       }
@@ -6800,6 +6998,17 @@
         }
       }
     },
+    "Rename what was named at 2am…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Döp om det som döptes klockan två…"
+          }
+        }
+      }
+    },
     "Rendering preview…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6873,6 +7082,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rapporter innehåller version, protokoll och anslutningshändelser. De utesluter meddelanden, prompter, filsökvägar, notistexter och inloggningsuppgifter."
+          }
+        }
+      }
+    },
+    "Reproduce the crash, then end it…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återskapa kraschen och avsluta den…"
           }
         }
       }
@@ -7346,6 +7566,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rulla till slutet av kodarkivet"
+          }
+        }
+      }
+    },
+    "Search archived sessions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök bland arkiverade sessioner"
           }
         }
       }
@@ -7867,6 +8098,17 @@
         }
       }
     },
+    "Show plan" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa plan"
+          }
+        }
+      }
+    },
     "Shows this project’s sessions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7984,6 +8226,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hastighet"
+          }
+        }
+      }
+    },
+    "Squash warnings before they breed…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Krossa varningarna innan de sprids…"
           }
         }
       }
@@ -9935,6 +10188,17 @@
         }
       }
     },
+    "Trace the stray pixel to its source…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spåra den förlupna pixeln till källan…"
+          }
+        }
+      }
+    },
     "Track usage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10019,6 +10283,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera notiser"
+          }
+        }
+      }
+    },
+    "Turn the TODO into a done…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förvandla TODO till klart…"
           }
         }
       }
@@ -10613,6 +10888,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetsyta"
+          }
+        }
+      }
+    },
+    "Write the test I should have written…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv testet jag borde ha skrivit…"
           }
         }
       }

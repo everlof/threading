@@ -289,7 +289,7 @@ struct ACPPlanUpdate {
         let status: ACPPlanEntryStatus?
 
         init(_ fields: [String: JSONValue]) {
-            title = fields["content"]?.stringValue
+            title = fields["content"]?.stringValue.map(RunProgressLimits.title)
             status = fields["status"]?.stringValue.map(ACPPlanEntryStatus.init(providerValue:))
         }
     }
@@ -300,26 +300,35 @@ struct ACPPlanUpdate {
         // All-or-nothing, matching the `as? [[String: Any]]` this replaced: a malformed element
         // withdraws the plan rather than presenting a partial one the agent never described.
         let raw = fields["entries"]?.arrayValue ?? []
+        guard raw.count <= RunProgressLimits.maximumSteps else {
+            entries = []
+            return
+        }
         let objects = raw.compactMap(\.objectValue)
         entries = objects.count == raw.count ? objects.map(Entry.init) : []
     }
 
     /// The steps the run indicator can draw.
     ///
-    /// An entry whose status this client does not know is left out rather than guessed at, which
-    /// is what the run indicator did before this was typed. The difference is that the omission
-    /// is now a named branch: a status ACP adds later arrives here as `.unknown` and can be
-    /// answered on purpose, instead of vanishing into a failed initializer three types away.
+    /// A snapshot is all-or-nothing. Omitting an entry whose status this client does not know
+    /// would silently change both the denominator and the provider's ordering.
     var steps: [RunProgress.Step] {
-        entries.compactMap { entry in
-            guard let title = entry.title, let status = entry.status else { return nil }
+        var steps: [RunProgress.Step] = []
+        steps.reserveCapacity(entries.count)
+        for entry in entries {
+            guard let title = entry.title, let status = entry.status else { return [] }
             switch status {
-            case .pending: return RunProgress.Step(id: nil, title: title, status: .pending)
-            case .inProgress: return RunProgress.Step(id: nil, title: title, status: .inProgress)
-            case .completed: return RunProgress.Step(id: nil, title: title, status: .completed)
-            case .unknown: return nil
+            case .pending:
+                steps.append(RunProgress.Step(id: nil, title: title, status: .pending))
+            case .inProgress:
+                steps.append(RunProgress.Step(id: nil, title: title, status: .inProgress))
+            case .completed:
+                steps.append(RunProgress.Step(id: nil, title: title, status: .completed))
+            case .unknown:
+                return []
             }
         }
+        return steps
     }
 }
 

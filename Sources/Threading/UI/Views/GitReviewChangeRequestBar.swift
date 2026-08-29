@@ -60,9 +60,11 @@ final class GitReviewChangeRequestBar: NSView {
         detailLabel.stringValue = provider.map { L10n.format("Reading %@…", $0.displayName) }
             ?? L10n.string("Reading provider…")
         statusLabel.stringValue = ""
-        actionButton.title = L10n.string("Loading…")
+        // The read is a state with no transition, and the strip's rule is that such a state is
+        // copy rather than a disabled primary button.
+        actionButton.title = ""
         actionButton.isEnabled = false
-        actionButton.isHidden = false
+        actionButton.isHidden = true
         openButton.isHidden = true
     }
 
@@ -112,7 +114,9 @@ final class GitReviewChangeRequestBar: NSView {
         titleLabel.applyFont(.control)
         titleLabel.textColor = Design.Text.label
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // The number and title are what the strip is for. At 420pt they were the first thing
+        // squeezed out, leaving "3 checks pending" beside half a branch name.
+        titleLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
 
         detailLabel.applyFont(.caption)
         detailLabel.textColor = Design.Text.secondary
@@ -121,8 +125,10 @@ final class GitReviewChangeRequestBar: NSView {
 
         statusLabel.applyFont(.caption)
         statusLabel.setContentHuggingPriority(.required, for: .horizontal)
+        statusLabel.lineBreakMode = .byTruncatingTail
+        statusLabel.setContentCompressionResistancePriority(.init(260), for: .horizontal)
 
-        policyChip.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        policyChip.setContentCompressionResistancePriority(.init(249), for: .horizontal)
         policyChip.itemsProvider = { [weak self] in self?.policyEntries() ?? [] }
         policyChip.onSelect = { [weak self] item in
             guard let raw = item.representedValue as? String,

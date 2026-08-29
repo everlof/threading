@@ -794,6 +794,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             )
         case "conversationResync":
             handleConversationResync(connection)
+        case "runPlanPage":
+            handleRunPlanPage(
+                connection,
+                revision: parsed.revision,
+                offset: parsed.offset,
+                limit: parsed.limit
+            )
         case "mobileDiagnosticsHello":
             handleMobileDiagnosticsSignal(
                 connection,
@@ -987,6 +994,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
+    /// What the journal says for a launch choice the request left to the account.
+    private enum RemoteLaunchJournalValue {
+        static let inherited = "inherit"
+    }
+
     private func handleCreateSession(
         _ request: HTTPRequest,
         respond: @escaping @Sendable (RemoteRouteDecision) -> Void
@@ -1004,7 +1016,21 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
-        let prompt = creation.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyPrompt = creation.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt: String
+        if let reportOpening = creation.reportOpening {
+            guard legacyPrompt.isEmpty else {
+                respond(.respond(RemoteRouter.error(
+                    400,
+                    "Bad Request",
+                    code: .invalidReportOpening
+                )))
+                return
+            }
+            prompt = reportOpening.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            prompt = legacyPrompt
+        }
         guard RemoteInboundPolicy.acceptsPrompt(prompt), !prompt.isEmpty,
               RemoteInboundPolicy.acceptsLaunchIdentifier(creation.projectID),
               RemoteInboundPolicy.acceptsLaunchIdentifier(creation.agentKind),
@@ -1017,15 +1043,63 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        // The bytes are validated and lent on the server queue before a session can exist. The
+        // application receives a temporary path, takes its own durable copy before launch, and
+        // this claim is discarded whichever way that transaction ends. An older Mac ignores the
+        // report envelope and refuses its deliberately empty legacy prompt, so version skew can
+        // never turn this into a text-only report.
+        let reportScreenshot: RemoteClaimedReportScreenshot?
+        if let screenshot = creation.reportOpening?.screenshot {
+            guard let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+                request.header(RemoteRouter.deviceHeader)
+            ), let jpegData = RemoteReportScreenshotPolicy.jpegData(from: screenshot) else {
+                respond(.respond(RemoteRouter.error(
+                    400,
+                    "Bad Request",
+                    code: .invalidReportOpening
+                )))
+                return
+            }
+            guard let claimed = attachmentUploads.stageAndClaimReportScreenshot(
+                jpegData,
+                deviceID: deviceID
+            ) else {
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Mac Not Ready",
+                    code: .persistenceUnavailable
+                )))
+                return
+            }
+            reportScreenshot = claimed
+        } else {
+            reportScreenshot = nil
+        }
+
         DispatchQueue.main.async {
+            defer {
+                if let uploadID = reportScreenshot?.uploadID {
+                    self.queue.async {
+                        self.attachmentUploads.discardClaimed(ids: [uploadID])
+                    }
+                }
+            }
+            // A refused choice answers the phone and used to leave nothing here, so a report
+            // saying "my chat would not start" could not be matched to what this Mac declined.
+            // The choices are what the refusal is about; the prompt stays out of the journal.
+            let refuse: (Int, String, RemoteRESTErrorCode) -> Void = { status, reason, code in
+                self.services.eventLog.recordRemoteEvent("Remote session refused", [
+                    .share: authorization.shareID,
+                    .reason: code.rawValue,
+                    .agent: creation.agentKind,
+                    .model: creation.model ?? RemoteLaunchJournalValue.inherited,
+                ])
+                respond(.respond(RemoteRouter.error(status, reason, code: code)))
+            }
             guard let projectID = ProjectID(uuidString: creation.projectID),
                   self.services.sessionQueries.project(withID: projectID) != nil,
                   let kind = AgentKind(rawValue: creation.agentKind) else {
-                respond(.respond(RemoteRouter.error(
-                    422,
-                    "Unknown Launch Choice",
-                    code: .unknownLaunchChoice
-                )))
+                refuse(422, "Unknown Launch Choice", .unknownLaunchChoice)
                 return
             }
 
@@ -1038,7 +1112,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 guard let selected = discoveredAccounts.first(where: {
                     $0.handle == accountHandle
                 }) else {
-                    respond(.respond(RemoteRouter.error(422, "Unknown Account", code: .unknownAccount)))
+                    refuse(422, "Unknown Account", .unknownAccount)
                     return
                 }
                 account = selected
@@ -1046,7 +1120,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             let modelOptions = AgentModels.options(for: kind, account: account)
             if let model = creation.model,
                !modelOptions.contains(where: { $0.identifier == model }) {
-                respond(.respond(RemoteRouter.error(422, "Unknown Model", code: .unknownModel)))
+                refuse(422, "Unknown Model", .unknownModel)
                 return
             }
             if let effort = creation.reasoningEffort {
@@ -1057,22 +1131,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     account: account,
                     options: modelOptions
                 ) else {
-                    respond(.respond(RemoteRouter.error(
-                        422,
-                        "Unknown Reasoning Effort",
-                        code: .unknownReasoningEffort
-                    )))
+                    refuse(422, "Unknown Reasoning Effort", .unknownReasoningEffort)
                     return
                 }
             }
             let permissionMode = creation.permissionMode.flatMap(AgentPermissionMode.init(rawValue:))
             guard creation.permissionMode == nil
                     || (permissionMode != nil && kind.supportsPermissionModes) else {
-                respond(.respond(RemoteRouter.error(
-                    422,
-                    "Unknown Permission Mode",
-                    code: .unknownPermissionMode
-                )))
+                refuse(422, "Unknown Permission Mode", .unknownPermissionMode)
                 return
             }
             if creation.fastMode != nil {
@@ -1081,21 +1147,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     model: creation.model,
                     account: account
                 ) else {
-                    respond(.respond(RemoteRouter.error(
-                        422,
-                        "Unsupported Speed",
-                        code: .unsupportedSpeed
-                    )))
+                    refuse(422, "Unsupported Speed", .unsupportedSpeed)
                     return
                 }
             }
             let usesNativeUI = creation.surface == .conversation
             guard !usesNativeUI || kind.supportsNativeUI else {
-                respond(.respond(RemoteRouter.error(
-                    422,
-                    "Unsupported Surface",
-                    code: .unsupportedSurface
-                )))
+                refuse(422, "Unsupported Surface", .unsupportedSurface)
                 return
             }
             // Absent is a chat, the only thing older phones could ask for. The lossless wire
@@ -1104,7 +1162,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             // guessed as chat: a phone that asked for a manager and got a chat would not find
             // out until the agent failed to reach its siblings.
             guard let role = creation.role.map({ SessionRole(rawValue: $0.rawValue) }) ?? .chat else {
-                respond(.respond(RemoteRouter.error(422, "Unknown Role", code: .unknownRole)))
+                refuse(422, "Unknown Role", .unknownRole)
                 return
             }
 
@@ -1124,11 +1182,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                           kind: kind,
                           usesNativeUI: usesNativeUI
                       ) else {
-                    respond(.respond(RemoteRouter.error(
-                        422,
-                        "Unsupported Workspace",
-                        code: .unsupportedWorkspace
-                    )))
+                    refuse(422, "Unsupported Workspace", .unsupportedWorkspace)
                     return
                 }
                 managedWorkspacePlan = ManagedWorkspacePlan(delivery: delivery)
@@ -1147,6 +1201,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 usesNativeUI: usesNativeUI,
                 managedWorkspacePlan: managedWorkspacePlan,
                 role: role,
+                openingAttachmentPaths: reportScreenshot.map { [$0.url.path] } ?? [],
                 prompt: prompt
             )
             guard let sessionID = self.sessionCommands?.startRemoteSession(launch) else {
@@ -3372,6 +3427,37 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             self.services.mirrors.resyncConversation(
                 for: connection,
                 sessionID: sessionID
+            )
+        }
+    }
+
+    private func handleRunPlanPage(
+        _ connection: RemoteConnection,
+        revision: Int?,
+        offset: Int?,
+        limit: Int?
+    ) {
+        guard let authorization = connection.authorization,
+              let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed),
+              let revision, revision >= 0,
+              let offset, offset >= 0,
+              limit.map({ (1...RemoteAccessDefaults.maximumRemoteRunPlanPageSteps).contains($0) })
+                ?? true else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidRunPlanPage")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
+            self.services.mirrors.requestRunPlanPage(
+                from: connection,
+                sessionID: sessionID,
+                revision: revision,
+                offset: offset,
+                limit: limit
             )
         }
     }

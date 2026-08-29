@@ -325,6 +325,7 @@ enum SidebarTreeBuilder {
     static func rootNodes(
         from projects: [Project],
         visibility: SidebarSessionVisibility = .attention,
+        excludingSessionIDs: Set<SessionID> = [],
         at date: Date = Date()
     ) -> [NSObject] {
         let arranged = pinningScratchpad(projects)
@@ -357,6 +358,7 @@ enum SidebarTreeBuilder {
                 order: order,
                 isReversed: isReversed,
                 visibility: visibility,
+                excludingSessionIDs: excludingSessionIDs,
                 date: date
             )
 
@@ -400,7 +402,8 @@ enum SidebarTreeBuilder {
     static func projectNode(
         for projectID: ProjectID,
         from projects: [Project],
-        visibility: SidebarSessionVisibility = .attention
+        visibility: SidebarSessionVisibility = .attention,
+        excludingSessionIDs: Set<SessionID> = []
     ) -> ProjectNode? {
         guard let project = projects.first(where: { $0.id == projectID }) else { return nil }
         return makeProjectNode(
@@ -408,7 +411,8 @@ enum SidebarTreeBuilder {
             terminals: visibility == .attention ? project.terminals : [],
             order: AppSettings.sidebarSessionOrder,
             isReversed: AppSettings.sidebarSessionOrderIsReversed,
-            visibility: visibility
+            visibility: visibility,
+            excludingSessionIDs: excludingSessionIDs
         )
     }
 
@@ -418,6 +422,7 @@ enum SidebarTreeBuilder {
         order: SidebarSessionOrder,
         isReversed: Bool,
         visibility: SidebarSessionVisibility = .attention,
+        excludingSessionIDs: Set<SessionID> = [],
         date: Date = Date()
     ) -> ProjectNode {
         let node = ProjectNode(projectID: project.id)
@@ -427,6 +432,7 @@ enum SidebarTreeBuilder {
             order: order,
             isReversed: isReversed,
             visibility: visibility,
+            excludingSessionIDs: excludingSessionIDs,
             date: date
         )
         node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
@@ -461,10 +467,11 @@ enum SidebarTreeBuilder {
         order: SidebarSessionOrder,
         isReversed: Bool,
         visibility: SidebarSessionVisibility = .attention,
+        excludingSessionIDs: Set<SessionID> = [],
         date: Date = Date()
     ) -> [AgentSession] {
         let active = sessions.filter {
-            guard !$0.isArchived else { return false }
+            guard !$0.isArchived, !excludingSessionIDs.contains($0.id) else { return false }
             let isSnoozed = $0.isSnoozed(at: date)
             return visibility == .snoozed ? isSnoozed : !isSnoozed
         }

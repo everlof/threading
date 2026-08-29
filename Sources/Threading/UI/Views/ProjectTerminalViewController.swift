@@ -22,6 +22,7 @@ final class ProjectTerminalViewController: NSViewController {
 
     private let appEvents = AppEventObservations()
     private let directoryTimer = MainRunLoopTimer()
+    private var initialCommand: ShellCommand?
 
     init(terminal: ProjectTerminal) {
         terminalID = terminal.id
@@ -101,20 +102,26 @@ final class ProjectTerminalViewController: NSViewController {
             ? preferred
             : home.folderURL
 
-        session.startShell(initialDirectory: startDirectory)
+        if let initialCommand {
+            session.startShell(initialDirectory: startDirectory, running: initialCommand)
+            if session.isRunning {
+                self.initialCommand = nil
+            }
+        } else {
+            session.startShell(initialDirectory: startDirectory)
+        }
     }
 
-    /// Sends one already-validated project command to this terminal's interactive shell.
-    /// Starting the shell and inserting the line happen only on this explicit call path; file
-    /// discovery never reaches the PTY. The returned receipt says the command was accepted by
-    /// a visible terminal, while the host-owned suffix printed there reports its eventual exit.
-    func runProjectScript(
+    /// Prepares one already-validated project command for this terminal's first process launch.
+    /// Only the explicit run path reaches this method; file discovery never starts a process.
+    /// The returned receipt says the command was accepted for the visible terminal, while the
+    /// host-owned suffix printed there reports its eventual exit.
+    func prepareProjectScript(
         _ invocation: ProjectScriptInvocation
     ) -> ProjectScriptExecutionReceipt? {
-        startIfNeeded()
-        guard session.isRunning else { return nil }
+        guard !session.isRunning, initialCommand == nil else { return nil }
 
-        session.insertText(ProjectScriptShellCommand.source(for: invocation) + "\n")
+        initialCommand = ProjectScriptShellCommand.command(for: invocation)
         return ProjectScriptExecutionReceipt(
             terminalID: terminalID,
             scriptID: invocation.script.id,
@@ -123,17 +130,15 @@ final class ProjectTerminalViewController: NSViewController {
         )
     }
 
-    /// Runs provider-authored updater commands in this visible terminal after the user pressed
-    /// the update toast's action. The plan is one shell command — several terminal lines, all of
-    /// them continuations the shell consumes before it runs anything — so a provider prompt
-    /// cannot consume a later provider's command as if the user had typed an answer.
-    func runAgentCLIUpdates(
+    /// Prepares provider-authored updater commands before the new terminal is selected and
+    /// started. The source travels in argv rather than through the PTY's bounded input queue;
+    /// the interactive bootstrap still leaves every prompt and interruption in this terminal.
+    func prepareAgentCLIUpdates(
         _ plan: AgentCLIUpdateExecutionPlan
     ) -> AgentCLIUpdateExecutionReceipt? {
-        startIfNeeded()
-        guard session.isRunning else { return nil }
+        guard !session.isRunning, initialCommand == nil else { return nil }
 
-        session.insertText(plan.shellSource + "\n")
+        initialCommand = plan.shellCommand
         return AgentCLIUpdateExecutionReceipt(
             terminalID: terminalID,
             toolIDs: plan.updates.map(\.id)

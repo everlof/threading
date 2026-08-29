@@ -81,10 +81,10 @@ enum BuildChannel: String, CaseIterable {
     /// Whether a build on this channel offers Remote Access at all.
     ///
     /// The feature works and is tested, but it is not something the first distributed builds
-    /// support, so they do not show the door. Hidden rather than deleted: every runtime path
-    /// already guards on `AppSettings.remoteAccessEnabled`, which is `absence: .falseValue`, so
-    /// withholding the one surface that can turn it on is enough to withhold the feature. Nothing
-    /// is stripped, nothing has to be put back, and a development build keeps it.
+    /// support, so they do not show the door. The same decision is enforced at the persisted
+    /// setting and coordinator start boundary: installing a release over a development build
+    /// that had Remote Access enabled clears the old opt-in and cannot start a listener. Nothing
+    /// is stripped, nothing has to be put back, and a development build keeps the feature.
     ///
     /// A distributed build could not offer the whole feature anyway. Hosted Direct needs
     /// `com.apple.developer.applesignin` to enroll the Mac as a host, and that entitlement never

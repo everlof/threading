@@ -5,6 +5,75 @@ final class ChangeRequestTests: XCTestCase {
 
     // MARK: - Identity and project policy
 
+    func testCheckModelKeepsExactOutcomesCoverageAndIndependentPolling() {
+        let checks = ChangeRequestChecks(
+            outcomes: [
+                .passed: 6,
+                .neutral: 1,
+                .skipped: 4,
+                .allowedFailure(original: "failed"): 2,
+                .requested: 1,
+                .queued: 1,
+                .waiting: 1,
+                .pending: 1,
+                .running: 1,
+                .inProgress: 1,
+                .cancelling: 1,
+                .failed: 1,
+                .error: 1,
+                .startupFailure: 1,
+                .actionRequired: 1,
+                .timedOut: 1,
+                .cancelled: 1,
+                .stale: 1,
+                .unknownActive("provider future active value"): 1,
+                .unknownTerminal("provider future terminal value"): 1
+            ],
+            coverage: .init(isPartial: true, isCapped: true, additionalCount: 7)
+        )
+
+        XCTAssertEqual(checks.state, .needsAttention, "attention wins the headline precedence")
+        XCTAssertTrue(checks.shouldPoll, "an active check still refreshes beside an adverse one")
+        XCTAssertEqual(checks.count(disposition: .successful), 6)
+        XCTAssertEqual(checks.count(disposition: .nonBlocking), 7)
+        XCTAssertEqual(checks.count(disposition: .active), 8)
+        XCTAssertEqual(checks.count(disposition: .needsAttention), 8)
+
+        let fragments = ChangeRequestCheckPresentation.fragments(for: checks)
+        XCTAssertEqual(fragments.first, "6 passed")
+        XCTAssertTrue(fragments.contains("4 skipped"))
+        XCTAssertTrue(fragments.contains("2 failed (allowed)"))
+        XCTAssertTrue(fragments.contains("1 running"))
+        XCTAssertTrue(fragments.contains("1 timed out"))
+        XCTAssertTrue(fragments.contains("1 unknown (provider future active v)"))
+        XCTAssertTrue(fragments.contains("summary incomplete"))
+        XCTAssertEqual(fragments.last, "7 more not loaded")
+
+        let settledFailure = ChangeRequestChecks(outcomes: [.failed: 1])
+        XCTAssertFalse(settledFailure.shouldPoll)
+
+        var futureValues: [ChangeRequestCheckOutcome: Int] = [:]
+        for index in 0..<20 {
+            futureValues[.unknownActive("future-active-\(index)")] = 1
+            futureValues[.unknownTerminal("future-terminal-\(index)")] = 1
+        }
+        let boundedFuture = ChangeRequestChecks(outcomes: futureValues)
+        XCTAssertEqual(boundedFuture.totalCount, 40)
+        XCTAssertLessThanOrEqual(
+            boundedFuture.buckets.count,
+            ChangeRequestCheckDefaults.maximumUnknownOutcomeBucketsPerDisposition * 2
+        )
+        XCTAssertEqual(boundedFuture.count(of: .unknownActive("other values")), 17)
+        XCTAssertEqual(boundedFuture.count(of: .unknownTerminal("other values")), 17)
+
+        let oneSource = ChangeRequestChecks(outcomes: [.passed: 2]).merging(.unavailable)
+        XCTAssertEqual(oneSource.passed, 2)
+        XCTAssertTrue(oneSource.coverage.isPartial)
+        XCTAssertEqual(ChangeRequestCheckPresentation.fragments(for: oneSource).last,
+                       "summary incomplete")
+        XCTAssertEqual(ChangeRequestChecks.unavailable.merging(.unavailable), .unavailable)
+    }
+
     func testRemoteIdentityUnderstandsHTTPSAndSCPWithoutCredentials() {
         XCTAssertEqual(
             GitRemoteIdentity(remote: "https://token:secret@GitHub.com/team/app.git"),
@@ -205,7 +274,9 @@ final class ChangeRequestTests: XCTestCase {
                 case "/repos/team/app/pulls":
                     body = Data("[\(String(decoding: Self.pullBody(number: 12), as: UTF8.self))]".utf8)
                 case "/repos/team/app/commits/remote-sha/check-runs":
-                    body = Data(#"{"check_runs":[{"status":"completed","conclusion":"success"},{"status":"completed","conclusion":"neutral"}]}"#.utf8)
+                    body = Data(#"{"total_count":14,"check_runs":[{"status":"completed","conclusion":"success"},{"status":"completed","conclusion":"neutral"},{"status":"completed","conclusion":"skipped"},{"status":"requested","conclusion":null},{"status":"queued","conclusion":null},{"status":"waiting","conclusion":null},{"status":"pending","conclusion":null},{"status":"in_progress","conclusion":null},{"status":"completed","conclusion":"failure"},{"status":"completed","conclusion":"cancelled"},{"status":"completed","conclusion":"timed_out"},{"status":"completed","conclusion":"action_required"},{"status":"completed","conclusion":"startup_failure"},{"status":"completed","conclusion":"stale"}]}"#.utf8)
+                case "/repos/team/app/commits/remote-sha/status":
+                    body = Data(#"{"total_count":4,"statuses":[{"state":"success"},{"state":"pending"},{"state":"failure"},{"state":"error"}]}"#.utf8)
                 case "/repos/team/app/pulls/12/reviews":
                     body = Data(#"[{"state":"CHANGES_REQUESTED","user":{"login":"sam"}},{"state":"APPROVED","user":{"login":"sam"}},{"state":"APPROVED","user":{"login":"lee"}}]"#.utf8)
                 default:
@@ -229,8 +300,22 @@ final class ChangeRequestTests: XCTestCase {
         let pull = try XCTUnwrap(status.changeRequest)
         XCTAssertEqual(status.defaultBranch, "main")
         XCTAssertEqual(pull.number, 12)
-        XCTAssertEqual(pull.checks.state, .passing)
+        XCTAssertEqual(pull.checks.state, .needsAttention)
         XCTAssertEqual(pull.checks.passed, 2)
+        XCTAssertEqual(pull.checks.skipped, 1)
+        XCTAssertEqual(pull.checks.count(of: .neutral), 1)
+        XCTAssertEqual(pull.checks.count(of: .requested), 1)
+        XCTAssertEqual(pull.checks.count(of: .queued), 1)
+        XCTAssertEqual(pull.checks.count(of: .waiting), 1)
+        XCTAssertEqual(pull.checks.count(of: .pending), 2)
+        XCTAssertEqual(pull.checks.count(of: .inProgress), 1)
+        XCTAssertEqual(pull.checks.count(of: .failed), 2)
+        XCTAssertEqual(pull.checks.count(of: .error), 1)
+        XCTAssertEqual(pull.checks.count(of: .startupFailure), 1)
+        XCTAssertEqual(pull.checks.count(of: .actionRequired), 1)
+        XCTAssertEqual(pull.checks.count(of: .timedOut), 1)
+        XCTAssertEqual(pull.checks.count(of: .cancelled), 1)
+        XCTAssertEqual(pull.checks.count(of: .stale), 1)
         XCTAssertEqual(pull.reviews.approvals, 2, "only each reviewer's latest decision counts")
         XCTAssertEqual(pull.reviews.changesRequested, 0)
         XCTAssertEqual(pull.reviews.requested, 1)
@@ -276,6 +361,67 @@ final class ChangeRequestTests: XCTestCase {
             .reloadIgnoringLocalCacheData,
             "a cached closed response must never authorize branch deletion after a reopen"
         )
+    }
+
+    func testGitHubCheckCollectionStopsAtFivePagesAndReportsTheExactRemainder() async throws {
+        let recorder = RequestRecorder()
+        let run = #"{"status":"completed","conclusion":"success"}"#
+        let pageText = "{\"total_count\":507,\"check_runs\":["
+            + Array(repeating: run, count: 100).joined(separator: ",")
+            + "]}"
+        let pageBody = Data(pageText.utf8)
+        let subject = GitHubPullRequestClient(
+            resolver: resolver(app: "app-token"),
+            transport: { request in
+                recorder.record(request)
+                let path = request.url?.path ?? ""
+                let body: Data
+                switch path {
+                case "/repos/team/app":
+                    body = Data(#"{"default_branch":"main"}"#.utf8)
+                case "/repos/team/app/pulls":
+                    body = Data("[\(String(decoding: Self.pullBody(number: 12), as: UTF8.self))]".utf8)
+                case "/repos/team/app/commits/remote-sha/check-runs":
+                    body = pageBody
+                case "/repos/team/app/commits/remote-sha/status":
+                    body = Data(#"{"total_count":0,"statuses":[]}"#.utf8)
+                case "/repos/team/app/pulls/12/reviews":
+                    body = Data("[]".utf8)
+                default:
+                    return (Data(), Self.response(404, request))
+                }
+                return (body, Self.response(200, request))
+            }
+        )
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.github(remote: "git@github.com:team/app.git")
+        )
+
+        guard case .loaded(let status) = await subject.discover(
+            repository: repository,
+            branch: "feature",
+            headRevision: "local-sha"
+        ) else { return XCTFail("expected a bounded GitHub check summary") }
+        let checks = try XCTUnwrap(status.changeRequest).checks
+        XCTAssertEqual(checks.passed, 500)
+        XCTAssertTrue(checks.coverage.isCapped)
+        XCTAssertEqual(checks.coverage.additionalCount, 7)
+        XCTAssertEqual(ChangeRequestCheckPresentation.fragments(for: checks).last, "7 more not loaded")
+
+        let checkRequests = recorder.requests.filter {
+            $0.url?.path.hasSuffix("/check-runs") == true
+        }
+        XCTAssertEqual(checkRequests.count, ChangeRequestCheckDefaults.maximumPages)
+        let pages = checkRequests.compactMap { request in
+            URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?
+                .queryItems?.first { $0.name == "page" }?.value
+        }.sorted()
+        XCTAssertEqual(pages, ["1", "2", "3", "4", "5"])
+        XCTAssertTrue(checkRequests.allSatisfy { request in
+            let items = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+            return items?.contains(URLQueryItem(name: "filter", value: "latest")) == true
+                && items?.contains(URLQueryItem(name: "per_page", value: "100")) == true
+        })
     }
 
     func testManagedRemoteCleanerNeverTouchesAnOpenReviewBranch() async throws {
@@ -597,7 +743,7 @@ final class ChangeRequestTests: XCTestCase {
             case "projects/team%2Fapp/merge_requests":
                 output = Self.gitlabMergeRequestsBody()
             case "projects/team%2Fapp/repository/commits/remote-sha/statuses":
-                output = Data(#"[{"status":"success"},{"status":"running"},{"status":"failed"}]"#.utf8)
+                output = Data(#"[{"status":"success"},{"status":"skipped"},{"status":"created"},{"status":"preparing"},{"status":"scheduled"},{"status":"waiting_for_callback"},{"status":"waiting_for_resource"},{"status":"pending"},{"status":"running"},{"status":"canceling"},{"status":"manual"},{"status":"manual","allow_failure":true},{"status":"failed"},{"status":"canceled"},{"status":"failed","allow_failure":true},{"status":"canceled","allow_failure":true}]"#.utf8)
             case "projects/team%2Fapp/merge_requests/31/approvals":
                 output = Data(#"{"approved_by":[{"user":{"id":1}},{"user":{"id":2}}]}"#.utf8)
             default:
@@ -624,16 +770,35 @@ final class ChangeRequestTests: XCTestCase {
         XCTAssertEqual(request.number, 31)
         XCTAssertTrue(request.isDraft)
         XCTAssertEqual(request.headRevision, "remote-sha")
-        XCTAssertEqual(request.checks.state, .failing)
+        XCTAssertEqual(request.checks.state, .needsAttention)
         XCTAssertEqual(request.checks.passed, 1)
-        XCTAssertEqual(request.checks.pending, 1)
-        XCTAssertEqual(request.checks.failed, 1)
+        XCTAssertEqual(request.checks.skipped, 1)
+        XCTAssertEqual(request.checks.count(of: .created), 1)
+        XCTAssertEqual(request.checks.count(of: .preparing), 1)
+        XCTAssertEqual(request.checks.count(of: .scheduled), 1)
+        XCTAssertEqual(request.checks.count(of: .waitingForCallback), 1)
+        XCTAssertEqual(request.checks.count(of: .waitingForResource), 1)
+        XCTAssertEqual(request.checks.count(of: .pending), 1)
+        XCTAssertEqual(request.checks.count(of: .running), 1)
+        XCTAssertEqual(request.checks.count(of: .cancelling), 1)
+        XCTAssertEqual(request.checks.count(of: .manual), 1)
+        XCTAssertEqual(request.checks.count(of: .allowedFailure(original: "manual")), 1)
+        XCTAssertEqual(request.checks.count(of: .failed), 1)
+        XCTAssertEqual(request.checks.count(of: .cancelled), 1)
+        XCTAssertEqual(request.checks.count(of: .allowedFailure(original: "failed")), 1)
+        XCTAssertEqual(request.checks.count(of: .allowedFailure(original: "canceled")), 1)
         XCTAssertEqual(request.reviews.approvals, 2)
         XCTAssertEqual(request.reviews.requested, 1)
         XCTAssertEqual(request.reviews.changesRequested, 0)
         XCTAssertTrue(recorder.snapshot().allSatisfy {
             $0.arguments.contains("--hostname") && $0.arguments.contains("gitlab.com")
         })
+        let checksCall = try XCTUnwrap(recorder.snapshot().first {
+            $0.arguments.last?.contains("/statuses") == true
+        })
+        XCTAssertTrue(checksCall.arguments.contains("ref=feature"))
+        XCTAssertTrue(checksCall.arguments.contains("per_page=100"))
+        XCTAssertTrue(checksCall.arguments.contains("page=1"))
     }
 
     func testCreatingADraftGitLabMergeRequestUsesOneJSONPOST() async throws {
@@ -680,6 +845,59 @@ final class ChangeRequestTests: XCTestCase {
         XCTAssertEqual(json["target_branch"] as? String, "trunk")
         XCTAssertEqual(json["title"] as? String, "Draft: Add provider boundary")
         XCTAssertEqual(json["description"] as? String, "## Summary\n\n- Add GitLab")
+    }
+
+    func testGitLabCheckCollectionStopsAtFivePagesAndMarksAnUnknownRemainder() async throws {
+        let recorder = GitLabInvocationRecorder()
+        let statusPage = Data(
+            ("[" + Array(repeating: #"{"status":"success"}"#, count: 100)
+                .joined(separator: ",") + "]").utf8
+        )
+        let subject = GitLabChangeRequestClient { invocation in
+            recorder.record(invocation)
+            let endpoint = invocation.arguments.last ?? ""
+            let output: Data
+            switch endpoint {
+            case "projects/team%2Fapp":
+                output = Data(#"{"default_branch":"trunk"}"#.utf8)
+            case "projects/team%2Fapp/merge_requests":
+                output = Self.gitlabMergeRequestsBody()
+            case "projects/team%2Fapp/repository/commits/remote-sha/statuses":
+                output = statusPage
+            case "projects/team%2Fapp/merge_requests/31/approvals":
+                output = Data(#"{"approved_by":[]}"#.utf8)
+            default:
+                return GitLabCLIResult(status: 1, output: Data(), diagnostic: "missing fixture")
+            }
+            return GitLabCLIResult(status: 0, output: output, diagnostic: "")
+        }
+        let repository = try XCTUnwrap(
+            ChangeRequestRepository.gitlab(remote: "git@gitlab.com:team/app.git")
+        )
+
+        guard case .loaded(let status) = await subject.discover(
+            repository: repository,
+            branch: "feature",
+            headRevision: "local-sha"
+        ) else { return XCTFail("expected a bounded GitLab check summary") }
+        let checks = try XCTUnwrap(status.changeRequest).checks
+        XCTAssertEqual(checks.passed, 500)
+        XCTAssertTrue(checks.coverage.isCapped)
+        XCTAssertNil(checks.coverage.additionalCount)
+        XCTAssertEqual(
+            ChangeRequestCheckPresentation.fragments(for: checks).last,
+            "more results not loaded"
+        )
+
+        let checkCalls = recorder.snapshot().filter {
+            $0.arguments.last?.hasSuffix("/statuses") == true
+        }
+        XCTAssertEqual(checkCalls.count, ChangeRequestCheckDefaults.maximumPages)
+        let pageFields = checkCalls.flatMap(\.arguments).filter { $0.hasPrefix("page=") }.sorted()
+        XCTAssertEqual(pageFields, ["page=1", "page=2", "page=3", "page=4", "page=5"])
+        XCTAssertTrue(checkCalls.allSatisfy {
+            $0.arguments.contains("ref=feature") && $0.arguments.contains("per_page=100")
+        })
     }
 
     func testFailedGitLabPOSTIsNeverRetried() async throws {

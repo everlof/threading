@@ -93,10 +93,30 @@ final class RemoteTransportInjectionTests: XCTestCase {
         XCTAssertGreaterThan(tailnet.stopCount, 0)
     }
 
-    private func isolatedAppSettings() -> AppSettings {
+    func testUnavailableBuildRefusesAProgrammaticEnableBeforeStartingAnything() {
+        let activity = RecordingRemoteAccessProcessActivity()
+        let settings = isolatedAppSettings(remoteAccessIsOffered: false)
+        let coordinator = RemoteAccessCoordinator(
+            ownerDeviceStore: InMemoryRemoteOwnerDeviceStore(),
+            appSettings: settings,
+            guestShareStore: InMemoryRemoteGuestShareStore(shares: []),
+            tailnetTransport: RecordingTailnetTransport(),
+            processActivity: activity
+        )
+
+        coordinator.setEnabled(true)
+
+        XCTAssertFalse(settings.remoteAccessEnabled)
+        XCTAssertEqual(activity.beginCount, 0, "the listener start boundary was crossed")
+    }
+
+    private func isolatedAppSettings(remoteAccessIsOffered: Bool = true) -> AppSettings {
         let name = "RemoteTransportInjectionTests.\(UUID().uuidString)"
         suiteNames.append(name)
-        return AppSettings(defaults: UserDefaults(suiteName: name)!)
+        return AppSettings(
+            defaults: UserDefaults(suiteName: name)!,
+            remoteAccessIsOffered: remoteAccessIsOffered
+        )
     }
 }
 

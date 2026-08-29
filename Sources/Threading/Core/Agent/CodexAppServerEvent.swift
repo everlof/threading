@@ -64,7 +64,10 @@ enum CodexAppServerEvent {
             // statement about the same snapshot. A plan is read as "step 3 of 7", so keeping the
             // readable half would move the denominator and quietly redraw the progress the agent
             // reported.
-            guard let plan = parameters["plan"] as? [[String: Any]] else { return [] }
+            guard let plan = parameters["plan"] as? [[String: Any]],
+                  plan.count <= RunProgressLimits.maximumSteps else {
+                return [.runPlanUpdated([])]
+            }
             var steps: [RunProgress.Step] = []
             steps.reserveCapacity(plan.count)
             for item in plan {
@@ -72,9 +75,9 @@ enum CodexAppServerEvent {
                       let statusValue = item["status"] as? String,
                       let status = RunProgress.Step.Status(providerValue: statusValue) else {
                     // A partial plan would make both the numerator and denominator plausible
-                    // but wrong. Ignore the notification atomically and wait for the next full
-                    // snapshot instead.
-                    return []
+                    // but wrong. Withdraw the prior snapshot atomically; the next complete
+                    // notification can recover it.
+                    return [.runPlanUpdated([])]
                 }
                 steps.append(RunProgress.Step(id: nil, title: title, status: status))
             }

@@ -2,13 +2,14 @@ import XCTest
 
 @testable import Threading
 
-/// One session asking to be told when another one stops, and being told exactly once.
+/// One session asking to be told when another one crosses its next activity boundary, and being
+/// told exactly once.
 ///
 /// The whole component is about *when* and *how often*: that the notice lands on the edge the
-/// app already calls "finished", that an ending which is not a finished turn — the agent exiting,
-/// the usage window running out — counts as one too, that a watch is spent when it fires, and
-/// that an optional deadline retires out loud rather than silently, and that omission does not
-/// impose a hidden wall-clock deadline.
+/// app already calls "started" or "finished", that an ending which is not a finished turn — the
+/// agent exiting, the usage window running out — counts as one too, that a watch is spent when it
+/// fires, and that an optional deadline retires out loud rather than silently, and that omission
+/// does not impose a hidden wall-clock deadline.
 ///
 /// Driven through a private `NotificationCenter` with the clock and all three lookups injected,
 /// so no live agent, no store and none of the running app's own event traffic is involved.
@@ -123,7 +124,7 @@ final class SessionWatchCenterTests: XCTestCase {
         let center = makeCenter()
         XCTAssertEqual(
             center.arm(watcher: watcher, target: target),
-            .armed(expiresAfter: nil)
+            .armed(awaiting: .turnSettled, expiresAfter: nil)
         )
 
         reportActivity(.working)
@@ -154,6 +155,46 @@ final class SessionWatchCenterTests: XCTestCase {
         XCTAssertTrue(center.isWatching(watcher: watcher, target: target))
     }
 
+    /// Arming while the target is settled captures the opposite edge instead of refusing the
+    /// watch. This is what lets a wait-for-all caller keep a guard on sessions that finished
+    /// before the final sibling: if one restarts, silence cannot be mistaken for quiescence.
+    func testASettledTargetIsWatchedForItsNextTurnStart() throws {
+        activities[target] = .idle
+        let center = makeCenter()
+
+        XCTAssertEqual(
+            center.arm(watcher: watcher, target: target),
+            .armed(awaiting: .turnStarted, expiresAfter: nil)
+        )
+
+        reportActivity(.needsAttention)
+        reportActivity(.idle)
+        XCTAssertTrue(delivered.isEmpty, "settled-state restatements are not turn starts")
+        XCTAssertTrue(center.isWatching(watcher: watcher, target: target))
+
+        reportActivity(.working)
+
+        let notice = try XCTUnwrap(delivered.first?.text)
+        XCTAssertEqual(delivered.count, 1)
+        XCTAssertTrue(notice.contains("started a new turn and is working"))
+        XCTAssertTrue(notice.contains("Re-arm it to watch the opposite edge."))
+        XCTAssertFalse(center.isWatching(watcher: watcher, target: target))
+
+        reportActivity(.idle)
+        XCTAssertEqual(delivered.count, 1, "the one-shot start watch also fired on settlement")
+    }
+
+    func testASettledTargetThatStartsBlockedSaysItIsWaitingOnInput() throws {
+        activities[target] = .idle
+        let center = makeCenter()
+        center.arm(watcher: watcher, target: target)
+
+        reportActivity(.awaitingUser)
+
+        let notice = try XCTUnwrap(delivered.first?.text)
+        XCTAssertTrue(notice.contains("started a new turn and is already waiting on input"))
+    }
+
     // MARK: - What the notice says
 
     /// The title is read when the watch fires, not when it is armed: an agent renames its own
@@ -176,6 +217,7 @@ final class SessionWatchCenterTests: XCTestCase {
             "the id is spelled the way every app-side surface prints it — lowercased"
         )
         XCTAssertTrue(notice.contains("finished its turn and is idle"))
+        XCTAssertTrue(notice.contains("Re-arm it to watch the opposite edge."))
         XCTAssertFalse(
             notice.contains("[Cross-session message"),
             "that header claims the target's agent wrote the body, which for a watch notice is a lie"
@@ -204,25 +246,22 @@ final class SessionWatchCenterTests: XCTestCase {
         }
     }
 
-    // MARK: - What arming refuses
+    // MARK: - Arming from every stable state
 
-    /// Nothing is in flight, so there is no edge to wait for: a watch armed here would fire on
-    /// whatever the target is asked to do next, which is not the work the watcher waited on.
-    func testAnAlreadySettledTargetIsRefusedRatherThanWatched() {
+    func testEverySettledStateArmsForTheNextStart() {
         let center = makeCenter()
 
         for settled in [SessionActivity.idle, .needsAttention, .dormant, .limitReached] {
             activities[target] = settled
             XCTAssertEqual(
                 center.arm(watcher: watcher, target: target),
-                .targetAlreadySettled,
-                "\(settled) was taken as something still to wait for"
+                .armed(awaiting: .turnStarted, expiresAfter: nil),
+                "\(settled) was not guarded against a later restart"
             )
+            reportActivity(.working)
+            delivered = []
+            activities[target] = settled
         }
-
-        reportActivity(.working)
-        reportActivity(.idle)
-        XCTAssertTrue(delivered.isEmpty, "a refused watch still delivered")
     }
 
     /// Two watches on one edge would deliver the same fact twice, spending two of the watcher's
@@ -232,9 +271,14 @@ final class SessionWatchCenterTests: XCTestCase {
 
         XCTAssertEqual(
             center.arm(watcher: watcher, target: target),
-            .armed(expiresAfter: nil)
+            .armed(awaiting: .turnSettled, expiresAfter: nil)
         )
-        XCTAssertEqual(center.arm(watcher: watcher, target: target), .alreadyWatching)
+        activities[target] = .idle
+        XCTAssertEqual(
+            center.arm(watcher: watcher, target: target),
+            .alreadyWatching(awaiting: .turnSettled),
+            "a duplicate must report the installed edge, not infer a new one from current state"
+        )
 
         reportActivity(.idle)
         XCTAssertEqual(delivered.count, 1)
@@ -251,7 +295,7 @@ final class SessionWatchCenterTests: XCTestCase {
         for id in targets {
             XCTAssertEqual(
                 center.arm(watcher: watcher, target: id),
-                .armed(expiresAfter: nil)
+                .armed(awaiting: .turnSettled, expiresAfter: nil)
             )
         }
 
@@ -263,7 +307,7 @@ final class SessionWatchCenterTests: XCTestCase {
         // Another session's budget is its own.
         XCTAssertEqual(
             center.arm(watcher: SessionID(), target: target),
-            .armed(expiresAfter: nil)
+            .armed(awaiting: .turnSettled, expiresAfter: nil)
         )
     }
 
@@ -288,6 +332,19 @@ final class SessionWatchCenterTests: XCTestCase {
 
         reportActivity(.idle)
         XCTAssertEqual(delivered.count, 1, "an expired watch was still spent on a later settle")
+    }
+
+    func testAWatchForAStartExpiresWithTheBoundaryItWasWaitingFor() throws {
+        activities[target] = .idle
+        let center = makeCenter()
+        center.arm(watcher: watcher, target: target, timeout: 0.03)
+
+        settle(0.2)
+
+        let notice = try XCTUnwrap(delivered.first?.text)
+        XCTAssertTrue(notice.contains("before a new turn started"))
+        XCTAssertFalse(notice.contains("with the turn still running"))
+        XCTAssertFalse(center.isWatching(watcher: watcher, target: target))
     }
 
     /// The run loop was blocked or the machine slept, so the expiry timer never ran and the edge
@@ -332,6 +389,18 @@ final class SessionWatchCenterTests: XCTestCase {
             )
             XCTAssertFalse(center.isWatching(watcher: watcher, target: target))
         }
+    }
+
+    func testTheToolContractExplainsBothEdgesAndRearming() throws {
+        let tool = try XCTUnwrap(MCPTools.definitions.first { $0.name == "watch_session" })
+
+        XCTAssertTrue(tool.description.contains("already settled"))
+        XCTAssertTrue(tool.description.contains("next turn starts"))
+        XCTAssertTrue(tool.description.contains("Re-arm after every notice"))
+        XCTAssertEqual(
+            tool.builtInPresentation?.detail,
+            "One notice when a sibling starts or settles."
+        )
     }
 
     // MARK: - Delivery

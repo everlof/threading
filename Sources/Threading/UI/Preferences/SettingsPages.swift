@@ -310,8 +310,9 @@ enum SettingsPages {
         // MARK: Access
         //
         // Remote Access is offered only where the build channel offers it. Withholding the page
-        // withholds the feature: it is the one surface that can set `remoteAccessEnabled`, and
-        // every runtime path guards on that. See `BuildChannel.offersRemoteAccess`.
+        // withholds its presentation. The persisted setting and coordinator separately enforce
+        // the same channel decision, including an upgrade from an enabled development build.
+        // See `BuildChannel.offersRemoteAccess`.
         Page(
             id: remoteAccessID,
             hostPage: nil,

@@ -280,35 +280,159 @@ struct GitHubPullRequestClient: ChangeRequestProviderClient {
         revision: String,
         credentials: [GitHubCredential]
     ) async -> ChangeRequestChecks {
-        let result = await read(
-            endpoint: endpoint(repository, suffix: "/commits/\(revision)/check-runs"),
+        async let checkRuns = checkRunSummary(
+            repository: repository,
+            revision: revision,
             credentials: credentials
         )
-        guard case .success(let data) = result,
-              let response = try? JSONDecoder().decode(CheckRunsResponse.self, from: data)
-        else { return .unavailable }
+        async let commitStatuses = commitStatusSummary(
+            repository: repository,
+            revision: revision,
+            credentials: credentials
+        )
+        return await checkRuns.merging(commitStatuses)
+    }
 
-        var passed = 0
-        var pending = 0
-        var failed = 0
-        for run in response.checkRuns {
-            guard run.status == "completed" else {
-                pending += 1
-                continue
+    private func checkRunSummary(
+        repository: ChangeRequestRepository,
+        revision: String,
+        credentials: [GitHubCredential]
+    ) async -> ChangeRequestChecks {
+        var outcomes: [ChangeRequestCheckOutcome: Int] = [:]
+        var loaded = 0
+
+        for page in 1...ChangeRequestCheckDefaults.maximumPages {
+            let result = await read(
+                endpoint: endpoint(
+                    repository,
+                    suffix: "/commits/\(revision)/check-runs",
+                    query: [
+                        URLQueryItem(name: "filter", value: "latest"),
+                        URLQueryItem(
+                            name: "per_page",
+                            value: String(ChangeRequestCheckDefaults.pageSize)
+                        ),
+                        URLQueryItem(name: "page", value: String(page))
+                    ]
+                ),
+                credentials: credentials
+            )
+            guard case .success(let data) = result,
+                  let response = try? JSONDecoder().decode(CheckRunsResponse.self, from: data)
+            else {
+                return loaded == 0
+                    ? .unavailable
+                    : ChangeRequestChecks(outcomes: outcomes, coverage: .partial)
             }
-            switch run.conclusion {
-            case "success", "neutral", "skipped": passed += 1
-            case "failure", "timed_out", "cancelled", "action_required", "startup_failure":
-                failed += 1
-            default: pending += 1
+
+            for run in response.checkRuns {
+                outcomes[checkRunOutcome(run), default: 0] += 1
+            }
+            loaded += response.checkRuns.count
+            if loaded >= response.totalCount
+                || response.checkRuns.count < ChangeRequestCheckDefaults.pageSize {
+                return ChangeRequestChecks(outcomes: outcomes)
+            }
+            if page == ChangeRequestCheckDefaults.maximumPages {
+                return ChangeRequestChecks(
+                    outcomes: outcomes,
+                    coverage: .capped(additionalCount: max(0, response.totalCount - loaded))
+                )
             }
         }
-        let state: ChangeRequestChecks.State
-        if failed > 0 { state = .failing }
-        else if pending > 0 { state = .pending }
-        else if passed > 0 { state = .passing }
-        else { state = .none }
-        return ChangeRequestChecks(state: state, passed: passed, pending: pending, failed: failed)
+        return ChangeRequestChecks(outcomes: outcomes)
+    }
+
+    private func commitStatusSummary(
+        repository: ChangeRequestRepository,
+        revision: String,
+        credentials: [GitHubCredential]
+    ) async -> ChangeRequestChecks {
+        var outcomes: [ChangeRequestCheckOutcome: Int] = [:]
+        var loaded = 0
+
+        for page in 1...ChangeRequestCheckDefaults.maximumPages {
+            let result = await read(
+                endpoint: endpoint(
+                    repository,
+                    suffix: "/commits/\(revision)/status",
+                    query: [
+                        URLQueryItem(
+                            name: "per_page",
+                            value: String(ChangeRequestCheckDefaults.pageSize)
+                        ),
+                        URLQueryItem(name: "page", value: String(page))
+                    ]
+                ),
+                credentials: credentials
+            )
+            guard case .success(let data) = result,
+                  let response = try? JSONDecoder().decode(CombinedStatusResponse.self, from: data)
+            else {
+                return loaded == 0
+                    ? .unavailable
+                    : ChangeRequestChecks(outcomes: outcomes, coverage: .partial)
+            }
+
+            for status in response.statuses {
+                outcomes[commitStatusOutcome(status.state), default: 0] += 1
+            }
+            loaded += response.statuses.count
+            if loaded >= response.totalCount
+                || response.statuses.count < ChangeRequestCheckDefaults.pageSize {
+                return ChangeRequestChecks(outcomes: outcomes)
+            }
+            if page == ChangeRequestCheckDefaults.maximumPages {
+                return ChangeRequestChecks(
+                    outcomes: outcomes,
+                    coverage: .capped(additionalCount: max(0, response.totalCount - loaded))
+                )
+            }
+        }
+        return ChangeRequestChecks(outcomes: outcomes)
+    }
+
+    private func checkRunOutcome(
+        _ run: CheckRunsResponse.CheckRun
+    ) -> ChangeRequestCheckOutcome {
+        let status = run.status.lowercased()
+        guard status == "completed" else {
+            switch status {
+            case "requested": return .requested
+            case "queued": return .queued
+            case "waiting": return .waiting
+            case "pending": return .pending
+            case "in_progress": return .inProgress
+            default:
+                return .unknownActive(ChangeRequestCheckOutcome.boundedProviderValue(status))
+            }
+        }
+
+        let conclusion = run.conclusion?.lowercased() ?? "no conclusion"
+        switch conclusion {
+        case "success": return .passed
+        case "neutral": return .neutral
+        case "skipped": return .skipped
+        case "failure": return .failed
+        case "cancelled": return .cancelled
+        case "timed_out": return .timedOut
+        case "action_required": return .actionRequired
+        case "startup_failure": return .startupFailure
+        case "stale": return .stale
+        default:
+            return .unknownTerminal(ChangeRequestCheckOutcome.boundedProviderValue(conclusion))
+        }
+    }
+
+    private func commitStatusOutcome(_ value: String) -> ChangeRequestCheckOutcome {
+        switch value.lowercased() {
+        case "success": return .passed
+        case "pending": return .pending
+        case "failure": return .failed
+        case "error": return .error
+        default:
+            return .unknownTerminal(ChangeRequestCheckOutcome.boundedProviderValue(value))
+        }
     }
 
     private func reviewSummary(
@@ -507,8 +631,22 @@ struct GitHubPullRequestClient: ChangeRequestProviderClient {
             let status: String
             let conclusion: String?
         }
+        let totalCount: Int
         let checkRuns: [CheckRun]
-        enum CodingKeys: String, CodingKey { case checkRuns = "check_runs" }
+        enum CodingKeys: String, CodingKey {
+            case totalCount = "total_count"
+            case checkRuns = "check_runs"
+        }
+    }
+
+    private struct CombinedStatusResponse: Decodable {
+        struct Status: Decodable { let state: String }
+        let totalCount: Int
+        let statuses: [Status]
+        enum CodingKeys: String, CodingKey {
+            case totalCount = "total_count"
+            case statuses
+        }
     }
 
     private struct ReviewResponse: Decodable {

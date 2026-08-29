@@ -6,9 +6,15 @@ Updates, and what an update check reveals is on the Privacy page. The custom `SP
 built — every update stage renders as Threading's own sheets; see
 [The UI is ours](#the-ui-is-ours-with-one-documented-exception). So is everything after the
 stapled zip: `scripts/generate_appcast.sh`, `scripts/publish_release.sh`, and the release and
-nightly workflows under `.github/workflows/`. What remains before the first tag is one manual
-`generate_keys` run ([Keys](#keys--threadings-own-one-manual-step-from-real)) and installing the
-five signing/notarization secrets named at the top of `.github/workflows/release.yml`.
+nightly workflows under `.github/workflows/`. The trusted-Mac route is
+`scripts/publish_local_release.sh v0.1.0`: it preflights the local keys, runs the complete test
+level and release-quality gate before either public ref exists, then proves the clean tested commit
+is still checked out. Only then does it push the outer repository and annotated tag, temporarily
+prevent the tag workflow from racing a second signed build, and invoke the same publisher locally.
+The publisher's duplicate quality-gate invocation is skipped only inside that driver, after the
+exact commit check; direct `release.sh` and `publish_release.sh` runs remain fail-closed. The Sparkle key
+already exists under account `mjukis-threading`; [Keys](#keys--threadings-own-one-manual-step-from-real)
+records its custody requirements.
 
 ## Distribution signing is not a build setting
 
@@ -265,8 +271,11 @@ Nothing shipped before Sparkle existed, so the release line starts wherever it l
 a reasonable first tag. The only rule from the first Sparkle-carrying build onward is that the
 number goes up.
 
-The remaining manual step is tagging: `git tag v0.1.0` before a release. This repo has no tags
-yet, so the first one establishes the sequence.
+The local driver creates the annotated tag only after the complete shipping test level passes and
+the outer `master` push succeeds. It is resumable: a local or remote tag already at the same HEAD
+is reused, and the publisher ignores only its own existing GitHub release when re-checking version
+allocation. That matters because release creation and the `appcast.xml` upload are separate remote
+writes. A different, lightweight, moved or version-colliding tag fails closed.
 
 ## Channels
 
@@ -278,6 +287,13 @@ Four, of which the release pipeline can stamp three:
 | `beta` | a `beta-vX.Y.Z` tag, through the same `release.sh --channel beta` | strictly below the stable it precedes, e.g. `0.1.90` before `0.2.0` | BETA |
 | `nightly` | `scripts/release.sh --channel nightly` with `THREADING_VERSION` | the date as dotted digits, e.g. `2026.8.2` | NIGHTLY |
 | `dev` | every build made any other way | `0.0.0` | DEV |
+
+Remote Access is deliberately offered only by `dev` today. The three distributed channels omit
+its Settings page, clamp the persisted master switch to false, clear an opt-in inherited from a
+development build, and guard the coordinator's final listener start boundary. The runtime guards
+are load-bearing: hiding the page alone would still start the server when a developer installed
+0.1.0 over a dev build that had already enabled it. `release.sh` reads the channel back from the
+exported app, so a mis-stamped shipping bundle fails before notarization.
 
 The channel travels the version's road exactly: `release.sh` passes `THREADING_CHANNEL` to
 `xcodebuild archive`, `Info.plist` carries it as `$(THREADING_CHANNEL)` under the
@@ -744,10 +760,10 @@ also what makes `generate_appcast` sign the feed at all, which the script assert
    `scripts/publish_release.sh` (tag preflight, `release.sh --notarize`, the appcast, and the
    GitHub release carrying zip + `appcast.xml` together). The appcast step runs *after*
    notarize-and-staple, since the zip is rebuilt from the stapled bundle and re-signing a
-   changed archive would invalidate the appcast's signature. **Neither script ever pushes**:
-   `submodule.recurse` makes a push from this machine publish the forked submodules, so the
-   tag is pushed by hand and `publish_release.sh` only verifies the remote already has it, at
-   HEAD, annotated.
+   changed archive would invalidate the appcast's signature. These two scripts never push.
+   `scripts/publish_local_release.sh` owns the local choreography: it neutralizes this checkout's
+   `submodule.recurse` twice, uses exact outer-repository refspecs, and leaves
+   `publish_release.sh` to verify the remote tag is still annotated and exactly at HEAD.
 6. ~~Host the appcast and archives over HTTPS.~~ Done — GitHub Releases, claudex's pattern:
    the stable feed is `releases/latest/download/appcast.xml`, uploaded beside each release's
    zip so `latest` always resolves to a matching pair. Whatever serves the feed is part of the
@@ -878,12 +894,14 @@ user was working in.
 The receipt uses the existing sidebar `Toast` component, remains for the unattended dwell, pauses
 under the pointer like every toast, and aligns now/latest values through the toast's generic
 comparison table. Checking never starts an updater. Pressing **Update** creates a durable
-standalone terminal and sends it one host-built shell command; each provider command is a quoted
-argument to its own login-shell child, runs sequentially, and leaves prompts, output and exit-code
-receipts visible and interruptible. A failing provider does not suppress the next one. That
-command spans several terminal lines, because the `printf` receipts carry real newlines — every
-one of them a continuation the shell consumes before it runs anything, and none within the tty's
-1023-byte canonical-mode limit (247 bytes at the longest, for a five-tool run).
+standalone terminal and supplies it one host-built shell command as a process argument; each
+provider command is a quoted argument to its own login-shell child, runs sequentially, and leaves
+prompts, output and exit-code receipts visible and interruptible. A failing provider does not
+suppress the next one. The argument route is load-bearing: macOS limits the complete queued
+terminal input to 1024 bytes, and a multi-tool plan can exceed that even when each physical line
+is shorter. Typing the plan immediately after shell creation silently duplicated or discarded its
+tail on the real path. A clean interactive Bash bootstrap receives the plan outside the PTY,
+preserves foreground-job interruption, then replaces itself with the user's configured shell.
 
 That host-owned check also makes Threading the central update manager for every Codex process it
 starts. Each Codex invocation therefore receives the documented one-run override

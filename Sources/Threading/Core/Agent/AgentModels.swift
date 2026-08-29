@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// One provider-native reasoning level an installed runtime says a model can use.
 struct AgentReasoningLevel: Equatable {
@@ -421,6 +422,15 @@ enum AgentModels {
     /// to the model family. Both are consulted here rather than in the view, which should only
     /// be deciding whether to show a chip.
     ///
+    /// A nil model means "let the account choose", not "there is no model" — the reading
+    /// `supports(reasoningEffort:)` already makes. It is resolved here, once, because every
+    /// caller that sends nil to mean the configured default (a phone's draft, a report chat, the
+    /// Mac composer) shows that default's own Fast control, and the answer has to be that
+    /// model's. A create request from the phone was refused with *Unsupported Speed* for exactly
+    /// this: the catalogue had said its default model runs Fast, the request left the model to
+    /// the account, and the gate answered for a model called nil. Only an account naming no
+    /// model at all is genuinely unknown, and unknown stays "no control" rather than a guess.
+    ///
     /// The control-channel branch is still Claude's measured family test, because Claude is the
     /// only runtime with that mechanism and no second one has been measured. A runtime granted
     /// `.liveFastModeControl` needs its own answer written here, not inherited from this one.
@@ -429,11 +439,13 @@ enum AgentModels {
         model: String?,
         account: AgentAccount?
     ) -> Bool {
+        let resolvedModel = model ?? defaultModel(for: kind, account: account)
         if kind.supports(.liveFastModeControl) {
-            return claudeSupportsFastMode(model)
+            return claudeSupportsFastMode(resolvedModel)
         }
         guard kind.supports(.serviceTierFastMode) else { return false }
-        return option(identifier: model, for: kind, account: account)?.supportsFastMode == true
+        return option(identifier: resolvedModel, for: kind, account: account)?
+            .supportsFastMode == true
     }
 
     /// Whether an explicit reasoning effort can be admitted for a new session.
@@ -513,8 +525,10 @@ enum AgentModels {
     /// against CLI 2.1.218: Opus 4.7/4.8). Matching the family rather than pinning dated ids
     /// keeps this correct as new Opus versions ship, and the CLI is the final arbiter — an
     /// unsupported request is rejected and surfaced — so erring toward offering the control costs
-    /// a rejection, not a wrong result. A nil model (the CLI's unnamed default) is treated as
-    /// incapable, hiding the control rather than guessing.
+    /// a rejection, not a wrong result. A nil model is treated as incapable, hiding the control
+    /// rather than guessing: `supportsFastMode(kind:model:account:)` has already replaced an
+    /// omitted model with the account's configured one by the time it asks, so nil here means
+    /// the login names no model at all and the CLI's fallback is not ours to predict.
     static func claudeSupportsFastMode(_ model: String?) -> Bool {
         model?.localizedCaseInsensitiveContains(AgentDefaults.claudeFastModeFamily) == true
     }
@@ -785,6 +799,43 @@ enum AgentModels {
         return nil
     }
 
+    /// The catalogue as last decoded for one login, with the file identity it was read from.
+    private struct RememberedCodexCatalog: Sendable {
+        var identity: CodexCatalogFileIdentity
+        var options: [AgentModelOption]
+    }
+
+    /// What tells one write of `models_cache.json` from the next without reading it.
+    private struct CodexCatalogFileIdentity: Equatable, Sendable {
+        let modified: Date?
+        let size: Int?
+
+        init?(of url: URL) {
+            guard let values = try? url.resourceValues(
+                forKeys: [.contentModificationDateKey, .fileSizeKey]
+            ) else { return nil }
+            modified = values.contentModificationDate
+            size = values.fileSize
+        }
+    }
+
+    /// Codex rewrites `models_cache.json` in place — truncate, then write — so for about a
+    /// millisecond every half-minute (measured on 2026-08-29 with a dozen resident TUIs) the
+    /// file is empty. Decoded then, it yields no catalogue, and the configured-model fallback
+    /// offers that model with no Fast tier and no effort levels: a phone create landing in that
+    /// moment is refused for a speed or effort the catalogue itself advertised. The last
+    /// catalogue a login proved it had is the answer across that moment. One entry per account
+    /// directory, re-read only when the file's identity moves — which also stops a catalogue
+    /// build decoding the same 200 KB once per model option.
+    private static let rememberedCodexCatalogs = OSAllocatedUnfairLock(
+        initialState: [String: RememberedCodexCatalog]()
+    )
+
+    /// A rewrite of a 200 KB cache is over in milliseconds. Keeping the last complete reading
+    /// for a few seconds covers truncate-and-rewrite without turning a permanently malformed or
+    /// removed cache into an indefinitely stale catalogue.
+    private static let codexCatalogRewriteGrace: TimeInterval = 5
+
     /// Reads the cache Codex writes after resolving the account's live model catalog.
     ///
     /// Hidden/internal models stay hidden. A future catalog can rename the fast service-tier
@@ -794,12 +845,42 @@ enum AgentModels {
 
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.codexModelsCacheFile)
+        let key = url.path
+        let identity = CodexCatalogFileIdentity(of: url)
+        let remembered = rememberedCodexCatalogs.withLock { $0[key] }
+        if let remembered, let identity, remembered.identity == identity {
+            return remembered.options
+        }
+        guard let identity else {
+            // A missing cache is an account with no live catalogue, not a rewrite observed in
+            // progress. Reusing a former login's entry here could offer models that no longer
+            // exist after sign-out and recreation at the same path.
+            return []
+        }
+        guard let decoded = decodeCodexCatalog(at: url) else {
+            let observedAt = Date()
+            guard let remembered,
+                  let modified = identity.modified,
+                  observedAt.timeIntervalSince(modified) >= -1,
+                  observedAt.timeIntervalSince(modified) <= codexCatalogRewriteGrace else {
+                return []
+            }
+            return remembered.options
+        }
+        rememberedCodexCatalogs.withLock {
+            $0[key] = RememberedCodexCatalog(identity: identity, options: decoded)
+        }
+        return decoded
+    }
+
+    /// One read of the file, or nil when it cannot be read or decoded whole.
+    private static func decodeCodexCatalog(at url: URL) -> [AgentModelOption]? {
         guard let data = try? BoundedFileReader.read(
             url,
             maximumBytes: maximumProviderCatalogBytes
         ),
               let cache = try? JSONDecoder().decode(CodexModelsCache.self, from: data)
-        else { return [] }
+        else { return nil }
 
         return cache.models
             .filter { $0.visibility == AgentDefaults.codexVisibleModel }

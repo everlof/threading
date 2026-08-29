@@ -587,4 +587,11 @@ enum SidebarRowDefaults {
 enum ProjectTerminalDefaults {
     /// Process cwd is the fallback for shells that do not emit OSC 7 directory reports.
     static let directoryRefreshInterval: TimeInterval = 1
+
+    /// A host-owned command is supplied to this clean interactive shell as an argv value, never
+    /// typed through the PTY. Interactive mode is load-bearing: it gives each updater or project
+    /// script its own foreground job, so Control-C stops that command and the bootstrap can still
+    /// replace itself with the user's configured shell afterwards.
+    static let bootstrapShell = "/bin/bash"
+    static let bootstrapArguments = ["--noprofile", "--norc", "-i", "-c"]
 }

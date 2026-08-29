@@ -2,18 +2,19 @@ import Foundation
 
 // MARK: - Session Watch Center
 
-/// Holds one session's request to be told when another session settles, and spends it once.
+/// Holds one session's request to be told when another session crosses its next activity edge,
+/// and spends it once.
 ///
 /// **The point is that nobody polls.** Without this, a session waiting on a sibling's result can
 /// only call `list_sessions` again and again — every call spending a turn of its own usage to
 /// learn nothing, and the interval between calls deciding how late the answer arrives. A watch
 /// costs one delivery, at the moment the fact becomes true.
 ///
-/// **The boundary watched is the app's existing answer to "is it finished"** — the edge out of
-/// `hasTurnInFlight` that `SessionArchiveScheduler` already fires on, plus the two endings that
-/// are not a finished turn but are just as final for a caller waiting on one: the agent exiting
-/// (`.dormant`) and the account's usage window being spent (`.limitReached`). A watch that
-/// ignored those would keep an agent waiting on a session that will never speak again.
+/// **The boundary is the app's existing `hasTurnInFlight` answer in both directions.** A target
+/// with a turn in flight is watched for the edge out (including `.dormant` and `.limitReached`);
+/// a target without one is watched for the next edge in. The state read and watch insertion are
+/// one main-actor operation, so the transition cannot land in between them. Re-arming after each
+/// notice gives a caller fail-closed current-state coverage without an unbounded subscription.
 ///
 /// **In memory, one-shot, and bounded.** A watch dies with the app run, fires at most once and is
 /// then spent. A caller may put a wall-clock timeout on that wait; omission means the watch lasts
@@ -47,15 +48,11 @@ final class SessionWatchCenter {
 
     /// What became of an ask to watch, before the plane dresses it in scope.
     enum WatchArmOutcome: Equatable {
-        case armed(expiresAfter: TimeInterval?)
+        case armed(awaiting: ControlWatchEdge, expiresAfter: TimeInterval?)
         /// This watcher already watches this target. Coalesced rather than doubled: two watches
         /// on one edge would deliver the same notice twice, spending two of the watcher's turns
         /// on one fact.
-        case alreadyWatching
-        /// The target has no turn in flight *now*. Refused rather than held for a future turn:
-        /// a watch armed on an idle session would fire on whatever it is asked to do next,
-        /// which is not the work the watcher was waiting on.
-        case targetAlreadySettled
+        case alreadyWatching(awaiting: ControlWatchEdge)
         case watcherAtCapacity(limit: Int)
         case invalidTimeout
     }
@@ -80,6 +77,7 @@ final class SessionWatchCenter {
 
     private struct Watch {
         let armedAt: Date
+        let awaiting: ControlWatchEdge
         let expiresAfter: TimeInterval?
         let timer: Timer?
     }
@@ -129,14 +127,12 @@ final class SessionWatchCenter {
         timeout: TimeInterval? = nil
     ) -> WatchArmOutcome {
         let key = WatchKey(watcher: watcher, target: target)
-        guard watches[key] == nil else { return .alreadyWatching }
+        if let existing = watches[key] {
+            return .alreadyWatching(awaiting: existing.awaiting)
+        }
 
         if let timeout, !ControlWatchDefaults.isValid(timeout: timeout) {
             return .invalidTimeout
-        }
-
-        guard dependencies.activity(target).hasTurnInFlight else {
-            return .targetAlreadySettled
         }
 
         let held = watches.keys.filter { $0.watcher == watcher }.count
@@ -144,13 +140,25 @@ final class SessionWatchCenter {
             return .watcherAtCapacity(limit: ControlWatchDefaults.maximumPerWatcher)
         }
 
+        // Main-actor isolation makes this snapshot and the insertion below atomic with respect
+        // to `activityChanged`. An edge can happen before the read or after the insertion, never
+        // in the gap — the fail-closed property a wait-for-all caller depends on.
+        let awaiting: ControlWatchEdge = dependencies.activity(target).hasTurnInFlight
+            ? .turnSettled
+            : .turnStarted
+
         let timer = timeout.map { timeout in
             Timer.scheduledTimer(withTimeInterval: timeout, repeats: false) { [weak self] _ in
                 MainActor.assumeIsolated { self?.expire(key) }
             }
         }
-        watches[key] = Watch(armedAt: now(), expiresAfter: timeout, timer: timer)
-        return .armed(expiresAfter: timeout)
+        watches[key] = Watch(
+            armedAt: now(),
+            awaiting: awaiting,
+            expiresAfter: timeout,
+            timer: timer
+        )
+        return .armed(awaiting: awaiting, expiresAfter: timeout)
     }
 
     func isWatching(watcher: SessionID, target: SessionID) -> Bool {
@@ -171,17 +179,6 @@ final class SessionWatchCenter {
             drainHeldNotices(for: target)
         }
 
-        let ending: Ending
-        switch activity {
-        case .dormant:
-            ending = .agentExited
-        case .limitReached:
-            ending = .usageLimit
-        case .working, .awaitingUser, .idle, .needsAttention:
-            guard !activity.hasTurnInFlight else { return }
-            ending = .turnFinished
-        }
-
         for key in watches.keys.filter({ $0.target == target }) {
             // A watch whose timer has not been serviced — the run loop was blocked, the machine
             // slept — is retired rather than spent on an edge it has already outlived.
@@ -189,8 +186,15 @@ final class SessionWatchCenter {
             if let expiresAfter = watch.expiresAfter,
                now().timeIntervalSince(watch.armedAt) >= expiresAfter {
                 expire(key)
-            } else {
-                fire(key, notice: Self.notice(for: ending, title: title(of: target), target: target))
+            } else if let transition = Self.transition(awaitedBy: watch, after: activity) {
+                fire(
+                    key,
+                    notice: Self.notice(
+                        for: transition,
+                        title: title(of: target),
+                        target: target
+                    )
+                )
             }
         }
     }
@@ -208,6 +212,7 @@ final class SessionWatchCenter {
         let notice = Self.expiryNotice(
             title: title(of: key.target),
             target: key.target,
+            awaiting: watch.awaiting,
             after: expiresAfter
         )
         fire(key, notice: notice)
@@ -269,13 +274,34 @@ final class SessionWatchCenter {
 
     // MARK: - Wording
 
-    /// How the watched session stopped. The three endings a watcher can be waiting for, kept
-    /// apart because "answer it" and "resume it" and "wait for the window to reset" are three
-    /// different next moves.
-    private enum Ending {
+    /// The transition the watched session made. Settlement keeps its three endings apart because
+    /// "answer it", "resume it" and "wait for the window to reset" are different next moves.
+    private enum Transition {
+        case turnStarted(SessionActivity)
         case turnFinished
         case agentExited
         case usageLimit
+    }
+
+    private static func transition(
+        awaitedBy watch: Watch,
+        after activity: SessionActivity
+    ) -> Transition? {
+        switch watch.awaiting {
+        case .turnStarted:
+            return activity.hasTurnInFlight ? .turnStarted(activity) : nil
+        case .turnSettled:
+            switch activity {
+            case .dormant:
+                return .agentExited
+            case .limitReached:
+                return .usageLimit
+            case .idle, .needsAttention:
+                return .turnFinished
+            case .working, .awaitingUser:
+                return nil
+            }
+        }
     }
 
     /// Threading's own frame, not the cross-session one.
@@ -284,9 +310,17 @@ final class SessionWatchCenter {
     /// agent. Nothing here was: the target never asked for this to be sent and may not know a
     /// watch existed. Reusing that header would be a false claim about who is speaking, so the
     /// notice carries its own frame and says outright whose words these are.
-    private static func notice(for ending: Ending, title: String, target: SessionID) -> String {
+    private static func notice(
+        for transition: Transition,
+        title: String,
+        target: SessionID
+    ) -> String {
         let body: String
-        switch ending {
+        switch transition {
+        case .turnStarted(.awaitingUser):
+            body = "started a new turn and is already waiting on input."
+        case .turnStarted:
+            body = "started a new turn and is working."
         case .turnFinished:
             body = "finished its turn and is idle."
         case .agentExited:
@@ -302,20 +336,25 @@ final class SessionWatchCenter {
 
         return """
             [Session watch — Threading] “\(title)” (\(target.uuidString.lowercased())) \(body) \
-            One-shot notice from watch_session; the watch is spent. This is Threading speaking, \
-            not that session's agent.
+            One-shot notice from watch_session; the watch is spent. Re-arm it to watch the \
+            opposite edge. This is Threading speaking, not that session's agent.
             """
     }
 
     private static func expiryNotice(
         title: String,
         target: SessionID,
+        awaiting: ControlWatchEdge,
         after expiry: TimeInterval
     ) -> String {
-        """
+        let wait = switch awaiting {
+        case .turnStarted: "before a new turn started"
+        case .turnSettled: "with the turn still running"
+        }
+        return """
         [Session watch — Threading] The watch on “\(title)” \
         (\(target.uuidString.lowercased())) expired after \(minutesDescription(for: expiry)) \
-        with the turn still running. Re-arm it if you still need the signal. This is \
+        \(wait). Re-arm it if you still need the signal. This is \
         Threading speaking, not that session's agent.
         """
     }

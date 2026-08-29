@@ -716,8 +716,11 @@ Threading's Archive/Undo pair would leave the two apps disagreeing as soon as yo
 Threading hides or restores only its own row and never turns Archive into Delete. This sync
 concerns provider coding sessions, not the archive for ordinary ChatGPT chats.
 
-**Archiving asks nothing, and hands you the way back instead.** The row leaves the sidebar
-(after Codex accepts the provider action, where applicable), and a small band appears at the
+**Archiving asks nothing, and hands you the way back instead.** The row leaves the sidebar as soon
+as you press Archive, while stopping the agent and any Codex provider work finish in the
+background. The same is true on iPhone, including Archive from inside an open chat, so you can file
+several conversations without waiting for each one to move. If the operation fails, the row (or
+open chat) returns and Threading reports the error. When it succeeds, a small band appears at the
 bottom of the sidebar naming the session, saying
 whether its agent was stopped, and where it went — with **Undo** on it. The band stays for about
 six seconds, and a thin line along its lower edge shows how much of that is left. Rest the
@@ -2834,7 +2837,11 @@ it goes with the report, and the sheet shows you the exact picture while it does
 happened, then send it to Threading privately or share one zip of the selected report files, named
 after the moment you made it so saved reports never collide. On a paired owner device that can
 manage sessions, **Send to Mac** instead starts a chat on your Mac with the whole report,
-including the screenshot preview when it is included, as its opening prompt.
+including the screenshot preview when it is included. The report text becomes the opening prompt;
+the screenshot is a real image attachment beside it, so the agent receives pixels rather than a
+base64 string. Threading takes the image into that session's attachment storage before the chat
+starts. If the Mac cannot accept it, no partial chat is created; an older Mac asks to be updated
+instead of silently dropping the picture.
 
 That chat is configured on the Mac, not on the phone. It comes up on the same agent, login, model,
 reasoning level, speed and permission mode as the chat you used most recently in that project, so
@@ -3593,11 +3600,14 @@ decision. Sessions can also *steer* each other — add a line to a chat turn alr
 the same thing ⌘Return does in your own composer — and a session that cannot be steered
 refuses rather than quietly queueing.
 
-A session waiting on a sibling can also ask to be told once when that sibling finishes, rather
-than checking on it over and over: `watch_session` arms a single notice for when the watched
-session's turn settles — or its agent exits, or it stops at its usage limit. The notice arrives
-as an ordinary visible message in the waiting session's conversation, so you see exactly what it
-was told and when.
+A session waiting on a sibling can also ask to be told about its next activity edge rather than
+checking on it over and over. If the sibling has a turn in flight, `watch_session` arms a single
+notice for when that turn settles — or its agent exits, or it stops at its usage limit. If the
+sibling is already settled, it arms the notice for the next turn starting instead. The notice
+arrives as an ordinary visible message in the waiting session's conversation, so you see exactly
+what it was told and when. Each watch is one-shot; re-arming after each notice keeps a guard on a
+finished sibling while other chats are still running, so a restart cannot be mistaken for an
+all-finished project.
 
 The canonical use is a side chat reporting its conclusion back to the session it was forked
 from — ask a side chat to "report back when done" and it can, or use **Send Result to
@@ -4317,7 +4327,12 @@ however far the page scrolls. Pages that list things rather than settings fold t
 header row — its name, its size ("31 tools", "12.4 GB"), and its one control (the group's
 switch, the checkout's **Remove All…**) — and clicking the header (or pressing Space/Return on
 it) unfolds the detail. The fold is remembered for the session, not saved. **Archived** shows
-the ten most recent conversations and folds the rest behind an "older conversations" row.
+the ten most recently archived conversations and folds the rest behind an "older conversations"
+row. Its search field finds archived conversations by title or project and includes matches behind
+that fold. Archive order is the time you pressed Archive, newest first, rather than when the chat
+was last active. Conversations already archived before this version use their last-active time as
+the best available initial order. The iPhone's Archived view follows the same order and has the
+same title/project search.
 
 Threading follows the language macOS selects for the app, with English as the per-string fallback.
 Menus, built-in Settings navigation, commands, and Settings components use the app string
@@ -4371,6 +4386,19 @@ than borrowing an unrelated app translation.
 
 Animation timing is tuned by Threading rather than exposed as another preference, and transitions
 honour macOS Reduce Motion.
+
+#### Live plan progress
+
+When Claude or Codex publishes a structured todo or plan during a turn, Threading shows the
+current item and its position without trying to read the agent's terminal screen. In Terminal it
+appears as its own row in the session status card, below the branch; in Chat it appears in the
+small status strip above the composer. Click it to open the full checklist. The row disappears
+when the turn finishes, so it is a live receipt rather than a second task database.
+
+The same compact strip appears below the navigation bar on a paired iPhone. Tap it for the full
+checklist; long plans arrive in pages while the popover is open. An older Mac, a disabled hook, or
+an agent version that writes no structured plan simply shows no strip. Threading never derives a
+plan from ANSI output, cursor movement, the terminal grid, or screenshots.
 
 #### Agent hooks
 

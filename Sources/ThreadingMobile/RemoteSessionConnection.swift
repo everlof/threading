@@ -6,6 +6,10 @@ import UIKit
 
 enum RemoteMobileConnectionDefaults {
     static let conversationPageRows = 64
+    static let runPlanPageSteps = 64
+    static let runPlanMaximumSteps = 256
+    static let runPlanMaximumTitleUTF8Bytes = 4_096
+    static let runPlanMaximumIdentifierUTF8Bytes = 1_024
     /// How much of the Mac's replay this phone asks for when it joins a terminal.
     ///
     /// The emulator here keeps SwiftTerm's default 500-line scrollback, so the Mac's whole
@@ -254,6 +258,9 @@ final class RemoteSessionConnection: ObservableObject {
     /// Direct-input terminals use a separate negotiated mutation: uploaded files enter the
     /// workspace and their paths are inserted at the TUI cursor without an implicit Return.
     @Published private(set) var supportsTerminalAttachmentInsertion = false
+    @Published private(set) var supportsRunPlanProgress = false
+    @Published private(set) var runPlan: RemoteRunPlanSummaryDTO?
+    @Published private(set) var runPlanSteps: [RemoteRunPlanStepDTO] = []
     @Published private(set) var inputControl: RemoteInputControlStateDTO?
     @Published private(set) var inputControlEvents: [RemoteInputControlEventDTO] = []
     @Published private(set) var inputControlResult: RemoteInputControlResultDTO?
@@ -309,6 +316,8 @@ final class RemoteSessionConnection: ObservableObject {
     private var typingIdleTask: Task<Void, Never>?
     private var isReportingTyping = false
     private var serverFeatures: Set<String> = []
+    private var runPlanRevision: Int?
+    private var runPlanPagePending = false
     private var warmTransportState: WarmTransportState = .active
     private var pendingPromptSubmission: PendingRemoteSubmission?
     private var pendingAttentionRequest: PendingAttentionRequest?
@@ -510,6 +519,7 @@ final class RemoteSessionConnection: ObservableObject {
             supportsSessionConnectionParking = false
             inputControl = nil
         }
+        clearRunPlanState(resetFeature: true)
         warmTransportState = .active
         inputControlEvents = []
         attentionRecipients = []
@@ -649,6 +659,7 @@ final class RemoteSessionConnection: ObservableObject {
         onPooledConnectionInvalidated = nil
         presence.removeAll()
         attentionRecipients = []
+        clearRunPlanState(resetFeature: true)
         pendingAttentionRequest = nil
         isAttentionRequestPending = false
         conversationStore.cancelLoadingEarlier()
@@ -716,6 +727,7 @@ final class RemoteSessionConnection: ObservableObject {
         }
         warmTransportState = .resuming
         phase = .connecting
+        clearRunPlanState(resetFeature: true)
         beginTerminalHydration()
         lastSentTerminalViewport = nil
         presence.removeAll()
@@ -1301,6 +1313,28 @@ final class RemoteSessionConnection: ObservableObject {
         }
     }
 
+    /// Requests the next bounded page only while an expanded disclosure needs it.
+    func requestNextRunPlanPage() {
+        guard phase == .connected,
+              supportsRunPlanProgress,
+              let runPlan,
+              let runPlanRevision,
+              runPlanSteps.count < runPlan.total,
+              !runPlanPagePending else { return }
+        runPlanPagePending = true
+        do {
+            try send(RemoteClientMessage(
+                type: "runPlanPage",
+                limit: RemoteMobileConnectionDefaults.runPlanPageSteps,
+                offset: runPlanSteps.count,
+                revision: runPlanRevision
+            ))
+        } catch {
+            runPlanPagePending = false
+            recordSocketFailure(error)
+        }
+    }
+
     private func receiveLoop(task: URLSessionWebSocketTask, generation: Int) async {
         do {
             while !Task.isCancelled, !stopped, connectionGeneration == generation {
@@ -1463,6 +1497,9 @@ final class RemoteSessionConnection: ObservableObject {
             supportsTerminalAttachmentInsertion = serverFeatures.contains(
                 RemoteWebSocketFeature.terminalAttachmentInsertion.rawValue
             )
+            supportsRunPlanProgress = serverFeatures.contains(
+                RemoteWebSocketFeature.runPlanProgress.rawValue
+            )
             updateTerminalGrid(cols: hello.cols, rows: hello.rows)
             cancelHelloDeadline()
             warmTransportState = .active
@@ -1568,6 +1605,42 @@ final class RemoteSessionConnection: ObservableObject {
             ) {
                 conversationStore.prepend(page)
             }
+        case "runPlan":
+            guard let update = try? JSONDecoder().decode(
+                RemoteRunPlanUpdateDTO.self,
+                from: data
+            ), update.revision >= 0,
+               Self.isValidRunPlanSummary(update.plan) else { return }
+            if let runPlanRevision {
+                guard update.revision > runPlanRevision else {
+                    // A revision is immutable. Ignoring duplicates also keeps a repeated summary
+                    // from clearing the pending bit for a page requested after that summary.
+                    return
+                }
+            }
+            runPlanRevision = update.revision
+            runPlan = update.plan
+            runPlanSteps = []
+            runPlanPagePending = false
+        case "runPlanPage":
+            if let page = try? JSONDecoder().decode(RemoteRunPlanPageDTO.self, from: data),
+               page.revision == runPlanRevision,
+               let runPlan,
+               page.offset == runPlanSteps.count {
+                runPlanPagePending = false
+                guard page.total == runPlan.total,
+                      page.steps.count <= RemoteMobileConnectionDefaults.runPlanPageSteps,
+                      page.offset <= page.total,
+                      page.steps.count <= page.total - page.offset,
+                      page.steps.allSatisfy(Self.isValidRunPlanStep),
+                      Set(page.steps.map(\.id)).count == page.steps.count,
+                      Set(runPlanSteps.map(\.id)).isDisjoint(with: page.steps.map(\.id))
+                else { return }
+                // A page must extend the exact prefix already displayed. A repeated page at
+                // offset zero or an out-of-order later page can therefore never roll back or
+                // punch a hole in the list.
+                runPlanSteps.append(contentsOf: page.steps)
+            }
         case "presence":
             if let update = try? JSONDecoder().decode(RemotePresenceDTO.self, from: data) {
                 if update.state == .left {
@@ -1656,6 +1729,7 @@ final class RemoteSessionConnection: ObservableObject {
                 return
             }
             stopped = true
+            clearRunPlanState(resetFeature: true)
             switch ended?.reason {
             case "sessionClosed":
                 phase = .ended(MobileL10n.string("Session closed on Mac"))
@@ -1756,6 +1830,7 @@ final class RemoteSessionConnection: ObservableObject {
         httpStatus: Int? = nil
     ) {
         let failedPhase = phase == .connected ? "session" : "hello"
+        clearRunPlanState(resetFeature: true)
         phase = .failed(failure)
         var fields = socketFields(phase: failedPhase)
         fields[.result] = "failed"
@@ -1785,6 +1860,39 @@ final class RemoteSessionConnection: ObservableObject {
         fields[.attempt] = String(socketAttempt)
         fields[.code] = MobileDiagnostics.errorCode(error)
         MobileDiagnostics.recordConnectivity(.socketFailed, level: .error, fields: fields)
+    }
+
+    private func clearRunPlanState(resetFeature: Bool) {
+        if resetFeature { supportsRunPlanProgress = false }
+        runPlan = nil
+        runPlanSteps = []
+        runPlanRevision = nil
+        runPlanPagePending = false
+    }
+
+    private static func isValidRunPlanSummary(_ plan: RemoteRunPlanSummaryDTO?) -> Bool {
+        guard let plan else { return true }
+        guard plan.total > 0,
+              plan.total <= RemoteMobileConnectionDefaults.runPlanMaximumSteps,
+              (1...plan.total).contains(plan.current),
+              (0...plan.total).contains(plan.completed),
+              (0...plan.total).contains(plan.active),
+              (plan.activeTitle?.utf8.count ?? 0)
+                <= RemoteMobileConnectionDefaults.runPlanMaximumTitleUTF8Bytes else {
+            return false
+        }
+        return plan.completed <= plan.total - plan.active
+    }
+
+    private static func isValidRunPlanStep(_ step: RemoteRunPlanStepDTO) -> Bool {
+        guard !step.id.isEmpty,
+              step.id.utf8.count <= RemoteMobileConnectionDefaults.runPlanMaximumIdentifierUTF8Bytes,
+              step.title.utf8.count <= RemoteMobileConnectionDefaults.runPlanMaximumTitleUTF8Bytes
+        else { return false }
+        guard let providerID = step.providerID else { return true }
+        return !providerID.isEmpty
+            && providerID.utf8.count
+                <= RemoteMobileConnectionDefaults.runPlanMaximumIdentifierUTF8Bytes
     }
 
     private func socketFields(phase: String) -> [RemoteDiagnosticField: String] {
@@ -2520,6 +2628,23 @@ final class RemoteSessionConnection: ObservableObject {
                 && sourceRowCount > rows.count
         )
         connection.conversationStore.replace(with: conversationSnapshot)
+        if demoMode == "conversation-run-plan" || demoMode == "conversation-run-plan-expanded" {
+            connection.runPlanRevision = 7
+            connection.runPlan = RemoteRunPlanSummaryDTO(
+                activeTitle: "Polish the phone checklist disclosure",
+                current: 3,
+                completed: 2,
+                active: 1,
+                total: 5
+            )
+            connection.runPlanSteps = [
+                .init(id: "0", title: "Inspect structured provider events", status: .completed),
+                .init(id: "1", title: "Relay the current plan to every surface", status: .completed),
+                .init(id: "2", title: "Polish the phone checklist disclosure", status: .inProgress),
+                .init(id: "3", title: "Verify native and terminal fixtures", status: .pending),
+                .init(id: "4", title: "Document the structured-data boundary", status: .pending),
+            ]
+        }
         if isPerformanceFixture {
             let storeEnded = ProcessInfo.processInfo.systemUptime
             MobileConversationPerformanceProbe.fixtureDidLoad(

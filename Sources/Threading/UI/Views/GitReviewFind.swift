@@ -367,8 +367,8 @@ final class GitReviewPathNavigatorViewController: NSViewController {
     }
 
     private final class Node: NSObject {
-        let name: String
-        let path: String
+        var name: String
+        var path: String
         let isDirectory: Bool
         var children: [Node] = []
         var added = 0
@@ -494,6 +494,23 @@ final class GitReviewPathNavigatorViewController: NSViewController {
                 parent = node
             }
         }
+
+        // A chain of single-child directories is one row — "Sources/Threading/Core/Agent" —
+        // rather than four rows with one file behind the last. Nine files took twenty-five
+        // rows with every level on its own line, and the names truncated at the rail's width.
+        func compact(_ nodes: [Node]) {
+            for node in nodes where node.isDirectory {
+                while node.children.count == 1,
+                      let child = node.children.first,
+                      child.isDirectory {
+                    node.name += "/" + child.name
+                    node.path = child.path
+                    node.children = child.children
+                }
+                compact(node.children)
+            }
+        }
+        compact(rootNodes)
 
         func sort(_ nodes: inout [Node]) {
             nodes.sort {

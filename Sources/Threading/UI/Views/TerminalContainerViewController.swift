@@ -2113,19 +2113,17 @@ private extension TerminalContainerViewController {
         }
     }
 
-    /// The same live checkout reading has two presentations: branch while idle, turn progress
-    /// while a turn is in flight.
-    ///
-    /// **Only a native conversation promotes the card.** A terminal session's CLI already draws
-    /// its own spinner and working word a few lines under this corner, so the orb and "Working…"
-    /// here said the same thing twice in the same view. The card keeps saying what the terminal
-    /// does not — branch and live `+N −M` — for the whole run.
+    /// Branch stays visible for the whole run. A structured provider checklist, when available,
+    /// occupies its own row rather than replacing repository identity.
     func refreshGitStatusOverlayRunState() {
         guard gitChangeMonitor != nil else { return }
 
+        let activity = currentConversation?.isTurnInFlight
+            ?? currentChild?.activity.hasTurnInFlight
+            ?? false
         gitStatusOverlay.updateRunState(
-            isActive: currentConversation?.isTurnInFlight ?? false,
-            progress: currentConversation?.runProgress
+            isActive: activity,
+            progress: currentConversation?.runProgress ?? currentChild?.runProgress
         )
     }
 
@@ -2234,7 +2232,7 @@ private extension TerminalContainerViewController {
                    last.signature == signature,
                    Date().timeIntervalSince(last.date)
                     < StatusCardRemoteDefaults.remoteRefreshInterval {
-                    if self.lastChangeRequestReading?.checks.state == .pending {
+                    if self.lastChangeRequestReading?.checks.shouldPoll == true {
                         self.scheduleGitStatusOverlayPendingChecks(
                             for: sessionID,
                             root: root
@@ -2257,7 +2255,7 @@ private extension TerminalContainerViewController {
                     let reading = GitStatusOverlayView.ChangeRequestReading(status: status)
                     self.lastChangeRequestReading = reading
                     self.gitStatusOverlay.updateChangeRequest(reading)
-                    if reading?.checks.state == .pending {
+                    if reading?.checks.shouldPoll == true {
                         self.scheduleGitStatusOverlayPendingChecks(
                             for: sessionID,
                             root: root
@@ -2647,6 +2645,7 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
         NotificationCenter.default.post(
             SessionActivityDidChange(sessionID: controller.sessionID)
         )
+        RemoteSessionMirrorRegistry.shared.sessionRunProgressChanged(controller.sessionID)
         delegate?.terminalContainer(self, sessionStateDidChange: controller.sessionID)
     }
 
@@ -2820,6 +2819,7 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
         NotificationCenter.default.post(
             SessionActivityDidChange(sessionID: controller.sessionID)
         )
+        RemoteSessionMirrorRegistry.shared.sessionRunProgressChanged(controller.sessionID)
         delegate?.terminalContainer(self, sessionStateDidChange: controller.sessionID)
     }
 

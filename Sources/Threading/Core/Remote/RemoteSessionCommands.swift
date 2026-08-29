@@ -21,6 +21,10 @@ struct RemoteSessionLaunch {
     /// — what the Mac's own New Manager template does. Validated by the server, conferred by the
     /// coordinator, so the authority never leaves the Mac.
     let role: SessionRole
+    /// Server-owned temporary files that must enter session attachment custody before launch.
+    /// The application either takes every path and names its own copies in the prompt, or starts
+    /// no session at all.
+    let openingAttachmentPaths: [String]
     let prompt: String
 }
 

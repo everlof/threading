@@ -1300,56 +1300,73 @@ enum CodexComposerCatalog {
     /// execution catalog: direct app-server mappings graduate into `builtIns` one at a time,
     /// with their own response and lifecycle handling.
     ///
-    /// Snapshot: Codex CLI 0.145.0 documentation, 2026-08-01. Aliases share one row so the
+    /// Snapshot: Codex CLI 0.150.1's own command catalog, read on 2026-08-29. Each row keeps
+    /// the CLI's own summary in Threading's voice, because a row that says only "Command" is
+    /// the answer to no question a person opening `/` is asking. Aliases share one row so the
     /// completion list stays below its bounded 64-row presentation limit.
     static let terminalOnly: [ComposerCapability] = [
-        terminalCommand("permissions"),
-        terminalCommand("ide"),
-        terminalCommand("keymap"),
-        terminalCommand("vim"),
-        terminalCommand("setup-default-sandbox"),
-        terminalCommand("sandbox-add-read-dir"),
-        terminalCommand("agent", aliases: ["subagents"]),
-        terminalCommand("apps"),
-        terminalCommand("plugins"),
-        terminalCommand("hooks"),
-        terminalCommand("clear"),
-        terminalCommand("rename"),
-        terminalCommand("archive"),
-        terminalCommand("delete"),
-        terminalCommand("copy"),
-        terminalCommand("diff"),
-        terminalCommand("exit", aliases: ["quit"]),
-        terminalCommand("experimental"),
-        terminalCommand("approve"),
-        terminalCommand("memories"),
-        terminalCommand("skills"),
-        terminalCommand("import"),
-        terminalCommand("feedback"),
-        terminalCommand("init"),
-        terminalCommand("logout"),
-        terminalCommand("mcp"),
-        terminalCommand("mention"),
-        terminalCommand("model"),
-        terminalCommand("fast"),
-        terminalCommand("plan"),
-        terminalCommand("goal"),
-        terminalCommand("personality"),
-        terminalCommand("ps"),
-        terminalCommand("stop", aliases: ["clean"]),
-        terminalCommand("fork"),
-        terminalCommand("app"),
-        terminalCommand("side", aliases: ["btw"]),
-        terminalCommand("raw"),
-        terminalCommand("resume"),
-        terminalCommand("new"),
-        terminalCommand("status"),
-        terminalCommand("usage"),
-        terminalCommand("debug-config"),
-        terminalCommand("statusline"),
-        terminalCommand("title"),
-        terminalCommand("theme"),
-        terminalCommand("pets", aliases: ["pet"])
+        terminalCommand("permissions", description: "Choose what Codex is allowed to do"),
+        terminalCommand("ide", description: "Include the IDE's selection, open files and context"),
+        terminalCommand("keymap", description: "Remap the terminal shortcuts"),
+        terminalCommand("vim", description: "Turn Vim mode on or off for the composer"),
+        terminalCommand("setup-default-sandbox", description: "Set up the elevated agent sandbox"),
+        terminalCommand(
+            "sandbox-add-read-dir",
+            description: "Let the sandbox read one more directory"
+        ),
+        terminalCommand(
+            "agent", aliases: ["subagents"],
+            description: "Switch between this session's subagents"
+        ),
+        terminalCommand("apps", description: "Manage the connected apps"),
+        terminalCommand("plugins", description: "Browse the installed plugins"),
+        terminalCommand("hooks", description: "View and manage the lifecycle hooks"),
+        terminalCommand("clear", description: "Clear the terminal and start a new chat"),
+        terminalCommand("rename", description: "Rename the current thread"),
+        terminalCommand("archive", description: "Archive this session and exit"),
+        terminalCommand("delete", description: "Permanently delete this session and exit"),
+        terminalCommand("copy", description: "Copy the last response, code block or quote"),
+        terminalCommand("diff", description: "Show the git diff, including untracked files"),
+        terminalCommand("exit", aliases: ["quit"], description: "Leave Codex"),
+        terminalCommand("experimental", description: "Turn the experimental features on or off"),
+        terminalCommand("approve", description: "Approve one retry of a recent auto-review denial"),
+        terminalCommand("memories", description: "Configure what Codex remembers and when"),
+        terminalCommand(
+            "skills",
+            description: "Use skills to improve how Codex handles specific tasks"
+        ),
+        terminalCommand(
+            "import",
+            description: "Import setup, projects and recent chats from Claude Code"
+        ),
+        terminalCommand("feedback", description: "Send logs to the Codex maintainers"),
+        terminalCommand("init", description: "Write an AGENTS.md with instructions for Codex"),
+        terminalCommand("logout", description: "Log out of Codex"),
+        terminalCommand("mcp", description: "List the configured MCP tools"),
+        terminalCommand("mention", description: "Mention a file in the prompt"),
+        terminalCommand("model", description: "Choose the model and reasoning effort"),
+        terminalCommand("fast", description: "Turn fast mode on or off"),
+        terminalCommand("plan", description: "Switch to Plan mode"),
+        terminalCommand("goal", description: "Set or view the goal for a long-running task"),
+        terminalCommand("personality", description: "Choose a communication style for Codex"),
+        terminalCommand("ps", description: "List the background terminals"),
+        terminalCommand("stop", aliases: ["clean"], description: "Stop every background terminal"),
+        terminalCommand("fork", description: "Fork the current chat"),
+        terminalCommand("app", description: "Continue this session in the desktop app"),
+        terminalCommand(
+            "side", aliases: ["btw"],
+            description: "Start a side conversation in an ephemeral fork"
+        ),
+        terminalCommand("raw", description: "Toggle raw scrollback for copy-friendly selection"),
+        terminalCommand("resume", description: "Resume a saved chat"),
+        terminalCommand("new", description: "Start a new chat without leaving Codex"),
+        terminalCommand("status", description: "Show this session's configuration and token usage"),
+        terminalCommand("usage", description: "View account usage, or use a usage limit reset"),
+        terminalCommand("debug-config", description: "Show the config layers behind each setting"),
+        terminalCommand("statusline", description: "Choose what appears in the status line"),
+        terminalCommand("title", description: "Choose what appears in the terminal title"),
+        terminalCommand("theme", description: "Choose a syntax highlighting theme"),
+        terminalCommand("pets", aliases: ["pet"], description: "Choose or hide the terminal pet")
     ]
 
     static let builtIns: [ComposerCapability] = [
@@ -1374,13 +1391,18 @@ enum CodexComposerCatalog {
         )
     ] + terminalOnly
 
+    /// `description` is localized here rather than at the call site so the 47 rows above stay
+    /// one readable line each; `scripts/localization_boundary_lint.py` still requires every
+    /// literal passed here to exist in the catalog.
     private static func terminalCommand(
         _ name: String,
-        aliases: [String] = []
+        aliases: [String] = [],
+        description: String
     ) -> ComposerCapability {
         ComposerCapability(
             id: "codex.terminal-command:\(name)",
             name: name,
+            description: L10n.string(description),
             aliases: aliases,
             kind: .command,
             trigger: .slash,

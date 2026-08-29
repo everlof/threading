@@ -33,8 +33,9 @@ final class WorkspaceControlPlane {
         /// Adds text to a session's running turn. Synchronous: a steer is a stream write the
         /// transport accepts or refuses on the spot, and no receipt exists to wait for.
         let steer: (String, SessionID) -> SessionMessageDelivery.SteerOutcome
-        /// Arms one watcher's one-shot watch on one target. The plane has already decided the
-        /// watch is permitted; the centre owns the edge, the budget and the notice.
+        /// Arms one watcher's one-shot watch on one target's next activity edge. The plane has
+        /// already decided the watch is permitted; the centre owns the atomic state snapshot,
+        /// edge, budget and notice.
         let armWatch: (SessionID, SessionID, TimeInterval?) -> SessionWatchCenter.WatchArmOutcome
 
         /// Reads and settles only the active native-chat permission card. Evidence has already
@@ -362,7 +363,7 @@ final class WorkspaceControlPlane {
 
     // MARK: - Watching
 
-    /// Arms a one-shot notice for when another session in the actor's scope next settles.
+    /// Arms a one-shot notice for another session's next in-flight/settled activity edge.
     ///
     /// The same scope guards a send runs, minus the ones about a message — a watch carries no
     /// text — so who may be watched is exactly who may be messaged, decided here rather than
@@ -393,12 +394,10 @@ final class WorkspaceControlPlane {
 
         let overview = overview(of: target, caller: callerID)
         switch dependencies.armWatch(callerID, targetID, timeout) {
-        case .armed(let expiresAfter):
-            return .armed(on: overview, expiresAfter: expiresAfter)
-        case .alreadyWatching:
-            return .alreadyWatching(on: overview)
-        case .targetAlreadySettled:
-            return .targetAlreadySettled(overview)
+        case .armed(let awaiting, let expiresAfter):
+            return .armed(on: overview, awaiting: awaiting, expiresAfter: expiresAfter)
+        case .alreadyWatching(let awaiting):
+            return .alreadyWatching(on: overview, awaiting: awaiting)
         case .watcherAtCapacity(let limit):
             return .refused(.watcherAtCapacity(limit: limit))
         case .invalidTimeout:

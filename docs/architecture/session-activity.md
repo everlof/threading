@@ -125,6 +125,31 @@ carrying the prompt text. Terminal sessions additionally carry a *tool-scoped, o
 `PreToolUse`/`PostToolUse` pair for the tools that ask the user outright — see "A runtime's own
 'I am waiting'" below, which is where the difference between that pair and the broker is drawn.
 
+**Run plans use the same observational boundary and never inspect terminal pixels.** When
+lifecycle reporting is enabled, Claude's session-only settings add silent, tool-scoped reports
+for `TodoWrite`, `TaskCreate`, and `TaskUpdate`; the account-shared Codex installer adds one
+`update_plan` matcher beside its existing entries. `HookRunProgressReport` normalizes those
+payloads and `TerminalRunProgressMonitor` folds them through `RunProgressReducer` off-main.
+Provider JSONL is the catch-up path: a resumable byte cursor reads only structured tool-use/result
+records, shares tool-call ids with the hook feed for idempotence, and survives the visible clear at
+a turn boundary. A new process or replaced/truncated transcript resets the cursor. ANSI output,
+the emulator grid, cursor positioning, and screenshots are deliberately not inputs.
+
+Provider-owned checklist state is admitted once at that shared boundary. A complete snapshot may
+contain at most 256 rows; titles retain at most 4,096 UTF-8 bytes and identifiers at most 1,024.
+Incremental Claude state has the same row ceiling plus 512 unresolved update calls, while the
+hook/transcript dedupe ledger admits 4,096 mutations per turn. These are safety contracts, not UI
+pagination: Mac still exposes every admitted row through a reusable table and remote clients page
+the same value in 64-row slices. An oversized or malformed snapshot withdraws the old plan
+atomically, and incremental mutations cannot rebuild a plausible partial plan until a complete
+snapshot or turn boundary recovers it. Exceeding the per-turn mutation ledger similarly withdraws
+the plan and discards further mutations until the next explicit turn boundary.
+
+The hook endpoint acknowledges before delivery and malformed reports are accepted then ignored;
+an observational plan must never delay, fail, or speak into the provider's turn. The plan is
+presentation state for the open turn, not a persisted Threading task list: the activity edge
+clears it, and native transports continue to use their already-structured stream events.
+
 **The brokering `PreToolUse` command is the one that answers for itself.** It is built by
 `MCPDefaults.hookBrokerCommand`, which is the same POST with `|| printf '%s' '{…}'` after it: an
 agent whose Threading has been quit is denied in words rather than left to the CLI's own headless

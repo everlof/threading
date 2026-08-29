@@ -162,10 +162,10 @@ final class WireArrayNullRecoveryTests: XCTestCase {
             method: "turn/plan/updated",
             #"{"threadId":"t1","plan":[{"step":"Read","status":"pending"},null]}"#
         )
-        XCTAssertTrue(
-            withNull.isEmpty,
-            "a partial plan would state a total the agent did not; the snapshot is withdrawn"
-        )
+        guard case .runPlanUpdated(let withdrawn)? = withNull.first else {
+            return XCTFail("expected the malformed snapshot to withdraw the plan")
+        }
+        XCTAssertTrue(withdrawn.isEmpty)
     }
 
     // MARK: - Hook lifecycle: recovered

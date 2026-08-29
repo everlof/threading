@@ -30,6 +30,14 @@ struct GitReviewHunkIdentity: Hashable {
     }
 }
 
+/// Which omitted range a context-expansion control stands for, so only the control that was
+/// pressed says "Expanding…" while the read runs. One click used to turn all three.
+enum GitReviewContextExpansionSite: Hashable {
+    case before
+    case between(Int)
+    case after
+}
+
 /// One changed file in the review pane: a collapsible section whose header names the file and
 /// its `+/−` weight, and whose body is the diff itself.
 ///
@@ -63,8 +71,12 @@ final class GitReviewFileRow: NSView {
     private let attribution: TurnAttributionMark
     private let headerOnly: Bool
     private let contextLines: Int
-    private let contextExpansionIsPending: Bool
+    private let contextExpansionPendingSite: GitReviewContextExpansionSite?
+    private var contextExpansionIsPending: Bool { contextExpansionPendingSite != nil }
     private let contextExpansionIsExhausted: Bool
+    /// Lines this row draws before offering the rest — the pane's cap, raised per file by the
+    /// "Show more lines" control.
+    private let displayCap: Int
 
     /// Where this file lives, when it still does. See `init`.
     private let fileURL: URL?
@@ -94,8 +106,12 @@ final class GitReviewFileRow: NSView {
     var onHunkExpansionGeometryChange: ((GitReviewHunkIdentity, Bool) -> Void)?
 
     /// Requests a larger, path-scoped git context read. One callback serves every omitted range;
-    /// Git merges neighbouring hunks and remains the source of truth for line numbering.
-    var onExpandContext: ((GitReviewSourceLineAnchor?) -> Void)?
+    /// Git merges neighbouring hunks and remains the source of truth for line numbering. The
+    /// site names which control asked, so only that one reports the read in progress.
+    var onExpandContext: ((GitReviewContextExpansionSite, GitReviewSourceLineAnchor?) -> Void)?
+
+    /// Asks the pane to raise this file's display cap by one more page of lines.
+    var onShowMoreLines: (() -> Void)?
 
     /// Provider-neutral chat context. Assignments also reach a body built during `init` for a
     /// row restored expanded, matching the image-provider handoff below.
@@ -111,7 +127,9 @@ final class GitReviewFileRow: NSView {
     private var hunkBodyRows: [GitReviewHunkIdentity: NSView] = [:]
     private var hunkDisclosures: [GitReviewHunkIdentity: ThemedDisclosureRow] = [:]
     private var hunkIdentitiesByIndex: [Int: GitReviewHunkIdentity] = [:]
-    private var contextExpansionAnchorByButton: [ObjectIdentifier: GitReviewSourceLineAnchor] = [:]
+    private var contextExpansionSiteByButton: [
+        ObjectIdentifier: (site: GitReviewContextExpansionSite, anchor: GitReviewSourceLineAnchor?)
+    ] = [:]
     private var collapsedHunks: Set<GitReviewHunkIdentity>
 
     /// Fetches the file's bytes at the mode's two endpoints, for an image row's body. Wired by
@@ -141,12 +159,14 @@ final class GitReviewFileRow: NSView {
     /// button would still swallow the header's own click-to-toggle and copy a path nobody
     /// asked for.
     private var copyPathButton: ThemedIconButton?
-    private var revealInFinderButton: ThemedIconButton?
+    private var openInEditorButton: ThemedIconButton?
+    private var hasResolvedOpenInEditorApp = false
 
-    /// Test seams for the two direct actions. Production uses the pasteboard and Workspace;
-    /// tests can prove the controls actually dispatch without opening Finder.
+    /// Test seams for the direct actions. Production uses the pasteboard, the launcher and
+    /// Workspace; tests can prove the controls actually dispatch without opening anything.
     var copyPathHandler: ((URL) -> Void)?
     var revealInFinderHandler: ((URL) -> Void)?
+    var openInEditorHandler: ((ExternalAppTarget, ExternalApp?) -> Void)?
 
     private var isHeaderHovered = false
     private var headerTrackingArea: NSTrackingArea?
@@ -212,7 +232,8 @@ final class GitReviewFileRow: NSView {
         textSize: Design.CodeTextScale = .standard,
         contextLines: Int = GitReviewDefaults.contextLines,
         contextExpansionIsExhausted: Bool = false,
-        collapsedHunks: Set<GitReviewHunkIdentity> = []
+        collapsedHunks: Set<GitReviewHunkIdentity> = [],
+        displayCap: Int = GitReviewDefaults.fileDisplayCap
     ) -> CGFloat {
         guard expanded, isExpandable(file) else { return 48 }
         guard !isImageComparison(file) else { return 96 }
@@ -220,14 +241,12 @@ final class GitReviewFileRow: NSView {
         let font = Design.Typography.code(size: textSize)
         let advance = max(font.maximumAdvancement.width, 1)
         let lineHeight = ceil(font.ascender - font.descender + font.leading) + 2
-        let numberColumns = max(
-            1,
-            Int((GitReviewDefaults.lineNumberWidth / advance).rounded(.down))
-        )
+        let numberColumns = Self.numberColumns(for: file, textSize: textSize)
         let totalColumns = max(Int((max(width, 1) / advance).rounded(.down)), 1)
-        let firstLineColumns = max(totalColumns - numberColumns - 3, 1)
+        let gutterColumns = Int((GitReviewDefaults.lineActionGutterWidth / advance).rounded(.up))
+        let firstLineColumns = max(totalColumns - gutterColumns - numberColumns - 3, 1)
 
-        var remaining = GitReviewDefaults.fileDisplayCap
+        var remaining = displayCap
         var visualLines = 0
         var shownHunks = 0
         var shownHunkBodies = 0
@@ -301,11 +320,12 @@ final class GitReviewFileRow: NSView {
 
         let hasHunkHeaders = file.hunks.count > 1 || file.change != .untracked
         let hunkHeaderHeight = hasHunkHeaders ? CGFloat(shownHunks) * 27 : 0
+        let omitted = omittedLineCount(in: file, displayCap: displayCap)
         let bodyItemCount = shownHunks * (hasHunkHeaders ? 1 : 0) + shownHunkBodies
             + contextControlCount
-            + (skipped > 0 ? 1 : 0)
+            + (omitted > 0 ? 1 : 0)
         let bodySpacing = CGFloat(max(bodyItemCount - 1, 0)) * Design.Spacing.tight
-        let omittedNoteHeight: CGFloat = skipped > 0 ? lineHeight : 0
+        _ = skipped
 
         // 54pt covers either one- or two-line file header, the header/body gap and card bottom;
         // the final small spacing belongs to `GitReviewVirtualRowHost` below the card.
@@ -313,11 +333,26 @@ final class GitReviewFileRow: NSView {
             54
                 + CGFloat(visualLines) * lineHeight
                 + hunkHeaderHeight
-                + CGFloat(contextControlCount) * 28
+                + CGFloat(contextControlCount + (omitted > 0 ? 1 : 0)) * 28
                 + bodySpacing
-                + omittedNoteHeight
                 + Design.Spacing.small
         )
+    }
+
+    /// Lines the cap leaves undrawn, across every hunk.
+    static func omittedLineCount(in file: GitFileDiff, displayCap: Int) -> Int {
+        max(file.hunks.reduce(0) { $0 + $1.lines.count } - displayCap, 0)
+    }
+
+    /// One number-column width for the whole file, so hunks line up: what `lineNumberWidth`
+    /// fits at this size, or the file's last (largest) line number when that is wider.
+    static func numberColumns(for file: GitFileDiff, textSize: Design.CodeTextScale) -> Int {
+        let font = Design.Typography.code(size: textSize)
+        let advance = max(font.maximumAdvancement.width, 1)
+        let fitted = max(1, Int((GitReviewDefaults.lineNumberWidth / advance).rounded(.down)))
+        let last = file.hunks.last?.lines.last
+        let largest = max(last?.oldNumber ?? 0, last?.newNumber ?? 0)
+        return max(fitted, String(largest).count)
     }
 
     /// A patchless row still knows its exact numstat weight. One visual line per changed line is
@@ -391,9 +426,10 @@ final class GitReviewFileRow: NSView {
         fileURL: URL? = nil,
         headerOnly: Bool = false,
         contextLines: Int = GitReviewDefaults.contextLines,
-        contextExpansionIsPending: Bool = false,
+        contextExpansionPendingSite: GitReviewContextExpansionSite? = nil,
         contextExpansionIsExhausted: Bool = false,
-        collapsedHunks: Set<GitReviewHunkIdentity> = []
+        collapsedHunks: Set<GitReviewHunkIdentity> = [],
+        displayCap: Int = GitReviewDefaults.fileDisplayCap
     ) {
         self.file = file
         self.staging = staging
@@ -410,9 +446,10 @@ final class GitReviewFileRow: NSView {
         self.fileURL = fileURL
         self.headerOnly = headerOnly
         self.contextLines = contextLines
-        self.contextExpansionIsPending = contextExpansionIsPending
+        self.contextExpansionPendingSite = contextExpansionPendingSite
         self.contextExpansionIsExhausted = contextExpansionIsExhausted
         self.collapsedHunks = collapsedHunks
+        self.displayCap = displayCap
         super.init(frame: .zero)
         setupViews()
         if headerOnly {
@@ -617,18 +654,18 @@ final class GitReviewFileRow: NSView {
             ).isActive = true
         }
 
-        if let copyPathButton, let revealInFinderButton {
+        if let copyPathButton, let openInEditorButton {
             NSLayoutConstraint.activate([
                 copyPathButton.leadingAnchor.constraint(
                     equalTo: nameLabel.trailingAnchor,
                     constant: Design.Spacing.small
                 ),
                 copyPathButton.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor),
-                revealInFinderButton.leadingAnchor.constraint(
+                openInEditorButton.leadingAnchor.constraint(
                     equalTo: copyPathButton.trailingAnchor,
                     constant: Design.Spacing.hairline
                 ),
-                revealInFinderButton.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor)
+                openInEditorButton.centerYAnchor.constraint(equalTo: glyphLabel.centerYAnchor)
             ])
         }
 
@@ -840,29 +877,62 @@ final class GitReviewFileRow: NSView {
         copy.onPress = { [weak self] in self?.copyPathClicked() }
         copy.setAccessibilityIdentifier("git-review.file.copy-path")
 
-        let reveal = ThemedIconButton(
-            symbolName: "folder",
-            accessibility: L10n.string("Reveal in Finder"),
+        // The one-press external open the right-click menu's "Open in" submenu also offers —
+        // the action a review actually wants beside a file name. Finder stays in the menu. The
+        // preferred app is resolved on first reveal, never at row construction, because rows
+        // materialize mid-scroll and the launcher's registry is a LaunchServices scan.
+        let open = ThemedIconButton(
+            symbolName: OpenInToolbarDefaults.fallbackSymbol,
+            accessibility: L10n.string("Open in editor"),
             target: .inline,
             inkSource: .chrome,
             glyphMaterialization: .deferred
         )
-        reveal.toolTip = L10n.string("Reveal in Finder")
-        reveal.onPress = { [weak self] in self?.revealInFinderClicked() }
-        reveal.setAccessibilityIdentifier("git-review.file.reveal-in-finder")
+        open.toolTip = L10n.string("Open in editor")
+        open.onPress = { [weak self] in self?.openInEditorClicked() }
+        open.setAccessibilityIdentifier("git-review.file.open-in-editor")
 
-        for button in [copy, reveal] {
+        for button in [copy, open] {
             button.isHidden = true
             button.alphaValue = 0
         }
         copyPathButton = copy
-        revealInFinderButton = reveal
+        openInEditorButton = open
     }
 
     private var hasHoverActions: Bool { copyPathButton != nil }
 
     private var hoverActionButtons: [ThemedIconButton] {
-        [copyPathButton, revealInFinderButton].compactMap { $0 }
+        [copyPathButton, openInEditorButton].compactMap { $0 }
+    }
+
+    /// Names the app the open button will use — its icon and "Open in Xcode" — the first time
+    /// the header is hovered. A checkout with no editor installed leaves the button disabled
+    /// rather than beeping after promising.
+    private func resolveOpenInEditorPresentationIfNeeded() {
+        guard !hasResolvedOpenInEditorApp,
+              let button = openInEditorButton,
+              let target = openInTarget else { return }
+        hasResolvedOpenInEditorApp = true
+        guard let app = ExternalAppLauncher.shared.preferred(for: target) else {
+            button.isEnabled = false
+            return
+        }
+        let label = L10n.format("Open in %@", app.name)
+        button.setImage(ExternalAppLauncher.shared.icon(for: app), accessibility: label)
+        button.toolTip = label
+    }
+
+    @objc private func openInEditorClicked() {
+        guard let target = openInTarget else { return }
+        let app = ExternalAppLauncher.shared.preferred(for: target)
+        if let openInEditorHandler {
+            openInEditorHandler(target, app)
+        } else if let app {
+            ExternalAppLauncher.shared.open(target, in: app)
+        } else {
+            SystemAlert.refuse()
+        }
     }
 
     /// The header line's own rect — everything above the body, gap included. The actions
@@ -937,6 +1007,7 @@ final class GitReviewFileRow: NSView {
                 $0.materializeGlyphIfNeeded()
                 $0.isHidden = false
             }
+            resolveOpenInEditorPresentationIfNeeded()
         }
         guard animated else {
             buttons.forEach {
@@ -1135,18 +1206,16 @@ final class GitReviewFileRow: NSView {
             return
         }
 
-        var remaining = GitReviewDefaults.fileDisplayCap
-        var skipped = 0
+        let numberColumns = Self.numberColumns(for: file, textSize: textSize)
+        var remaining = displayCap
 
         for (index, hunk) in file.hunks.enumerated() {
-            guard remaining > 0 else {
-                skipped += hunk.lines.count
-                continue
-            }
+            guard remaining > 0 else { break }
 
             if index == 0, hasUnmodifiedLinesBefore(hunk) {
                 addBodyRow(makeContextExpansionControl(
                     L10n.string("Show earlier unmodified lines"),
+                    site: .before,
                     preserving: leadingChangedLine(in: hunk)
                 ))
             } else if index > 0 {
@@ -1154,6 +1223,7 @@ final class GitReviewFileRow: NSView {
                 if count > 0 {
                     addBodyRow(makeContextExpansionControl(
                         L10n.format("Expand %lld unmodified lines", Int64(count)),
+                        site: .between(index),
                         preserving: leadingChangedLine(in: hunk)
                     ))
                 }
@@ -1176,7 +1246,9 @@ final class GitReviewFileRow: NSView {
                     wraps: wraps,
                     initialLayoutWidth: initialDiffWidth,
                     textSize: textSize,
-                    showsWordDiffs: showsWordDiffs
+                    showsWordDiffs: showsWordDiffs,
+                    showsOmissionNote: false,
+                    numberColumns: numberColumns
                 )
                 contextDiffs.append(diff)
                 wireContextDiff(diff)
@@ -1188,7 +1260,9 @@ final class GitReviewFileRow: NSView {
                     displayCap: remaining,
                     path: file.path,
                     textSize: textSize,
-                    showsWordDiffs: showsWordDiffs
+                    showsWordDiffs: showsWordDiffs,
+                    showsOmissionNote: false,
+                    numberColumns: numberColumns
                 )
                 splitContextDiffs.append(diff)
                 wireContextDiff(diff)
@@ -1204,13 +1278,28 @@ final class GitReviewFileRow: NSView {
         if shouldOfferLaterContext {
             addBodyRow(makeContextExpansionControl(
                 L10n.string("Show later unmodified lines"),
+                site: .after,
                 preserving: file.hunks.last.flatMap { trailingChangedLine(in: $0) }
             ))
         }
 
-        if skipped > 0 {
-            addBodyRow(makeNote("… \(skipped) more lines in later hunks"))
+        // The cap is a scaling bound on what one row draws, not on what the reader may see:
+        // the tail arrives a page at a time, through the pane, which raises this file's cap.
+        let omitted = Self.omittedLineCount(in: file, displayCap: displayCap)
+        if omitted > 0 {
+            let page = GitReviewDefaults.fileDisplayCap
+            addBodyRow(makeBodyControl(
+                title: omitted <= page
+                    ? L10n.format("Show the remaining %lld lines", Int64(omitted))
+                    : L10n.format("Show %lld more lines", Int64(page)),
+                enabled: true,
+                action: #selector(showMoreLinesClicked)
+            ).surface)
         }
+    }
+
+    @objc private func showMoreLinesClicked() {
+        onShowMoreLines?()
     }
 
     private func wireContextDiffs() {
@@ -1277,28 +1366,39 @@ final class GitReviewFileRow: NSView {
 
     private func makeContextExpansionControl(
         _ title: String,
+        site: GitReviewContextExpansionSite,
         preserving anchor: GitReviewSourceLineAnchor?
     ) -> NSView {
+        let isThisRead = site == contextExpansionPendingSite
+        let control = makeBodyControl(
+            title: isThisRead ? L10n.string("Expanding…") : "↕  " + title,
+            enabled: !contextExpansionIsPending,
+            action: #selector(expandContextClicked(_:))
+        )
+        contextExpansionSiteByButton[ObjectIdentifier(control.button)] = (site, anchor)
+        return control.surface
+    }
+
+    /// A full-width caption control inside the body — the shape the context-expansion and
+    /// show-more rows share.
+    private func makeBodyControl(
+        title: String,
+        enabled: Bool,
+        action: Selector
+    ) -> (surface: NSView, button: ThemedButton) {
         let surface = ThemedSurfaceView()
         surface.translatesAutoresizingMaskIntoConstraints = false
         surface.applySurface(fill: Design.Surface.controlResting, radius: .control)
 
-        let button = ThemedButton(
-            title: contextExpansionIsPending ? L10n.string("Expanding…") : "↕  " + title,
-            target: self,
-            action: #selector(expandContextClicked(_:))
-        )
+        let button = ThemedButton(title: title, target: self, action: action)
         button.isBordered = false
         // This button fills a surface that is already `controlResting`; the default plain-button
         // hover would draw that same colour again and visually erase the target under the pointer.
         button.hoverFill = Design.Surface.controlHover
         button.applyFont(.caption)
         button.contentTintColor = Design.Text.secondary
-        button.isEnabled = !contextExpansionIsPending
+        button.isEnabled = enabled
         button.translatesAutoresizingMaskIntoConstraints = false
-        if let anchor {
-            contextExpansionAnchorByButton[ObjectIdentifier(button)] = anchor
-        }
         surface.addSubview(button)
         NSLayoutConstraint.activate([
             button.topAnchor.constraint(equalTo: surface.topAnchor),
@@ -1307,12 +1407,13 @@ final class GitReviewFileRow: NSView {
             button.trailingAnchor.constraint(equalTo: surface.trailingAnchor),
             surface.heightAnchor.constraint(equalToConstant: 28)
         ])
-        return surface
+        return (surface, button)
     }
 
     @objc private func expandContextClicked(_ sender: ThemedButton) {
-        guard !contextExpansionIsPending else { return }
-        onExpandContext?(contextExpansionAnchorByButton[ObjectIdentifier(sender)])
+        guard !contextExpansionIsPending,
+              let entry = contextExpansionSiteByButton[ObjectIdentifier(sender)] else { return }
+        onExpandContext?(entry.site, entry.anchor)
     }
 
     /// The compare surface, fed with the file's bytes at the mode's two endpoints. Fetched on
@@ -1551,12 +1652,26 @@ final class GitReviewFileRow: NSView {
         onStageHunk?(sender.tag)
     }
 
+    /// A line of the card's own voice inside the full-bleed body — inset like the header's
+    /// content rather than flush against the card's edge, where it read as a rendering slip.
     private func makeNote(_ text: String) -> NSView {
         let label = NSTextField(labelWithString: text)
         label.applyFont(.code())
         label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
-        return label
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(
+                equalTo: host.leadingAnchor,
+                constant: Design.Spacing.small
+            ),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: host.trailingAnchor),
+            label.topAnchor.constraint(equalTo: host.topAnchor),
+            label.bottomAnchor.constraint(equalTo: host.bottomAnchor)
+        ])
+        return host
     }
 
     // MARK: - Header Content
@@ -1585,8 +1700,15 @@ final class GitReviewFileRow: NSView {
         return file.fileName
     }
 
+    /// A rename that crossed directories says so; the tooltip alone carried where it came from.
     private var directoryText: String {
-        file.directory
+        if case .renamed(let from) = file.change {
+            let fromDirectory = (from as NSString).deletingLastPathComponent
+            if fromDirectory != file.directory {
+                return "\(fromDirectory) → \(file.directory)"
+            }
+        }
+        return file.directory
     }
 
     /// The row's trailing summary, plus what a contested turn can say about who wrote this file.

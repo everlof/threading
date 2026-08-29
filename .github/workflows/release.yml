@@ -4,8 +4,9 @@
 # credentials, and Sparkle's private key. Maintaining the steps here instead would be the
 # second list scripts/ci.sh exists to avoid.
 #
-# Trigger: push an annotated tag by hand — pushes from the release machine recurse into the
-# submodule forks, so scripts never push; see CLAUDE.md.
+# Trigger: an annotated tag. The trusted-Mac driver temporarily disables this workflow while it
+# publishes locally so two independently signed archives cannot race; its push primitive names
+# exact outer refs and disables submodule recursion twice. See CLAUDE.md.
 #
 #   vX.Y.Z        a stable release, published as the repository's Latest
 #   beta-vX.Y.Z   a beta, published as a prerelease and visible only to people who chose betas
@@ -136,4 +137,3 @@ jobs:
       - name: Remove the Sparkle private key
         if: always()
         run: rm -f "$RUNNER_TEMP/sparkle-ed25519"
-

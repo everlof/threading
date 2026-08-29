@@ -212,7 +212,10 @@ connection status; the leading Mac button switches paired hosts, so the dashboar
 that same device as a card in its content. Project headings are destinations. Opening one replaces
 the mixed dashboard with one plain, project-scoped chat list, names the project above the same
 connection status, and scopes the navigation-bar **+** to that project. Pinned sessions stay at the
-top on both Mac and iPhone, and the archive is available from the dashboard.
+top on both Mac and iPhone. Archived sessions are ordered newest archive first and searchable by
+title or project. Archive/Restore removes a row at the press edge while the Mac finishes the
+durable provider transaction, so several sessions can be filed without serial UI stalls; a
+refusal restores the row. Archive is available from the dashboard and an open owner chat.
 
 This mobile browser is deliberately host-owned. Threading retains project/session navigation,
 launch scoping, connection truth, row actions and the native fallback; the macOS extension
@@ -1278,7 +1281,19 @@ never eligible. Guest and view-only links cannot upload diagnostics.
 Shaking the iPhone opens a report sheet. Everyone can send it to Threading's private intake or
 share the files. An owner device that may manage sessions, and that can see the Threading project
 on the paired Mac, also gets **Send to Mac**: the report becomes the opening prompt of a new chat
-in that project, screenshot path and all.
+in that project, with the reviewed screenshot as a real image attachment when included.
+
+**The opening is atomic, and image bytes never become prompt text.** The public intake still uses
+base64 as a bounded HTTP wire encoding, but the paired-Mac path places readable report JSON in
+`RemoteReportSessionOpeningDTO.prompt` and the JPEG in its separate screenshot field. The Mac
+validates and stages that JPEG on the remote-server queue, then the session coordinator takes its
+own attachment-store copy and appends only that copy's quoted path before launch. Failure at any
+of those gates starts no chat. The legacy `RemoteCreateSessionRequestDTO.prompt` is deliberately
+empty for this path: a Mac predating the atomic envelope ignores the new field and refuses the
+empty prompt, rather than creating a report chat that lost the picture or received raw base64.
+The catalogue advertises `report-session-opening`; a current phone uses the old prompt route only
+for a text-only report to an older Mac, and asks for a Mac update when a selected screenshot could
+not travel safely.
 
 **What that chat comes up as is the Mac's answer, forwarded by the phone.** The phone used to
 choose out of two literals — Codex, and the standard login — which is how a report could land on
@@ -1870,7 +1885,14 @@ a second certificate for the same address.
   denial produces an ordinary no-route error, which the phone tells apart from an absent host by
   the address it was aimed at, and reports as its own state with the Settings link.
 
-## Beta limitations
+## Distributed-build gate and beta limitations
+
+Remote Access is not offered by `release`, `beta` or `nightly` builds yet. Those channels remove
+the Settings destination and enforce the same decision below presentation: `AppSettings` clears
+and clamps the persisted master switch, and `RemoteAccessCoordinator` refuses to cross its final
+listener-start boundary. Clearing matters for a release installed over a development build whose
+experimental server had already been enabled. Ordinary uninjected `dev` builds retain the feature
+for development and connection-matrix testing.
 
 Hosted Direct is implemented but not production-deployed by this repository checkout. The
 checked-in Worker configuration contains a deliberately invalid D1 identifier, and the production

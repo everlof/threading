@@ -70,7 +70,7 @@ enum AgentLaunchPlanningError: LocalizedError, Equatable {
 /// Every caller-provided word is single-quoted as it enters the command. The only syntax that
 /// can be emitted raw is one of the fixed operators below, so interpolating a title, branch,
 /// model, prompt, environment value, or path into `sh -c` is not an available operation.
-struct ShellCommand: Equatable {
+struct ShellCommand: Equatable, Sendable {
     enum Operator {
         case and
         case endOfOptions

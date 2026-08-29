@@ -137,6 +137,7 @@ final class ComponentGalleryViewController: NSViewController {
         "PromptCompletionPresenter",
         "PromptView",
         "RevealHighlightView",
+        "RunPlanDisclosureView",
         "SearchMatchLabel",
         "SearchResultRowView",
         "ScreenshotReportDropTargetView",
@@ -180,6 +181,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ThemedSegmentedControl",
         "ThemedSpinner",
         "ThemedSplitView",
+        "ThemedStatusReceiptButton",
         "ThemedBarSparklineView",
         "ThemedStackedBandChartView",
         "ThemedTimeSeriesChartView",
@@ -2005,6 +2007,33 @@ final class ComponentGalleryViewController: NSViewController {
         submissionSamples.spacing = Design.Spacing.small
         submissionSamples.setAccessibilityIdentifier("gallery.preview.submission-statuses")
 
+        let runPlan = RunPlanDisclosureView()
+        runPlan.update(RunProgress(steps: [
+            .init(id: "inspect", title: L10n.string("Inspect the current state"), status: .completed),
+            .init(id: "repair", title: L10n.string("Repair the loading path"), status: .inProgress),
+            .init(id: "verify", title: L10n.string("Verify every surface"), status: .pending),
+        ]))
+        runPlan.widthAnchor.constraint(equalToConstant: 360).isActive = true
+
+        let statusReceipt = ThemedStatusReceiptButton(
+            target: self,
+            action: #selector(buttonPressed)
+        )
+        statusReceipt.fragments = [
+            L10n.string("6 passed"),
+            L10n.string("2 skipped"),
+            L10n.string("1 running"),
+            L10n.string("1 timed out"),
+        ]
+        statusReceipt.image = ThemedStatusProgressRing.image(
+            positive: 6,
+            nonBlocking: 2,
+            active: 1,
+            negative: 1
+        )
+        statusReceipt.setAccessibilityHelp(L10n.string("Open checks"))
+        statusReceipt.widthAnchor.constraint(equalToConstant: 360).isActive = true
+
         return section(
             "Feedback & separation",
             note: "Animation, determinate progress, and theme-weighted rules.",
@@ -2013,6 +2042,16 @@ final class ComponentGalleryViewController: NSViewController {
                     "ThemedSpinner",
                     "Indeterminate activity with a real start/stop state.",
                     row([spinner, spinnerButton])
+                ),
+                story(
+                    "RunPlanDisclosureView",
+                    "A live plan summary whose full-row button opens the reusable checklist.",
+                    runPlan
+                ),
+                story(
+                    "ThemedStatusReceiptButton",
+                    "Complete provider outcomes wrap as units; press the receipt like its card row.",
+                    statusReceipt
                 ),
                 story(
                     "DiffSkeletonView",

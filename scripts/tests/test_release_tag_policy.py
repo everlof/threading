@@ -109,10 +109,6 @@ class VersionOrderingTests(unittest.TestCase):
                 self.assertNotEqual(run("compare", version, "1.0.0").returncode, 0)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class VersionAllocationTests(unittest.TestCase):
     """The rule that keeps a prerelease from becoming a dead end.
 
@@ -164,3 +160,19 @@ class VersionAllocationTests(unittest.TestCase):
         because a draft serves nothing. This holds that the filter has to stay there."""
         published = releases(("v9.9.9", False))
         self.assertEqual(run("publishable", "release", "0.2.0", published=published).returncode, 1)
+
+    def test_retrying_the_same_published_tag_is_allowed(self) -> None:
+        """Release creation and feed upload are separate writes. A retry after the first one
+        succeeded must reach the publisher's existing-release recovery path."""
+        published = releases(("v0.1.0", False))
+        result = run("publishable", "release", "0.1.0", "v0.1.0", published=published)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_another_tag_with_the_same_version_is_still_a_collision(self) -> None:
+        published = releases(("v0.1.0", False))
+        result = run("publishable", "release", "0.1.0", "v0.1.0-retry", published=published)
+        self.assertEqual(result.returncode, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

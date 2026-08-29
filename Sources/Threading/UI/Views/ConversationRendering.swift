@@ -87,6 +87,7 @@ extension ConversationViewController {
                 return false
             }()
             if !isTurnInFlight { runProgress = nil }
+            runPlanDisclosure.update(isTurnInFlight ? runProgress : nil)
 
             // The meter follows metrics, not the status: a Ready that carries none — the
             // post-replay reset, a model change — must not blank a reading that still holds.

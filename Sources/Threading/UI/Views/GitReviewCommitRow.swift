@@ -18,8 +18,16 @@ final class GitReviewCommitRow: NSView {
     private static let relativeFormatter: RelativeDateTimeFormatter = {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
+        // "now" and "yesterday" rather than "0 sec. ago" for a commit that just landed.
+        formatter.dateTimeStyle = .named
         return formatter
     }()
+
+    /// The byline's age. A commit cannot be in the future from the list's point of view; clock
+    /// skew or a commit made this second produced "in 0 sec", so the future is clamped to now.
+    static func relativeDescription(for date: Date, relativeTo now: Date = Date()) -> String {
+        relativeFormatter.localizedString(for: min(date, now), relativeTo: now)
+    }
 
     // MARK: - Initialization
 
@@ -73,7 +81,7 @@ final class GitReviewCommitRow: NSView {
         let countsLabel = NSTextField.label(attributed: counts)
         countsLabel.setContentHuggingPriority(.required, for: .horizontal)
 
-        let when = Self.relativeFormatter.localizedString(for: commit.date, relativeTo: Date())
+        let when = Self.relativeDescription(for: commit.date)
         let byline = NSTextField(labelWithString: "\(commit.author) · \(when)")
         byline.applyFont(.detail())
         byline.textColor = Design.Text.tertiary

@@ -121,6 +121,9 @@ python3 "${repository_directory}/scripts/tests/test_agent_feedback_audit.py"
 say "Testing release tag policy"
 python3 "${repository_directory}/scripts/tests/test_release_tag_policy.py"
 
+say "Testing the local release driver"
+python3 "${repository_directory}/scripts/tests/test_local_release_driver.py"
+
 say "Installing ThreadingControlPlane test dependencies"
 npm --prefix "${repository_directory}/Service/ThreadingControlPlane" ci
 

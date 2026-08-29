@@ -90,6 +90,7 @@
 		A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */; };
 		A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */; };
 		A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */; };
+		A70800010000000000000001 /* MobileDeveloperReportHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70800010000000000000002 /* MobileDeveloperReportHandoffTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
@@ -307,6 +308,7 @@
 		A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteTerminalLayoutViewTests.swift; sourceTree = "<group>"; };
 		A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentPreviewFailureTests.swift; sourceTree = "<group>"; };
 		A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentThumbnailRequestStateTests.swift; sourceTree = "<group>"; };
+		A70800010000000000000002 /* MobileDeveloperReportHandoffTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDeveloperReportHandoffTests.swift; sourceTree = "<group>"; };
 		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -621,6 +623,7 @@
 				A70500010000000000000002 /* RemoteTerminalLayoutViewTests.swift */,
 				A70600010000000000000002 /* RemoteAttachmentPreviewFailureTests.swift */,
 				A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */,
+				A70800010000000000000002 /* MobileDeveloperReportHandoffTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -1335,6 +1338,7 @@
 				A70500010000000000000001 /* RemoteTerminalLayoutViewTests.swift in Sources */,
 				A70600010000000000000001 /* RemoteAttachmentPreviewFailureTests.swift in Sources */,
 				A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */,
+				A70800010000000000000001 /* MobileDeveloperReportHandoffTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,4 +1,6 @@
 import ThreadingRemoteKit
+import SwiftUI
+import UIKit
 import XCTest
 @testable import ThreadingMobile
 
@@ -15,6 +17,40 @@ final class SessionDashboardTests: XCTestCase {
     func testDashboardOrganizationIncludesProjectRecentAndType() {
         XCTAssertEqual(SessionOrganization.allCases, [.project, .recent, .type])
         XCTAssertEqual(SessionOrganization.type.title, "By type")
+    }
+
+    func testArchivedRowsUseArchiveChronologyAndIgnoreActiveListPinning() {
+        let archivedFirst = RemoteSessionSummaryDTO(
+            id: "first",
+            title: "Archived first",
+            agentKind: "codex",
+            surface: .terminal,
+            state: .idle,
+            projectName: "Project",
+            lastActiveAt: 9_000,
+            isPinned: true,
+            isArchived: true,
+            archivedAt: 10_000
+        )
+        let archivedLast = RemoteSessionSummaryDTO(
+            id: "last",
+            title: "Archived last",
+            agentKind: "codex",
+            surface: .terminal,
+            state: .idle,
+            projectName: "Project",
+            lastActiveAt: 1_000,
+            isArchived: true,
+            archivedAt: 11_000
+        )
+
+        XCTAssertEqual(
+            MobileSessionOrdering.sorted(
+                [archivedFirst, archivedLast],
+                archived: true
+            ).map(\.id),
+            ["last", "first"]
+        )
     }
 
     /// The age is one narrow unit, and never a signed quantity: `RelativeDateTimeFormatter`'s
@@ -472,6 +508,29 @@ final class SessionDashboardTests: XCTestCase {
 /// the real app, which photographs cleanly and passes review while showing the wrong screen — so
 /// the mapping is worth spelling out rather than reading back from the code that performs it.
 final class MobileDemoSceneTests: XCTestCase {
+    @MainActor
+    func testRunPlanFixtureBuildsTheStructuredPlanItPhotographs() {
+        let key = MobileDemoScene.environmentKey
+        let previous = ProcessInfo.processInfo.environment[key]
+        setenv(key, MobileDemoFixture.conversationRunPlan.rawValue, 1)
+        defer {
+            if let previous {
+                setenv(key, previous, 1)
+            } else {
+                unsetenv(key)
+            }
+        }
+
+        let connection = RemoteSessionConnection.demoConversation()
+
+        XCTAssertEqual(connection.runPlan?.activeTitle, "Polish the phone checklist disclosure")
+        XCTAssertEqual(connection.runPlanSteps.count, 5)
+
+        let host = UIHostingController(rootView: MobileRunPlanDisclosure(connection: connection))
+        let size = host.sizeThatFits(in: CGSize(width: 440, height: 956))
+        XCTAssertGreaterThan(size.height, 0)
+    }
+
     /// Every catalogue id, and the scene it names, written as literals.
     ///
     /// The `switch` is exhaustive so a new fixture id cannot be added without a line here, and
@@ -500,6 +559,9 @@ final class MobileDemoSceneTests: XCTestCase {
             case .conversationReconnectStress:
                 expected = ("conversation-reconnect-stress", .conversation)
             case .conversationRichContent: expected = ("conversation-rich-content", .conversation)
+            case .conversationRunPlan: expected = ("conversation-run-plan", .conversation)
+            case .conversationRunPlanExpanded:
+                expected = ("conversation-run-plan-expanded", .conversation)
             case .conversationScrollStress: expected = ("conversation-scroll-stress", .conversation)
             case .conversationStreaming: expected = ("conversation-streaming", .conversation)
             case .conversationToolExpanded: expected = ("conversation-tool-expanded", .conversation)

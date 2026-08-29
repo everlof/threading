@@ -1147,6 +1147,95 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(runtimeStatus.runningSessionIDs.contains(dormant.id))
     }
 
+    func testReportCreateHandsReadablePromptAndClaimedScreenshotToApplicationAtomically() throws {
+        let me = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "goodtoken")).body
+        )
+        XCTAssertTrue(
+            me.features?.contains(RemoteRESTFeature.reportSessionOpening.rawValue) == true
+        )
+
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-report-opening-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        sessionCommands.createdSessionID = SessionID()
+
+        let jpeg = Data([0xff, 0xd8, 0xff, 0x10, 0x20, 0x30])
+        let reportPrompt = "Investigate report without embedding image bytes"
+        let body = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
+            projectID: project.id.uuidString,
+            agentKind: AgentKind.codex.rawValue,
+            surface: .terminal,
+            reportOpening: RemoteReportSessionOpeningDTO(
+                prompt: reportPrompt,
+                screenshot: RemoteReportScreenshotDTO(
+                    jpegBase64: jpeg.base64EncodedString()
+                )
+            ),
+            prompt: ""
+        ))
+
+        let response = try XCTUnwrap(post("/api/session", bearer: "goodtoken", body: body))
+
+        XCTAssertEqual(response.status, 201)
+        let launch = try XCTUnwrap(sessionCommands.launches.last)
+        XCTAssertEqual(launch.prompt, reportPrompt)
+        XCTAssertEqual(launch.openingAttachmentPaths.count, 1)
+        XCTAssertEqual(sessionCommands.openingAttachmentPayloads.last, [jpeg])
+        XCTAssertFalse(launch.prompt.contains(jpeg.base64EncodedString()))
+    }
+
+    func testMalformedOrAmbiguousReportOpeningStartsNoSession() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-report-refusal-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        sessionCommands.createdSessionID = SessionID()
+
+        func create(prompt: String, screenshot: RemoteReportScreenshotDTO?) throws -> Probe {
+            let body = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
+                projectID: project.id.uuidString,
+                agentKind: AgentKind.codex.rawValue,
+                surface: .terminal,
+                reportOpening: RemoteReportSessionOpeningDTO(
+                    prompt: "Read the attached report",
+                    screenshot: screenshot
+                ),
+                prompt: prompt
+            ))
+            return try XCTUnwrap(post("/api/session", bearer: "goodtoken", body: body))
+        }
+
+        let ambiguous = try create(
+            prompt: "A second competing prompt",
+            screenshot: nil
+        )
+        XCTAssertEqual(ambiguous.status, 400)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: ambiguous.body).code,
+            RemoteRESTErrorCode.invalidReportOpening.rawValue
+        )
+
+        let malformed = try create(
+            prompt: "",
+            screenshot: RemoteReportScreenshotDTO(jpegBase64: "not-base64")
+        )
+        XCTAssertEqual(malformed.status, 400)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: malformed.body).code,
+            RemoteRESTErrorCode.invalidReportOpening.rawValue
+        )
+        XCTAssertTrue(sessionCommands.launches.isEmpty)
+    }
+
     /// A phone may start a manager: the request names the role, the launch carries it to the
     /// coordinator that confers the grant, and a role the vocabulary does not know is refused
     /// rather than started as a chat that would not find out until it failed to reach its
@@ -4103,6 +4192,7 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
     var resumeResult = true
     var accountMoveResult: Result<Void, RemoteSessionAccountMoveFailure> = .success(())
     private(set) var launches: [RemoteSessionLaunch] = []
+    private(set) var openingAttachmentPayloads: [[Data?]] = []
     private(set) var resumedSessionIDs: [SessionID] = []
     private(set) var resumedTerminalIDs: [TerminalID] = []
     private(set) var accountMoves: [(sessionID: SessionID, accountHandle: AccountHandle)] = []
@@ -4129,6 +4219,9 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
 
     func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID? {
         launches.append(launch)
+        openingAttachmentPayloads.append(launch.openingAttachmentPaths.map {
+            try? Data(contentsOf: URL(fileURLWithPath: $0))
+        })
         return createdSessionID
     }
 
