@@ -49,6 +49,11 @@ final class TerminalKeyBridge: ObservableObject {
         keyboardWantedUp = wanted
     }
 
+    /// The line composer took the keyboard: writing there is writing in this chat.
+    func noteKeyboardWanted() {
+        keyboardWantedUp = true
+    }
+
     var applicationCursorActive: Bool {
         terminalView?.terminalStateSnapshot().applicationCursor ?? false
     }

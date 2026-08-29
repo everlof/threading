@@ -17,7 +17,10 @@ enum RemoteMobileConnectionDefaults {
     static let terminalReplayBudgetBytes = 128 * 1024
     /// How long a return from the background waits for the socket to answer a ping before
     /// treating it as dead and reconnecting.
-    static let resumeLivenessDeadline: Duration = .seconds(3)
+    static let resumeLivenessDeadline: Duration = .seconds(1)
+    /// A background longer than this has almost certainly cost the socket on the Mac's side
+    /// while the phone's side still looks alive; asking is slower than reconnecting.
+    static let reconnectOutrightAfterBackground: TimeInterval = 30
     /// Stay inside the Mac's five-minute replay window even after timer and network jitter.
     static let acknowledgedSubmissionRetrySeconds: TimeInterval = 4 * 60
     /// How long a socket may stay open without the Mac greeting it.
@@ -234,6 +237,7 @@ final class RemoteSessionConnection: ObservableObject {
     /// softened one rather than sharp text that blurs a moment later.
     @Published private(set) var isAwaitingResume = false
     private var resumeProbeGeneration: Int?
+    private var backgroundedAt: Date?
     @Published private(set) var conversationCanSend = false
     @Published private(set) var composerCapabilities: [RemoteComposerCapabilityDTO] = []
     @Published private(set) var presence: [String: RemotePresenceDTO] = [:]
@@ -451,18 +455,25 @@ final class RemoteSessionConnection: ObservableObject {
 #if canImport(UIKit)
         lifecycleObservers = [
             NotificationCenter.default.addObserver(
+                forName: UIApplication.willResignActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated { self?.noteResigningActive() }
+            },
+            NotificationCenter.default.addObserver(
                 forName: UIApplication.didEnterBackgroundNotification,
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.noteEnteringBackground() }
+                MainActor.assumeIsolated { self?.noteEnteringBackground() }
             },
             NotificationCenter.default.addObserver(
                 forName: UIApplication.didBecomeActiveNotification,
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.resumeAfterActivation() }
+                MainActor.assumeIsolated { self?.resumeAfterActivation() }
             },
         ]
 #endif
@@ -811,24 +822,41 @@ final class RemoteSessionConnection: ObservableObject {
         output(data)
     }
 
-    /// The app has gone to the background — not merely resigned active, which a paste prompt,
-    /// Control Center or a notification pull also do without the socket dropping. A terminal
-    /// with something on screen locks it now; UIKit snapshots the scene for the switcher and
-    /// the return shortly after this, so the snapshot is the softened screen.
-    private func noteEnteringBackground() {
+    /// The app is losing the front — to another app, to the switcher, or only to a prompt. A
+    /// terminal with something on screen locks it now, so the switcher card and the snapshot
+    /// iOS keeps for the return are already the softened screen. Locking any later (on entering
+    /// the background) raced that snapshot and let sharp old text flash on return.
+    func noteResigningActive() {
         guard hasEverConnected, surface == .terminal, hasPresentedTerminalOutput else { return }
         isAwaitingResume = true
     }
 
-    /// The app is back. A reconnect already waiting starts now; otherwise a socket that looks
-    /// connected may have died in the background without a word, so one ping settles whether
-    /// the locked screen can be released or must be replaced.
-    private func resumeAfterActivation() {
+    /// Only a real background can have cost the socket; a prompt never reaches here.
+    func noteEnteringBackground(at now: Date = Date()) {
+        backgroundedAt = now
+    }
+
+    /// The app is back. A reconnect already waiting starts now. A resign that never became a
+    /// background — a paste prompt, Control Center — releases the lock at once, nothing having
+    /// happened to the socket. A long background reconnects outright, because the Mac has
+    /// almost certainly dropped a socket the phone's side still thinks alive; a short one asks
+    /// with a ping, briefly, so a quick app switch does not replay for nothing.
+    func resumeAfterActivation(now: Date = Date()) {
+        let backgroundDuration = backgroundedAt.map { now.timeIntervalSince($0) }
+        backgroundedAt = nil
         if reconnectTask != nil {
             reconnectNowIfWaiting()
             return
         }
         guard isAwaitingResume else { return }
+        guard let backgroundDuration else {
+            isAwaitingResume = false
+            return
+        }
+        if backgroundDuration >= RemoteMobileConnectionDefaults.reconnectOutrightAfterBackground {
+            connect()
+            return
+        }
         guard phase == .connected, let task else {
             isAwaitingResume = false
             return

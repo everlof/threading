@@ -890,7 +890,8 @@ struct TerminalRemoteView: View {
     @Environment(\.remoteTheme) private var inheritedTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showsReconnectPlate = false
+    @State private var waitedLongEnough = false
+    @State private var openingSnapshot: UIImage?
     @State private var showsAttentionRequest = false
     @State private var showsKeyboardEditor = false
     @State private var directAttachmentTray: ComposerAttachmentTray?
@@ -921,28 +922,47 @@ struct TerminalRemoteView: View {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
     }
 
-    /// Hydrating after a connect, or locked from the moment the app went to the background
-    /// until the socket proved itself again — one span from the reader's side.
+    /// Hydrating after a connect, or locked from the moment the app lost the front until the
+    /// socket proved itself again — one span from the reader's side.
     private var isCatchingUp: Bool {
         connection.isTerminalHydrating || connection.isAwaitingResume
     }
 
-    /// A reconnect's plate is owed only while the person is back and the wait is still on.
-    private var wantsReconnectPlate: Bool {
-        isCatchingUp && connection.hasEverConnected && scenePhase == .active
+    /// A reconnect keeps the live screen; the lock from leaving the app does too.
+    private var keepsLiveScreen: Bool {
+        connection.holdsPreviousScreen || connection.isAwaitingResume
     }
 
-    /// A reconnect keeps the last screen on display — dimmed and softened under the loader —
-    /// until the held replay replaces it in one frame, and the lock from the background does
-    /// the same over the live screen. An opening has no screen to keep: its replay streams in
-    /// behind the loader on the terminal's own ground, never behind a blur.
-    private var holdsOldScreen: Bool {
-        isCatchingUp && (connection.holdsPreviousScreen || connection.isAwaitingResume)
+    private var presentation: TerminalSurfacePresentation {
+        TerminalSurfacePresentation.resolve(
+            isLoading: isCatchingUp,
+            keepsLiveScreen: keepsLiveScreen,
+            hasSnapshot: openingSnapshot != nil,
+            waitedLongEnough: waitedLongEnough
+        )
     }
 
-    private var terminalPresentationOpacity: Double {
-        guard isCatchingUp else { return 1 }
-        return holdsOldScreen ? SessionDetailMetrics.reconnectDim : 0
+    private var isLockedLive: Bool {
+        if case .lockedLive = presentation { return true }
+        return false
+    }
+
+    /// The loader over a softened screen is owed only once the wait has lasted a beat, and
+    /// only while the person is looking — the switcher card is the softened screen alone.
+    private var wantsLoaderTimer: Bool {
+        presentation.delaysLoader && scenePhase == .active
+    }
+
+    private var terminalOpacity: Double {
+        switch presentation {
+        case .live: return 1
+        case .lockedLive: return SessionDetailMetrics.reconnectDim
+        case .snapshot, .loader: return 0
+        }
+    }
+
+    private var openingStatus: String {
+        MobileSessionChrome.openingStatus(isAvailable: true, routeWalk: model.routeWalkStatus)
     }
 
     private var terminalBackground: Color {
@@ -999,7 +1019,8 @@ struct TerminalRemoteView: View {
                 TerminalLineComposer(
                     connection: connection,
                     bridge: keyBridge,
-                    quotes: $selectionQuotes
+                    quotes: $selectionQuotes,
+                    focusesOnAppear: rememberedTerminalKeyboardUp
                 )
             }
             if allowsDirectInput, !selectionQuotes.isEmpty {
@@ -1117,46 +1138,56 @@ struct TerminalRemoteView: View {
             quoteSelection: inputMode == .none ? nil : addSelectionQuote,
             focusesOnCreation: rememberedTerminalKeyboardUp
         )
-        .opacity(terminalPresentationOpacity)
+        .opacity(terminalOpacity)
         .blur(
-            radius: holdsOldScreen && !reduceMotion
-                ? SessionDetailMetrics.reconnectBlurRadius
-                : 0
+            radius: isLockedLive && !reduceMotion ? SessionDetailMetrics.reconnectBlurRadius : 0
         )
         .overlay {
-            if isCatchingUp, !connection.hasEverConnected {
-                // An opening has nothing else to show: the loader, at once, on the ground.
-                MobileLoadingPlaceholder(MobileSessionChrome.openingStatus(
-                    isAvailable: true,
-                    routeWalk: model.routeWalkStatus
-                ))
+            switch presentation {
+            case .live:
+                EmptyView()
+            case .lockedLive(let showsLoader):
+                if showsLoader {
+                    MobileLoadingPlaceholder(MobileL10n.string("Reconnecting…"), standsOnContent: true)
+                }
+            case .snapshot(let showsLoader):
+                ZStack {
+                    if let openingSnapshot {
+                        Image(uiImage: openingSnapshot)
+                            .resizable()
+                            .scaledToFill()
+                            .blur(radius: reduceMotion ? 0 : SessionDetailMetrics.reconnectBlurRadius)
+                            .opacity(SessionDetailMetrics.reconnectDim)
+                            .clipped()
+                    }
+                    if showsLoader {
+                        MobileLoadingPlaceholder(openingStatus, standsOnContent: true)
+                    }
+                }
                 .background(terminalBackground)
-            } else if showsReconnectPlate {
-                // The softened screen is the lock and is what the switcher card shows; the
-                // plate is for a wait that has lasted a beat while the person is back.
-                MobileLoadingPlaceholder(
-                    MobileL10n.string("Reconnecting…"),
-                    standsOnContent: holdsOldScreen
-                )
-                .background(holdsOldScreen ? Color.clear : terminalBackground)
+            case .loader:
+                MobileLoadingPlaceholder(openingStatus)
+                    .background(terminalBackground)
             }
         }
         .animation(
             reduceMotion ? nil : .easeOut(duration: SessionDetailMetrics.reconnectRevealDuration),
-            value: isCatchingUp
+            value: presentation
         )
-        .animation(
-            reduceMotion ? nil : .easeOut(duration: SessionDetailMetrics.reconnectRevealDuration),
-            value: showsReconnectPlate
-        )
-        .task(id: wantsReconnectPlate) {
-            guard wantsReconnectPlate else {
-                showsReconnectPlate = false
+        .task(id: wantsLoaderTimer) {
+            guard wantsLoaderTimer else {
+                waitedLongEnough = false
                 return
             }
             try? await Task.sleep(for: SessionDetailMetrics.reconnectPlateDelay)
             guard !Task.isCancelled else { return }
-            showsReconnectPlate = true
+            waitedLongEnough = true
+        }
+        .onAppear {
+            openingSnapshot = MobileTerminalSnapshotCache.shared.image(for: connection.session.id)
+        }
+        .onChange(of: presentation) { _, now in
+            if now == .live { openingSnapshot = nil }
         }
         .background(terminalBackground)
         // `TerminalViewRepresentable` owns this inset inside its stable-width UIKit host. Keeping
@@ -1183,18 +1214,23 @@ struct TerminalRemoteView: View {
         return nil
     }
 
-    /// The keyboard comes back the way this chat was left — from the list or after the app was
-    /// away — rather than up on every reopen and wherever iOS left it on return.
+    /// The keyboard comes back if this chat was left while writing, and recently; otherwise a
+    /// chat opens with the keyboard down. Returning from the background needs no memory: the
+    /// terminal is not rebuilt, so iOS restores the responder it had.
     private var rememberedTerminalKeyboardUp: Bool {
-        guard let hostID = model.activeHostID else { return true }
-        return continuity.state(hostID: hostID, sessionID: connection.session.id)
-            .terminalKeyboardWasUp ?? true
+        guard let hostID = model.activeHostID else { return false }
+        let state = continuity.state(hostID: hostID, sessionID: connection.session.id)
+        return MobileTerminalKeyboardMemory.opensKeyboard(
+            wasUp: state.terminalKeyboardWasUp,
+            leftAt: state.terminalKeyboardLeftAt
+        )
     }
 
     private func rememberTerminalKeyboard() {
-        guard allowsDirectInput, let hostID = model.activeHostID else { return }
+        guard let hostID = model.activeHostID else { return }
         continuity.setTerminalKeyboardUp(
             keyBridge.keyboardWantedUp,
+            at: Date(),
             hostID: hostID,
             sessionID: connection.session.id
         )
@@ -1578,6 +1614,9 @@ private struct TerminalLineComposer: View {
     @ObservedObject var connection: RemoteSessionConnection
     @ObservedObject var bridge: TerminalKeyBridge
     @Binding var quotes: [RemoteTerminalSelectionQuote]
+    /// Writing here was writing in this chat: a chat left mid-draft opens with the composer
+    /// focused again, within the keyboard memory's recall.
+    var focusesOnAppear = false
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
     @Environment(\.remoteTheme) private var theme
@@ -1700,6 +1739,10 @@ private struct TerminalLineComposer: View {
         }
         .onAppear(perform: restoreDraft)
         .onAppear(perform: configureAttachments)
+        .onAppear { if focusesOnAppear { draftIsFocused = true } }
+        .onChange(of: draftIsFocused) { _, focused in
+            if focused { bridge.noteKeyboardWanted() }
+        }
         .onAppear(perform: refreshClipboardOffer)
         // A pasteboard written in another app raises no notification here, so returning to the
         // foreground is the moment that has to ask again; the local notification covers a copy

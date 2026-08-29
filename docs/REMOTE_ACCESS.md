@@ -637,21 +637,34 @@ asks for the ring again). Separately, the session socket reconnects the moment t
 active instead of serving out a backoff that was counting while the app was suspended.
 `RemoteTerminalViewportLeaseTests` proves both the hold and the untouched first-open reset.
 
-The lock starts as the app *leaves*, not when the reconnect begins. On return iOS first shows its
-own snapshot of the app, and a blur that only arrived once the dead socket had been noticed let
-sharp old text flash before it — so `isAwaitingResume` is raised on `didEnterBackground` (for a
-terminal that has drawn something), which UIKit follows with the snapshot it keeps for the
-switcher and the return, so that snapshot is already the softened screen. Not on
-`willResignActive`: a paste prompt, Control Center or a notification pull resign active without
-the socket dropping, and locking there blurred a terminal that was never leaving. The loader plate
-is shown only while the scene is active, so the switcher card is the softened screen alone. On
-`didBecomeActive` a reconnect that was waiting starts at once, and hydration
-completing releases the lock; a socket that still looks connected may have died silently, so one
-ping settles it — a pong releases the lock, an error or three seconds of silence reconnects. A
-reconnect also keeps what the last hello established (server features, atomic-submission and
-input-control support, the roster) until the next hello replaces it: clearing them at connect time
-computed every terminal into the `.none` input mode for the reconnect, which resigned the keyboard
-and unmounted the line composer someone was typing in.
+**What the terminal shows while its content is not yet the truth is three rules, held in one
+resolver.** They were right by accident once and lost in a view change, so
+`TerminalSurfacePresentation.resolve` is where they live and `MobileTerminalPresentationTests`
+holds every row: opening a chat that has a picture of its last screen shows the picture softened,
+with the loader over it once the wait has lasted half a second; opening one with no picture shows
+the loader at once; returning to a live screen — a reconnect, or the lock from leaving the app —
+keeps the live screen softened, again with the loader only after that beat. A live screen outranks
+a stale picture, and nothing is shown over a screen that is not loading. The picture is
+`MobileTerminalSnapshotCache`: the terminal container keeps a quarter-resolution image of itself
+as it leaves its window (a pop, a surface switch), a handful of chats, dropped under memory
+pressure and never persisted, so a cold launch shows the loader.
+
+The lock starts as the app *loses the front* (`willResignActive`), not when the reconnect begins:
+on return iOS first shows its own snapshot of the app, and a lock applied on `didEnterBackground`
+raced that snapshot and let sharp old text flash. The switcher card is therefore the softened
+screen too — and the loader plate is shown only while the scene is active, so the card is the
+softened screen alone. A resign that never became a background — a paste prompt, Control Center,
+a notification pull — releases the lock the moment the app is back, nothing having happened to
+the socket. A real background is judged by its length on `didBecomeActive`: longer than thirty
+seconds reconnects outright, because the Mac has almost certainly dropped a socket the phone's
+side still thinks alive; shorter asks with one ping and a one-second deadline, so a quick app
+switch does not replay for nothing. A reconnect that was already waiting starts at once, and
+hydration completing releases the lock. A reconnect also keeps what the last hello established
+(server features, atomic-submission and input-control support, the roster) until the next hello
+replaces it: clearing them at connect time computed every terminal into the `.none` input mode
+for the reconnect, which resigned the keyboard and unmounted the line composer someone was typing
+in. `RemoteTerminalViewportLeaseTests` proves the prompt release and the long-background
+reconnect that keeps the screen.
 
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
@@ -782,16 +795,18 @@ instead of repeating the click. With the keyboard already up, or nothing trackin
 keeps its old meanings — the program's click and word selection respectively.
 `RemoteTerminalTapTests` pins all of it.
 
-**The keyboard comes back the way the chat was left.** An interactive terminal took the keyboard
-on every creation, and a return from the background kept whatever iOS had restored — two rules
-that read as none. `TerminalKeyBridge.keyboardWantedUp` is what the person asked for: raised
-whenever the terminal takes the keyboard, lowered only by the bar's own dismiss; a pop, a sheet,
-an input-mode switch or the app going away hide the keyboard without touching it. The chat's
-continuity record keeps that answer (`terminalKeyboardWasUp`, a disposable position-like field)
-when the chat is left or the app resigns, and a reopened chat's terminal takes the keyboard on
-creation only if it was wanted last time. A chat never left before takes it, as it always did.
-Returning from the background changes nothing here: the terminal is no longer rebuilt on
-reconnect, so iOS restores the responder it had.
+**The keyboard comes back if the chat was left while writing, and recently.** An interactive
+terminal took the keyboard on every creation, and a return from the background kept whatever iOS
+had restored — two rules that read as none. `TerminalKeyBridge.keyboardWantedUp` is what the
+person asked for: raised whenever the terminal or the line composer takes the keyboard, lowered
+only by the bar's own dismiss; a pop, a sheet, an input-mode switch or the app going away hide
+the keyboard without touching it. The chat's continuity record keeps that answer and when it was
+given (`terminalKeyboardWasUp`, `terminalKeyboardLeftAt` — disposable, position-like fields)
+when the chat is left or the app resigns. `MobileTerminalKeyboardMemory` decides on reopening: the
+keyboard comes up only if it was wanted less than thirty minutes ago, into the terminal or the
+composer as before; otherwise a chat opens with the keyboard down. Returning from the background
+needs no memory: the terminal is no longer rebuilt on reconnect, so iOS restores the responder it
+had. `MobileTerminalPresentationTests` pins the recall.
 
 **Selecting text had to survive the thing being selected.** SwiftTerm's iOS view cleared the
 selection on every line feed whenever the program tracked the mouse — which on the phone is
