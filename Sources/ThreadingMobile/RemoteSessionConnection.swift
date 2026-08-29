@@ -1,5 +1,8 @@
 import Foundation
 import ThreadingRemoteKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum RemoteMobileConnectionDefaults {
     static let conversationPageRows = 64
@@ -212,6 +215,12 @@ final class RemoteSessionConnection: ObservableObject {
     @Published private(set) var terminalColumns = 0
     @Published private(set) var terminalRows = 0
     @Published private(set) var isTerminalHydrating: Bool
+    /// True once a mounted terminal has drawn this connection's output. A reconnect then has a
+    /// screen worth keeping on display, and holds its replay until hydration completes.
+    @Published private(set) var hasPresentedTerminalOutput = false
+    /// True once a hello has been answered: the next `.connecting` is a reconnect, not an
+    /// opening, and is named as one.
+    @Published private(set) var hasEverConnected = false
     @Published private(set) var conversationCanSend = false
     @Published private(set) var composerCapabilities: [RemoteComposerCapabilityDTO] = []
     @Published private(set) var presence: [String: RemotePresenceDTO] = [:]
@@ -257,6 +266,10 @@ final class RemoteSessionConnection: ObservableObject {
     private var stopped = false
     private var connectionGeneration = 0
     private var pendingTerminalOutput = Data()
+    /// Set by a reconnect whose terminal already shows something: output is held rather than
+    /// delivered until hydration completes, then arrives behind one reset.
+    private var holdsReplayForHydration = false
+    private var lifecycleObserver: NSObjectProtocol?
     private let pendingTerminalOutputLimit = 2 * 1_024 * 1_024
     /// The mounted SwiftTerm view that owns terminal delivery and the phone's viewport lease.
     ///
@@ -295,7 +308,16 @@ final class RemoteSessionConnection: ObservableObject {
             // before SwiftTerm has parsed output that arrived ahead of the view. The static UI
             // fixtures enter through this same buffer instead of pretending to own a socket.
             noteTerminalHydrationOutput()
-            onTerminalOutput(buffered)
+            if holdsReplayForHydration {
+                // A view attaching mid-reconnect has no old screen to keep: give it the reset
+                // and everything held so far, and let hydration reveal the rest live.
+                holdsReplayForHydration = false
+                var frame = Data([0x1b, 0x63])
+                frame.append(buffered)
+                presentTerminalOutput(frame, through: onTerminalOutput)
+            } else {
+                presentTerminalOutput(buffered, through: onTerminalOutput)
+            }
             if let ready = pendingTerminalReady {
                 pendingTerminalReady = nil
                 completeTerminalHydration(ifMatching: ready)
@@ -409,6 +431,21 @@ final class RemoteSessionConnection: ObservableObject {
         conversationStore.onCanSendChange = { [weak self] canSend in
             self?.conversationCanSend = canSend
         }
+#if canImport(UIKit)
+        lifecycleObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.reconnectNowIfWaiting() }
+        }
+#endif
+    }
+
+    deinit {
+        if let lifecycleObserver {
+            NotificationCenter.default.removeObserver(lifecycleObserver)
+        }
     }
 
     func connect() {
@@ -446,9 +483,17 @@ final class RemoteSessionConnection: ObservableObject {
             .minimumProtocolVersion: String(RemoteProtocol.minimumSupported),
         ]) { current, _ in current })
         pendingTerminalOutput.removeAll(keepingCapacity: true)
-        // A reconnect receives the Mac's authoritative ring again. Reset an already-mounted
-        // SwiftTerm first so replay replaces its prior state instead of duplicating scrollback.
-        onTerminalOutput?(Data([0x1b, 0x63]))
+        // A reconnect receives the Mac's authoritative ring again, so a mounted SwiftTerm must
+        // be reset before replay replaces its prior state. A terminal that has already drawn
+        // something keeps it on display instead: the reset and the replay are held and
+        // delivered together when hydration completes, so the old screen becomes the new one
+        // in a single frame rather than going blank while the replay streams in.
+        if surface == .terminal, hasPresentedTerminalOutput, onTerminalOutput != nil {
+            holdsReplayForHydration = true
+        } else {
+            holdsReplayForHydration = false
+            onTerminalOutput?(Data([0x1b, 0x63]))
+        }
 
         // The demo's canned Mac takes the socket's place; everything downstream of the wire —
         // the hello, snapshots, acknowledgements — still arrives through `handle`.
@@ -530,6 +575,12 @@ final class RemoteSessionConnection: ObservableObject {
         terminalHydrationMaximumTask?.cancel()
         terminalHydrationMaximumTask = nil
         isTerminalHydrating = false
+        if holdsReplayForHydration {
+            // The held replay belonged to a connection that is now over; the next one asks for
+            // the ring again. The old screen stays as it is.
+            holdsReplayForHydration = false
+            pendingTerminalOutput.removeAll(keepingCapacity: true)
+        }
         viewportSettleTask?.cancel()
         viewportSettleTask = nil
         if phase == .connected, capability == .interact, pendingViewport != nil {
@@ -698,9 +749,44 @@ final class RemoteSessionConnection: ObservableObject {
         terminalHydrationMaximumTask?.cancel()
         terminalHydrationMaximumTask = nil
         isTerminalHydrating = false
+        releaseHeldReplay()
 #if DEBUG
         MobileTerminalWirePerformanceProbe.terminalHydrationCompleted(session)
 #endif
+    }
+
+    /// The moment a held reconnect becomes the screen: one reset, then everything the Mac
+    /// replayed, in one delivery.
+    private func releaseHeldReplay() {
+        guard holdsReplayForHydration else { return }
+        holdsReplayForHydration = false
+        guard let onTerminalOutput else { return }
+        var frame = Data([0x1b, 0x63])
+        frame.append(pendingTerminalOutput)
+        pendingTerminalOutput.removeAll(keepingCapacity: true)
+        presentTerminalOutput(frame, through: onTerminalOutput)
+    }
+
+    private func presentTerminalOutput(_ data: Data, through output: (Data) -> Void) {
+        hasPresentedTerminalOutput = true
+        output(data)
+    }
+
+    /// A socket dropped in the background is not a flaky network. Reconnect the moment the
+    /// app is back rather than serving out a backoff that was counting while it was suspended.
+    private func reconnectNowIfWaiting() {
+        guard let waiting = reconnectTask, let reconnectClient else { return }
+        waiting.cancel()
+        reconnectTask = nil
+        reconnectAttempt = 0
+        let generation = connectionGeneration
+        Task { [weak self] in
+            guard let client = await reconnectClient(0) else { return }
+            guard let self, self.connectionGeneration == generation,
+                  self.reconnectTask == nil else { return }
+            self.client = client
+            self.connect()
+        }
     }
 
     private func completeTerminalHydration(ifMatching ready: RemoteTerminalReadyDTO) {
@@ -1115,8 +1201,8 @@ final class RemoteSessionConnection: ObservableObject {
 #if DEBUG
                     MobileTerminalWirePerformanceProbe.outputReceived(data, session: session)
 #endif
-                    if let onTerminalOutput {
-                        onTerminalOutput(data)
+                    if let onTerminalOutput, !holdsReplayForHydration {
+                        presentTerminalOutput(data, through: onTerminalOutput)
                     } else {
                         pendingTerminalOutput.append(data)
                         if pendingTerminalOutput.count > pendingTerminalOutputLimit {
@@ -1172,8 +1258,8 @@ final class RemoteSessionConnection: ObservableObject {
     func receiveDemoTerminalOutput(_ data: Data) {
         guard demoScript != nil else { return }
         noteTerminalHydrationOutput()
-        if let onTerminalOutput {
-            onTerminalOutput(data)
+        if let onTerminalOutput, !holdsReplayForHydration {
+            presentTerminalOutput(data, through: onTerminalOutput)
         } else {
             pendingTerminalOutput.append(data)
             if pendingTerminalOutput.count > pendingTerminalOutputLimit {
@@ -1268,6 +1354,7 @@ final class RemoteSessionConnection: ObservableObject {
             cancelHelloDeadline()
             warmTransportState = .active
             phase = .connected
+            hasEverConnected = true
 #if DEBUG
             MobileTerminalWirePerformanceProbe.helloReceived(
                 session,

@@ -6415,6 +6415,17 @@
         }
       }
     },
+    "Reconnecting…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återansluter…"
+          }
+        }
+      }
+    },
     "Recorded resets" : {
       "extractionState" : "manual",
       "localizations" : {

@@ -134,6 +134,13 @@ enum MobileSessionChrome {
     }
 }
 
+enum SessionDetailMetrics {
+    /// How the last terminal screen stands under the reconnect loader.
+    static var reconnectDim: Double { 0.55 }
+    static var reconnectBlurRadius: CGFloat { 6 }
+    static var reconnectRevealDuration: TimeInterval { 0.25 }
+}
+
 struct SessionDetailView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
@@ -811,7 +818,10 @@ private struct RemoteNavigationTitle: View {
 
     private var label: String {
         switch connection.phase {
-        case .connecting: return MobileL10n.string("Opening chat…")
+        case .connecting:
+            return connection.hasEverConnected
+                ? MobileL10n.string("Reconnecting…")
+                : MobileL10n.string("Opening chat…")
         case .connected:
             return model.activeHost?.name ?? MobileL10n.string("Connected")
         case .ended(let reason): return reason
@@ -826,6 +836,7 @@ struct TerminalRemoteView: View {
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @Environment(\.remoteTheme) private var inheritedTheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsAttentionRequest = false
     @State private var showsKeyboardEditor = false
     @State private var directAttachmentTray: ComposerAttachmentTray?
@@ -854,6 +865,18 @@ struct TerminalRemoteView: View {
 
     private var theme: RemoteThemePalette {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
+    }
+
+    /// A reconnect keeps the last screen on display — dimmed and softened under the loader —
+    /// until the held replay replaces it in one frame. A first opening has no screen yet, so
+    /// the loader stands on the terminal's own ground.
+    private var keepsOldScreenWhileHydrating: Bool {
+        connection.isTerminalHydrating && connection.hasPresentedTerminalOutput
+    }
+
+    private var terminalPresentationOpacity: Double {
+        guard connection.isTerminalHydrating else { return 1 }
+        return connection.hasPresentedTerminalOutput ? SessionDetailMetrics.reconnectDim : 0
     }
 
     private var terminalBackground: Color {
@@ -960,6 +983,11 @@ struct TerminalRemoteView: View {
         .onAppear(perform: restoreInputPreference)
         .onAppear(perform: configureDirectAttachments)
         .onAppear(perform: seedSelectionQuotesForEvidence)
+        .onAppear { keyBridge.seedKeyboardWanted(rememberedTerminalKeyboardUp) }
+        .onDisappear(perform: rememberTerminalKeyboard)
+        .onReceive(
+            NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
+        ) { _ in rememberTerminalKeyboard() }
         .onChange(of: model.client != nil) { _, _ in
             configureDirectAttachments()
         }
@@ -1020,18 +1048,33 @@ struct TerminalRemoteView: View {
             onFontSizeChange: { terminalFontSize = $0 },
             initialScrollProgress: initialTerminalScrollProgress,
             onScrollProgress: saveTerminalViewport,
-            quoteSelection: inputMode == .none ? nil : addSelectionQuote
+            quoteSelection: inputMode == .none ? nil : addSelectionQuote,
+            focusesOnCreation: rememberedTerminalKeyboardUp
         )
-        .opacity(connection.isTerminalHydrating ? 0 : 1)
+        .opacity(terminalPresentationOpacity)
+        .blur(
+            radius: keepsOldScreenWhileHydrating && !reduceMotion
+                ? SessionDetailMetrics.reconnectBlurRadius
+                : 0
+        )
         .overlay {
             if connection.isTerminalHydrating {
-                MobileLoadingPlaceholder(MobileSessionChrome.openingStatus(
-                    isAvailable: true,
-                    routeWalk: model.routeWalkStatus
-                ))
-                .background(terminalBackground)
+                MobileLoadingPlaceholder(
+                    connection.hasEverConnected
+                        ? MobileL10n.string("Reconnecting…")
+                        : MobileSessionChrome.openingStatus(
+                            isAvailable: true,
+                            routeWalk: model.routeWalkStatus
+                        ),
+                    standsOnContent: keepsOldScreenWhileHydrating
+                )
+                .background(keepsOldScreenWhileHydrating ? Color.clear : terminalBackground)
             }
         }
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: SessionDetailMetrics.reconnectRevealDuration),
+            value: connection.isTerminalHydrating
+        )
         .background(terminalBackground)
         // `TerminalViewRepresentable` owns this inset inside its stable-width UIKit host. Keeping
         // it outside in SwiftUI would make the host guess how much of the navigation viewport a
@@ -1055,6 +1098,23 @@ struct TerminalRemoteView: View {
         }
 #endif
         return nil
+    }
+
+    /// The keyboard comes back the way this chat was left — from the list or after the app was
+    /// away — rather than up on every reopen and wherever iOS left it on return.
+    private var rememberedTerminalKeyboardUp: Bool {
+        guard let hostID = model.activeHostID else { return true }
+        return continuity.state(hostID: hostID, sessionID: connection.session.id)
+            .terminalKeyboardWasUp ?? true
+    }
+
+    private func rememberTerminalKeyboard() {
+        guard allowsDirectInput, let hostID = model.activeHostID else { return }
+        continuity.setTerminalKeyboardUp(
+            keyBridge.keyboardWantedUp,
+            hostID: hostID,
+            sessionID: connection.session.id
+        )
     }
 
     private func saveTerminalViewport(_ progress: Double) {
@@ -1087,7 +1147,7 @@ struct TerminalRemoteView: View {
 
     private func toggleInputPreference() {
         guard canChooseInputPreference else { return }
-        keyBridge.dismissKeyboard()
+        keyBridge.dismissKeyboardForModeSwitch()
         let next: MobileTerminalInputPreference = inputPreference == .direct ? .compose : .direct
         selectedInputPreference = next
         saveInputPreference(next)
