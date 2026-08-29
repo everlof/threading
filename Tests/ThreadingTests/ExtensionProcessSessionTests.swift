@@ -190,6 +190,87 @@ final class ExtensionProcessSessionTests: XCTestCase {
         XCTAssertEqual(request.context, context)
     }
 
+    func testPersistentProcessRoutesWorkspaceNavigatorHostEventsAndItemPatches() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "threads",
+                layout: .list,
+                items: [.init(
+                    id: "thread-1",
+                    content: .status("Idle", role: .neutral)
+                )]
+            )),
+            eventActionID: "session-event"
+        )
+        let patch = ExtensionWorkspaceNavigatorItemPatch(
+            collectionID: "threads",
+            itemID: "thread-1",
+            content: .status("Running", role: .positive)
+        )
+        let response = ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "navigator-event-1",
+            navigatorID: navigator.id,
+            itemPatches: [patch]
+        )
+        let storage = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingNavigatorEvent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: storage,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: storage) }
+        let directory = try makeBundle(
+            registration: .init(workspaceNavigators: [navigator]),
+            additionalCapabilities: [.hostEvents, .keyValueStorage],
+            scriptAfterRegistration: """
+            IFS= read -r request || exit 65
+            printf '%s\\n' "$request" > "$THREADING_EXTENSION_KEY_VALUE_DIRECTORY/navigator-event.json"
+            printf '%s\\n' \(shellQuoted(try json(response)))
+            while IFS= read -r request; do :; done
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let started = try ExtensionProcessSession.start(
+            bundle: ExtensionBundleInspector.inspect(at: directory),
+            additionalEnvironment: [
+                ExtensionStorageEnvironment.keyValueDirectory: storage.path
+            ]
+        )
+        defer { started.session.terminate() }
+
+        let event = ExtensionWorkspaceNavigatorHostEvent(
+            kind: .sessionChanged,
+            sessionIDs: ["session-1"]
+        )
+        let completed = expectation(description: "navigator item patch")
+        started.session.invokeWorkspaceNavigatorAction(
+            navigatorID: navigator.id,
+            actionID: "session-event",
+            value: try event.actionValue,
+            requestID: response.requestID
+        ) { result in
+            XCTAssertEqual(try? result.get(), response)
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 2)
+
+        let request = try JSONDecoder().decode(
+            ExtensionWorkspaceNavigatorActionRequest.self,
+            from: Data(
+                contentsOf: storage.appendingPathComponent("navigator-event.json")
+            )
+        )
+        XCTAssertEqual(request.actionID, navigator.eventActionID)
+        let requestValue = try XCTUnwrap(request.value)
+        XCTAssertEqual(
+            try ExtensionWorkspaceNavigatorHostEvent(actionValue: requestValue),
+            event
+        )
+    }
+
     func testWorkspaceNavigatorResponseMustNameTheInvokedNavigator() throws {
         let navigator = ExtensionWorkspaceNavigator(
             id: "activity",

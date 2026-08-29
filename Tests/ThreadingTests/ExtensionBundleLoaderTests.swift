@@ -57,7 +57,8 @@ final class ExtensionBundleLoaderTests: XCTestCase {
         try JSONEncoder().encode([
             "Status": "Status på svenska",
             "Ready": "Klar",
-            "Refresh": "Uppdatera"
+            "Refresh": "Uppdatera",
+            "Running": "Kör"
         ]).write(to: localizationDirectory.appendingPathComponent("sv.json"))
 
         let manifest = ExtensionManifest(
@@ -130,6 +131,20 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             "sv"
         )
         XCTAssertNotNil(environment[ExtensionLocalizationEnvironment.stringsJSON])
+
+        let localizedPatch = resolver.workspaceNavigatorActionResponse(.init(
+            requestID: "event",
+            navigatorID: "activity",
+            itemPatches: [.init(
+                collectionID: "sessions",
+                itemID: "one",
+                content: .status("Running", role: .positive)
+            )]
+        ))
+        XCTAssertEqual(
+            localizedPatch.itemPatches?.first?.content,
+            .status("Kör", role: .positive)
+        )
     }
 
     func testInspectorRejectsLocalizationFilesThatAreNotFlatStringCatalogues() throws {

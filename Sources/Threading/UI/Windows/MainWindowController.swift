@@ -904,6 +904,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.workspaceSidebarViewController.refreshDocument()
         }
+        appEvents.observe(SessionActivityDidChange.self) { [weak self] event in
+            self?.workspaceSidebarViewController.sessionDidChange(event.sessionID)
+        }
     }
 
     private func renderCustomSurface(

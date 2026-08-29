@@ -3,11 +3,14 @@ import ThreadingExtensionKit
 
 /// Presents one live extension navigator inside Threading's host-owned sidebar shell.
 ///
-/// The document is rebuilt atomically. Collection presentation state and first responder are
-/// captured before the swap and restored by stable semantic IDs afterward.
+/// Full documents are rebuilt atomically. Live item content patches keep the existing collection
+/// views in place and reload only rows addressed by stable semantic IDs.
 final class WorkspaceNavigatorHostViewController: NSViewController {
     typealias ContextProvider = () -> ExtensionCommandContext
     typealias DestinationHandler = (ExtensionWorkspaceNavigatorDestination) -> String?
+
+    static let maximumPendingSessionIDs =
+        ExtensionWorkspaceNavigatorHostEvent.maximumSessionIDs * 4
 
     let extensionIdentifier: String
     let navigatorID: String
@@ -23,6 +26,13 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     private var collectionStates: [String: WorkspaceNavigatorCollectionState] = [:]
     private var synchronizedDestination: ExtensionWorkspaceNavigatorDestination?
     private var actionSequence = 0
+    private var ordinaryActionSequencesInFlight = Set<Int>()
+    private var contentRevision = 0
+    private var pendingSessionIDs = Set<SessionID>()
+    private var inFlightSessionIDs = Set<SessionID>()
+    private var isEventDispatchScheduled = false
+    private var isEventActionInFlight = false
+    private var isLiveEventDeliveryEnabled = true
     private var isFailingClosed = false
     private lazy var toasts = ToastPresenter(host: view, above: view.bottomAnchor)
 
@@ -75,6 +85,28 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         invoke(actionID: actionID, value: nil)
     }
 
+    func sessionDidChange(_ sessionID: SessionID) {
+        guard !isFailingClosed, navigator.eventActionID != nil else { return }
+        guard admitPendingSessionIDs([sessionID]) else { return }
+        scheduleEventDispatch()
+    }
+
+    /// Pauses process work and returns every edge whose result has not yet been incorporated.
+    /// The container retains these IDs while Settings owns the sidebar so a process-generation
+    /// replacement cannot discard the catch-up set with the old host controller.
+    func suspendLiveEventDelivery() -> Set<SessionID> {
+        isLiveEventDeliveryEnabled = false
+        return pendingSessionIDs.union(inFlightSessionIDs)
+    }
+
+    func setLiveEventDeliveryEnabled(_ enabled: Bool) {
+        guard enabled != isLiveEventDeliveryEnabled else { return }
+        isLiveEventDeliveryEnabled = enabled
+        if enabled {
+            scheduleEventDispatch()
+        }
+    }
+
     func synchronizeSelection(with destination: ExtensionWorkspaceNavigatorDestination?) {
         synchronizedDestination = destination
         for controller in collectionControllers {
@@ -108,6 +140,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             ])
             rootHost = built
             navigator = replacement
+            contentRevision += 1
             if let synchronizedDestination {
                 collectionControllers.forEach {
                     $0.synchronizeSelection(with: synchronizedDestination)
@@ -255,6 +288,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     private func invoke(actionID: String, value: ExtensionJSONValue?) {
         actionSequence += 1
         let sequence = actionSequence
+        ordinaryActionSequencesInFlight.insert(sequence)
         let accepted = routing.invokeWorkspaceNavigatorAction(
             extensionIdentifier: extensionIdentifier,
             navigatorID: navigatorID,
@@ -262,7 +296,10 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             value: value,
             context: contextProvider()
         ) { [weak self] result in
-            guard let self, sequence == self.actionSequence else { return }
+            guard let self else { return }
+            guard self.ordinaryActionSequencesInFlight.remove(sequence) != nil else { return }
+            defer { self.scheduleEventDispatch() }
+            guard sequence == self.actionSequence else { return }
             guard self.routing.registeredWorkspaceNavigator(
                 extensionIdentifier: self.extensionIdentifier,
                 navigatorID: self.navigatorID
@@ -278,6 +315,13 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                     self.onUnavailable()
                 }
             case .success(let response):
+                do {
+                    try response.validate()
+                    try self.applyItemPatches(response.itemPatches ?? [])
+                } catch {
+                    self.failClosed(afterRendering: error)
+                    return
+                }
                 if let error = response.error {
                     self.presentError(error)
                     return
@@ -290,9 +334,168 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                 }
             }
         }
-        if !accepted {
+        if !accepted,
+           ordinaryActionSequencesInFlight.remove(sequence) != nil {
             onUnavailable()
         }
+    }
+
+    private func scheduleEventDispatch() {
+        guard !isFailingClosed,
+              isLiveEventDeliveryEnabled,
+              !pendingSessionIDs.isEmpty,
+              !isEventDispatchScheduled,
+              !isEventActionInFlight,
+              ordinaryActionSequencesInFlight.isEmpty else { return }
+        isEventDispatchScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isEventDispatchScheduled = false
+            self.dispatchNextEventBatch()
+        }
+    }
+
+    private func dispatchNextEventBatch() {
+        guard !isFailingClosed,
+              isLiveEventDeliveryEnabled,
+              !isEventActionInFlight,
+              ordinaryActionSequencesInFlight.isEmpty,
+              let actionID = navigator.eventActionID,
+              !pendingSessionIDs.isEmpty else {
+            return
+        }
+        let sessionIDs = Array(
+            pendingSessionIDs.sorted { $0.uuidString < $1.uuidString }.prefix(
+                ExtensionWorkspaceNavigatorHostEvent.maximumSessionIDs
+            )
+        )
+        pendingSessionIDs.subtract(sessionIDs)
+        inFlightSessionIDs = Set(sessionIDs)
+        let event = ExtensionWorkspaceNavigatorHostEvent(
+            kind: .sessionChanged,
+            sessionIDs: sessionIDs.map { $0.uuidString.lowercased() }
+        )
+        let value: ExtensionJSONValue
+        do {
+            try event.validate()
+            value = try event.actionValue
+        } catch {
+            failClosed(afterRendering: error)
+            return
+        }
+
+        let revision = contentRevision
+        isEventActionInFlight = true
+        let accepted = routing.invokeWorkspaceNavigatorAction(
+            extensionIdentifier: extensionIdentifier,
+            navigatorID: navigatorID,
+            actionID: actionID,
+            value: value,
+            context: contextProvider()
+        ) { [weak self] result in
+            guard let self else { return }
+            self.isEventActionInFlight = false
+            self.inFlightSessionIDs.removeAll(keepingCapacity: true)
+            defer { self.scheduleEventDispatch() }
+            guard self.routing.registeredWorkspaceNavigator(
+                extensionIdentifier: self.extensionIdentifier,
+                navigatorID: self.navigatorID
+            )?.processGeneration == self.processGeneration else {
+                self.onUnavailable()
+                return
+            }
+
+            switch result {
+            case .failure(let error):
+                self.presentError(error.localizedDescription)
+                // A live edge is invalidation, not an optional user command. Losing the final
+                // edge can leave a selected row stale forever, so any failed batch returns to
+                // Native instead of pretending the old content is current.
+                self.failClosed()
+            case .success(let response):
+                do {
+                    try response.validateForHostEvent()
+                } catch {
+                    self.failClosed(afterRendering: error)
+                    return
+                }
+                if let error = response.error {
+                    self.presentError(error)
+                    self.failClosed()
+                    return
+                }
+                guard revision == self.contentRevision else {
+                    _ = self.admitPendingSessionIDs(sessionIDs)
+                    return
+                }
+                do {
+                    try self.applyItemPatches(response.itemPatches ?? [])
+                } catch {
+                    self.failClosed(afterRendering: error)
+                    return
+                }
+                if let message = response.message {
+                    self.present(message)
+                }
+            }
+        }
+        if !accepted {
+            isEventActionInFlight = false
+            inFlightSessionIDs.removeAll(keepingCapacity: true)
+            onUnavailable()
+        }
+    }
+
+    @discardableResult
+    private func admitPendingSessionIDs<S: Sequence>(_ sessionIDs: S) -> Bool
+    where S.Element == SessionID {
+        var admitted = pendingSessionIDs
+        admitted.formUnion(sessionIDs)
+        guard admitted.count <= Self.maximumPendingSessionIDs else {
+            pendingSessionIDs.removeAll(keepingCapacity: true)
+            failClosed(afterRendering: ExtensionValidationError(issues: [.init(
+                path: "sessionIDs",
+                message: "navigator event backlog exceeded the host limit"
+            )]))
+            return false
+        }
+        pendingSessionIDs = admitted
+        return true
+    }
+
+    private func applyItemPatches(
+        _ patches: [ExtensionWorkspaceNavigatorItemPatch]
+    ) throws {
+        guard !patches.isEmpty else { return }
+        let controllersByID = Dictionary(
+            uniqueKeysWithValues: collectionControllers.map { ($0.collectionID, $0) }
+        )
+        var grouped: [String: [ExtensionWorkspaceNavigatorItemPatch]] = [:]
+        var issues: [ExtensionValidationIssue] = []
+        for (index, patch) in patches.enumerated() {
+            guard let controller = controllersByID[patch.collectionID] else {
+                issues.append(.init(
+                    path: "itemPatches[\(index)].collectionID",
+                    message: "does not name a collection in the presented navigator"
+                ))
+                continue
+            }
+            guard controller.containsItem(patch.itemID) else {
+                issues.append(.init(
+                    path: "itemPatches[\(index)].itemID",
+                    message: "does not name an item in collection '\(patch.collectionID)'"
+                ))
+                continue
+            }
+            grouped[patch.collectionID, default: []].append(patch)
+        }
+        guard issues.isEmpty else {
+            throw ExtensionValidationError(issues: issues)
+        }
+        for (collectionID, patches) in grouped {
+            controllersByID[collectionID]?.applyItemPatches(patches)
+        }
+        contentRevision += 1
     }
 
     private func shouldFailClosed(after error: Error) -> Bool {
@@ -485,6 +688,7 @@ final class WorkspaceNavigatorCollectionViewController:
     let collectionID: String
 
     private let collection: ExtensionWorkspaceNavigatorCollection
+    private let itemIDs: Set<String>
     private let renderContent: ContentRenderer
     private let onActivation: ActivationHandler
     private let onRenderFailure: RenderFailureHandler
@@ -492,6 +696,8 @@ final class WorkspaceNavigatorCollectionViewController:
     private var roots: [WorkspaceNavigatorCollectionNode] = []
     private var nodesByItemID: [String: WorkspaceNavigatorCollectionNode] = [:]
     private var gridRows: [WorkspaceNavigatorGridRow] = []
+    private var gridRowByItemID: [String: Int] = [:]
+    private var contentOverrides: [String: ExtensionNode] = [:]
     private var selectedGridItemID: String?
     private var suppressSelectionCallback = false
 
@@ -540,6 +746,7 @@ final class WorkspaceNavigatorCollectionViewController:
     ) {
         collectionID = collection.id
         self.collection = collection
+        itemIDs = Set(collection.items.map(\.id))
         self.restoredState = restoredState
         self.renderContent = renderContent
         self.onActivation = onActivation
@@ -633,6 +840,33 @@ final class WorkspaceNavigatorCollectionViewController:
         suppressSelectionCallback = false
     }
 
+    func containsItem(_ itemID: String) -> Bool {
+        itemIDs.contains(itemID)
+    }
+
+    func applyItemPatches(_ patches: [ExtensionWorkspaceNavigatorItemPatch]) {
+        for patch in patches {
+            contentOverrides[patch.itemID] = patch.content
+        }
+        if isGrid {
+            let rows = IndexSet(patches.compactMap { gridRowByItemID[$0.itemID] })
+            tableView.reloadData(
+                forRowIndexes: rows,
+                columnIndexes: IndexSet(integer: 0)
+            )
+            return
+        }
+        let rows = IndexSet(patches.compactMap { patch in
+            guard let node = nodesByItemID[patch.itemID] else { return nil }
+            let row = outlineView.row(forItem: node)
+            return row >= 0 ? row : nil
+        })
+        outlineView.reloadData(
+            forRowIndexes: rows,
+            columnIndexes: IndexSet(integer: 0)
+        )
+    }
+
     private var isGrid: Bool {
         if case .grid = collection.layout { return true }
         return false
@@ -692,9 +926,14 @@ final class WorkspaceNavigatorCollectionViewController:
     private func appendGridItems(_ items: [ExtensionWorkspaceNavigatorItem]) {
         guard !items.isEmpty else { return }
         for start in stride(from: 0, to: items.count, by: gridColumnCount) {
-            gridRows.append(.items(Array(
+            let row = Array(
                 items[start..<min(start + gridColumnCount, items.count)]
-            )))
+            )
+            let rowIndex = gridRows.count
+            for item in row {
+                gridRowByItemID[item.id] = rowIndex
+            }
+            gridRows.append(.items(row))
         }
     }
 
@@ -913,7 +1152,7 @@ final class WorkspaceNavigatorCollectionViewController:
                 "workspace.navigator.section.\(collectionID).\(section.id)"
             )
         case .item(let item):
-            content = item.content
+            content = contentOverrides[item.id] ?? item.content
             host.setAccessibilityIdentifier(
                 "workspace.navigator.item.\(collectionID).\(item.id)"
             )
@@ -961,7 +1200,7 @@ final class WorkspaceNavigatorCollectionViewController:
         host.identifier = identifier
         do {
             try host.install(
-                gridRows[row],
+                gridRows[row].replacingContent(using: contentOverrides),
                 collectionID: collectionID,
                 columns: gridColumnCount,
                 selectedItemID: selectedGridItemID,
@@ -1026,6 +1265,24 @@ private enum WorkspaceNavigatorGridRow {
     func contains(_ itemID: String) -> Bool {
         guard case .items(let items) = self else { return false }
         return items.contains { $0.id == itemID }
+    }
+
+    func replacingContent(using overrides: [String: ExtensionNode]) -> Self {
+        guard case .items(let items) = self else { return self }
+        return .items(items.map { item in
+            guard let content = overrides[item.id] else { return item }
+            return ExtensionWorkspaceNavigatorItem(
+                id: item.id,
+                sectionID: item.sectionID,
+                parentID: item.parentID,
+                content: content,
+                accessibilityLabel: item.accessibilityLabel,
+                activation: item.activation,
+                isEnabled: item.isEnabled,
+                isSelected: item.isSelected,
+                isExpanded: item.isExpanded
+            )
+        })
     }
 
     var firstItemID: String? {

@@ -96,6 +96,7 @@ struct ExtensionLocalizationResolver: Sendable {
             title: string(navigator.title),
             root: workspaceNavigatorNode(navigator.root),
             loadActionID: navigator.loadActionID,
+            eventActionID: navigator.eventActionID,
             preferredWidth: navigator.preferredWidth
         )
     }
@@ -181,6 +182,13 @@ struct ExtensionLocalizationResolver: Sendable {
             requestID: response.requestID,
             navigatorID: response.navigatorID,
             navigator: response.navigator.map(workspaceNavigator),
+            itemPatches: response.itemPatches?.map {
+                ExtensionWorkspaceNavigatorItemPatch(
+                    collectionID: $0.collectionID,
+                    itemID: $0.itemID,
+                    content: node($0.content)
+                )
+            },
             message: optional(response.message),
             error: optional(response.error)
         )

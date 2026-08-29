@@ -305,6 +305,931 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: host.view), [])
     }
 
+    func testWorkspaceNavigatorCoalescesLiveSessionEdgesIntoTargetedRowPatches() throws {
+        let firstSession = SessionID()
+        let secondSession = SessionID()
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .outline,
+                items: [
+                    .init(
+                        id: "session-row",
+                        content: .status("Idle", role: .neutral),
+                        activation: .destination(.session(
+                            id: firstSession.uuidString,
+                            projectID: nil
+                        ))
+                    )
+                ]
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.result = .success(.init(
+            requestID: "event-response",
+            navigatorID: navigator.id,
+            itemPatches: [.init(
+                collectionID: "sessions",
+                itemID: "session-row",
+                content: .status("Running", role: .positive)
+            )]
+        ))
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("valid live patch became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        host.view.layoutSubtreeIfNeeded()
+        let outline = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedOutlineView }.first
+        )
+        _ = outline.view(atColumn: 0, row: 0, makeIfNecessary: true)
+
+        host.sessionDidChange(firstSession)
+        host.sessionDidChange(secondSession)
+        host.sessionDidChange(firstSession)
+
+        let dispatched = expectation(description: "coalesced navigator event")
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.count, 1)
+            XCTAssertEqual(router.invocations.first?.actionID, "session-event")
+            do {
+                let value = try XCTUnwrap(router.invocations.first?.value)
+                let event = try ExtensionWorkspaceNavigatorHostEvent(actionValue: value)
+                XCTAssertEqual(
+                    Set(event.sessionIDs),
+                    Set([
+                        firstSession.uuidString.lowercased(),
+                        secondSession.uuidString.lowercased()
+                    ])
+                )
+            } catch {
+                XCTFail("could not decode live navigator event: \(error)")
+            }
+            XCTAssertTrue(
+                self.descendants(in: host.view).compactMap {
+                    ($0 as? NSTextField)?.stringValue
+                }.contains("Running")
+            )
+            XCTAssertTrue(
+                self.descendants(in: host.view).compactMap {
+                    $0 as? ThemedOutlineView
+                }.first === outline,
+                "content patches must retain the virtualized collection host"
+            )
+            dispatched.fulfill()
+        }
+        wait(for: [dispatched], timeout: 1)
+    }
+
+    func testWorkspaceNavigatorLivePatchWithUnknownTargetFailsClosed() {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .list,
+                items: [.init(id: "known", content: .text("Known", role: .body))]
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.result = .success(.init(
+            requestID: "event-response",
+            navigatorID: navigator.id,
+            itemPatches: [.init(
+                collectionID: "sessions",
+                itemID: "unknown",
+                content: .text("Unknown", role: .body)
+            )]
+        ))
+        let unavailable = expectation(description: "invalid patch fails closed")
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { unavailable.fulfill() }
+        )
+        _ = host.view
+        host.sessionDidChange(SessionID())
+
+        wait(for: [unavailable], timeout: 1)
+    }
+
+    func testWorkspaceNavigatorLiveEdgeStaysVirtualAtMaximumDocumentAndBatchSize() throws {
+        let sessionIDs = (0..<ExtensionWorkspaceNavigatorHostEvent.maximumSessionIDs).map { _ in
+            SessionID()
+        }
+        let items = (0..<ExtensionWorkspaceNavigator.maximumItems).map { index in
+            ExtensionWorkspaceNavigatorItem(
+                id: "session-\(index)",
+                content: .status("Idle", role: .neutral)
+            )
+        }
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "stress",
+            title: "Stress",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .list,
+                items: items
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.result = .success(.init(
+            requestID: "stress-response",
+            navigatorID: navigator.id,
+            itemPatches: (0..<ExtensionWorkspaceNavigator.maximumItemPatches).map { index in
+                .init(
+                    collectionID: "sessions",
+                    itemID: "session-\(index)",
+                    content: .status("Running", role: .positive)
+                )
+            }
+        ))
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("bounded stress navigator became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 400)
+        host.view.layoutSubtreeIfNeeded()
+        let outline = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedOutlineView }.first
+        )
+
+        sessionIDs.forEach(host.sessionDidChange)
+
+        let dispatched = expectation(description: "maximum live edge batch")
+        DispatchQueue.main.async {
+            XCTAssertEqual(outline.numberOfRows, ExtensionWorkspaceNavigator.maximumItems)
+            XCTAssertEqual(router.invocations.count, 1)
+            do {
+                let value = try XCTUnwrap(router.invocations.first?.value)
+                XCTAssertEqual(
+                    try ExtensionWorkspaceNavigatorHostEvent(actionValue: value).sessionIDs.count,
+                    ExtensionWorkspaceNavigatorHostEvent.maximumSessionIDs
+                )
+            } catch {
+                XCTFail("could not decode stress event: \(error)")
+            }
+            XCTAssertLessThan(
+                self.descendants(in: host.view).filter {
+                    $0.accessibilityIdentifier().hasPrefix("workspace.navigator.item.sessions.")
+                }.count,
+                ExtensionWorkspaceNavigator.maximumItemPatches,
+                "a live batch must not materialize every patched or document row"
+            )
+            dispatched.fulfill()
+        }
+        wait(for: [dispatched], timeout: 1)
+    }
+
+    func testWorkspaceNavigatorWithoutEventActionIgnoresLiveSessionEdges() {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "static",
+            title: "Static",
+            root: .content(.text("Static", role: .body))
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("static navigator became unavailable") }
+        )
+        _ = host.view
+        host.sessionDidChange(SessionID())
+
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testWorkspaceSidebarForwardsLiveEdgesOnlyWhileExtensionNavigatorIsSelected() {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Idle", role: .neutral)),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let container = WorkspaceSidebarContainerViewController(
+            nativeController: ProjectSidebarViewController(),
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil }
+        )
+        _ = container.view
+        container.sessionDidChange(SessionID())
+        XCTAssertTrue(router.invocations.isEmpty)
+
+        container.activate(.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: navigator.id
+        ))
+        container.sessionDidChange(SessionID())
+
+        let dispatched = expectation(description: "selected navigator receives live edge")
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.map(\.actionID), ["session-event"])
+            container.activate(.native)
+            container.sessionDidChange(SessionID())
+            XCTAssertEqual(router.invocations.count, 1)
+            dispatched.fulfill()
+        }
+        wait(for: [dispatched], timeout: 1)
+    }
+
+    func testWorkspaceNavigatorDrainsLaterEventBatchesOneAtATime() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Idle", role: .neutral)),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.defersCompletion = true
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("bounded event batches became unavailable") }
+        )
+        _ = host.view
+        let sessionIDs = (0..<(ExtensionWorkspaceNavigatorHostEvent.maximumSessionIDs + 3))
+            .map { _ in SessionID() }
+        sessionIDs.forEach(host.sessionDidChange)
+
+        let drained = expectation(description: "later event batch drains")
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.count, 1)
+            router.defersCompletion = false
+            router.completeDeferred(with: .success(.init(
+                requestID: "first-event",
+                navigatorID: navigator.id
+            )))
+            DispatchQueue.main.async {
+                XCTAssertEqual(router.invocations.count, 2)
+                do {
+                    let batches = try router.invocations.map { invocation in
+                        try ExtensionWorkspaceNavigatorHostEvent(
+                            actionValue: XCTUnwrap(invocation.value)
+                        ).sessionIDs
+                    }
+                    XCTAssertEqual(
+                        batches.map(\.count),
+                        [ExtensionWorkspaceNavigatorHostEvent.maximumSessionIDs, 3]
+                    )
+                    XCTAssertEqual(
+                        Set(batches.flatMap { $0 }),
+                        Set(sessionIDs.map { $0.uuidString.lowercased() })
+                    )
+                } catch {
+                    XCTFail("could not decode event batches: \(error)")
+                }
+                drained.fulfill()
+            }
+        }
+        wait(for: [drained], timeout: 1)
+    }
+
+    func testWorkspaceNavigatorQuiescesAndCatchesUpAcrossSettingsOverride() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Idle", role: .neutral)),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.defersCompletion = true
+        let container = WorkspaceSidebarContainerViewController(
+            nativeController: ProjectSidebarViewController(),
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil }
+        )
+        _ = container.view
+        container.activate(.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: navigator.id
+        ))
+        let first = SessionID()
+        let whileInFlight = SessionID()
+        let whileHidden = SessionID()
+        container.sessionDidChange(first)
+
+        let caughtUp = expectation(description: "settings catch-up batch")
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.count, 1)
+            container.sessionDidChange(whileInFlight)
+            container.setSettingsOverride(true)
+            container.sessionDidChange(whileHidden)
+            router.defersCompletion = false
+            router.completeDeferred(with: .success(.init(
+                requestID: "first-event",
+                navigatorID: navigator.id
+            )))
+            DispatchQueue.main.async {
+                XCTAssertEqual(
+                    router.invocations.count,
+                    1,
+                    "Settings must not start another extension process request"
+                )
+                container.setSettingsOverride(false)
+                DispatchQueue.main.async {
+                    XCTAssertEqual(router.invocations.count, 2)
+                    do {
+                        let value = try XCTUnwrap(router.invocations.last?.value)
+                        let event = try ExtensionWorkspaceNavigatorHostEvent(actionValue: value)
+                        XCTAssertEqual(
+                            Set(event.sessionIDs),
+                            Set([
+                                first.uuidString.lowercased(),
+                                whileInFlight.uuidString.lowercased(),
+                                whileHidden.uuidString.lowercased()
+                            ])
+                        )
+                    } catch {
+                        XCTFail("could not decode Settings catch-up: \(error)")
+                    }
+                    caughtUp.fulfill()
+                }
+            }
+        }
+        wait(for: [caughtUp], timeout: 1)
+    }
+
+    func testWorkspaceNavigatorSettingsCatchUpSurvivesProcessGenerationReplacement() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Idle", role: .neutral)),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let container = WorkspaceSidebarContainerViewController(
+            nativeController: ProjectSidebarViewController(),
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil }
+        )
+        _ = container.view
+        container.activate(.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: navigator.id
+        ))
+        container.setSettingsOverride(true)
+        let beforeReplacement = SessionID()
+        let afterReplacement = SessionID()
+        container.sessionDidChange(beforeReplacement)
+        router.inventory = .init(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            extensionName: router.inventory.extensionName,
+            processGeneration: "generation-2",
+            navigator: navigator
+        )
+        container.refreshAvailability()
+        container.sessionDidChange(afterReplacement)
+        container.setSettingsOverride(false)
+
+        let replayed = expectation(description: "replacement generation receives catch-up")
+        DispatchQueue.main.async {
+            XCTAssertEqual(
+                container.children.compactMap {
+                    $0 as? WorkspaceNavigatorHostViewController
+                }.first?.processGeneration,
+                "generation-2"
+            )
+            XCTAssertEqual(router.invocations.count, 1)
+            do {
+                let value = try XCTUnwrap(router.invocations.first?.value)
+                let event = try ExtensionWorkspaceNavigatorHostEvent(actionValue: value)
+                XCTAssertEqual(
+                    Set(event.sessionIDs),
+                    Set([
+                        beforeReplacement.uuidString.lowercased(),
+                        afterReplacement.uuidString.lowercased()
+                    ])
+                )
+            } catch {
+                XCTFail("could not decode replacement catch-up: \(error)")
+            }
+            replayed.fulfill()
+        }
+        wait(for: [replayed], timeout: 1)
+    }
+
+    func testWorkspaceNavigatorReplacementLoadsBeforeSettingsCatchUp() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .list,
+                items: [.init(id: "known", content: .status("Idle", role: .neutral))]
+            )),
+            loadActionID: "load",
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.defersCompletion = true
+        let container = WorkspaceSidebarContainerViewController(
+            nativeController: ProjectSidebarViewController(),
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil }
+        )
+        _ = container.view
+        container.setSettingsOverride(true)
+        container.activate(.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: navigator.id
+        ))
+        container.sessionDidChange(SessionID())
+        container.refreshDocument()
+        XCTAssertTrue(router.invocations.isEmpty, "Settings must quiesce load actions")
+        router.inventory = .init(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            extensionName: router.inventory.extensionName,
+            processGeneration: "generation-2",
+            navigator: navigator
+        )
+        container.refreshAvailability()
+        container.setSettingsOverride(false)
+
+        let host = try XCTUnwrap(
+            container.children.compactMap {
+                $0 as? WorkspaceNavigatorHostViewController
+            }.first
+        )
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        host.view.layoutSubtreeIfNeeded()
+        let outline = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedOutlineView }.first
+        )
+        _ = outline.view(atColumn: 0, row: 0, makeIfNecessary: true)
+
+        let applied = expectation(description: "catch-up applies after replacement load")
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.map(\.actionID), ["load"])
+            router.defersCompletion = false
+            router.result = .success(.init(
+                requestID: "fresh-event",
+                navigatorID: navigator.id,
+                itemPatches: [.init(
+                    collectionID: "sessions",
+                    itemID: "known",
+                    content: .status("Fresh", role: .positive)
+                )]
+            ))
+            router.completeDeferred(with: .success(.init(
+                requestID: "old-load",
+                navigatorID: navigator.id,
+                itemPatches: [.init(
+                    collectionID: "sessions",
+                    itemID: "known",
+                    content: .status("Old", role: .neutral)
+                )]
+            )))
+            DispatchQueue.main.async {
+                XCTAssertEqual(
+                    router.invocations.map(\.actionID),
+                    ["load", "session-event"]
+                )
+                _ = outline.view(atColumn: 0, row: 0, makeIfNecessary: true)
+                let labels = self.descendants(in: host.view).compactMap {
+                    ($0 as? NSTextField)?.stringValue
+                }
+                XCTAssertTrue(labels.contains("Fresh"))
+                XCTAssertFalse(labels.contains("Old"))
+                applied.fulfill()
+            }
+        }
+        wait(for: [applied], timeout: 1)
+    }
+
+    func testWorkspaceNavigatorEventFailureFailsBackInsteadOfLosingTheEdge() {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Idle", role: .neutral)),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.result = .failure(ExtensionProcessError.actionTimedOut("session-event"))
+        let unavailable = expectation(description: "timed-out event fails back")
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { unavailable.fulfill() }
+        )
+        _ = host.view
+        host.sessionDidChange(SessionID())
+
+        wait(for: [unavailable], timeout: 1)
+    }
+
+    func testRejectedActionWithSynchronousCompletionIsAccountedExactlyOnce() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.button(
+                id: "refresh",
+                title: "Refresh",
+                role: .standard,
+                isEnabled: true
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.acceptsActions = false
+        router.completesRejectedActions = true
+        var unavailableCount = 0
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { unavailableCount += 1 }
+        )
+        _ = host.view
+        let button = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedButton }.first
+        )
+        button.performClick()
+        XCTAssertEqual(unavailableCount, 1)
+
+        router.acceptsActions = true
+        host.sessionDidChange(SessionID())
+        let dispatched = expectation(description: "event dispatch survives rejected action")
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.map(\.actionID), ["session-event"])
+            XCTAssertEqual(unavailableCount, 1)
+            dispatched.fulfill()
+        }
+        wait(for: [dispatched], timeout: 1)
+    }
+
+    func testWorkspaceNavigatorEventBacklogIsBoundedAndFailsBack() {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Idle", role: .neutral)),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.defersCompletion = true
+        let unavailable = expectation(description: "event backlog fails back")
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { unavailable.fulfill() }
+        )
+        _ = host.view
+        host.sessionDidChange(SessionID())
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.count, 1)
+            (0...WorkspaceNavigatorHostViewController.maximumPendingSessionIDs).forEach { _ in
+                host.sessionDidChange(SessionID())
+            }
+        }
+
+        wait(for: [unavailable], timeout: 1)
+        XCTAssertEqual(router.invocations.count, 1)
+    }
+
+    func testWorkspaceNavigatorMixedValidAndUnknownPatchesApplyNothing() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .list,
+                items: [.init(id: "known", content: .status("Idle", role: .neutral))]
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.result = .success(.init(
+            requestID: "mixed-patches",
+            navigatorID: navigator.id,
+            itemPatches: [
+                .init(
+                    collectionID: "sessions",
+                    itemID: "known",
+                    content: .status("Running", role: .positive)
+                ),
+                .init(
+                    collectionID: "sessions",
+                    itemID: "unknown",
+                    content: .status("Unknown", role: .negative)
+                )
+            ]
+        ))
+        let unavailable = expectation(description: "mixed patches fail atomically")
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { unavailable.fulfill() }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        host.view.layoutSubtreeIfNeeded()
+        let outline = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedOutlineView }.first
+        )
+        _ = outline.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        host.sessionDidChange(SessionID())
+
+        wait(for: [unavailable], timeout: 1)
+        let labels = descendants(in: host.view).compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertTrue(labels.contains("Idle"))
+        XCTAssertFalse(labels.contains("Running"))
+    }
+
+    func testWorkspaceNavigatorAppliesTargetedGridItemPatch() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .grid(columns: 2),
+                items: [
+                    .init(id: "first", content: .status("Idle", role: .neutral)),
+                    .init(id: "second", content: .status("Waiting", role: .neutral))
+                ]
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.result = .success(.init(
+            requestID: "grid-patch",
+            navigatorID: navigator.id,
+            itemPatches: [.init(
+                collectionID: "sessions",
+                itemID: "first",
+                content: .status("Running", role: .positive)
+            )]
+        ))
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("valid grid patch became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        host.view.layoutSubtreeIfNeeded()
+        let table = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedTableView }.first
+        )
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        host.sessionDidChange(SessionID())
+
+        let applied = expectation(description: "grid item patch")
+        DispatchQueue.main.async {
+            let labels = self.descendants(in: host.view).compactMap {
+                ($0 as? NSTextField)?.stringValue
+            }
+            XCTAssertTrue(labels.contains("Running"))
+            XCTAssertTrue(labels.contains("Waiting"))
+            applied.fulfill()
+        }
+        wait(for: [applied], timeout: 1)
+    }
+
+    func testNewerActionPatchCausesOlderEventPatchToRetry() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .list,
+                items: [.init(
+                    id: "known",
+                    content: .status("Idle", role: .neutral),
+                    activation: .action(id: "user-action")
+                )]
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.defersCompletion = true
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("ordered patches became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        host.view.layoutSubtreeIfNeeded()
+        let outline = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedOutlineView }.first
+        )
+        _ = outline.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        host.sessionDidChange(SessionID())
+
+        let retried = expectation(description: "stale event patch retried")
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.map(\.actionID), ["session-event"])
+            router.defersCompletion = false
+            router.result = .success(.init(
+                requestID: "user-patch",
+                navigatorID: navigator.id,
+                itemPatches: [.init(
+                    collectionID: "sessions",
+                    itemID: "known",
+                    content: .status("User", role: .positive)
+                )]
+            ))
+            outline.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            router.result = .success(.init(
+                requestID: "fresh-event",
+                navigatorID: navigator.id,
+                itemPatches: [.init(
+                    collectionID: "sessions",
+                    itemID: "known",
+                    content: .status("Fresh", role: .positive)
+                )]
+            ))
+            router.completeDeferred(with: .success(.init(
+                requestID: "old-event",
+                navigatorID: navigator.id,
+                itemPatches: [.init(
+                    collectionID: "sessions",
+                    itemID: "known",
+                    content: .status("Stale", role: .negative)
+                )]
+            )))
+            DispatchQueue.main.async {
+                XCTAssertEqual(
+                    router.invocations.map(\.actionID),
+                    ["session-event", "user-action", "session-event"]
+                )
+                let labels = self.descendants(in: host.view).compactMap {
+                    ($0 as? NSTextField)?.stringValue
+                }
+                XCTAssertTrue(labels.contains("Fresh"))
+                XCTAssertFalse(labels.contains("Stale"))
+                retried.fulfill()
+            }
+        }
+        wait(for: [retried], timeout: 1)
+    }
+
+    func testStaleEventRetryCannotOverflowPendingBacklog() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .list,
+                items: [.init(
+                    id: "known",
+                    content: .status("Idle", role: .neutral),
+                    activation: .action(id: "user-action")
+                )]
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.defersCompletion = true
+        let unavailable = expectation(description: "stale retry overflow fails back")
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { unavailable.fulfill() }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        host.view.layoutSubtreeIfNeeded()
+        let outline = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedOutlineView }.first
+        )
+        _ = outline.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        host.sessionDidChange(SessionID())
+
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.map(\.actionID), ["session-event"])
+            (0..<WorkspaceNavigatorHostViewController.maximumPendingSessionIDs).forEach { _ in
+                host.sessionDidChange(SessionID())
+            }
+            router.defersCompletion = false
+            router.result = .success(.init(
+                requestID: "user-patch",
+                navigatorID: navigator.id,
+                itemPatches: [.init(
+                    collectionID: "sessions",
+                    itemID: "known",
+                    content: .status("User", role: .positive)
+                )]
+            ))
+            outline.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+            router.completeDeferred(with: .success(.init(
+                requestID: "stale-event",
+                navigatorID: navigator.id
+            )))
+        }
+
+        wait(for: [unavailable], timeout: 1)
+    }
+
+    func testEventWaitsForOlderOrdinaryActionAndAppliesLast() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .list,
+                items: [.init(
+                    id: "known",
+                    content: .status("Idle", role: .neutral),
+                    activation: .action(id: "user-action")
+                )]
+            )),
+            eventActionID: "session-event"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.defersCompletion = true
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("ordered action and event became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        host.view.layoutSubtreeIfNeeded()
+        let outline = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedOutlineView }.first
+        )
+        _ = outline.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        outline.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        host.sessionDidChange(SessionID())
+
+        let applied = expectation(description: "event applies after older action")
+        DispatchQueue.main.async {
+            XCTAssertEqual(router.invocations.map(\.actionID), ["user-action"])
+            router.defersCompletion = false
+            router.result = .success(.init(
+                requestID: "fresh-event",
+                navigatorID: navigator.id,
+                itemPatches: [.init(
+                    collectionID: "sessions",
+                    itemID: "known",
+                    content: .status("Fresh", role: .positive)
+                )]
+            ))
+            router.completeDeferred(with: .success(.init(
+                requestID: "old-action",
+                navigatorID: navigator.id,
+                itemPatches: [.init(
+                    collectionID: "sessions",
+                    itemID: "known",
+                    content: .status("Old", role: .neutral)
+                )]
+            )))
+            DispatchQueue.main.async {
+                XCTAssertEqual(
+                    router.invocations.map(\.actionID),
+                    ["user-action", "session-event"]
+                )
+                let labels = self.descendants(in: host.view).compactMap {
+                    ($0 as? NSTextField)?.stringValue
+                }
+                XCTAssertTrue(labels.contains("Fresh"))
+                XCTAssertFalse(labels.contains("Old"))
+                applied.fulfill()
+            }
+        }
+        wait(for: [applied], timeout: 1)
+    }
+
     func testWorkspaceNavigatorSelectionNoneStillActivatesWithoutRetainingSelection()
         throws
     {
@@ -5886,6 +6811,7 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
     var invocations: [Invocation] = []
     var result: Result<ExtensionWorkspaceNavigatorActionResponse, Error>
     var acceptsActions = true
+    var completesRejectedActions = false
     var defersCompletion = false
     private var deferredCompletions: [(
         Result<ExtensionWorkspaceNavigatorActionResponse, Error>
@@ -5936,7 +6862,12 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
             Result<ExtensionWorkspaceNavigatorActionResponse, Error>
         ) -> Void
     ) -> Bool {
-        guard acceptsActions else { return false }
+        guard acceptsActions else {
+            if completesRejectedActions {
+                completion(.failure(ExtensionProcessError.notRunning))
+            }
+            return false
+        }
         invocations.append(.init(actionID: actionID, value: value, context: context))
         if defersCompletion {
             deferredCompletions.append(completion)
