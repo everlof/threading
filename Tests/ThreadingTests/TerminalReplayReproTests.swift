@@ -38,17 +38,17 @@ final class TerminalReplayReproTests: XCTestCase {
     private var window: NSWindow?
     private var controller: AgentSessionViewController?
 
-    override func tearDown() {
+    private func clearReplaySurface() {
         window?.orderOut(nil)
         window = nil
         controller = nil
-        super.tearDown()
     }
 
     func testReplaysRecordedStreamsIntoTheProductTerminal() throws {
         guard let list = ProcessInfo.processInfo.environment[Fixture.replayKey], !list.isEmpty else {
             throw XCTSkip("set \(Fixture.replayKey) to one or more record_pty.py .jsonl files")
         }
+        defer { clearReplaySurface() }
         try FileManager.default.createDirectory(
             at: Fixture.outputDirectory,
             withIntermediateDirectories: true
