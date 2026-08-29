@@ -103,7 +103,7 @@ published="$(gh release list --repo "$REPO" --limit 200 \
     --jq '.[] | select(.isDraft | not) | "\(.isPrerelease)\t\(.tagName)"')" \
     || fail "could not list the published releases of $REPO"
 
-release_version_is_publishable "$CHANNEL" "$VERSION" <<< "$published" \
+release_version_is_publishable "$CHANNEL" "$VERSION" "$TAG" <<< "$published" \
     || fail "$TAG cannot be published at this version — see the reason above"
 
 # MARK: - Build, notarize, appcast

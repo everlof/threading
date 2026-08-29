@@ -28,13 +28,19 @@ final class AppSettings {
     }
 
     private let defaults: UserDefaults
+    /// A distributed channel currently withholds Remote Access. Keep that policy beside the
+    /// persisted master switch as well as in Settings: a developer may install a release over a
+    /// dev build whose switch was already on, and hiding the page cannot make that stored `true`
+    /// safe. Injected so the shipping case is testable from a hosted dev test bundle.
+    private let remoteAccessIsOffered: Bool
     private let workspaceNavigatorPersistence:
         RecoverableDefaultsStore<WorkspaceNavigatorSelection>
     private var cachedWorkspaceNavigatorSelection: WorkspaceNavigatorSelection
 
     init(
         defaults: UserDefaults = .standard,
-        legacyPreferences: [String: Any] = [:]
+        legacyPreferences: [String: Any] = [:],
+        remoteAccessIsOffered: Bool = AppInfo.buildChannel.offersRemoteAccess
     ) {
         let workspaceNavigatorPersistence =
             RecoverableDefaultsStore<WorkspaceNavigatorSelection>(
@@ -44,6 +50,7 @@ final class AppSettings {
                 sizePolicy: .compactMetadata
             )
         self.defaults = defaults
+        self.remoteAccessIsOffered = remoteAccessIsOffered
         self.workspaceNavigatorPersistence = workspaceNavigatorPersistence
         self.cachedWorkspaceNavigatorSelection = workspaceNavigatorPersistence.load(
             defaultValue: .native,
@@ -54,6 +61,7 @@ final class AppSettings {
         migrateClosingConfirmation()
         migrateAttentionAlertSoundSwitch()
         migrateRemoteAccessConnectionMode()
+        disableRemoteAccessWhenUnavailable()
     }
 
     // MARK: - Settings
@@ -1109,9 +1117,15 @@ final class AppSettings {
     /// default: even the loopback-only first milestone exposes interactive terminal access to
     /// any process holding its private link, so it exists only when the user turns it on.
     var remoteAccessEnabled: Bool {
-        get { AppSettingDefinitions.remoteAccessEnabled.read(from: defaults) ?? false }
+        get {
+            remoteAccessIsOffered
+                && (AppSettingDefinitions.remoteAccessEnabled.read(from: defaults) ?? false)
+        }
         set {
-            AppSettingDefinitions.remoteAccessEnabled.write(newValue, to: defaults)
+            AppSettingDefinitions.remoteAccessEnabled.write(
+                remoteAccessIsOffered && newValue,
+                to: defaults
+            )
         }
     }
 
@@ -1483,6 +1497,22 @@ final class AppSettings {
         }
         for key in RetiredRemoteAccessKeys.all { defaults.removeObject(forKey: key) }
         marker.write(true, to: defaults, notifying: false)
+    }
+
+    /// A release installed over a development build inherits that build's defaults domain.
+    /// Clear an old opt-in rather than merely masking it, so a later channel that offers Remote
+    /// Access cannot silently resurrect a server the person last enabled in an experimental
+    /// build. Writes no value for the ordinary already-off case.
+    private func disableRemoteAccessWhenUnavailable() {
+        guard !remoteAccessIsOffered,
+              AppSettingDefinitions.remoteAccessEnabled.read(from: defaults) == true else {
+            return
+        }
+        AppSettingDefinitions.remoteAccessEnabled.write(
+            false,
+            to: defaults,
+            notifying: false
+        )
     }
 
     /// The stored values the retired connection mode left behind, named once so the migration

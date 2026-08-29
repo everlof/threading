@@ -3,10 +3,9 @@ import XCTest
 
 /// Remote Access is present in the source but withheld from distributed builds.
 ///
-/// The whole gate rests on one fact: `AppSettings.remoteAccessEnabled` is `absence: .falseValue`
-/// and every runtime path guards on it, so withholding the single surface that can turn it on
-/// withholds the feature. These tests pin both halves of that, because either one drifting alone
-/// ships a door that opens onto nothing or a feature nobody meant to distribute.
+/// The gate is enforced twice: distributed channels withhold the page and the persisted switch
+/// clamps off at runtime. Both matter because a release can be installed over a development
+/// build whose switch was already on.
 final class RemoteAccessChannelGateTests: XCTestCase {
 
     // MARK: - The channel decides
@@ -61,5 +60,42 @@ final class RemoteAccessChannelGateTests: XCTestCase {
     /// stop withholding anything: the feature would simply be on, with no way to turn it off.
     func testRemoteAccessIsOffUntilSomethingTurnsItOn() {
         XCTAssertEqual(AppSettingDefinitions.remoteAccessEnabled.absence.value, false)
+    }
+
+    @MainActor
+    func testAShippingBuildClearsADevelopmentBuildsStoredOptIn() throws {
+        let suite = "RemoteAccessChannelGateTests.shipping.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: AppSettingDefinitions.remoteAccessEnabled.persistenceKey)
+
+        let settings = AppSettings(defaults: defaults, remoteAccessIsOffered: false)
+
+        XCTAssertFalse(settings.remoteAccessEnabled)
+        XCTAssertEqual(
+            defaults.object(
+                forKey: AppSettingDefinitions.remoteAccessEnabled.persistenceKey
+            ) as? Bool,
+            false,
+            "the stale opt-in must not resurrect when a later release offers the feature"
+        )
+    }
+
+    @MainActor
+    func testAShippingBuildRefusesToTurnTheMasterSwitchBackOn() throws {
+        let suite = "RemoteAccessChannelGateTests.refusal.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = AppSettings(defaults: defaults, remoteAccessIsOffered: false)
+
+        settings.remoteAccessEnabled = true
+
+        XCTAssertFalse(settings.remoteAccessEnabled)
+        XCTAssertEqual(
+            defaults.object(
+                forKey: AppSettingDefinitions.remoteAccessEnabled.persistenceKey
+            ) as? Bool,
+            false
+        )
     }
 }

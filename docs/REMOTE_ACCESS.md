@@ -1809,7 +1809,14 @@ a second certificate for the same address.
   denial produces an ordinary no-route error, which the phone tells apart from an absent host by
   the address it was aimed at, and reports as its own state with the Settings link.
 
-## Beta limitations
+## Distributed-build gate and beta limitations
+
+Remote Access is not offered by `release`, `beta` or `nightly` builds yet. Those channels remove
+the Settings destination and enforce the same decision below presentation: `AppSettings` clears
+and clamps the persisted master switch, and `RemoteAccessCoordinator` refuses to cross its final
+listener-start boundary. Clearing matters for a release installed over a development build whose
+experimental server had already been enabled. Ordinary uninjected `dev` builds retain the feature
+for development and connection-matrix testing.
 
 Hosted Direct is implemented but not production-deployed by this repository checkout. The
 checked-in Worker configuration contains a deliberately invalid D1 identifier, and the production

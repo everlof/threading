@@ -93,12 +93,17 @@ release_version_is_above() {
 # already served whichever channel it belongs to. What differs is who gets hurt when it does
 # not, which is why the two collisions are reported separately.
 release_version_is_publishable() {
-    local channel="${1:-}" version="${2:-}"
+    local channel="${1:-}" version="${2:-}" current_tag="${3:-}"
     local newest_stable="" newest_prerelease=""
     local is_prerelease tag description published_version
 
     while IFS=$'\t' read -r is_prerelease tag; do
         [[ -n "$tag" ]] || continue
+        # A publish is deliberately resumable. GitHub release creation and feed upload are
+        # separate remote writes, so the process can fail after the release exists but before
+        # appcast.xml lands beside it. Ignore only this exact tag on a retry; another tag that
+        # allocated the same version remains a collision and must still fail closed.
+        [[ -n "$current_tag" && "$tag" == "$current_tag" ]] && continue
         description="$(release_tag_describe "$tag" 2>/dev/null)" || continue
         read -r _ published_version <<< "$description"
         if [[ "$is_prerelease" == "true" ]]; then
@@ -145,9 +150,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     case "${1:-}" in
         describe) release_tag_describe "${2:-}" ;;
         compare) release_version_compare "${2:-}" "${3:-}" ;;
-        publishable) release_version_is_publishable "${2:-}" "${3:-}" ;;
+        publishable) release_version_is_publishable "${2:-}" "${3:-}" "${4:-}" ;;
         *)
-            printf 'usage: %s describe <tag> | compare <a> <b> | publishable <channel> <version> < releases\n' "$0" >&2
+            printf 'usage: %s describe <tag> | compare <a> <b> | publishable <channel> <version> [current-tag] < releases\n' "$0" >&2
             exit 2
             ;;
     esac
