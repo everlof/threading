@@ -68,6 +68,20 @@ assert_release_snapshot() {
         || fail "the worktree changed after release validation; commit and rerun"
 }
 
+assert_release_credentials() {
+    local current_signing_key
+
+    security find-identity -v -p codesigning \
+        | grep -q 'Developer ID Application.*(SMQ3E8Y57T)' \
+        || fail "no Developer ID Application certificate for team SMQ3E8Y57T"
+    xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
+        || fail "notarytool profile '$NOTARY_PROFILE' is unavailable"
+    current_signing_key="$("$sparkle_bin/generate_keys" -p --account "${THREADING_SPARKLE_ACCOUNT:-mjukis-threading}" 2>/dev/null)" \
+        || fail "the Threading Sparkle private key is unavailable"
+    [[ "$shipped_key" == "$current_signing_key" ]] \
+        || fail "the Sparkle private key does not match the public key shipped by the app"
+}
+
 workflow_was_disabled=0
 restore_release_workflow() {
     [[ $workflow_was_disabled -eq 1 ]] || return 0
@@ -142,13 +156,6 @@ if [[ -n "$local_tag_object" ]]; then
     fi
 fi
 
-say "Checking release credentials"
-security find-identity -v -p codesigning \
-    | grep -q 'Developer ID Application.*(SMQ3E8Y57T)' \
-    || fail "no Developer ID Application certificate for team SMQ3E8Y57T"
-xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 \
-    || fail "notarytool profile '$NOTARY_PROFILE' is unavailable"
-
 sparkle_bin="${THREADING_SPARKLE_BIN:-}"
 if [[ -z "$sparkle_bin" ]]; then
     sparkle_bin="$(ls -dt "$HOME"/Library/Developer/Xcode/DerivedData/Threading-*/SourcePackages/artifacts/sparkle/Sparkle/bin 2>/dev/null | head -1 || true)"
@@ -157,10 +164,8 @@ fi
     || fail "Sparkle's tools are unavailable — build once in Xcode or set THREADING_SPARKLE_BIN"
 shipped_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' "$ROOT/Sources/Threading/Resources/Info.plist")" \
     || fail "Info.plist carries no Sparkle public key"
-signing_key="$("$sparkle_bin/generate_keys" -p --account "${THREADING_SPARKLE_ACCOUNT:-mjukis-threading}" 2>/dev/null)" \
-    || fail "the Threading Sparkle private key is unavailable"
-[[ "$shipped_key" == "$signing_key" ]] \
-    || fail "the Sparkle private key does not match the public key shipped by the app"
+say "Checking release credentials"
+assert_release_credentials
 
 notes="$(release_notes_for_version "$VERSION" "$ROOT/CHANGELOG.md")"
 [[ -n "${notes//[[:space:]]/}" ]] || fail "CHANGELOG.md has no release notes for $VERSION"
@@ -185,6 +190,13 @@ say "Running the release quality gate before publishing refs"
 
 # Tests are long enough for another local process or chat to move the branch or edit the shared
 # checkout. Never substitute whatever HEAD happens to mean now for the commit preflighted above.
+assert_release_snapshot
+
+# Keychain items can be removed, locked, or replaced during the long test run. Recheck every
+# release credential immediately before the first public ref moves, and prove that this check did
+# not itself race a checkout change.
+say "Rechecking release credentials before publishing refs"
+assert_release_credentials
 assert_release_snapshot
 
 if [[ "$remote_branch_commit" != "$HEAD_COMMIT" ]]; then

@@ -47,6 +47,12 @@ class LocalReleaseDriverTests(unittest.TestCase):
         source = DRIVER.read_text()
         quality_gate = source.index('"$ROOT/scripts/ci.sh"')
         snapshot_check = source.index("assert_release_snapshot", quality_gate)
+        credential_recheck = source.index(
+            'say "Rechecking release credentials before publishing refs"'
+        )
+        second_snapshot_check = source.index(
+            "assert_release_snapshot", credential_recheck
+        )
         branch_push = source.index(
             'push_outer_ref "$HEAD_COMMIT:refs/heads/$RELEASE_BRANCH"'
         )
@@ -62,7 +68,9 @@ class LocalReleaseDriverTests(unittest.TestCase):
             source,
         )
         self.assertLess(quality_gate, snapshot_check)
-        self.assertLess(snapshot_check, branch_push)
+        self.assertLess(snapshot_check, credential_recheck)
+        self.assertLess(credential_recheck, second_snapshot_check)
+        self.assertLess(second_snapshot_check, branch_push)
         self.assertLess(disable, tag_push)
         self.assertLess(tag_push, publish)
         self.assertLess(publish, restore)
@@ -73,7 +81,19 @@ class LocalReleaseDriverTests(unittest.TestCase):
 
         self.assertIn('[[ "$current_commit" == "$HEAD_COMMIT" ]]', function)
         self.assertIn("status --porcelain=v1 --untracked-files=all", function)
-        self.assertGreaterEqual(source.count("assert_release_snapshot"), 3)
+        self.assertGreaterEqual(source.count("assert_release_snapshot"), 4)
+
+    def test_volatile_credentials_are_rechecked_before_the_first_ref_moves(self) -> None:
+        source = DRIVER.read_text()
+
+        self.assertGreaterEqual(source.count("assert_release_credentials"), 3)
+        credential_recheck = source.index(
+            'say "Rechecking release credentials before publishing refs"'
+        )
+        branch_push = source.index(
+            'push_outer_ref "$HEAD_COMMIT:refs/heads/$RELEASE_BRANCH"'
+        )
+        self.assertLess(credential_recheck, branch_push)
 
     def test_a_partial_remote_publish_is_retryable(self) -> None:
         source = PUBLISHER.read_text()
