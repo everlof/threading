@@ -288,6 +288,85 @@ final class MobileAccountDiscRenderTests: XCTestCase {
         XCTAssertLessThan(innerGap.alpha, 80, "a clear point between the five hours and the model")
     }
 
+    /// The login chip is drawn *inside* the disc, and this is the test that says why.
+    ///
+    /// A navigation bar clips its item at the item's own bounds, so the three-point overhang a
+    /// row's tile uses came out as a badge with a flat bottom — 13 points of 15, measured off a
+    /// simulator screenshot, and 9 at a wider one. Padding the item does not buy the room back.
+    /// An offscreen render clips at that same edge, so an overhang restored here fails exactly
+    /// the way the bar failed.
+    func testTheLoginChipIsDrawnWhollyInsideTheDisc() throws {
+        let disc = MobileAccountDisc(
+            identity: .resolve("claude"),
+            reading: MobileAccountUsageReading(
+                rings: [.init(id: "7d", fraction: 0.56)],
+                summary: "7d 56%"
+            ),
+            account: RemoteSessionAccountDTO(
+                name: "Vera Keller",
+                glyph: "V",
+                isEmoji: false,
+                hue: 0.72
+            )
+        )
+        let image = try render(disc)
+        try save(image, named: "account-disc-login-chip")
+
+        let chip = try chipBounds(in: image)
+        XCTAssertEqual(
+            chip.height,
+            MobileDesign.Size.accountChip,
+            accuracy: 1,
+            "the chip lost \(MobileDesign.Size.accountChip - chip.height) points off its bottom"
+        )
+        XCTAssertEqual(chip.width, MobileDesign.Size.accountChip, accuracy: 1)
+    }
+
+    /// The extent of the chip's own hue in the rendered disc, in points.
+    private func chipBounds(in image: UIImage) throws -> CGSize {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let width = cgImage.width
+        let height = cgImage.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var minX = width, maxX = -1, minY = height, maxY = -1
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                let red = CGFloat(bytes[offset]) / 255
+                let green = CGFloat(bytes[offset + 1]) / 255
+                let blue = CGFloat(bytes[offset + 2]) / 255
+                var hue: CGFloat = 0
+                var saturation: CGFloat = 0
+                var brightness: CGFloat = 0
+                UIColor(red: red, green: green, blue: blue, alpha: 1)
+                    .getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: nil)
+                guard (0.66...0.80).contains(hue), saturation > 0.35, brightness > 0.25 else {
+                    continue
+                }
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else {
+            throw XCTSkip("no chip was drawn at all")
+        }
+        return CGSize(
+            width: CGFloat(maxX - minX + 1) / scale,
+            height: CGFloat(maxY - minY + 1) / scale
+        )
+    }
+
     /// The mark must not grow into the innermost ring: at 16 points it ends 2 points short of it.
     func testTheMarkClearsTheInnermostRing() throws {
         let reading = MobileAccountUsageReading(

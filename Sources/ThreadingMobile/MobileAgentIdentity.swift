@@ -362,6 +362,12 @@ struct MobileAccountDisc: View {
     /// sends a session's account only when the chat runs somewhere other than the standard
     /// login, which is exactly when saying *which* login is worth a badge. Passing it here puts
     /// the disc in the bar under the same rule as the mark in a row.
+    ///
+    /// **Unlike a row's, this chip is drawn inside the disc rather than hanging off it.** A
+    /// navigation bar clips its item at the item's own bounds, so the row's three-point overhang
+    /// came out as a badge with a flat bottom — 13 points of 15, measured off the screen, and 9
+    /// at a wider overhang. Padding the item does not buy the room back; only staying inside the
+    /// frame does. `MobileSessionMark` keeps its overhang, because a row clips nothing.
     var account: RemoteSessionAccountDTO?
     @Environment(\.remoteTheme) private var theme
 
@@ -380,9 +386,11 @@ struct MobileAccountDisc: View {
         )
         .overlay(alignment: .bottomTrailing) {
             if let account {
-                let overhang = MobileAccountDiscChipOverhang.current
                 MobileAccountChip(account: account)
-                    .offset(x: overhang, y: overhang)
+                    .offset(
+                        x: MobileAccountDiscChipOverhang.current,
+                        y: MobileAccountDiscChipOverhang.current
+                    )
             }
         }
         .contentShape(Circle())
@@ -395,11 +403,13 @@ struct MobileAccountDisc: View {
 enum MobileAccountDiscChipOverhang {
     static var current: CGFloat {
 #if DEBUG
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_DISC_CHIP"] == "clear"
-            ? MobileDesign.Offset.accountChipDiscOverhang
-            : MobileDesign.Offset.accountChipOverhang
+        if let value = ProcessInfo.processInfo.environment["THREADING_MOBILE_DISC_CHIP"],
+           let points = Double(value) {
+            return CGFloat(points)
+        }
+        return MobileDesign.Offset.accountChipDiscOverhang
 #else
-        MobileDesign.Offset.accountChipOverhang
+        MobileDesign.Offset.accountChipDiscOverhang
 #endif
     }
 }

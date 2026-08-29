@@ -133,11 +133,10 @@ enum MobileDesign {
         /// How far the account chip hangs past the mark's corner. Flush inside the tile it covered
         /// the middle of the mark; hanging it out keeps the mark recognisable underneath.
         static let accountChipOverhang: CGFloat = 3
-        /// The same chip on the chat's toolbar disc, which has rings to protect where a row's
-        /// square tile had only a mark. Hung further out so it clears the arcs rather than
-        /// covering the reading they are there to give. **Scaffolding**, alongside
-        /// `MobileUsageMenuShape`: one of the two overhangs is being chosen from a picture.
-        static let accountChipDiscOverhang: CGFloat = 7
+        /// The same chip on the chat's toolbar disc. Flush with the disc's corner rather than
+        /// hanging past it: a navigation bar clips its item's own bounds, and every overhang
+        /// tried came back with a flat-bottomed badge. Flush is the whole circle.
+        static let accountChipDiscOverhang: CGFloat = 0
         /// How far the attention dot hangs past the mark's top-trailing corner so that its
         /// centre sits on the tile's edge — the midpoint of the corner arc, not the corner of the
         /// bounding box, which on a rounded tile floats the dot off the ink.
