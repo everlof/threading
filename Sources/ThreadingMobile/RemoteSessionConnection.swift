@@ -221,6 +221,10 @@ final class RemoteSessionConnection: ObservableObject {
     /// True once a mounted terminal has drawn this connection's output. A reconnect then has a
     /// screen worth keeping on display, and holds its replay until hydration completes.
     @Published private(set) var hasPresentedTerminalOutput = false
+    /// True while a reconnect keeps the previous screen on display with its replay held. The
+    /// surface dims and softens only then — an opening whose replay streams in live shows the
+    /// loader, not a blur over the text arriving behind it.
+    @Published private(set) var holdsPreviousScreen = false
     /// True once a hello has been answered: the next `.connecting` is a reconnect, not an
     /// opening, and is named as one.
     @Published private(set) var hasEverConnected = false
@@ -324,6 +328,7 @@ final class RemoteSessionConnection: ObservableObject {
                 // A view attaching mid-reconnect has no old screen to keep: give it the reset
                 // and everything held so far, and let hydration reveal the rest live.
                 holdsReplayForHydration = false
+                holdsPreviousScreen = false
                 var frame = Data([0x1b, 0x63])
                 frame.append(buffered)
                 presentTerminalOutput(frame, through: onTerminalOutput)
@@ -517,8 +522,10 @@ final class RemoteSessionConnection: ObservableObject {
         // in a single frame rather than going blank while the replay streams in.
         if surface == .terminal, hasPresentedTerminalOutput, onTerminalOutput != nil {
             holdsReplayForHydration = true
+            holdsPreviousScreen = true
         } else {
             holdsReplayForHydration = false
+            holdsPreviousScreen = false
             onTerminalOutput?(Data([0x1b, 0x63]))
         }
 
@@ -608,6 +615,7 @@ final class RemoteSessionConnection: ObservableObject {
             // The held replay belonged to a connection that is now over; the next one asks for
             // the ring again. The old screen stays as it is.
             holdsReplayForHydration = false
+            holdsPreviousScreen = false
             pendingTerminalOutput.removeAll(keepingCapacity: true)
         }
         viewportSettleTask?.cancel()
@@ -790,6 +798,7 @@ final class RemoteSessionConnection: ObservableObject {
     private func releaseHeldReplay() {
         guard holdsReplayForHydration else { return }
         holdsReplayForHydration = false
+        holdsPreviousScreen = false
         guard let onTerminalOutput else { return }
         var frame = Data([0x1b, 0x63])
         frame.append(pendingTerminalOutput)

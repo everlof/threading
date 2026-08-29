@@ -924,15 +924,16 @@ struct TerminalRemoteView: View {
     }
 
     /// A reconnect keeps the last screen on display — dimmed and softened under the loader —
-    /// until the held replay replaces it in one frame. A first opening has no screen yet, so
-    /// the loader stands on the terminal's own ground.
+    /// until the held replay replaces it in one frame, and the lock from the background does
+    /// the same over the live screen. An opening has no screen to keep: its replay streams in
+    /// behind the loader on the terminal's own ground, never behind a blur.
     private var holdsOldScreen: Bool {
-        isCatchingUp && connection.hasPresentedTerminalOutput
+        isCatchingUp && (connection.holdsPreviousScreen || connection.isAwaitingResume)
     }
 
     private var terminalPresentationOpacity: Double {
         guard isCatchingUp else { return 1 }
-        return connection.hasPresentedTerminalOutput ? SessionDetailMetrics.reconnectDim : 0
+        return holdsOldScreen ? SessionDetailMetrics.reconnectDim : 0
     }
 
     private var terminalBackground: Color {
