@@ -466,10 +466,12 @@ enum MCPToolCatalog {
       and they spend the receiving session's own usage — send conclusions and briefs, \
       sparingly, and never relay a message that itself arrived as a cross-session message.
 
-      watch_session gives you one notice when a sibling next settles — or exits, or stops at \
-      its usage limit — instead of calling list_sessions again and again while you wait; the \
-      notice arrives as a message and therefore spends a turn of this session's own usage, and \
-      a session that has already settled is refused rather than watched.
+      watch_session gives you one notice on a sibling's next activity edge instead of polling: \
+      a sibling with a turn in flight is watched until it settles, exits, or stops at its usage \
+      limit; a sibling already settled is watched until its next turn starts. The notice arrives \
+      as a message and therefore spends a turn of this session's own usage. The watch is one-shot, \
+      so re-arm it after every notice while coordinating a multi-chat wait; each arm snapshots \
+      and guards the current state as one operation, so a restart cannot slip through that arm.
 
       If you were forked as a side chat and asked to report back, list_sessions shows your \
       parent beside "side chat of"; send your conclusion there when the work is done. A \

@@ -234,20 +234,34 @@ The tool description and group instruction both carry the measured caveat from
 tool results, where models discard override-shaped instructions as injection — steer to add,
 never to countermand.
 
-## Watch, as one notice instead of polling
+## Watch, as one activity edge instead of polling
 
-`watch_session` arms a one-shot notice: when the named sibling next **settles**, Threading
-delivers a message saying so to the session that asked. Without it, a session waiting on a
-sibling's result can only call `list_sessions` again and again — each call spending a turn of
-its own usage to learn nothing, and the polling interval deciding how late the answer arrives.
+`watch_session` arms a one-shot notice on the named sibling's **next activity edge**. If the
+target has a turn in flight, Threading delivers when it settles; if the target is already
+settled, Threading delivers when its next turn starts. Without it, a session coordinating a
+sibling can only call `list_sessions` again and again — each call spending a turn of its own
+usage to learn nothing, and the polling interval deciding how late the answer arrives.
 
-**The boundary is the one the app already has.** `SessionWatchCenter` (Core/Control) watches the
-same `SessionActivityDidChange` edge out of `hasTurnInFlight` that `SessionArchiveScheduler`
-fires on — the agent's own turn report where a runtime gives one, the output heuristic where it
-does not — plus the two endings that are not a finished turn and are just as final for someone
-waiting on one: `.dormant` (the agent exited) and `.limitReached` (nothing runs there until the
+**The boundary is the one the app already has, in both directions.** `SessionWatchCenter`
+(Core/Control) watches `SessionActivityDidChange` across `hasTurnInFlight`: the agent's own turn
+report where a runtime gives one, the output heuristic where it does not. A watched turn also
+settles on the two endings that are not a finished answer and are just as final for someone
+waiting on it: `.dormant` (the agent exited) and `.limitReached` (nothing runs there until the
 window resets). A watch that ignored those would leave an agent waiting on a session that will
-never speak again, which is the failure the tool exists to prevent.
+never speak again.
+
+**Arming is the fail-closed seam.** The centre is main-actor isolated; it reads the target's
+`hasTurnInFlight` value and inserts a watch for the opposite edge without an `await` or queue hop
+between them. An edge can therefore happen before the snapshot or after the guard exists, never
+in the gap. The arm outcome says which edge it captured. A repeated arm returns the edge already
+held rather than inferring from a newer overview.
+
+This is what makes a wait over several chats safe without creating an unbounded subscription.
+After every notice, the caller re-arms that target: a chat that just settled is then guarded for
+restart while the other chats finish, and a chat that just restarted is guarded for settlement.
+If it changed twice before the caller re-armed, the fresh atomic snapshot captures its current
+phase; for the all-settled predicate, current phase is the fact that matters. Silence is never
+interpreted as continued idleness without a watch on that edge.
 
 **One-shot, in memory, bounded.** The watch is spent when it fires; re-arming is another call, and
 it lives only with the app run. With no `timeout_minutes`, the watch has no wall-clock expiry: it
@@ -256,11 +270,6 @@ caller asked for with a clock it did not ask for. A caller that needs a deadline
 positive finite number of minutes; that watch expires **with a notice saying so**. One session
 may hold at most `ControlWatchDefaults.maximumPerWatcher` (8), which bounds both memory and being
 woken because every delivered notice spends a turn of the watcher's own usage.
-
-**An already-settled target is refused, not watched** (`.targetAlreadySettled`, which is an
-outcome rather than a `ControlRefusal` — nothing was wrong with the ask). There is no edge left to
-wait for, and a watch armed on an idle session would fire on whatever it is next asked to do,
-which is not the work the caller was waiting on. The answer says to read `list_sessions` instead.
 
 **The notice is Threading speaking, and says so.** It carries its own frame —
 `[Session watch — Threading] “<title>” (<id>) …` — and deliberately **not** the
