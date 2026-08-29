@@ -1,0 +1,564 @@
+import Foundation
+import ThreadingExtensionKit
+
+struct ExtensionFactCell: Equatable, Hashable, Sendable {
+    let subject: ExtensionFactSubject
+    let key: ExtensionFactKey
+}
+
+enum ExtensionFactChange: Equatable, Sendable {
+    case exact(Set<ExtensionFactCell>)
+    case all
+}
+
+struct ExtensionFactsDidChange: AppEvent {
+    static let name = Notification.Name("extensionFactsDidChange")
+    let change: ExtensionFactChange
+}
+
+enum ExtensionFactResolutionSource: Equatable, Hashable, Sendable {
+    case host
+    case `extension`(identifier: String, processGeneration: String)
+}
+
+struct ExtensionResolvedFact: Equatable, Sendable {
+    let fact: ExtensionFact
+    let definition: ExtensionFactDefinition
+    let source: ExtensionFactResolutionSource
+}
+
+enum ExtensionFactRegistryError: Error, Equatable, LocalizedError {
+    case invalidDefinition(index: Int, reason: String)
+    case invalidFact(index: Int, reason: String)
+    case duplicateDefinition(ExtensionFactKey)
+    case duplicateFact(ExtensionFactCell)
+    case reservedHostKey(ExtensionFactKey)
+    case hostKeyRequired(ExtensionFactKey)
+    case conflictingDefinition(ExtensionFactKey)
+    case missingDefinition(ExtensionFactKey)
+    case incompatibleFact(ExtensionFactKey)
+    case factOutsideReplacementScope(ExtensionFactSubject)
+    case tooManyDefinitions(maximum: Int)
+    case tooManyReplacementSubjects(maximum: Int)
+    case tooManyReplacementFacts(maximum: Int)
+    case tooManyFactsForSubject(maximum: Int)
+    case tooManyFactsForGeneration(maximum: Int)
+    case tooManyResolvedFactsForSubject(maximum: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidDefinition(let index, let reason):
+            "Invalid fact definition at index \(index): \(reason)"
+        case .invalidFact(let index, let reason):
+            "Invalid fact at index \(index): \(reason)"
+        case .duplicateDefinition(let key):
+            "Fact definition '\(key.id)@\(key.version)' is duplicated."
+        case .duplicateFact(let cell):
+            "Fact '\(cell.key.id)@\(cell.key.version)' is duplicated for \(cell.subject)."
+        case .reservedHostKey(let key):
+            "Fact key '\(key.id)@\(key.version)' is reserved for Threading."
+        case .hostKeyRequired(let key):
+            "Host fact key '\(key.id)@\(key.version)' is outside a reserved host namespace."
+        case .conflictingDefinition(let key):
+            "Fact definition '\(key.id)@\(key.version)' conflicts with a live provider."
+        case .missingDefinition(let key):
+            "Fact '\(key.id)@\(key.version)' has no definition from this source."
+        case .incompatibleFact(let key):
+            "Fact '\(key.id)@\(key.version)' does not match its definition."
+        case .factOutsideReplacementScope(let subject):
+            "Fact subject \(subject) is outside the replacement scope."
+        case .tooManyDefinitions(let maximum):
+            "A process generation may define at most \(maximum) facts."
+        case .tooManyReplacementSubjects(let maximum):
+            "One replacement may name at most \(maximum) subjects."
+        case .tooManyReplacementFacts(let maximum):
+            "One replacement may contain at most \(maximum) facts."
+        case .tooManyFactsForSubject(let maximum):
+            "One source may publish at most \(maximum) facts for one subject."
+        case .tooManyFactsForGeneration(let maximum):
+            "A process generation may publish at most \(maximum) facts."
+        case .tooManyResolvedFactsForSubject(let maximum):
+            "One subject may resolve at most \(maximum) facts."
+        }
+    }
+}
+
+/// Bounded, generation-aware fact storage with synchronous reads for the render path.
+///
+/// Publication is atomic. Lookups never call an extension and never touch disk or the network.
+@MainActor
+final class ExtensionFactRegistry {
+    static let maximumDefinitionsPerGeneration = 128
+    static let maximumSubjectsPerReplacement = 2_048
+    static let maximumFactsPerReplacement = 2_048
+    static let maximumFactsPerSourceSubject = 32
+    static let maximumFactsPerGeneration = 16_384
+    static let maximumResolvedFactsPerSubject = 128
+    static let maximumExactNotificationCells = 256
+
+    private struct StoredFact: Equatable {
+        let value: ExtensionFactValue
+        let label: String?
+        let status: ExtensionStatusRole?
+        let icon: ExtensionImageReference?
+        let observedAt: Date
+
+        init(_ fact: ExtensionFact) {
+            value = fact.value
+            label = fact.label
+            status = fact.status
+            icon = fact.icon
+            observedAt = fact.observedAt
+        }
+
+        func fact(key: ExtensionFactKey, subject: ExtensionFactSubject) -> ExtensionFact {
+            ExtensionFact(
+                key: key,
+                subject: subject,
+                value: value,
+                label: label,
+                status: status,
+                icon: icon,
+                observedAt: observedAt
+            )
+        }
+
+        func preservingHostObservation(ifSemanticallyEqualTo old: StoredFact?) -> StoredFact {
+            guard let old,
+                  value == old.value,
+                  label == old.label,
+                  status == old.status,
+                  icon == old.icon else { return self }
+            return old
+        }
+    }
+
+    private struct ResolvedCell: Equatable {
+        let stored: StoredFact
+        let definition: ExtensionFactDefinition
+        let source: ExtensionFactResolutionSource
+    }
+
+    private struct Publication {
+        let source: ComponentCustomizationSource
+        var definitions: [ExtensionFactKey: ExtensionFactDefinition]
+        var facts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]]
+
+        init(source: ComponentCustomizationSource) {
+            self.source = source
+            definitions = [:]
+            facts = [:]
+        }
+
+        init(
+            source: ComponentCustomizationSource,
+            definitions: [ExtensionFactKey: ExtensionFactDefinition],
+            facts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]]
+        ) {
+            self.source = source
+            self.definitions = definitions
+            self.facts = facts
+        }
+    }
+
+    private var hostDefinitions: [ExtensionFactKey: ExtensionFactDefinition] = [:]
+    private var hostFacts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]] = [:]
+    private var publications: [SourceGeneration: Publication] = [:]
+    private var resolved: [ExtensionFactSubject: [ExtensionFactKey: ResolvedCell]] = [:]
+    private let notificationCenter: NotificationCenter
+
+    init(notificationCenter: NotificationCenter = .default) {
+        self.notificationCenter = notificationCenter
+    }
+
+    func definition(for key: ExtensionFactKey) -> ExtensionFactDefinition? {
+        if let definition = hostDefinitions[key] { return definition }
+        return orderedPublications().compactMap { $0.definitions[key] }.first
+    }
+
+    func fact(
+        _ key: ExtensionFactKey,
+        for subject: ExtensionFactSubject
+    ) -> ExtensionResolvedFact? {
+        guard let cell = resolved[subject]?[key] else { return nil }
+        return ExtensionResolvedFact(
+            fact: cell.stored.fact(key: key, subject: subject),
+            definition: cell.definition,
+            source: cell.source
+        )
+    }
+
+    func facts(
+        for subject: ExtensionFactSubject
+    ) -> [ExtensionFactKey: ExtensionResolvedFact] {
+        Dictionary(uniqueKeysWithValues: (resolved[subject] ?? [:]).map { key, cell in
+            (key, ExtensionResolvedFact(
+                fact: cell.stored.fact(key: key, subject: subject),
+                definition: cell.definition,
+                source: cell.source
+            ))
+        })
+    }
+
+    func replaceHostDefinitions(_ definitions: [ExtensionFactDefinition]) throws {
+        let candidate = try validatedDefinitions(definitions, isHost: true)
+        guard candidate != hostDefinitions else { return }
+
+        let oldDefinitions = hostDefinitions
+        hostDefinitions = candidate
+        do {
+            try validateExistingHostFacts()
+            try recomputeAllResolvedWithoutPosting()
+        } catch {
+            hostDefinitions = oldDefinitions
+            try? recomputeAllResolvedWithoutPosting()
+            throw error
+        }
+        post(.all)
+    }
+
+    func replaceHostFacts(
+        _ facts: [ExtensionFact],
+        replacing subjects: Set<ExtensionFactSubject>
+    ) throws {
+        let grouped = try validatedFacts(
+            facts,
+            replacing: subjects,
+            definitions: hostDefinitions,
+            isHost: true
+        )
+        var candidate = hostFacts
+        for subject in subjects {
+            let old = hostFacts[subject] ?? [:]
+            let values = Dictionary(uniqueKeysWithValues: (grouped[subject] ?? [:]).map {
+                key, incoming in
+                (
+                    key,
+                    incoming.preservingHostObservation(ifSemanticallyEqualTo: old[key])
+                )
+            })
+            if values.isEmpty { candidate.removeValue(forKey: subject) }
+            else { candidate[subject] = values }
+        }
+        try validateResolvedCaps(subjects: subjects, hostFacts: candidate, publications: publications)
+        let before = resolvedCells(for: subjects)
+        hostFacts = candidate
+        recompute(subjects: subjects)
+        postDifference(before: before, subjects: subjects)
+    }
+
+    func replaceDefinitions(
+        _ definitions: [ExtensionFactDefinition],
+        from source: ComponentCustomizationSource
+    ) throws {
+        let candidateDefinitions = try validatedDefinitions(definitions, isHost: false)
+        try validateDefinitionConflicts(candidateDefinitions, excluding: SourceGeneration(source))
+
+        let key = SourceGeneration(source)
+        var publication = publications[key] ?? Publication(source: source)
+        let oldPublication = publication
+        publication = Publication(
+            source: source,
+            definitions: candidateDefinitions,
+            facts: publication.facts
+        )
+        try validateFacts(publication.facts, against: candidateDefinitions)
+
+        var candidatePublications = publications
+        candidatePublications[key] = publication
+        let subjects = Set(oldPublication.facts.keys).union(publication.facts.keys)
+        try validateResolvedCaps(
+            subjects: subjects,
+            hostFacts: hostFacts,
+            publications: candidatePublications
+        )
+        guard oldPublication.definitions != candidateDefinitions else { return }
+        publications = candidatePublications
+        recompute(subjects: subjects)
+        post(.all)
+    }
+
+    func replaceFacts(
+        _ facts: [ExtensionFact],
+        replacing subjects: Set<ExtensionFactSubject>,
+        from source: ComponentCustomizationSource
+    ) throws {
+        let key = SourceGeneration(source)
+        var publication = publications[key] ?? Publication(source: source)
+        let grouped = try validatedFacts(
+            facts,
+            replacing: subjects,
+            definitions: publication.definitions,
+            isHost: false
+        )
+        for subject in subjects {
+            if let values = grouped[subject], !values.isEmpty {
+                publication.facts[subject] = values
+            } else {
+                publication.facts.removeValue(forKey: subject)
+            }
+        }
+        let total = publication.facts.values.reduce(0) { $0 + $1.count }
+        guard total <= Self.maximumFactsPerGeneration else {
+            throw ExtensionFactRegistryError.tooManyFactsForGeneration(
+                maximum: Self.maximumFactsPerGeneration
+            )
+        }
+
+        var candidatePublications = publications
+        candidatePublications[key] = publication
+        try validateResolvedCaps(
+            subjects: subjects,
+            hostFacts: hostFacts,
+            publications: candidatePublications
+        )
+        let before = resolvedCells(for: subjects)
+        publications = candidatePublications
+        recompute(subjects: subjects)
+        postDifference(before: before, subjects: subjects)
+    }
+
+    func removeGeneration(extensionIdentifier: String, processGeneration: String) {
+        let key = SourceGeneration(
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: processGeneration
+        )
+        guard let removed = publications.removeValue(forKey: key) else { return }
+        let subjects = Set(removed.facts.keys)
+        let before = resolvedCells(for: subjects)
+        recompute(subjects: subjects)
+        if removed.definitions.isEmpty {
+            postDifference(before: before, subjects: subjects)
+        } else {
+            post(.all)
+        }
+    }
+
+    private func validatedDefinitions(
+        _ definitions: [ExtensionFactDefinition],
+        isHost: Bool
+    ) throws -> [ExtensionFactKey: ExtensionFactDefinition] {
+        guard definitions.count <= Self.maximumDefinitionsPerGeneration else {
+            throw ExtensionFactRegistryError.tooManyDefinitions(
+                maximum: Self.maximumDefinitionsPerGeneration
+            )
+        }
+        var result: [ExtensionFactKey: ExtensionFactDefinition] = [:]
+        for (index, definition) in definitions.enumerated() {
+            do { try definition.validate() }
+            catch let error as ExtensionValidationError {
+                throw ExtensionFactRegistryError.invalidDefinition(
+                    index: index,
+                    reason: error.issues.map(\.description).joined(separator: "; ")
+                )
+            }
+            if isHost, !ExtensionHostFactKey.isReserved(definition.key) {
+                throw ExtensionFactRegistryError.hostKeyRequired(definition.key)
+            }
+            if !isHost, ExtensionHostFactKey.isReserved(definition.key) {
+                throw ExtensionFactRegistryError.reservedHostKey(definition.key)
+            }
+            guard result.updateValue(definition, forKey: definition.key) == nil else {
+                throw ExtensionFactRegistryError.duplicateDefinition(definition.key)
+            }
+        }
+        return result
+    }
+
+    private func validatedFacts(
+        _ facts: [ExtensionFact],
+        replacing subjects: Set<ExtensionFactSubject>,
+        definitions: [ExtensionFactKey: ExtensionFactDefinition],
+        isHost: Bool
+    ) throws -> [ExtensionFactSubject: [ExtensionFactKey: StoredFact]] {
+        guard facts.count <= Self.maximumFactsPerReplacement else {
+            throw ExtensionFactRegistryError.tooManyReplacementFacts(
+                maximum: Self.maximumFactsPerReplacement
+            )
+        }
+        guard subjects.count <= Self.maximumSubjectsPerReplacement else {
+            throw ExtensionFactRegistryError.tooManyReplacementSubjects(
+                maximum: Self.maximumSubjectsPerReplacement
+            )
+        }
+        var grouped: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]] = [:]
+        for (index, fact) in facts.enumerated() {
+            do { try fact.validate() }
+            catch let error as ExtensionValidationError {
+                throw ExtensionFactRegistryError.invalidFact(
+                    index: index,
+                    reason: error.issues.map(\.description).joined(separator: "; ")
+                )
+            }
+            guard subjects.contains(fact.subject) else {
+                throw ExtensionFactRegistryError.factOutsideReplacementScope(fact.subject)
+            }
+            if isHost, !ExtensionHostFactKey.isReserved(fact.key) {
+                throw ExtensionFactRegistryError.hostKeyRequired(fact.key)
+            }
+            if !isHost, ExtensionHostFactKey.isReserved(fact.key) {
+                throw ExtensionFactRegistryError.reservedHostKey(fact.key)
+            }
+            guard let definition = definitions[fact.key] else {
+                throw ExtensionFactRegistryError.missingDefinition(fact.key)
+            }
+            guard definition.valueType == fact.value.type,
+                  definition.subjectKinds.contains(fact.subject.kind) else {
+                throw ExtensionFactRegistryError.incompatibleFact(fact.key)
+            }
+            let cell = ExtensionFactCell(subject: fact.subject, key: fact.key)
+            guard grouped[fact.subject, default: [:]].updateValue(
+                StoredFact(fact),
+                forKey: fact.key
+            ) == nil else {
+                throw ExtensionFactRegistryError.duplicateFact(cell)
+            }
+        }
+        guard grouped.values.allSatisfy({ $0.count <= Self.maximumFactsPerSourceSubject }) else {
+            throw ExtensionFactRegistryError.tooManyFactsForSubject(
+                maximum: Self.maximumFactsPerSourceSubject
+            )
+        }
+        return grouped
+    }
+
+    private func validateDefinitionConflicts(
+        _ definitions: [ExtensionFactKey: ExtensionFactDefinition],
+        excluding excluded: SourceGeneration
+    ) throws {
+        for publication in publications where publication.key != excluded {
+            for (key, definition) in definitions {
+                guard let other = publication.value.definitions[key] else { continue }
+                guard definition.valueType == other.valueType,
+                      definition.subjectKinds == other.subjectKinds else {
+                    throw ExtensionFactRegistryError.conflictingDefinition(key)
+                }
+            }
+        }
+    }
+
+    private func validateFacts(
+        _ facts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]],
+        against definitions: [ExtensionFactKey: ExtensionFactDefinition]
+    ) throws {
+        for (subject, values) in facts {
+            for (key, value) in values {
+                guard let definition = definitions[key] else {
+                    throw ExtensionFactRegistryError.missingDefinition(key)
+                }
+                guard definition.valueType == value.value.type,
+                      definition.subjectKinds.contains(subject.kind) else {
+                    throw ExtensionFactRegistryError.incompatibleFact(key)
+                }
+            }
+        }
+    }
+
+    private func validateExistingHostFacts() throws {
+        try validateFacts(hostFacts, against: hostDefinitions)
+    }
+
+    private func orderedPublications(
+        _ values: [SourceGeneration: Publication]? = nil
+    ) -> [Publication] {
+        Array((values ?? publications).values).sorted { lhs, rhs in
+            if lhs.source.order != rhs.source.order { return lhs.source.order < rhs.source.order }
+            if lhs.source.extensionIdentifier != rhs.source.extensionIdentifier {
+                return lhs.source.extensionIdentifier < rhs.source.extensionIdentifier
+            }
+            return lhs.source.processGeneration < rhs.source.processGeneration
+        }
+    }
+
+    private func resolvedCells(
+        for subject: ExtensionFactSubject,
+        hostFacts candidateHostFacts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]],
+        publications candidatePublications: [SourceGeneration: Publication]
+    ) -> [ExtensionFactKey: ResolvedCell] {
+        var result: [ExtensionFactKey: ResolvedCell] = [:]
+        for (key, stored) in candidateHostFacts[subject] ?? [:] {
+            guard let definition = hostDefinitions[key] else { continue }
+            result[key] = ResolvedCell(stored: stored, definition: definition, source: .host)
+        }
+        for publication in orderedPublications(candidatePublications) {
+            for (key, stored) in publication.facts[subject] ?? [:] where result[key] == nil {
+                guard let definition = publication.definitions[key] else { continue }
+                result[key] = ResolvedCell(
+                    stored: stored,
+                    definition: definition,
+                    source: .extension(
+                        identifier: publication.source.extensionIdentifier,
+                        processGeneration: publication.source.processGeneration
+                    )
+                )
+            }
+        }
+        return result
+    }
+
+    private func validateResolvedCaps(
+        subjects: Set<ExtensionFactSubject>,
+        hostFacts candidateHostFacts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]],
+        publications candidatePublications: [SourceGeneration: Publication]
+    ) throws {
+        for subject in subjects where resolvedCells(
+            for: subject,
+            hostFacts: candidateHostFacts,
+            publications: candidatePublications
+        ).count > Self.maximumResolvedFactsPerSubject {
+            throw ExtensionFactRegistryError.tooManyResolvedFactsForSubject(
+                maximum: Self.maximumResolvedFactsPerSubject
+            )
+        }
+    }
+
+    private func recompute(subjects: Set<ExtensionFactSubject>) {
+        for subject in subjects {
+            let values = resolvedCells(
+                for: subject,
+                hostFacts: hostFacts,
+                publications: publications
+            )
+            if values.isEmpty { resolved.removeValue(forKey: subject) }
+            else { resolved[subject] = values }
+        }
+    }
+
+    private func recomputeAllResolvedWithoutPosting() throws {
+        let subjects = Set(hostFacts.keys).union(publications.values.flatMap { $0.facts.keys })
+        try validateResolvedCaps(
+            subjects: subjects,
+            hostFacts: hostFacts,
+            publications: publications
+        )
+        resolved.removeAll(keepingCapacity: true)
+        recompute(subjects: subjects)
+    }
+
+    private func resolvedCells(
+        for subjects: Set<ExtensionFactSubject>
+    ) -> [ExtensionFactSubject: [ExtensionFactKey: ResolvedCell]] {
+        Dictionary(uniqueKeysWithValues: subjects.map { ($0, resolved[$0] ?? [:]) })
+    }
+
+    private func postDifference(
+        before: [ExtensionFactSubject: [ExtensionFactKey: ResolvedCell]],
+        subjects: Set<ExtensionFactSubject>
+    ) {
+        var changed: Set<ExtensionFactCell> = []
+        for subject in subjects {
+            let old = before[subject] ?? [:]
+            let new = resolved[subject] ?? [:]
+            for key in Set(old.keys).union(new.keys) where old[key] != new[key] {
+                changed.insert(.init(subject: subject, key: key))
+            }
+        }
+        guard !changed.isEmpty else { return }
+        if changed.count > Self.maximumExactNotificationCells { post(.all) }
+        else { post(.exact(changed)) }
+    }
+
+    private func post(_ change: ExtensionFactChange) {
+        notificationCenter.post(ExtensionFactsDidChange(change: change))
+    }
+}
