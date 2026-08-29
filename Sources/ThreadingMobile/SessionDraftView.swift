@@ -93,6 +93,11 @@ struct SessionDraftView: View {
 }
 
 /// The one motion from draft to chat.
+enum SessionDraftMetrics {
+    /// One caption line under the folded composer: the run it is set up for.
+    static var foldedSummaryHeight: CGFloat { 18 }
+}
+
 enum SessionDraftMotion {
     /// How long the drafting screen takes to become the session's screen.
     static let startDuration: TimeInterval = 0.35
@@ -442,7 +447,28 @@ private struct SessionDraftComposerScreen: View {
     /// harness drives and what a tap on the prompt changes; the keyboard's own announcement
     /// only brings the fold forward to the moment the keyboard starts to go.
     private var showsChoices: Bool {
-        promptIsFocused && !keyboardIsLeaving && !isSubmitting
+        ((promptIsFocused && !keyboardIsLeaving) || anyChooserIsPresented) && !isSubmitting
+    }
+
+    /// A chooser drops the keyboard for the room it needs, but it is still the composer being
+    /// edited: the strip it was opened from stays unfolded beneath it, and the prompt takes the
+    /// keyboard back when it closes, so choosing a model does not end the writing.
+    private var showsFoldedSummary: Bool {
+        !showsChoices && !isSubmitting
+    }
+
+    private var anyChooserIsPresented: Bool {
+        runPickerIsPresented || speedChooserIsPresented || permissionChooserIsPresented
+    }
+
+    /// What the folded composer says instead of nothing: the run it is set up for, in one
+    /// quiet line. Tapping it is tapping the composer.
+    private var foldedSummary: String {
+        var parts = [runSummary]
+        if selectedModel?.supportsFastMode == true { parts.append(selectedSpeedName) }
+        if !(selectedAgent?.permissionModes ?? []).isEmpty { parts.append(selectedPermissionName) }
+        if selectedAgent?.supportsConversation == true { parts.append(selectedSurfaceTitle) }
+        return parts.joined(separator: " · ")
     }
 
     private var composer: some View {
@@ -461,6 +487,26 @@ private struct SessionDraftComposerScreen: View {
                 .clipped()
                 .allowsHitTesting(showsChoices)
                 .accessibilityHidden(!showsChoices)
+            // The folded composer says what it is set up for rather than nothing. Not while
+            // starting: the strip folds for the handoff too, and a line appearing for that
+            // third of a second would read as a glitch.
+            Text(foldedSummary)
+                .font(.caption)
+                .foregroundStyle(theme.tertiaryLabel)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: showsFoldedSummary ? SessionDraftMetrics.foldedSummaryHeight : 0)
+                .padding(.top, showsFoldedSummary ? MobileDesign.Spacing.tight : 0)
+                .opacity(showsFoldedSummary ? 1 : 0)
+                .clipped()
+                .contentShape(Rectangle())
+                .onTapGesture { promptIsFocused = true }
+                .allowsHitTesting(showsFoldedSummary)
+                .accessibilityHidden(!showsFoldedSummary)
+        }
+        .onChange(of: anyChooserIsPresented) { _, presented in
+            if !presented { promptIsFocused = true }
         }
         .padding(.horizontal, MobileDesign.Spacing.composerHorizontal)
         .padding(.top, MobileDesign.Spacing.small)
@@ -482,7 +528,7 @@ private struct SessionDraftComposerScreen: View {
     /// still the whole composer. Top-aligned: a longer prompt grows down from a stable first
     /// row instead of carrying the button away with every line.
     private var promptEditor: some View {
-        TextField(promptPlaceholder, text: $prompt, axis: .vertical)
+        TextField("", text: $prompt, axis: .vertical)
             .focused($promptIsFocused)
             .mobileUIEvidenceKeyboardFocus($promptIsFocused)
             .textFieldStyle(.plain)
@@ -490,6 +536,20 @@ private struct SessionDraftComposerScreen: View {
             .lineLimit(1...6)
             .frame(minHeight: MobileDesign.Size.compactControl)
             .disabled(isSubmitting)
+            .accessibilityLabel(promptPlaceholder)
+            // Drawn here rather than by the field: the field's own placeholder takes the
+            // system's colour, not the theme's, and disappears behind a prompt that is only
+            // whitespace — a stray newline left the phone's composer saying nothing at all.
+            .overlay(alignment: .leading) {
+                if prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(promptPlaceholder)
+                        .font(.body)
+                        .foregroundStyle(theme.tertiaryLabel)
+                        .lineLimit(1)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
+            }
     }
 
     /// The run settings — how the chat will run — as one compact, non-scrolling row. Where and
