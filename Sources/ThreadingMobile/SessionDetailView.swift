@@ -148,6 +148,7 @@ struct SessionDetailView: View {
     let openingStrategy: MobileSessionOpeningStrategy
     @StateObject private var workspaceActivity: MobileWorkspaceActivity
     @State private var connection: RemoteSessionConnection?
+    @State private var isShowingUsage = false
     @State private var launchError: String?
     @State private var themeError: String?
     @State private var isChangingTheme = false
@@ -274,6 +275,12 @@ struct SessionDetailView: View {
             .environmentObject(model)
             .mobileTheme(theme)
         }
+        .sheet(isPresented: $isShowingUsage) {
+            if let link = model.activeHost?.link {
+                RemoteUsageDashboardView(link: link, isDemo: model.isDemo)
+                    .mobileTheme(theme)
+            }
+        }
         .task {
             await open()
             openPendingNotificationDestination()
@@ -357,6 +364,21 @@ struct SessionDetailView: View {
     /// of the two is reached often enough to spend a permanent slot on.
     @ViewBuilder
     private var sessionMenuContent: some View {
+        // The disc that opens this menu is ringed by the account's usage; the menu leads with
+        // the reading in words — every window the chat is metered by, and when the nearest
+        // one resets — and takes the reader to the dashboard for the rest.
+        if let account = sessionAccount, let detail = sessionUsageMenuDetail {
+            Button {
+                isShowingUsage = true
+            } label: {
+                // Title, subtitle, glyph: the menu's own two-line item, which a `Label`
+                // does not become.
+                Text(account.name)
+                Text(detail)
+                Image(systemName: "gauge.with.dots.needle.67percent")
+            }
+            Divider()
+        }
         if canOpenWorkspace {
             Button(action: openWorkspace) {
                 Label("Workspace", systemImage: "square.grid.2x2")
@@ -497,6 +519,24 @@ struct SessionDetailView: View {
     /// window rings a Fable chat and no other.
     private var sessionUsageReading: MobileAccountUsageReading? {
         MobileAccountUsageReading.resolve(account: sessionAccount, model: currentSession.model)
+    }
+
+    /// The rings' own summary, `5h 43% · 7d 73%`, followed by the nearest reset still ahead.
+    private var sessionUsageMenuDetail: String? {
+        guard let summary = sessionUsageReading?.summary else { return nil }
+        let now = Date()
+        let nextReset = (sessionAccount?.usageWindows ?? [])
+            .compactMap(\.resetsAt)
+            .map { Date(timeIntervalSince1970: $0) }
+            .filter { $0 > now }
+            .min()
+        guard let nextReset else { return summary }
+        return summary
+            + MobileUsageDefaults.segmentSeparator
+            + MobileL10n.string(
+                "Next reset %@",
+                nextReset.formatted(.relative(presentation: .named))
+            )
     }
 
     /// The catalogue's row for the login this chat runs on, which is where its usage lives —

@@ -623,9 +623,13 @@ active instead of serving out a backoff that was counting while the app was susp
 
 The lock starts as the app *leaves*, not when the reconnect begins. On return iOS first shows its
 own snapshot of the app, and a blur that only arrived once the dead socket had been noticed let
-sharp old text flash before it — so `isAwaitingResume` is raised on `willResignActive` (for a
-terminal that has drawn something) and the surface is already dimmed and softened in the snapshot
-iOS takes. On `didBecomeActive` a reconnect that was waiting starts at once, and hydration
+sharp old text flash before it — so `isAwaitingResume` is raised on `didEnterBackground` (for a
+terminal that has drawn something), which UIKit follows with the snapshot it keeps for the
+switcher and the return, so that snapshot is already the softened screen. Not on
+`willResignActive`: a paste prompt, Control Center or a notification pull resign active without
+the socket dropping, and locking there blurred a terminal that was never leaving. The loader plate
+is shown only while the scene is active, so the switcher card is the softened screen alone. On
+`didBecomeActive` a reconnect that was waiting starts at once, and hydration
 completing releases the lock; a socket that still looks connected may have died silently, so one
 ping settles it — a pong releases the lock, an error or three seconds of silence reconnects. A
 reconnect also keeps what the last hello established (server features, atomic-submission and

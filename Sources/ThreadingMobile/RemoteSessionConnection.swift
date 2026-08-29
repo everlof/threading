@@ -309,6 +309,9 @@ final class RemoteSessionConnection: ObservableObject {
     private var demoScript: DemoSessionScript?
     var onTerminalOutput: ((Data) -> Void)? {
         didSet {
+            // A detached renderer takes its screen with it: a chat reopened from the list on a
+            // parked connection has nothing to keep, and gets the opening loader as before.
+            if onTerminalOutput == nil { hasPresentedTerminalOutput = false }
             guard let onTerminalOutput, !pendingTerminalOutput.isEmpty else { return }
             let buffered = pendingTerminalOutput
             pendingTerminalOutput.removeAll(keepingCapacity: true)
@@ -443,11 +446,11 @@ final class RemoteSessionConnection: ObservableObject {
 #if canImport(UIKit)
         lifecycleObservers = [
             NotificationCenter.default.addObserver(
-                forName: UIApplication.willResignActiveNotification,
+                forName: UIApplication.didEnterBackgroundNotification,
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                Task { @MainActor in self?.noteResigningActive() }
+                Task { @MainActor in self?.noteEnteringBackground() }
             },
             NotificationCenter.default.addObserver(
                 forName: UIApplication.didBecomeActiveNotification,
@@ -799,10 +802,11 @@ final class RemoteSessionConnection: ObservableObject {
         output(data)
     }
 
-    /// The app is on its way out. A terminal with something on screen locks it under the
-    /// loader now, so what iOS snapshots for the switcher and the return is already the
-    /// softened screen.
-    private func noteResigningActive() {
+    /// The app has gone to the background — not merely resigned active, which a paste prompt,
+    /// Control Center or a notification pull also do without the socket dropping. A terminal
+    /// with something on screen locks it now; UIKit snapshots the scene for the switcher and
+    /// the return shortly after this, so the snapshot is the softened screen.
+    private func noteEnteringBackground() {
         guard hasEverConnected, surface == .terminal, hasPresentedTerminalOutput else { return }
         isAwaitingResume = true
     }
