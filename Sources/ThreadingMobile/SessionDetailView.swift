@@ -837,6 +837,7 @@ struct TerminalRemoteView: View {
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @Environment(\.remoteTheme) private var inheritedTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showsAttentionRequest = false
     @State private var showsKeyboardEditor = false
     @State private var directAttachmentTray: ComposerAttachmentTray?
@@ -1064,7 +1065,9 @@ struct TerminalRemoteView: View {
                 : 0
         )
         .overlay {
-            if isCatchingUp {
+            // The softened screen is what the switcher card and the return snapshot show; the
+            // loader is for the moment the person is back and waiting, not for the card.
+            if isCatchingUp, scenePhase == .active {
                 MobileLoadingPlaceholder(
                     connection.hasEverConnected
                         ? MobileL10n.string("Reconnecting…")
