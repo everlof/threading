@@ -21,6 +21,7 @@ enum PreSessionComposerCatalog {
             acpExpectations(
                 names: grokNames,
                 aliases: ["exit": ["quit"]],
+                describing: grokDescription(for:),
                 policy: GrokACPComposerCatalog.policy,
                 usesNativeUI: usesNativeUI
             )
@@ -28,6 +29,7 @@ enum PreSessionComposerCatalog {
             acpExpectations(
                 names: cursorNames,
                 aliases: [:],
+                describing: cursorDescription(for:),
                 policy: CursorACPComposerCatalog.policy,
                 usesNativeUI: usesNativeUI
             )
@@ -233,6 +235,7 @@ enum PreSessionComposerCatalog {
     private static func acpExpectations(
         names: Set<String>,
         aliases: [String: [String]],
+        describing: (String) -> String,
         policy: ACPCommandCatalogPolicy,
         usesNativeUI: Bool
     ) -> [ComposerCapability] {
@@ -241,7 +244,7 @@ enum PreSessionComposerCatalog {
             ComposerCapability(
                 id: "pre-session.\(policy.identifierPrefix)\(name)",
                 name: name,
-                description: L10n.string("Availability is checked when the agent starts"),
+                description: describing(name),
                 aliases: aliases[name] ?? [],
                 kind: .command,
                 trigger: .slash,
@@ -253,8 +256,38 @@ enum PreSessionComposerCatalog {
         }
     }
 
+    /// `hostOnlyNames` is a *denylist* over whatever the live catalog advertises, so it may name
+    /// a command the current CLI no longer has — harmless as a refusal, wrong as an expectation.
+    /// `/permissions` is one: Grok 1.0.5 advertises neither the name nor a doc entry for it and
+    /// offers `/always-approve` instead, so a pre-session row would promise a command that does
+    /// not exist. It stays on the denylist in case a later Grok reintroduces it.
     private static let grokNames = GrokACPComposerCatalog.policy.hostOnlyNames
         .union(GrokACPComposerCatalog.policy.sessionCommandNames)
+        .subtracting(grokNamesAbsentFromTheCLI)
+
+    private static let grokNamesAbsentFromTheCLI: Set<String> = ["permissions"]
+
+    /// Wording from Grok 1.0.5's own catalog: the four session commands as its ACP `initialize`
+    /// reports them, the rest as its slash table words them. Grok replaces all of it with the
+    /// live catalog once the handshake lands.
+    private static func grokDescription(for name: String) -> String {
+        switch name {
+        case "always-approve":
+            L10n.string("Toggle always-approve mode and skip the permission prompts")
+        case "clear", "new": L10n.string("Start a new session")
+        case "compact": L10n.string("Compress the history to save context window")
+        case "context": L10n.string("Show context window usage and session stats")
+        case "exit": L10n.string("Quit the application")
+        case "feedback": L10n.string("Send feedback about the current session")
+        case "fork": L10n.string("Branch the current session into a peer agent")
+        case "login": L10n.string("Log in or re-authenticate with your account")
+        case "logout": L10n.string("Log out and return to the login screen")
+        case "model": L10n.string("Switch the active model")
+        case "resume": L10n.string("Resume a previous session")
+        case "session-info": L10n.string("Show the session's model, turns and context usage")
+        default: L10n.string("Availability is checked when the agent starts")
+        }
+    }
 
     /// Cursor built-ins measured separately from the account/project commands in the pushed
     /// catalog. The live update augments and replaces these after launch.
@@ -264,11 +297,35 @@ enum PreSessionComposerCatalog {
         "split-to-prs", "statusline", "update-cli-config"
     ]
 
+    /// Shortened from the `available_commands_update` Cursor pushed on 2026-08-29, keeping only
+    /// the built-ins named above: the rest of that catalog is this account's own commands and
+    /// cannot be predicted before launch.
+    private static func cursorDescription(for name: String) -> String {
+        switch name {
+        case "copy-request-id": L10n.string("Copy the last request ID to the clipboard")
+        case "create-hook": L10n.string("Create a Cursor hook that runs around agent events")
+        case "create-rule": L10n.string("Create a Cursor rule for persistent guidance")
+        case "create-skill": L10n.string("Create a Cursor Agent Skill")
+        case "create-subagent": L10n.string("Create a subagent for a specialized task")
+        case "loop": L10n.string("Run a prompt or skill on a recurring interval")
+        case "migrate-to-skills":
+            L10n.string("Convert Cursor rules and commands into Agent Skills")
+        case "rename-chat": L10n.string("Rename the current chat to match its focus")
+        case "sdk": L10n.string("Guidance for building on the Cursor SDK")
+        case "shell": L10n.string("Run the rest of the line as a literal shell command")
+        case "split-to-prs": L10n.string("Split the current work into small reviewable PRs")
+        case "statusline": L10n.string("Configure a custom status line in the CLI")
+        case "update-cli-config": L10n.string("View and change the Cursor CLI configuration")
+        default: L10n.string("Availability is checked when the agent starts")
+        }
+    }
+
     // MARK: - OpenCode
 
     /// OpenCode has only a terminal surface, so its TUI remains the execution authority.
-    /// Snapshot: OpenCode TUI documentation, 2026-08-27. Configured commands are intentionally
-    /// absent because they can override built-ins and are loaded by OpenCode itself at launch.
+    /// Snapshot: OpenCode's own command registry, read on 2026-08-29. Configured commands are
+    /// intentionally absent because they can override built-ins and are loaded by OpenCode
+    /// itself at launch.
     private static func openCode() -> [ComposerCapability] {
         let entries: [(String, [String])] = [
             ("compact", ["summarize"]),
@@ -293,12 +350,37 @@ enum PreSessionComposerCatalog {
             ComposerCapability(
                 id: "pre-session.opencode:\(name)",
                 name: name,
-                description: L10n.string("Handled by OpenCode's terminal after launch"),
+                description: openCodeDescription(for: name),
                 aliases: aliases,
                 kind: .command,
                 trigger: .slash,
                 presentation: .command
             )
+        }
+    }
+
+    /// Wording from OpenCode's own command registry rather than from its docs, so a row says
+    /// what this build does.
+    private static func openCodeDescription(for name: String) -> String {
+        switch name {
+        case "compact": L10n.string("Summarize the session to reduce context size")
+        case "connect": L10n.string("Connect a model provider")
+        case "details": L10n.string("Show or hide the tool details")
+        case "editor": L10n.string("Open the external editor")
+        case "exit": L10n.string("Leave OpenCode")
+        case "export": L10n.string("Export the session transcript")
+        case "help": L10n.string("Open the help dialog")
+        case "init": L10n.string("Write an AGENTS.md for this repository")
+        case "models": L10n.string("List the available models")
+        case "new": L10n.string("Create a new session")
+        case "redo": L10n.string("Redo the last undone message")
+        case "sessions": L10n.string("List all sessions")
+        case "share": L10n.string("Share this session and copy its link")
+        case "themes": L10n.string("List the available themes")
+        case "thinking": L10n.string("Show or hide the thinking blocks")
+        case "undo": L10n.string("Undo the last message")
+        case "unshare": L10n.string("Stop sharing this session")
+        default: L10n.string("Handled by OpenCode's terminal after launch")
         }
     }
 }

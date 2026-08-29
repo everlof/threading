@@ -1880,9 +1880,16 @@ final class PromptInputTests: XCTestCase {
     /// A completion row reserves a line for the description whether or not there is one, so an
     /// empty string is not "no detail" — it is a blank gap under a name that already said what
     /// it said, beside a right-hand label reading "Command". Every row Threading writes itself
-    /// therefore has to carry a sentence, and it must not be the name back again.
+    /// therefore has to carry a sentence; it must not be the name back again, and it must not
+    /// be the per-runtime placeholder, which says something about Threading rather than about
+    /// the command. A name added to a policy set without copy fails here rather than shipping.
     func testEveryPreSessionCommandExplainsItselfRatherThanRepeatingItsName() {
-        for kind in [AgentKind.claude, .codex] {
+        let placeholders = Set([
+            "Availability is checked when Claude Code starts",
+            "Availability is checked when the agent starts",
+            "Handled by OpenCode's terminal after launch"
+        ])
+        for kind in AgentKind.allCases {
             for usesNativeUI in [true, false] {
                 let capabilities = PreSessionComposerCatalog.capabilities(
                     for: kind,
@@ -1899,6 +1906,10 @@ final class PromptInputTests: XCTestCase {
                         capability.description.lowercased(),
                         capability.name.lowercased(),
                         "\(kind) /\(capability.name) only repeats its own name"
+                    )
+                    XCTAssertFalse(
+                        placeholders.contains(capability.description),
+                        "\(kind) /\(capability.name) still shows the placeholder description"
                     )
                 }
             }

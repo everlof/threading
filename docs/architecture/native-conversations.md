@@ -386,13 +386,29 @@ native safety refusal; unknown text still follows the provider's ordinary unknow
 Every row Threading writes itself carries a description, because the completion row reserves a
 line for one whether or not there is text in it. The Codex terminal-only rows shipped with none,
 so `/goal` and `/logout` drew a name, a blank line, and a right-hand label reading "Command" —
-which answers nothing the person who pressed `/` was asking. The Claude expectations had four
-real descriptions and a shared "availability is checked when Claude Code starts" for the other
-ninety-two, which is a sentence about Threading rather than about the command. Both now carry
-the CLI's own summary in Threading's voice, snapshotted from Codex 0.150.1 and Claude Code
-2.1.251 on 2026-08-29; a test fails on a pre-session row whose detail is empty or is only the
-name again. The live catalogs still replace all of it, and Codex's terminal-only rows are the
-same values in both, so a description added here is not missing once app-server is up.
+which answers nothing the person who pressed `/` was asking. The other four runtimes each had a
+single placeholder standing in for their whole catalog: "availability is checked when Claude Code
+starts" for ninety-two of Claude's ninety-six, one "availability is checked when the agent starts"
+across Grok and Cursor, and "handled by OpenCode's terminal after launch" for all of OpenCode's.
+Each of those is a sentence about Threading rather than about the command.
+
+All five now carry the CLI's own summary in Threading's voice, read from the installed agents on
+2026-08-29 rather than from documentation: Claude Code 2.1.251 through its `initialize` control
+request, Codex 0.150.1 and OpenCode from their own command registries, Grok 1.0.5 from its ACP
+`initialize` and slash table, Cursor from the `available_commands_update` it pushes. Only Cursor's
+builtins are named here, because the rest of that push is the account's own commands. A test fails
+on a pre-session row whose detail is empty, is only the name again, or is still one of those
+placeholders — so a name added to a policy set without copy is caught rather than shipped. The
+live catalogs still replace all of it, and Codex's terminal-only rows are the same values in both,
+so a description added there is not missing once app-server is up.
+
+Reading the CLIs also answered a question the placeholder had hidden. Grok's pre-session names
+come from `hostOnlyNames ∪ sessionCommandNames`, but `hostOnlyNames` is a *denylist* applied to
+whatever the live catalog advertises — it may name a command the current CLI no longer has, which
+is harmless as a refusal and wrong as an expectation. `/permissions` is one: Grok 1.0.5 advertises
+neither the name nor a doc entry and offers `/always-approve` instead, so the composer was
+promising a command that does not exist. It is subtracted from the expectation set and kept on the
+denylist in case a later Grok reintroduces it.
 Ordinary opening prose is not delayed. Grok's ACP catalog is complete in `initialize`; Cursor's
 arrives in `available_commands_update`, with a five-second fallback so an omitted optional
 notification cannot strand the opening message. Codex's built-in slash catalog becomes available
