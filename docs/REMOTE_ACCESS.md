@@ -283,6 +283,22 @@ account/window's current inventory and nearest expiry; zero is distinct from una
 historical banked-reset marker means a credit was observed being used rather than merely being
 available. One-chat guest links cannot discover or read this whole-host data.
 
+**The sheet has two scopes, and names the one it is in.** It used to stack an all-accounts card,
+every login's windows, one login's history and the fleet's consumption in one scroll, with nothing
+to say which numbers were whose. A segmented **Accounts | Totals** control now leads, with a caption
+under it that states the scope every time. *Accounts* is per login — a horizontal rail of logins
+(a login is an account on one runtime, so the same name can appear twice with different runtimes
+under it), then only the selected login's windows and its limit history, whose window picker is
+restricted to that login. Opened from a chat — the chat menu's usage row or Chat Settings — the
+rail starts on that chat's login (`MobileUsageAccountFocus`, matched by runtime and account, then
+by account name alone since a runtime's display name can differ between the catalogue and the
+usage index); from the session list it starts on the first. *Totals* is across all logins and
+follows the shape of a raw-cost report: the figure with its footnote and the period beside it, each
+provider's share as a bar in its series colour, the days as stacked provider areas under a
+Cost/Tokens toggle, a strip of token totals each with the one line that gives it scale, the Mac's
+bounded breakdown by model, project, account or provider, and cost quality. Every place the phone
+shows usage — the list's options menu, the chat menu, Chat Settings — opens this one sheet.
+
 An open chat's **… ▸ Chat Settings** puts its operational controls beside that chat. **Account**
 shows the current login and its normalized usage, and can move a live conversation to another
 login for the same agent after warning that the running process will stop. **When the Limit Is

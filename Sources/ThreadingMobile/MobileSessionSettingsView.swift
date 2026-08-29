@@ -110,6 +110,12 @@ struct MobileSessionSettingsView: View {
     @State private var errorMessage: String?
     @State private var showsUsage = false
 
+    /// The screen opens on this chat's login.
+    private var usageFocus: MobileUsageAccountFocus? {
+        guard let agent, let account = currentAccount else { return nil }
+        return MobileUsageAccountFocus(runtimeName: agent.name, accountName: account.name)
+    }
+
     private var session: RemoteSessionSummaryDTO? {
         let active = model.me?.sessions.first { $0.id == sessionID }
         return active ?? model.me?.archivedSessions?.first { $0.id == sessionID }
@@ -186,7 +192,7 @@ struct MobileSessionSettingsView: View {
         }
         .sheet(isPresented: $showsUsage) {
             if let link = model.activeHost?.link {
-                RemoteUsageDashboardView(link: link, isDemo: model.isDemo)
+                RemoteUsageDashboardView(link: link, isDemo: model.isDemo, focus: usageFocus)
                     .mobileTheme(theme)
             }
         }

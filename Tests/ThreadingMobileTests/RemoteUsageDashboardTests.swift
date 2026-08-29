@@ -69,6 +69,44 @@ final class RemoteUsageDashboardTests: XCTestCase {
         )
     }
 
+    /// Opened from a chat, the rail starts on that chat's login: matched by runtime and account
+    /// first, by account name alone when the runtime's display name differs between the
+    /// catalogue and the usage index, and on the first login when nothing matches.
+    func testRailStartsOnTheFocusedLoginByRuntimeThenByNameThenFirst() {
+        let accounts = MobileUsageFleetProjection.accounts(from: [
+            series("claude-work", runtime: "Claude Code", account: "Work", window: "Weekly"),
+            series("codex-home", runtime: "Codex", account: "Home", window: "Weekly"),
+            series("codex-work", runtime: "Codex", account: "Work", window: "Weekly"),
+        ])
+        XCTAssertEqual(accounts.count, 3)
+        let second = accounts[1]
+
+        let exact = MobileUsageFleetProjection.startingAccountID(
+            in: accounts,
+            focus: MobileUsageAccountFocus(
+                runtimeName: second.runtimeName,
+                accountName: second.accountName
+            )
+        )
+        XCTAssertEqual(exact, second.id)
+
+        let byName = MobileUsageFleetProjection.startingAccountID(
+            in: accounts,
+            focus: MobileUsageAccountFocus(runtimeName: "Some Other Runtime", accountName: second.accountName)
+        )
+        XCTAssertEqual(byName?.split(separator: "|").last.map(String.init), second.accountName)
+
+        let unknown = MobileUsageFleetProjection.startingAccountID(
+            in: accounts,
+            focus: MobileUsageAccountFocus(runtimeName: "Nobody", accountName: "Nobody")
+        )
+        XCTAssertEqual(unknown, accounts.first?.id)
+        XCTAssertEqual(
+            MobileUsageFleetProjection.startingAccountID(in: accounts, focus: nil),
+            accounts.first?.id
+        )
+    }
+
     func testFleetProjectionGroupsProviderWindowsByAccount() {
         let accounts = MobileUsageFleetProjection.accounts(from: [
             series("weekly", runtime: "Claude", account: "Work", window: "Weekly"),

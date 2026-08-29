@@ -122,6 +122,17 @@
         }
       }
     },
+    "%@ cache writes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ cacheskrivningar"
+          }
+        }
+      }
+    },
     "%@ couldn’t be sent to your Mac." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -221,6 +232,17 @@
         }
       }
     },
+    "%@ of observed input" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ av observerad indata"
+          }
+        }
+      }
+    },
     "%@ of tokens · %lld requests" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -239,6 +261,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@ på %2$@"
+          }
+        }
+      }
+    },
+    "%@ per active day" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ per aktiv dag"
           }
         }
       }
@@ -355,6 +388,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@, skickas"
+          }
+        }
+      }
+    },
+    "%@× the raw token cost" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@× den råa tokenkostnaden"
           }
         }
       }
@@ -658,6 +702,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "+%lld"
+          }
+        }
+      }
+    },
+    "+%lld more" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+%lld till"
           }
         }
       }
@@ -1036,6 +1091,17 @@
         }
       }
     },
+    "Accounts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konton"
+          }
+        }
+      }
+    },
     "Accounts · %lld loaded" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1043,6 +1109,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Konton · %lld inlästa"
+          }
+        }
+      }
+    },
+    "Across all %lld logins" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Över alla %lld inloggningar"
           }
         }
       }
@@ -1681,6 +1758,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Gren"
+          }
+        }
+      }
+    },
+    "Breakdown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fördelning"
           }
         }
       }
@@ -2719,6 +2807,17 @@
         }
       }
     },
+    "Cost quality" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kostnadskvalitet"
+          }
+        }
+      }
+    },
     "Cost, tokens, limits, and reset history" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3001,6 +3100,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dagligt diagram för %@"
+          }
+        }
+      }
+    },
+    "Daily cost" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daglig kostnad"
+          }
+        }
+      }
+    },
+    "Daily tokens" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dagliga tokens"
           }
         }
       }
@@ -3962,6 +4083,17 @@
         }
       }
     },
+    "Includes %@ reasoning" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inklusive %@ resonemang"
+          }
+        }
+      }
+    },
     "Increase terminal font size" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4732,6 +4864,17 @@
         }
       }
     },
+    "Model priced" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prissatt per modell"
+          }
+        }
+      }
+    },
     "Model × effort" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4750,6 +4893,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Modell, språk, ström, skärm och anslutningsstatus"
+          }
+        }
+      }
+    },
+    "Models" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modeller"
           }
         }
       }
@@ -5865,6 +6019,17 @@
         }
       }
     },
+    "Per login — its windows and history" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Per inloggning — dess fönster och historik"
+          }
+        }
+      }
+    },
     "Permission" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6250,6 +6415,28 @@
         }
       }
     },
+    "Projects" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekt"
+          }
+        }
+      }
+    },
+    "Provider reported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rapporterat av leverantören"
+          }
+        }
+      }
+    },
     "Provider totals plus local list-price estimates" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6312,6 +6499,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Intervall"
+          }
+        }
+      }
+    },
+    "Raw token cost" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rå tokenkostnad"
           }
         }
       }
@@ -7097,6 +7295,17 @@
         }
       }
     },
+    "Scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Omfång"
+          }
+        }
+      }
+    },
     "Screenshot" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7412,6 +7621,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inställningarna ändrades"
+          }
+        }
+      }
+    },
+    "Share" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Andel"
           }
         }
       }
@@ -9924,6 +10144,17 @@
         }
       }
     },
+    "Unpriced" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Oprissatt"
+          }
+        }
+      }
+    },
     "Unpriced tokens" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10316,6 +10547,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "När gränsen nås"
+          }
+        }
+      }
+    },
+    "Window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fönster"
           }
         }
       }

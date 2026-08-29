@@ -280,7 +280,7 @@ struct SessionDetailView: View {
         }
         .sheet(isPresented: $isShowingUsage) {
             if let link = model.activeHost?.link {
-                RemoteUsageDashboardView(link: link, isDemo: model.isDemo)
+                RemoteUsageDashboardView(link: link, isDemo: model.isDemo, focus: usageFocus)
                     .mobileTheme(theme)
             }
         }
@@ -522,6 +522,15 @@ struct SessionDetailView: View {
     /// window rings a Fable chat and no other.
     private var sessionUsageReading: MobileAccountUsageReading? {
         MobileAccountUsageReading.resolve(account: sessionAccount, model: currentSession.model)
+    }
+
+    /// The usage screen opens on this chat's login.
+    private var usageFocus: MobileUsageAccountFocus? {
+        guard let account = sessionAccount,
+              let agent = model.me?.newSessionCatalog?.agents.first(where: {
+                  $0.id == currentSession.agentKind
+              }) else { return nil }
+        return MobileUsageAccountFocus(runtimeName: agent.name, accountName: account.name)
     }
 
     /// The rings' own summary, `5h 43% · 7d 73%`, followed by the nearest reset still ahead.
