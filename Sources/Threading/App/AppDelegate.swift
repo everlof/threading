@@ -149,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var componentGalleryWindowController: ComponentGalleryWindowController?
     private var aboutWindowController: AboutWindowController?
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
+    private var hostFactPipeline: HostFactPipeline?
     private var workspaceNavigatorMenu: NSMenu?
     private var commandPaletteController: CommandPaletteViewController?
     private var agentCLIUpdateCoordinator: AgentCLIUpdateCoordinator?
@@ -639,6 +640,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         if plan.startsExtensions {
+            installHostFactPipeline()
             ExtensionHostService.shared.installSessionRuntimeShellRootProvider {
                 [weak mainWindowController] sessionID in
                 mainWindowController?.extensionShellRootPid(for: sessionID)
@@ -1596,6 +1598,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         ComponentCustomizationProviderSlot.shared.actionHandler = { action in
             ExtensionManager.shared.invokeComponentAction(action)
         }
+    }
+
+    /// Creates the public navigator fact plane only for launches that allow extensions. The
+    /// caller is below the startup-profile return and after the first window has been ordered;
+    /// the pipeline crosses one more main-queue turn before doing its bounded initial snapshot.
+    @MainActor
+    private func installHostFactPipeline() {
+        let source = LiveHostFactProjectionSource.live(
+            projectStore: environment.projectStore,
+            agentRuntime: environment.agentRuntime
+        )
+        let pipeline = HostFactPipeline(
+            publisherDependencies: source.publisherDependencies()
+        )
+        hostFactPipeline = pipeline
+        pipeline.startAfterFirstWindowVisible()
     }
 
     // MARK: - Single Instance Triage
