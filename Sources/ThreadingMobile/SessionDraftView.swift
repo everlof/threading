@@ -745,7 +745,11 @@ private struct SessionDraftComposerScreen: View {
                 )
             }
         } label: {
-            DraftMenuLabel(symbol: selectedSpeedSymbol, title: selectedSpeedName)
+            DraftMenuLabel(
+                symbol: selectedSpeedSymbol,
+                title: selectedSpeedName,
+                isSet: !speedID.isEmpty
+            )
         }
         .id("speed-\(speedID)")
         .disabled(isSubmitting)
@@ -1016,18 +1020,20 @@ enum SessionDraftRunSummary {
 
 /// A menu that is a line of text: an optional glyph, the chosen value, a chevron. No plate —
 /// the project in the middle of the ground and the run settings in the composer are the same
-/// kind of control and read as the same kind of thing.
+/// kind of control and read as the same kind of thing. An explicit, non-inherited choice
+/// promotes only its value glyph to the accent; otherwise the glyph stays secondary.
 private struct DraftMenuLabel: View {
     @Environment(\.remoteTheme) private var theme
     var symbol: String? = nil
     let title: String
+    var isSet = false
 
     var body: some View {
         HStack(spacing: MobileDesign.Spacing.tight) {
             if let symbol {
                 Image(systemName: symbol)
                     .font(.caption)
-                    .foregroundStyle(theme.secondaryLabel)
+                    .foregroundStyle(isSet ? theme.accent : theme.secondaryLabel)
             }
             Text(title)
                 .font(.subheadline.weight(.medium))
