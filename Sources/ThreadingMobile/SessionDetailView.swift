@@ -141,7 +141,7 @@ enum SessionDetailMetrics {
     static var reconnectRevealDuration: TimeInterval { 0.25 }
     /// How long a reconnect may take before its plate says so. A quick one never shows a
     /// spinner: the dim is the lock, the plate is "this is taking a moment".
-    static var reconnectPlateDelay: Duration { .milliseconds(500) }
+    static var reconnectPlateDelay: Duration { .milliseconds(250) }
 }
 
 struct SessionDetailView: View {
