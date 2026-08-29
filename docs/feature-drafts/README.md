@@ -109,8 +109,9 @@ reshuffling it is a line move.
   repository-analysis capability, and a project action that opens an extension panel.
 - [The navigator pipeline](navigator-pipeline.md) — make the sidebar a transform over typed facts
   rather than a document an extension renders, so a t3-style list, a ChatGPT-style activity inbox,
-  and a GitLab provider with no UI at all are each buildable from the published SDK. A platform
-  investment with nothing scheduled.
+  and a GitLab provider with no UI at all are each buildable from the published SDK. Its first
+  slice — live session edges and targeted row patches on v1 — was implemented 2026-08-29; the
+  host fact registry and parity gate are now in progress.
 - [Traffic inspector extension and workbench surfaces](network-inspector-extension.md) — put a
   lightweight, agent-readable HTTP(S) inspector in the existing bottom drawer while adding the
   isolated rich surface, live companion data plane and crash-safe system leases other ambitious

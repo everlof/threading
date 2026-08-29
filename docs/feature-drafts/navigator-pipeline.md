@@ -1,10 +1,10 @@
 # The Navigator Pipeline
 
-> Status: feature draft — the product goal is that a user who wants a different sidebar can have
-> one, built by an extension, without Threading having anticipated the shape they wanted. The
+> Status: active feature draft — the product goal is that a user who wants a different sidebar
+> can have one, built by an extension, without Threading having anticipated the shape they wanted. The
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
-> plus a host-executed intent vocabulary. Nothing here is scheduled, and no part of
-> `ui.workspace-navigation` v1 is withdrawn.
+> plus a host-executed intent vocabulary. Rollout step 1 was implemented on 2026-08-29 and rollout
+> step 2 is in progress; no part of `ui.workspace-navigation` v1 is withdrawn.
 
 ## Decision
 
@@ -62,15 +62,17 @@ correct call for a published vocabulary installed extensions already switch on, 
 "Priority" section cannot tell *a turn stopped waiting on you* from *finished and unread* from
 *the account is spent*.
 
-**3. The document is pull-only, and refreshed by the wrong signal.** `loadActionID` fires when the
-host asks; the host asks on `ProjectsDidChange` (`MainWindowController.swift:844`). Activity
-changes never re-render a navigator, and the process has no way to push one — the SDK has
+**3. Before rollout step 1, the document was pull-only and refreshed by the wrong signal.**
+`loadActionID` fires when the host asks; the host asks on `ProjectsDidChange`. Activity changes did
+not re-render a navigator, and the process had no way to push one — the SDK has
 unsolicited publication for other surfaces (`ExtensionHostClient.publishComponentPatches`,
 `publishIdentityResolutions`), but a navigator only ever arrives as a field of an action
-*response*. A live spinner in an extension navigator is frozen. The irony is that the host
-**already** journals exactly this edge for extensions: `ExtensionHostService.swift:1969` observes
+*response*. A live spinner in an extension navigator was frozen. The host
+**already** journals exactly this edge for extensions: `ExtensionHostService` observes
 `SessionActivityDidChange` and emits `session.changed` into the cursor-paged event stream. The
-data path exists and is not wired to the surface that needs it.
+first rollout slice now forwards that edge to the selected v1 navigator and accepts bounded
+content-only item patches; the durable contract is in
+[`WORKSPACE_NAVIGATORS.md`](../extensions/WORKSPACE_NAVIGATORS.md#live-session-edges).
 
 **4. Rows can navigate; they cannot act.** The host capability list in `ExtensionManifest.swift`
 grants reads and event subscription (`host.events`) and nothing else — no mutation authority of
@@ -344,7 +346,7 @@ this primitive exists.
 ### Search is a host control feeding the transform
 
 v1 keeps continuous search deliberately explicit — a text input action, one IPC round trip per
-keystroke ([`WORKSPACE_NAVIGATORS.md:139`](../extensions/WORKSPACE_NAVIGATORS.md)). The pipeline
+keystroke ([`WORKSPACE_NAVIGATORS.md`](../extensions/WORKSPACE_NAVIGATORS.md#search-and-privacy)). The pipeline
 earns its per-keystroke claim only if search is part of the vocabulary: the navigator declares a
 search field and which facts are searchable, the host owns the control and its live text, and the
 query enters the transform through `match` the way an option value does. No keystroke ever
@@ -540,8 +542,10 @@ does. An install must never reorder somebody's sidebar on its own.
 
 ## Rollout
 
-1. **Live edges on v1.** Forward `session.changed` to the selected navigator and accept a row patch
-   in reply. Ships the live spinner, proves the diff path, no new vocabulary.
+1. **Live edges on v1 — implemented 2026-08-29.** The selected navigator may opt into coalesced
+   `session.changed` actions and return bounded content-only item patches. This ships the live
+   spinner path and proves targeted virtual-row replacement without giving the extension
+   structural or interaction authority.
 2. **The fact registry**, host facts only, plus the parity lint. Nothing consumes it yet.
 3. **Extension fact providers** and the domain-key join. `GitLabStateExtension` becomes buildable
    and is the test.

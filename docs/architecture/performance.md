@@ -342,6 +342,37 @@ outline insertion. In the same after-process, the deliberately retained whole-gr
 and full-reload comparisons cost 244.985 ms and 51.045 ms. The performance record is
 `/tmp/threading-profiles/20260823T211000Z-created-session-add/project-sidebar-stress.log`.
 
+### Workspace navigator live-edge scaling contract, 2026-08-29
+
+An extension navigator may contain 1,000 items and session activity can change many times during a
+turn. A live edge therefore cannot rebuild the semantic document, scan every row, start concurrent
+process requests, or do work for a navigator hidden behind Native or Settings.
+
+The selected navigator coalesces changed session IDs for one main-queue turn and admits at most 64
+unique IDs per request. It keeps one event action in flight; later edges stay in a set for the next
+bounded request. The extension may return at most 64 content-only item patches. Collection and
+item membership are indexed by stable ID, grid items retain their row index, and the host reloads
+only the named outline or grid rows. Patch validation is atomic: an unknown target changes no row
+and fails that process generation back to Native. Full replacements and ordinary action patches
+increment a shared content revision; a live answer overtaken by either is retried rather than
+applied over newer content.
+
+Pending invalidations are bounded to four batches (256 unique session IDs) in addition to the
+single in-flight batch. Crossing that bound, a timeout, or any other event-action failure returns
+the selected generation to Native rather than leaving stale content presented. A Settings
+override stops process dispatch while retaining a bounded set of changed IDs; reopening the
+navigator performs its initial load or deferred document refresh first, then drains that catch-up
+set through the same single-flight path. A project refresh observed while Settings is visible is
+latched without waking the extension process. The catch-up set is container-owned, so replacing a
+process generation while Settings is visible cannot silently discard invalidations.
+
+The regression target is a maximum-size 1,000-item virtual collection with a 64-ID burst. The
+contract and renderer tests pin request/response ceilings, duplicate coalescing, targeted row
+content replacement, retained collection identity, unknown-target failback, and the absence of
+event work without `eventActionID`. No per-edge profiler span is added because that would instrument
+the hot path at the event frequency; the bounded request and row-level assertions are the durable
+gate.
+
 ### Mobile terminal viewport-lease scaling contract, 2026-08-20
 
 A phone-owned terminal grid is recomputed on every crossed cell boundary — pinch steps, the

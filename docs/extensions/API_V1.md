@@ -28,8 +28,9 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   complete Settings pages and built-in Settings sections.
 - Validated `ui.workspace-navigation` registrations describing a complete semantic navigator
   interior with virtualized list, outline, and grid snapshots, optional initial load actions,
-  correlated runtime replacements, host-routed project/session destinations, persistent user
-  selection, and generation-scoped Native failback.
+  correlated runtime replacements, opt-in coalesced live session edges with bounded content-only
+  row patches, host-routed project/session destinations, persistent user selection, and
+  generation-scoped Native failback.
 - Package-owned localization catalogues with host language negotiation. The selected catalogue
   localizes static Settings and runtime semantic contributions, and is also exposed through
   `ExtensionLocalizer` for dynamic messages and formatted copy.

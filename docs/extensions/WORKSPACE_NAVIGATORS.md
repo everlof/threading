@@ -23,6 +23,8 @@ status, scenes, and one or more collections.
 - a persisted user choice under **View → Navigator**, with Native always outside the replaceable
   surface;
 - correlated, value-bearing runtime actions and optional `loadActionID` refreshes;
+- optional `eventActionID` delivery of coalesced `session.changed` edges, with bounded
+  content-only item patches in reply;
 - atomic snapshot replacement while preserving selection, outline expansion, visible position,
   and first responder by stable semantic ID;
 - live generation-bound inventory and immediate Native failback when a selected process stops,
@@ -110,20 +112,94 @@ ExtensionWorkspaceNavigator(
     id: "project-outline",
     title: "Project outline",
     root: .content(.status("Loading projects…", role: .neutral)),
-    preferredWidth: 280,
-    loadActionID: "refresh"
+    loadActionID: "refresh",
+    preferredWidth: 280
 )
 ```
 
 The process receives an `ExtensionWorkspaceNavigatorActionRequest` with `navigatorID`,
 `actionID`, optional `value`, and the current opaque project/session context. Return an
 `ExtensionWorkspaceNavigatorActionResponse` naming the same navigator. A response may contain a
-complete replacement navigator and/or a message, or an error by itself.
+complete replacement navigator or bounded content-only item patches, and/or a message; an error is
+exclusive. Complete replacement and patches are mutually exclusive.
 
-Replacement is intentionally whole-document rather than imperative mutation. Stable collection
-and item IDs let Threading carry presentation state across the swap without exposing AppKit or
-locking the API to today's sidebar structure. Out-of-order responses, responses from an older
-process generation, mismatched navigator IDs, and invalid replacement documents are rejected.
+Structural replacement is intentionally whole-document rather than imperative mutation. Stable
+collection and item IDs let Threading carry presentation state across a replacement or patch
+without exposing AppKit or locking the API to today's sidebar structure. Out-of-order responses,
+responses from an older process generation, mismatched navigator IDs, and invalid output are
+rejected.
+
+### Live session edges
+
+Set `eventActionID` when existing rows expose live session state such as an activity spinner.
+This opt-in also requires the `host.events` capability because the request identifies sessions
+whose host-observed state changed:
+
+```swift
+ExtensionWorkspaceNavigator(
+    id: "activity",
+    title: "Activity",
+    root: .collection(.init(
+        id: "sessions",
+        layout: .list,
+        items: [
+            .init(
+                id: "session:s1",
+                content: .status("Idle", role: .neutral),
+                activation: .destination(.session(id: "s1", projectID: nil))
+            )
+        ]
+    )),
+    eventActionID: "session-event"
+)
+```
+
+While that navigator is selected, Threading coalesces `SessionActivityDidChange` edges by session
+ID and sends at most 64 IDs in one `ExtensionWorkspaceNavigatorHostEvent`. Decode the action's
+`value`, refresh the affected presentation facts, and return at most 64
+`ExtensionWorkspaceNavigatorItemPatch` values. For example, using the stable session-to-item map
+that produced the current document:
+
+```swift
+let event = try ExtensionWorkspaceNavigatorHostEvent(
+    actionValue: request.value ?? .emptyObject
+)
+let patches = event.sessionIDs.compactMap { sessionID in
+    itemIDBySessionID[sessionID].map { itemID in
+        ExtensionWorkspaceNavigatorItemPatch(
+            collectionID: "sessions",
+            itemID: itemID,
+            content: .status("Running", role: .positive)
+        )
+    }
+}
+let response = ExtensionWorkspaceNavigatorActionResponse(
+    requestID: request.requestID,
+    navigatorID: request.navigatorID,
+    itemPatches: patches.isEmpty ? nil : patches
+)
+```
+
+An item patch replaces only `content` on an existing item. It cannot insert, remove, reorder,
+reparent, select, enable, or change activation. Threading validates every target before applying
+any patch, then reloads only affected virtual rows. An unknown collection or item fails the
+selected process generation back to Native; structural change still requires a complete navigator
+replacement. Only one event action is in flight, later edges remain coalesced, and a response
+overtaken by newer document or action content is retried against the current document. Settings
+pauses process dispatch and retains a bounded, container-owned catch-up set even if the process is
+replaced. When the navigator returns, Threading performs its initial load or a document refresh
+deferred under Settings before draining that catch-up set. A project refresh observed while
+Settings is visible is latched without waking the extension process. The host retains at most 256
+pending IDs beyond the in-flight batch; overflow or any event-action failure returns to Native
+rather than presenting content which may be stale.
+
+Call `validateForHostEvent()` on the response before encoding it. The shared response wire type
+also serves ordinary actions, so its general `validate()` method permits a complete replacement;
+the event-specific validator deliberately does not.
+
+An event can name a session that the current document does not show, so return patches only for
+IDs mapped to existing items. Declare `host.sessions.read` as well when the action reads sanitized
+session snapshots to derive the new content; `host.events` alone grants the edge, not session data.
 
 ## Host destinations
 
@@ -135,6 +211,8 @@ remain consistent whether Native or an extension navigator is visible.
 Use `.action(id:)` for extension-owned behavior such as filters, inbox state, or changing the
 document. Host destinations do not grant project/session read access; request the applicable
 `host.*.read` capabilities if the extension needs to construct its snapshot from host data.
+
+### Search and privacy
 
 Continuous search remains intentionally explicit: use a text input action and return snapshots.
 The protocol does not expose keystrokes, arbitrary timers, AppKit views, or a private route around
