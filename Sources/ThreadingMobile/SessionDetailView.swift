@@ -139,6 +139,9 @@ enum SessionDetailMetrics {
     static var reconnectDim: Double { 0.55 }
     static var reconnectBlurRadius: CGFloat { 6 }
     static var reconnectRevealDuration: TimeInterval { 0.25 }
+    /// How long a reconnect may take before its plate says so. A quick one never shows a
+    /// spinner: the dim is the lock, the plate is "this is taking a moment".
+    static var reconnectPlateDelay: Duration { .milliseconds(500) }
 }
 
 struct SessionDetailView: View {
@@ -878,6 +881,7 @@ struct TerminalRemoteView: View {
     @Environment(\.remoteTheme) private var inheritedTheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showsReconnectPlate = false
     @State private var showsAttentionRequest = false
     @State private var showsKeyboardEditor = false
     @State private var directAttachmentTray: ComposerAttachmentTray?
@@ -908,10 +912,15 @@ struct TerminalRemoteView: View {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
     }
 
-    /// Hydrating after a connect, or locked from the moment the app resigned active until the
-    /// socket proved itself again — one span from the reader's side.
+    /// Hydrating after a connect, or locked from the moment the app went to the background
+    /// until the socket proved itself again — one span from the reader's side.
     private var isCatchingUp: Bool {
         connection.isTerminalHydrating || connection.isAwaitingResume
+    }
+
+    /// A reconnect's plate is owed only while the person is back and the wait is still on.
+    private var wantsReconnectPlate: Bool {
+        isCatchingUp && connection.hasEverConnected && scenePhase == .active
     }
 
     /// A reconnect keeps the last screen on display — dimmed and softened under the loader —
@@ -1105,16 +1114,18 @@ struct TerminalRemoteView: View {
                 : 0
         )
         .overlay {
-            // The softened screen is what the switcher card and the return snapshot show; the
-            // loader is for the moment the person is back and waiting, not for the card.
-            if isCatchingUp, scenePhase == .active {
+            if isCatchingUp, !connection.hasEverConnected {
+                // An opening has nothing else to show: the loader, at once, on the ground.
+                MobileLoadingPlaceholder(MobileSessionChrome.openingStatus(
+                    isAvailable: true,
+                    routeWalk: model.routeWalkStatus
+                ))
+                .background(terminalBackground)
+            } else if showsReconnectPlate {
+                // The softened screen is the lock and is what the switcher card shows; the
+                // plate is for a wait that has lasted a beat while the person is back.
                 MobileLoadingPlaceholder(
-                    connection.hasEverConnected
-                        ? MobileL10n.string("Reconnecting…")
-                        : MobileSessionChrome.openingStatus(
-                            isAvailable: true,
-                            routeWalk: model.routeWalkStatus
-                        ),
+                    MobileL10n.string("Reconnecting…"),
                     standsOnContent: holdsOldScreen
                 )
                 .background(holdsOldScreen ? Color.clear : terminalBackground)
@@ -1124,6 +1135,19 @@ struct TerminalRemoteView: View {
             reduceMotion ? nil : .easeOut(duration: SessionDetailMetrics.reconnectRevealDuration),
             value: isCatchingUp
         )
+        .animation(
+            reduceMotion ? nil : .easeOut(duration: SessionDetailMetrics.reconnectRevealDuration),
+            value: showsReconnectPlate
+        )
+        .task(id: wantsReconnectPlate) {
+            guard wantsReconnectPlate else {
+                showsReconnectPlate = false
+                return
+            }
+            try? await Task.sleep(for: SessionDetailMetrics.reconnectPlateDelay)
+            guard !Task.isCancelled else { return }
+            showsReconnectPlate = true
+        }
         .background(terminalBackground)
         // `TerminalViewRepresentable` owns this inset inside its stable-width UIKit host. Keeping
         // it outside in SwiftUI would make the host guess how much of the navigation viewport a
