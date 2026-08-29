@@ -1024,11 +1024,25 @@ lands the next phrase synchronously with no scroll or fade.
 The same boundary reserves LabelMorph's raster overflow inside its clipping frame. The package
 draws each glyph into a padded tile so overhanging ink survives; clipping the wrapper at the
 typographic advance instead cut the leading edge of the first character in the navigation bar.
-The connection dot fades out at its old position and back in at its new one on every phrase
-identity change, even when its colour did not change, because the centred dot-and-phrase row moves
-horizontally when the new phrase has a different width. Hiding the real dot during that reflow is
-what prevents the first frame from teleporting before an ordinary opacity animation could start.
-Reduce Motion lands both the dot and the phrase without that transition.
+
+The dot and the phrase are one UIKit view, `MobileConnectionStatusLineView`, on both the SwiftUI
+principal item and the UIKit conversation title. The phrase's label is given a frame the row's
+width and the mark's slot decide — never the words — and the line places the dot at the drawn
+phrase's first character itself, `Spacing.tight` before it, with the pair centred. A recording of
+a chat opening is why: the connection settles about 100 ms after the screen appears, which is
+inside the push that brings its title in, and that one status change flew twice. The phrase label
+had been sized to its words in SwiftUI, so the morph was built in the old width and the characters
+that did not fit were made fresh, unanimated, at their final slots when the wider frame landed a
+pass later — "David's MacBo" still rising while "ok Pro" already sat lit. And the dot faded a copy
+of itself out in the *window* at its model frame, which during a push is the resting frame while
+the presentation is still sliding: the copy popped in at the far end of the slide, sat still while
+the words slid under it, and the real dot faded in elsewhere. The dot still fades out at its old
+position and back in at its new one on every phrase identity change, even when its colour did not
+change, because the phrase's width is what moves it; the copy is now the line's own subview at the
+row-local frame the dot was drawn in, so it goes wherever the bar takes the row. A change that
+lands while anything above the line is mid-animation — the push itself — is committed without
+morph or fade, so a title still sliding in arrives already saying the settled state. Reduce Motion
+lands both the dot and the phrase without any of it.
 
 An automatic dashboard reconnect does not present the full recovery card on its first transient
 route miss. While recovery is already scheduled, the existing compact connection card says

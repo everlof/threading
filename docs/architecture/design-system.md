@@ -1435,7 +1435,11 @@ The vocabulary these encode, which new work should follow:
   iPhone mutable chat titles cross the same boundary through `MobileMorphingTitleLabel` and
   `MobileMorphingTitle`; a feature row must not substitute `Text` or `UILabel`. This includes the
   dashboard chat list, both SwiftUI and UIKit conversation navigation titles, and their live
-  rename updates. The navigation title keeps the chat name above the connection state. A
+  rename updates. The navigation title keeps the chat name above the connection state, and the
+  connection state — mark and phrase — is one UIKit view on both titles,
+  `MobileConnectionStatusLineView`, which gives the phrase a frame the words do not decide and
+  stands the mark beside the drawn line itself; the copy of the mark that fades out where it
+  stood is that row's subview, never the window's, so a push carries it with the words. A
   morphing label in a centred `UIStackView` uses `.defaultLow` horizontal compression resistance:
   priority 1 lets the stack solve an over-width sentence by collapsing the title to zero instead
   of truncating it to the bar. This presentation is deliberately host-owned: providers and
@@ -1513,7 +1517,10 @@ through `CommandLineRedactor` (secrets behind credential-shaped flags become `<r
 shared vocabulary with the execution audit); the raw line is one right-click away, per row,
 forgotten on rebuild. Both text fields explicitly use AppKit's single-line mode: a truncating
 line-break mode alone still lets a paragraph-long launch command wrap outside the fixed-height
-row and paint through its siblings. The hover plate belongs only to the port rows, whose whole
+row and paint through its siblings. The command presentation also collapses whitespace inside
+each argv element before it reaches a label: a startup prompt is one argument even when it
+contains paragraphs, and joining argv with spaces does not remove those embedded newlines. The
+hover plate belongs only to the port rows, whose whole
 surface is a click; a stoppable process row hovers by revealing its `✕` in the value's place — a
 `ThemedIconButton` that asks (`ConfirmationPrompt.stopSessionProcess`, `.irreversible`) and
 signals exactly one pid through `SessionProcessTerminator`'s identity-checked SIGTERM.

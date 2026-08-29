@@ -459,7 +459,13 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     which hands its title the 176 points its button groups leave. So the settled width depends on
     the device and never on the name. A host that genuinely cannot hold its width still —
     rotation, Dynamic Type — will still see the snap; the package does not yet re-target an
-    in-flight morph.
+    in-flight morph. The connection phrase under that title was the second host to learn this:
+    it hugged its words so a SwiftUI `HStack` could stand the status dot beside it, and a chat
+    opening drew "David's MacBook Pro" in two pieces — the head still rising in the old width,
+    the tail already lit at its final slot, made by `relayoutCurrent()` when the wider frame
+    landed. `MobileConnectionStatusLineView` owns that row now: the label's frame follows from
+    the row's width and the mark's slot, and the line measures `textWidth(fitting:)` to stand the
+    mark at the drawn phrase itself, so nothing bridged into SwiftUI hugs.
   - **A glyph layer's frame is a raster tile, not the glyph's metrics.** It is padded for
     ink that overhangs the advance and snapped to the pixel grid, so it always overruns the
     text it draws. `CharacterSlot.inkFrame` (exposed as `MorphingLabel.glyphInkFrames`) is
