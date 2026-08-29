@@ -272,7 +272,7 @@
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["420×760 points"]
+        "sizes": ["420×820 points", "312×760-point narrow sentinel"]
       },
       "source": {
         "path": "Tests/ThreadingTests/SessionInfoRenderTests.swift",

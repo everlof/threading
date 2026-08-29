@@ -552,7 +552,9 @@ final class SessionInfoViewController: NSViewController {
         if let coverage = snapshot.coverage, coverage.state != .complete {
             parts.append(coverage.detail ?? L10n.string("Partial"))
         }
-        list.addNote(parts.joined(separator: " · "))
+        guard let scope = parts.first else { return }
+        let provenance = parts.dropFirst().joined(separator: " · ")
+        list.addNote([scope, provenance].filter { !$0.isEmpty }.joined(separator: "\n"))
     }
 
     private func add(process: SessionProcess) {

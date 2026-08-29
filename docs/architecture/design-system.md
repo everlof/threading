@@ -1502,9 +1502,13 @@ dot column itself, and the dot is honest about state — filled positive for ali
 `circle` in the warning role for stopped, because a suspended process holding its memory and
 its ports is a fact the "alive" dot must not paint over. A zombie is not a state here: Darwin's
 `proc_pidinfo` cannot see one at all (measured; `SessionInfoTests` pins it), so an unreaped
-child leaves the list instead. The value column is a `CompoundValueLabel` — `12% · 248 MB`
-gives up whole segments, never characters — and the row speaks as one accessibility element: a
-pressable link where the row opens a port, a quiet group otherwise. Command lines render
+child leaves the list instead. A row keeps its name and detail/command on separate compact lines,
+then gives the reading its own trailing column; putting all three on one baseline made distinct
+facts read as a merged sentence even when Auto Layout had technically kept their frames apart.
+The value column is a `CompoundValueLabel` — `12% · 248 MB` gives up whole segments, never
+characters — and the row speaks as one accessibility element: a pressable link where the row
+opens a port, a quiet group otherwise. Index scope gets its own line above update/catalog
+provenance for the same reason. Command lines render
 through `CommandLineRedactor` (secrets behind credential-shaped flags become `<redacted>`,
 shared vocabulary with the execution audit); the raw line is one right-click away, per row,
 forgotten on rebuild. Both text fields explicitly use AppKit's single-line mode: a truncating

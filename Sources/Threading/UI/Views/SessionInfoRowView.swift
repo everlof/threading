@@ -1,6 +1,7 @@
 import AppKit
 
-/// One line in the info panel: a state glyph, what the line is about, and a reading on the right.
+/// One compact fact in the info panel: a state glyph, a two-line name/detail column, and a
+/// reading on the right.
 ///
 /// It follows the tool row's rule rather than the table's — **no fill at rest**, raised on
 /// hover — because a panel is mostly rows, and a stack of filled slabs reads as the content
@@ -40,6 +41,7 @@ final class SessionInfoRowView: NSView, PointerClaiming {
     private let glyphView = GlyphView()
     private let primaryLabel = NSTextField(labelWithString: "")
     private let secondaryLabel = NSTextField(labelWithString: "")
+    private let textStack = NSStackView()
     private let valueLabel = CompoundValueLabel()
 
     private let secondaryPrefix: String
@@ -92,9 +94,18 @@ final class SessionInfoRowView: NSView, PointerClaiming {
         secondaryLabel.textColor = Design.Text.tertiary
         secondaryLabel.lineBreakMode = .byTruncatingTail
         // `lineBreakMode` chooses how a line ends; it does not make an AppKit label one line.
-        // Agent launch arguments can be paragraph-long, and a wrapping field centred inside the
-        // fixed-height row paints through the rows and section headings on both sides of it.
+        // Agent launch arguments can be paragraph-long, and a wrapping field inside this compact
+        // two-line row paints through the rows and section headings on both sides of it.
         secondaryLabel.usesSingleLineMode = true
+
+        textStack.orientation = .vertical
+        textStack.alignment = .leading
+        textStack.distribution = .fillEqually
+        textStack.spacing = 0
+        textStack.addArrangedSubview(primaryLabel)
+        textStack.addArrangedSubview(secondaryLabel)
+        primaryLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor).isActive = true
+        secondaryLabel.widthAnchor.constraint(equalTo: textStack.widthAnchor).isActive = true
 
         valueLabel.segments = valueSegments
         valueLabel.alignment = .right
@@ -104,10 +115,12 @@ final class SessionInfoRowView: NSView, PointerClaiming {
         // than required: required would make the widest row a hard floor under the whole panel.
         valueLabel.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         valueLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        textStack.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textStack.setContentHuggingPriority(.defaultLow, for: .horizontal)
         secondaryLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         primaryLabel.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
 
-        [glyphView, primaryLabel, secondaryLabel, valueLabel].forEach {
+        [glyphView, textStack, valueLabel].forEach {
             $0.translatesAutoresizingMaskIntoConstraints = false
             addSubview($0)
         }
@@ -125,14 +138,15 @@ final class SessionInfoRowView: NSView, PointerClaiming {
             glyphView.widthAnchor.constraint(equalToConstant: Design.Chat.toolIconWidth),
             glyphView.heightAnchor.constraint(equalTo: heightAnchor),
 
-            primaryLabel.leadingAnchor.constraint(equalTo: glyphView.trailingAnchor, constant: Design.Spacing.small),
-            primaryLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
-
-            secondaryLabel.leadingAnchor.constraint(equalTo: primaryLabel.trailingAnchor, constant: Design.Spacing.small),
-            secondaryLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+            textStack.leadingAnchor.constraint(
+                equalTo: glyphView.trailingAnchor,
+                constant: Design.Spacing.small
+            ),
+            textStack.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.hairline),
+            textStack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.hairline),
 
             valueLabel.leadingAnchor.constraint(
-                greaterThanOrEqualTo: secondaryLabel.trailingAnchor,
+                equalTo: textStack.trailingAnchor,
                 constant: Design.Spacing.small
             ),
             valueLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Design.Spacing.small),
@@ -225,7 +239,7 @@ final class SessionInfoRowView: NSView, PointerClaiming {
         let display = revealsSecrets ? commandLine.fullDisplay : commandLine.redactedDisplay
         secondaryLabel.stringValue = display.isEmpty
             ? secondaryPrefix
-            : "\(secondaryPrefix)  \(display)"
+            : "\(secondaryPrefix)\(SessionInfoLayout.detailSeparator)\(display)"
     }
 
     /// A process row's tooltip is the whole answer: the command line at the reveal the user
@@ -379,8 +393,9 @@ final class SessionInfoRowView: NSView, PointerClaiming {
 // MARK: - Layout
 
 enum SessionInfoLayout {
-    static let rowHeight: CGFloat = 22
+    static let rowHeight: CGFloat = 30
     static let glyphPointSize: CGFloat = 11
+    static let detailSeparator = " · "
 
     /// Levels of parentage the indent will draw before flattening: deep enough for any real
     /// dev-server tree, shallow enough that a runaway chain leaves room for the name.

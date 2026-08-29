@@ -39,7 +39,7 @@ final class SessionInfoRenderTests: XCTestCase {
             ("swiss", AppThemeStyles.swissMinimalist)
         ]
 
-        static let size = NSSize(width: 420, height: 760)
+        static let size = NSSize(width: 420, height: 820)
         static let narrowSize = NSSize(width: 312, height: 760)
     }
 

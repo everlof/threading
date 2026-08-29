@@ -68,10 +68,16 @@ final class SessionInfoRowTests: XCTestCase {
     }
 
     private func secondaryText(of row: SessionInfoRowView) -> String? {
-        row.subviews
-            .compactMap { $0 as? NSTextField }
+        descendants(of: NSTextField.self, in: row)
             .first { $0.stringValue.contains("50301") }?
             .stringValue
+    }
+
+    private func descendants<T>(of type: T.Type, in view: NSView) -> [T] {
+        view.subviews.flatMap { subview -> [T] in
+            let match = (subview as? T).map { [$0] } ?? []
+            return match + descendants(of: type, in: subview)
+        }
     }
 
     // MARK: - Redaction & Reveal
@@ -82,7 +88,7 @@ final class SessionInfoRowTests: XCTestCase {
         let row = makeProcessRow(commandLine: secretCommandLine)
         row.update(reading(facts: ["Started 8 min ago"]))
 
-        XCTAssertEqual(secondaryText(of: row), "50301  server.js --token <redacted>")
+        XCTAssertEqual(secondaryText(of: row), "50301 · server.js --token <redacted>")
         XCTAssertFalse(row.revealsFullCommand)
 
         let toolTip = row.toolTip ?? ""
@@ -97,11 +103,11 @@ final class SessionInfoRowTests: XCTestCase {
 
         row.toggleReveal()
         XCTAssertTrue(row.revealsFullCommand)
-        XCTAssertEqual(secondaryText(of: row), "50301  server.js --token abc123")
+        XCTAssertEqual(secondaryText(of: row), "50301 · server.js --token abc123")
         XCTAssertTrue(row.toolTip?.contains("abc123") == true)
 
         row.toggleReveal()
-        XCTAssertEqual(secondaryText(of: row), "50301  server.js --token <redacted>")
+        XCTAssertEqual(secondaryText(of: row), "50301 · server.js --token <redacted>")
         XCTAssertFalse(row.toolTip?.contains("abc123") == true)
     }
 
@@ -196,9 +202,9 @@ final class SessionInfoRowTests: XCTestCase {
     }
 
     /// A real agent command can carry an opening prompt or configuration paths long enough to
-    /// wrap many times. The row is deliberately one line tall, so both descriptions must remain
-    /// one-line fields and truncate horizontally instead of painting through adjacent rows.
-    func testLongCommandLineStaysInsideItsFixedHeightRow() {
+    /// wrap many times. Each description owns one line in the compact row and must truncate
+    /// horizontally instead of painting through its sibling or the reading on the right.
+    func testLongCommandLineKeepsTwoTextLinesSeparateFromTheReading() throws {
         let longCommand = SessionInfoRowView.CommandLine(
             redactedDisplay: String(repeating: "--settings /Users/me/Library/Application Support/Threading ", count: 8),
             fullDisplay: String(repeating: "--settings /Users/me/Library/Application Support/Threading ", count: 8),
@@ -211,7 +217,7 @@ final class SessionInfoRowTests: XCTestCase {
         host.translatesAutoresizingMaskIntoConstraints = false
         host.addSubview(row)
         NSLayoutConstraint.activate([
-            host.widthAnchor.constraint(equalToConstant: 320),
+            host.widthAnchor.constraint(equalToConstant: 312),
             host.heightAnchor.constraint(equalToConstant: SessionInfoLayout.rowHeight),
             row.leadingAnchor.constraint(equalTo: host.leadingAnchor),
             row.trailingAnchor.constraint(equalTo: host.trailingAnchor),
@@ -220,10 +226,24 @@ final class SessionInfoRowTests: XCTestCase {
 
         host.layoutSubtreeIfNeeded()
 
-        for label in row.subviews.compactMap({ $0 as? NSTextField }) {
+        let labels = descendants(of: NSTextField.self, in: row)
+        let primary = try XCTUnwrap(labels.first { $0.stringValue == "node" })
+        let secondary = try XCTUnwrap(labels.first { $0.stringValue.contains("50301") })
+        let value = try XCTUnwrap(descendants(of: CompoundValueLabel.self, in: row).first)
+
+        let primaryFrame = primary.convert(primary.bounds, to: row)
+        let secondaryFrame = secondary.convert(secondary.bounds, to: row)
+        let valueFrame = value.convert(value.bounds, to: row)
+
+        XCTAssertFalse(primaryFrame.intersects(secondaryFrame))
+        XCTAssertLessThanOrEqual(primaryFrame.maxX + Design.Spacing.tight, valueFrame.minX)
+        XCTAssertLessThanOrEqual(secondaryFrame.maxX + Design.Spacing.tight, valueFrame.minX)
+
+        for label in labels {
+            let frame = label.convert(label.bounds, to: row)
             XCTAssertTrue(label.usesSingleLineMode)
-            XCTAssertGreaterThanOrEqual(label.frame.minY, row.bounds.minY)
-            XCTAssertLessThanOrEqual(label.frame.maxY, row.bounds.maxY)
+            XCTAssertGreaterThanOrEqual(frame.minY, row.bounds.minY)
+            XCTAssertLessThanOrEqual(frame.maxY, row.bounds.maxY)
         }
     }
 
