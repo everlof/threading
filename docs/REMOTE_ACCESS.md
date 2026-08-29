@@ -621,6 +621,18 @@ asks for the ring again). Separately, the session socket reconnects the moment t
 active instead of serving out a backoff that was counting while the app was suspended.
 `RemoteTerminalViewportLeaseTests` proves both the hold and the untouched first-open reset.
 
+The lock starts as the app *leaves*, not when the reconnect begins. On return iOS first shows its
+own snapshot of the app, and a blur that only arrived once the dead socket had been noticed let
+sharp old text flash before it — so `isAwaitingResume` is raised on `willResignActive` (for a
+terminal that has drawn something) and the surface is already dimmed and softened in the snapshot
+iOS takes. On `didBecomeActive` a reconnect that was waiting starts at once, and hydration
+completing releases the lock; a socket that still looks connected may have died silently, so one
+ping settles it — a pong releases the lock, an error or three seconds of silence reconnects. A
+reconnect also keeps what the last hello established (server features, atomic-submission and
+input-control support, the roster) until the next hello replaces it: clearing them at connect time
+computed every terminal into the `.none` input mode for the reconnect, which resigned the keyboard
+and unmounted the line composer someone was typing in.
+
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
 links were still lying around unused. That was a privacy gap and a debugging one: two clients

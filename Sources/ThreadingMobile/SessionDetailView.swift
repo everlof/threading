@@ -867,15 +867,21 @@ struct TerminalRemoteView: View {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
     }
 
+    /// Hydrating after a connect, or locked from the moment the app resigned active until the
+    /// socket proved itself again — one span from the reader's side.
+    private var isCatchingUp: Bool {
+        connection.isTerminalHydrating || connection.isAwaitingResume
+    }
+
     /// A reconnect keeps the last screen on display — dimmed and softened under the loader —
     /// until the held replay replaces it in one frame. A first opening has no screen yet, so
     /// the loader stands on the terminal's own ground.
-    private var keepsOldScreenWhileHydrating: Bool {
-        connection.isTerminalHydrating && connection.hasPresentedTerminalOutput
+    private var holdsOldScreen: Bool {
+        isCatchingUp && connection.hasPresentedTerminalOutput
     }
 
     private var terminalPresentationOpacity: Double {
-        guard connection.isTerminalHydrating else { return 1 }
+        guard isCatchingUp else { return 1 }
         return connection.hasPresentedTerminalOutput ? SessionDetailMetrics.reconnectDim : 0
     }
 
@@ -1053,12 +1059,12 @@ struct TerminalRemoteView: View {
         )
         .opacity(terminalPresentationOpacity)
         .blur(
-            radius: keepsOldScreenWhileHydrating && !reduceMotion
+            radius: holdsOldScreen && !reduceMotion
                 ? SessionDetailMetrics.reconnectBlurRadius
                 : 0
         )
         .overlay {
-            if connection.isTerminalHydrating {
+            if isCatchingUp {
                 MobileLoadingPlaceholder(
                     connection.hasEverConnected
                         ? MobileL10n.string("Reconnecting…")
@@ -1066,14 +1072,14 @@ struct TerminalRemoteView: View {
                             isAvailable: true,
                             routeWalk: model.routeWalkStatus
                         ),
-                    standsOnContent: keepsOldScreenWhileHydrating
+                    standsOnContent: holdsOldScreen
                 )
-                .background(keepsOldScreenWhileHydrating ? Color.clear : terminalBackground)
+                .background(holdsOldScreen ? Color.clear : terminalBackground)
             }
         }
         .animation(
             reduceMotion ? nil : .easeOut(duration: SessionDetailMetrics.reconnectRevealDuration),
-            value: connection.isTerminalHydrating
+            value: isCatchingUp
         )
         .background(terminalBackground)
         // `TerminalViewRepresentable` owns this inset inside its stable-width UIKit host. Keeping

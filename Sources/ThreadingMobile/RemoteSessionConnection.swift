@@ -15,6 +15,9 @@ enum RemoteMobileConnectionDefaults {
     /// roughly a third of that even counting the repaint the Mac sends after a cut replay — so a
     /// shorter replay is not a dimmer one, only a cheaper one.
     static let terminalReplayBudgetBytes = 128 * 1024
+    /// How long a return from the background waits for the socket to answer a ping before
+    /// treating it as dead and reconnecting.
+    static let resumeLivenessDeadline: Duration = .seconds(3)
     /// Stay inside the Mac's five-minute replay window even after timer and network jitter.
     static let acknowledgedSubmissionRetrySeconds: TimeInterval = 4 * 60
     /// How long a socket may stay open without the Mac greeting it.
@@ -221,6 +224,12 @@ final class RemoteSessionConnection: ObservableObject {
     /// True once a hello has been answered: the next `.connecting` is a reconnect, not an
     /// opening, and is named as one.
     @Published private(set) var hasEverConnected = false
+    /// Set as the app resigns active and cleared once the connection has proven itself again —
+    /// a pong, or a completed reconnect. The terminal surface keeps its last screen locked
+    /// under the loader for the whole span, so the snapshot iOS shows on return is already the
+    /// softened one rather than sharp text that blurs a moment later.
+    @Published private(set) var isAwaitingResume = false
+    private var resumeProbeGeneration: Int?
     @Published private(set) var conversationCanSend = false
     @Published private(set) var composerCapabilities: [RemoteComposerCapabilityDTO] = []
     @Published private(set) var presence: [String: RemotePresenceDTO] = [:]
@@ -269,7 +278,7 @@ final class RemoteSessionConnection: ObservableObject {
     /// Set by a reconnect whose terminal already shows something: output is held rather than
     /// delivered until hydration completes, then arrives behind one reset.
     private var holdsReplayForHydration = false
-    private var lifecycleObserver: NSObjectProtocol?
+    private var lifecycleObservers: [NSObjectProtocol] = []
     private let pendingTerminalOutputLimit = 2 * 1_024 * 1_024
     /// The mounted SwiftTerm view that owns terminal delivery and the phone's viewport lease.
     ///
@@ -432,19 +441,28 @@ final class RemoteSessionConnection: ObservableObject {
             self?.conversationCanSend = canSend
         }
 #if canImport(UIKit)
-        lifecycleObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.reconnectNowIfWaiting() }
-        }
+        lifecycleObservers = [
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.willResignActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.noteResigningActive() }
+            },
+            NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in self?.resumeAfterActivation() }
+            },
+        ]
 #endif
     }
 
     deinit {
-        if let lifecycleObserver {
-            NotificationCenter.default.removeObserver(lifecycleObserver)
+        for observer in lifecycleObservers {
+            NotificationCenter.default.removeObserver(observer)
         }
     }
 
@@ -458,16 +476,22 @@ final class RemoteSessionConnection: ObservableObject {
         phase = .connecting
         beginTerminalHydration()
         lastSentTerminalViewport = nil
-        composerCapabilities = []
-        serverFeatures.removeAll()
-        supportsComposerAttachmentUploads = false
-        supportsTerminalAttachmentInsertion = false
-        supportsAtomicTerminalSubmission = false
-        supportsAttentionRequests = false
-        supportsFocusedInputControl = false
-        supportsSessionConnectionParking = false
+        // A reconnect keeps what the last hello established until the next hello replaces it
+        // wholesale. Clearing these here put every terminal into `.none` input mode for the
+        // reconnect, which resigned the keyboard and unmounted the composer someone was typing
+        // in — a return from another app ended with the keyboard gone and the draft blinking out.
+        if !hasEverConnected {
+            composerCapabilities = []
+            serverFeatures.removeAll()
+            supportsComposerAttachmentUploads = false
+            supportsTerminalAttachmentInsertion = false
+            supportsAtomicTerminalSubmission = false
+            supportsAttentionRequests = false
+            supportsFocusedInputControl = false
+            supportsSessionConnectionParking = false
+            inputControl = nil
+        }
         warmTransportState = .active
-        inputControl = nil
         inputControlEvents = []
         attentionRecipients = []
         socketTrace = MobileDiagnostics.connectivityTrace()
@@ -570,6 +594,8 @@ final class RemoteSessionConnection: ObservableObject {
 
     func disconnect(markEnded: Bool = true) {
         reportTyping(false)
+        if markEnded { isAwaitingResume = false }
+        resumeProbeGeneration = nil
         terminalHydrationQuietTask?.cancel()
         terminalHydrationQuietTask = nil
         terminalHydrationMaximumTask?.cancel()
@@ -750,6 +776,7 @@ final class RemoteSessionConnection: ObservableObject {
         terminalHydrationMaximumTask = nil
         isTerminalHydrating = false
         releaseHeldReplay()
+        isAwaitingResume = false
 #if DEBUG
         MobileTerminalWirePerformanceProbe.terminalHydrationCompleted(session)
 #endif
@@ -772,6 +799,48 @@ final class RemoteSessionConnection: ObservableObject {
         output(data)
     }
 
+    /// The app is on its way out. A terminal with something on screen locks it under the
+    /// loader now, so what iOS snapshots for the switcher and the return is already the
+    /// softened screen.
+    private func noteResigningActive() {
+        guard hasEverConnected, surface == .terminal, hasPresentedTerminalOutput else { return }
+        isAwaitingResume = true
+    }
+
+    /// The app is back. A reconnect already waiting starts now; otherwise a socket that looks
+    /// connected may have died in the background without a word, so one ping settles whether
+    /// the locked screen can be released or must be replaced.
+    private func resumeAfterActivation() {
+        if reconnectTask != nil {
+            reconnectNowIfWaiting()
+            return
+        }
+        guard isAwaitingResume else { return }
+        guard phase == .connected, let task else {
+            isAwaitingResume = false
+            return
+        }
+        let generation = connectionGeneration
+        resumeProbeGeneration = generation
+        task.sendPing { [weak self] error in
+            Task { @MainActor in
+                guard let self, self.resumeProbeGeneration == generation else { return }
+                self.resumeProbeGeneration = nil
+                if error == nil {
+                    self.isAwaitingResume = false
+                } else {
+                    self.connect()
+                }
+            }
+        }
+        Task { [weak self, deadline = RemoteMobileConnectionDefaults.resumeLivenessDeadline] in
+            try? await Task.sleep(for: deadline)
+            guard let self, self.resumeProbeGeneration == generation else { return }
+            self.resumeProbeGeneration = nil
+            self.connect()
+        }
+    }
+
     /// A socket dropped in the background is not a flaky network. Reconnect the moment the
     /// app is back rather than serving out a backoff that was counting while it was suspended.
     private func reconnectNowIfWaiting() {
@@ -781,7 +850,10 @@ final class RemoteSessionConnection: ObservableObject {
         reconnectAttempt = 0
         let generation = connectionGeneration
         Task { [weak self] in
-            guard let client = await reconnectClient(0) else { return }
+            guard let client = await reconnectClient(0) else {
+                self?.isAwaitingResume = false
+                return
+            }
             guard let self, self.connectionGeneration == generation,
                   self.reconnectTask == nil else { return }
             self.client = client
@@ -1729,8 +1801,12 @@ final class RemoteSessionConnection: ObservableObject {
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self,
                   self.connectionGeneration == generation,
-                  let reconnectClient = self.reconnectClient,
-                  let client = await reconnectClient(attempt) else { return }
+                  let reconnectClient = self.reconnectClient else { return }
+            guard let client = await reconnectClient(attempt) else {
+                // Nothing to reconnect with: the locked screen would never be released.
+                self.isAwaitingResume = false
+                return
+            }
             guard !Task.isCancelled, self.connectionGeneration == generation else { return }
             self.client = client
             self.reconnectTask = nil
