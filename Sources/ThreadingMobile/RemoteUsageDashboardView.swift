@@ -864,18 +864,9 @@ struct RemoteUsageDashboardView: View {
             let current = available.first { $0.kind == breakdownKind } ?? available[0]
             let total = metric == .cost ? range.cost.totalUSD : Double(range.tokens.processed)
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-                HStack(alignment: .firstTextBaseline) {
-                    sectionTitle("Breakdown")
-                    Spacer(minLength: MobileDesign.Spacing.small)
-                    if available.count > 1 {
-                        Picker("Breakdown", selection: $breakdownKind) {
-                            ForEach(available, id: \.kind) { breakdown in
-                                Text(breakdownTitle(breakdown.kind)).tag(breakdown.kind)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .fixedSize()
-                    }
+                sectionTitle("Breakdown")
+                if available.count > 1 {
+                    breakdownRail(available)
                 }
                 UsageCard {
                     LazyVStack(spacing: 0) {
@@ -927,6 +918,63 @@ struct RemoteUsageDashboardView: View {
                 }
             }
         }
+    }
+
+    /// The breakdown selector as a horizontally scrollable pill rail rather than a segmented
+    /// control. Four localized labels — "Providers" is "Leverantörer" — cannot share one screen
+    /// width as fixed segments without running off it or being clipped; a rail shows each label
+    /// in full, scrolls to the rest, and brings the chosen one into view. The same idiom, and
+    /// the same edge-to-edge margins, as `accountRail`.
+    private func breakdownRail(_ available: [RemoteUsageBreakdownDTO]) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MobileDesign.Spacing.small) {
+                    ForEach(available, id: \.kind) { breakdown in
+                        breakdownChip(breakdown.kind, isSelected: breakdown.kind == breakdownKind)
+                            .id(breakdown.kind)
+                    }
+                }
+                .padding(.vertical, MobileDesign.Spacing.hairline)
+            }
+            .contentMargins(.horizontal, MobileDesign.Spacing.inset, for: .scrollContent)
+            .padding(.horizontal, -MobileDesign.Spacing.inset)
+            .onChange(of: breakdownKind) { _, kind in
+                withAnimation(.easeOut(duration: MobileDesign.Motion.controlResponse)) {
+                    proxy.scrollTo(kind, anchor: .center)
+                }
+            }
+        }
+    }
+
+    private func breakdownChip(
+        _ kind: RemoteUsageBreakdownKindDTO,
+        isSelected: Bool
+    ) -> some View {
+        Button {
+            breakdownKind = kind
+        } label: {
+            Text(breakdownTitle(kind))
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                .foregroundStyle(isSelected ? theme.label : theme.secondaryLabel)
+                .lineLimit(1)
+                .padding(.horizontal, MobileDesign.Spacing.medium)
+                .frame(height: MobileDesign.Size.compactControl)
+                .background(
+                    isSelected ? theme.controlHover : theme.panel,
+                    in: RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: theme.controlRadius, style: .continuous)
+                        .stroke(
+                            isSelected ? theme.accent : theme.border,
+                            lineWidth: isSelected ? max(theme.borderWidth, 1) : theme.borderWidth
+                        )
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(breakdownTitle(kind))
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     private func breakdownTitle(_ kind: RemoteUsageBreakdownKindDTO) -> String {
