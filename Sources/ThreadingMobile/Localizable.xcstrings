@@ -46,6 +46,7 @@
       }
     },
     "%@ (%@)" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -596,6 +597,7 @@
       }
     },
     "%lld ms" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -727,6 +729,7 @@
       }
     },
     "%lld · this app %lld" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -1320,6 +1323,7 @@
       }
     },
     "Address" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -1330,6 +1334,7 @@
       }
     },
     "Addresses stay on this iPhone. Copy details puts these words on the clipboard and never includes the pairing credential." : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -2066,6 +2071,7 @@
       }
     },
     "Cellular" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -2164,6 +2170,7 @@
       }
     },
     "Check connection" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -2614,6 +2621,7 @@
       }
     },
     "Connected over %@" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -2778,6 +2786,7 @@
       }
     },
     "Connection reused" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -2920,6 +2929,7 @@
       }
     },
     "Copy details" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -3249,6 +3259,7 @@
       }
     },
     "DNS" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -3710,6 +3721,7 @@
       }
     },
     "Ethernet" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -4039,6 +4051,7 @@
       }
     },
     "Found on this network" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -4225,6 +4238,7 @@
       }
     },
     "Identity" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -4235,6 +4249,7 @@
       }
     },
     "Identity code" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -4311,6 +4326,7 @@
       }
     },
     "In use" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -4629,6 +4645,7 @@
       }
     },
     "Last request" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -4650,6 +4667,7 @@
       }
     },
     "Last used address" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -4660,6 +4678,7 @@
       }
     },
     "Last way in" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -4967,6 +4986,7 @@
       }
     },
     "Low Data Mode" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -5395,6 +5415,7 @@
       }
     },
     "Network" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -5493,6 +5514,7 @@
       }
     },
     "No" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -5547,6 +5569,7 @@
       }
     },
     "No addresses" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -5645,6 +5668,7 @@
       }
     },
     "No network" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -5765,6 +5789,7 @@
       }
     },
     "Not connected to a Mac" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -5797,6 +5822,7 @@
       }
     },
     "Not pinned" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -5807,6 +5833,7 @@
       }
     },
     "Not pinned, system trust" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -6301,6 +6328,7 @@
       }
     },
     "Over cellular" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -6597,6 +6625,7 @@
       }
     },
     "Pinned and verified" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -6607,6 +6636,7 @@
       }
     },
     "Pinned, not checked yet" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -6925,6 +6955,7 @@
       }
     },
     "Prompt" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -6935,6 +6966,7 @@
       }
     },
     "Protocol" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -7198,6 +7230,7 @@
       }
     },
     "Refused: certificate mismatch" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -8066,6 +8099,7 @@
       }
     },
     "Server wait" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -8450,6 +8484,7 @@
       }
     },
     "Shows how this iPhone reaches the Mac" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -8856,6 +8891,7 @@
       }
     },
     "TCP" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -8866,6 +8902,7 @@
       }
     },
     "TLS" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -10053,6 +10090,7 @@
       }
     },
     "This Mac" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -10228,6 +10266,7 @@
       }
     },
     "This iPhone" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -10513,6 +10552,7 @@
       }
     },
     "Through Threading’s service" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -10611,6 +10651,7 @@
       }
     },
     "Tried in this order until one answers." : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -11149,6 +11190,7 @@
       }
     },
     "VPN or other" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -11192,6 +11234,7 @@
       }
     },
     "Way in" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -11202,6 +11245,7 @@
       }
     },
     "Ways in" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -11267,6 +11311,7 @@
       }
     },
     "Wi-Fi" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
@@ -11365,6 +11410,7 @@
       }
     },
     "Yes" : {
+      "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
