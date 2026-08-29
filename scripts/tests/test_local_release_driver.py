@@ -75,6 +75,18 @@ class LocalReleaseDriverTests(unittest.TestCase):
         self.assertLess(tag_push, publish)
         self.assertLess(publish, restore)
 
+    def test_the_direct_distribution_gate_is_explicitly_mac_only(self) -> None:
+        driver = DRIVER.read_text()
+        ci = (REPOSITORY / "scripts/ci.sh").read_text()
+        test_runner = (REPOSITORY / "scripts/test.sh").read_text()
+
+        self.assertIn('"$ROOT/scripts/test.sh" mac-all', driver)
+        self.assertIn('"$ROOT/scripts/ci.sh" --mac-release', driver)
+        self.assertIn('--mac-release) include_mobile=0', ci)
+        self.assertIn('if [[ "${include_mobile}" == "1" ]]', ci)
+        self.assertIn('all|mac-all) test_plan="Threading-All"', test_runner)
+        self.assertIn('if [[ "${level}" == "all"', test_runner)
+
     def test_the_tested_commit_cannot_be_replaced_during_the_long_gate(self) -> None:
         source = DRIVER.read_text()
         function = source[source.index("assert_release_snapshot() {") :]

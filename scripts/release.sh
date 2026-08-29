@@ -120,8 +120,8 @@ if [[ $NOTARIZE -eq 1 && -n "$(git -C "$ROOT" status --porcelain)" ]]; then
 fi
 
 if [[ "${THREADING_SKIP_RELEASE_CHECKS:-0}" != "1" ]]; then
-    say "Running the release quality gate"
-    "$ROOT/scripts/ci.sh"
+    say "Running the Mac release quality gate"
+    "$ROOT/scripts/ci.sh" --mac-release
 else
     echo "warning: release quality gate skipped by THREADING_SKIP_RELEASE_CHECKS=1" >&2
 fi

@@ -5,6 +5,7 @@
 #   scripts/test.sh              # fast  — default; no window is ordered on screen
 #   scripts/test.sh fast
 #   scripts/test.sh all          # every Mac and iPhone unit test, plus on-screen WKWebView tests
+#   scripts/test.sh mac-all      # every Mac test only; the direct-distribution release lane
 #   scripts/test.sh ui           # app-level XCUITest scenarios in a disposable Cocoa home
 #   scripts/test.sh e2e          # real APNs + optionally a real Claude; needs credentials
 #
@@ -14,7 +15,7 @@
 set -euo pipefail
 
 level="${1:-fast}"
-if [[ "${level}" == "fast" || "${level}" == "all" || "${level}" == "ui" || "${level}" == "e2e" ]]; then
+if [[ "${level}" == "fast" || "${level}" == "all" || "${level}" == "mac-all" || "${level}" == "ui" || "${level}" == "e2e" ]]; then
   shift || true
 else
   level="fast"
@@ -196,7 +197,7 @@ fi
 
 case "${level}" in
   fast) test_plan="Threading-Fast" ;;
-  all)  test_plan="Threading-All" ;;
+  all|mac-all) test_plan="Threading-All" ;;
 esac
 
 export THREADING_TEST_RUN_TOKEN="$(uuidgen)"

@@ -7,9 +7,13 @@ built — every update stage renders as Threading's own sheets; see
 [The UI is ours](#the-ui-is-ours-with-one-documented-exception). So is everything after the
 stapled zip: `scripts/generate_appcast.sh`, `scripts/publish_release.sh`, and the release and
 nightly workflows under `.github/workflows/`. The trusted-Mac route is
-`scripts/publish_local_release.sh v0.1.0`: it preflights the local keys, runs the complete test
-level and release-quality gate before either public ref exists, then proves the clean tested commit
-is still checked out. Because the tests are long enough for Keychain state to change, it rechecks
+`scripts/publish_local_release.sh v0.1.0`: it preflights the local keys, runs the complete Mac test
+level and Mac release-quality gate before either public ref exists, then proves the clean tested
+commit is still checked out. The downloadable artifact is the Mac app, release builds force
+Remote Access off, and the iPhone companion is not published with it; the release lane therefore
+does not make an unshipped mobile test a prerequisite. Ordinary CI remains the superset and still
+builds and tests ThreadingMobile. Because the tests are long enough for Keychain state to change,
+it rechecks
 the Developer ID identity, notary profile, and matching Sparkle key immediately before the first
 ref moves, then proves the checkout remained unchanged during that check. Only then does it push
 the outer repository and annotated tag, temporarily prevent the tag workflow from racing a second

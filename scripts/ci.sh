@@ -5,7 +5,19 @@
 # The app has no root Package.swift, so "swift test" alone silently omits the product. Test the
 # six local protocol/runtime/test-contract packages explicitly, then run the app's off-screen
 # Xcode plan. Application-level UI scenarios stay in their separate GUI lane.
+#
+# `--mac-release` is the direct-distribution lane. Threading's downloadable artifact is the Mac
+# app, and release builds force Remote Access off; the companion is neither embedded nor
+# published. This mode therefore keeps every repository, package, service and Mac shipping gate
+# while omitting only the ThreadingMobile build and test lanes. Ordinary CI remains the superset.
 set -euo pipefail
+
+include_mobile=1
+case "${1:-}" in
+    "") ;;
+    --mac-release) include_mobile=0 ;;
+    *) printf 'error: usage: scripts/ci.sh [--mac-release]\n' >&2; exit 1 ;;
+esac
 
 script_directory="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_directory="$(cd "${script_directory}/.." && pwd)"
@@ -56,22 +68,26 @@ swiftlint lint \
     --config "${repository_directory}/.swiftlint.yml" \
     "${repository_directory}/Sources"
 
-say "Building ThreadingMobile (generic iOS Simulator)"
-capture_swift_warnings mobile-build xcodebuild \
-    -project "${repository_directory}/Threading.xcodeproj" \
-    -scheme ThreadingMobile \
-    -configuration Debug \
-    -destination 'generic/platform=iOS Simulator' \
-    -derivedDataPath "${ci_derived_data}" \
-    build \
-    SWIFT_STRICT_CONCURRENCY=complete \
-    COMPILER_INDEX_STORE_ENABLE=NO
+if [[ "${include_mobile}" == "1" ]]; then
+    say "Building ThreadingMobile (generic iOS Simulator)"
+    capture_swift_warnings mobile-build xcodebuild \
+        -project "${repository_directory}/Threading.xcodeproj" \
+        -scheme ThreadingMobile \
+        -configuration Debug \
+        -destination 'generic/platform=iOS Simulator' \
+        -derivedDataPath "${ci_derived_data}" \
+        build \
+        SWIFT_STRICT_CONCURRENCY=complete \
+        COMPILER_INDEX_STORE_ENABLE=NO
 
-say "Testing ThreadingMobile (complete iOS Simulator target)"
-capture_swift_warnings mobile-tests "${script_directory}/test-mobile.sh" \
-    -derivedDataPath "${ci_derived_data}" \
-    SWIFT_STRICT_CONCURRENCY=complete \
-    COMPILER_INDEX_STORE_ENABLE=NO
+    say "Testing ThreadingMobile (complete iOS Simulator target)"
+    capture_swift_warnings mobile-tests "${script_directory}/test-mobile.sh" \
+        -derivedDataPath "${ci_derived_data}" \
+        SWIFT_STRICT_CONCURRENCY=complete \
+        COMPILER_INDEX_STORE_ENABLE=NO
+else
+    say "Skipping the unshipped ThreadingMobile lane for the Mac release"
+fi
 
 for package in ThreadingExtensionKit ThreadingRemoteKit ThreadingWasmRuntime ThreadingScenarioKit ThreadingPeerTransport ThreadingSimulatorKit; do
     say "Testing ${package}"

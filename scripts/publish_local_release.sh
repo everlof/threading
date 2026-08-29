@@ -9,7 +9,7 @@
 #   scripts/publish_local_release.sh beta-v0.1.90
 #
 # This is intentionally the whole outer-repository choreography: validate the local signing
-# material and remote allocation, run the complete shipping test level and release-quality gate,
+# material and remote allocation, run the complete Mac shipping test level and release-quality gate,
 # prove that the clean commit which passed them is still checked out, push only `master`,
 # create/push one annotated tag, then hand the build/notarize/appcast/release work to the same
 # publish_release.sh used by CI. It is safe to rerun after a partial publication.
@@ -179,14 +179,14 @@ release_version_is_publishable "$CHANNEL" "$VERSION" "$TAG" <<< "$published" \
 
 # MARK: - Test, push, and publish
 
-say "Running the complete shipping test level"
-"$ROOT/scripts/test.sh" all
+say "Running the complete Mac shipping test level"
+"$ROOT/scripts/test.sh" mac-all
 
 # `release.sh` normally runs this gate immediately before archive. The local driver must run it
-# before publishing either immutable ref: a lint, package, service, strict-concurrency, or iOS
+# before publishing either immutable ref: a lint, package, service, strict-concurrency, or Mac
 # failure cannot be allowed to leave a tag pointing at a commit that was never releasable.
-say "Running the release quality gate before publishing refs"
-"$ROOT/scripts/ci.sh"
+say "Running the Mac release quality gate before publishing refs"
+"$ROOT/scripts/ci.sh" --mac-release
 
 # Tests are long enough for another local process or chat to move the branch or edit the shared
 # checkout. Never substitute whatever HEAD happens to mean now for the commit preflighted above.
