@@ -382,6 +382,19 @@ runtime's mark ringed by the session's login's usage fraction, joined from the c
 turn and how close it is to its limit. It is the same disc the draft's bar wears to choose that
 account, so starting a chat keeps the control where it was; a share or an older host with no
 usage to report gets the mark alone.
+
+**That menu leads with the same reading it is opened by, drawn rather than spelled out.** Its
+first row is the login, and its glyph is `MobileAccountUsageGauge` — the disc's own rings
+(`MobileAccountUsageRings`, shared by both so one reading cannot be drawn two ways) rendered
+through `ImageRenderer` into the one thing a `UIMenu` row will accept a picture in. The row used
+to read "7d 34% · Next reset in 5 hours", and the person reading it asked why a percentage was
+being spelled out under a control that draws it; the words now say only when the nearest window
+still ahead comes back, which is the part no ring can show. Two hosts keep the percentages in
+words: one that reports no reset time, and an older one that sends a summary with no window to
+ring, because a row left with a name and nothing else has lost its reason to be there
+(`MobileSessionChrome.usageMenuDetail`). VoiceOver hears the full reading either way, from the
+row's value and from the disc that opens the menu. Tapping the row opens the usage dashboard on
+that login.
 A swipe in from the right edge opens Workspace without the menu, and the menu still appears for
 any of the three permissions that used to reveal a button of its own — a share that may recolour
 a terminal without managing the session still gets it.

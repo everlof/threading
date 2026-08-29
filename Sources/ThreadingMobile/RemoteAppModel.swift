@@ -3180,17 +3180,67 @@ final class RemoteAppModel: ObservableObject {
         RemoteModelChoiceDTO(id: "claude-fable-5", name: "Fable 5"),
     ]
 
-    private static let demoClaudeUsageWindows: [RemoteAccountUsageWindowDTO] = [
-        RemoteAccountUsageWindowDTO(id: "5h", name: "5h", fraction: 0.31, windowDuration: 5 * 60 * 60),
-        RemoteAccountUsageWindowDTO(id: "7d", name: "7d", fraction: 0.56, windowDuration: 7 * 24 * 60 * 60),
-        RemoteAccountUsageWindowDTO(
-            id: "Fable",
-            name: "7d Fable",
-            fraction: 0.82,
-            windowDuration: 7 * 24 * 60 * 60,
-            metersModelIDs: ["claude-fable-5"]
-        ),
-    ]
+    /// Each window says when it comes back, as a real host's does: the chat menu's usage row
+    /// spends its words on the nearest reset now that its gauge draws the percentages, and a
+    /// demo whose windows never reset could only ever show that row's fallback.
+    private static let demoClaudeUsageWindows: [RemoteAccountUsageWindowDTO] = {
+        let now = Date().timeIntervalSince1970
+        return [
+            RemoteAccountUsageWindowDTO(
+                id: "5h",
+                name: "5h",
+                fraction: 0.31,
+                resetsAt: now + 3 * 60 * 60,
+                windowDuration: 5 * 60 * 60
+            ),
+            RemoteAccountUsageWindowDTO(
+                id: "7d",
+                name: "7d",
+                fraction: 0.56,
+                resetsAt: now + 4 * 24 * 60 * 60,
+                windowDuration: 7 * 24 * 60 * 60
+            ),
+            RemoteAccountUsageWindowDTO(
+                id: "Fable",
+                name: "7d Fable",
+                fraction: 0.82,
+                resetsAt: now + 4 * 24 * 60 * 60,
+                windowDuration: 7 * 24 * 60 * 60,
+                metersModelIDs: ["claude-fable-5"]
+            ),
+        ]
+    }()
+
+    /// The demo's terminal chat, held apart from the catalogue literal for the reason its
+    /// windows are: one more argument inside that expression puts the type checker over budget.
+    private static func demoTerminalSession(now: Double) -> RemoteSessionSummaryDTO {
+        RemoteSessionSummaryDTO(
+            id: "ff9f4a47-4c3b-466b-bcc5-a864b0657423",
+            title: "Finish remote access review",
+            agentKind: "claude",
+            surface: .terminal,
+            state: .idle,
+            projectName: "AnotherTerminal",
+            isAvailable: true,
+            lastActiveAt: now - 380,
+            terminalTheme: demoTerminalTheme,
+            terminalThemeAssignmentID: demoTerminalTheme.id,
+            inheritedTerminalThemeName: demoTerminalTheme.name,
+            inheritedTerminalTheme: demoTerminalTheme,
+            // Both chip forms are represented on purpose: a login with a chosen emoji and one
+            // falling back to its initial on a hashed disc are drawn differently, and the
+            // evidence capture is where that difference is reviewed.
+            account: .init(
+                name: "Vera Keller",
+                glyph: "V",
+                isEmoji: false,
+                hue: 0.72
+            ),
+            // Routed to a login, as every chat on a host with account routing is. Its disc is
+            // ringed by that login's windows and its menu leads with them.
+            accountID: "default"
+        )
+    }
 
     private static var demoResponse: RemoteMeDTO {
         let now = Date().timeIntervalSince1970
@@ -3220,29 +3270,7 @@ final class RemoteAppModel: ObservableObject {
                     accountID: "default",
                     limitRecovery: .resumeOnBestAccount
                 ),
-                .init(
-                    id: "ff9f4a47-4c3b-466b-bcc5-a864b0657423",
-                    title: "Finish remote access review",
-                    agentKind: "claude",
-                    surface: .terminal,
-                    state: .idle,
-                    projectName: "AnotherTerminal",
-                    isAvailable: true,
-                    lastActiveAt: now - 380,
-                    terminalTheme: demoTerminalTheme,
-                    terminalThemeAssignmentID: demoTerminalTheme.id,
-                    inheritedTerminalThemeName: demoTerminalTheme.name,
-                    inheritedTerminalTheme: demoTerminalTheme,
-                    // Both chip forms are represented on purpose: a login with a chosen emoji and
-                    // one falling back to its initial on a hashed disc are drawn differently, and
-                    // the evidence capture is where that difference is reviewed.
-                    account: .init(
-                        name: "Vera Keller",
-                        glyph: "V",
-                        isEmoji: false,
-                        hue: 0.72
-                    )
-                ),
+                demoTerminalSession(now: now),
                 .init(
                     id: "164182ac-7908-4c2d-89a2-fe8f040c4b50",
                     title: "Theme polish",

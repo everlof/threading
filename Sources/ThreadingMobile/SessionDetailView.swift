@@ -132,6 +132,48 @@ enum MobileSessionChrome {
     static func showsSessionMenu(canManageSessions: Bool, canChooseTerminalTheme: Bool) -> Bool {
         canManageSessions || canChooseTerminalTheme
     }
+
+    /// The chat menu leads with the account's usage when there is either a gauge to draw or a
+    /// reading to spell out. A login with neither is left to Chat Settings rather than given a
+    /// row that says only its own name.
+    static func showsUsageMenuRow(reading: MobileAccountUsageReading?) -> Bool {
+        guard let reading else { return false }
+        return !reading.rings.isEmpty || reading.summary != nil
+    }
+
+    /// What that row says under the login's name.
+    ///
+    /// The gauge beside it carries the percentages, so the words are spent on the one thing a
+    /// ring cannot show: when the nearest window still ahead comes back. Two cases keep the
+    /// reading in words instead — a host that sends no reset time, and one that sends no window
+    /// to ring — because a row reduced to a name and an undrawable gauge has lost the reason it
+    /// is in the menu.
+    static func usageMenuDetail(
+        reading: MobileAccountUsageReading,
+        windows: [RemoteAccountUsageWindowDTO]?,
+        now: Date = Date()
+    ) -> String {
+        let nextReset = (windows ?? [])
+            .compactMap(\.resetsAt)
+            .map { Date(timeIntervalSince1970: $0) }
+            .filter { $0 > now }
+            .min()
+        guard let nextReset, !reading.rings.isEmpty else {
+            // A gauge with no words at all is a host that sent a fraction and no reading; the
+            // row keeps the dash the rest of the app uses for a value it does not know rather
+            // than an empty second line.
+            return reading.summary ?? MobileUsageDefaults.unknownValue
+        }
+        // Relative to the same instant the window ahead was chosen against, and in the usage
+        // dashboard's own words for the same fact. `Date.formatted(.relative:)` is always
+        // relative to the real clock instead, which is a second reading of "now" in one line.
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return MobileL10n.string(
+            "Next reset %@",
+            formatter.localizedString(for: nextReset, relativeTo: now)
+        )
+    }
 }
 
 enum SessionDetailMetrics {
@@ -147,6 +189,9 @@ enum SessionDetailMetrics {
 struct SessionDetailView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
+    /// The menu's usage glyph is a rendered picture rather than a symbol, so it is rendered for
+    /// the screen it will be shown on.
+    @Environment(\.displayScale) private var displayScale
     let session: RemoteSessionSummaryDTO
     let openingStrategy: MobileSessionOpeningStrategy
     @StateObject private var workspaceActivity: MobileWorkspaceActivity
@@ -367,19 +412,28 @@ struct SessionDetailView: View {
     /// of the two is reached often enough to spend a permanent slot on.
     @ViewBuilder
     private var sessionMenuContent: some View {
-        // The disc that opens this menu is ringed by the account's usage; the menu leads with
-        // the reading in words — every window the chat is metered by, and when the nearest
-        // one resets — and takes the reader to the dashboard for the rest.
-        if let account = sessionAccount, let detail = sessionUsageMenuDetail {
+        // The disc that opens this menu is ringed by the account's usage; the row leads with
+        // that same drawing at glyph size, says when the nearest window comes back, and takes
+        // the reader to the dashboard for the rest.
+        if let account = sessionAccount,
+           let reading = sessionUsageReading,
+           MobileSessionChrome.showsUsageMenuRow(reading: reading) {
             Button {
                 isShowingUsage = true
             } label: {
                 // Title, subtitle, glyph: the menu's own two-line item, which a `Label`
                 // does not become.
                 Text(account.name)
-                Text(detail)
-                Image(systemName: "gauge.with.dots.needle.67percent")
+                Text(MobileSessionChrome.usageMenuDetail(
+                    reading: reading,
+                    windows: account.usageWindows
+                ))
+                usageMenuGlyph(for: reading)
             }
+            // The rings carry the percentages now. VoiceOver still hears them, here and on the
+            // disc that opens this menu, because a gauge read aloud is not a reading.
+            .accessibilityLabel(account.name)
+            .accessibilityValue(reading.summary ?? "")
             Divider()
         }
         if canOpenWorkspace {
@@ -533,22 +587,17 @@ struct SessionDetailView: View {
         return MobileUsageAccountFocus(runtimeName: agent.name, accountName: account.name)
     }
 
-    /// The rings' own summary, `5h 43% · 7d 73%`, followed by the nearest reset still ahead.
-    private var sessionUsageMenuDetail: String? {
-        guard let summary = sessionUsageReading?.summary else { return nil }
-        let now = Date()
-        let nextReset = (sessionAccount?.usageWindows ?? [])
-            .compactMap(\.resetsAt)
-            .map { Date(timeIntervalSince1970: $0) }
-            .filter { $0 > now }
-            .min()
-        guard let nextReset else { return summary }
-        return summary
-            + MobileUsageDefaults.segmentSeparator
-            + MobileL10n.string(
-                "Next reset %@",
-                nextReset.formatted(.relative(presentation: .named))
-            )
+    /// The reading as the menu row's glyph: its rings, or the gauge symbol when a host reports
+    /// usage in words alone and there is nothing to ring.
+    private func usageMenuGlyph(for reading: MobileAccountUsageReading) -> Image {
+        guard let gauge = MobileAccountUsageGauge.image(
+            for: reading,
+            theme: theme,
+            scale: displayScale
+        ) else {
+            return Image(systemName: "gauge.with.dots.needle.67percent")
+        }
+        return Image(uiImage: gauge)
     }
 
     /// The catalogue's row for the login this chat runs on, which is where its usage lives —
