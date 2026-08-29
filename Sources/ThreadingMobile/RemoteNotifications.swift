@@ -140,8 +140,20 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
                 notifications: notifications,
                 inheritedTheme: theme
             )
-            controller.title = connection.mirroredCaption
-            let navigationController = UINavigationController(rootViewController: controller)
+            let rootController: UIViewController = if connection.runPlan != nil {
+                // Plan evidence must include the same SwiftUI disclosure that wraps the
+                // shipping UIKit conversation. This small fixture host preserves the direct
+                // conversation controller and its real navigation title underneath it.
+                DemoConversationRunPlanHostController(
+                    connection: connection,
+                    conversation: controller,
+                    theme: theme
+                )
+            } else {
+                controller
+            }
+            rootController.title = connection.mirroredCaption
+            let navigationController = UINavigationController(rootViewController: rootController)
             configure(navigationController, theme: theme)
             return navigationController
         }
@@ -253,6 +265,61 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
     }
 
 }
+
+#if DEBUG
+/// Fixture-only containment for the plan states photographed from the direct UIKit demo route.
+private final class DemoConversationRunPlanHostController: UIViewController {
+    private let conversation: RemoteConversationViewController
+    private let disclosure: UIHostingController<AnyView>
+    private let theme: RemoteThemePalette
+
+    var evidenceShowsRunPlan: Bool {
+        isViewLoaded && disclosure.view.window != nil && disclosure.view.bounds.height > 0
+    }
+
+    init(
+        connection: RemoteSessionConnection,
+        conversation: RemoteConversationViewController,
+        theme: RemoteThemePalette
+    ) {
+        self.conversation = conversation
+        self.theme = theme
+        disclosure = UIHostingController(rootView: AnyView(
+            MobileRunPlanDisclosure(connection: connection).mobileTheme(theme)
+        ))
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = theme.uiGround
+
+        addChild(disclosure)
+        addChild(conversation)
+        disclosure.view.translatesAutoresizingMaskIntoConstraints = false
+        conversation.view.translatesAutoresizingMaskIntoConstraints = false
+        disclosure.view.backgroundColor = .clear
+        view.addSubview(disclosure.view)
+        view.addSubview(conversation.view)
+        NSLayoutConstraint.activate([
+            disclosure.view.topAnchor.constraint(equalTo: view.topAnchor),
+            disclosure.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            disclosure.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            conversation.view.topAnchor.constraint(equalTo: disclosure.view.bottomAnchor),
+            conversation.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            conversation.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            conversation.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        disclosure.didMove(toParent: self)
+        conversation.didMove(toParent: self)
+    }
+}
+#endif
 
 @MainActor
 final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
@@ -445,7 +512,7 @@ private enum MobileUIEvidenceCapture {
                 return
             }
 
-            let keyboardChecks = try await prepareKeyboard(
+            var evidenceChecks = try await prepareKeyboard(
                 request.keyboardState,
                 layoutContract: request.keyboardLayout,
                 in: window
@@ -495,6 +562,18 @@ private enum MobileUIEvidenceCapture {
                 stabilized = reachedStability
             }
 
+            if request.demo == MobileDemoFixture.conversationRunPlan.rawValue
+                || request.demo == MobileDemoFixture.conversationRunPlanExpanded.rawValue {
+                let host = (window.rootViewController as? UINavigationController)?
+                    .topViewController as? DemoConversationRunPlanHostController
+                evidenceChecks["runPlanVisible"] = host?.evidenceShowsRunPlan == true
+                if request.demo == MobileDemoFixture.conversationRunPlanExpanded.rawValue {
+                    evidenceChecks["runPlanExpanded"] = hasPresentedController(
+                        window.rootViewController
+                    )
+                }
+            }
+
             try last.write(to: imageURL, options: .atomic)
             let scale = window.screen.scale
             let marker = Marker(
@@ -510,7 +589,7 @@ private enum MobileUIEvidenceCapture {
                 sampleCount: sampleCount,
                 stabilized: stabilized,
                 keyboardState: request.keyboardState?.rawValue,
-                checks: keyboardChecks
+                checks: evidenceChecks
             )
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -528,6 +607,12 @@ private enum MobileUIEvidenceCapture {
             )
             return
         }
+    }
+
+    private static func hasPresentedController(_ controller: UIViewController?) -> Bool {
+        guard let controller else { return false }
+        if controller.presentedViewController != nil { return true }
+        return controller.children.contains(where: hasPresentedController)
     }
 
     private static func prepareKeyboard(

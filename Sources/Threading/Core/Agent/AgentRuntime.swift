@@ -43,6 +43,7 @@ protocol AgentTerminalRuntimeSurface:
     var isRunning: Bool { get }
     var activity: SessionActivity { get }
     var activityTracker: SessionActivityTracker { get }
+    var runProgress: RunProgress? { get }
     var isVisible: Bool { get set }
     var remoteTerminalSurface: any RemoteTerminalSurface { get }
 
@@ -50,6 +51,7 @@ protocol AgentTerminalRuntimeSurface:
     var isHostBacked: Bool { get }
 
     func noteStateChanged()
+    func applyRunProgress(_ report: HookRunProgressReport)
     func noteReportedCodexTranscript(path: String?, providerSessionID: TranscriptID?)
     func noteTurnFinishedForAttachmentDetection(lastAssistantMessage: String?)
     func terminate()
@@ -88,6 +90,8 @@ protocol AgentConversationRuntimeSurface:
     RemoteConversationSurface
 {
     var activity: SessionActivity { get }
+    var isTurnInFlight: Bool { get }
+    var runProgress: RunProgress? { get }
     var isVisible: Bool { get set }
     var onAttention: (() -> Void)? { get set }
     var conversationRootProcessIdentifier: pid_t? { get }
@@ -625,6 +629,29 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
                 "event": report.event.rawValue
             ])
         }
+    }
+
+    /// Routes structured todo/plan observations only to terminal sessions. Native conversations
+    /// already receive the same provider-neutral events over their own stream.
+    func applyRunProgress(_ report: HookRunProgressReport) {
+        guard let controller = controllers[report.sessionID] else {
+            ThreadingLogger.agent.debug(
+                "Run progress for a session with no terminal: \(report.sessionID.uuidString, privacy: .public)"
+            )
+            return
+        }
+        controller.applyRunProgress(report)
+    }
+
+    func runProgress(for sessionID: SessionID) -> RunProgress? {
+        if let controller = controllers[sessionID],
+           controller.activity.hasTurnInFlight {
+            return controller.runProgress
+        }
+        if let conversation = conversations[sessionID], conversation.isTurnInFlight {
+            return conversation.runProgress
+        }
+        return nil
     }
 
     /// Folds terminal hook events into the same hierarchy native transports report.

@@ -128,6 +128,21 @@ final class BrowserFindBar: NSView, ThemedComponent, NSTextFieldDelegate {
         }
     }
 
+    /// Keeps the keyboard in the field while a match is revealed, without selecting the query.
+    ///
+    /// `focus()` selects the whole query, which is right for a bar being reopened. Called after
+    /// every incremental reveal it made the next keystroke replace what had just been typed, so
+    /// the field never held more than one character. If something did take the keyboard, it
+    /// comes back with the caret at the end rather than over the text.
+    func keepFocus() {
+        guard let window else { return }
+        if let editor = queryField.currentEditor(), window.firstResponder === editor { return }
+        window.makeFirstResponder(queryField)
+        if let editor = queryField.currentEditor() {
+            editor.selectedRange = NSRange(location: queryField.stringValue.utf16.count, length: 0)
+        }
+    }
+
     func setMatchFound(_ found: Bool?) {
         statusLabel.stringValue = switch found {
         case true: L10n.string("Match found")

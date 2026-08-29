@@ -27,6 +27,53 @@ final class TranscriptReplayTests: XCTestCase {
         XCTAssertEqual(input["command"], .string("ls -la"))
     }
 
+    func testCodexCodeModePlanReplaysAsStructuredProgress() throws {
+        let record: [String: Any] = [
+            "type": "response_item",
+            "payload": [
+                "type": "custom_tool_call",
+                "call_id": "call-plan",
+                "name": "exec",
+                "input": #"const p = await tools.update_plan({explanation:"Working",plan:[{step:"Inspect \"hooks\"",status:"completed",},{step:"Implement",status:"in_progress"},{step:"Verify",status:"pending"},],}); text(p);"#,
+            ],
+        ]
+
+        let event = try XCTUnwrap(TranscriptReplay.codexEvent(from: record))
+        guard case .assistantMessage(let blocks) = event,
+              case .toolUse(_, let tool, let input) = try XCTUnwrap(blocks.first) else {
+            return XCTFail("Expected one replayed plan call")
+        }
+        XCTAssertEqual(tool, .plan)
+
+        let progress = try XCTUnwrap(RunProgress(
+            tool: tool,
+            input: input.mapValues(\.foundationValue)
+        ))
+        XCTAssertEqual(progress.steps.map(\.title), ["Inspect \"hooks\"", "Implement", "Verify"])
+        XCTAssertEqual(progress.currentStep?.title, "Implement")
+    }
+
+    func testCodexCodeModePlanParserRefusesExecutableValues() throws {
+        let record: [String: Any] = [
+            "type": "response_item",
+            "payload": [
+                "type": "custom_tool_call",
+                "call_id": "call-plan",
+                "name": "exec",
+                "input": #"const p = await tools.update_plan({plan:dangerous()}); text(p);"#,
+            ],
+        ]
+
+        let event = try XCTUnwrap(TranscriptReplay.codexEvent(from: record))
+        guard case .assistantMessage(let blocks) = event,
+              case .toolUse(_, let tool, let input) = try XCTUnwrap(blocks.first) else {
+            return XCTFail("Expected the raw tool-call fallback")
+        }
+        XCTAssertEqual(tool, .plan)
+        XCTAssertNil(input["plan"])
+        XCTAssertNotNil(input["input"])
+    }
+
     func testCodexCustomToolOutputAttachesToCall() throws {
         let record: [String: Any] = [
             "type": "response_item",

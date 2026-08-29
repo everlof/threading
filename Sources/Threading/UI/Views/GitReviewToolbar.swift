@@ -76,6 +76,7 @@ extension GitReviewViewController {
                 onChoose: { [weak self] in self?.refreshFromMenu() }
             ))
         ]
+        entries.append(contentsOf: foldedControlEntries())
 
         // Everything below speaks about a diff, so it appears only when one is on screen — the
         // history list has no lines to wrap, collapse or copy.
@@ -105,32 +106,73 @@ extension GitReviewViewController {
         ]
     }
 
+    /// The header's glyph runs, offered here while a narrow pane has folded them away. The
+    /// entries press the same buttons, so the two routes cannot drift.
+    private func foldedControlEntries() -> [ThemedMenuEntry] {
+        var entries: [ThemedMenuEntry] = []
+        if navigationButtonGroup.isHidden {
+            entries.append(.separator)
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Jump to file"),
+                shortcut: KeyboardShortcut(key: "j", modifiers: .command),
+                isEnabled: jumpToFileButton.isEnabled,
+                onChoose: { [weak self] in self?.jumpToFileButton.onPress?() }
+            )))
+            entries.append(.item(ThemedMenuItem(
+                title: diffLayout == .unified
+                    ? L10n.string("Switch to split diff")
+                    : L10n.string("Switch to unified diff"),
+                onChoose: { [weak self] in self?.diffLayoutButton.onPress?() }
+            )))
+            entries.append(.item(ThemedMenuItem(
+                title: fileNavigatorVisibleForTesting
+                    ? L10n.string("Hide changed files")
+                    : L10n.string("Show changed files"),
+                isEnabled: fileNavigatorButton.isEnabled,
+                onChoose: { [weak self] in self?.fileNavigatorButton.onPress?() }
+            )))
+        }
+        if textSizeButtonGroup.isHidden {
+            entries.append(.separator)
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Increase diff text size"),
+                isEnabled: increaseTextSizeButton.isEnabled,
+                onChoose: { [weak self] in self?.increaseTextSizeButton.onPress?() }
+            )))
+            entries.append(.item(ThemedMenuItem(
+                title: L10n.string("Decrease diff text size"),
+                isEnabled: decreaseTextSizeButton.isEnabled,
+                onChoose: { [weak self] in self?.decreaseTextSizeButton.onPress?() }
+            )))
+        }
+        return entries
+    }
+
+    /// Five switches, one convention: each names its state and carries a check while it is on.
+    /// Four of them used to rename themselves to their opposite verb ("Disable word wrap")
+    /// beside one that was checked, which read as two kinds of control.
     private func renderingEntries() -> [ThemedMenuEntry] {
         [
             .separator,
             .item(ThemedMenuItem(
-                title: wrapsDiffLines
-                    ? L10n.string("Disable word wrap")
-                    : L10n.string("Enable word wrap"),
+                title: L10n.string("Word wrap"),
+                isSelected: wrapsDiffLines,
                 isEnabled: diffLayout == .unified,
                 onChoose: { [weak self] in self?.toggleWordWrap() }
             )),
             .item(ThemedMenuItem(
-                title: loadsFullFiles
-                    ? L10n.string("Don’t load full files")
-                    : L10n.string("Load full files"),
+                title: L10n.string("Full files"),
+                isSelected: loadsFullFiles,
                 onChoose: { [weak self] in self?.toggleFullFiles() }
             )),
             .item(ThemedMenuItem(
-                title: showsRichPreviews
-                    ? L10n.string("Disable rich preview")
-                    : L10n.string("Enable rich preview"),
+                title: L10n.string("Rich previews"),
+                isSelected: showsRichPreviews,
                 onChoose: { [weak self] in self?.toggleRichPreviews() }
             )),
             .item(ThemedMenuItem(
-                title: showsWordDiffs
-                    ? L10n.string("Disable word diffs")
-                    : L10n.string("Enable word diffs"),
+                title: L10n.string("Word diffs"),
+                isSelected: showsWordDiffs,
                 onChoose: { [weak self] in self?.toggleWordDiffs() }
             )),
             .item(ThemedMenuItem(
@@ -208,6 +250,10 @@ extension GitReviewViewController {
         for file in expandable {
             expansionOverrides[file.path] = expand
         }
+        // Every exact height describes the state being left. Reloading with them in place laid
+        // collapsed headers out in 300pt slots and expanded bodies in 48pt ones until each row's
+        // measurement caught up, and the rows overprinted each other meanwhile.
+        measuredFileRowHeights.removeAll(keepingCapacity: true)
         fileTableView.reloadData()
         updateScrollControls()
     }

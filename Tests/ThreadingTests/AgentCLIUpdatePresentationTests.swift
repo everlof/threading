@@ -115,28 +115,64 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
         XCTAssertTrue(text.contains("second"), "the first updater's exit stopped the second")
     }
 
-    func testThePlanIsOneCommandWhoseLongestLineClearsTheTTYLimit() {
-        // Every newline in the plan falls inside a quoted word, so the shell reads all of them
-        // before it runs anything — that is what keeps an updater's prompt from swallowing the
-        // next provider's command. What each line may not do is exceed the tty's canonical-mode
-        // limit, past which the line discipline discards the whole line and says nothing.
-        let source = AgentCLIUpdateExecutionPlan(
-            updates: AgentCLIUpdateCatalog.all.map {
+    func testAFullPlanBypassesTheCompleteTTYInputLimitAndLeavesAnInteractiveShell() {
+        let plan = AgentCLIUpdateExecutionPlan(
+            updates: AgentCLIUpdateCatalog.all.map { definition in
                 AgentCLIUpdate(
-                    id: $0.id,
-                    displayName: $0.displayName,
+                    id: definition.id,
+                    displayName: definition.displayName,
                     installedVersion: "2026.08.11-e8db854",
                     latestVersion: "2026.08.19-aabbccd",
-                    updateCommand: $0.updateCommand
+                    updateCommand: "/usr/bin/printf 'ran-\(definition.id)\\n'"
                 )
             }
-        ).shellSource
+        )
+        let source = plan.shellSource
 
         let longestLine = source.split(separator: "\n", omittingEmptySubsequences: false)
             .map(\.utf8.count)
             .max() ?? 0
+        XCTAssertGreaterThan(
+            source.utf8.count,
+            Self.terminalInputQueueLimit,
+            "the fixture must cover the aggregate queue limit that broke Update All"
+        )
         XCTAssertLessThan(longestLine, Self.terminalCanonicalLineLimit)
         XCTAssertEqual(source.filter { $0 == "'" }.count % 2, 0, "quoting must balance")
+
+        var profile = TerminalProfile.default
+        profile.shellPath = "/bin/sh"
+        profile.shellArguments = []
+        let session = TerminalSession(
+            profile: profile,
+            frame: NSRect(x: 0, y: 0, width: 800, height: 500)
+        )
+        var output = Data()
+        session.onRawOutput = { output.append($0) }
+        session.startShell(
+            initialDirectory: FileManager.default.temporaryDirectory,
+            running: plan.shellCommand
+        )
+        defer { session.terminate() }
+
+        XCTAssertTrue(
+            waitForTerminalText("Agent tool update run finished.") {
+                String(decoding: output, as: UTF8.self)
+            },
+            String(decoding: output, as: UTF8.self)
+        )
+        let completedText = String(decoding: output, as: UTF8.self)
+        for definition in AgentCLIUpdateCatalog.all {
+            XCTAssertTrue(completedText.contains("ran-\(definition.id)"), completedText)
+        }
+
+        session.insertText("/usr/bin/printf '\\nTHREADING_SHELL_READY\\n'\n")
+        XCTAssertTrue(
+            waitForTerminalOccurrences("THREADING_SHELL_READY", count: 2) {
+                String(decoding: output, as: UTF8.self)
+            },
+            "the configured shell echoed the command but did not execute it"
+        )
     }
 
     func testScheduleIsDailyAndRecoversFromAClockCorrection() {
@@ -308,8 +344,35 @@ final class AgentCLIUpdatePresentationTests: XCTestCase {
     // MARK: - Helpers
 
     private static let planDeadline: TimeInterval = 30
+    /// `{MAX_INPUT}` on this platform: the aggregate terminal input queue, not one line.
+    private static let terminalInputQueueLimit = 1_024
     /// `MAX_CANON` on this platform: a longer line is discarded whole by the line discipline.
     private static let terminalCanonicalLineLimit = 1_024
+
+    private func waitForTerminalText(
+        _ expected: String,
+        timeout: TimeInterval = 10,
+        output: () -> String
+    ) -> Bool {
+        waitForTerminalOccurrences(expected, count: 1, timeout: timeout, output: output)
+    }
+
+    private func waitForTerminalOccurrences(
+        _ expected: String,
+        count: Int,
+        timeout: TimeInterval = 10,
+        output: () -> String
+    ) -> Bool {
+        func occurrenceCount() -> Int {
+            output().components(separatedBy: expected).count - 1
+        }
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            if occurrenceCount() >= count { return true }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.01))
+        } while Date() < deadline
+        return occurrenceCount() >= count
+    }
 
     private func makeCoordinator(
         updates: [AgentCLIUpdate],

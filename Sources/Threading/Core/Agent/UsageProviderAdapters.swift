@@ -39,6 +39,18 @@ enum ClaudeUsageAdapter {
             let cacheCreation = usage[UsageIndexDefaults.cacheWriteDetailKey]
                 as? [String: Any]
 
+            // A count this app cannot hold makes the line unreadable, and an unreadable line
+            // produces no record — the same answer this loop already gives one whose JSON does
+            // not parse. Writing `0` into the field instead would put a number in the bill the
+            // account was never charged, and nothing downstream could tell it from a response
+            // that genuinely used no cached input.
+            guard let uncachedInput = count(usage[UsageIndexDefaults.inputKey]),
+                  let cachedInput = count(usage[UsageIndexDefaults.cacheReadKey]),
+                  let cacheWrite = count(usage[UsageIndexDefaults.cacheWriteKey]),
+                  let cacheWrite1h = count(cacheCreation?[UsageIndexDefaults.cacheWrite1hKey]),
+                  let output = count(usage[UsageIndexDefaults.outputKey])
+            else { return true }
+
             found.append(UsageLedgerRecord(
                 identity: identity,
                 sessionID: sessionID,
@@ -50,13 +62,11 @@ enum ClaudeUsageAdapter {
                     ?? UsageIndexDefaults.unknownModel,
                 workingDirectory: object[UsageIndexDefaults.cwdKey] as? String ?? "",
                 tokens: UsageTokenCounts(
-                    uncachedInput: integer(usage[UsageIndexDefaults.inputKey]),
-                    cachedInput: integer(usage[UsageIndexDefaults.cacheReadKey]),
-                    cacheWrite: integer(usage[UsageIndexDefaults.cacheWriteKey]),
-                    cacheWrite1h: integer(
-                        cacheCreation?[UsageIndexDefaults.cacheWrite1hKey]
-                    ),
-                    output: integer(usage[UsageIndexDefaults.outputKey])
+                    uncachedInput: uncachedInput,
+                    cachedInput: cachedInput,
+                    cacheWrite: cacheWrite,
+                    cacheWrite1h: cacheWrite1h,
+                    output: output
                 ),
                 reportedCostUSD: reported
             ))
@@ -111,10 +121,13 @@ enum CodexUsageAdapter {
                       let last = info["last_token_usage"] as? [String: Any]
                 else { return true }
 
-                let input = integer(last["input_tokens"])
-                let cached = integer(last["cached_input_tokens"])
-                let output = integer(last["output_tokens"])
-                let reasoning = integer(last["reasoning_output_tokens"])
+                // As in the Claude adapter above: a count outside `Int64` makes this record
+                // unreadable rather than a record of zero tokens.
+                guard let input = count(last["input_tokens"]),
+                      let cached = count(last["cached_input_tokens"]),
+                      let output = count(last["output_tokens"]),
+                      let reasoning = count(last["reasoning_output_tokens"])
+                else { return true }
                 let stamp = object["timestamp"] as? String ?? ""
 
                 // Codex may restate an unchanged last response as surrounding events arrive.
@@ -125,10 +138,10 @@ enum CodexUsageAdapter {
                 if let total = info["total_token_usage"] as? [String: Any] {
                     signature = [
                         "total",
-                        String(integer(total["input_tokens"])),
-                        String(integer(total["cached_input_tokens"])),
-                        String(integer(total["output_tokens"])),
-                        String(integer(total["reasoning_output_tokens"])),
+                        String(signatureNumber(total["input_tokens"])),
+                        String(signatureNumber(total["cached_input_tokens"])),
+                        String(signatureNumber(total["output_tokens"])),
+                        String(signatureNumber(total["reasoning_output_tokens"])),
                         model
                     ].joined(separator: "|")
                 } else {
@@ -190,11 +203,12 @@ enum CodexUsageAdapter {
 enum OpenCodeUsageAdapter {
     enum Failure: Error, Equatable {
         case unfamiliarExport
-        /// The export was the shape this adapter knows, but one of its messages was not an
-        /// object — so the bill it describes cannot be totalled. Separate from
-        /// `unfamiliarExport` because the two ask for different things: an unfamiliar export
-        /// means this adapter is looking at the wrong document, while this means it is looking
-        /// at the right one and cannot finish reading it.
+        /// The export was the shape this adapter knows, but one of its messages could not be
+        /// read — it was not an object, or one of its token counts is a number outside `Int64` —
+        /// so the bill it describes cannot be totalled. Separate from `unfamiliarExport` because
+        /// the two ask for different things: an unfamiliar export means this adapter is looking
+        /// at the wrong document, while this means it is looking at the right one and cannot
+        /// finish reading it.
         case unreadableMessage(index: Int)
     }
 
@@ -257,6 +271,18 @@ enum OpenCodeUsageAdapter {
             }
             let messageID = info["id"] as? String ?? "\(rootSessionID)-\(index)"
 
+            // A count outside `Int64` stops the whole export, for the reason stated above: this
+            // adapter's answer is one total a person reads as *the* cost of the session, and it
+            // has nowhere on the figure to say a number in it was invented. The Claude and Codex
+            // loops skip the record instead, because theirs are per-line readers whose surface
+            // already treats a skipped line as ordinary.
+            guard let uncachedInput = count(tokens["input"]),
+                  let cachedInput = count(cache?["read"]),
+                  let cacheWrite = count(cache?["write"]),
+                  let output = count(tokens["output"]),
+                  let reasoning = count(tokens["reasoning"])
+            else { throw Failure.unreadableMessage(index: index) }
+
             found.append(UsageLedgerRecord(
                 identity: "opencode|\(messageID)",
                 sessionID: info["sessionID"] as? String
@@ -271,11 +297,11 @@ enum OpenCodeUsageAdapter {
                     ?? UsageIndexDefaults.unknownModel,
                 workingDirectory: path?["cwd"] as? String ?? rootDirectory,
                 tokens: UsageTokenCounts(
-                    uncachedInput: integer(tokens["input"]),
-                    cachedInput: integer(cache?["read"]),
-                    cacheWrite: integer(cache?["write"]),
-                    output: integer(tokens["output"]),
-                    reasoning: integer(tokens["reasoning"])
+                    uncachedInput: uncachedInput,
+                    cachedInput: cachedInput,
+                    cacheWrite: cacheWrite,
+                    output: output,
+                    reasoning: reasoning
                 ),
                 reportedCostUSD: double(info["cost"])
             ))
@@ -298,7 +324,37 @@ enum GrokUsageAdapter {
 
 // MARK: - Shared Wire Numbers
 
-private func integer(_ value: Any?) -> Int64 {
+/// One token count from the wire, or nil when the value is there and this app cannot hold it.
+///
+/// **Nil is reserved for a single answer: the value is a JSON number outside `Int64`.** Every
+/// other reading is the one this has always given. An absent key is a count of none, which is
+/// what a provider means by omitting it, and a quoted number `Int64` cannot parse still reads as
+/// none — that last one is a separate finding, pinned by `ProviderWireTextCorpusTests`, and it is
+/// deliberately neither fixed nor moved here: a string was never a JSON number, and what to do
+/// about a provider that quotes its numbers is a different decision from this one.
+///
+/// The reading this replaced was `max(0, number.int64Value)`, which wrapped an oversized count to
+/// a negative and then clamped that to `0` — so a response the account was billed twelve
+/// quintillion input tokens for was filed as one that used none. See `WireInteger` for why
+/// `int64Value` is a reinterpretation rather than a reading.
+private func count(_ value: Any?) -> Int64? {
+    if let number = value as? NSNumber {
+        guard let whole = WireInteger.whole(number) else { return nil }
+        return max(0, whole)
+    }
+    if let string = value as? String, let number = Int64(string) { return max(0, number) }
+    return 0
+}
+
+/// The deduplication discriminator's reading of a cumulative counter.
+///
+/// It reads the same wire numbers as `count(_:)` and deliberately does not refuse any of them,
+/// because it is not a quantity anyone is shown. It is compared against the previous line's and
+/// then spelled into the record's `identity`, which the parsed-file cache retains — so changing
+/// what it produces would rename records the ledger already holds, and one response filed under
+/// two names is counted twice. Refusing here would be worse still: it would drop a perfectly
+/// readable `last_token_usage` bill because the *running total* beside it is out of range.
+private func signatureNumber(_ value: Any?) -> Int64 {
     if let number = value as? NSNumber { return max(0, number.int64Value) }
     if let string = value as? String, let number = Int64(string) { return max(0, number) }
     return 0

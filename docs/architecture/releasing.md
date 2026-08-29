@@ -878,12 +878,14 @@ user was working in.
 The receipt uses the existing sidebar `Toast` component, remains for the unattended dwell, pauses
 under the pointer like every toast, and aligns now/latest values through the toast's generic
 comparison table. Checking never starts an updater. Pressing **Update** creates a durable
-standalone terminal and sends it one host-built shell command; each provider command is a quoted
-argument to its own login-shell child, runs sequentially, and leaves prompts, output and exit-code
-receipts visible and interruptible. A failing provider does not suppress the next one. That
-command spans several terminal lines, because the `printf` receipts carry real newlines — every
-one of them a continuation the shell consumes before it runs anything, and none within the tty's
-1023-byte canonical-mode limit (247 bytes at the longest, for a five-tool run).
+standalone terminal and supplies it one host-built shell command as a process argument; each
+provider command is a quoted argument to its own login-shell child, runs sequentially, and leaves
+prompts, output and exit-code receipts visible and interruptible. A failing provider does not
+suppress the next one. The argument route is load-bearing: macOS limits the complete queued
+terminal input to 1024 bytes, and a multi-tool plan can exceed that even when each physical line
+is shorter. Typing the plan immediately after shell creation silently duplicated or discarded its
+tail on the real path. A clean interactive Bash bootstrap receives the plan outside the PTY,
+preserves foreground-job interruption, then replaces itself with the user's configured shell.
 
 That host-owned check also makes Threading the central update manager for every Codex process it
 starts. Each Codex invocation therefore receives the documented one-run override

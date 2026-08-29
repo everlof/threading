@@ -321,6 +321,20 @@ enum JSONValue: Codable, Equatable, Sendable {
     /// `CFBooleanGetTypeID` test below is the honest question, because it asks what the number
     /// *is* rather than what it could be read as. A Swift `Bool` still lands there: it bridges to
     /// `__NSCFBoolean`, which that test recognises.
+    ///
+    /// **`WireInteger.exact` is the same question asked about size, and it replaced the same
+    /// mistake.** The test here used to be "is this double integral", which a JSON integer past
+    /// `Int64` passes — so `12345678901234567890` became `.integer(-6101065172474983726)` and
+    /// `-12345678901234567890` became a *positive* `.integer`. `.integer` is this type's claim of
+    /// exactness, and the execution-audit ledger records what it is handed, so that claim has to
+    /// be true or not made.
+    ///
+    /// **An integer `Int64` cannot hold becomes `.number`, not `.unconvertible`.** JSON permits
+    /// arbitrary-precision numbers, so a big integer is perfectly good JSON and `.unconvertible`
+    /// means "not JSON" — see its doc comment. `.number` keeps the sign and seventeen significant
+    /// digits and claims nothing more, which is exactly what survived `JSONSerialization`: by the
+    /// time the value reaches here the digits are already gone from the out-of-range negative,
+    /// which arrives stored as a `Double`, so no case could honestly promise them back.
     private static func scalar(foundationValue value: Any) -> JSONValue? {
         switch value {
         case is NSNull:
@@ -329,8 +343,8 @@ enum JSONValue: Codable, Equatable, Sendable {
             if CFGetTypeID(value) == CFBooleanGetTypeID() {
                 return .bool(value.boolValue)
             }
-            if value.doubleValue.rounded(.towardZero) == value.doubleValue {
-                return .integer(value.int64Value)
+            if let integer = WireInteger.exact(value) {
+                return .integer(integer)
             }
             return .number(value.doubleValue)
         case let value as Bool:

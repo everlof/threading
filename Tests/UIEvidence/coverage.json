@@ -225,12 +225,12 @@
       "status": "implemented",
       "priority": "important",
       "title": "Session Status Card",
-      "description": "The complete menu-like Session Status Card over pane content, with compact session and delegated token receipts, connected review checks, bounded attachment rows, a full-cell hover, native and extension section dividers, and an icon-bearing extension disclosure.",
-      "states": ["Session usage", "Delegated usage", "Connected pull request", "Pending checks", "Recent attachments", "View all", "Extension disclosure", "Hovered attachment row"],
+      "description": "The complete menu-like Session Status Card over pane content, plus focused GitHub and GitLab receipts that retain exact successful, non-blocking, active, attention and capped check outcomes with whole-fragment wrapping.",
+      "states": ["Session usage", "Delegated usage", "Live structured run plan", "Connected pull request", "GitHub exact check outcomes", "GitLab exact and allowed-failure outcomes", "Capped coverage markers", "Whole-fragment wrapping", "Recent attachments", "View all", "Extension disclosure", "Hovered attachment row"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["680×470 points"]
+        "sizes": ["680×470 points", "560×340 points"]
       },
       "source": {
         "path": "Tests/ThreadingTests/ThemedIndicatorsTests.swift",
@@ -330,8 +330,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Native conversation timeline",
-      "description": "Real conversation rows reconstructed from bounded Claude and Codex transcript fixtures, including tool calls, thinking, execution, patches and reasoning.",
-      "states": ["Edit-heavy Claude turn", "Claude tools and thinking", "Codex execution and patch", "Codex reasoning"],
+      "description": "Real conversation rows reconstructed from bounded Claude and Codex transcript fixtures, plus the live structured-plan status strip in the shipping native pane.",
+      "states": ["Edit-heavy Claude turn", "Claude tools and thinking", "Codex execution and patch", "Codex reasoning", "Live structured run plan"],
       "matrix": {
         "providers": ["Claude", "Codex"],
         "appearances": ["Light", "Dark"],
@@ -339,7 +339,10 @@
       },
       "source": {
         "path": "Tests/ThreadingTests/ConversationRenderTests.swift",
-        "test": "ThreadingTests/ConversationRenderTests/testRendersEveryFixtureInBothAppearances"
+        "tests": [
+          "ThreadingTests/ConversationRenderTests/testRendersEveryFixtureInBothAppearances",
+          "ThreadingTests/ConversationRenderTests/testRendersTheLiveRunPlanStatusStrip"
+        ]
       },
       "capture": {
         "glob": "conversation-fixture-*.png"

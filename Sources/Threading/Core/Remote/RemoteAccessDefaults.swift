@@ -186,6 +186,8 @@ enum RemoteAccessDefaults {
     static let maximumRemoteConversationContentBytes = 128 * 1024
     static let maximumRemoteConversationFieldBytes = 32 * 1024
     static let maximumRemoteStreamingBytes = 32 * 1024
+    static let maximumRemoteRunPlanPageSteps = 64
+    static let maximumRemoteRunPlanTitleBytes = 16 * 1024
     static let maximumRemotePermissionBytes = 64 * 1024
     static let maximumRemoteComposerCapabilities = 256
     static let maximumRemoteComposerCapabilityBytes = 64 * 1024

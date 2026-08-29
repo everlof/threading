@@ -794,6 +794,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             )
         case "conversationResync":
             handleConversationResync(connection)
+        case "runPlanPage":
+            handleRunPlanPage(
+                connection,
+                revision: parsed.revision,
+                offset: parsed.offset,
+                limit: parsed.limit
+            )
         case "mobileDiagnosticsHello":
             handleMobileDiagnosticsSignal(
                 connection,
@@ -1009,7 +1016,21 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
-        let prompt = creation.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyPrompt = creation.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let prompt: String
+        if let reportOpening = creation.reportOpening {
+            guard legacyPrompt.isEmpty else {
+                respond(.respond(RemoteRouter.error(
+                    400,
+                    "Bad Request",
+                    code: .invalidReportOpening
+                )))
+                return
+            }
+            prompt = reportOpening.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        } else {
+            prompt = legacyPrompt
+        }
         guard RemoteInboundPolicy.acceptsPrompt(prompt), !prompt.isEmpty,
               RemoteInboundPolicy.acceptsLaunchIdentifier(creation.projectID),
               RemoteInboundPolicy.acceptsLaunchIdentifier(creation.agentKind),
@@ -1022,7 +1043,47 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        // The bytes are validated and lent on the server queue before a session can exist. The
+        // application receives a temporary path, takes its own durable copy before launch, and
+        // this claim is discarded whichever way that transaction ends. An older Mac ignores the
+        // report envelope and refuses its deliberately empty legacy prompt, so version skew can
+        // never turn this into a text-only report.
+        let reportScreenshot: RemoteClaimedReportScreenshot?
+        if let screenshot = creation.reportOpening?.screenshot {
+            guard let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+                request.header(RemoteRouter.deviceHeader)
+            ), let jpegData = RemoteReportScreenshotPolicy.jpegData(from: screenshot) else {
+                respond(.respond(RemoteRouter.error(
+                    400,
+                    "Bad Request",
+                    code: .invalidReportOpening
+                )))
+                return
+            }
+            guard let claimed = attachmentUploads.stageAndClaimReportScreenshot(
+                jpegData,
+                deviceID: deviceID
+            ) else {
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Mac Not Ready",
+                    code: .persistenceUnavailable
+                )))
+                return
+            }
+            reportScreenshot = claimed
+        } else {
+            reportScreenshot = nil
+        }
+
         DispatchQueue.main.async {
+            defer {
+                if let uploadID = reportScreenshot?.uploadID {
+                    self.queue.async {
+                        self.attachmentUploads.discardClaimed(ids: [uploadID])
+                    }
+                }
+            }
             // A refused choice answers the phone and used to leave nothing here, so a report
             // saying "my chat would not start" could not be matched to what this Mac declined.
             // The choices are what the refusal is about; the prompt stays out of the journal.
@@ -1140,6 +1201,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 usesNativeUI: usesNativeUI,
                 managedWorkspacePlan: managedWorkspacePlan,
                 role: role,
+                openingAttachmentPaths: reportScreenshot.map { [$0.url.path] } ?? [],
                 prompt: prompt
             )
             guard let sessionID = self.sessionCommands?.startRemoteSession(launch) else {
@@ -3365,6 +3427,37 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             self.services.mirrors.resyncConversation(
                 for: connection,
                 sessionID: sessionID
+            )
+        }
+    }
+
+    private func handleRunPlanPage(
+        _ connection: RemoteConnection,
+        revision: Int?,
+        offset: Int?,
+        limit: Int?
+    ) {
+        guard let authorization = connection.authorization,
+              let routed = connection.routedSessionID,
+              let sessionID = SessionID(uuidString: routed),
+              let revision, revision >= 0,
+              let offset, offset >= 0,
+              limit.map({ (1...RemoteAccessDefaults.maximumRemoteRunPlanPageSteps).contains($0) })
+                ?? true else {
+            connection.sendText(encode(RemoteErrorDTO(code: "invalidRunPlanPage")))
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                return
+            }
+            self.services.mirrors.requestRunPlanPage(
+                from: connection,
+                sessionID: sessionID,
+                revision: revision,
+                offset: offset,
+                limit: limit
             )
         }
     }

@@ -57,6 +57,16 @@ struct CodeContextPreview: Equatable, Sendable {
         let indices: [Int?]
         if candidateCount <= maximumVisibleLineRows {
             indices = Array(lower...upper).map(Optional.some)
+        } else if target.count <= maximumVisibleLineRows {
+            // The selection is what the sheet is about; only the neighbours are optional. Cutting
+            // from the middle of the candidate range hid the selected lines themselves ("1 more
+            // lines are not shown" inside a four-line comment), so context is shed first, from
+            // whichever side has more of it.
+            let spare = maximumVisibleLineRows - target.count
+            let leading = min(target.lowerBound - lower, (spare + 1) / 2)
+            let trailing = min(upper - target.upperBound, spare - leading)
+            indices = Array((target.lowerBound - leading)...(target.upperBound + trailing))
+                .map(Optional.some)
         } else {
             let leadingCount = maximumVisibleLineRows / 2
             let trailingCount = maximumVisibleLineRows - leadingCount
@@ -282,7 +292,9 @@ private final class CodeContextPreviewRowView: NSView, ThemedComponent {
             targetLabel.stringValue = ""
             numberLabel.stringValue = ""
             changeLabel.stringValue = "⋯"
-            codeLabel.stringValue = L10n.format("%lld more lines are not shown.", Int64(count))
+            codeLabel.stringValue = count == 1
+                ? L10n.string("1 more line is not shown.")
+                : L10n.format("%lld more lines are not shown.", Int64(count))
             setAccessibilitySelected(false)
             setAccessibilityLabel(codeLabel.stringValue)
         }

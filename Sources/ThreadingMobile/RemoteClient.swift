@@ -181,6 +181,10 @@ enum RemoteClientError: LocalizedError {
             return MobileL10n.string(
                 "That workspace option is not available for this project and agent. Review the updated choices and try again."
             )
+        case .invalidReportOpening:
+            return MobileL10n.string(
+                "The screenshot preview could not be prepared. Remove it and try again."
+            )
         case .invalidInvitation:
             return MobileL10n.string("This invitation is expired or already used.")
         case .invalidRequestID, .requestIDReused:

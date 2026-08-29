@@ -165,9 +165,8 @@ final class CodexHookInstallerTests: XCTestCase {
         }
     }
 
-    /// A hook Codex cannot scope to particular tools must not be installed unscoped. An
-    /// unmatched `PreToolUse` reporting a *question* would say that every command Codex runs is
-    /// one the user is blocked on, which is worse than reporting nothing.
+    /// The observational plan hook is tool-scoped while the permission broker deliberately is
+    /// not: policy decides which tools require a decision, but only `update_plan` is a plan.
     func testInstallWritesNoToolScopedEntryWithoutItsMatcher() throws {
         CodexHookInstaller.install(inCodexHome: codexHome.path)
 
@@ -176,10 +175,17 @@ final class CodexHookInstallerTests: XCTestCase {
 
         XCTAssertEqual(
             preToolUse.count,
-            1,
-            "only the permission broker registers on PreToolUse for Codex today"
+            2,
+            "PreToolUse should carry one plan observer and one permission broker"
         )
-        XCTAssertNil(preToolUse[0][HookRegistrationDefaults.matcherKey])
+        XCTAssertEqual(
+            preToolUse.compactMap { $0[HookRegistrationDefaults.matcherKey] as? String },
+            ["update_plan"]
+        )
+        XCTAssertEqual(
+            preToolUse.filter { $0[HookRegistrationDefaults.matcherKey] == nil }.count,
+            1
+        )
     }
 
     /// Codex has no `Notification`, so writing one would put an event into the file that the
@@ -290,6 +296,7 @@ final class CodexHookInstallerTests: XCTestCase {
     /// reviewed command byte-stable while still admitting a loopback fallback.
     func testCommandCarriesNoLaunchSpecificValues() {
         var commands = HookLifecycleEvent.allCases.map(CodexHookInstaller.command(for:))
+        commands += HookRunProgressPhase.allCases.map(CodexHookInstaller.command(for:))
         commands.append(CodexHookInstaller.permissionCommand())
 
         for command in commands {
@@ -337,6 +344,7 @@ final class CodexHookInstallerTests: XCTestCase {
         ]
 
         try runShell(CodexHookInstaller.command(for: .turnStarted), environment: environment)
+        try runShell(CodexHookInstaller.command(for: .toolUse), environment: environment)
         try runShell(CodexHookInstaller.permissionCommand(), environment: environment)
 
         XCTAssertFalse(
@@ -352,6 +360,7 @@ final class CodexHookInstallerTests: XCTestCase {
     /// user's own, that would pay for it. Found by a probe whose hook posted an empty body.
     func testEveryCommandDrainsStdinBeforeGuarding() {
         var commands = HookLifecycleEvent.allCases.map(CodexHookInstaller.command(for:))
+        commands += HookRunProgressPhase.allCases.map(CodexHookInstaller.command(for:))
         commands.append(CodexHookInstaller.permissionCommand())
 
         for command in commands {
@@ -402,8 +411,8 @@ final class CodexHookInstallerTests: XCTestCase {
         CodexHookInstaller.install(inCodexHome: codexHome.path)
 
         let commands = try commands(forEvent: "PreToolUse")
-        XCTAssertEqual(commands.count, 1)
-        XCTAssertTrue(commands[0].contains(MCPDefaults.permissionPathPrefix))
+        XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.permissionPathPrefix) }.count, 1)
+        XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.runProgressPathPrefix) }.count, 1)
     }
 
     /// Scoped by a *second* variable, not the session token: `hooks.json` is shared by every

@@ -375,6 +375,20 @@ enum GitReviewDefaults {
     static let remoteRepositoryFileByteCap = 512 * 1024
 
     static let lineNumberWidth: CGFloat = 36
+    /// The gutter before the number column that the hovered line's action plate is drawn in.
+    /// Drawn over the number instead, the plate removed the one thing a reader hovers a line
+    /// to read, and in hard-print themes its translucent plate overprinted the digits.
+    static let lineActionGutterWidth: CGFloat = 24
+
+    /// Below these pane widths the header folds its text-size run, then its navigation run,
+    /// into the ··· menu. At 360pt all six glyphs otherwise ran into the totals, which had
+    /// wrapped to one character per line.
+    static let textSizeGroupFoldWidth: CGFloat = 500
+    static let navigationGroupFoldWidth: CGFloat = 420
+
+    /// Narrower than this, a split diff is two columns of clipped fragments; the pane shows the
+    /// unified layout instead and keeps the split choice for when there is room again.
+    static let splitLayoutMinimumWidth: CGFloat = 600
 
     /// Tried in order when origin has no recorded HEAD.
     static let defaultBranchCandidates = ["origin/main", "origin/master", "main", "master"]

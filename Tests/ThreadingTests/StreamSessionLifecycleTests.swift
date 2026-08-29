@@ -2338,7 +2338,11 @@ final class CodexAppServerEventTests: XCTestCase {
         var timeline = ConversationTimeline(sessionID: SessionID())
         XCTAssertEqual(
             timeline.apply(events[0]),
-            [.runProgress(RunProgress(step: 2, total: 3))]
+            [.runProgress(RunProgress(steps: [
+                .init(id: nil, title: "Inspect", status: .completed),
+                .init(id: nil, title: "Implement", status: .inProgress),
+                .init(id: nil, title: "Verify", status: .pending),
+            ]))]
         )
     }
 

@@ -31,12 +31,17 @@ enum MCPDefaults {
     /// told and forgotten.
     static let lifecyclePathPrefix = "/lifecycle/"
 
+    /// Structured, observational plan/todo reports. Kept separate from lifecycle so a tool
+    /// callback can never inherit the turn-start checkpoint barrier.
+    static let runProgressPathPrefix = "/progress/"
+
     /// The query parameter naming which lifecycle event a report describes.
     ///
     /// The event is carried in the URL rather than read from the payload so that one endpoint
     /// per session still distinguishes the events, and so nothing depends on the payload's own
     /// event field — Claude and Codex spell it differently.
     static let lifecycleEventParameter = "event"
+    static let runProgressPhaseParameter = "phase"
 
     /// The authority a `--unix-socket` request carries.
     ///
@@ -209,6 +214,8 @@ enum MCPDefaults {
     /// Stop is the other checkpoint barrier. Releasing it early would let the next queued turn
     /// alter the checkout before the authoritative final tree had been published.
     static let turnFinishLifecycleTimeout: TimeInterval = 62
+    /// Progress hooks are observational and must never add noticeable tool latency.
+    static let runProgressTimeout: TimeInterval = 2
 
     static func lifecycleTimeout(for event: HookLifecycleEvent) -> TimeInterval {
         switch event {

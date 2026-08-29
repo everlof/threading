@@ -773,6 +773,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         HookLifecycleRelay.observe = { report in
             AgentRuntime.shared.applyLifecycle(report)
         }
+        HookRunProgressRelay.observe = { report in
+            AgentRuntime.shared.applyRunProgress(report)
+        }
 
         // Codex is the one runtime with a reversible provider archive. Reconcile before the
         // startup restore is released where possible, then again whenever Threading regains
@@ -1321,6 +1324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             usesNativeUI: launch.usesNativeUI,
             managedWorkspacePlan: launch.managedWorkspacePlan,
             role: launch.role,
+            openingAttachmentPaths: launch.openingAttachmentPaths,
             prompt: launch.prompt
         )?.id
     }

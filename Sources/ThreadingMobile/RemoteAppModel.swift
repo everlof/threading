@@ -1270,6 +1270,7 @@ final class RemoteAppModel: ObservableObject {
         surface: RemoteSessionSurface,
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
         role: RemoteSessionRole? = nil,
+        reportOpening: RemoteReportSessionOpeningDTO? = nil,
         prompt: String
     ) async throws -> MobileCreatedSession {
         guard canManageSessions, let host = activeHost else {
@@ -1287,6 +1288,7 @@ final class RemoteAppModel: ObservableObject {
             surface: surface,
             managedWorkspace: managedWorkspace,
             role: role,
+            reportOpening: reportOpening,
             compactResponse: true,
             prompt: prompt
         )

@@ -110,7 +110,8 @@ struct GitLabChangeRequestClient: ChangeRequestProviderClient {
         async let checks = checkSummary(
             repository: repository,
             projectPath: projectPath,
-            revision: revision
+            revision: revision,
+            branch: branch
         )
 
         let summary: ChangeRequestSummary?
@@ -235,34 +236,68 @@ struct GitLabChangeRequestClient: ChangeRequestProviderClient {
     private func checkSummary(
         repository: ChangeRequestRepository,
         projectPath: String,
-        revision: String
+        revision: String,
+        branch: String
     ) async -> ChangeRequestChecks {
-        let result = await api(
-            repository: repository,
-            method: "GET",
-            endpoint: "projects/\(projectPath)/repository/commits/\(revision)/statuses",
-            fields: ["per_page=100"]
-        )
-        guard result.succeeded,
-              let statuses = try? JSONDecoder().decode([CommitStatusResponse].self, from: result.output)
-        else { return .unavailable }
+        var outcomes: [ChangeRequestCheckOutcome: Int] = [:]
+        var loaded = 0
 
-        var passed = 0
-        var pending = 0
-        var failed = 0
-        for status in statuses {
-            switch status.status {
-            case "success", "skipped": passed += 1
-            case "failed", "canceled", "canceling": failed += 1
-            default: pending += 1
+        for page in 1...ChangeRequestCheckDefaults.maximumPages {
+            let result = await api(
+                repository: repository,
+                method: "GET",
+                endpoint: "projects/\(projectPath)/repository/commits/\(revision)/statuses",
+                fields: [
+                    "ref=\(branch)",
+                    "per_page=\(ChangeRequestCheckDefaults.pageSize)",
+                    "page=\(page)"
+                ]
+            )
+            guard result.succeeded,
+                  let statuses = try? JSONDecoder().decode(
+                    [CommitStatusResponse].self,
+                    from: result.output
+                  )
+            else {
+                return loaded == 0
+                    ? .unavailable
+                    : ChangeRequestChecks(outcomes: outcomes, coverage: .partial)
+            }
+
+            for status in statuses {
+                outcomes[commitStatusOutcome(status), default: 0] += 1
+            }
+            loaded += statuses.count
+            if statuses.count < ChangeRequestCheckDefaults.pageSize {
+                return ChangeRequestChecks(outcomes: outcomes)
+            }
+            if page == ChangeRequestCheckDefaults.maximumPages {
+                return ChangeRequestChecks(
+                    outcomes: outcomes,
+                    coverage: .capped(additionalCount: nil)
+                )
             }
         }
-        let state: ChangeRequestChecks.State
-        if failed > 0 { state = .failing }
-        else if pending > 0 { state = .pending }
-        else if passed > 0 { state = .passing }
-        else { state = .none }
-        return ChangeRequestChecks(state: state, passed: passed, pending: pending, failed: failed)
+        return ChangeRequestChecks(outcomes: outcomes)
+    }
+
+    private func commitStatusOutcome(
+        _ response: CommitStatusResponse
+    ) -> ChangeRequestCheckOutcome {
+        let status = response.status.lowercased()
+        switch status {
+        case "success": return .passed
+        case "skipped": return .skipped
+        case "pending": return .pending
+        case "running": return .running
+        case "canceling": return .cancelling
+        case "failed":
+            return response.allowFailure ? .allowedFailure(original: status) : .failed
+        case "canceled":
+            return response.allowFailure ? .allowedFailure(original: status) : .cancelled
+        default:
+            return .unknownTerminal(ChangeRequestCheckOutcome.boundedProviderValue(status))
+        }
     }
 
     private func reviewSummary(
@@ -432,7 +467,21 @@ struct GitLabChangeRequestClient: ChangeRequestProviderClient {
         }
     }
 
-    private struct CommitStatusResponse: Decodable { let status: String }
+    private struct CommitStatusResponse: Decodable {
+        let status: String
+        let allowFailure: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case status
+            case allowFailure = "allow_failure"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            status = try container.decode(String.self, forKey: .status)
+            allowFailure = try container.decodeIfPresent(Bool.self, forKey: .allowFailure) ?? false
+        }
+    }
 
     private struct ApprovalsResponse: Decodable {
         struct Approval: Decodable { let user: MergeRequestResponse.User }

@@ -2172,7 +2172,9 @@ enum Design {
         /// The ghost has to whisper a file's added/removed weight without becoming content: at
         /// full strength a screen of green and red bars reads as the diff having loaded, and the
         /// pulse over it then reads as failure rather than loading.
-        static let skeletonDiffTint: CGFloat = 0.45
+        /// Quieter than the diff wash it stands in for: at 0.45 the ghost was louder than the
+        /// content that replaced it, so the pane got dimmer as it loaded.
+        static let skeletonDiffTint: CGFloat = 0.3
 
         /// How much ink a chart's loading ghost keeps, and how much the band behind it keeps.
         ///

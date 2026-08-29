@@ -479,7 +479,7 @@
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Anslutningshjälp" } } }
     },
     "Find the bug hiding in plain sight…": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hitta buggen som gömmer sig helt öppet…" } } }
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Hitta buggen mitt framför näsan…" } } }
     },
     "Hunt down the flaky test…": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Spåra upp det opålitliga testet…" } } }
@@ -513,14 +513,8 @@
     "Pair this Mac again": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Parkoppla den här Mac-datorn igen" } } }
     },
-    "Polish the rough edges…": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Putsa de grova kanterna…" } } }
-    },
     "Saved identity": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sparad identitet" } } }
-    },
-    "Teach this screen a new trick…": {
-      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lär den här skärmen ett nytt trick…" } } }
     },
     "The Mac refused the request": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Mac-datorn avvisade begäran" } } }
@@ -6112,7 +6106,33 @@
     "No current capacity": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ingen aktuell kapacitet"}}}},
     "The Mac has not observed a provider limit window yet.": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Mac-datorn har ännu inte observerat något gränsfönster från en leverantör."}}}},
     "Accounts · %lld loaded": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Konton · %lld inlästa"}}}},
-    "No active windows": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga aktiva fönster"}}}}
+    "No active windows": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Inga aktiva fönster"}}}},
+    "%@, step %lld of %lld": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%@, steg %lld av %lld"}}}},
+    "%lld of %lld complete": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "%lld av %lld klara"}}}},
+    "Active": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Aktiv"}}}},
+    "Pending": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Väntar"}}}},
+    "Plan": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Plan"}}}},
+    "Show plan": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa plan"}}}},
+    "Complete": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Klar"}}}},
+    "Delete the code nobody will miss…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ta bort koden ingen kommer sakna…"}}}},
+    "Find out why CI went red…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ta reda på varför CI blev rött…"}}}},
+    "Make the slow path the fast path…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Gör den långsamma vägen snabb…"}}}},
+    "Write the test I should have written…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skriv testet jag borde ha skrivit…"}}}},
+    "Reproduce the crash, then end it…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återskapa kraschen och avsluta den…"}}}},
+    "Turn the TODO into a done…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förvandla TODO till klart…"}}}},
+    "Name the magic numbers…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Namnge de magiska talen…"}}}},
+    "Squash warnings before they breed…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Krossa varningarna innan de sprids…"}}}},
+    "Find where the leak starts…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hitta var läckan börjar…"}}}},
+    "Make the retry actually retry…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Få omförsöket att försöka på riktigt…"}}}},
+    "Cut the launch time in half…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Halvera starttiden…"}}}},
+    "Rename what was named at 2am…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Döp om det som döptes klockan två…"}}}},
+    "Find the off-by-one…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hitta off-by-one-felet…"}}}},
+    "Explain why this works at all…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förklara varför det här ens fungerar…"}}}},
+    "Move the work off the main thread…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Flytta arbetet bort från huvudtråden…"}}}},
+    "Kill the race, keep the speed…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Döda kapplöpningen, behåll farten…"}}}},
+    "Trace the stray pixel to its source…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Spåra den förlupna pixeln till källan…"}}}},
+    "Bring the prototype up to code…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Få prototypen upp till standard…"}}}},
+    "Make the error message useful…": {"localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Gör felmeddelandet användbart…"}}}}
   },
   "version": "1.2"
 }

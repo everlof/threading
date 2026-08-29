@@ -125,6 +125,21 @@ carrying the prompt text. Terminal sessions additionally carry a *tool-scoped, o
 `PreToolUse`/`PostToolUse` pair for the tools that ask the user outright — see "A runtime's own
 'I am waiting'" below, which is where the difference between that pair and the broker is drawn.
 
+**Run plans use the same observational boundary and never inspect terminal pixels.** When
+lifecycle reporting is enabled, Claude's session-only settings add silent, tool-scoped reports
+for `TodoWrite`, `TaskCreate`, and `TaskUpdate`; the account-shared Codex installer adds one
+`update_plan` matcher beside its existing entries. `HookRunProgressReport` normalizes those
+payloads and `TerminalRunProgressMonitor` folds them through `RunProgressReducer` off-main.
+Provider JSONL is the catch-up path: a resumable byte cursor reads only structured tool-use/result
+records, shares tool-call ids with the hook feed for idempotence, and survives the visible clear at
+a turn boundary. A new process or replaced/truncated transcript resets the cursor. ANSI output,
+the emulator grid, cursor positioning, and screenshots are deliberately not inputs.
+
+The hook endpoint acknowledges before delivery and malformed reports are accepted then ignored;
+an observational plan must never delay, fail, or speak into the provider's turn. The plan is
+presentation state for the open turn, not a persisted Threading task list: the activity edge
+clears it, and native transports continue to use their already-structured stream events.
+
 **The brokering `PreToolUse` command is the one that answers for itself.** It is built by
 `MCPDefaults.hookBrokerCommand`, which is the same POST with `|| printf '%s' '{…}'` after it: an
 agent whose Threading has been quit is denied in words rather than left to the CLI's own headless

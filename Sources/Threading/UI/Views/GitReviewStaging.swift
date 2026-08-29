@@ -59,8 +59,12 @@ extension GitReviewViewController {
     /// Every write ends the same way: say what went wrong if anything did, then re-read —
     /// the index has moved, and the pane is a picture of the index.
     func finishWrite(_ result: Result<Void, GitFailure>) {
-        if case .failure(let failure) = result {
+        switch result {
+        case .failure(let failure):
             notice = (failure.errorDescription ?? L10n.string("git failed."), true)
+        case .success:
+            // A standing error is about the write that just succeeded; it has been answered.
+            if notice?.isError == true { notice = nil }
         }
         refresh(force: true)
     }

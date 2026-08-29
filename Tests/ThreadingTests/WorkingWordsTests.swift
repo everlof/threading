@@ -119,7 +119,10 @@ final class WorkingWordsTests: XCTestCase {
             ]
         ]))
 
-        XCTAssertEqual(progress, RunProgress(step: 2, total: 4))
+        assertSummary(progress, equals: RunProgress(step: 2, total: 4))
+        XCTAssertEqual(progress.steps.map(\.title), ["Inspect", "Implement", "Verify", "Document"])
+        XCTAssertEqual(progress.currentStep?.title, "Implement")
+        XCTAssertEqual(progress.compactLabel, "Implement · 2 of 4")
         XCTAssertEqual(progress.label, "Step 2 / 4")
     }
 
@@ -132,7 +135,8 @@ final class WorkingWordsTests: XCTestCase {
             ]
         ]))
 
-        XCTAssertEqual(progress, RunProgress(step: 3, total: 3))
+        assertSummary(progress, equals: RunProgress(step: 3, total: 3))
+        XCTAssertEqual(progress.steps.map(\.title), ["Inspect", "Implement", "Verify"])
     }
 
     func testUnrelatedAndEmptyToolsDoNotInventProgress() {
@@ -140,24 +144,34 @@ final class WorkingWordsTests: XCTestCase {
         XCTAssertNil(RunProgress(tool: .plan, input: ["plan": []]))
     }
 
+    func testLegacySummariesRetainTheirReportedCounts() {
+        let step = RunProgress(step: 2, total: 4)
+        XCTAssertEqual(step.completed, 1)
+        XCTAssertEqual(step.active, 1)
+
+        let tasks = RunProgress(completed: 3, active: 2, total: 8)
+        XCTAssertEqual(tasks.completed, 3)
+        XCTAssertEqual(tasks.active, 2)
+    }
+
     func testClaudeIncrementalTasksReconcileCreateResultsAndUpdates() throws {
         var reducer = RunProgressReducer()
 
-        XCTAssertEqual(
+        assertSummary(
             try changedProgress(reducer.apply(
                 toolUseID: "create-1",
                 tool: .taskCreate,
                 input: ["subject": "Inspect", "activeForm": "Inspecting"]
             )),
-            RunProgress(step: 1, total: 1)
+            equals: RunProgress(step: 1, total: 1)
         )
-        XCTAssertEqual(
+        assertSummary(
             try changedProgress(reducer.apply(result: ToolResult(
                 toolUseID: "create-1",
                 text: "Task #1 created successfully: Inspect",
                 isError: false
             ))),
-            RunProgress(step: 1, total: 1)
+            equals: RunProgress(step: 1, total: 1)
         )
 
         _ = reducer.apply(
@@ -170,21 +184,21 @@ final class WorkingWordsTests: XCTestCase {
             text: "Task #2 created successfully: Implement",
             isError: false
         ))
-        XCTAssertEqual(
+        assertSummary(
             try changedProgress(reducer.apply(
                 toolUseID: "update-1",
                 tool: .taskUpdate,
                 input: ["taskId": "1", "status": "completed"]
             )),
-            RunProgress(step: 2, total: 2)
+            equals: RunProgress(step: 2, total: 2)
         )
-        XCTAssertEqual(
+        assertSummary(
             try changedProgress(reducer.apply(
                 toolUseID: "update-2",
                 tool: .taskUpdate,
                 input: ["taskId": "2", "status": "in_progress"]
             )),
-            RunProgress(step: 2, total: 2)
+            equals: RunProgress(step: 2, total: 2)
         )
     }
 
@@ -213,6 +227,22 @@ final class WorkingWordsTests: XCTestCase {
         )))
     }
 
+    func testClaudeFailedTaskUpdateClearsItsOptimisticProgress() throws {
+        var reducer = RunProgressReducer()
+        _ = reducer.apply(
+            toolUseID: "update-1",
+            tool: .taskUpdate,
+            input: ["taskId": "1", "status": "in_progress", "subject": "Implement"]
+        )
+
+        XCTAssertNil(try changedProgress(reducer.apply(result: ToolResult(
+            toolUseID: "update-1",
+            text: "Task update failed",
+            isError: true
+        ))))
+        XCTAssertNil(reducer.snapshot)
+    }
+
     func testParallelClaudeTasksUseCountsInsteadOfInventingALinearStep() throws {
         var reducer = RunProgressReducer()
         _ = reducer.apply(
@@ -228,6 +258,8 @@ final class WorkingWordsTests: XCTestCase {
 
         XCTAssertNil(progress.step)
         XCTAssertEqual(progress.label, "0 / 2 done · 2 active")
+        XCTAssertEqual(progress.currentPosition, 1)
+        XCTAssertEqual(progress.compactLabel, "Audit · 1 of 2")
     }
 
     // MARK: - Context Meter
@@ -257,6 +289,17 @@ final class WorkingWordsTests: XCTestCase {
             throw ProgressTestError.unchanged
         }
         return progress
+    }
+
+    private func assertSummary(
+        _ actual: RunProgress?,
+        equals expected: RunProgress,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(actual?.step, expected.step, file: file, line: line)
+        XCTAssertEqual(actual?.total, expected.total, file: file, line: line)
+        XCTAssertEqual(actual?.label, expected.label, file: file, line: line)
     }
 
     private enum ProgressTestError: Error {

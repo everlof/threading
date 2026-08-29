@@ -144,16 +144,18 @@ final class SeparatorView: NSView, ThemedComponent {
 
 // MARK: - Status Progress Ring
 
-/// A compact semantic receipt split between completed, outstanding, and failed work.
+/// A compact semantic receipt split between positive, non-blocking, active, and adverse outcomes.
 ///
 /// The host supplies counts; the design system owns the ring's geometry and status colours.
-/// Text beside the mark still names every non-zero count, so the meaning never depends on hue.
+/// Non-blocking outcomes remain the neutral base track while adjacent text keeps every provider
+/// state distinct, so neither the outcome nor its reason depends on hue.
 @MainActor
 enum ThemedStatusProgressRing {
 
     struct Fractions: Equatable {
         let positive: CGFloat
-        let pending: CGFloat
+        let nonBlocking: CGFloat
+        let active: CGFloat
         let negative: CGFloat
     }
 
@@ -167,21 +169,39 @@ enum ThemedStatusProgressRing {
         static let maximumCount = 10_000
     }
 
-    static func fractions(positive: Int, pending: Int, negative: Int) -> Fractions {
-        let counts = [positive, pending, negative].map {
+    static func fractions(
+        positive: Int,
+        nonBlocking: Int,
+        active: Int,
+        negative: Int
+    ) -> Fractions {
+        let counts = [positive, nonBlocking, active, negative].map {
             min(max(0, $0), Layout.maximumCount)
         }
         let total = counts.reduce(0, +)
-        guard total > 0 else { return Fractions(positive: 0, pending: 1, negative: 0) }
+        guard total > 0 else {
+            return Fractions(positive: 0, nonBlocking: 1, active: 0, negative: 0)
+        }
         return Fractions(
             positive: CGFloat(counts[0]) / CGFloat(total),
-            pending: CGFloat(counts[1]) / CGFloat(total),
-            negative: CGFloat(counts[2]) / CGFloat(total)
+            nonBlocking: CGFloat(counts[1]) / CGFloat(total),
+            active: CGFloat(counts[2]) / CGFloat(total),
+            negative: CGFloat(counts[3]) / CGFloat(total)
         )
     }
 
-    static func image(positive: Int, pending: Int, negative: Int) -> NSImage {
-        let reading = fractions(positive: positive, pending: pending, negative: negative)
+    static func image(
+        positive: Int,
+        nonBlocking: Int,
+        active: Int,
+        negative: Int
+    ) -> NSImage {
+        let reading = fractions(
+            positive: positive,
+            nonBlocking: nonBlocking,
+            active: active,
+            negative: negative
+        )
         let image = NSImage(size: Layout.size, flipped: false) { rect in
             let ringRect = rect.insetBy(dx: Layout.lineWidth / 2, dy: Layout.lineWidth / 2)
             let track = NSBezierPath(ovalIn: ringRect)
@@ -196,8 +216,14 @@ enum ThemedStatusProgressRing {
                 color: Design.Status.positive
             )
             draw(
+                fraction: reading.active,
+                after: reading.positive + reading.nonBlocking,
+                in: ringRect,
+                color: Design.Status.warning
+            )
+            draw(
                 fraction: reading.negative,
-                after: reading.positive,
+                after: reading.positive + reading.nonBlocking + reading.active,
                 in: ringRect,
                 color: Design.Status.negative
             )

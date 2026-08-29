@@ -443,7 +443,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// you are about to send belongs inside the thing you are sending. Left here they read as a
     /// strip of chips floating between the conversation and the input, belonging to neither.
     private lazy var statusRow: NSStackView = {
-        let row = NSStackView(views: [orbView, statusLabel])
+        let row = NSStackView(views: [orbView, statusLabel, runPlanDisclosure])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = Design.Spacing.tight
@@ -459,6 +459,15 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return label
+    }()
+    lazy var runPlanDisclosure: RunPlanDisclosureView = {
+        let disclosure = RunPlanDisclosureView()
+        disclosure.preferredEdge = .maxY
+        disclosure.isHidden = true
+        disclosure.setAccessibilityIdentifier("conversation.status.run-plan")
+        disclosure.setContentHuggingPriority(.required, for: .horizontal)
+        disclosure.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return disclosure
     }()
     private let modelChip = ChipView()
 
@@ -515,7 +524,12 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     var workingStatusTimer: Timer?
 
     /// The structured plan position most recently reported in this turn.
-    var runProgress: RunProgress?
+    var runProgress: RunProgress? {
+        didSet {
+            guard isViewLoaded else { return }
+            runPlanDisclosure.update(isTurnInFlight ? runProgress : nil)
+        }
+    }
 
     /// Unlike `stream.isRunning`, this is one user turn currently awaiting its terminal event.
     /// Both native transports keep their process open between turns.

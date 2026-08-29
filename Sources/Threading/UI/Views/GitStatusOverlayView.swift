@@ -327,6 +327,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     /// The agent line: which model this session is running, and how, for the facts its own
     /// status line does not already say.
     private let modelRow = NSStackView()
+    private let runPlanDisclosure = RunPlanDisclosureView()
     private let sourceDivider = SeparatorView()
     private let extensionDivider = SeparatorView()
     private let glyph = ThemedFloatingGlyphView(
@@ -376,7 +377,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     private let subagentsButton: ThemedButton
     private let audienceButton: ThemedButton
     private let changeRequestButton: ThemedButton
-    private let checksButton: ThemedButton
+    private let checksButton: ThemedStatusReceiptButton
     private let attachmentButtons: [ThemedButton]
     private let viewAllAttachmentsButton: ThemedButton
     private var workspaceLabel: NSTextField?
@@ -529,12 +530,7 @@ final class GitStatusOverlayView: BackdropOverlay {
             target: nil,
             action: nil
         )
-        checksButton = ThemedButton(
-            symbol: "checkmark.circle",
-            accessibility: L10n.string("Open checks in Git Review"),
-            target: nil,
-            action: nil
-        )
+        checksButton = ThemedStatusReceiptButton(target: nil, action: nil)
         attachmentButtons = (0..<GitStatusOverlayDefaults.maximumAttachmentRows).map { index in
             let button = ThemedButton(
                 symbol: "paperclip",
@@ -630,14 +626,17 @@ final class GitStatusOverlayView: BackdropOverlay {
         speedMark.isHidden = true
         modelRow.addArrangedSubview(speedMark)
 
-        for button in [changeRequestButton, checksButton] {
-            button.target = self
-            button.action = #selector(openGitReview)
-            button.emphasis = .tertiary
-            button.contentAlignment = .leading
-            button.applyFont(GitStatusOverlayDefaults.font)
-            button.isHidden = true
-        }
+        changeRequestButton.target = self
+        changeRequestButton.action = #selector(openGitReview)
+        changeRequestButton.emphasis = .tertiary
+        changeRequestButton.contentAlignment = .leading
+        changeRequestButton.applyFont(GitStatusOverlayDefaults.font)
+        changeRequestButton.isHidden = true
+
+        checksButton.target = self
+        checksButton.action = #selector(openGitReview)
+        checksButton.fontRole = GitStatusOverlayDefaults.font
+        checksButton.isHidden = true
 
         // One gap, every row, and the card's own inset around the outside — see `rowGap` for
         // the rhythm this replaced. The children row is the one row that pads itself, and
@@ -655,6 +654,10 @@ final class GitStatusOverlayView: BackdropOverlay {
         // detached head has no branch to name, so without this the card opened on its counters.
         content.addArrangedSubview(workspaceRow)
         content.addArrangedSubview(summaryRow)
+        runPlanDisclosure.preferredEdge = .minY
+        runPlanDisclosure.isHidden = true
+        runPlanDisclosure.setAccessibilityIdentifier("session.status.run-plan")
+        content.addArrangedSubview(runPlanDisclosure)
         content.addArrangedSubview(countersRow)
         // Under the checkout, over the children: the rows read outward from what this pane *is* —
         // which branch, what changed in it, which agent is working it, who it delegated to.
@@ -772,6 +775,9 @@ final class GitStatusOverlayView: BackdropOverlay {
             equalToConstant: GitStatusOverlayDefaults.rowHeight
         )
         let checksHeight = checksButton.heightAnchor.constraint(
+            greaterThanOrEqualToConstant: GitStatusOverlayDefaults.rowHeight
+        )
+        let runPlanHeight = runPlanDisclosure.heightAnchor.constraint(
             equalToConstant: GitStatusOverlayDefaults.rowHeight
         )
         let contentLeading = content.leadingAnchor.constraint(
@@ -822,7 +828,8 @@ final class GitStatusOverlayView: BackdropOverlay {
             subagentsHeight,
             audienceHeight,
             changeRequestHeight,
-            checksHeight
+            checksHeight,
+            runPlanHeight
         ] + attachmentButtons.map {
             $0.heightAnchor.constraint(equalToConstant: GitStatusOverlayDefaults.rowHeight)
         } + [
@@ -850,6 +857,7 @@ final class GitStatusOverlayView: BackdropOverlay {
             audienceHeight,
             changeRequestHeight,
             checksHeight,
+            runPlanHeight,
             widthAnchor.constraint(greaterThanOrEqualToConstant: GitStatusOverlayDefaults.minWidth),
             widthAnchor.constraint(lessThanOrEqualToConstant: GitStatusOverlayDefaults.maxWidth),
             contentLeading,
@@ -860,7 +868,7 @@ final class GitStatusOverlayView: BackdropOverlay {
             slotTop,
             collapsedBottom
         ])
-        NSLayoutConstraint.activate(Array(rowHeightConstraints.dropFirst(5)))
+        NSLayoutConstraint.activate(Array(rowHeightConstraints.dropFirst(6)))
 
         // The one row whose sentence is routinely longer than the card is wide, held to the
         // column rather than allowed to overflow it.
@@ -883,6 +891,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         NSLayoutConstraint.activate(
             ([
                 usageButton,
+                runPlanDisclosure,
                 changeRequestButton,
                 checksButton,
                 subagentsButton,
@@ -952,10 +961,10 @@ final class GitStatusOverlayView: BackdropOverlay {
         // Destinations directly attached to the connected review are the primary receipt, not
         // quiet metadata about it. Their words take label ink; the progress image is authored
         // colour and therefore keeps its green/grey/red slices beside them.
-        for button in [changeRequestButton, checksButton] {
-            button.contentTintColor = surfaceInk.label
-            button.hoverFill = surfaceInk.surfaceHover
-        }
+        changeRequestButton.contentTintColor = surfaceInk.label
+        changeRequestButton.hoverFill = surfaceInk.surfaceHover
+        checksButton.contentTintColor = surfaceInk.label
+        checksButton.hoverFill = surfaceInk.surfaceHover
         // Supporting destinations stay one tier quieter. The audience row used to be given
         // neither colour, so it drew in AppKit's own label colour and lifted to nothing under
         // the pointer — the one row inert by omission rather than by design.
@@ -968,6 +977,8 @@ final class GitStatusOverlayView: BackdropOverlay {
             button.contentTintColor = surfaceInk.secondary
             button.hoverFill = surfaceInk.surfaceHover
         }
+        runPlanDisclosure.contentTintColor = surfaceInk.secondary
+        runPlanDisclosure.hoverFill = surfaceInk.surfaceHover
         applyDensity()
         needsDisplay = true
         rebuild()
@@ -980,11 +991,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         rebuild()
     }
 
-    /// Promotes the ordinary branch card into the live run receipt shown in the same place.
-    ///
-    /// The checkout monitor continues feeding `update(with:)`, so file and line totals move
-    /// independently of plan updates. There is no spinner in this promotion: the plan position
-    /// *is* the receipt, and whichever surface the session actually uses already animates one.
+    /// Adds a structured run receipt without replacing the branch row.
     func updateRunState(isActive: Bool, progress: RunProgress?) {
         isRunActive = isActive
         runProgress = isActive ? progress : nil
@@ -1081,6 +1088,8 @@ final class GitStatusOverlayView: BackdropOverlay {
         audienceButton.isHidden = true
         changeRequestButton.isHidden = true
         checksButton.isHidden = true
+        runPlanDisclosure.update(nil)
+        runPlanDisclosure.isHidden = true
         sourceDivider.isHidden = true
         attachmentButtons.forEach { $0.isHidden = true }
         viewAllAttachmentsButton.isHidden = true
@@ -1203,12 +1212,7 @@ final class GitStatusOverlayView: BackdropOverlay {
     private func rebuild() {
         // The counters sit on the card, not on the terminal backdrop around it.
         let diff = Design.Diff.on(surfaceFill)
-        let head = Self.headText(
-            for: lastReading,
-            isRunActive: isRunActive,
-            progress: runProgress,
-            ink: surfaceInk
-        )
+        let head = Self.headText(for: lastReading, ink: surfaceInk)
         let counters = Self.countersText(for: lastReading, ink: surfaceInk, diff: diff)
 
         let model = Self.modelText(for: modelReading, ink: surfaceInk)
@@ -1223,10 +1227,11 @@ final class GitStatusOverlayView: BackdropOverlay {
         let hasAudience = !audienceReading.isEmpty
         let hasChangeRequest = changeRequestReading != nil
         let hasAttachments = !attachmentReading.isEmpty
+        let hasRunPlan = isRunActive && runProgress != nil
         let hasNativeReading = hasGitReceipt || hasUsage || hasSubagents || hasAudience || hasChangeRequest
-            || model != nil || isFast || workspace != nil
+            || model != nil || isFast || workspace != nil || hasRunPlan
         guard hasGitReceipt || hasUsage || hasSubagents || hasAudience || hasChangeRequest
-            || hasAttachments || model != nil || isFast || workspace != nil else {
+            || hasAttachments || model != nil || isFast || workspace != nil || hasRunPlan else {
             hasContent = false
             applyVisibility(animated: false)
             return
@@ -1259,11 +1264,12 @@ final class GitStatusOverlayView: BackdropOverlay {
             summaryLabel = label
             summaryRow.addArrangedSubview(label)
             glyph.setSymbol(
-                isRunActive ? "checklist" : "arrow.triangle.branch",
-                classicGlyph: isRunActive ? .plan : .branch,
-                accessibilityDescription: isRunActive ? L10n.string("Plan") : L10n.string("Branch")
+                "arrow.triangle.branch",
+                classicGlyph: .branch,
+                accessibilityDescription: L10n.string("Branch")
             )
         }
+        runPlanDisclosure.update(hasRunPlan ? runProgress : nil)
         if let counters {
             let files = NSTextField.label(attributed: counters.files)
             files.cell?.lineBreakMode = .byTruncatingTail
@@ -1297,6 +1303,7 @@ final class GitStatusOverlayView: BackdropOverlay {
 
         workspaceRow.isHidden = workspace == nil
         summaryRow.isHidden = head == nil
+        runPlanDisclosure.isHidden = !hasRunPlan
         countersRow.isHidden = counters == nil
         modelRow.isHidden = model == nil && !isFast
         speedMark.isHidden = !isFast
@@ -1319,6 +1326,7 @@ final class GitStatusOverlayView: BackdropOverlay {
         let textRows = [workspaceRow, summaryRow, countersRow, modelRow].filter { !$0.isHidden }
         let nativeButtonRows = [
             usageButton,
+            runPlanDisclosure,
             changeRequestButton,
             checksButton,
             subagentsButton,
@@ -1415,11 +1423,12 @@ final class GitStatusOverlayView: BackdropOverlay {
             changeRequestButton.setAccessibilityHelp(
                 L10n.format("Open %@ in Git Review", request.provider.changeRequestName)
             )
-            checksButton.title = Self.checksText(request.checks)
+            checksButton.fragments = ChangeRequestCheckPresentation.fragments(for: request.checks)
             checksButton.image = ThemedStatusProgressRing.image(
-                positive: request.checks.passed,
-                pending: request.checks.pending,
-                negative: request.checks.failed
+                positive: request.checks.count(disposition: .successful),
+                nonBlocking: request.checks.count(disposition: .nonBlocking),
+                active: request.checks.count(disposition: .active),
+                negative: request.checks.count(disposition: .needsAttention)
             )
             checksButton.setAccessibilityHelp(L10n.string("Open checks in Git Review"))
         }
@@ -1513,23 +1522,13 @@ final class GitStatusOverlayView: BackdropOverlay {
         ).isActive = true
     }
 
-    /// The card's leading line: the plan position while a run is in flight, the branch otherwise.
-    ///
-    /// Nil for a detached head with no run, which leaves the counters row — which has a mark of
-    /// its own — to lead, and nil with nothing at all, which is the caller's cue to hide the card.
+    /// The card's leading repository line. Run progress has a separate disclosure row, so the
+    /// branch never disappears when a turn begins.
     private static func headText(
         for reading: GitChangeMonitor.Reading?,
-        isRunActive: Bool,
-        progress: RunProgress?,
         ink: Design.Ink
     ) -> NSAttributedString? {
         let font = GitStatusOverlayDefaults.font.resolved()
-        if isRunActive {
-            return NSAttributedString(
-                string: progress?.label ?? "Working…",
-                attributes: [.font: font, .foregroundColor: ink.label]
-            )
-        }
         guard let branch = reading?.branch else { return nil }
         return NSAttributedString(
             string: branch,
@@ -1737,30 +1736,6 @@ final class GitStatusOverlayView: BackdropOverlay {
         return following ?? L10n.string("Shared")
     }
 
-    /// Every non-zero check bucket, shortened into one complete row. The overall state alone
-    /// loses useful information — a pending run may already have five green checks — and the
-    /// sliced ring beside this text is deliberately the same three-part reading.
-    private static func checksText(_ checks: ChangeRequestChecks) -> String {
-        switch checks.state {
-        case .unavailable:
-            return L10n.string("Checks unavailable")
-        case .none:
-            return L10n.string("No checks")
-        case .pending, .passing, .failing:
-            var parts: [String] = []
-            if checks.passed > 0 {
-                parts.append(L10n.format("%lld passed", Int64(checks.passed)))
-            }
-            if checks.pending > 0 {
-                parts.append(L10n.format("%lld pending", Int64(checks.pending)))
-            }
-            if checks.failed > 0 {
-                parts.append(L10n.format("%lld failed", Int64(checks.failed)))
-            }
-            return parts.isEmpty ? L10n.string("No checks") : parts.joined(separator: " · ")
-        }
-    }
-
     /// The agent line as one spoken phrase, or nil when the card has no agent row.
     ///
     /// Fast is a **word** here and a bolt on screen, in the same last place. A symbol is the
@@ -1786,11 +1761,10 @@ final class GitStatusOverlayView: BackdropOverlay {
     ) -> String {
         var parts: [String] = []
         if let spoken = spokenWorkspaceText(for: workspace) { parts.append(spoken) }
-        if isRunActive {
-            parts.append(progress?.label ?? "Working…")
-        } else if let branch = reading?.branch {
+        if let branch = reading?.branch {
             parts.append(branch)
         }
+        if isRunActive, let progress { parts.append(progress.compactLabel) }
 
         if let reading, !reading.summary.isClean {
             parts.append(

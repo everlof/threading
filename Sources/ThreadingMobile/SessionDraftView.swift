@@ -149,12 +149,39 @@ private struct SessionDraftComposerScreen: View {
     @State private var runPickerIsPresented = false
     @FocusState private var promptIsFocused: Bool
 
+    /// What the empty prompt suggests. One is drawn per draft, so the set has to be large
+    /// enough that a person starting several chats in a sitting does not see the same line
+    /// twice in a row. Each is a task a developer would actually type — an imperative with a
+    /// specific object, not a mood.
+    ///
+    /// Each also has to fit the prompt's first line beside Start, in English and in Swedish:
+    /// the field grows vertically, so a hint that wraps makes the folded composer two lines
+    /// tall before anything is typed. The room is the screen width less the composer's two
+    /// insets, the gap and the button — 301pt on a 375pt phone — and every line here measures
+    /// under that at the 17pt body size. Measure a new one before adding it.
     private static let promptSuggestions = [
         MobileL10n.string("Hunt down the flaky test…"),
         MobileL10n.string("Make the impossible state impossible…"),
-        MobileL10n.string("Polish the rough edges…"),
-        MobileL10n.string("Teach this screen a new trick…"),
         MobileL10n.string("Find the bug hiding in plain sight…"),
+        MobileL10n.string("Delete the code nobody will miss…"),
+        MobileL10n.string("Find out why CI went red…"),
+        MobileL10n.string("Make the slow path the fast path…"),
+        MobileL10n.string("Write the test I should have written…"),
+        MobileL10n.string("Reproduce the crash, then end it…"),
+        MobileL10n.string("Turn the TODO into a done…"),
+        MobileL10n.string("Name the magic numbers…"),
+        MobileL10n.string("Squash warnings before they breed…"),
+        MobileL10n.string("Find where the leak starts…"),
+        MobileL10n.string("Make the retry actually retry…"),
+        MobileL10n.string("Cut the launch time in half…"),
+        MobileL10n.string("Rename what was named at 2am…"),
+        MobileL10n.string("Find the off-by-one…"),
+        MobileL10n.string("Explain why this works at all…"),
+        MobileL10n.string("Move the work off the main thread…"),
+        MobileL10n.string("Kill the race, keep the speed…"),
+        MobileL10n.string("Trace the stray pixel to its source…"),
+        MobileL10n.string("Bring the prototype up to code…"),
+        MobileL10n.string("Make the error message useful…"),
     ]
 
     init(draft: MobileSessionDraft) {

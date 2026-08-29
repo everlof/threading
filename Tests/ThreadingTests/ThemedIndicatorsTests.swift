@@ -640,20 +640,55 @@ final class ThemedIndicatorsTests: XCTestCase {
     func testStatusProgressRingKeepsEveryCheckSlice() {
         let fractions = ThemedStatusProgressRing.fractions(
             positive: 5,
-            pending: 2,
+            nonBlocking: 2,
+            active: 3,
             negative: 1
         )
-        XCTAssertEqual(fractions.positive, 5.0 / 8.0, accuracy: 0.001)
-        XCTAssertEqual(fractions.pending, 2.0 / 8.0, accuracy: 0.001)
-        XCTAssertEqual(fractions.negative, 1.0 / 8.0, accuracy: 0.001)
+        XCTAssertEqual(fractions.positive, 5.0 / 11.0, accuracy: 0.001)
+        XCTAssertEqual(fractions.nonBlocking, 2.0 / 11.0, accuracy: 0.001)
+        XCTAssertEqual(fractions.active, 3.0 / 11.0, accuracy: 0.001)
+        XCTAssertEqual(fractions.negative, 1.0 / 11.0, accuracy: 0.001)
 
-        let empty = ThemedStatusProgressRing.fractions(positive: 0, pending: 0, negative: 0)
+        let empty = ThemedStatusProgressRing.fractions(
+            positive: 0,
+            nonBlocking: 0,
+            active: 0,
+            negative: 0
+        )
         XCTAssertEqual(empty.positive, 0, accuracy: 0.001)
-        XCTAssertEqual(empty.pending, 1, accuracy: 0.001)
+        XCTAssertEqual(empty.nonBlocking, 1, accuracy: 0.001)
+        XCTAssertEqual(empty.active, 0, accuracy: 0.001)
         XCTAssertEqual(empty.negative, 0, accuracy: 0.001)
         XCTAssertFalse(
-            ThemedStatusProgressRing.image(positive: 5, pending: 2, negative: 1).isTemplate,
+            ThemedStatusProgressRing.image(
+                positive: 5,
+                nonBlocking: 2,
+                active: 3,
+                negative: 1
+            ).isTemplate,
             "semantic slices must retain their own colours inside a tinted button"
+        )
+    }
+
+    func testStatusReceiptWrapsOnlyBetweenCompleteOutcomeFragments() {
+        let button = ThemedStatusReceiptButton(target: nil, action: nil)
+        button.fragments = ["6 passed", "4 skipped", "2 running", "1 timed out"]
+
+        let wide = button.wrappedLinesForTesting(atWidth: 400)
+        XCTAssertEqual(wide, ["6 passed · 4 skipped · 2 running · 1 timed out"])
+
+        let narrow = button.wrappedLinesForTesting(atWidth: 150)
+        XCTAssertGreaterThan(narrow.count, 1)
+        XCTAssertEqual(
+            narrow.flatMap { $0.components(separatedBy: " · ") },
+            button.fragments,
+            "wrapping must never split or omit a semantic outcome fragment"
+        )
+        button.setFrameSize(NSSize(width: 150, height: GitStatusOverlayDefaults.rowHeight))
+        XCTAssertGreaterThan(
+            button.intrinsicContentSize.height,
+            GitStatusOverlayDefaults.rowHeight,
+            "a wrapped receipt must grow the status-card row instead of clipping it"
         )
     }
 
@@ -1318,7 +1353,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         print("Rendered session status marks to \(directory.path)")
     }
 
-    func testGitStatusCardBecomesALiveRunReceipt() {
+    func testGitStatusCardAddsALiveRunPlanBelowTheBranch() {
         let card = GitStatusOverlayView()
         card.update(with: GitChangeMonitor.Reading(
             branch: "feature/progress",
@@ -1335,7 +1370,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertFalse(card.isHidden)
         XCTAssertEqual(
             card.accessibilityLabel(),
-            "Step 2 / 4  ·  2 files +35 −1"
+            "feature/progress  ·  Step 2 / 4  ·  2 files +35 −1"
         )
 
         card.updateRunState(
@@ -1344,7 +1379,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         )
         XCTAssertEqual(
             card.accessibilityLabel(),
-            "1 / 4 done · 2 active  ·  2 files +35 −1"
+            "feature/progress  ·  1 / 4 done · 2 active  ·  2 files +35 −1"
         )
 
         card.updateRunState(
@@ -1360,9 +1395,15 @@ final class ThemedIndicatorsTests: XCTestCase {
         ))
         XCTAssertEqual(
             card.accessibilityLabel(),
-            "Step 2 / 4  ·  \(1_234.formatted()) files "
+            "feature/progress  ·  Step 2 / 4  ·  \(1_234.formatted()) files "
                 + "+\(8_349.formatted()) −\(4_742.formatted())"
         )
+
+        let plan = descendants(of: card).first {
+            $0.accessibilityIdentifier() == "session.status.run-plan"
+        }
+        XCTAssertNotNil(plan)
+        XCTAssertFalse(plan?.isHidden ?? true)
 
         card.updateRunState(isActive: false, progress: nil)
         XCTAssertEqual(
@@ -1439,7 +1480,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         )
     }
 
-    /// A run promotes the card's first line; it does not put a *third* spinner on screen.
+    /// A plan adds one quiet disclosure row; it does not put a *third* spinner on screen.
     ///
     /// A terminal session's CLI draws its own a few lines below the card, and a native
     /// conversation animates one beside its status. The card's copy repeated either one without
@@ -1463,7 +1504,7 @@ final class ThemedIndicatorsTests: XCTestCase {
         let marks = everything.compactMap {
             ($0 as? ThemedFloatingGlyphView)?.semanticDescription
         }
-        XCTAssertTrue(marks.contains("Plan"), "the promoted line lost its mark with the spinner")
+        XCTAssertTrue(marks.contains("Plan"), "the plan row lost its semantic mark")
     }
 
     /// Marks share one column, so the rows read as a list. The children row is a titled button
@@ -2574,7 +2615,13 @@ final class ThemedIndicatorsTests: XCTestCase {
             order: 0
         ))
 
-        let checks = ChangeRequestChecks(state: .pending, passed: 5, pending: 2, failed: 0)
+        let checks = ChangeRequestChecks(
+            state: .passing,
+            passed: 6,
+            skipped: 4,
+            pending: 0,
+            failed: 0
+        )
         let repository = ChangeRequestRepository(
             provider: .github,
             host: "github.com",
@@ -2601,6 +2648,90 @@ final class ThemedIndicatorsTests: XCTestCase {
             changeRequest: request,
             checks: checks
         )
+        let githubDenseChecks = ChangeRequestChecks(
+            outcomes: [
+                .passed: 6,
+                .neutral: 2,
+                .skipped: 4,
+                .requested: 1,
+                .queued: 2,
+                .waiting: 1,
+                .pending: 2,
+                .inProgress: 3,
+                .failed: 1,
+                .error: 1,
+                .startupFailure: 1,
+                .actionRequired: 1,
+                .timedOut: 1,
+                .cancelled: 1,
+                .stale: 1
+            ],
+            coverage: .capped(additionalCount: 7)
+        )
+        let githubDenseRequest = ChangeRequestSummary(
+            number: 913,
+            title: "Cover every GitHub check outcome",
+            body: "",
+            url: URL(string: "https://github.com/threading/app/pull/913")!,
+            isDraft: false,
+            isMerged: false,
+            baseBranch: "main",
+            headBranch: "feature/github-check-states",
+            headRevision: "github-dense",
+            checks: githubDenseChecks,
+            reviews: .empty
+        )
+        let githubDenseReview = ChangeRequestRepositoryStatus(
+            repository: repository,
+            defaultBranch: "main",
+            branch: githubDenseRequest.headBranch,
+            changeRequest: githubDenseRequest,
+            checks: githubDenseChecks
+        )
+        let gitlabDenseChecks = ChangeRequestChecks(
+            outcomes: [
+                .passed: 5,
+                .skipped: 3,
+                .allowedFailure(original: "failed"): 2,
+                .allowedFailure(original: "canceled"): 1,
+                .pending: 2,
+                .running: 3,
+                .cancelling: 1,
+                .failed: 1,
+                .cancelled: 1
+            ],
+            coverage: .capped(additionalCount: nil)
+        )
+        let gitlabRepository = ChangeRequestRepository(
+            provider: .gitlab,
+            host: "gitlab.com",
+            namespace: "threading",
+            name: "app"
+        )
+        let gitlabDenseRequest = ChangeRequestSummary(
+            number: 314,
+            title: "Cover every GitLab pipeline state",
+            body: "",
+            url: URL(string: "https://gitlab.com/threading/app/-/merge_requests/314")!,
+            isDraft: false,
+            isMerged: false,
+            baseBranch: "main",
+            headBranch: "feature/gitlab-check-states",
+            headRevision: "gitlab-dense",
+            checks: gitlabDenseChecks,
+            reviews: .empty
+        )
+        let gitlabDenseReview = ChangeRequestRepositoryStatus(
+            repository: gitlabRepository,
+            defaultBranch: "main",
+            branch: gitlabDenseRequest.headBranch,
+            changeRequest: gitlabDenseRequest,
+            checks: gitlabDenseChecks
+        )
+        let focusedCheckFixtures = [
+            (name: "github", request: githubDenseRequest, review: githubDenseReview),
+            (name: "gitlab", request: gitlabDenseRequest, review: gitlabDenseReview)
+        ]
         let root = URL(fileURLWithPath: "/tmp/environment-evidence", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try writeAttachmentPreviewFixture(
@@ -2634,6 +2765,7 @@ final class ThemedIndicatorsTests: XCTestCase {
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
             var data: Data?
             var hoverData: Data?
+            var runPlanData: Data?
             appearance.performAsCurrentDrawingAppearance {
                 MainActor.assumeIsolated {
                     let host = NSView(frame: NSRect(x: 0, y: 0, width: 680, height: 470))
@@ -2685,6 +2817,15 @@ final class ThemedIndicatorsTests: XCTestCase {
                     ))
                     card.updateChangeRequest(GitStatusOverlayView.ChangeRequestReading(status: review))
                     card.updateSubagents(workingCount: 0, doneCount: 1, tokenCount: 61_000)
+                    card.updateRunState(
+                        isActive: true,
+                        progress: RunProgress(steps: [
+                            .init(id: nil, title: "Inspect structured provider events", status: .completed),
+                            .init(id: nil, title: "Relay the current plan to every surface", status: .completed),
+                            .init(id: nil, title: "Polish the phone checklist disclosure", status: .inProgress),
+                            .init(id: nil, title: "Verify native and terminal fixtures", status: .pending),
+                        ])
+                    )
                     card.updateAttachments(.init(attachments: attachments))
                     card.applyInk(WindowBackdrop.ink)
 
@@ -2755,6 +2896,39 @@ final class ThemedIndicatorsTests: XCTestCase {
                     else { return }
                     host.cacheDisplay(in: host.bounds, to: hoverRep)
                     hoverData = hoverRep.representation(using: .png, properties: [:])
+
+                    chrome.removeFromSuperview()
+                    guard let disclosure = self.descendants(of: card)
+                        .compactMap({ $0 as? RunPlanDisclosureView })
+                        .first,
+                        let planController = disclosure.makeDetailSurface()
+                    else { return }
+                    planController.loadView()
+                    let planSize = planController.preferredContentSize
+                    planController.view.frame = NSRect(origin: .zero, size: planSize)
+                    planController.view.layoutSubtreeIfNeeded()
+                    let planAnchor = disclosure.convert(disclosure.bounds, to: host)
+                    let planPlacement = ThemedPopoverLayout.place(
+                        anchor: planAnchor,
+                        contentSize: planSize,
+                        visibleFrame: host.bounds,
+                        preferredEdge: disclosure.preferredEdge,
+                        style: material.popoverStyle,
+                        hasMaterialShadow: material.glow != nil,
+                        bevelWidth: material.bevel?.width
+                    )
+                    let planChrome = ThemedPopoverChromeView(frame: planPlacement.panelFrame)
+                    planChrome.appearance = appearance
+                    planChrome.placement = planPlacement
+                    planChrome.contentView = planController.view
+                    host.addSubview(planChrome)
+                    host.layoutSubtreeIfNeeded()
+                    host.displayIfNeeded()
+
+                    guard let planRep = host.bitmapImageRepForCachingDisplay(in: host.bounds)
+                    else { return }
+                    host.cacheDisplay(in: host.bounds, to: planRep)
+                    runPlanData = planRep.representation(using: .png, properties: [:])
                 }
             }
             try XCTUnwrap(data).write(
@@ -2765,6 +2939,74 @@ final class ThemedIndicatorsTests: XCTestCase {
                     "status-card-attachment-hover-\(name).png"
                 )
             )
+            try XCTUnwrap(runPlanData).write(
+                to: directory.appendingPathComponent(
+                    "status-card-run-plan-expanded-\(name).png"
+                )
+            )
+
+            for fixture in focusedCheckFixtures {
+                var focusedData: Data?
+                appearance.performAsCurrentDrawingAppearance {
+                    MainActor.assumeIsolated {
+                        let host = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 340))
+                        host.appearance = appearance
+                        host.applySurface(fill: Design.Surface.background, radius: .fixed(0))
+
+                        for (index, text) in [
+                            "$ git switch \(fixture.request.headBranch)",
+                            fixture.name == "github" ? "$ gh pr checks" : "$ glab ci status",
+                            "Reading every provider outcome…"
+                        ].enumerated() {
+                            let label = NSTextField(labelWithString: text)
+                            label.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+                            label.textColor = Design.Ink.chrome.tertiary
+                            label.frame = NSRect(
+                                x: Design.Spacing.pane,
+                                y: host.bounds.height - 68 - CGFloat(index) * 25,
+                                width: 500,
+                                height: 18
+                            )
+                            host.addSubview(label)
+                        }
+
+                        let card = GitStatusOverlayView()
+                        card.update(with: .init(
+                            branch: fixture.request.headBranch,
+                            summary: .clean
+                        ))
+                        card.updateChangeRequest(
+                            GitStatusOverlayView.ChangeRequestReading(status: fixture.review)
+                        )
+                        card.applyInk(WindowBackdrop.ink)
+                        card.frame = NSRect(origin: .zero, size: card.fittingSize)
+                        card.layoutSubtreeIfNeeded()
+                        card.frame.size = card.fittingSize
+                        card.layoutSubtreeIfNeeded()
+                        card.frame.origin = NSPoint(
+                            x: host.bounds.width - card.bounds.width - Design.Spacing.pane,
+                            y: host.bounds.height - card.bounds.height - Design.Spacing.pane
+                        )
+                        host.addSubview(card)
+                        host.layoutSubtreeIfNeeded()
+                        if let statusButton = (descendants(of: card)
+                            .compactMap { $0 as? ThemedStatusReceiptButton }).first {
+                            statusButton.mouseEntered(with: NSEvent())
+                        }
+                        host.displayIfNeeded()
+
+                        guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds)
+                        else { return }
+                        host.cacheDisplay(in: host.bounds, to: rep)
+                        focusedData = rep.representation(using: .png, properties: [:])
+                    }
+                }
+                try XCTUnwrap(focusedData).write(
+                    to: directory.appendingPathComponent(
+                        "status-card-checks-\(fixture.name)-\(name).png"
+                    )
+                )
+            }
         }
 
         print("Rendered the environment status card to \(directory.path)")
@@ -3105,9 +3347,10 @@ final class ThemedIndicatorsTests: XCTestCase {
 
     func testStatusCardShowsConnectedReviewAndRoutesBothRowsToGitReview() throws {
         let checks = ChangeRequestChecks(
-            state: .pending,
-            passed: 4,
-            pending: 2,
+            state: .passing,
+            passed: 6,
+            skipped: 4,
+            pending: 0,
             failed: 0
         )
         let repository = ChangeRequestRepository(
@@ -3147,17 +3390,23 @@ final class ThemedIndicatorsTests: XCTestCase {
         let buttons = descendants(of: card)
             .compactMap { $0 as? ThemedButton }
             .filter { !$0.isHiddenOrHasHiddenAncestor }
-        XCTAssertEqual(buttons.map(\.title), [
-            "#482 · Make the environment card useful",
-            "4 passed · 2 pending"
-        ])
+        XCTAssertEqual(buttons.map(\.title), ["#482 · Make the environment card useful"])
+        let checksButton = try XCTUnwrap(descendants(of: card)
+            .compactMap { $0 as? ThemedStatusReceiptButton }
+            .first { !$0.isHiddenOrHasHiddenAncestor })
+        XCTAssertEqual(checksButton.fragments, ["6 passed", "4 skipped"])
         XCTAssertTrue(buttons.allSatisfy {
             $0.frame.width >= GitStatusOverlayDefaults.minWidth - 2 * Design.Spacing.medium
         }, "review hover targets should fill the card's menu-like column")
+        XCTAssertGreaterThanOrEqual(
+            checksButton.frame.width,
+            GitStatusOverlayDefaults.minWidth - 2 * Design.Spacing.medium
+        )
 
         var opens = 0
         card.onOpen = { opens += 1 }
         buttons.forEach { $0.performClick() }
+        XCTAssertTrue(checksButton.performPrimaryAction())
         XCTAssertEqual(opens, 2)
     }
 

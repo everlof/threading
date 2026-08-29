@@ -2834,7 +2834,11 @@ it goes with the report, and the sheet shows you the exact picture while it does
 happened, then send it to Threading privately or share one zip of the selected report files, named
 after the moment you made it so saved reports never collide. On a paired owner device that can
 manage sessions, **Send to Mac** instead starts a chat on your Mac with the whole report,
-including the screenshot preview when it is included, as its opening prompt.
+including the screenshot preview when it is included. The report text becomes the opening prompt;
+the screenshot is a real image attachment beside it, so the agent receives pixels rather than a
+base64 string. Threading takes the image into that session's attachment storage before the chat
+starts. If the Mac cannot accept it, no partial chat is created; an older Mac asks to be updated
+instead of silently dropping the picture.
 
 That chat is configured on the Mac, not on the phone. It comes up on the same agent, login, model,
 reasoning level, speed and permission mode as the chat you used most recently in that project, so
@@ -3593,11 +3597,14 @@ decision. Sessions can also *steer* each other — add a line to a chat turn alr
 the same thing ⌘Return does in your own composer — and a session that cannot be steered
 refuses rather than quietly queueing.
 
-A session waiting on a sibling can also ask to be told once when that sibling finishes, rather
-than checking on it over and over: `watch_session` arms a single notice for when the watched
-session's turn settles — or its agent exits, or it stops at its usage limit. The notice arrives
-as an ordinary visible message in the waiting session's conversation, so you see exactly what it
-was told and when.
+A session waiting on a sibling can also ask to be told about its next activity edge rather than
+checking on it over and over. If the sibling has a turn in flight, `watch_session` arms a single
+notice for when that turn settles — or its agent exits, or it stops at its usage limit. If the
+sibling is already settled, it arms the notice for the next turn starting instead. The notice
+arrives as an ordinary visible message in the waiting session's conversation, so you see exactly
+what it was told and when. Each watch is one-shot; re-arming after each notice keeps a guard on a
+finished sibling while other chats are still running, so a restart cannot be mistaken for an
+all-finished project.
 
 The canonical use is a side chat reporting its conclusion back to the session it was forked
 from — ask a side chat to "report back when done" and it can, or use **Send Result to
@@ -4371,6 +4378,19 @@ than borrowing an unrelated app translation.
 
 Animation timing is tuned by Threading rather than exposed as another preference, and transitions
 honour macOS Reduce Motion.
+
+#### Live plan progress
+
+When Claude or Codex publishes a structured todo or plan during a turn, Threading shows the
+current item and its position without trying to read the agent's terminal screen. In Terminal it
+appears as its own row in the session status card, below the branch; in Chat it appears in the
+small status strip above the composer. Click it to open the full checklist. The row disappears
+when the turn finishes, so it is a live receipt rather than a second task database.
+
+The same compact strip appears below the navigation bar on a paired iPhone. Tap it for the full
+checklist; long plans arrive in pages while the popover is open. An older Mac, a disabled hook, or
+an agent version that writes no structured plan simply shows no strip. Threading never derives a
+plan from ANSI output, cursor movement, the terminal grid, or screenshots.
 
 #### Agent hooks
 

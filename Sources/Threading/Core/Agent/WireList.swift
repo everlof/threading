@@ -65,7 +65,6 @@ enum WireList {
     static func objects(_ value: Any?, site: String, log: Logger) -> [[String: Any]]? {
         guard let elements = value as? [Any] else { return nil }
         let objects = elements.compactMap { $0 as? [String: Any] }
-        guard !objects.isEmpty || elements.isEmpty else { return nil }  // DELIBERATE BREAK
         report(kept: objects.count, of: elements.count, site: site, log: log)
         return objects
     }

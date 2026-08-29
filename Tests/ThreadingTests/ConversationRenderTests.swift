@@ -697,6 +697,49 @@ final class ConversationRenderTests: XCTestCase {
         print("Rendered live pane widths to \(directory.path)")
     }
 
+    /// The native surface's live plan belongs in the status strip above the composer, not in a
+    /// transcript row. Hold a real in-flight pane still so placement, truncation and contrast
+    /// are reviewed in the product hierarchy that ships them.
+    func testRendersTheLiveRunPlanStatusStrip() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let progress = try XCTUnwrap(RunProgress(steps: [
+            .init(id: nil, title: "Inspect structured provider events", status: .completed),
+            .init(id: nil, title: "Relay the current plan to every surface", status: .completed),
+            .init(id: nil, title: "Polish the native status disclosure", status: .inProgress),
+            .init(id: nil, title: "Verify terminal and phone fixtures", status: .pending),
+        ]))
+
+        for (name, appearanceName) in [
+            ("light", NSAppearance.Name.aqua),
+            ("dark", NSAppearance.Name.darkAqua),
+        ] {
+            let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
+            var data: Data?
+            appearance.performAsCurrentDrawingAppearance {
+                let (controller, host) = livePane(
+                    turns: 2,
+                    width: Render.width,
+                    height: Render.viewportHeight,
+                    appearance: appearance
+                )
+                host.appearance = appearance
+                controller.apply(.status(.working(word: "Implementing…")))
+                controller.apply(.runProgress(progress))
+                host.layoutSubtreeIfNeeded()
+                data = png(
+                    of: host,
+                    ground: appearanceName == .darkAqua
+                        ? NSColor(white: 0.11, alpha: 1)
+                        : NSColor(white: 1, alpha: 1)
+                )
+            }
+            try XCTUnwrap(data).write(to: directory.appendingPathComponent(
+                "conversation-fixture-live-run-plan-\(name).png"
+            ))
+        }
+    }
+
     // MARK: - Stress Profiling
 
     /// Opt-in because this deliberately reduces several hundred production transcript rows and

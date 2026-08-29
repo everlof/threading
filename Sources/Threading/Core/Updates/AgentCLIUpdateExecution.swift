@@ -20,7 +20,14 @@ struct AgentCLIUpdateExecutionPlan: Equatable, Sendable {
     }
 
     var shellSource: String {
-        AgentCLIUpdateShellCommand.source(for: updates)
+        shellCommand.source
+    }
+
+    /// Kept as words until the terminal process is launched. The complete source can exceed a
+    /// tty's input queue even when every physical line is short, so it must travel in argv rather
+    /// than being typed after the shell starts.
+    var shellCommand: ShellCommand {
+        AgentCLIUpdateShellCommand.command(for: updates)
     }
 }
 
@@ -30,25 +37,24 @@ struct AgentCLIUpdateExecutionReceipt: Equatable, Sendable {
 }
 
 /// One shell command for the interactive terminal, with every provider command already inside a
-/// quoted child-shell argument. This matters when an updater asks a question: sending several
-/// *commands* up front would leave the later ones in the PTY as accidental prompt input.
+/// quoted child-shell argument. This matters when an updater asks a question: launching several
+/// independent commands would leave the later ones in the PTY as accidental prompt input.
 ///
-/// It is one command, not one terminal line — the `printf` formats carry real newlines, so the
-/// text arrives as a dozen or so lines. That is deliberate on both counts. The shell reads every
-/// continuation line before running anything, because each newline falls inside a quoted word, so
-/// no updater can ever be handed the next one as an answer. And no single line comes near the
-/// tty's canonical-mode limit: a five-tool run measures 247 bytes at its longest line against a
-/// hard limit of 1023, past which the line discipline discards the whole line without a word.
+/// The complete command is passed as one process argument before the PTY starts. It must not be
+/// typed into the shell: macOS bounds the whole terminal input queue at 1024 bytes, and this plan
+/// exceeds that with several tools even though no individual physical line does. The nested
+/// provider shells inherit the visible PTY for prompts, while the outer script alone owns the
+/// sequencing and receipts.
 enum AgentCLIUpdateShellCommand {
-    static func source(for updates: [AgentCLIUpdate]) -> String {
+    static func command(for updates: [AgentCLIUpdate]) -> ShellCommand {
         var wrapper = ShellCommand(word: "/bin/sh")
         wrapper.append(word: "-l")
         wrapper.append(word: "-c")
         wrapper.append(word: script(for: updates))
-        return wrapper.source
+        return wrapper
     }
 
-    /// Exposed beside `source` so tests can assert the sequencing contract without trying to
+    /// Exposed beside `command` so tests can assert the sequencing contract without trying to
     /// decode the outer command's shell quoting.
     static func script(for updates: [AgentCLIUpdate]) -> String {
         precondition(!updates.isEmpty, "An update command requires at least one tool")

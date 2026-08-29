@@ -159,6 +159,75 @@ final class RemoteConversationStoreTests: XCTestCase {
         XCTAssertFalse(store.isLoadingEarlier)
     }
 
+    @MainActor
+    func testRunPlanPagesAreRevisionBoundAndTurnEndClearsTheStrip() throws {
+        let connection = RemoteSessionConnection(
+            session: RemoteSessionSummaryDTO(
+                id: "run-plan-fixture",
+                title: "Plan fixture",
+                agentKind: "codex",
+                surface: .conversation,
+                state: .working,
+                projectName: "Threading"
+            ),
+            client: RemoteClient(
+                link: RemoteConnectionLink(string: "https://run-plan.invalid/#fixture")!
+            )
+        )
+        let summary = RemoteRunPlanUpdateDTO(
+            revision: 4,
+            plan: .init(
+                activeTitle: "Implement",
+                current: 2,
+                completed: 1,
+                active: 1,
+                total: 3
+            )
+        )
+        connection.receiveServerTextForTesting(encoded(summary))
+
+        let firstPage = RemoteRunPlanPageDTO(
+            revision: 4,
+            offset: 0,
+            total: 3,
+            steps: [
+                .init(id: "step-0", title: "Inspect", status: .completed),
+                .init(id: "step-1", title: "Implement", status: .inProgress),
+            ]
+        )
+        connection.receiveServerTextForTesting(encoded(firstPage))
+        XCTAssertEqual(connection.runPlan?.activeTitle, "Implement")
+        XCTAssertEqual(connection.runPlanSteps.map(\.title), ["Inspect", "Implement"])
+
+        let stale = RemoteRunPlanPageDTO(
+            revision: 3,
+            offset: 2,
+            total: 3,
+            steps: [.init(id: "stale", title: "Stale", status: .pending)]
+        )
+        connection.receiveServerTextForTesting(encoded(stale))
+        XCTAssertEqual(connection.runPlanSteps.count, 2)
+
+        connection.receiveServerTextForTesting(encoded(RemoteRunPlanUpdateDTO(
+            revision: 5,
+            plan: .init(
+                activeTitle: "Verify",
+                current: 1,
+                completed: 0,
+                active: 1,
+                total: 1
+            )
+        )))
+        XCTAssertTrue(connection.runPlanSteps.isEmpty)
+
+        connection.receiveServerTextForTesting(encoded(RemoteRunPlanUpdateDTO(
+            revision: 6,
+            plan: nil
+        )))
+        XCTAssertNil(connection.runPlan)
+        XCTAssertTrue(connection.runPlanSteps.isEmpty)
+    }
+
     private func snapshot(
         rows: [RemoteConversationRowDTO],
         revision: Int,
@@ -177,5 +246,9 @@ final class RemoteConversationStoreTests: XCTestCase {
             let own = (view as? T).map { [$0] } ?? []
             return own + descendants(of: type, in: view)
         }
+    }
+
+    private func encoded<T: Encodable>(_ value: T) -> String {
+        String(decoding: try! JSONEncoder().encode(value), as: UTF8.self)
     }
 }

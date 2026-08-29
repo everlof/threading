@@ -70,6 +70,30 @@ enum ComposerAttachmentHandover {
         return recorded.isEmpty ? paths : recorded.map(\.url.path)
     }
 
+    /// Takes custody of server-owned staging files, or refuses the whole handoff.
+    ///
+    /// `handOver` deliberately falls back to the caller's paths for a local file the user may
+    /// still own. A remote server is about to delete its staging duplicate, so that fallback is
+    /// a dead path and must never enter a prompt. This stricter answer is shared by ordinary
+    /// phone composer submissions and a report session's opening attachment.
+    @MainActor
+    static func handOverStaged(
+        paths: [String],
+        sessionID: SessionID,
+        projectRoot: URL,
+        store: SessionAttachmentStore = .shared
+    ) -> [String]? {
+        guard !paths.isEmpty else { return [] }
+        let handed = handOver(
+            paths: paths,
+            sessionID: sessionID,
+            projectRoot: projectRoot,
+            store: store
+        )
+        guard handed.count == paths.count, handed != paths else { return nil }
+        return handed
+    }
+
     /// The words followed by quoted paths — the only form of an image either CLI can open.
     ///
     /// Shared with the scheduled send that finally hands its pictures over: the composer builds

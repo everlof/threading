@@ -87,13 +87,17 @@ shows the repository-authored command and resolved cwd, defaults Return to Cance
 the script again after approval. If the config, checkout, or directory changed while the sheet
 was open, nothing runs.
 
-An accepted invocation creates a named standalone project terminal in the resolved cwd, selects
-it so output is visible, and sends one host-built line. The repository command is a quoted
-argument to `/bin/sh -lc`; it cannot splice into the host suffix. The child shell isolates an
-authored `exit` or shell-state mutation from the interactive terminal. The suffix prints the
-actual child exit status and optional preview URL. `ProjectScriptExecutionReceipt` means only
-that this validated command reached that visible PTY; completion is the exit line the user can
-see, not an optimistic in-memory status.
+An accepted invocation creates a named standalone project terminal in the resolved cwd, prepares
+its host-built command, then selects the terminal so its first process launch already carries the
+command as an argument. The repository command is a quoted argument to `/bin/sh -lc`; it cannot
+splice into the host suffix. The child shell isolates an authored `exit` or shell-state mutation
+from the interactive terminal. The suffix prints the actual child exit status and optional
+preview URL. This must not be typed after shell creation: the contract permits a 4096-byte command
+while macOS's complete terminal input queue holds only 1024 bytes. The shared interactive
+bootstrap keeps Control-C attached to the foreground command and replaces itself with the user's
+configured shell afterwards. `ProjectScriptExecutionReceipt` means only that this validated
+command was accepted by that visible PTY launch; completion is the exit line the user can see,
+not an optimistic in-memory status.
 
 ## Trust boundary and automatic setup
 

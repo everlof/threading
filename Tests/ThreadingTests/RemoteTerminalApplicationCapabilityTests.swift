@@ -514,6 +514,7 @@ final class AgentTerminalRuntimeCapabilityTests: XCTestCase {
         var isRunning: Bool
         var activity: SessionActivity { activityTracker.activity }
         let activityTracker = SessionActivityTracker()
+        var runProgress: RunProgress?
         var isVisible = false
         let remoteTerminalSurface: any RemoteTerminalSurface = EmptyRemoteTerminalSurface()
         let terminalRootProcessIdentifier: pid_t?
@@ -540,6 +541,7 @@ final class AgentTerminalRuntimeCapabilityTests: XCTestCase {
         func noteLimitCleared() { limitClearCount += 1 }
         func noteLimitParked(recoveryArmed: Bool) { parked.append(recoveryArmed) }
         func noteStateChanged() {}
+        func applyRunProgress(_ report: HookRunProgressReport) {}
         func noteReportedCodexTranscript(path: String?, providerSessionID: TranscriptID?) {}
         func noteTurnFinishedForAttachmentDetection(lastAssistantMessage: String?) {}
         func terminate() { isRunning = false }

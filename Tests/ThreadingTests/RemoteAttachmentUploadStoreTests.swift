@@ -51,6 +51,22 @@ final class RemoteAttachmentUploadStoreTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: claimed[0]), png)
     }
 
+    func testReportScreenshotStagesAsAClaimedJPEG() throws {
+        let jpeg = Data([0xff, 0xd8, 0xff, 0x10, 0x20, 0x30])
+
+        let claimed = try XCTUnwrap(store.stageAndClaimReportScreenshot(
+            jpeg,
+            deviceID: device
+        ))
+
+        XCTAssertTrue(["jpg", "jpeg"].contains(claimed.url.pathExtension))
+        XCTAssertEqual(try Data(contentsOf: claimed.url), jpeg)
+        XCTAssertEqual(store.stagedCount, 1)
+        store.discardClaimed(ids: [claimed.uploadID])
+        XCTAssertEqual(store.stagedCount, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: claimed.url.path))
+    }
+
     /// The extension comes from the declared uniform type, never from the client's filename.
     /// A name is the one part of this request the network fully controls.
     func testStagedFileTakesItsExtensionFromTheDeclaredTypeNotTheName() throws {

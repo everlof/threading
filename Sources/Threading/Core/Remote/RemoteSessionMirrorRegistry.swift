@@ -171,6 +171,8 @@ final class RemoteSessionMirrorRegistry {
         var conversationSnapshot: RemoteConversationSnapshotDTO? = nil
         var conversationRowsRevision: RemoteConversationRowsRevision? = nil
         var conversationRevision = 0
+        var runPlan: RunProgress? = nil
+        var runPlanRevision = 0
         /// Devices that have already sent input, so the "first remote input" audit line is
         /// written once per device+session rather than per keystroke.
         var inputSeenDevices: Set<String> = []
@@ -555,6 +557,9 @@ final class RemoteSessionMirrorRegistry {
         // advertised to whoever may read attachments at all.
         features.append(RemoteRESTFeature.attachmentThumbnails.rawValue)
         features.append(RemoteRESTFeature.sessionStartupHandshake.rawValue)
+        if authorization.canManageHost {
+            features.append(RemoteRESTFeature.reportSessionOpening.rawValue)
+        }
         return features.isEmpty ? nil : features
     }
 
@@ -1152,6 +1157,7 @@ final class RemoteSessionMirrorRegistry {
             features: Self.advertisedFeatures(for: connection.authorization)
         )
         connection.sendText(encode(hello))
+        sendCurrentRunPlan(to: connection, sessionID: sessionID)
         sendLatestWorkspaceActivity(to: connection, sessionID: sessionID)
 
         let ringSnapshot = mirrors[sessionID]?.ring.snapshot() ?? Data()
@@ -1260,6 +1266,7 @@ final class RemoteSessionMirrorRegistry {
             terminalTheme: RemoteThemeBridge.terminalTheme(for: sessionID),
             features: Self.advertisedFeatures(for: authorization)
         )))
+        sendCurrentRunPlan(to: connection, sessionID: sessionID)
         sendLatestWorkspaceActivity(to: connection, sessionID: sessionID)
         let revision = mirrors[sessionID]?.conversationRevision ?? 0
         connection.sendText(encode(RemoteConversationWirePolicy.authorized(
@@ -1789,17 +1796,11 @@ final class RemoteSessionMirrorRegistry {
         guard let folder = ProjectStore.shared.workingDirectory(forSessionID: sessionID) else {
             return nil
         }
-        let handed = ComposerAttachmentHandover.handOver(
+        guard let handed = ComposerAttachmentHandover.handOverStaged(
             paths: stagedAttachmentPaths,
             sessionID: sessionID,
             projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
-        )
-        // `handOver` falls back to the caller's own paths when custody could not be taken, which
-        // is right for a Mac drop naming a file the user still has. Here that fallback would name
-        // staging, which the server is about to reclaim, so anything short of custody for every
-        // file is a refusal instead.
-        guard handed.count == stagedAttachmentPaths.count,
-              handed != stagedAttachmentPaths else { return nil }
+        ) else { return nil }
         return ComposerAttachmentHandover.appending(paths: handed, to: text)
     }
 
@@ -2498,6 +2499,124 @@ final class RemoteSessionMirrorRegistry {
         for connection in mirror.subscribers.values {
             connection.sendText(message)
         }
+    }
+
+    /// Publishes the current provider-owned checklist independently of terminal bytes or native
+    /// transcript rows, so both surfaces have the same remote chrome.
+    func sessionRunProgressChanged(_ sessionID: SessionID) {
+        guard var mirror = mirrors[sessionID] else { return }
+        let progress = AgentRuntime.shared.runProgress(for: sessionID)
+        guard mirror.runPlan != progress else { return }
+        mirror.runPlan = progress
+        mirror.runPlanRevision &+= 1
+        mirrors[sessionID] = mirror
+        let message = encode(Self.runPlanUpdate(
+            progress,
+            revision: mirror.runPlanRevision
+        ))
+        for connection in mirror.subscribers.values {
+            connection.sendText(message)
+        }
+    }
+
+    /// Serves one bounded checklist page for the exact revision the client is displaying.
+    func requestRunPlanPage(
+        from connection: RemoteConnection,
+        sessionID: SessionID,
+        revision: Int,
+        offset: Int,
+        limit: Int?
+    ) {
+        guard let mirror = mirrors[sessionID],
+              mirror.subscribers[ObjectIdentifier(connection)] != nil,
+              mirror.runPlanRevision == revision,
+              let progress = mirror.runPlan else {
+            connection.sendText(encode(Self.runPlanUpdate(
+                mirrors[sessionID]?.runPlan,
+                revision: mirrors[sessionID]?.runPlanRevision ?? 0
+            )))
+            return
+        }
+        let start = min(max(0, offset), progress.steps.count)
+        let count = min(
+            max(1, limit ?? RemoteAccessDefaults.maximumRemoteRunPlanPageSteps),
+            RemoteAccessDefaults.maximumRemoteRunPlanPageSteps
+        )
+        let end = min(progress.steps.count, start + count)
+        connection.sendText(encode(RemoteRunPlanPageDTO(
+            revision: revision,
+            offset: start,
+            total: progress.steps.count,
+            steps: Self.remoteSteps(Array(progress.steps[start..<end]), baseOffset: start)
+        )))
+    }
+
+    private func sendCurrentRunPlan(to connection: RemoteConnection, sessionID: SessionID) {
+        guard var mirror = mirrors[sessionID] else { return }
+        let current = AgentRuntime.shared.runProgress(for: sessionID)
+        if mirror.runPlan != current {
+            mirror.runPlan = current
+            mirror.runPlanRevision &+= 1
+            mirrors[sessionID] = mirror
+        }
+        connection.sendText(encode(Self.runPlanUpdate(
+            current,
+            revision: mirror.runPlanRevision
+        )))
+    }
+
+    private static func runPlanUpdate(
+        _ progress: RunProgress?,
+        revision: Int
+    ) -> RemoteRunPlanUpdateDTO {
+        let summary = progress.map { progress in
+            RemoteRunPlanSummaryDTO(
+                activeTitle: progress.currentStep.map {
+                    boundedRunPlanTitle($0.title)
+                },
+                current: progress.currentPosition,
+                completed: progress.completed,
+                active: progress.active,
+                total: progress.total
+            )
+        }
+        return RemoteRunPlanUpdateDTO(revision: revision, plan: summary)
+    }
+
+    private static func remoteSteps(
+        _ steps: [RunProgress.Step],
+        baseOffset: Int
+    ) -> [RemoteRunPlanStepDTO] {
+        steps.enumerated().map { index, step in
+            let status: RemoteRunPlanStepStatus = switch step.status {
+            case .pending: .pending
+            case .inProgress: .inProgress
+            case .completed: .completed
+            }
+            return RemoteRunPlanStepDTO(
+                // Provider ids are useful metadata but are not guaranteed unique. The wire id
+                // is positional within one immutable revision so paged SwiftUI lists stay sound.
+                id: "step-\(baseOffset + index)",
+                providerID: step.id,
+                title: boundedRunPlanTitle(step.title),
+                status: status
+            )
+        }
+    }
+
+    private static func boundedRunPlanTitle(_ title: String) -> String {
+        let limit = RemoteAccessDefaults.maximumRemoteRunPlanTitleBytes
+        guard title.utf8.count > limit else { return title }
+        var end = title.startIndex
+        var bytes = 0
+        while end < title.endIndex {
+            let next = title.index(after: end)
+            let width = title[end..<next].utf8.count
+            guard bytes + width <= limit - 3 else { break }
+            bytes += width
+            end = next
+        }
+        return String(title[..<end]) + "…"
     }
 
     /// OSC title changes are part of the live terminal state too. Sending a small dedicated

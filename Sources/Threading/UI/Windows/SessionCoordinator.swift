@@ -1082,6 +1082,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         usesNativeUI: Bool,
         managedWorkspacePlan: ManagedWorkspacePlan?,
         role: SessionRole = .chat,
+        openingAttachmentPaths: [String] = [],
         prompt: String
     ) -> AgentSession? {
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1090,7 +1091,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             prefix: environment.settings.newChatOpeningPrefix,
             suffix: environment.settings.newChatOpeningSuffix
         )
-        guard !task.isEmpty else { return nil }
+        guard !task.isEmpty,
+              let project = environment.projectStore.project(withID: projectID) else { return nil }
 
         // Named once and used twice, as in the composer: the sidebar row, and the checkout a
         // managed session stands in for the whole conversation.
@@ -1103,8 +1105,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         // protect.
         let managedWorkspace: ManagedWorkspace?
         if let managedWorkspacePlan {
-            guard let project = environment.projectStore.project(withID: projectID),
-                  let provisioned = try? ManagedGitWorkspace.provision(
+            guard let provisioned = try? ManagedGitWorkspace.provision(
                       sessionID: sessionID,
                       from: project,
                       plan: managedWorkspacePlan,
@@ -1117,6 +1118,25 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             )
         } else {
             managedWorkspace = nil
+        }
+
+        if !openingAttachmentPaths.isEmpty {
+            let workingDirectory = managedWorkspace?.executionPath ?? project.folderPath
+            guard let handed = ComposerAttachmentHandover.handOverStaged(
+                paths: openingAttachmentPaths,
+                sessionID: sessionID,
+                projectRoot: URL(fileURLWithPath: workingDirectory, isDirectory: true)
+            ), let currentOpening = opening else {
+                SessionAttachmentStore.shared.removeSession(sessionID)
+                if let managedWorkspace {
+                    try? ManagedGitWorkspace.discardUnstarted(managedWorkspace)
+                }
+                return nil
+            }
+            opening = ComposerAttachmentHandover.appending(
+                paths: handed,
+                to: currentOpening
+            )
         }
 
         guard let session = environment.projectStore.addSession(
@@ -1132,6 +1152,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             managedWorkspace: managedWorkspace,
             id: sessionID
         ) else {
+            SessionAttachmentStore.shared.removeSession(sessionID)
             if let managedWorkspace {
                 try? ManagedGitWorkspace.discardUnstarted(managedWorkspace)
             }
@@ -1146,6 +1167,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                origin: .newManagerTemplate
            ) == nil {
             _ = environment.projectStore.removeSession(id: session.id)
+            SessionAttachmentStore.shared.removeSession(session.id)
             if let managedWorkspace { try? ManagedGitWorkspace.discardUnstarted(managedWorkspace) }
             return nil
         }

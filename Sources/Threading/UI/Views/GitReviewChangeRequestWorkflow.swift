@@ -132,8 +132,11 @@ extension GitReviewViewController {
 
         let policy = changeRequestConfiguration.publishPolicy
         let request = status.changeRequest
+        // "Publish master" over "Default branch" promised a transition the strip then denied.
         let title = request.map { "#\($0.number) · \($0.title)" }
-            ?? L10n.format("Publish %@", local.branch)
+            ?? (local.branch == status.defaultBranch
+                ? local.branch
+                : L10n.format("Publish %@", local.branch))
         var details = ["\(local.branch) → \(status.defaultBranch)"]
         if let request {
             if request.isDraft { details.append(L10n.string("Draft")) }
@@ -228,24 +231,12 @@ extension GitReviewViewController {
     }
 
     private func checkPresentation(_ checks: ChangeRequestChecks) -> (String, NSColor) {
+        let text = ChangeRequestCheckPresentation.text(for: checks)
         switch checks.state {
-        case .unavailable: return ("", Design.Text.tertiary)
-        case .none: return (L10n.string("No checks"), Design.Text.tertiary)
-        case .pending:
-            return (
-                L10n.format("%lld checks pending", Int64(checks.pending)),
-                Design.Status.warning
-            )
-        case .passing:
-            return (
-                L10n.format("%lld checks passed", Int64(checks.passed)),
-                Design.Status.positive
-            )
-        case .failing:
-            return (
-                L10n.format("%lld checks failed", Int64(checks.failed)),
-                Design.Status.negative
-            )
+        case .unavailable, .none: return (text, Design.Text.tertiary)
+        case .pending: return (text, Design.Status.warning)
+        case .passing: return (text, Design.Status.positive)
+        case .needsAttention: return (text, Design.Status.negative)
         }
     }
 

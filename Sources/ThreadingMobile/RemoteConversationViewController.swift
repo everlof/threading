@@ -17,8 +17,11 @@ struct ConversationRemoteView: View {
     let connection: RemoteSessionConnection
 
     var body: some View {
-        RemoteConversationViewControllerBridge(connection: connection)
-            .ignoresSafeArea(.container, edges: .bottom)
+        VStack(spacing: 0) {
+            MobileRunPlanDisclosure(connection: connection)
+            RemoteConversationViewControllerBridge(connection: connection)
+                .ignoresSafeArea(.container, edges: .bottom)
+        }
     }
 }
 

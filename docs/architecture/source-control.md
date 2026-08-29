@@ -63,6 +63,25 @@ never retried, because GitHub may already have accepted the POST.
 The GitHub-specific credential chain, device flow, issue filing, and brokered extension reads
 remain documented in [github.md](github.md). Those are not universal provider behaviours.
 
+Discovery reads both modern check runs and classic combined commit statuses for the request's
+remote head revision. Each source requests 100 entries at a time and stops after five pages, so a
+refresh performs at most ten check requests and retains at most 1,000 provider results. GitHub's
+`total_count` makes a capped source report the exact number not loaded. A later-page failure keeps
+the already-read outcomes and marks the summary incomplete; a first-page failure makes only that
+source unavailable, so a working source is still shown with the same incomplete marker.
+
+The adapter preserves every documented check-run status and conclusion rather than projecting
+them immediately into pass/pending/fail. `success` is successful; `neutral` and `skipped` are
+separate non-blocking outcomes; `requested`, `queued`, `waiting`, `pending`, and `in_progress` are
+separate active outcomes; and `failure`, `cancelled`, `timed_out`, `action_required`,
+`startup_failure`, and `stale` are separate attention outcomes. Classic `success`, `pending`,
+`failure`, and `error` join those same buckets. An unfamiliar incomplete run stays a bounded
+unknown-active outcome; an unfamiliar completed conclusion or classic state stays a bounded
+unknown-terminal outcome. That forward-compatible visibility is deliberate: new provider data
+must not silently become success. Provider strings are limited to 24 characters; each unknown
+disposition keeps three named values plus one “other values” aggregate, retaining totals while
+bounding the status-card model even if every result invents a different value.
+
 ## GitLab adapter
 
 `GitLabChangeRequestClient` uses the official `glab` CLI as its authenticated transport. It asks
@@ -79,10 +98,17 @@ uses GitLab's supported `Draft:` title convention, while reads also recognise th
 prefixes when an older GitLab response omits its `draft` field.
 
 GitLab discovery returns the repository's default branch and HTTPS/SSH clone locations alongside
-the current branch's open merge request. Commit statuses map to the provider-neutral checks
-summary; the approvals endpoint supplies approvals and requested reviewers. Because GitLab does
-not expose GitHub's per-review changes-requested meaning through this workflow, that capability is
-false and the adapter reports no invented count.
+the current branch's open merge request. Commit-status reads include `ref=<source branch>` so a
+named external status does not leak across ref-specific histories, request 100 statuses per page,
+and stop after five pages. GitLab's endpoint does not provide a total count in the response body,
+so a full fifth page carries “more results not loaded” without inventing a remainder. The six
+documented commit states remain exact: `success`, `skipped`, `pending`, `running`, `failed`, and
+`canceled`; `canceling` is also retained as an active compatibility state. A failed or canceled
+status with `allow_failure` remains a separate non-blocking allowed-failure outcome instead of
+being counted as either passed or adverse. Unfamiliar values are visible as bounded unknown
+terminal outcomes. The approvals endpoint supplies approvals and requested reviewers. Because
+GitLab does not expose GitHub's per-review changes-requested meaning through this workflow, that
+capability is false and the adapter reports no invented count.
 
 ## Read-only status-card projection
 
@@ -93,10 +119,12 @@ navigate to Git Review; publication, pushing, review details and browser opening
 
 The filesystem watcher can report a checkout burst for every file an agent writes, so this read
 path is bounded independently: events debounce for 500 ms, an unchanged branch + HEAD signature
-reuses its answer for 15 seconds, and a 30-second poll exists only while visible checks are
-pending. Switching sessions or disabling the card cancels the task, debounce and poll and rejects
-late generations. Unsupported remotes stop before a provider request. These are idempotent reads;
-the explicit-publication rule below is unchanged.
+reuses its answer for 15 seconds, and a 30-second poll exists while any visible check outcome is
+active or the provider summary is incomplete. Polling reads the underlying buckets rather than
+the headline severity: one failed check beside one running check still refreshes. Switching
+sessions or disabling the card cancels the task, debounce and poll and rejects late generations.
+Unsupported remotes stop before a provider request. These are idempotent reads; the
+explicit-publication rule below is unchanged.
 
 ## Explicit publication and durable safety
 

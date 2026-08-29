@@ -100,7 +100,7 @@ final class TerminalSession: NSObject {
     /// never reap a replacement PID. Keep the user's latest launch request here and perform it
     /// from the exact old child's termination callback.
     private enum PendingLaunch {
-        case shell(initialDirectory: URL?)
+        case shell(initialDirectory: URL?, initialCommand: ShellCommand?)
         case agent(AgentLaunchPlan)
     }
     private var pendingLaunch: PendingLaunch?
@@ -452,18 +452,65 @@ final class TerminalSession: NSObject {
     }
 
     func startShell(initialDirectory: URL?) {
+        startShell(initialDirectory: initialDirectory, initialCommand: nil)
+    }
+
+    /// Starts a project terminal with one host-built command already in its process arguments.
+    ///
+    /// Typing that source after spawning the shell is not equivalent. macOS caps the complete
+    /// tty input queue at 1024 bytes, so a multi-provider update or one valid 4 KiB project script
+    /// can be silently duplicated or dropped when it is queued before the shell begins reading.
+    /// A clean interactive bootstrap preserves foreground-job interruption, runs the command in
+    /// the visible PTY, then replaces itself with the person's configured shell.
+    func startShell(initialDirectory: URL, running initialCommand: ShellCommand) {
+        startShell(initialDirectory: initialDirectory, initialCommand: initialCommand)
+    }
+
+    private func startShell(initialDirectory: URL?, initialCommand: ShellCommand?) {
         guard !isRunning else { return }
 
         guard !terminalView.process.running else {
-            pendingLaunch = .shell(initialDirectory: initialDirectory)
+            pendingLaunch = .shell(
+                initialDirectory: initialDirectory,
+                initialCommand: initialCommand
+            )
             return
         }
 
-        launchShell(initialDirectory: initialDirectory)
+        launchShell(initialDirectory: initialDirectory, initialCommand: initialCommand)
     }
 
-    private func launchShell(initialDirectory: URL?) {
+    private func launchShell(initialDirectory: URL?, initialCommand: ShellCommand?) {
         let environment = buildEnvironment()
+
+        if let initialCommand {
+            guard let initialDirectory else {
+                preconditionFailure("A terminal startup command requires an execution directory")
+            }
+
+            var configuredShell = ShellCommand(word: profile.shellPath)
+            for argument in profile.shellArguments {
+                configuredShell.append(word: argument)
+            }
+            var resumedShell = ShellCommand(word: "exec")
+            resumedShell.append(contentsOf: configuredShell)
+
+            var bootstrap = ShellCommand(word: ProjectTerminalDefaults.bootstrapShell)
+            for argument in ProjectTerminalDefaults.bootstrapArguments {
+                bootstrap.append(word: argument)
+            }
+            bootstrap.append(word: initialCommand.source + "; " + resumedShell.source)
+
+            let source = ShellCommand.executing(bootstrap, in: initialDirectory.path)
+            terminalView.startProcess(
+                executable: "/bin/sh",
+                args: ["-c", source.source],
+                environment: environment,
+                execName: (profile.shellPath as NSString).lastPathComponent
+            )
+            finishProcessStart()
+            return
+        }
 
         if let dir = initialDirectory {
             var shell = ShellCommand(word: profile.shellPath)
@@ -1185,8 +1232,11 @@ extension TerminalSession {
         if let pendingLaunch {
             self.pendingLaunch = nil
             switch pendingLaunch {
-            case .shell(let initialDirectory):
-                launchShell(initialDirectory: initialDirectory)
+            case .shell(let initialDirectory, let initialCommand):
+                launchShell(
+                    initialDirectory: initialDirectory,
+                    initialCommand: initialCommand
+                )
             case .agent(let plan):
                 launchAgent(plan: plan)
             }

@@ -289,6 +289,12 @@ struct AgentCapabilities: OptionSet {
   /// Claude only. Codex keeps provider conversation ids in its global rollout store, while ACP
   /// runtimes resume through provider-owned ids rather than a checkout-shaped transcript path.
   static let checkoutScopedConversationStorage = Self(rawValue: 1 << 32)
+
+  /// Lifecycle reports name the exact durable transcript file for the running terminal
+  /// conversation, so observers can adopt that path without enumerating the provider's
+  /// account-wide history tree. Codex only: its Threading lifecycle payload includes
+  /// `rollout_path`; Claude's session-scoped transcript is already resolved from its preset id.
+  static let lifecycleReportedTranscriptPath = Self(rawValue: 1 << 33)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -358,7 +364,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
-        .inlineTerminalViewport
+        .inlineTerminalViewport, .lifecycleReportedTranscriptPath
       ]
     case .grok:
       return [

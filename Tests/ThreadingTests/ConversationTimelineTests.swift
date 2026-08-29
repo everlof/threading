@@ -304,7 +304,12 @@ final class ConversationTimelineTests: XCTestCase {
         ]))
 
         XCTAssertEqual(changes.count, 2)
-        XCTAssertEqual(changes.last, .runProgress(RunProgress(step: 2, total: 4)))
+        XCTAssertEqual(changes.last, .runProgress(RunProgress(steps: [
+            .init(id: nil, title: "Inspect", status: .completed),
+            .init(id: nil, title: "Implement", status: .inProgress),
+            .init(id: nil, title: "Verify", status: .pending),
+            .init(id: nil, title: "Document", status: .pending),
+        ])))
     }
 
     func testClaudeTaskEventsBuildProgressThroughTheOrdinaryTimeline() {
@@ -317,7 +322,9 @@ final class ConversationTimelineTests: XCTestCase {
                 input: ["subject": "Inspect"]
             )
         ]))
-        XCTAssertEqual(created.last, .runProgress(RunProgress(step: 1, total: 1)))
+        XCTAssertEqual(created.last, .runProgress(RunProgress(steps: [
+            .init(id: nil, title: "Inspect", status: .pending),
+        ])))
 
         let bound = timeline.apply(.toolResults([
             ToolResult(
@@ -326,7 +333,9 @@ final class ConversationTimelineTests: XCTestCase {
                 isError: false
             )
         ]))
-        XCTAssertEqual(bound.last, .runProgress(RunProgress(step: 1, total: 1)))
+        XCTAssertEqual(bound.last, .runProgress(RunProgress(steps: [
+            .init(id: "1", title: "Inspect", status: .pending),
+        ])))
 
         let completed = timeline.apply(.assistantMessage(blocks: [
             .toolUse(
@@ -335,7 +344,9 @@ final class ConversationTimelineTests: XCTestCase {
                 input: ["taskId": "1", "status": "completed"]
             )
         ]))
-        XCTAssertEqual(completed.last, .runProgress(RunProgress(step: 1, total: 1)))
+        XCTAssertEqual(completed.last, .runProgress(RunProgress(steps: [
+            .init(id: "1", title: "Inspect", status: .completed),
+        ])))
     }
 
     func testExplicitEmptyPlanClearsRunProgress() {

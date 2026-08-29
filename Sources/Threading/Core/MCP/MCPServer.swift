@@ -516,6 +516,11 @@ final class MCPServer: @unchecked Sendable {
             return
         }
 
+        if request.path.hasPrefix(MCPDefaults.runProgressPathPrefix) {
+            routeRunProgress(request, respond: respond)
+            return
+        }
+
         guard request.path.hasPrefix(MCPDefaults.pathPrefix) else {
             respond(.status(404, "Not Found"))
             return

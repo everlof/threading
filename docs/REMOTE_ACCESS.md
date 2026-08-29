@@ -1205,7 +1205,19 @@ never eligible. Guest and view-only links cannot upload diagnostics.
 Shaking the iPhone opens a report sheet. Everyone can send it to Threading's private intake or
 share the files. An owner device that may manage sessions, and that can see the Threading project
 on the paired Mac, also gets **Send to Mac**: the report becomes the opening prompt of a new chat
-in that project, screenshot path and all.
+in that project, with the reviewed screenshot as a real image attachment when included.
+
+**The opening is atomic, and image bytes never become prompt text.** The public intake still uses
+base64 as a bounded HTTP wire encoding, but the paired-Mac path places readable report JSON in
+`RemoteReportSessionOpeningDTO.prompt` and the JPEG in its separate screenshot field. The Mac
+validates and stages that JPEG on the remote-server queue, then the session coordinator takes its
+own attachment-store copy and appends only that copy's quoted path before launch. Failure at any
+of those gates starts no chat. The legacy `RemoteCreateSessionRequestDTO.prompt` is deliberately
+empty for this path: a Mac predating the atomic envelope ignores the new field and refuses the
+empty prompt, rather than creating a report chat that lost the picture or received raw base64.
+The catalogue advertises `report-session-opening`; a current phone uses the old prompt route only
+for a text-only report to an older Mac, and asks for a Mac update when a selected screenshot could
+not travel safely.
 
 **What that chat comes up as is the Mac's answer, forwarded by the phone.** The phone used to
 choose out of two literals — Codex, and the standard login — which is how a report could land on

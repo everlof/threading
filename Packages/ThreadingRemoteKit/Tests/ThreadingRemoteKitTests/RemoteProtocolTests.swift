@@ -1661,6 +1661,61 @@ final class RemoteProtocolTests: XCTestCase {
             RemoteWebSocketFeature.allCases.contains(.sessionConnectionParking)
         )
     }
+
+    func testRunPlanSummaryClearAndPagedChecklistRoundTrip() throws {
+        let summary = RemoteRunPlanUpdateDTO(
+            revision: 7,
+            plan: .init(
+                activeTitle: "Implement status strip",
+                current: 2,
+                completed: 1,
+                active: 1,
+                total: 3
+            )
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteRunPlanUpdateDTO.self,
+                from: JSONEncoder().encode(summary)
+            ),
+            summary
+        )
+
+        let page = RemoteRunPlanPageDTO(
+            revision: 7,
+            offset: 0,
+            total: 3,
+            steps: [
+                .init(id: "step-0", providerID: "provider-1", title: "Inspect", status: .completed),
+                .init(id: "step-1", providerID: "provider-2", title: "Implement", status: .inProgress),
+            ]
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteRunPlanPageDTO.self,
+                from: JSONEncoder().encode(page)
+            ),
+            page
+        )
+
+        let request = RemoteClientMessage(type: "runPlanPage", offset: 64, revision: 7)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteClientMessage.self,
+                from: JSONEncoder().encode(request)
+            ),
+            request
+        )
+
+        let clear = RemoteRunPlanUpdateDTO(revision: 8, plan: nil)
+        XCTAssertNil(
+            try JSONDecoder().decode(
+                RemoteRunPlanUpdateDTO.self,
+                from: JSONEncoder().encode(clear)
+            ).plan
+        )
+        XCTAssertTrue(RemoteWebSocketFeature.allCases.contains(.runPlanProgress))
+    }
 }
 
 // MARK: - Account usage windows

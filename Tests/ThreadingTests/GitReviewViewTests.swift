@@ -436,22 +436,22 @@ final class GitReviewViewTests: XCTestCase {
         let url = URL(fileURLWithPath: "/tmp/Sources/Foo.swift")
         let row = GitReviewFileRow(file: file, expanded: false, fileURL: url)
         var copied: URL?
-        var revealed: URL?
+        var opened: ExternalAppTarget?
         row.copyPathHandler = { copied = $0 }
-        row.revealInFinderHandler = { revealed = $0 }
+        row.openInEditorHandler = { target, _ in opened = target }
 
         let buttons = row.subviews.compactMap { $0 as? ThemedIconButton }
         let copy = try XCTUnwrap(buttons.first {
             $0.accessibilityIdentifier() == "git-review.file.copy-path"
         })
-        let reveal = try XCTUnwrap(buttons.first {
-            $0.accessibilityIdentifier() == "git-review.file.reveal-in-finder"
+        let open = try XCTUnwrap(buttons.first {
+            $0.accessibilityIdentifier() == "git-review.file.open-in-editor"
         })
 
         XCTAssertTrue(copy.performPrimaryAction())
-        XCTAssertTrue(reveal.performPrimaryAction())
+        XCTAssertTrue(open.performPrimaryAction())
         XCTAssertEqual(copied, url)
-        XCTAssertEqual(revealed, url)
+        XCTAssertEqual(opened?.url, url)
     }
 
     /// A click that lands on a revealed hover action belongs to that control; the row folding
@@ -573,9 +573,9 @@ final class GitReviewViewTests: XCTestCase {
         let row = GitReviewFileRow(file: files[0], expanded: true)
         var expansionRequests = 0
         var preservedAnchor: GitReviewSourceLineAnchor?
-        row.onExpandContext = {
+        row.onExpandContext = { _, anchor in
             expansionRequests += 1
-            preservedAnchor = $0
+            preservedAnchor = anchor
         }
 
         // Force layout to surface any conflicting constraints as a crash/log here, not in the app.
@@ -1687,7 +1687,8 @@ final class GitReviewViewTests: XCTestCase {
 
         XCTAssertEqual(
             controller.counterLabel.stringValue,
-            "+\(added.formatted(.number.notation(.compactName))) "
+            L10n.string("1 file") + GitReviewUIDefaults.subtitleSeparator
+                + "+\(added.formatted(.number.notation(.compactName))) "
                 + "−\(removed.formatted(.number.notation(.compactName)))"
         )
         XCTAssertEqual(

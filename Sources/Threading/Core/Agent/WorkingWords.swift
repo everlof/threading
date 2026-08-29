@@ -218,7 +218,55 @@ struct RunProgress: Equatable, Sendable {
     }
 
     private let presentation: Presentation
+    /// The provider's complete ordered checklist. Legacy summary-only initializers leave this
+    /// empty; every structured plan/todo path retains the exact rows it reduced.
+    let steps: [Step]
     let total: Int
+
+    var completed: Int {
+        if !steps.isEmpty { return steps.count { $0.status == .completed } }
+        switch presentation {
+        case .step(let step): return max(0, step - 1)
+        case .tasks(let completed, _): return completed
+        }
+    }
+
+    var active: Int {
+        if !steps.isEmpty { return steps.count { $0.status == .inProgress } }
+        switch presentation {
+        case .step: return total > 0 ? 1 : 0
+        case .tasks(_, let active): return active
+        }
+    }
+
+    /// The first active row, or the first unfinished row when a provider has not marked one
+    /// active yet. A completed plan keeps its last row as the compact subject until the turn
+    /// boundary clears the plan.
+    var currentStep: Step? {
+        steps.first { $0.status == .inProgress }
+            ?? steps.first { $0.status != .completed }
+            ?? steps.last
+    }
+
+    /// One-based provider order for the compact counter and remote status strip.
+    var currentPosition: Int {
+        if let step { return step }
+        if let currentStep,
+           let index = steps.firstIndex(of: currentStep) {
+            return index + 1
+        }
+        return max(1, min(total, completed + 1))
+    }
+
+    var compactLabel: String {
+        guard let title = currentStep?.title else { return label }
+        return L10n.format(
+            "%@ · %lld of %lld",
+            title,
+            Int64(currentPosition),
+            Int64(total)
+        )
+    }
 
     var step: Int? {
         guard case .step(let value) = presentation else { return nil }
@@ -249,6 +297,7 @@ struct RunProgress: Equatable, Sendable {
     init(step: Int, total: Int) {
         let total = max(1, total)
         self.presentation = .step(min(max(1, step), total))
+        self.steps = []
         self.total = total
     }
 
@@ -257,6 +306,7 @@ struct RunProgress: Equatable, Sendable {
             completed: min(max(0, completed), max(0, total)),
             active: max(0, active)
         )
+        self.steps = []
         self.total = max(0, total)
     }
 
@@ -265,18 +315,21 @@ struct RunProgress: Equatable, Sendable {
 
         let activeIndices = steps.indices.filter { steps[$0].status == .inProgress }
         if activeIndices.count > 1 {
-            self.init(
+            self.presentation = .tasks(
                 completed: steps.count { $0.status == .completed },
-                active: activeIndices.count,
-                total: steps.count
+                active: activeIndices.count
             )
+            self.steps = steps
+            self.total = steps.count
             return
         }
 
         let next = activeIndices.first
             ?? steps.firstIndex { $0.status != .completed }
             ?? (steps.count - 1)
-        self.init(step: next + 1, total: steps.count)
+        self.presentation = .step(next + 1)
+        self.steps = steps
+        self.total = steps.count
     }
 
     init?(tool: ToolIdentity, input: [String: Any]) {
@@ -288,11 +341,10 @@ struct RunProgress: Equatable, Sendable {
 
     /// The checklist a plan or todo tool call states, or nil when it does not state one.
     ///
-    /// Both containers stay all-or-nothing. This list is not shown as a list — it is reduced to
-    /// "step 3 of 7" — so every element is part of the denominator, and dropping an unreadable
-    /// one would move the total the agent reported and redraw the progress bar around it. The
-    /// loop below already returns nil for one entry whose status does not read, for the same
-    /// reason; an element that is not an object at all says no less than that.
+    /// Both containers stay all-or-nothing. The compact summary and disclosed checklist share
+    /// this exact value, so dropping an unreadable element would both move the denominator and
+    /// omit a row the agent reported. The loop already returns nil for one entry whose status
+    /// does not read, for the same reason; an element that is not an object at all says no less.
     static func steps(tool: ToolIdentity, input: [String: Any]) -> [Step]? {
         let items: [[String: Any]]
         let titleKey: String
@@ -344,6 +396,16 @@ struct RunProgressReducer {
     private var tasks: [String: RunProgress.Step] = [:]
     private var order: [String] = []
     private var pendingTaskKeyByToolUseID: [String: String] = [:]
+    private var pendingTaskUpdateToolUseIDs: Set<String> = []
+
+    mutating func reset() -> Update {
+        let hadProgress = progress != nil
+        tasks.removeAll(keepingCapacity: true)
+        order.removeAll(keepingCapacity: true)
+        pendingTaskKeyByToolUseID.removeAll(keepingCapacity: true)
+        pendingTaskUpdateToolUseIDs.removeAll(keepingCapacity: true)
+        return hadProgress ? .changed(nil) : .unchanged
+    }
 
     mutating func apply(plan steps: [RunProgress.Step]) -> Update {
         replace(with: steps)
@@ -375,6 +437,7 @@ struct RunProgressReducer {
 
         case .taskUpdate:
             guard let taskID = taskID(in: input) else { return .unchanged }
+            pendingTaskUpdateToolUseIDs.insert(toolUseID)
             let key = "task:\(taskID)"
             let statusValue = input["status"] as? String
 
@@ -402,6 +465,12 @@ struct RunProgressReducer {
     }
 
     mutating func apply(result: ToolResult) -> Update {
+        if pendingTaskUpdateToolUseIDs.remove(result.toolUseID) != nil {
+            // TaskUpdate is drawn optimistically so a live checklist moves with the tool call.
+            // Its failure carries no authoritative replacement state; clearing is more honest
+            // than retaining a mutation Claude rejected. A later snapshot/update rebuilds it.
+            return result.isError ? reset() : .unchanged
+        }
         guard let pendingKey = pendingTaskKeyByToolUseID[result.toolUseID] else {
             return .unchanged
         }
@@ -446,10 +515,13 @@ struct RunProgressReducer {
         RunProgress(steps: order.compactMap { tasks[$0] })
     }
 
+    var snapshot: RunProgress? { progress }
+
     private mutating func replace(with steps: [RunProgress.Step]) {
         tasks.removeAll(keepingCapacity: true)
         order.removeAll(keepingCapacity: true)
         pendingTaskKeyByToolUseID.removeAll(keepingCapacity: true)
+        pendingTaskUpdateToolUseIDs.removeAll(keepingCapacity: true)
 
         for (index, step) in steps.enumerated() {
             let base = step.id.map { "task:\($0)" } ?? "snapshot:\(index)"

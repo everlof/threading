@@ -402,6 +402,24 @@ enum MCPSessionRegistry {
                     )
                 }
             }
+
+            for phase in HookRunProgressPhase.allCases {
+                let registration = phase.claudeRegistration
+                guard registration.isSupported else { continue }
+                let payload = "threading_hook_payload"
+                let command = "\(payload)=$(cat); " + MCPDefaults.hookPostCommand(
+                    payloadVariable: payload,
+                    endpointSuffix: "\(MCPDefaults.runProgressPathPrefix)\(token)"
+                        + "?\(MCPDefaults.runProgressPhaseParameter)=\(phase.rawValue)",
+                    timeout: MCPDefaults.runProgressTimeout
+                ) + " >/dev/null 2>&1 || true"
+
+                for name in registration.eventNames {
+                    groups[name, default: []].append(
+                        group(command: command, matcher: registration.toolMatcher)
+                    )
+                }
+            }
         }
 
         for (name, entries) in groups {

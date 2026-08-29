@@ -238,6 +238,10 @@ final class GitReviewDiffTextView: ThemedTextView {
 
     private let renderedLines: [RenderedLine]
     private let omittedLineCount: Int
+    private let showsOmissionNote: Bool
+    /// The number column's width in characters, when the file row has measured it for every
+    /// hunk it holds — one width per file, so the code column lines up across hunks.
+    private let numberColumnsOverride: Int?
     private let path: String?
     private let wraps: Bool
     private let textSize: Design.CodeTextScale
@@ -255,6 +259,10 @@ final class GitReviewDiffTextView: ThemedTextView {
     private var preferredHeightConstraint: NSLayoutConstraint?
     private var heightNotificationPending = false
     private var contextMenuSession: AnyObject?
+    /// What was selected before a menu grew the selection to whole lines, so a cancelled menu
+    /// can give it back rather than leave a selection nobody made.
+    private var selectionBeforeMenu: NSRange?
+    private var menuChoiceMade = false
     private var lineActionTrackingArea: NSTrackingArea?
     /// The line whose action affordance is drawn, or nil. Readable so a test can ask what the
     /// pointer under a covering surface reached without sampling a pixel.
@@ -278,7 +286,9 @@ final class GitReviewDiffTextView: ThemedTextView {
         wraps: Bool = true,
         initialLayoutWidth: CGFloat? = nil,
         textSize: Design.CodeTextScale = .standard,
-        showsWordDiffs: Bool = false
+        showsWordDiffs: Bool = false,
+        showsOmissionNote: Bool = true,
+        numberColumns: Int? = nil
     ) {
         let shown = Array(gitLines.prefix(max(displayCap, 0)))
         let capped = shown.map { line in
@@ -294,6 +304,8 @@ final class GitReviewDiffTextView: ThemedTextView {
             RenderedLine(source: pair.0, text: pair.1.text, tokens: tokens)
         }
         omittedLineCount = max(gitLines.count - shown.count, 0)
+        self.showsOmissionNote = showsOmissionNote
+        numberColumnsOverride = numberColumns
         self.path = path
         self.wraps = wraps
         self.textSize = textSize
@@ -423,18 +435,23 @@ final class GitReviewDiffTextView: ThemedTextView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        // The plate answers for the selection when it sits inside one — the same rule the
+        // right-click follows. Answering for the hovered line alone threw a five-line selection
+        // away the moment the more discoverable of the two entry points was used.
         if let hoveredLineIndex,
-           lineActionRect(for: hoveredLineIndex)?.contains(point) == true,
-           let reference = contextAttachment(atDisplayedLine: hoveredLineIndex),
-           let preview = contextPreview(spanningDisplayedLines: hoveredLineIndex...hoveredLineIndex) {
-            highlightLines(hoveredLineIndex...hoveredLineIndex)
-            presentContextMenu(
-                for: reference,
-                preview: preview,
-                spanning: hoveredLineIndex...hoveredLineIndex,
-                at: event.locationInWindow
-            )
-            return
+           lineActionRect(for: hoveredLineIndex)?.contains(point) == true {
+            let span = targetSpan(forClickedLine: hoveredLineIndex)
+            if let reference = contextAttachment(spanningDisplayedLines: span),
+               let preview = contextPreview(spanningDisplayedLines: span) {
+                highlightLinesForMenu(span)
+                presentContextMenu(
+                    for: reference,
+                    preview: preview,
+                    spanning: span,
+                    at: event.locationInWindow
+                )
+                return
+            }
         }
         super.mouseDown(with: event)
     }
@@ -448,7 +465,7 @@ final class GitReviewDiffTextView: ThemedTextView {
         let span = targetSpan(forClickedLine: lineIndex)
         guard let reference = contextAttachment(spanningDisplayedLines: span),
               let preview = contextPreview(spanningDisplayedLines: span) else { return }
-        highlightLines(span)
+        highlightLinesForMenu(span)
         presentContextMenu(
             for: reference,
             preview: preview,
@@ -494,12 +511,21 @@ final class GitReviewDiffTextView: ThemedTextView {
             }
         }
 
-        if omittedLineCount > 0 {
+        if omittedLineCount > 0, showsOmissionNote {
+            // On the code column, not the card's edge: the note continues the source it cuts.
+            let font = Design.Typography.code(size: textSize)
+            let advance = max(font.maximumAdvancement.width, 1)
+            let prefixColumns = numberColumns(for: font) + 3
+            let noteStyle = NSMutableParagraphStyle()
+            noteStyle.firstLineHeadIndent = GitReviewDefaults.lineActionGutterWidth
+                + CGFloat(prefixColumns) * advance
+            noteStyle.headIndent = noteStyle.firstLineHeadIndent
             let note = NSMutableAttributedString(
                 string: "… \(omittedLineCount) more lines",
                 attributes: [
-                    .font: Design.Typography.code(size: textSize),
+                    .font: font,
                     .foregroundColor: Design.Text.tertiary,
+                    .paragraphStyle: noteStyle,
                 ]
             )
             document.append(note)
@@ -527,7 +553,7 @@ final class GitReviewDiffTextView: ThemedTextView {
     ) -> NSAttributedString {
         let font = Design.Typography.code(size: textSize)
         let number = line.source.displayNumber.map(String.init) ?? ""
-        let numberColumns = max(1, Int((GitReviewDefaults.lineNumberWidth / max(font.maximumAdvancement.width, 1)).rounded(.down)))
+        let numberColumns = numberColumns(for: font)
         let paddedNumber = String(repeating: " ", count: max(numberColumns - number.count, 0)) + number
         let sign: String = switch line.source.kind {
         case .added: "+"
@@ -540,13 +566,15 @@ final class GitReviewDiffTextView: ThemedTextView {
 
         let style = NSMutableParagraphStyle()
         style.lineBreakMode = wraps ? .byCharWrapping : .byClipping
-        style.firstLineHeadIndent = 0
+        // The action gutter is paragraph indent rather than characters, so ranges, find
+        // offsets and the copied text know nothing about it.
+        style.firstLineHeadIndent = GitReviewDefaults.lineActionGutterWidth
         let continuationColumns = min(
             Self.leadingIndentColumns(in: line.text),
             Self.maximumContinuationIndentColumns
         )
-        style.headIndent = CGFloat(prefix.count + continuationColumns)
-            * font.maximumAdvancement.width
+        style.headIndent = GitReviewDefaults.lineActionGutterWidth
+            + CGFloat(prefix.count + continuationColumns) * font.maximumAdvancement.width
         style.lineSpacing = 2
 
         let base = textForeground(for: line.source.kind)
@@ -781,9 +809,10 @@ final class GitReviewDiffTextView: ThemedTextView {
             forGlyphAt: glyphRange.location,
             effectiveRange: nil
         )
-        let size = min(max(fragment.height - 2, 18), 24)
+        let gutter = GitReviewDefaults.lineActionGutterWidth - Self.changedLineMarkerWidth
+        let size = min(max(fragment.height - 2, 18), gutter)
         return NSRect(
-            x: max(GitReviewDefaults.lineNumberWidth - size - 2, 2),
+            x: Self.changedLineMarkerWidth + max((gutter - size) / 2, 0),
             y: fragment.midY + textContainerOrigin.y - size / 2,
             width: size,
             height: size
@@ -886,8 +915,16 @@ final class GitReviewDiffTextView: ThemedTextView {
     private func lineIndex(at point: NSPoint) -> Int? {
         guard let textContainer, let layoutManager, !lineRanges.isEmpty else { return nil }
         let origin = textContainerOrigin
-        let containerPoint = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
-        guard layoutManager.usedRect(for: textContainer).contains(containerPoint) else { return nil }
+        let point = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+        // The used rect starts at the action gutter's indent and ends at the longest line, but
+        // the hover is the whole row: a pointer in the gutter or past a short line's end still
+        // names the line it is level with.
+        let used = layoutManager.usedRect(for: textContainer)
+        guard point.y >= used.minY, point.y <= used.maxY else { return nil }
+        let containerPoint = NSPoint(
+            x: min(max(point.x, used.minX), max(used.maxX - 0.5, used.minX)),
+            y: point.y
+        )
         let glyph = layoutManager.glyphIndex(
             for: containerPoint,
             in: textContainer,
@@ -998,6 +1035,42 @@ final class GitReviewDiffTextView: ThemedTextView {
         scrollRangeToVisible(selection)
     }
 
+    /// Grows the selection to the span's whole lines for the menu, remembering what it was.
+    private func highlightLinesForMenu(_ span: ClosedRange<Int>) {
+        selectionBeforeMenu = selectedRange()
+        highlightLines(span)
+    }
+
+    /// The text a copy of the selection should carry: the source lines, without the number and
+    /// sign prefix the document draws in front of them. Partial first and last lines stay
+    /// partial; a line's placeholder space for an empty source line is not text.
+    func selectedSourceText() -> String {
+        let selection = selectedRange()
+        guard selection.length > 0, let storage = textStorage else { return "" }
+        var pieces: [String] = []
+        for (index, range) in lineRanges.enumerated() where NSIntersectionRange(selection, range).length > 0 {
+            let text = lineTextRanges[index]
+            let visible = NSIntersectionRange(selection, text)
+            pieces.append(visible.length > 0 ? storage.mutableString.substring(with: visible) : "")
+        }
+        return pieces.joined(separator: "\n")
+    }
+
+    override func writeSelection(
+        to pboard: NSPasteboard,
+        types: [NSPasteboard.PasteboardType]
+    ) -> Bool {
+        let text = selectedSourceText()
+        guard !text.isEmpty else { return super.writeSelection(to: pboard, types: types) }
+        pboard.clearContents()
+        return pboard.setString(text, forType: .string)
+    }
+
+    /// Closes an open line menu as a cancel would, for tests that cannot reach the overlay.
+    func dismissContextMenuForTesting() {
+        ThemedMenuPresenter.dismiss(contextMenuSession)
+    }
+
     private func presentContextMenu(
         for reference: ConversationContextAttachment,
         preview: CodeContextPreview,
@@ -1005,6 +1078,7 @@ final class GitReviewDiffTextView: ThemedTextView {
         at windowPoint: NSPoint
     ) {
         guard contextMenuSession == nil else { return }
+        menuChoiceMade = false
         let plural = span.count > 1
         var entries: [ThemedMenuEntry] = []
         if onAddContextAttachment != nil {
@@ -1028,9 +1102,31 @@ final class GitReviewDiffTextView: ThemedTextView {
             from: self,
             anchor: .pointer(windowPoint),
             selectedEntryIndex: nil,
-            onChoose: { _, item in item.onChoose?() },
-            onDismiss: { [weak self] in self?.contextMenuSession = nil }
+            onChoose: { [weak self] _, item in
+                self?.menuChoiceMade = true
+                item.onChoose?()
+            },
+            onDismiss: { [weak self] in
+                guard let self else { return }
+                self.contextMenuSession = nil
+                if !self.menuChoiceMade, let previous = self.selectionBeforeMenu {
+                    self.setSelectedRange(previous)
+                }
+                self.selectionBeforeMenu = nil
+            }
         )
+    }
+
+    /// Characters reserved for the line number: what `lineNumberWidth` fits at this size, or the
+    /// file's own widest number when the row measured one — a four-digit line used to push its
+    /// code a column to the right at the largest text size.
+    private func numberColumns(for font: NSFont) -> Int {
+        let fitted = max(
+            1,
+            Int((GitReviewDefaults.lineNumberWidth / max(font.maximumAdvancement.width, 1))
+                .rounded(.down))
+        )
+        return max(fitted, numberColumnsOverride ?? 0)
     }
 
     private func textForeground(for kind: GitDiffLine.Kind) -> NSColor {
@@ -1179,7 +1275,9 @@ final class GitReviewSplitDiffView: NSView {
         displayCap: Int,
         path: String?,
         textSize: Design.CodeTextScale,
-        showsWordDiffs: Bool
+        showsWordDiffs: Bool,
+        showsOmissionNote: Bool = true,
+        numberColumns: Int? = nil
     ) {
         let shown = Array(gitLines.prefix(max(displayCap, 0)))
         let pairing = Self.pair(shown)
@@ -1191,7 +1289,9 @@ final class GitReviewSplitDiffView: NSView {
             path: path,
             wraps: false,
             textSize: textSize,
-            showsWordDiffs: showsWordDiffs
+            showsWordDiffs: showsWordDiffs,
+            showsOmissionNote: showsOmissionNote,
+            numberColumns: numberColumns
         )
         newView = GitReviewDiffTextView(
             gitLines: pairing.new,
@@ -1199,7 +1299,9 @@ final class GitReviewSplitDiffView: NSView {
             path: path,
             wraps: false,
             textSize: textSize,
-            showsWordDiffs: showsWordDiffs
+            showsWordDiffs: showsWordDiffs,
+            showsOmissionNote: showsOmissionNote,
+            numberColumns: numberColumns
         )
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false

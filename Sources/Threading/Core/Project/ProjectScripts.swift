@@ -70,10 +70,19 @@ struct ProjectScriptExecutionReceipt: Equatable, Sendable {
     let previewURL: URL?
 }
 
-/// One line sent to a visible interactive terminal. Repository-authored shell syntax is passed
-/// as a quoted argument to a child `/bin/sh -lc`; it cannot splice into the host-owned receipt
-/// suffix. The child isolates `exit` and other shell state from the terminal that remains open.
+/// One command launched in a visible interactive terminal. Repository-authored shell syntax is
+/// passed as a quoted argument to a child `/bin/sh -lc`; it cannot splice into the host-owned
+/// receipt suffix. The child isolates `exit` and other shell state from the terminal that remains
+/// open. The command itself travels in process argv rather than through the bounded PTY input
+/// queue, which matters because a valid repository command may be 4 KiB.
 enum ProjectScriptShellCommand {
+    static func command(for invocation: ProjectScriptInvocation) -> ShellCommand {
+        var command = ShellCommand(word: "/bin/sh")
+        command.append(word: "-c")
+        command.append(word: source(for: invocation))
+        return command
+    }
+
     static func source(for invocation: ProjectScriptInvocation) -> String {
         var launch = ShellCommand(word: "/bin/sh")
         launch.append(word: "-l")
