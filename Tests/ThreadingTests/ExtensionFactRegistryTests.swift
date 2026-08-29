@@ -57,6 +57,49 @@ final class ExtensionFactRegistryTests: XCTestCase {
         )
     }
 
+    func testBulkHostReplacementRejectsEveryBatchAtomically() throws {
+        let center = NotificationCenter()
+        let registry = ExtensionFactRegistry(notificationCenter: center)
+        let definition = makeDefinition(key: ExtensionHostFactKey.sessionTitle)
+        try registry.replaceHostDefinitions([definition])
+        var changes: [ExtensionFactChange] = []
+        let token = center.addObserver(
+            forName: ExtensionFactsDidChange.name,
+            object: nil,
+            queue: nil
+        ) { notification in
+            if let event = notification.object as? ExtensionFactsDidChange {
+                changes.append(event.change)
+            }
+        }
+        defer { center.removeObserver(token) }
+
+        let first = makeFact(
+            key: definition.key,
+            subject: .session("first"),
+            value: "would-have-committed"
+        )
+        let invalid = ExtensionFact(
+            key: definition.key,
+            subject: .session("second"),
+            value: .boolean(true),
+            observedAt: Date(timeIntervalSinceReferenceDate: 1)
+        )
+        XCTAssertThrowsError(try registry.replaceHostFacts([
+            .init(facts: [first], subjects: [.session("first")]),
+            .init(facts: [invalid], subjects: [.session("second")]),
+        ])) { error in
+            XCTAssertEqual(
+                error as? ExtensionFactRegistryError,
+                .incompatibleFact(definition.key)
+            )
+        }
+
+        XCTAssertTrue(registry.facts(for: .session("first")).isEmpty)
+        XCTAssertTrue(registry.facts(for: .session("second")).isEmpty)
+        XCTAssertTrue(changes.isEmpty)
+    }
+
     func testDuplicateCellsAndOutsideScopeAreRejected() throws {
         let registry = ExtensionFactRegistry()
         let definition = makeDefinition(key: ExtensionHostFactKey.sessionTitle)

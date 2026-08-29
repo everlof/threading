@@ -21,6 +21,16 @@ enum ExtensionFactResolutionSource: Equatable, Hashable, Sendable {
     case `extension`(identifier: String, processGeneration: String)
 }
 
+/// One independently bounded part of an atomic host-fact publication.
+///
+/// A complete host snapshot may exceed the registry's per-replacement limits. Keeping the
+/// bounded parts explicit lets the registry validate every part before making any of them
+/// visible, so a rejection cannot strand an earlier part of the same snapshot.
+struct ExtensionHostFactReplacement: Sendable {
+    let facts: [ExtensionFact]
+    let subjects: Set<ExtensionFactSubject>
+}
+
 struct ExtensionResolvedFact: Equatable, Sendable {
     let fact: ExtensionFact
     let definition: ExtensionFactDefinition
@@ -221,30 +231,46 @@ final class ExtensionFactRegistry {
         _ facts: [ExtensionFact],
         replacing subjects: Set<ExtensionFactSubject>
     ) throws {
-        let grouped = try validatedFacts(
-            facts,
-            replacing: subjects,
-            definitions: hostDefinitions,
-            isHost: true
-        )
+        try replaceHostFacts([.init(facts: facts, subjects: subjects)])
+    }
+
+    /// Atomically applies an arbitrarily large host update assembled from bounded replacements.
+    /// Every replacement retains the ordinary fact and subject caps; the outer collection is a
+    /// staging boundary, not a way to raise them.
+    func replaceHostFacts(_ replacements: [ExtensionHostFactReplacement]) throws {
+        guard !replacements.isEmpty else { return }
         var candidate = hostFacts
-        for subject in subjects {
-            let old = hostFacts[subject] ?? [:]
-            let values = Dictionary(uniqueKeysWithValues: (grouped[subject] ?? [:]).map {
-                key, incoming in
-                (
-                    key,
-                    incoming.preservingHostObservation(ifSemanticallyEqualTo: old[key])
-                )
-            })
-            if values.isEmpty { candidate.removeValue(forKey: subject) }
-            else { candidate[subject] = values }
+        var affectedSubjects: Set<ExtensionFactSubject> = []
+        for replacement in replacements {
+            let grouped = try validatedFacts(
+                replacement.facts,
+                replacing: replacement.subjects,
+                definitions: hostDefinitions,
+                isHost: true
+            )
+            for subject in replacement.subjects {
+                let old = candidate[subject] ?? [:]
+                let values = Dictionary(uniqueKeysWithValues: (grouped[subject] ?? [:]).map {
+                    key, incoming in
+                    (
+                        key,
+                        incoming.preservingHostObservation(ifSemanticallyEqualTo: old[key])
+                    )
+                })
+                if values.isEmpty { candidate.removeValue(forKey: subject) }
+                else { candidate[subject] = values }
+            }
+            try validateResolvedCaps(
+                subjects: replacement.subjects,
+                hostFacts: candidate,
+                publications: publications
+            )
+            affectedSubjects.formUnion(replacement.subjects)
         }
-        try validateResolvedCaps(subjects: subjects, hostFacts: candidate, publications: publications)
-        let before = resolvedCells(for: subjects)
+        let before = resolvedCells(for: affectedSubjects)
         hostFacts = candidate
-        recompute(subjects: subjects)
-        postDifference(before: before, subjects: subjects)
+        recompute(subjects: affectedSubjects)
+        postDifference(before: before, subjects: affectedSubjects)
     }
 
     func replaceDefinitions(
