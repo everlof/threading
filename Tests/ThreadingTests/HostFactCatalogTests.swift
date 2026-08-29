@@ -124,6 +124,7 @@ final class HostFactCatalogTests: XCTestCase {
             managerID: nil,
             isManager: false,
             hasCustomConduct: false,
+            hasScheduledStart: false,
             scheduledStartAt: nil
         )
         let values = values(for: .session(session))
@@ -143,6 +144,7 @@ final class HostFactCatalogTests: XCTestCase {
             XCTAssertNil(values[key], key.id)
         }
         XCTAssertEqual(values[ExtensionHostFactKey.sessionIsSideChat], .boolean(false))
+        XCTAssertEqual(values[ExtensionHostFactKey.sessionHasScheduledStart], .boolean(false))
         XCTAssertEqual(values[ExtensionHostFactKey.sessionIsSnoozed], .boolean(false))
         XCTAssertEqual(values[ExtensionHostFactKey.sessionHasScheduledStart], .boolean(false))
     }
@@ -281,6 +283,7 @@ final class HostFactCatalogTests: XCTestCase {
             managerID: "manager-1",
             isManager: true,
             hasCustomConduct: true,
+            hasScheduledStart: true,
             scheduledStartAt: Date(timeIntervalSinceReferenceDate: 400)
         )
     }
@@ -314,6 +317,7 @@ final class HostFactCatalogTests: XCTestCase {
             managerID: session.managerID,
             isManager: session.isManager,
             hasCustomConduct: session.hasCustomConduct,
+            hasScheduledStart: session.hasScheduledStart,
             scheduledStartAt: session.scheduledStartAt
         )
     }

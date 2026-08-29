@@ -283,9 +283,10 @@ final class HostFactPublisher {
         case .sessionAdded(_, let sessionID), .sessionOrder(let sessionID),
              .sessionRow(let sessionID):
             refreshSessionsSafely([sessionID])
-        case .sessionRemoved(_, let sessionID):
-            do { try removeSession(sessionID) }
-            catch { report(error) }
+        case .sessionRemoved(let projectID, _):
+            // Removing one array element changes every following sibling's manual-order fact.
+            // The project is the smallest correct replacement boundary for that edge.
+            refreshProjectSafely(projectID)
         case .terminalRow(let terminalID):
             do { try refreshTerminal(terminalID) }
             catch { report(error) }

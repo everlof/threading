@@ -66,6 +66,7 @@ struct NativeSidebarSessionFacts: Equatable, Sendable {
     let managerID: String?
     let isManager: Bool
     let hasCustomConduct: Bool
+    let hasScheduledStart: Bool
     let scheduledStartAt: Date?
 }
 
@@ -279,7 +280,7 @@ enum HostFactCatalog {
             .boolean,
             stateUsages,
             parity: [.sessionScheduledStart]
-        ) { .boolean($0.scheduledStartAt != nil) },
+        ) { .boolean($0.hasScheduledStart) },
         session(
             ExtensionHostFactKey.sessionScheduledStartAt,
             "Scheduled Start At",

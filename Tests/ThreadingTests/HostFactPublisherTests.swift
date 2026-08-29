@@ -121,7 +121,7 @@ final class HostFactPublisherTests: XCTestCase {
         XCTAssertEqual(harness.allProjectionCalls, allProjectionCallsAfterSuccess)
     }
 
-    func testRemovalEventDeletesOnlyTheNamedSession() throws {
+    func testRemovalEventRefreshesTheProjectAndDeletesTheNamedSession() throws {
         let center = NotificationCenter()
         let registry = ExtensionFactRegistry(notificationCenter: center)
         let projectID = ProjectID()
@@ -135,6 +135,11 @@ final class HostFactPublisherTests: XCTestCase {
         try publisher.start()
 
         harness.remove(.session(Self.opaque(removedID)))
+        harness.store(Self.makeSession(
+            id: standingID,
+            projectID: projectID,
+            manualOrder: 0
+        ))
         harness.batches.removeAll()
         center.post(ProjectsDidChange(sidebarImpact: .sessionRemoved(
             projectID: projectID,
@@ -143,7 +148,7 @@ final class HostFactPublisherTests: XCTestCase {
 
         XCTAssertTrue(registry.facts(for: .session(Self.opaque(removedID))).isEmpty)
         XCTAssertEqual(registry.facts(for: .session(Self.opaque(standingID))).count, 19)
-        XCTAssertEqual(harness.batches, [Batch(facts: 0, subjects: 1)])
+        XCTAssertEqual(harness.batches, [Batch(facts: 19, subjects: 2)])
     }
 
     func testDuplicateSubjectRefusesTheWholeRefresh() throws {
@@ -269,6 +274,7 @@ final class HostFactPublisherTests: XCTestCase {
             managerID: nil,
             isManager: false,
             hasCustomConduct: false,
+            hasScheduledStart: false,
             scheduledStartAt: nil
         ))
     }
