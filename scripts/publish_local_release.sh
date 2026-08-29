@@ -9,7 +9,8 @@
 #   scripts/publish_local_release.sh beta-v0.1.90
 #
 # This is intentionally the whole outer-repository choreography: validate the local signing
-# material and remote allocation, run the complete shipping test level, push only `master`,
+# material and remote allocation, run the complete shipping test level and release-quality gate,
+# prove that the clean commit which passed them is still checked out, push only `master`,
 # create/push one annotated tag, then hand the build/notarize/appcast/release work to the same
 # publish_release.sh used by CI. It is safe to rerun after a partial publication.
 
@@ -56,6 +57,15 @@ active_release_run_count() {
         total=$((total + count))
     done
     printf '%s\n' "$total"
+}
+
+assert_release_snapshot() {
+    local current_commit
+    current_commit="$(git -C "$ROOT" rev-parse HEAD)"
+    [[ "$current_commit" == "$HEAD_COMMIT" ]] \
+        || fail "HEAD moved from tested commit $HEAD_COMMIT to $current_commit"
+    [[ -z "$(git -C "$ROOT" status --porcelain=v1 --untracked-files=all)" ]] \
+        || fail "the worktree changed after release validation; commit and rerun"
 }
 
 workflow_was_disabled=0
@@ -171,9 +181,19 @@ release_version_is_publishable "$CHANNEL" "$VERSION" "$TAG" <<< "$published" \
 say "Running the complete shipping test level"
 "$ROOT/scripts/test.sh" all
 
+# `release.sh` normally runs this gate immediately before archive. The local driver must run it
+# before publishing either immutable ref: a lint, package, service, strict-concurrency, or iOS
+# failure cannot be allowed to leave a tag pointing at a commit that was never releasable.
+say "Running the release quality gate before publishing refs"
+"$ROOT/scripts/ci.sh"
+
+# Tests are long enough for another local process or chat to move the branch or edit the shared
+# checkout. Never substitute whatever HEAD happens to mean now for the commit preflighted above.
+assert_release_snapshot
+
 if [[ "$remote_branch_commit" != "$HEAD_COMMIT" ]]; then
     say "Pushing only the outer $RELEASE_BRANCH ref"
-    push_outer_ref "HEAD:refs/heads/$RELEASE_BRANCH"
+    push_outer_ref "$HEAD_COMMIT:refs/heads/$RELEASE_BRANCH"
     [[ "$(remote_ref_commit --heads origin "refs/heads/$RELEASE_BRANCH")" == "$HEAD_COMMIT" ]] \
         || fail "origin/$RELEASE_BRANCH did not advance to HEAD"
 else
@@ -182,7 +202,7 @@ fi
 
 if [[ -z "$local_tag_object" ]]; then
     say "Creating annotated tag $TAG"
-    git -C "$ROOT" tag -a "$TAG" -m "Threading $VERSION"
+    git -C "$ROOT" tag -a "$TAG" -m "Threading $VERSION" "$HEAD_COMMIT"
     local_tag_object="$(git -C "$ROOT" rev-parse "refs/tags/$TAG")"
 fi
 
@@ -221,7 +241,11 @@ fi
 [[ "$remote_tag_object" == "$local_tag_object" && "$remote_tag_commit" == "$HEAD_COMMIT" ]] \
     || fail "origin's annotated $TAG was not published exactly at HEAD"
 
-"$ROOT/scripts/publish_release.sh"
+# The exact commit already passed release.sh's own quality gate above, before either ref moved.
+# Scope the escape hatch to this one child process; release.sh remains fail-closed when invoked
+# directly, and its clean-tree/tag/build checks still run here.
+assert_release_snapshot
+THREADING_SKIP_RELEASE_CHECKS=1 "$ROOT/scripts/publish_release.sh"
 
 restore_release_workflow \
     || fail "the release was published, but $RELEASE_WORKFLOW could not be re-enabled"

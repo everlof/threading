@@ -37,20 +37,43 @@ class LocalReleaseDriverTests(unittest.TestCase):
         self.assertIn("--recurse-submodules=no", git_pushes[0])
         self.assertNotIn("--force", git_pushes[0])
         self.assertNotIn("--tags", git_pushes[0])
-        self.assertIn('push_outer_ref "HEAD:refs/heads/$RELEASE_BRANCH"', source)
+        self.assertIn(
+            'push_outer_ref "$HEAD_COMMIT:refs/heads/$RELEASE_BRANCH"',
+            source,
+        )
         self.assertIn('push_outer_ref "refs/tags/$TAG:refs/tags/$TAG"', source)
 
     def test_the_tag_is_annotated_and_ci_cannot_race_the_local_publisher(self) -> None:
         source = DRIVER.read_text()
+        quality_gate = source.index('"$ROOT/scripts/ci.sh"')
+        snapshot_check = source.index("assert_release_snapshot", quality_gate)
+        branch_push = source.index(
+            'push_outer_ref "$HEAD_COMMIT:refs/heads/$RELEASE_BRANCH"'
+        )
         disable = source.rindex('gh workflow disable "$RELEASE_WORKFLOW"')
         tag_push = source.index('push_outer_ref "refs/tags/$TAG:refs/tags/$TAG"')
-        publish = source.rindex('"$ROOT/scripts/publish_release.sh"')
+        publish = source.rindex(
+            'THREADING_SKIP_RELEASE_CHECKS=1 "$ROOT/scripts/publish_release.sh"'
+        )
         restore = source.rindex("restore_release_workflow \\")
 
-        self.assertIn('git -C "$ROOT" tag -a "$TAG"', source)
+        self.assertIn(
+            'git -C "$ROOT" tag -a "$TAG" -m "Threading $VERSION" "$HEAD_COMMIT"',
+            source,
+        )
+        self.assertLess(quality_gate, snapshot_check)
+        self.assertLess(snapshot_check, branch_push)
         self.assertLess(disable, tag_push)
         self.assertLess(tag_push, publish)
         self.assertLess(publish, restore)
+
+    def test_the_tested_commit_cannot_be_replaced_during_the_long_gate(self) -> None:
+        source = DRIVER.read_text()
+        function = source[source.index("assert_release_snapshot() {") :]
+
+        self.assertIn('[[ "$current_commit" == "$HEAD_COMMIT" ]]', function)
+        self.assertIn("status --porcelain=v1 --untracked-files=all", function)
+        self.assertGreaterEqual(source.count("assert_release_snapshot"), 3)
 
     def test_a_partial_remote_publish_is_retryable(self) -> None:
         source = PUBLISHER.read_text()

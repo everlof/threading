@@ -8,8 +8,11 @@ built — every update stage renders as Threading's own sheets; see
 stapled zip: `scripts/generate_appcast.sh`, `scripts/publish_release.sh`, and the release and
 nightly workflows under `.github/workflows/`. The trusted-Mac route is
 `scripts/publish_local_release.sh v0.1.0`: it preflights the local keys, runs the complete test
-level, pushes only the outer repository and annotated tag, temporarily prevents the tag workflow
-from racing a second signed build, then invokes the same publisher locally. The Sparkle key
+level and release-quality gate before either public ref exists, then proves the clean tested commit
+is still checked out. Only then does it push the outer repository and annotated tag, temporarily
+prevent the tag workflow from racing a second signed build, and invoke the same publisher locally.
+The publisher's duplicate quality-gate invocation is skipped only inside that driver, after the
+exact commit check; direct `release.sh` and `publish_release.sh` runs remain fail-closed. The Sparkle key
 already exists under account `mjukis-threading`; [Keys](#keys--threadings-own-one-manual-step-from-real)
 records its custody requirements.
 
