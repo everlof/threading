@@ -3237,8 +3237,9 @@ final class RemoteAppModel: ObservableObject {
                 hue: 0.72
             ),
             // Routed to a login, as every chat on a host with account routing is. Its disc is
-            // ringed by that login's windows and its menu leads with them.
-            accountID: "default"
+            // ringed by that login's windows and its menu leads with them — and this one runs on
+            // the alternate login whose chip the row above wears, so the two agree.
+            accountID: "keller"
         )
     }
 
@@ -3474,12 +3475,25 @@ final class RemoteAppModel: ObservableObject {
                             .init(
                                 id: "default",
                                 name: "David",
+                                email: "david.everlof@example.com",
                                 usageSummary: "5h 31% · 7d 56% · 7d Fable 82%",
                                 usageFraction: 0.82,
                                 usageWindows: demoClaudeUsageWindows,
                                 models: demoClaudeModels,
                                 defaultModelID: demoClaudeModels[0].id
-                            )
+                            ),
+                            // A second login on the same runtime, which is what a chip on a row
+                            // — and now on the chat's own disc — exists to tell apart.
+                            .init(
+                                id: "keller",
+                                name: "Vera Keller",
+                                email: "vera.keller@example.com",
+                                usageSummary: "5h 12% · 7d 44%",
+                                usageFraction: 0.44,
+                                usageWindows: demoClaudeUsageWindows,
+                                models: demoClaudeModels,
+                                defaultModelID: demoClaudeModels[0].id
+                            ),
                         ],
                         models: [],
                         defaultModelID: nil,

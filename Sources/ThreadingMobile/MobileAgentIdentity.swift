@@ -356,6 +356,13 @@ struct MobileAccountDisc: View {
     /// Nil, or a reading with no rings, draws the mark alone: a share, or a host that does not
     /// report usage.
     let reading: MobileAccountUsageReading?
+    /// The chip a row would wear, for a chat on a login that is not the CLI's default one.
+    ///
+    /// Nil is the ordinary case and the Mac decides it, not this view: `RemoteAccountBridge`
+    /// sends a session's account only when the chat runs somewhere other than the standard
+    /// login, which is exactly when saying *which* login is worth a badge. Passing it here puts
+    /// the disc in the bar under the same rule as the mark in a row.
+    var account: RemoteSessionAccountDTO?
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
@@ -371,7 +378,29 @@ struct MobileAccountDisc: View {
             width: MobileDesign.Size.compactControl,
             height: MobileDesign.Size.compactControl
         )
+        .overlay(alignment: .bottomTrailing) {
+            if let account {
+                let overhang = MobileAccountDiscChipOverhang.current
+                MobileAccountChip(account: account)
+                    .offset(x: overhang, y: overhang)
+            }
+        }
         .contentShape(Circle())
+    }
+}
+
+/// **Scaffolding.** How far the login chip hangs past the toolbar disc, so both candidates can be
+/// photographed from one build. `.rows` is the value a row's tile uses; `.clear` hangs it out far
+/// enough to stay off the usage arcs. Delete with the one that is not chosen.
+enum MobileAccountDiscChipOverhang {
+    static var current: CGFloat {
+#if DEBUG
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_DISC_CHIP"] == "clear"
+            ? MobileDesign.Offset.accountChipDiscOverhang
+            : MobileDesign.Offset.accountChipOverhang
+#else
+        MobileDesign.Offset.accountChipOverhang
+#endif
     }
 }
 

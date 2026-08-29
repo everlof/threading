@@ -887,6 +887,39 @@ final class MobileSessionUsageMenuRowTests: XCTestCase {
         )
     }
 
+    /// `AccountName` derives the person from the address, and falls back to the address itself
+    /// when two logins derive the same person. A row handed both must not print it twice.
+    func testAnAddressThatIsAlreadyTheNameIsNotSaidAgain() {
+        func account(name: String, email: String?) -> RemoteAccountChoiceDTO {
+            RemoteAccountChoiceDTO(
+                id: "default",
+                name: name,
+                email: email,
+                models: [],
+                defaultModelID: nil
+            )
+        }
+
+        XCTAssertEqual(
+            MobileSessionChrome.usageMenuAddress(
+                for: account(name: "Everlof", email: "everlof@gmail.com")
+            ),
+            "everlof@gmail.com"
+        )
+        XCTAssertNil(MobileSessionChrome.usageMenuAddress(
+            for: account(name: "everlof@gmail.com", email: "everlof@gmail.com")
+        ))
+        XCTAssertNil(MobileSessionChrome.usageMenuAddress(
+            for: account(name: "Everlof@Gmail.com", email: "everlof@gmail.com")
+        ))
+        XCTAssertNil(MobileSessionChrome.usageMenuAddress(
+            for: account(name: "Everlof", email: "   ")
+        ))
+        XCTAssertNil(MobileSessionChrome.usageMenuAddress(
+            for: account(name: "Everlof", email: nil)
+        ))
+    }
+
     func testTheRowAppearsForAnythingItCanDrawOrSayAndForNothingElse() {
         XCTAssertTrue(MobileSessionChrome.showsUsageMenuRow(reading: ringed))
         XCTAssertTrue(MobileSessionChrome.showsUsageMenuRow(

@@ -133,6 +133,21 @@ enum MobileSessionChrome {
         canManageSessions || canChooseTerminalTheme
     }
 
+    /// The login's address, when it is worth a second line.
+    ///
+    /// Nil when the catalogue sends none, and nil when it *is* the name: `AccountName` derives
+    /// the person from the address and falls back to the address itself when two logins derive
+    /// the same person, so a row can be handed "everlof@gmail.com" as both. Printing it twice
+    /// would look like a bug in the app rather than a fact about the account.
+    static func usageMenuAddress(for account: RemoteAccountChoiceDTO) -> String? {
+        guard let email = account.email?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !email.isEmpty,
+              email.compare(account.name, options: .caseInsensitive) != .orderedSame else {
+            return nil
+        }
+        return email
+    }
+
     /// The chat menu leads with the account's usage when there is either a gauge to draw or a
     /// reading to spell out. A login with neither is left to Chat Settings rather than given a
     /// row that says only its own name.
@@ -173,6 +188,29 @@ enum MobileSessionChrome {
             "Next reset %@",
             formatter.localizedString(for: nextReset, relativeTo: now)
         )
+    }
+}
+
+/// **Scaffolding.** The shapes the chat menu's account block is being tried in, so all four can
+/// be photographed from one build. Ships as `.reset`; a DEBUG run names another through
+/// `THREADING_MOBILE_USAGE_MENU`. Delete with the three shapes that are not chosen.
+enum MobileUsageMenuShape: String {
+    /// What ships today: the login, and when its nearest window comes back.
+    case reset
+    /// The address joined onto the same line.
+    case address
+    /// The login and its address as their own row, then usage as a second.
+    case split
+    /// The address as the section's heading, over the usage row.
+    case header
+
+    static var current: MobileUsageMenuShape {
+#if DEBUG
+        ProcessInfo.processInfo.environment["THREADING_MOBILE_USAGE_MENU"]
+            .flatMap(MobileUsageMenuShape.init(rawValue:)) ?? .reset
+#else
+        .reset
+#endif
     }
 }
 
@@ -272,7 +310,8 @@ struct SessionDetailView: View {
                         SessionActionsToolbarIcon(
                             activity: workspaceActivity,
                             identity: .resolve(currentSession.agentKind),
-                            reading: sessionUsageReading
+                            reading: sessionUsageReading,
+                            account: currentSession.account
                         )
                     }
                     .accessibilityLabel(
@@ -418,22 +457,7 @@ struct SessionDetailView: View {
         if let account = sessionAccount,
            let reading = sessionUsageReading,
            MobileSessionChrome.showsUsageMenuRow(reading: reading) {
-            Button {
-                isShowingUsage = true
-            } label: {
-                // Title, subtitle, glyph: the menu's own two-line item, which a `Label`
-                // does not become.
-                Text(account.name)
-                Text(MobileSessionChrome.usageMenuDetail(
-                    reading: reading,
-                    windows: account.usageWindows
-                ))
-                usageMenuGlyph(for: reading)
-            }
-            // The rings carry the percentages now. VoiceOver still hears them, here and on the
-            // disc that opens this menu, because a gauge read aloud is not a reading.
-            .accessibilityLabel(account.name)
-            .accessibilityValue(reading.summary ?? "")
+            usageMenuRows(account: account, reading: reading)
             Divider()
         }
         if canOpenWorkspace {
@@ -585,6 +609,70 @@ struct SessionDetailView: View {
                   $0.id == currentSession.agentKind
               }) else { return nil }
         return MobileUsageAccountFocus(runtimeName: agent.name, accountName: account.name)
+    }
+
+    /// The menu's account block, in whichever shape is being tried.
+    ///
+    /// **Scaffolding.** Four shapes are kept side by side only long enough to photograph them
+    /// and choose one; `MobileUsageMenuShape.current` is `.reset` — what ships — unless a DEBUG
+    /// run names another. Collapse this to the chosen shape before it goes anywhere.
+    @ViewBuilder
+    private func usageMenuRows(
+        account: RemoteAccountChoiceDTO,
+        reading: MobileAccountUsageReading
+    ) -> some View {
+        let detail = MobileSessionChrome.usageMenuDetail(
+            reading: reading,
+            windows: account.usageWindows
+        )
+        let address = MobileSessionChrome.usageMenuAddress(for: account)
+        switch MobileUsageMenuShape.current {
+        case .reset:
+            usageRow(title: account.name, detail: detail, reading: reading)
+        case .address:
+            usageRow(
+                title: account.name,
+                detail: [address, detail]
+                    .compactMap { $0 }
+                    .joined(separator: MobileUsageDefaults.segmentSeparator),
+                reading: reading
+            )
+        case .split:
+            Button {
+                isShowingSessionSettings = true
+            } label: {
+                Text(account.name)
+                Text(address ?? MobileL10n.string("Account"))
+                Image(systemName: "person.crop.circle")
+            }
+            .disabled(!canOpenSessionSettings)
+            usageRow(title: MobileL10n.string("Usage"), detail: detail, reading: reading)
+        case .header:
+            Section(address ?? account.name) {
+                usageRow(title: account.name, detail: detail, reading: reading)
+            }
+        }
+    }
+
+    /// One row: the login, what is left to say in words, and the reading drawn beside them.
+    private func usageRow(
+        title: String,
+        detail: String,
+        reading: MobileAccountUsageReading
+    ) -> some View {
+        Button {
+            isShowingUsage = true
+        } label: {
+            // Title, subtitle, glyph: the menu's own two-line item, which a `Label`
+            // does not become.
+            Text(title)
+            Text(detail)
+            usageMenuGlyph(for: reading)
+        }
+        // The rings carry the percentages now. VoiceOver still hears them, here and on the
+        // disc that opens this menu, because a gauge read aloud is not a reading.
+        .accessibilityLabel(title)
+        .accessibilityValue(reading.summary ?? "")
     }
 
     /// The reading as the menu row's glyph: its rings, or the gauge symbol when a host reports
@@ -817,6 +905,8 @@ private struct SessionActionsToolbarIcon: View {
     @ObservedObject var activity: MobileWorkspaceActivity
     let identity: MobileAgentIdentity
     let reading: MobileAccountUsageReading?
+    /// Only for a chat on an alternate login; see `MobileAccountDisc.account`.
+    let account: RemoteSessionAccountDTO?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.remoteTheme) private var theme
@@ -853,7 +943,7 @@ private struct SessionActionsToolbarIcon: View {
     /// mark is not a symbol, so the breath is a scale phase rather than a symbol effect.
     @ViewBuilder
     private var disc: some View {
-        let disc = MobileAccountDisc(identity: identity, reading: reading)
+        let disc = MobileAccountDisc(identity: identity, reading: reading, account: account)
         if reduceMotion {
             disc
         } else {

@@ -54,6 +54,19 @@ enum RemoteAccountBridge {
         )
     }
 
+    /// The login's own address, for a client that names the person and the account separately.
+    ///
+    /// Both stores, in the order `AccountName` reads them: what the CLI wrote down, then what it
+    /// answered when asked. Nil is ordinary — the standard Claude login records only a hashed id
+    /// until the probe has run — and a client is expected to show the name alone in that case.
+    ///
+    /// Free on the catalogue path, which is the only caller: `AccountName.names(for:)` resolves
+    /// the same two caches for the same accounts a couple of lines earlier, to derive the names.
+    /// This adds a dictionary read, not a directory scan.
+    static func email(for account: AgentAccount) -> String? {
+        AccountAvatarStore.cachedEmail(for: account) ?? AccountEmailProbe.cachedEmail(for: account)
+    }
+
     // MARK: - Usage
 
     /// The account's limit windows as the phone's disc rings them: the account's own first, then
