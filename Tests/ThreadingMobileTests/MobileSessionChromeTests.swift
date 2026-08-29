@@ -656,6 +656,7 @@ final class SessionWorkspaceDrawerTests: XCTestCase {
     /// Only a scroll view's pan waits for the drawer's. The terminal's long press on the same
     /// scroll view does not: a pan under a resting finger never fails, and a wait on it held
     /// the press until touch-up.
+    @MainActor
     func testOnlyAScrollViewsPanWaitsForTheDrawer() {
         let scroller = UIScrollView()
         let scrollerPan = UIPanGestureRecognizer()

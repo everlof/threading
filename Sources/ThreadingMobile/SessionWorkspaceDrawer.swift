@@ -103,6 +103,7 @@ enum SessionWorkspaceDrawer {
     /// fails, and a pan does not fail while a finger rests on the glass, so a long press made to
     /// wait for it fired at touch-up instead of after its own delay; the terminal's word
     /// selection did exactly that.
+    @MainActor
     static func isCompetingPan(_ other: UIGestureRecognizer) -> Bool {
         other is UIPanGestureRecognizer && other.view is UIScrollView
     }

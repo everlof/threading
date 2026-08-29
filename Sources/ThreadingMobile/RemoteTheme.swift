@@ -184,6 +184,9 @@ enum MobileDesign {
         /// moved only about 70% of one line, leaving both phrases stacked over each other.
         static let connectionStatusMorphDuration: TimeInterval = 0.65
         static let connectionStatusMorphIntensity = 0.72
+        /// How much of the morph the departing mark's fade takes: gone before the real mark,
+        /// which stays invisible for the first half, begins to fade in beside the new phrase.
+        static let connectionStatusDepartureShare = 0.42
         /// Every glyph shares one eased trough. Repeating five 100 ms troughs and staggering
         /// them across the sentence made the leading half flicker while a trailing `Book Pro`
         /// stayed fully lit, so the status did not read as one moving line.
@@ -197,25 +200,17 @@ enum MobileDesign {
     }
 }
 
-/// The connection mark fades out where it was and back in where the new phrase puts it.
+/// The connection mark as the bar draws it: a circle in the status colour.
 ///
-/// The mark sits immediately before an intrinsically sized phrase. When that phrase changes
-/// width, the centred row gives the mark a new horizontal position in the same layout pass. A
-/// plain `Circle` therefore teleports even while the words themselves scroll. Merely animating
-/// the circle's opacity is too late: its frame has already jumped on the first animation frame.
-/// A short-lived copy fades at the old window position while the real mark stays invisible until
-/// layout has put it beside the new phrase, then fades back in. The transition is keyed to the
-/// status identity — not only to the colour — and the model colour is always the settled state,
-/// so SwiftUI and UIKit agree and an interrupted animation cannot strand the mark between states.
+/// Where it stands beside the phrase is `MobileConnectionStatusLineView`'s decision, and so is
+/// the copy that fades out where it used to stand. The mark itself only settles on a colour —
+/// the model colour is always the settled state, so SwiftUI and UIKit agree and an interrupted
+/// animation cannot strand it between states — and, when the line asks, stays invisible for the
+/// first half of the line's transition before fading back in where the new phrase put it.
 final class MobileConnectionStatusIndicatorView: UIView {
     private enum Animation {
         static let transition = "threading.connection-status-indicator.transition"
-        static let departing = "threading.connection-status-indicator.departing"
     }
-
-    private var targetColor: UIColor?
-    private var targetStatus: String?
-    private weak var departingIndicator: UIView?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -233,74 +228,14 @@ final class MobileConnectionStatusIndicatorView: UIView {
         layer.cornerRadius = min(bounds.width, bounds.height) / 2
     }
 
-    func update(
-        color: UIColor,
-        status: String,
-        reducesMotion: Bool
-    ) {
-        let isFirstPresentation = targetStatus == nil
-        guard targetStatus != status || targetColor?.isEqual(color) != true else { return }
-
-        var visibleColor = UIColor(
-            cgColor: layer.presentation()?.backgroundColor
-                ?? layer.backgroundColor
-                ?? color.cgColor
-        )
-        var visibleOpacity = layer.presentation()?.opacity ?? layer.opacity
-        var departureFrame = window.map { convert(bounds, to: $0) }
-        if
-            let window,
-            let departingIndicator,
-            departingIndicator.superview === window
-        {
-            let departingOpacity = departingIndicator.layer.presentation()?.opacity
-                ?? departingIndicator.layer.opacity
-            if departingOpacity > visibleOpacity {
-                visibleColor = departingIndicator.backgroundColor ?? visibleColor
-                visibleOpacity = departingOpacity
-                departureFrame = departingIndicator.frame
-            }
-        }
-        targetColor = color
-        targetStatus = status
-
-        departingIndicator?.removeFromSuperview()
+    /// Settles on `color` now. `fadingIn` hides the mark for the first half of
+    /// `MobileDesign.Motion.connectionStatusMorphDuration` and fades it in over the second —
+    /// the line fades a copy out where the mark stood, and the two halves must not overlap.
+    func settle(on color: UIColor, fadingIn: Bool) {
         layer.removeAnimation(forKey: Animation.transition)
         backgroundColor = color
         layer.opacity = 1
-
-        guard
-            !isFirstPresentation,
-            !reducesMotion,
-            let window,
-            let departureFrame
-        else { return }
-
-        let departing = UIView(frame: departureFrame)
-        departing.isUserInteractionEnabled = false
-        departing.backgroundColor = visibleColor
-        departing.layer.cornerCurve = .continuous
-        departing.layer.cornerRadius = min(departureFrame.width, departureFrame.height) / 2
-        departing.layer.opacity = visibleOpacity
-        window.addSubview(departing)
-        departingIndicator = departing
-
-        let departure = CABasicAnimation(keyPath: "opacity")
-        departure.fromValue = visibleOpacity
-        departure.toValue = 0
-        departure.duration = MobileDesign.Motion.connectionStatusMorphDuration * 0.42
-        departure.timingFunction = CAMediaTimingFunction(name: .easeIn)
-        departing.layer.opacity = 0
-        departing.layer.add(departure, forKey: Animation.departing)
-
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + MobileDesign.Motion.connectionStatusMorphDuration
-        ) { [weak self, weak departing] in
-            departing?.removeFromSuperview()
-            if self?.departingIndicator === departing {
-                self?.departingIndicator = nil
-            }
-        }
+        guard fadingIn else { return }
 
         let opacity = CAKeyframeAnimation(keyPath: "opacity")
         opacity.values = [0, 0, 1]
@@ -324,30 +259,312 @@ final class MobileConnectionStatusIndicatorView: UIView {
     var transitionForTesting: CAAnimationGroup? {
         layer.animation(forKey: Animation.transition) as? CAAnimationGroup
     }
+}
+
+/// One connection reading — the mark and the phrase beside it — with one owner for where each
+/// stands. Both navigation titles draw their second line with this: the SwiftUI principal item
+/// through `MobileConnectionStatusLine`, the UIKit conversation title directly.
+///
+/// It exists because the mark and the phrase were two views the bar could move separately, and a
+/// recording of a chat opening showed both of them flying. The connection settles about 100 ms
+/// after the screen appears, which is always inside the push that brings its title in, and that
+/// one status change did two things wrong:
+///
+/// - The mark faded a copy of itself out **in the window**, at `convert(bounds, to: window)`.
+///   During a push the model frame is already the resting frame while the presentation is still
+///   sliding, so the copy popped in at the far end of the slide, sat still while the words slid
+///   under it, and the real mark — hidden for half the morph — faded in somewhere else. On screen
+///   a dot appeared from nowhere, held, dimmed, and a different dot arrived beside it.
+/// - The phrase label was sized to its words by SwiftUI, and a morph is built against the
+///   geometry it starts in. The new phrase was laid out — and tail-truncated — in the old width;
+///   the wider frame landed a pass later and `relayoutCurrent()` made the characters that had not
+///   fit as fresh, unanimated layers at their final slots. "David's MacBo" was still rising and
+///   dim while "ok Pro" already sat lit, a line above it.
+///
+/// So this view keeps three things true. The label's frame is decided by the row's width and the
+/// mark's slot, never by the phrase, so a phrase change re-lays nothing while it morphs and the
+/// centred old and new lines cross inside one set of bounds. The mark is placed at the phrase's
+/// leading ink by this view's own layout, and the copy that fades out where it stood is this
+/// view's subview, so both go wherever the row goes. And a change that lands while anything
+/// above this row is mid-animation is committed without any of it: a title still sliding in
+/// arrives already saying the settled state, rather than performing a status change in flight.
+final class MobileConnectionStatusLineView: UIView {
+    private enum Animation {
+        static let departing = "threading.connection-status-indicator.departing"
+    }
+
+    let indicator = MobileConnectionStatusIndicatorView()
+    let label = MobileMorphingTitleLabel()
+
+    /// A mark that stands in the dot's place while a turn runs — a chat's working orb. It takes
+    /// the dot's slot rather than a place of its own, so the phrase keeps its position and one
+    /// mark speaks at a time. The host owns the mark's theme and its animation; this row only
+    /// decides where it stands.
+    var workingMark: UIView? {
+        didSet {
+            oldValue?.removeFromSuperview()
+            if let workingMark {
+                workingMark.translatesAutoresizingMaskIntoConstraints = false
+                workingMarkHost.addSubview(workingMark)
+                NSLayoutConstraint.activate([
+                    workingMark.centerXAnchor.constraint(equalTo: workingMarkHost.centerXAnchor),
+                    workingMark.centerYAnchor.constraint(equalTo: workingMarkHost.centerYAnchor),
+                ])
+            }
+            invalidateIntrinsicContentSize()
+            setNeedsLayout()
+        }
+    }
+
+    var isWorking = false {
+        didSet {
+            guard isWorking != oldValue else { return }
+            // Entering the working state replaces the dot immediately. A status change may have
+            // left both the real dot and its departing copy mid-fade; neither may remain beside
+            // the orb, and the settled dot must be ready when work ends again.
+            if isWorking {
+                departingIndicator?.removeFromSuperview()
+                departingIndicator = nil
+                if let settledColor {
+                    indicator.settle(on: settledColor, fadingIn: false)
+                }
+            }
+            indicator.isHidden = isWorking
+            workingMarkHost.isHidden = !isWorking
+            invalidateIntrinsicContentSize()
+            setNeedsLayout()
+        }
+    }
+
+    /// The status this row last settled on; nil before the first one.
+    var presentedStatus: String? { settledStatus }
+
+    private let workingMarkHost = UIView()
+    private var settledStatus: String?
+    private var settledColor: UIColor?
+    private weak var departingIndicator: UIView?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // The host names the whole title; a line that is also an element would be read twice.
+        isAccessibilityElement = false
+        label.isAccessibilityElement = false
+        workingMarkHost.isHidden = true
+        workingMarkHost.isUserInteractionEnabled = false
+        addSubview(label)
+        addSubview(indicator)
+        addSubview(workingMarkHost)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override var intrinsicContentSize: CGSize {
+        CGSize(
+            width: UIView.noIntrinsicMetric,
+            height: max(label.intrinsicContentSize.height, markSize)
+        )
+    }
+
+    func update(
+        status: String,
+        color: UIColor,
+        textColor: UIColor,
+        groundColor: UIColor,
+        reducesMotion: Bool
+    ) {
+        let isFirstPresentation = settledStatus == nil
+        // Keyed to the status identity, not only to the colour: the phrase's width is what
+        // moves the mark, and it moves between two warning-coloured steps as well.
+        let changed = settledStatus != status || settledColor?.isEqual(color) != true
+        let animates = changed
+            && !isFirstPresentation
+            && !reducesMotion
+            && window != nil
+            && !isHostInMotion
+        // Read where the mark is drawn before anything moves it — in this row's coordinates,
+        // which are the coordinates the copy will live in.
+        let departure = animates && !isWorking ? presentedMark() : nil
+        settledStatus = status
+        settledColor = color
+
+        departingIndicator?.removeFromSuperview()
+        // SwiftUI and the UIKit conversation host may restate the same title several times per
+        // frame. Do not let an idempotent restatement remove the transition this change began.
+        if changed {
+            indicator.settle(on: color, fadingIn: departure != nil)
+        }
+        label.configure(
+            title: status,
+            textStyle: .caption2,
+            weight: .regular,
+            textColor: textColor,
+            groundColor: groundColor,
+            alignment: .center,
+            reducesMotion: reducesMotion,
+            animated: animates,
+            role: .connectionStatus
+        )
+        invalidateIntrinsicContentSize()
+        // The mark takes its place beside the new phrase now, invisible until the copy is gone.
+        setNeedsLayout()
+        layoutIfNeeded()
+
+        guard let departure else { return }
+        let departing = UIView(frame: departure.frame)
+        departing.isUserInteractionEnabled = false
+        departing.backgroundColor = departure.color
+        departing.layer.cornerCurve = .continuous
+        departing.layer.cornerRadius = min(departure.frame.width, departure.frame.height) / 2
+        departing.layer.opacity = departure.opacity
+        addSubview(departing)
+        departingIndicator = departing
+
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = departure.opacity
+        fade.toValue = 0
+        fade.duration = MobileDesign.Motion.connectionStatusMorphDuration
+            * MobileDesign.Motion.connectionStatusDepartureShare
+        fade.timingFunction = CAMediaTimingFunction(name: .easeIn)
+        departing.layer.opacity = 0
+        departing.layer.add(fade, forKey: Animation.departing)
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + MobileDesign.Motion.connectionStatusMorphDuration
+        ) { [weak self, weak departing] in
+            departing?.removeFromSuperview()
+            if self?.departingIndicator === departing {
+                self?.departingIndicator = nil
+            }
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let mark = markSize
+        let slot = mark + MobileDesign.Spacing.tight
+        let labelHeight = label.intrinsicContentSize.height
+        let labelWidth = max(0, bounds.width - slot)
+        // The label's frame follows from the row and the slot alone. It centres whatever it
+        // says inside that frame, so the mark lands `Spacing.tight` before the line it draws:
+        // the phrase where it fits, the ellipsized head where it does not.
+        label.frame = CGRect(
+            x: slot,
+            y: snapped((bounds.height - labelHeight) / 2),
+            width: labelWidth,
+            height: labelHeight
+        )
+        let textWidth = min(label.textWidth(fitting: labelWidth), labelWidth)
+        let leading = snapped(max(0, (bounds.width - slot - textWidth) / 2))
+        let markFrame = CGRect(
+            x: leading,
+            y: snapped((bounds.height - mark) / 2),
+            width: mark,
+            height: mark
+        )
+        indicator.frame = markFrame
+        workingMarkHost.frame = markFrame
+    }
+
+    /// The mark's footprint: the dot, or the working mark's own stated size while a turn runs.
+    private var markSize: CGFloat {
+        guard isWorking, let workingMark else { return MobileDesign.Size.navigationStatusIndicator }
+        let stated = workingMark.intrinsicContentSize.width
+        if stated > 0 { return stated }
+        let measured = workingMark.systemLayoutSizeFitting(UIView.layoutFittingCompressedSize).width
+        return measured > 0 ? measured : MobileDesign.Size.navigationStatusIndicator
+    }
+
+    /// Whether anything above this row is being moved or faded: a push sliding the bar's title
+    /// in, a bar collapsing under a scroll. Only geometry and opacity count — a decorative
+    /// animation some chrome layer keeps running must not silence every morph under it. Walked
+    /// only on a status change, and a view's depth deep.
+    private var isHostInMotion: Bool {
+        var ancestor = layer.superlayer
+        while let current = ancestor {
+            for key in current.animationKeys() ?? [] {
+                guard let animation = current.animation(forKey: key) else { continue }
+                if Self.movesOrFades(animation) { return true }
+            }
+            ancestor = current.superlayer
+        }
+        return false
+    }
+
+    private static let motionKeyPaths = ["position", "bounds", "transform", "opacity", "frame"]
+
+    private static func movesOrFades(_ animation: CAAnimation) -> Bool {
+        if let group = animation as? CAAnimationGroup {
+            return group.animations?.contains(where: movesOrFades) == true
+        }
+        guard let keyPath = (animation as? CAPropertyAnimation)?.keyPath else { return false }
+        return motionKeyPaths.contains { keyPath == $0 || keyPath.hasPrefix($0 + ".") }
+    }
+
+    /// The mark as it is drawn right now: the real one, or a copy still fading out from an
+    /// earlier change when that copy is the more visible of the two.
+    private func presentedMark() -> (frame: CGRect, color: UIColor, opacity: Float)? {
+        guard let color = indicator.backgroundColor else { return nil }
+        var mark = (
+            frame: indicator.frame,
+            color: color,
+            opacity: indicator.layer.presentation()?.opacity ?? indicator.layer.opacity
+        )
+        if let departingIndicator, let departingColor = departingIndicator.backgroundColor {
+            let departingOpacity = departingIndicator.layer.presentation()?.opacity
+                ?? departingIndicator.layer.opacity
+            if departingOpacity > mark.opacity {
+                mark = (departingIndicator.frame, departingColor, departingOpacity)
+            }
+        }
+        return mark
+    }
+
+    private func snapped(_ value: CGFloat) -> CGFloat {
+        let scale = max(1, traitCollection.displayScale)
+        return (value * scale).rounded() / scale
+    }
 
     var departingIndicatorForTesting: UIView? {
         departingIndicator
     }
 }
 
-private struct MobileConnectionStatusIndicator: UIViewRepresentable {
-    let color: Color
+/// SwiftUI's bridge to the status line. Fills the width it is offered, whatever the phrase
+/// says, for the reason `MobileMorphingTitle` does: the frame is decided in SwiftUI's pass, a
+/// pass after the phrase changed, and a morph cannot survive its bounds moving under it.
+struct MobileConnectionStatusLine: UIViewRepresentable {
     let status: String
+    let statusColor: Color
+    @Environment(\.remoteTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reducesMotion
 
-    func makeUIView(context: Context) -> MobileConnectionStatusIndicatorView {
-        MobileConnectionStatusIndicatorView()
+    func makeUIView(context: Context) -> MobileConnectionStatusLineView {
+        MobileConnectionStatusLineView()
     }
 
-    func updateUIView(
-        _ view: MobileConnectionStatusIndicatorView,
-        context: Context
-    ) {
+    func updateUIView(_ view: MobileConnectionStatusLineView, context: Context) {
         view.update(
-            color: UIColor(color),
             status: status,
+            color: UIColor(statusColor),
+            textColor: theme.uiSecondaryLabel,
+            groundColor: theme.uiSurface,
             reducesMotion: reducesMotion
         )
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: MobileConnectionStatusLineView,
+        context: Context
+    ) -> CGSize? {
+        let height = uiView.intrinsicContentSize.height
+        guard let width = proposal.width, width.isFinite else {
+            return CGSize(width: MobileDesign.Size.navigationTitleWidth, height: height)
+        }
+        return CGSize(width: width, height: height)
     }
 }
 
@@ -375,26 +592,8 @@ struct MobileConnectionNavigationTitle: View {
             )
             .frame(maxWidth: .infinity)
 
-            HStack(spacing: MobileDesign.Spacing.tight) {
-                MobileConnectionStatusIndicator(
-                    color: statusColor,
-                    status: status
-                )
-                    .frame(
-                        width: MobileDesign.Size.navigationStatusIndicator,
-                        height: MobileDesign.Size.navigationStatusIndicator
-                    )
-                MobileMorphingTitle(
-                    title: status,
-                    textStyle: .caption2,
-                    weight: .regular,
-                    textColor: theme.uiSecondaryLabel,
-                    groundColor: theme.uiSurface,
-                    alignment: .center,
-                    role: .connectionStatus
-                )
-            }
-            .foregroundStyle(theme.secondaryLabel)
+            MobileConnectionStatusLine(status: status, statusColor: statusColor)
+                .frame(maxWidth: .infinity)
         }
         // Asked for, not measured. The ideal is what a principal toolbar item is sized by, so
         // stating one takes the name out of the answer; the same value as the maximum keeps the

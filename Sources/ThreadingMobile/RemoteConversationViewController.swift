@@ -1448,11 +1448,12 @@ final class MobileThemeOutlineView: UIView {
 
 private final class RemoteConversationNavigationTitleView: UIControl {
     private let titleLabel = MobileMorphingTitleLabel()
-    private let statusLabel = MobileMorphingTitleLabel()
-    private let dot = MobileConnectionStatusIndicatorView()
+    /// The mark and the phrase, laid out by the one owner both navigation titles share.
+    private let statusLine = MobileConnectionStatusLineView()
     private var titleColor = UIColor.label
     private var titleGroundColor = UIColor.systemBackground
     private var statusLabelColor = UIColor.secondaryLabel
+    private var statusColor = UIColor.secondaryLabel
     /// In the status dot's place, not beside the title. Beside the title it took a column of
     /// its own and pushed the name off the bar's centre every time a turn started, and it left
     /// two marks on one line saying two different things at once. Standing where the dot stands
@@ -1463,12 +1464,8 @@ private final class RemoteConversationNavigationTitleView: UIControl {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        orb.isHidden = true
-        let statusStack = UIStackView(arrangedSubviews: [dot, orb, statusLabel])
-        statusStack.axis = .horizontal
-        statusStack.alignment = .center
-        statusStack.spacing = MobileDesign.Spacing.tight
-        let stack = UIStackView(arrangedSubviews: [titleLabel, statusStack])
+        statusLine.workingMark = orb
+        let stack = UIStackView(arrangedSubviews: [titleLabel, statusLine])
         stack.axis = .vertical
         stack.alignment = .center
         stack.spacing = MobileDesign.Spacing.hairline
@@ -1479,11 +1476,11 @@ private final class RemoteConversationNavigationTitleView: UIControl {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
-            dot.widthAnchor.constraint(equalToConstant: MobileDesign.Size.navigationStatusIndicator),
-            dot.heightAnchor.constraint(equalTo: dot.widthAnchor),
+            // The line is as wide as the title and centres the mark and phrase inside itself,
+            // so the phrase's width decides where the mark stands and never how wide the line is.
+            statusLine.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
         titleLabel.isAccessibilityElement = false
-        statusLabel.isAccessibilityElement = false
         addAction(UIAction { [weak self] _ in self?.reconnect?() }, for: .touchUpInside)
         accessibilityTraits = .header
     }
@@ -1511,9 +1508,19 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         isWorking: Bool,
         recovery: (title: String, action: () -> Void)?
     ) {
-        dot.update(
-            color: statusColor,
+        self.statusColor = statusColor
+        // Entering work hides the dot before a simultaneous status update can start a fade.
+        // Leaving work updates the hidden dot first, then reveals it already settled beside the
+        // current phrase. In either direction one mark speaks at a time.
+        if isWorking, !statusLine.isWorking {
+            orb.prepareForWorking()
+            statusLine.isWorking = true
+        }
+        statusLine.update(
             status: status,
+            color: statusColor,
+            textColor: statusLabelColor,
+            groundColor: titleGroundColor,
             reducesMotion: UIAccessibility.isReduceMotionEnabled
         )
         titleLabel.configure(
@@ -1526,25 +1533,11 @@ private final class RemoteConversationNavigationTitleView: UIControl {
             reducesMotion: UIAccessibility.isReduceMotionEnabled,
             role: .chatName
         )
-        statusLabel.configure(
-            title: status,
-            textStyle: .caption2,
-            weight: .regular,
-            textColor: statusLabelColor,
-            groundColor: titleGroundColor,
-            alignment: .center,
-            reducesMotion: UIAccessibility.isReduceMotionEnabled,
-            role: .connectionStatus
-        )
-        // One variant per working period, chosen on the hidden→visible edge, so a turn keeps
-        // the animation it started with instead of re-rolling on every render.
-        if isWorking, orb.isHidden {
-            orb.prepareForWorking()
+        // One mark at a time: the line hides whichever is not speaking and reflows the phrase
+        // around the other instead of holding a gap for it.
+        if !isWorking, statusLine.isWorking {
+            statusLine.isWorking = false
         }
-        orb.isHidden = !isWorking
-        // One mark at a time. Both are stack-hidden rather than merely transparent, so the row
-        // reflows around whichever is speaking instead of holding a gap for the other.
-        dot.isHidden = isWorking
         self.reconnect = recovery?.action
         isUserInteractionEnabled = recovery != nil
         // The orb is a picture of the same fact, so VoiceOver hears it as a word rather than
@@ -1569,16 +1562,17 @@ private final class RemoteConversationNavigationTitleView: UIControl {
             reducesMotion: UIAccessibility.isReduceMotionEnabled,
             role: .chatName
         )
-        statusLabel.configure(
-            title: statusLabel.stringValue,
-            textStyle: .caption2,
-            weight: .regular,
-            textColor: statusLabelColor,
-            groundColor: titleGroundColor,
-            alignment: .center,
-            reducesMotion: UIAccessibility.isReduceMotionEnabled,
-            role: .connectionStatus
-        )
+        // Restated in the new ink only once there is a status to restate: a theme that lands
+        // before the first update must not count as the line's first presentation.
+        if let status = statusLine.presentedStatus {
+            statusLine.update(
+                status: status,
+                color: statusColor,
+                textColor: statusLabelColor,
+                groundColor: titleGroundColor,
+                reducesMotion: UIAccessibility.isReduceMotionEnabled
+            )
+        }
         orb.applyTheme(theme)
     }
 }

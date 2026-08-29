@@ -41,6 +41,7 @@ final class SessionInfoRenderTests: XCTestCase {
 
         static let size = NSSize(width: 420, height: 820)
         static let narrowSize = NSSize(width: 312, height: 760)
+        static let multilineCommandSize = NSSize(width: 477, height: 559)
     }
 
     // MARK: - Stories
@@ -83,7 +84,22 @@ final class SessionInfoRenderTests: XCTestCase {
         )
         written += 1
 
-        XCTAssertEqual(written, Render.themes.count * Render.appearances.count + 1)
+        let multilineCommand = try XCTUnwrap(
+            panelImage(
+                appearance: .darkAqua,
+                snapshot: Self.multilineCommandFixture,
+                isRunning: true,
+                size: Render.multilineCommandSize,
+                usageSnapshot: Self.multilineCommandUsageFixture
+            ),
+            "Failed to render the live multiline-command regression"
+        )
+        try multilineCommand.write(
+            to: directory.appendingPathComponent("info-panel-system-dark-multiline-command.png")
+        )
+        written += 1
+
+        XCTAssertEqual(written, Render.themes.count * Render.appearances.count + 2)
         print("Rendered info panel storybook to \(directory.path)")
     }
 
@@ -207,6 +223,61 @@ final class SessionInfoRenderTests: XCTestCase {
         )
     }
 
+    /// Mirrors the live failure report: the first two processes are Codex launchers whose argv
+    /// includes a paragraph-bearing startup prompt. The embedded line breaks — not merely a
+    /// long command — are what made AppKit paint their detail lines above "Processes".
+    private static var multilineCommandFixture: SessionInfoSnapshot {
+        SessionInfoSnapshot(
+            processGroups: [
+                SessionProcessGroup(origin: .agent, processes: [
+                    SessionProcess(
+                        pid: 57_385,
+                        command: "node",
+                        memoryBytes: 16_400_000,
+                        cpuPercent: 0,
+                        depth: 0,
+                        arguments: [
+                            "/Users/me/.npm-global/bin/codex",
+                            "--config",
+                            "check_for_update_on_startup=false",
+                            "Investigate the session info panel.\n\nKeep the process tree readable."
+                        ]
+                    ),
+                    SessionProcess(
+                        pid: 57_366,
+                        command: "codex",
+                        memoryBytes: 279_800_000,
+                        cpuPercent: 4,
+                        depth: 1,
+                        arguments: [
+                            "/Users/me/.npm-global/bin/codex",
+                            "--config",
+                            "check_for_update_on_startup=false",
+                            "First paragraph of the opening request.\nSecond paragraph of the opening request."
+                        ]
+                    ),
+                    SessionProcess(
+                        pid: 15_182,
+                        command: "bash",
+                        memoryBytes: 2_000_000,
+                        cpuPercent: 0,
+                        depth: 1,
+                        arguments: ["bash", "scripts/test.sh", "all"]
+                    ),
+                    SessionProcess(
+                        pid: 15_197,
+                        command: "xcodebuild",
+                        memoryBytes: 166_200_000,
+                        cpuPercent: 9,
+                        depth: 2,
+                        arguments: ["xcodebuild", "-project", "/Users/me/repo/AnotherTerminal/Threading.xcodeproj"]
+                    )
+                ])
+            ],
+            portGroups: []
+        )
+    }
+
     private static var usageFixture: SessionUsageSnapshot {
         let total = SessionUsageSnapshot.Reading(
             tokens: .init(
@@ -262,13 +333,57 @@ final class SessionInfoRenderTests: XCTestCase {
         )
     }
 
+    private static var multilineCommandUsageFixture: SessionUsageSnapshot {
+        let total = SessionUsageSnapshot.Reading(
+            tokens: .init(
+                uncachedInput: 4_000_000,
+                cachedInput: 141_700_000,
+                output: 272_000,
+                reasoning: 113_000
+            ),
+            cost: .init(providerReportedUSD: 78),
+            records: 1_072,
+            models: [
+                .init(
+                    name: "gpt-5.6-sol",
+                    tokens: .init(
+                        uncachedInput: 4_000_000,
+                        cachedInput: 141_700_000,
+                        output: 272_000,
+                        reasoning: 113_000
+                    ),
+                    cost: .init(providerReportedUSD: 78),
+                    records: 1_072
+                )
+            ]
+        )
+        return SessionUsageSnapshot(
+            sessionID: SessionID(),
+            total: total,
+            main: total,
+            subagents: .init(),
+            children: [:],
+            indexedRange: .lifetime,
+            builtAt: Date(),
+            pricingCatalogVersion: UsagePricingCatalog.version,
+            coverage: .init(
+                runtimeID: AgentKind.codex.rawValue,
+                runtimeName: AgentKind.codex.displayName,
+                state: .complete,
+                sourceCount: 1,
+                recordCount: 1_072
+            )
+        )
+    }
+
     // MARK: - Helpers
 
     private func panelImage(
         appearance name: NSAppearance.Name,
         snapshot: SessionInfoSnapshot,
         isRunning: Bool,
-        size: NSSize = Render.size
+        size: NSSize = Render.size,
+        usageSnapshot: SessionUsageSnapshot? = nil
     ) -> Data? {
         let appearance = NSAppearance(named: name)
 
@@ -281,7 +396,8 @@ final class SessionInfoRenderTests: XCTestCase {
             // Installed before the view exists, so even `viewDidLoad`'s own refresh reads the
             // fixture rather than walking the machine.
             controller.readSource = { completion in completion(snapshot) }
-            controller.usageSource = { Self.usageFixture }
+            let resolvedUsage = usageSnapshot ?? Self.usageFixture
+            controller.usageSource = { resolvedUsage }
 
             let host = ThemedSurfaceView()
             host.frame = NSRect(origin: .zero, size: size)

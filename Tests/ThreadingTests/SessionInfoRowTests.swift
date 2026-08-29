@@ -57,6 +57,28 @@ final class SessionInfoRowTests: XCTestCase {
         )
     }
 
+    /// A startup prompt is one argv element even when it contains paragraphs. The Info panel is
+    /// not a transcript: those line breaks must not become row geometry or escape above the
+    /// Processes heading, which is the production failure this fixture represents.
+    func testMultilineProcessArgumentsBecomeOneDisplayLine() throws {
+        let command = try XCTUnwrap(SessionInfoRowView.CommandLine(processArguments: [
+            "/Users/me/.npm-global/bin/codex",
+            "--config",
+            "check_for_update_on_startup=false",
+            "First prompt line\n\nSecond\tprompt line"
+        ]))
+
+        XCTAssertEqual(
+            command.fullDisplay,
+            "--config check_for_update_on_startup=false First prompt line Second prompt line"
+        )
+        XCTAssertEqual(
+            command.fullLine,
+            "/Users/me/.npm-global/bin/codex --config check_for_update_on_startup=false First prompt line Second prompt line"
+        )
+        XCTAssertFalse(command.fullDisplay.contains(where: { $0.isNewline }))
+    }
+
     private func reading(facts: [String]) -> SessionInfoRowView.Reading {
         SessionInfoRowView.Reading(
             valueSegments: ["3%", "96 MB"],

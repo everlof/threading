@@ -133,6 +133,19 @@ final class MobileMorphingTitleLabel: UIView {
         )
     }
 
+    /// The width of the line this view draws when it is `width` wide: the whole title where it
+    /// fits inside the reserved raster overflow, or the ellipsized head tail truncation leaves.
+    /// A host placing something beside the words — the connection mark — measures this rather
+    /// than the frame, because the frame is the slot and the line is centred inside it.
+    func textWidth(fitting width: CGFloat) -> CGFloat {
+        label.width(fitting: max(0, width - MorphingLabel.glyphRasterOverflow * 2))
+    }
+
+    /// Where the drawn characters' ink is, in this view's coordinates.
+    var glyphInkFrames: [CGRect] {
+        label.glyphInkFrames.map { convert($0, from: label) }
+    }
+
     func configure(
         title: String,
         textStyle: UIFont.TextStyle,
@@ -141,6 +154,7 @@ final class MobileMorphingTitleLabel: UIView {
         groundColor: UIColor,
         alignment: NSTextAlignment,
         reducesMotion: Bool,
+        animated: Bool = true,
         role: MobileMorphingTextRole = .chatName
     ) {
         let fontChanged = self.textStyle != textStyle || self.weight != weight
@@ -156,7 +170,10 @@ final class MobileMorphingTitleLabel: UIView {
         label.rasterizationBackground = groundColor
         label.alignment = alignment
 
-        let animates = !presentedTitle.isEmpty
+        // `animated` is the host's say: a status line whose bar is mid-transition lands its
+        // phrase rather than morphing it in flight. The rest is this view's.
+        let animates = animated
+            && !presentedTitle.isEmpty
             && title != presentedTitle
             && !reducesMotion
             && window != nil
@@ -298,7 +315,7 @@ struct MobileMorphingTitle: UIViewRepresentable {
         MobileMorphingTitleLabel()
     }
 
-    /// Keeps chat-name geometry stable while a connection phrase stays beside its status mark.
+    /// Fills the width it is offered, whatever the title says.
     ///
     /// A morph is built against the geometry it starts in: the label resolves every character's
     /// final slot up front and animates each one there. A label sized to its own text cannot
@@ -309,10 +326,11 @@ struct MobileMorphingTitle: UIViewRepresentable {
     /// exactly that. Filling the offer instead makes the container decide — the bar's title
     /// area, the row's remaining width — and a rename changes only the glyphs inside it.
     ///
-    /// A connection phrase has the opposite contract. It shares a horizontal row with a status
-    /// dot, so taking the full offer strands that dot at the invisible label frame's leading edge
-    /// while the phrase is centred inside it. Status text therefore hugs its intrinsic measure,
-    /// bounded by the offer only when the bar genuinely needs to truncate it.
+    /// The connection phrase once hugged its words here instead, so that the status mark beside
+    /// it in a SwiftUI row would not be stranded at the slot's leading edge — and paid for it
+    /// with exactly the snap above, drawn as a phrase in two pieces. That row is
+    /// `MobileConnectionStatusLineView` now: it gives the phrase a frame the words do not decide
+    /// and places the mark at the drawn line itself, so nothing bridged here needs to hug.
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView: MobileMorphingTitleLabel,
@@ -320,11 +338,7 @@ struct MobileMorphingTitle: UIViewRepresentable {
     ) -> CGSize? {
         let intrinsic = uiView.intrinsicContentSize
         guard let width = proposal.width, width.isFinite else { return intrinsic }
-        let fittedWidth = switch role {
-        case .chatName: width
-        case .connectionStatus, .connectionProgress: min(width, intrinsic.width)
-        }
-        return CGSize(width: fittedWidth, height: intrinsic.height)
+        return CGSize(width: width, height: intrinsic.height)
     }
 
     func updateUIView(_ view: MobileMorphingTitleLabel, context: Context) {

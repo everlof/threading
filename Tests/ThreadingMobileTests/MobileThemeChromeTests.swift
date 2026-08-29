@@ -401,18 +401,21 @@ final class MobileMorphingTitleTests: XCTestCase {
 
     /// The dot moves because the centred phrase beside it changes width. The old-position copy
     /// fades away while the real dot is initially invisible at its new position, so two
-    /// warning-coloured connection steps do not reveal that reflow as a teleport.
+    /// warning-coloured connection steps do not reveal that reflow as a teleport. The copy is
+    /// the row's own subview at the row-local frame the dot was drawn in: a bar carrying the row
+    /// somewhere — a push — carries the copy with it, where a copy parked in the window at the
+    /// dot's *model* frame sat at the far end of the slide while the words slid under it.
     func testTheConnectionDotFadesAcrossLayoutWhenTheStatusChangesButItsColorDoesNot() throws {
-        let (window, dot) = mountedConnectionDot()
+        let (window, line) = mountedStatusLine()
         defer { window.isHidden = true }
 
-        dot.update(color: .systemOrange, status: "Checking connections", reducesMotion: false)
-        XCTAssertFalse(dot.isAnimatingTransitionForTesting)
+        update(line, status: "Checking connections", color: .systemOrange)
+        XCTAssertFalse(line.indicator.isAnimatingTransitionForTesting)
+        let oldFrame = line.indicator.frame
 
-        let oldFrame = dot.convert(dot.bounds, to: window)
-        dot.update(color: .systemOrange, status: "Trying LAN", reducesMotion: false)
+        update(line, status: "Trying LAN", color: .systemOrange)
 
-        let transition = try XCTUnwrap(dot.transitionForTesting)
+        let transition = try XCTUnwrap(line.indicator.transitionForTesting)
         let opacity = try XCTUnwrap(
             transition.animations?.compactMap { $0 as? CAKeyframeAnimation }
                 .first { $0.keyPath == "opacity" }
@@ -424,9 +427,12 @@ final class MobileMorphingTitleTests: XCTestCase {
             MobileDesign.Motion.connectionStatusMorphDuration,
             accuracy: 0.001
         )
+        XCTAssertNotEqual(line.indicator.frame, oldFrame, "a shorter phrase leaves the dot where it was")
 
-        let departing = try XCTUnwrap(dot.departingIndicatorForTesting)
+        let departing = try XCTUnwrap(line.departingIndicatorForTesting)
+        XCTAssertTrue(departing.superview === line, "the departing copy left the row it belongs to")
         XCTAssertEqual(departing.frame, oldFrame)
+        XCTAssertEqual(departing.backgroundColor, .systemOrange)
         let departure = try XCTUnwrap(
             departing.layer.animation(
                 forKey: "threading.connection-status-indicator.departing"
@@ -434,18 +440,203 @@ final class MobileMorphingTitleTests: XCTestCase {
         )
         XCTAssertEqual(departure.fromValue as? Float, 1)
         XCTAssertEqual(departure.toValue as? Float, 0)
+        XCTAssertEqual(
+            departure.duration,
+            MobileDesign.Motion.connectionStatusMorphDuration
+                * MobileDesign.Motion.connectionStatusDepartureShare,
+            accuracy: 0.001
+        )
     }
 
     func testReduceMotionLandsAConnectionDotChangeWithoutAFade() {
-        let (window, dot) = mountedConnectionDot()
+        let (window, line) = mountedStatusLine()
         defer { window.isHidden = true }
 
-        dot.update(color: .systemOrange, status: "Checking connections", reducesMotion: false)
-        dot.update(color: .systemGreen, status: "Connected", reducesMotion: true)
+        update(line, status: "Checking connections", color: .systemOrange)
+        update(line, status: "Connected", color: .systemGreen, reducesMotion: true)
 
-        XCTAssertFalse(dot.isAnimatingTransitionForTesting)
-        XCTAssertNil(dot.departingIndicatorForTesting)
-        XCTAssertEqual(dot.layer.backgroundColor, UIColor.systemGreen.cgColor)
+        XCTAssertFalse(line.indicator.isAnimatingTransitionForTesting)
+        XCTAssertFalse(line.label.isAnimatingLineScrollForTesting)
+        XCTAssertNil(line.departingIndicatorForTesting)
+        XCTAssertEqual(line.indicator.layer.backgroundColor, UIColor.systemGreen.cgColor)
+    }
+
+    /// SwiftUI and the UIKit conversation title may restate the same model several times while
+    /// the transition is still playing. An idempotent update must not make the new dot pop in or
+    /// discard the old-position copy early.
+    func testRestatingAConnectionStatusPreservesItsInFlightTransition() throws {
+        let (window, line) = mountedStatusLine()
+        defer { window.isHidden = true }
+
+        update(line, status: "Checking connections", color: .systemOrange)
+        update(line, status: "Connected", color: .systemGreen)
+        let departing = try XCTUnwrap(line.departingIndicatorForTesting)
+        XCTAssertTrue(line.indicator.isAnimatingTransitionForTesting)
+
+        update(line, status: "Connected", color: .systemGreen)
+
+        XCTAssertTrue(line.indicator.isAnimatingTransitionForTesting)
+        XCTAssertTrue(line.departingIndicatorForTesting === departing)
+    }
+
+    /// The working orb replaces the connection dot. If work begins during a connection change,
+    /// both halves of the dot's fade must leave before the orb is shown.
+    func testEnteringWorkCancelsBothConnectionDotHalves() throws {
+        let (window, line) = mountedStatusLine()
+        defer { window.isHidden = true }
+
+        let mark = UIView()
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            mark.widthAnchor.constraint(equalToConstant: MobileDesign.Size.navigationWorkingOrb),
+            mark.heightAnchor.constraint(equalToConstant: MobileDesign.Size.navigationWorkingOrb),
+        ])
+        line.workingMark = mark
+        update(line, status: "Checking connections", color: .systemOrange)
+        update(line, status: "Connected", color: .systemGreen)
+        XCTAssertNotNil(line.departingIndicatorForTesting)
+
+        line.isWorking = true
+
+        XCTAssertTrue(line.indicator.isHidden)
+        XCTAssertNil(line.departingIndicatorForTesting)
+        XCTAssertFalse(line.indicator.isAnimatingTransitionForTesting)
+    }
+
+    /// The recording this line exists for: "Opening chat…" gave way to "David's MacBook Pro"
+    /// and the new phrase was drawn in two pieces, "David's MacBo" still rising while "ok Pro"
+    /// already sat lit a line above it. The label had been sized to the old words, so the morph
+    /// was built in the old width and the characters that had not fit were made fresh, without
+    /// the animation, when the wider frame landed a pass later. The line gives the phrase a
+    /// frame the words do not decide, so the morph it builds is the one that plays.
+    func testThePhraseKeepsItsFrameThroughAChangeSoTheMorphItBuildsIsTheOneThatPlays() {
+        let (window, line) = mountedStatusLine()
+        defer { window.isHidden = true }
+
+        update(line, status: "Opening chat…", color: .systemOrange)
+        let frame = line.label.frame
+
+        update(line, status: "David's MacBook Pro", color: .systemGreen)
+
+        XCTAssertEqual(line.label.frame, frame)
+        XCTAssertEqual(
+            frame.width,
+            line.bounds.width
+                - MobileDesign.Size.navigationStatusIndicator
+                - MobileDesign.Spacing.tight,
+            accuracy: 0.5,
+            "the phrase's frame is the row's width less the mark's slot, never the phrase's own"
+        )
+        XCTAssertTrue(line.label.isAnimatingLineScrollForTesting)
+        XCTAssertEqual(line.label.stringValue, "David's MacBook Pro")
+    }
+
+    /// The mark stands `Spacing.tight` before the phrase's first character, and the pair is
+    /// centred on the row — the geometry the SwiftUI row used to get from an `HStack`, now
+    /// answered by the line itself so that the label can fill the row.
+    func testTheMarkStandsBesideThePhrasesFirstCharacterAndThePairIsCentred() throws {
+        let (window, line) = mountedStatusLine()
+        defer { window.isHidden = true }
+
+        update(line, status: "Connected · Tailscale", color: .systemGreen, reducesMotion: true)
+        window.layoutIfNeeded()
+
+        let ink = line.label.glyphInkFrames.map { line.convert($0, from: line.label) }
+        let first = try XCTUnwrap(ink.min { $0.minX < $1.minX })
+        let last = try XCTUnwrap(ink.max { $0.maxX < $1.maxX })
+        XCTAssertEqual(
+            line.indicator.frame.maxX + MobileDesign.Spacing.tight,
+            first.minX,
+            accuracy: 1
+        )
+        XCTAssertEqual((line.indicator.frame.minX + last.maxX) / 2, line.bounds.midX, accuracy: 1)
+        XCTAssertEqual(line.indicator.frame.midY, line.bounds.midY, accuracy: 0.5)
+    }
+
+    /// A phrase too long for the row is drawn as its ellipsized head, and the mark stands
+    /// beside that head — not beside where the whole phrase would have begun.
+    func testATruncatedPhraseKeepsTheMarkBesideItsHead() throws {
+        let (window, line) = mountedStatusLine()
+        defer { window.isHidden = true }
+
+        let phrase = String(repeating: "Connected over a very long route name ", count: 3)
+        update(line, status: phrase, color: .systemGreen, reducesMotion: true)
+        window.layoutIfNeeded()
+
+        let ink = line.label.glyphInkFrames.map { line.convert($0, from: line.label) }
+        let first = try XCTUnwrap(ink.min { $0.minX < $1.minX })
+        let last = try XCTUnwrap(ink.max { $0.maxX < $1.maxX })
+        XCTAssertLessThanOrEqual(last.maxX, line.bounds.maxX + 0.5)
+        XCTAssertGreaterThanOrEqual(line.indicator.frame.minX, -0.01)
+        XCTAssertEqual(
+            line.indicator.frame.maxX + MobileDesign.Spacing.tight,
+            first.minX,
+            accuracy: 1
+        )
+    }
+
+    /// A change that lands while the bar is carrying the row — a push in flight — is committed,
+    /// not performed: the title arrives already saying the settled state. The connection settles
+    /// about 100 ms after a chat's screen appears, which is always inside its push.
+    func testAStatusChangeWhileTheHostIsInFlightLandsWithoutAnimation() throws {
+        let (window, line) = mountedStatusLine()
+        defer { window.isHidden = true }
+
+        update(line, status: "Opening chat…", color: .systemOrange)
+        let host = try XCTUnwrap(line.superview)
+        UIView.animate(withDuration: 1) { host.center.x += 120 }
+        XCTAssertFalse(host.layer.animationKeys()?.isEmpty ?? true, "the fixture's host is not moving")
+
+        update(line, status: "David's MacBook Pro", color: .systemGreen)
+
+        XCTAssertFalse(line.label.isAnimatingLineScrollForTesting)
+        XCTAssertFalse(line.indicator.isAnimatingTransitionForTesting)
+        XCTAssertNil(line.departingIndicatorForTesting)
+        XCTAssertEqual(line.label.stringValue, "David's MacBook Pro")
+        XCTAssertEqual(line.indicator.layer.backgroundColor, UIColor.systemGreen.cgColor)
+        host.layer.removeAllAnimations()
+    }
+
+    /// The working mark takes the dot's slot: the dot is hidden, the mark is centred where the
+    /// dot stood, and the phrase moves over to make room for the wider mark.
+    func testTheWorkingMarkStandsInTheDotsPlace() {
+        let (window, line) = mountedStatusLine()
+        defer { window.isHidden = true }
+
+        let mark = UIView()
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            mark.widthAnchor.constraint(equalToConstant: MobileDesign.Size.navigationWorkingOrb),
+            mark.heightAnchor.constraint(equalToConstant: MobileDesign.Size.navigationWorkingOrb),
+        ])
+        line.workingMark = mark
+        update(line, status: "David's MacBook Pro", color: .systemGreen, reducesMotion: true)
+        window.layoutIfNeeded()
+        let restingLabel = line.label.frame
+
+        line.isWorking = true
+        window.layoutIfNeeded()
+
+        XCTAssertTrue(line.indicator.isHidden)
+        XCTAssertFalse(mark.isHidden)
+        let markFrame = mark.convert(mark.bounds, to: line)
+        XCTAssertEqual(markFrame.width, MobileDesign.Size.navigationWorkingOrb, accuracy: 0.5)
+        XCTAssertEqual(markFrame.midY, line.bounds.midY, accuracy: 0.5)
+        XCTAssertEqual(
+            line.label.frame.minX - restingLabel.minX,
+            MobileDesign.Size.navigationWorkingOrb - MobileDesign.Size.navigationStatusIndicator,
+            accuracy: 0.5
+        )
+        XCTAssertEqual(
+            line.intrinsicContentSize.height,
+            MobileDesign.Size.navigationWorkingOrb,
+            accuracy: 0.5
+        )
+
+        line.isWorking = false
+        window.layoutIfNeeded()
+        XCTAssertFalse(line.indicator.isHidden)
+        XCTAssertEqual(line.label.frame, restingLabel)
     }
 
     func testAConnectionProgressFadeDoesNotChangeItsWords() {
@@ -528,22 +719,44 @@ final class MobileMorphingTitleTests: XCTestCase {
         return (window, title)
     }
 
-    private func mountedConnectionDot() -> (UIWindow, MobileConnectionStatusIndicatorView) {
+    /// The line at the width the bar hands a title, inside a host that stands in for the bar's
+    /// title area — something a push can move.
+    private func mountedStatusLine() -> (UIWindow, MobileConnectionStatusLineView) {
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         let controller = UIViewController()
         window.rootViewController = controller
-        let dot = MobileConnectionStatusIndicatorView(
-            frame: CGRect(
-                x: 100,
-                y: 100,
-                width: MobileDesign.Size.navigationStatusIndicator,
-                height: MobileDesign.Size.navigationStatusIndicator
-            )
-        )
-        controller.view.addSubview(dot)
+        let host = UIView(frame: CGRect(
+            x: 77,
+            y: 60,
+            width: MobileDesign.Size.navigationTitleWidth,
+            height: MobileDesign.Size.navigationTitleHeight
+        ))
+        let line = MobileConnectionStatusLineView(frame: CGRect(
+            x: 0,
+            y: 24,
+            width: MobileDesign.Size.navigationTitleWidth,
+            height: 14
+        ))
+        host.addSubview(line)
+        controller.view.addSubview(host)
         window.makeKeyAndVisible()
         window.layoutIfNeeded()
-        return (window, dot)
+        return (window, line)
+    }
+
+    private func update(
+        _ line: MobileConnectionStatusLineView,
+        status: String,
+        color: UIColor,
+        reducesMotion: Bool = false
+    ) {
+        line.update(
+            status: status,
+            color: color,
+            textColor: .secondaryLabel,
+            groundColor: .systemBackground,
+            reducesMotion: reducesMotion
+        )
     }
 
     private func configure(

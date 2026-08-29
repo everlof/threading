@@ -24,6 +24,44 @@ final class SessionInfoRowView: NSView, PointerClaiming {
         let redactedLine: String
         let fullLine: String
         let redactedCount: Int
+
+        /// Builds the two safe presentation forms from argv. An argument may itself contain a
+        /// multiline prompt; joining argv with spaces does not remove those embedded newlines,
+        /// and AppKit then measures a tall field whose first line can paint several rows away.
+        /// The panel is a one-line summary/tooltip, so all display whitespace is deliberately
+        /// collapsed before any string reaches a label.
+        init?(processArguments arguments: [String]) {
+            guard !arguments.isEmpty else { return nil }
+
+            let redacted = CommandLineRedactor.redact(arguments)
+            redactedDisplay = Self.inline(redacted.arguments.dropFirst())
+            fullDisplay = Self.inline(arguments.dropFirst())
+            redactedLine = Self.inline(redacted.arguments)
+            fullLine = Self.inline(arguments)
+            redactedCount = redacted.redactedCount
+        }
+
+        init(
+            redactedDisplay: String,
+            fullDisplay: String,
+            redactedLine: String,
+            fullLine: String,
+            redactedCount: Int
+        ) {
+            self.redactedDisplay = redactedDisplay
+            self.fullDisplay = fullDisplay
+            self.redactedLine = redactedLine
+            self.fullLine = fullLine
+            self.redactedCount = redactedCount
+        }
+
+        private static func inline<Arguments: Collection>(_ arguments: Arguments) -> String
+        where Arguments.Element == String {
+            arguments
+                .joined(separator: " ")
+                .split(whereSeparator: { $0.isWhitespace })
+                .joined(separator: " ")
+        }
     }
 
     /// What moves between polls, written into the row in place so a changing number never costs

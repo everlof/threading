@@ -165,20 +165,59 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
         )
     }
 
-    /// The status dot and phrase are one reading. Giving the phrase the title's full invisible
-    /// slot left the dot at that slot's leading edge, more than a hundred points from the words.
-    func testTheConnectionStatusHugsItsWordsInsteadOfTheTitleSlot() throws {
+    /// The status dot and phrase are one reading. The phrase once hugged its words so that the
+    /// dot beside it in an `HStack` would not be stranded at the title slot's leading edge, and
+    /// paid for it with a morph laid out in the old width. The line fills the slot instead and
+    /// places the dot at the drawn words itself.
+    func testTheConnectionLineFillsTheTitleSlotAndStandsTheDotBesideTheWords() throws {
         let status = "Trying LAN"
         let fixture = hosted(title: "David's MacBook Pro", status: status)
         let titleLabel = try morphingLabel(with: "David's MacBook Pro", in: fixture.window)
-        let statusLabel = try morphingLabel(with: status, in: fixture.window)
+        let line = try statusLine(in: fixture.window)
 
+        XCTAssertEqual(line.bounds.width, titleLabel.bounds.width, accuracy: 0.5)
+        XCTAssertEqual(line.label.stringValue, status)
+        let ink = line.label.glyphInkFrames.map { line.convert($0, from: line.label) }
+        let first = try XCTUnwrap(ink.min { $0.minX < $1.minX })
         XCTAssertEqual(
-            statusLabel.bounds.width,
-            statusLabel.intrinsicContentSize.width,
-            accuracy: 0.5
+            line.indicator.frame.maxX + MobileDesign.Spacing.tight,
+            first.minX,
+            accuracy: 1
         )
-        XCTAssertLessThan(statusLabel.bounds.width, titleLabel.bounds.width)
+    }
+
+    /// The recording: a chat opens, "Opening chat…" gives way to the Mac's name inside the
+    /// push, and the new phrase was drawn in two pieces because SwiftUI committed the wider
+    /// label a pass after the morph had been built in the narrow one. In the shipping bar the
+    /// line and its label keep their frames through the change; only the words and the dot's
+    /// place beside them differ.
+    func testAStatusChangeInTheShippingBarMovesNothingButTheWordsAndTheDot() throws {
+        let fixture = hosted(title: "TYPOGRAPHY", status: "Opening chat…")
+        let line = try statusLine(in: fixture.window)
+        let lineFrame = line.frame
+        let labelFrame = line.label.frame
+        let dotBefore = line.indicator.frame
+
+        fixture.model.status = "David's MacBook Pro"
+        settle(fixture.window)
+
+        XCTAssertTrue(try statusLine(in: fixture.window) === line, "the line was rebuilt")
+        XCTAssertEqual(line.frame, lineFrame)
+        XCTAssertEqual(line.label.frame, labelFrame)
+        XCTAssertEqual(line.label.stringValue, "David's MacBook Pro")
+        XCTAssertLessThan(line.indicator.frame.minX, dotBefore.minX, "a wider phrase moves the dot out")
+        // A settled bar is not "in motion": the change above did morph, and so does the next.
+        // This is what keeps the in-flight rule honest against a real bar's own layers.
+        XCTAssertTrue(line.label.isAnimatingLineScrollForTesting, "the phrase landed without its morph")
+        fixture.model.status = "Trying again…"
+        settle(fixture.window)
+        XCTAssertTrue(line.label.isAnimatingLineScrollForTesting)
+        XCTAssertNotNil(line.departingIndicatorForTesting)
+    }
+
+    private func statusLine(in view: UIView) throws -> MobileConnectionStatusLineView {
+        try XCTUnwrap(first(MobileConnectionStatusLineView.self, in: view),
+                      "no MobileConnectionStatusLineView in the hosted title")
     }
 
     /// LabelMorph's raster tiles deliberately extend past each glyph's typographic advance.

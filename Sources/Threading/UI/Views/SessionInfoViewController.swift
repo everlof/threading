@@ -623,16 +623,7 @@ final class SessionInfoViewController: NSViewController {
     /// hidden by `CommandLineRedactor` before anything is drawn; the raw vector survives only
     /// inside the row, behind its reveal.
     private func commandLine(for process: SessionProcess) -> SessionInfoRowView.CommandLine? {
-        guard !process.arguments.isEmpty else { return nil }
-
-        let redacted = CommandLineRedactor.redact(process.arguments)
-        return SessionInfoRowView.CommandLine(
-            redactedDisplay: redacted.arguments.dropFirst().joined(separator: " "),
-            fullDisplay: process.arguments.dropFirst().joined(separator: " "),
-            redactedLine: redacted.arguments.joined(separator: " "),
-            fullLine: process.arguments.joined(separator: " "),
-            redactedCount: redacted.redactedCount
-        )
+        SessionInfoRowView.CommandLine(processArguments: process.arguments)
     }
 
     private func add(port: ListeningPort) {
