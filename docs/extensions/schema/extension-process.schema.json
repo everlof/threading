@@ -152,6 +152,48 @@
         "context": { "$ref": "#/$defs/commandContext" }
       }
     },
+    "workspaceNavigatorHostEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "sessionIDs"],
+      "properties": {
+        "kind": { "const": "session.changed" },
+        "sessionIDs": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": "\\S"
+          }
+        }
+      }
+    },
+    "workspaceNavigatorItemPatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["collectionID", "itemID", "content"],
+      "properties": {
+        "collectionID": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "itemID": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "\\S"
+        },
+        "content": {
+          "$ref": "workspace-navigator.schema.json#/$defs/navigatorItemContent"
+        }
+      }
+    },
     "workspaceNavigatorActionResponse": {
       "type": "object",
       "additionalProperties": false,
@@ -161,6 +203,14 @@
         "requestID": { "type": "string", "minLength": 1 },
         "navigatorID": { "$ref": "#/$defs/identifier" },
         "navigator": { "$ref": "workspace-navigator.schema.json" },
+        "itemPatches": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "$comment": "The Swift validator additionally requires unique collectionID/itemID targets when patch content differs.",
+          "items": { "$ref": "#/$defs/workspaceNavigatorItemPatch" }
+        },
         "message": { "type": "string" },
         "error": { "type": "string", "minLength": 1 }
       },
@@ -173,9 +223,18 @@
             "not": {
               "anyOf": [
                 { "required": ["navigator"] },
+                { "required": ["itemPatches"] },
                 { "required": ["message"] }
               ]
             }
+          }
+        },
+        {
+          "if": {
+            "required": ["navigator"]
+          },
+          "then": {
+            "not": { "required": ["itemPatches"] }
           }
         }
       ]

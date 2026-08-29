@@ -420,6 +420,13 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
                 """
             ))
         }
+        if workspaceNavigators.contains(where: { $0.eventActionID != nil }),
+           !manifest.capabilities.contains(.hostEvents) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'host.events' when a navigator declares eventActionID"
+            ))
+        }
         if workspaceNavigators.count > 8 {
             issues.append(.init(
                 path: "workspaceNavigators",

@@ -1471,7 +1471,8 @@ final class ExtensionContractTests: XCTestCase {
                     )
                 ]
             )),
-            loadActionID: "refresh"
+            loadActionID: "refresh",
+            eventActionID: "session-event"
         )
         let request = ExtensionWorkspaceNavigatorActionRequest(
             requestID: "navigator-request",
@@ -1516,12 +1517,143 @@ final class ExtensionContractTests: XCTestCase {
             ) as? [String: Any]
         )
         legacyObject.removeValue(forKey: "loadActionID")
-        XCTAssertNil(
-            try JSONDecoder().decode(
-                ExtensionWorkspaceNavigator.self,
-                from: JSONSerialization.data(withJSONObject: legacyObject)
-            ).loadActionID
+        legacyObject.removeValue(forKey: "eventActionID")
+        let legacyNavigator = try JSONDecoder().decode(
+            ExtensionWorkspaceNavigator.self,
+            from: JSONSerialization.data(withJSONObject: legacyObject)
         )
+        XCTAssertNil(legacyNavigator.loadActionID)
+        XCTAssertNil(legacyNavigator.eventActionID)
+    }
+
+    func testWorkspaceNavigatorLiveEventsRequireAuthorityAndRoundTrip() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "threads",
+                layout: .list,
+                items: [.init(id: "one", content: .text("One", role: .body))]
+            )),
+            eventActionID: "session-event"
+        )
+        let registration = ExtensionRegistration(workspaceNavigators: [navigator])
+        let permitted = ExtensionManifest(
+            identifier: "com.example.navigator",
+            name: "Navigator",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/navigator",
+            capabilities: [.workspaceNavigation, .hostEvents]
+        )
+        try registration.validate(for: permitted)
+
+        let missingEventAuthority = ExtensionManifest(
+            identifier: "com.example.navigator",
+            name: "Navigator",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/navigator",
+            capabilities: [.workspaceNavigation]
+        )
+        XCTAssertThrowsError(try registration.validate(for: missingEventAuthority)) { error in
+            XCTAssertTrue((error as? ExtensionValidationError)?.issues.contains {
+                $0.path == "capabilities" && $0.message.contains("host.events")
+            } == true)
+        }
+
+        let event = ExtensionWorkspaceNavigatorHostEvent(
+            kind: .sessionChanged,
+            sessionIDs: ["session-1", "session-2"]
+        )
+        try event.validate()
+        XCTAssertEqual(
+            try ExtensionWorkspaceNavigatorHostEvent(actionValue: event.actionValue),
+            event
+        )
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorHostEvent(
+            kind: .sessionChanged,
+            sessionIDs: ["session-1", "session-1"]
+        ).validate())
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorHostEvent(
+            kind: .sessionChanged,
+            sessionIDs: []
+        ).actionValue)
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorHostEvent(
+            kind: .sessionChanged,
+            sessionIDs: (0...ExtensionWorkspaceNavigatorHostEvent.maximumSessionIDs).map {
+                "session-\($0)"
+            }
+        ).validate())
+    }
+
+    func testWorkspaceNavigatorItemPatchesAreBoundedAtomicContentUpdates() throws {
+        let patch = ExtensionWorkspaceNavigatorItemPatch(
+            collectionID: "threads",
+            itemID: "thread-1",
+            content: .status("Running", role: .positive)
+        )
+        let response = ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "event-request",
+            navigatorID: "activity",
+            itemPatches: [patch]
+        )
+        try response.validate()
+        try response.validateForHostEvent()
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ExtensionWorkspaceNavigatorActionResponse.self,
+                from: JSONEncoder().encode(response)
+            ),
+            response
+        )
+
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "event-request",
+            navigatorID: "activity",
+            itemPatches: [patch, patch]
+        ).validate())
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "event-request",
+            navigatorID: "activity",
+            itemPatches: []
+        ).validate())
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "event-request",
+            navigatorID: "activity",
+            itemPatches: (0...ExtensionWorkspaceNavigator.maximumItemPatches).map { index in
+                ExtensionWorkspaceNavigatorItemPatch(
+                    collectionID: "threads",
+                    itemID: "thread-\(index)",
+                    content: .status("Running", role: .positive)
+                )
+            }
+        ).validate())
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "event-request",
+            navigatorID: "activity",
+            navigator: .init(
+                id: "activity",
+                title: "Activity",
+                root: .content(.text("Complete", role: .body))
+            ),
+            itemPatches: [patch]
+        ).validate())
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "event-request",
+            navigatorID: "activity",
+            navigator: .init(
+                id: "activity",
+                title: "Activity",
+                root: .content(.text("Complete", role: .body))
+            )
+        ).validateForHostEvent())
+        XCTAssertThrowsError(try ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "event-request",
+            navigatorID: "activity",
+            itemPatches: [patch],
+            error: "Unavailable"
+        ).validate())
     }
 
     func testWorkspaceNavigatorRejectsInvalidHierarchyAndSelection() {

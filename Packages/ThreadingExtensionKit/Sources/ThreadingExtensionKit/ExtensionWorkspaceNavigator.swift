@@ -234,6 +234,51 @@ public struct ExtensionWorkspaceNavigatorItem: Codable, Equatable, Sendable {
     }
 }
 
+/// One bounded content update for an existing navigator row or grid item.
+///
+/// Item patches deliberately cannot insert, remove, reorder, reparent, retarget, select, or
+/// enable an item. They are the live-reading path for facts such as activity while the complete
+/// navigator document remains the authority for structure and interaction.
+public struct ExtensionWorkspaceNavigatorItemPatch: Codable, Equatable, Sendable {
+    public let collectionID: String
+    public let itemID: String
+    public let content: ExtensionNode
+
+    public init(collectionID: String, itemID: String, content: ExtensionNode) {
+        self.collectionID = collectionID
+        self.itemID = itemID
+        self.content = content
+    }
+
+    func validationIssues(path: String) -> [ExtensionValidationIssue] {
+        var issues: [ExtensionValidationIssue] = []
+        for (field, value) in [
+            ("collectionID", collectionID),
+            ("itemID", itemID)
+        ] {
+            if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                issues.append(.init(path: "\(path).\(field)", message: "must not be empty"))
+            } else if value.count > 256 {
+                issues.append(.init(
+                    path: "\(path).\(field)",
+                    message: "must contain at most 256 characters"
+                ))
+            }
+        }
+        do {
+            try ExtensionWorkspaceNavigator.itemConstraints.validate(
+                content,
+                path: "\(path).content"
+            )
+        } catch let error as ExtensionValidationError {
+            issues.append(contentsOf: error.issues)
+        } catch {
+            issues.append(.init(path: "\(path).content", message: error.localizedDescription))
+        }
+        return issues
+    }
+}
+
 /// A bounded snapshot which the host can render with row reuse and diff by stable item ID.
 public struct ExtensionWorkspaceNavigatorCollection: Codable, Equatable, Sendable {
     public let id: String
@@ -368,6 +413,7 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
     public static let maximumStructureNodes = 128
     public static let maximumCollections = 8
     public static let maximumItems = 1_000
+    public static let maximumItemPatches = 64
 
     public static let chromeConstraints = ExtensionComponentNodeConstraints(
         maximumDepth: 12,
@@ -408,6 +454,11 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
     /// Optional action used when the host first presents the navigator or its project model
     /// changes. The response may carry a complete replacement snapshot with the same ID.
     public let loadActionID: String?
+    /// Optional action which receives coalesced, host-observed navigator events while selected.
+    ///
+    /// The extension must also declare `host.events`. A response may carry bounded item-content
+    /// patches so one activity edge never requires replacing the complete navigator document.
+    public let eventActionID: String?
     /// A bounded hint; the user's persisted split position and host limits remain authoritative.
     public let preferredWidth: Double?
 
@@ -416,12 +467,14 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         title: String,
         root: ExtensionWorkspaceNavigatorNode,
         loadActionID: String? = nil,
+        eventActionID: String? = nil,
         preferredWidth: Double? = nil
     ) {
         self.id = id
         self.title = title
         self.root = root
         self.loadActionID = loadActionID
+        self.eventActionID = eventActionID
         self.preferredWidth = preferredWidth
     }
 
@@ -446,6 +499,13 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
            !ExtensionIdentifierRules.isContributionIdentifier(loadActionID) {
             issues.append(.init(
                 path: "\(path).loadActionID",
+                message: ExtensionIdentifierRules.contributionMessage
+            ))
+        }
+        if let eventActionID,
+           !ExtensionIdentifierRules.isContributionIdentifier(eventActionID) {
+            issues.append(.init(
+                path: "\(path).eventActionID",
                 message: ExtensionIdentifierRules.contributionMessage
             ))
         }

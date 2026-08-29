@@ -14,6 +14,101 @@
       "type": "string",
       "pattern": "^[a-z][a-z0-9.-]*$"
     },
+    "navigatorItemContent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text", "role"],
+          "properties": {
+            "type": { "const": "text" },
+            "text": { "type": "string", "maxLength": 1000 },
+            "role": {
+              "enum": [
+                "heading",
+                "body",
+                "detail",
+                "code",
+                "compactBody",
+                "compactDetail"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "reference", "role"],
+          "properties": {
+            "type": { "const": "image" },
+            "reference": {
+              "$ref": "extension-node.schema.json#/$defs/imageReference"
+            },
+            "role": { "enum": ["identity", "icon", "decoration"] },
+            "accessibilityLabel": { "type": "string", "maxLength": 1000 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "title", "role", "isEnabled"],
+          "properties": {
+            "type": { "const": "button" },
+            "id": { "$ref": "#/$defs/contributionID" },
+            "title": { "type": "string", "maxLength": 1000 },
+            "role": { "const": "standard" },
+            "isEnabled": { "type": "boolean" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text", "role"],
+          "properties": {
+            "type": { "const": "status" },
+            "text": { "type": "string", "maxLength": 1000 },
+            "role": { "enum": ["neutral", "positive", "warning", "negative"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "divider" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "spacing"],
+          "properties": {
+            "type": { "const": "spacer" },
+            "spacing": { "enum": ["none", "tight", "small", "medium", "large"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "flexibleSpacer" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "axis", "spacing", "children"],
+          "properties": {
+            "type": { "const": "stack" },
+            "axis": { "enum": ["horizontal", "vertical"] },
+            "spacing": { "enum": ["none", "tight", "small", "medium", "large"] },
+            "children": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": { "$ref": "#/$defs/navigatorItemContent" }
+            }
+          }
+        }
+      ]
+    },
     "navigator": {
       "type": "object",
       "additionalProperties": false,
@@ -27,6 +122,7 @@
         },
         "root": { "$ref": "#/$defs/navigatorNode" },
         "loadActionID": { "$ref": "#/$defs/contributionID" },
+        "eventActionID": { "$ref": "#/$defs/contributionID" },
         "preferredWidth": {
           "type": "number",
           "minimum": 180,
@@ -180,7 +276,7 @@
         "id": { "$ref": "#/$defs/stableID" },
         "sectionID": { "$ref": "#/$defs/stableID" },
         "parentID": { "$ref": "#/$defs/stableID" },
-        "content": { "$ref": "extension-node.schema.json" },
+        "content": { "$ref": "#/$defs/navigatorItemContent" },
         "accessibilityLabel": {
           "type": "string",
           "minLength": 1,
