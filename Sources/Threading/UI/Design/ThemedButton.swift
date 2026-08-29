@@ -227,8 +227,18 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// face is embedded floating chrome rather than the ordinary control surface. Remembering
     /// the semantic shape lets an appearance/theme sweep rebuild the resolved fill and depth
     /// instead of leaving the layer frozen in the theme under which the host was constructed.
-    private var floatingSurfaceRadius: SurfaceRadius?
+    private var floatingSurfaceRadius: SurfaceRadius? {
+        didSet {
+            guard floatingSurfaceRadius != nil, floatingBackdropEvents == nil else { return }
+            let events = AppEventObservations()
+            events.observe(WindowBackdropDidChange.self) { [weak self] _ in
+                self?.layoutFloatingIsolation()
+            }
+            floatingBackdropEvents = events
+        }
+    }
     private var floatingIsolationLayer: FloatingTargetIsolationLayer?
+    private var floatingBackdropEvents: AppEventObservations?
 
     /// What is painted may follow a theme's display convention; what accessibility and the
     /// action model expose remains the authored title below.
@@ -922,11 +932,13 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
             cornerHeight: radius.current,
             transform: nil
         )
+        // The face belongs to the app theme; the pixels immediately around it belong to the
+        // pane. Native Conversation and Git Review can sit on the selected terminal palette,
+        // which is deliberately independent of the theme's `ground` role. Painting this ring
+        // from the theme therefore reproduces the very tail it is meant to erase whenever the
+        // terminal and chrome grounds differ.
         effectiveAppearance.performAsCurrentDrawingAppearance {
-            isolation.isolationColor = AppThemePalette.current.resolved(
-                .ground,
-                appearance: effectiveAppearance
-            ).cgColor
+            isolation.isolationColor = WindowBackdrop.color.cgColor
         }
         isolation.setNeedsDisplay()
     }

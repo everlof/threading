@@ -34,6 +34,7 @@ enum MobileDemoScene: Equatable {
     case welcome
     case settings
     case connectionProgressLab
+    case connectionStatus
     case appIconSettings
     case collaborationSettings
     case advancedConnectionSettings
@@ -105,6 +106,7 @@ extension MobileDemoScene {
         case let id where id.hasPrefix("welcome"): return .welcome
         case "settings": return .settings
         case "connection-progress-lab": return .connectionProgressLab
+        case "connection-status": return .connectionStatus
         case "app-icon-settings": return .appIconSettings
         case "collaboration-settings": return .collaborationSettings
         case "advanced-connection-settings": return .advancedConnectionSettings
@@ -199,6 +201,7 @@ enum MobileDemoFixture: String, CaseIterable {
     case notificationSettings = "notification-settings"
     case macAppearanceSettings = "mac-appearance-settings"
     case connectionProgressLab = "connection-progress-lab"
+    case connectionStatus = "connection-status"
     case diagnostics = "diagnostics"
 
     /// The mobile terminal key bar's editor.
@@ -389,6 +392,25 @@ struct RootView: View {
         case .connectionProgressLab:
             NavigationStack {
                 MobileConnectionProgressLab()
+            }
+        case .connectionStatus:
+            // The panel's content on its own stack, from the demo Mac's record: what the sheet
+            // shows, without a sheet to wait for. The chain reaches this only with a host, which
+            // every demo mode has from the first render.
+            if let host = model.activeHost {
+                NavigationStack {
+                    MobileConnectionStatusContent(
+                        report: MobileConnectionReport.demo(
+                            host: host,
+                            record: model.lastConnection
+                        ),
+                        isChecking: false,
+                        check: {},
+                        copy: {}
+                    )
+                }
+            } else {
+                standardRoot
             }
         case .appIconSettings:
             NavigationStack {

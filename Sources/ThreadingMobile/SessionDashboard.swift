@@ -1018,7 +1018,7 @@ struct SessionDashboard: View {
             }
         }
         ToolbarItem(placement: .principal) {
-            MobileConnectionNavigationTitle(
+            MobileConnectionStatusButton(
                 title: navigationTitle,
                 status: statusText,
                 statusColor: statusColor

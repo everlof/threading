@@ -777,7 +777,17 @@ private struct RemoteNavigationTitle: View {
             .buttonStyle(.plain)
             .accessibilityHint(Text(failure.recoveryTitle))
         } else {
-            title
+            // A healthy title answers the question its second line raises: tapping it opens
+            // the same connection panel the chat list's title does.
+            MobileConnectionStatusButton(
+                title: MobileSessionChrome.navigationTitle(
+                    for: connection.session,
+                    in: model.me,
+                    liveTitle: connection.mirroredCaption
+                ),
+                status: label,
+                statusColor: color
+            )
         }
     }
 

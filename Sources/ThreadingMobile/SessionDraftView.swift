@@ -340,7 +340,7 @@ private struct SessionDraftComposerScreen: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                MobileConnectionNavigationTitle(
+                MobileConnectionStatusButton(
                     title: MobileL10n.string("New session"),
                     status: appModel.activeHost?.name ?? MobileL10n.string("Connected"),
                     statusColor: hostStatusColor

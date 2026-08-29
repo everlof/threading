@@ -1,6 +1,16 @@
 {
   "sourceLanguage": "en",
   "strings": {
+    "%@ (%@)": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ (%@)"
+          }
+        }
+      }
+    },
     "%d / %d": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d / %d" } } }
     },
@@ -16,14 +26,364 @@
     "%d seconds": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "%d sekunder" } } }
     },
+    "%lld ms": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld ms"
+          }
+        }
+      }
+    },
+    "%lld · this app %lld": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld · den här appen %lld"
+          }
+        }
+      }
+    },
     "1 minute": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 minut" } } }
     },
     "1 second": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "1 sekund" } } }
     },
+    "Address": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adress"
+          }
+        }
+      }
+    },
+    "Addresses stay on this iPhone. Copy details puts these words on the clipboard and never includes the pairing credential.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Adresserna stannar på den här iPhonen. Kopiera uppgifter lägger de här orden på urklipp och tar aldrig med parkopplingens behörighet."
+          }
+        }
+      }
+    },
+    "Cellular": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mobilnät"
+          }
+        }
+      }
+    },
+    "Check connection": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kontrollera anslutningen"
+          }
+        }
+      }
+    },
+    "Connected over %@": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ansluten via %@"
+          }
+        }
+      }
+    },
+    "Connection reused": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Anslutning återanvänd"
+          }
+        }
+      }
+    },
+    "Copy details": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Kopiera uppgifter"
+          }
+        }
+      }
+    },
+    "DNS": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "DNS"
+          }
+        }
+      }
+    },
+    "Ethernet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ethernet"
+          }
+        }
+      }
+    },
+    "Found on this network": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hittad på det här nätverket"
+          }
+        }
+      }
+    },
+    "Identity": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identitet"
+          }
+        }
+      }
+    },
+    "Identity code": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Identitetskod"
+          }
+        }
+      }
+    },
+    "In use": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Används"
+          }
+        }
+      }
+    },
+    "Last request": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senaste begäran"
+          }
+        }
+      }
+    },
+    "Last used address": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senast använda adress"
+          }
+        }
+      }
+    },
+    "Last way in": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Senaste väg in"
+          }
+        }
+      }
+    },
     "Local diagnostics is disabled on the Mac.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Lokal diagnostik är avstängd på Macen." } } }
+    },
+    "Low Data Mode": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Låg datatrafik"
+          }
+        }
+      }
+    },
+    "Network": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nätverk"
+          }
+        }
+      }
+    },
+    "No": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nej"
+          }
+        }
+      }
+    },
+    "No addresses": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga adresser"
+          }
+        }
+      }
+    },
+    "No network": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inget nätverk"
+          }
+        }
+      }
+    },
+    "Not connected to a Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte ansluten till någon Mac"
+          }
+        }
+      }
+    },
+    "Not pinned": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte fastnålad"
+          }
+        }
+      }
+    },
+    "Not pinned, system trust": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inte fastnålad, systemets tillit"
+          }
+        }
+      }
+    },
+    "Over cellular": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Via mobilnät"
+          }
+        }
+      }
+    },
+    "Pinned and verified": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fastnålad och verifierad"
+          }
+        }
+      }
+    },
+    "Pinned, not checked yet": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fastnålad, inte kontrollerad ännu"
+          }
+        }
+      }
+    },
+    "Protocol": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Protokoll"
+          }
+        }
+      }
+    },
+    "Refused: certificate mismatch": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nekad: certifikatet stämmer inte"
+          }
+        }
+      }
+    },
+    "Server wait": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Väntan på servern"
+          }
+        }
+      }
+    },
+    "Shows how this iPhone reaches the Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visar hur den här iPhonen når Mac-datorn"
+          }
+        }
+      }
+    },
+    "TCP": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TCP"
+          }
+        }
+      }
+    },
+    "TLS": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "TLS"
+          }
+        }
+      }
     },
     "That account is no longer available. Threading is refreshing the choices; review them and try again.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Det kontot är inte längre tillgängligt. Threading uppdaterar alternativen; granska dem och försök igen." } } }
@@ -84,6 +444,26 @@
     },
     "The Mac received too many requests. Wait a moment and try again.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Macen fick för många förfrågningar. Vänta en stund och försök igen." } } }
+    },
+    "This Mac": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här Mac-datorn"
+          }
+        }
+      }
+    },
+    "This iPhone": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Den här iPhonen"
+          }
+        }
+      }
     },
     "This invitation is expired or already used.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Inbjudan har gått ut eller har redan använts." } } }
@@ -253,6 +633,26 @@
     "Switched Macs": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Bytte Mac" } } }
     },
+    "Through Threading’s service": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Via Threadings tjänst"
+          }
+        }
+      }
+    },
+    "Tried in this order until one answers.": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prövas i den här ordningen tills någon svarar."
+          }
+        }
+      }
+    },
     "Under 5 seconds": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Under 5 sekunder" } } }
     },
@@ -334,8 +734,58 @@
     "This controls how this chat responds when an account limit is reached.": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Detta styr hur den här chatten reagerar när en kontogräns nås." } } }
     },
+    "VPN or other": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "VPN eller annat"
+          }
+        }
+      }
+    },
+    "Way in": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Väg in"
+          }
+        }
+      }
+    },
+    "Ways in": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Vägar in"
+          }
+        }
+      }
+    },
     "When the Limit Is Reached": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "När gränsen nås" } } }
+    },
+    "Wi-Fi": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Wi-Fi"
+          }
+        }
+      }
+    },
+    "Yes": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ja"
+          }
+        }
+      }
     },
     "this account": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "det här kontot" } } }

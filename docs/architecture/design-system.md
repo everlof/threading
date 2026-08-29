@@ -3363,14 +3363,18 @@ still become part of its perceived silhouette when there is no separating ink.
 `ThemedButton.floatingScrollToEnd` had also bypassed `ThemedFloatingSurfaceChrome`, constructing an
 `elevated` surface directly. The shared factory now uses the floating-surface contract: an opaque
 floating-role fill flattened over theme ground, the active material's edge and depth treatment,
-and the target's semantic pill geometry. A two-point ring of theme ground is drawn immediately
-outside that geometry. The ring does not enlarge the hit target; it only prevents arbitrary rows,
-rules and selections underneath from visually joining the control. Its shadow path remains the
-button face, so the knockout cannot create shadow ticks, and a half-side pill uses a true circular
-curve rather than a continuous-corner squircle.
+and the target's semantic pill geometry. A two-point ring of the **live `WindowBackdrop`** is
+drawn immediately outside that geometry. The distinction is load-bearing: the face belongs to the
+app theme, while a session pane may still be painted from the selected terminal palette; using
+the theme's ground for both made the ring disappear whenever those grounds differed. The ring
+follows backdrop changes without waiting for a theme sweep, does not enlarge the hit target, and
+only prevents arbitrary rows, rules and selections underneath from visually joining the control.
+Its shadow path remains the button face, so the knockout cannot create shadow ticks, and a
+half-side pill uses a true circular curve rather than a continuous-corner squircle.
 
 This belongs in the factory rather than either host. Both macOS consumers get the same behavior,
 and theme/appearance refresh re-derives the fill, isolation ink, edge, radius and depth together.
-`FloatingScrollTargetRenderTests` holds the contract over every stock theme and every appearance:
-changing the live content behind the control may not change interior pixels, and a visible band
-crossing its midpoint must be separated from both outer edges.
+`FloatingScrollTargetRenderTests` holds the contract over every stock theme and every appearance
+on a contrasting terminal backdrop: changing the live content behind the control may not change
+interior pixels, and a visible band crossing its midpoint must be separated from both outer edges
+by pixels matching the live backdrop rather than the theme's ground.

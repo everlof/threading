@@ -17,6 +17,22 @@ final class FloatingScrollTargetRenderTests: XCTestCase {
         static let scale = 3
         static let target = NSRect(x: 36, y: 28, width: 40, height: 40)
         static let band = NSRect(x: 0, y: 20, width: size.width, height: 28)
+        /// A session pane may keep the selected terminal palette behind a native conversation.
+        /// Deliberately unlike every ordinary dark chrome ground, so a ring resolved from the
+        /// app theme instead of the live window backdrop cannot pass by coincidence.
+        static let terminalGround = NSColor(
+            srgbRed: 5 / 255,
+            green: 10 / 255,
+            blue: 17 / 255,
+            alpha: 1
+        )
+        /// The pane-wide live row from the reported dark screenshot.
+        static let liveBand = NSColor(
+            srgbRed: 35 / 255,
+            green: 39 / 255,
+            blue: 45 / 255,
+            alpha: 1
+        )
         static let colorTolerance: CGFloat = 0.025
         static let visibleBandDifference: CGFloat = 0.04
     }
@@ -56,19 +72,19 @@ final class FloatingScrollTargetRenderTests: XCTestCase {
         for theme in AppThemeLibrary.stock {
             for (suffix, appearance) in try appearances(of: theme) {
                 AppThemePalette.set(theme)
-                WindowBackdrop.set(.chrome)
 
-                let ground = theme.resolved(.ground, appearance: appearance)
-                let band = theme.resolved(.border, appearance: appearance)
-                    .composited(over: ground)
+                let ground = Fixture.terminalGround
+                let band = Fixture.liveBand
                 let plain = try render(
                     theme: theme,
                     appearance: appearance,
+                    ground: ground,
                     band: ground
                 )
                 let crossed = try render(
                     theme: theme,
                     appearance: appearance,
+                    ground: ground,
                     band: band
                 )
                 let name = "\(theme.name)\(suffix)"
@@ -93,12 +109,18 @@ final class FloatingScrollTargetRenderTests: XCTestCase {
                 guard difference(ground, band) > Fixture.visibleBandDifference else { continue }
                 checkedVisibleBands += 1
                 let farBand = try crossed.color(at: NSPoint(x: 4, y: Fixture.target.midY))
+                let farGround = try plain.color(at: NSPoint(x: 4, y: Fixture.target.midY))
                 for (side, x) in [
                     ("leading", Fixture.target.minX - 1),
                     ("trailing", Fixture.target.maxX + 1)
                 ] {
                     let separation = try crossed.color(
                         at: NSPoint(x: x, y: Fixture.target.midY)
+                    )
+                    XCTAssertLessThanOrEqual(
+                        difference(separation, farGround),
+                        Fixture.colorTolerance,
+                        "\(name): the \(side) isolation ring did not match the live window backdrop"
                     )
                     XCTAssertGreaterThan(
                         difference(separation, farBand),
@@ -136,9 +158,9 @@ final class FloatingScrollTargetRenderTests: XCTestCase {
     private func render(
         theme: AppTheme,
         appearance: NSAppearance,
+        ground: NSColor,
         band: NSColor
     ) throws -> Raster {
-        let ground = theme.resolved(.ground, appearance: appearance)
         let root = BackdropView(ground: ground, band: band)
         root.appearance = appearance
 
@@ -156,6 +178,10 @@ final class FloatingScrollTargetRenderTests: XCTestCase {
             window.close()
         }
 
+        // Construct the target against app chrome, then switch the live session backdrop after
+        // layout. The production pane can change palettes without a theme repaint; retaining the
+        // old ring colour would recreate the reported bridge until some unrelated relayout.
+        WindowBackdrop.set(.chrome)
         let button = ThemedButton.floatingScrollToEnd(
             accessibility: "Scroll to end",
             target: nil,
@@ -168,6 +194,7 @@ final class FloatingScrollTargetRenderTests: XCTestCase {
         AppThemeRefresh.repaint(root)
         root.layoutSubtreeIfNeeded()
         button.layoutSubtreeIfNeeded()
+        WindowBackdrop.set(.terminal(ground))
 
         let rep = try XCTUnwrap(NSBitmapImageRep(
             bitmapDataPlanes: nil,

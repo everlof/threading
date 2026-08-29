@@ -272,6 +272,10 @@ final class RemoteAppModel: ObservableObject {
     /// The dashboard uses the count to keep a transient miss in compact progress chrome and
     /// disclose the full recovery surface only after repeated bounded attempts.
     @Published private(set) var connectionRecoveryAttempt = 0
+    /// The route this phone last reached a Mac over, for the connection panel. Kept across a
+    /// drop so the panel can still say what was in use; the panel reads it only for the Mac it
+    /// names.
+    @Published private(set) var lastConnection: MobileConnectionRecord?
     private var themeEventsDidReceiveHello = false
     private var themeEventsStartedAt: UInt64?
     private var themeEventsDiagnosticFields: [RemoteDiagnosticField: String] = [:]
@@ -333,6 +337,12 @@ final class RemoteAppModel: ObservableObject {
             string: "https://david-mac.tailnet-demo.ts.net:8443/#preview"
            ) {
             isDemo = true
+            // This scene photographs a row containing the connection time. Its clock is part of
+            // the fixture, not ambient machine state: otherwise every minute creates a visual
+            // regression and accepting it merely blesses the time at which the test happened.
+            let demoNow = demoMode == "connection-status"
+                ? Date(timeIntervalSince1970: 1_800_000_000)
+                : Date()
             var host = PairedRemoteHost(
                 id: "demo-mac",
                 hostID: "demo-mac",
@@ -340,7 +350,7 @@ final class RemoteAppModel: ObservableObject {
                 scope: "all",
                 name: "David’s MacBook Pro",
                 link: link,
-                lastConnectedAt: Date(),
+                lastConnectedAt: demoNow,
                 endpoints: [
                     RemoteHostEndpointDTO(
                         kind: .tailscale,
@@ -356,7 +366,7 @@ final class RemoteAppModel: ObservableObject {
                 connectionPolicy: .privateOnly,
                 activeEndpointKind: .tailscale
             )
-            if demoMode == "sessions-offline" {
+            if demoMode == "sessions-offline" || demoMode == "connection-status" {
                 // A public, deterministic certificate fingerprint gives the recovery fixture the
                 // same 26-character comparison code a real paired record carries. No credential
                 // or machine state enters UI evidence.
@@ -374,7 +384,7 @@ final class RemoteAppModel: ObservableObject {
                 scope: "all",
                 name: "Studio Mac",
                 link: studioLink,
-                lastConnectedAt: Date().addingTimeInterval(-600),
+                lastConnectedAt: demoNow.addingTimeInterval(-600),
                 endpoints: [RemoteHostEndpointDTO(
                     kind: .tailscale,
                     baseURL: studioLink.baseURL,
@@ -404,6 +414,12 @@ final class RemoteAppModel: ObservableObject {
             } else {
                 me = Self.demoResponse
                 phase = .online
+                lastConnection = .demo(
+                    hostID: host.id,
+                    baseURL: link.baseURL,
+                    kind: .tailscale,
+                    now: demoNow
+                )
             }
             return
         }
@@ -454,6 +470,12 @@ final class RemoteAppModel: ObservableObject {
         continuity.setActiveHostID(host.id)
         me = Self.demoResponse
         phase = .online
+        lastConnection = .demo(
+            hostID: host.id,
+            baseURL: host.link.baseURL,
+            kind: host.activeEndpointKind ?? PairedRemoteHost.endpointKind(for: host.link.baseURL),
+            now: Date()
+        )
     }
 
     /// Leaves the demo and restores whatever was actually paired — for a first-run user,
@@ -1045,6 +1067,15 @@ final class RemoteAppModel: ObservableObject {
             connectionRecoveryAttempt = 0
         }
         phase = .online
+        lastConnection = MobileConnectionRecord(
+            hostID: hostID,
+            kind: connection.kind,
+            baseURL: successfulLink.baseURL,
+            isHosted: connection.isHosted,
+            connectedAt: Date(),
+            metrics: connection.metrics,
+            serverProtocol: response.serverProtocol
+        )
         restoreRouteIfPossible(hostID: hostID, response: response)
         MobileDiagnostics.recordConnectivity(
             .hostRefreshSucceeded,
@@ -1634,6 +1665,11 @@ final class RemoteAppModel: ObservableObject {
         discovery.stop()
     }
 
+    /// Where a paired Mac was last found on this network, if the browse has seen it.
+    func discoveredAddress(forHostID id: String) -> URL? {
+        discoveredAddresses[id]
+    }
+
     /// Records where a paired Mac was found, and puts that record's existing pins into force for
     /// the address so the next request over it is checked rather than refused.
     ///
@@ -1720,6 +1756,8 @@ final class RemoteAppModel: ObservableObject {
         let link: RemoteConnectionLink
         let isHosted: Bool
         let kind: RemoteHostEndpointKind
+        /// URL loading evidence for the request that answered, when the task reported any.
+        let metrics: RemoteRequestMetrics?
     }
 
     private func fetchMe(
@@ -2097,7 +2135,8 @@ final class RemoteAppModel: ObservableObject {
                 response: response,
                 link: candidate.link,
                 isHosted: candidate.isHosted,
-                kind: candidate.kind
+                kind: candidate.kind,
+                metrics: metrics.snapshot
             )
         } catch {
             let cancelled = error is CancellationError || Task.isCancelled
@@ -2197,6 +2236,20 @@ final class RemoteAppModel: ObservableObject {
                     ]) { _, new in new }
                 )
                 invalidateRefreshes()
+                // A mutation that had to fail over is now the route in use; the panel says so
+                // without waiting for the next catalogue refresh.
+                if let current = lastConnection, current.hostID == hostID,
+                   current.baseURL != candidate.link.baseURL || current.isHosted != candidate.isHosted {
+                    lastConnection = MobileConnectionRecord(
+                        hostID: hostID,
+                        kind: candidate.kind,
+                        baseURL: candidate.link.baseURL,
+                        isHosted: candidate.isHosted,
+                        connectedAt: Date(),
+                        metrics: nil,
+                        serverProtocol: current.serverProtocol
+                    )
+                }
                 if let index = hosts.firstIndex(where: { $0.id == hostID }),
                    (candidate.isHosted
                         ? hosts[index].activeEndpointKind != .hosted

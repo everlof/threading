@@ -719,6 +719,13 @@ final class RemoteRequestMetricsCollector: NSObject, URLSessionTaskDelegate, @un
         return stored?.diagnosticFields ?? [:]
     }
 
+    /// The metrics as collected, for the connection panel. Nil until the task finished.
+    var snapshot: RemoteRequestMetrics? {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,

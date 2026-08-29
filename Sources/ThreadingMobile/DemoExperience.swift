@@ -41,7 +41,13 @@ enum DemoExperience {
             scope: "all",
             name: MobileL10n.string("Demo Mac"),
             link: link,
-            lastConnectedAt: Date()
+            lastConnectedAt: Date(),
+            // One advertised door, so the demo reads as a Mac on the same network rather than
+            // as the legacy relay a bare sentinel address classifies as. Nothing connects to
+            // it: `refresh()` and the session sockets both stop at `isDemo` first.
+            endpoints: [RemoteHostEndpointDTO(kind: .lan, baseURL: link.baseURL, isStable: true)],
+            connectionPolicy: .privateOnly,
+            activeEndpointKind: .lan
         )
     }
 }

@@ -33,6 +33,8 @@
     {"id": "session-dashboard-connecting-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-connecting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "session-dashboard-offline-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-offline", "appearance": "dark", "theme": "custom"},
     {"id": "connection-progress-lab-custom-dark", "entryID": "ios-connection-progress", "demo": "connection-progress-lab", "appearance": "dark", "theme": "custom"},
+    {"id": "connection-status-custom-dark", "entryID": "ios-connection-status", "demo": "connection-status", "appearance": "dark", "theme": "custom"},
+    {"id": "connection-status-custom-light", "entryID": "ios-connection-status", "demo": "connection-status", "appearance": "light", "theme": "custom-light"},
     {"id": "session-settings-custom-dark", "entryID": "ios-session-settings", "demo": "session-settings", "appearance": "dark", "theme": "custom"},
     {"id": "session-opening-connecting-custom-dark", "entryID": "ios-session-opening", "demo": "session-opening-connecting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "session-opening-connecting-custom-light", "entryID": "ios-session-opening", "demo": "session-opening-connecting", "appearance": "light", "theme": "custom-light", "captureMode": "display"},
@@ -241,6 +243,18 @@
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/connection-progress-lab-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}
+    },
+    {
+      "id": "ios-connection-status",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Connection panel",
+      "description": "The panel the two-line connection title opens on the chat list, a project's chat list, an open chat and a new-session draft: the way in and address in use, the identity check, the answering request's protocol and timings, every saved way in, and the iPhone's own network and addresses.",
+      "states": ["Connected over Tailscale on Wi-Fi with a cellular context up"],
+      "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
+      "capture": {"glob": "ios/connection-status-*.png"},
+      "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied"]}
     },
     {
       "id": "ios-native-conversation",

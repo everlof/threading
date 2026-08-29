@@ -405,6 +405,10 @@ struct MobileConnectionNavigationTitle: View {
             maxWidth: MobileDesign.Size.navigationTitleWidth
         )
         .accessibilityElement(children: .combine)
+        // Stated, not combined: the two lines are bridged UIKit labels, and combining the
+        // children of a SwiftUI element reads nothing off a bridged view, so the title reached
+        // VoiceOver as an unnamed element. The name is what the two lines say.
+        .accessibilityLabel(Text(verbatim: "\(title), \(status)"))
     }
 }
 

@@ -2521,6 +2521,19 @@ loading sessions after the Mac answers. The current words carry a short travelin
 Motion keeps them still. If one route does not answer, Threading moves to the next saved route
 automatically; you do not need to restart the app or choose a connection manually.
 
+Tap the title at the top of the chat list, a project's chat list, an open chat or a new-session
+draft to see how the phone is connected. The panel names the Mac and the way in that answered
+(**this network**, **VPN**, **Tailscale** or **Threading Direct**), the address it answered at and
+when, whether the certificate it presented matched the identity this phone pins, and the remote
+protocol on both sides. Under it are the HTTP protocol and the DNS, TCP, TLS and server-wait
+timings of the request that answered; every saved way in with its address, with the one in use
+marked and an address found by discovery on the current network listed first; and this iPhone's
+own network (Wi-Fi, cellular, Ethernet, Low Data Mode) with its addresses per interface.
+**Check connection** tries the saved ways in again, and **Copy details** puts the same words on
+this iPhone's local clipboard without Universal Clipboard sharing. Nothing in the panel leaves
+the phone, and the copy never includes the pairing credential. While the Mac is unreachable the
+panel keeps the last way in and address so you can see what stopped answering.
+
 A connection that cannot be made says so rather than spinning. A Mac that accepts the connection
 and never answers is reported after a short wait, and the chat title stays tappable to retry. Two
 failures are named because retrying them changes nothing: **This Mac’s address has changed. Scan

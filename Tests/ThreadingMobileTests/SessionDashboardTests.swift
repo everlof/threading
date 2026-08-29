@@ -583,6 +583,7 @@ final class MobileDemoSceneTests: XCTestCase {
                 expected = ("mac-appearance-settings", .macAppearanceSettings)
             case .connectionProgressLab:
                 expected = ("connection-progress-lab", .connectionProgressLab)
+            case .connectionStatus: expected = ("connection-status", .connectionStatus)
             case .diagnostics: expected = ("diagnostics", .diagnostics)
             case .terminalKeySettings: expected = ("terminal-key-settings", .terminalKeySettings)
             case .terminalKeyEditor: expected = ("terminal-key-editor", .terminalKeyEditor)

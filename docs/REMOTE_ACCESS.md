@@ -1175,6 +1175,44 @@ prompt it would have from the Mac, and appears in the Attachments tab beside wha
 of it. If custody cannot be taken for every file, the submission is rejected rather than sent
 without them: someone who attached a picture and pressed send meant to send the picture.
 
+## Connection details on the phone
+
+The two-line title in the phone's navigation bar — the chat list, a project's chat list, an open
+chat and the new-session draft all carry it — is `MobileConnectionStatusButton`, and tapping it
+opens `MobileConnectionStatusSheet`. One control on every screen, because the second line ("Connected
+· Tailscale") raises the same question everywhere and the answer should not depend on which screen
+asked it. An open chat keeps its own tap only while its socket has failed, where the title is
+already the recovery action.
+
+What the panel says is a value, `MobileConnectionReport`, resolved from four things:
+
+- **`MobileConnectionRecord`**, which `RemoteAppModel` writes when a refresh race succeeds and
+  replaces when a mutation had to fail over: the way in, the origin (scheme, host, port; never the
+  link, whose fragment is the bearer), whether it was the hosted rendezvous, when, the
+  `RemoteRequestMetrics` URLSession reported for the answering request, and the Mac's protocol
+  pair. The diagnostics journal deliberately hashes the origin and drops the timings' context, so
+  this is the only place the facts survive in a form a person can read. It is on-device state.
+- **The paired record**: name, every policy-admitted endpoint with its address, the discovered
+  address if the browse found one, the pinned identity's pairing code.
+- **The pin verdict** for the address in use, read from the pinning delegate the same way the
+  support report reads it: *pinned and verified*, *refused* on a fingerprint mismatch, *not
+  pinned, system trust* for a Serve or hosted endpoint, and *pinned, not checked yet* before the
+  first challenge.
+- **The phone's own network**: `MobileNetworkPathObserver` runs one `NWPathMonitor` for as long as
+  the panel is up and walks `getifaddrs` in the path handler and nowhere else, so the syscall runs
+  when the network changes and not per render. `MobileNetworkInterfaces` classifies by BSD name
+  (`en0` Wi-Fi, `pdp_ip*` cellular, `utun*`/`ipsec*`/`ppp*` VPN, other `en*` Ethernet), hides
+  loopback and the peer links, drops link-local IPv6, and bounds both the interface count and the
+  addresses per family.
+
+The panel lists addresses on purpose. The recovery card names only the *labels* of the routes it
+tried, because recovery should not read as a network inspector; this panel is the network
+inspector, opened by asking for it. **Copy details** puts the report's words on a `localOnly`
+pasteboard item, so Universal Clipboard cannot carry the private-network addresses to another
+device. Nothing else is copied, and the tests assert both that policy and that the credential, the
+fingerprint hex and the link never reach the item. `THREADING_MOBILE_DEMO=connection-status`
+renders the panel's content from the demo Mac's record for the evidence catalogue.
+
 ## Diagnostics sharing
 
 iOS and the browser keep a small seven-day journal of typed connection events on that client.

@@ -39,6 +39,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Mobile terminal return-to-end control | — | host-only | emulator scroll-end truth, TUI/local ownership, follow-mode transition, motion and accessibility | Host-only |
 | Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |
 | Mobile connection reuse settings and metrics | — | host-only | authenticated transport lifecycle, mirror detach/resume truth, bounded pool policy, privacy-safe telemetry | Host-only |
+| Mobile connection details panel | — | host-only | active-route and address truth, endpoint ordering, certificate verdict, bounded network inspection, refresh authority and device-local clipboard policy | Host-only |
 | Local iOS diagnostics settings | — | host-only | independent consent, pairing and authorization, request nonces, evidence allowlist, screenshot policy and bounded custody | Host-only |
 | Session hover card | `sidebar.session-hover-card@1` | hook, replacement | hover, popover, session lifecycle | Implemented |
 | Account usage popover | `toolbar.account-usage-popover@1` | hook, replacement | refresh, account selection, hover survival | Implemented |
@@ -165,6 +166,14 @@ subscriber detachment, viewport/presence/input-control release, resume authoriza
 capacity bounds, and the privacy boundary of the aggregate counters. An extension may not replace
 or relabel this page and claim a socket is cheap, parked, reused or private when the host lifecycle
 does not say so.
+
+The mobile connection details panel is host-only for the same truthfulness and security reasons.
+It names the route that actually answered, the address and request timings captured by that
+attempt, the ordered fallback routes, the certificate verdict from the pinning delegate and the
+phone's bounded interface snapshot. Threading retains the refresh action and the device-local
+clipboard policy as well as those facts; a replaceable panel could otherwise claim an unverified
+address is pinned, mark the wrong route active, or export network details beyond the phone. No
+extension component or host-data authority is introduced for this diagnostic surface.
 
 Local iOS diagnostics settings are host-only because the switches are the visible consent
 boundary for a content-bearing evidence route. Threading must keep each device's opt-in paired
