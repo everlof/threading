@@ -55,10 +55,12 @@ final class RemoteEventJournalTests: XCTestCase {
             case .decision: expected = "decision"
             case .update: expected = "update"
             case .reason: expected = "reason"
+            case .agent: expected = "agent"
+            case .model: expected = "model"
             }
             XCTAssertEqual(field.rawValue, expected)
         }
-        XCTAssertEqual(RemoteEventField.allCases.count, 18)
+        XCTAssertEqual(RemoteEventField.allCases.count, 20)
     }
 
     /// The typed key has to survive the one place it becomes a string again.

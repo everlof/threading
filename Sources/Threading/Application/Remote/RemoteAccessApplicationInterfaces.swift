@@ -114,6 +114,10 @@ enum RemoteEventField: String, CaseIterable, Hashable, Sendable {
     case update
     /// Why something was refused.
     case reason
+    /// The runtime a launch request named.
+    case agent
+    /// The model a launch request named, or `inherit` when it left that to the account.
+    case model
 }
 
 /// The remote adapter may append structured events but cannot inspect or manage the journal.

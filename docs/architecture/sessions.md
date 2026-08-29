@@ -1226,6 +1226,21 @@ Delivery covers both surfaces:
   Native per-chat changes continue to ride `turn/start`, so they take effect on the next turn
   without restarting the app-server.
 
+**An omitted model is the account's default, for Fast as well as for effort.** A phone's draft,
+the report chat and the Mac composer all send no model to mean "whatever this login is configured
+to run" — while showing that model's own Fast control, because the catalogue answers
+`supportsFastMode` per model id. `handleCreateSession` asked the same question with the model it
+was sent, which was nil, and `AgentModels.supportsFastMode` answered for a model called nil:
+*Unsupported Speed*, for a speed the Mac had offered the phone seconds earlier (a Codex draft on
+`gpt-5.6-sol`, model left to the account, Fast picked). The effort check beside it had always
+resolved nil through `defaultModel(for:account:)` first; the Fast check now does the same, so the
+catalogue projection, the create gate, the report launch and every chip agree about an inherited
+model. Only a login naming no model at all still answers "no control", and
+`claudeSupportsFastMode(nil)` keeps meaning that. The refusal was also invisible on the Mac — a
+422 answered the phone and journalled nothing — so every launch-choice refusal now records
+`Remote session refused` with the code, agent and model (never the prompt), which is what turns
+"my chat would not start" into a line that says why.
+
 The reply chip's effective reading follows the same precedence (conversation, app default,
 account/catalog, runtime fallback) — and it now *asks* `AgentModels.effectiveFastMode` rather than
 restating three of its four steps. The two disagreed about the fourth: Claude's fast mode is a

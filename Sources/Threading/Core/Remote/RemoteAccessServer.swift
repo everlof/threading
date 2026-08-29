@@ -987,6 +987,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
     }
 
+    /// What the journal says for a launch choice the request left to the account.
+    private enum RemoteLaunchJournalValue {
+        static let inherited = "inherit"
+    }
+
     private func handleCreateSession(
         _ request: HTTPRequest,
         respond: @escaping @Sendable (RemoteRouteDecision) -> Void
@@ -1018,14 +1023,22 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         DispatchQueue.main.async {
+            // A refused choice answers the phone and used to leave nothing here, so a report
+            // saying "my chat would not start" could not be matched to what this Mac declined.
+            // The choices are what the refusal is about; the prompt stays out of the journal.
+            let refuse: (Int, String, RemoteRESTErrorCode) -> Void = { status, reason, code in
+                self.services.eventLog.recordRemoteEvent("Remote session refused", [
+                    .share: authorization.shareID,
+                    .reason: code.rawValue,
+                    .agent: creation.agentKind,
+                    .model: creation.model ?? RemoteLaunchJournalValue.inherited,
+                ])
+                respond(.respond(RemoteRouter.error(status, reason, code: code)))
+            }
             guard let projectID = ProjectID(uuidString: creation.projectID),
                   self.services.sessionQueries.project(withID: projectID) != nil,
                   let kind = AgentKind(rawValue: creation.agentKind) else {
-                respond(.respond(RemoteRouter.error(
-                    422,
-                    "Unknown Launch Choice",
-                    code: .unknownLaunchChoice
-                )))
+                refuse(422, "Unknown Launch Choice", .unknownLaunchChoice)
                 return
             }
 
@@ -1038,7 +1051,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 guard let selected = discoveredAccounts.first(where: {
                     $0.handle == accountHandle
                 }) else {
-                    respond(.respond(RemoteRouter.error(422, "Unknown Account", code: .unknownAccount)))
+                    refuse(422, "Unknown Account", .unknownAccount)
                     return
                 }
                 account = selected
@@ -1046,7 +1059,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             let modelOptions = AgentModels.options(for: kind, account: account)
             if let model = creation.model,
                !modelOptions.contains(where: { $0.identifier == model }) {
-                respond(.respond(RemoteRouter.error(422, "Unknown Model", code: .unknownModel)))
+                refuse(422, "Unknown Model", .unknownModel)
                 return
             }
             if let effort = creation.reasoningEffort {
@@ -1057,22 +1070,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     account: account,
                     options: modelOptions
                 ) else {
-                    respond(.respond(RemoteRouter.error(
-                        422,
-                        "Unknown Reasoning Effort",
-                        code: .unknownReasoningEffort
-                    )))
+                    refuse(422, "Unknown Reasoning Effort", .unknownReasoningEffort)
                     return
                 }
             }
             let permissionMode = creation.permissionMode.flatMap(AgentPermissionMode.init(rawValue:))
             guard creation.permissionMode == nil
                     || (permissionMode != nil && kind.supportsPermissionModes) else {
-                respond(.respond(RemoteRouter.error(
-                    422,
-                    "Unknown Permission Mode",
-                    code: .unknownPermissionMode
-                )))
+                refuse(422, "Unknown Permission Mode", .unknownPermissionMode)
                 return
             }
             if creation.fastMode != nil {
@@ -1081,21 +1086,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     model: creation.model,
                     account: account
                 ) else {
-                    respond(.respond(RemoteRouter.error(
-                        422,
-                        "Unsupported Speed",
-                        code: .unsupportedSpeed
-                    )))
+                    refuse(422, "Unsupported Speed", .unsupportedSpeed)
                     return
                 }
             }
             let usesNativeUI = creation.surface == .conversation
             guard !usesNativeUI || kind.supportsNativeUI else {
-                respond(.respond(RemoteRouter.error(
-                    422,
-                    "Unsupported Surface",
-                    code: .unsupportedSurface
-                )))
+                refuse(422, "Unsupported Surface", .unsupportedSurface)
                 return
             }
             // Absent is a chat, the only thing older phones could ask for. The lossless wire
@@ -1104,7 +1101,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             // guessed as chat: a phone that asked for a manager and got a chat would not find
             // out until the agent failed to reach its siblings.
             guard let role = creation.role.map({ SessionRole(rawValue: $0.rawValue) }) ?? .chat else {
-                respond(.respond(RemoteRouter.error(422, "Unknown Role", code: .unknownRole)))
+                refuse(422, "Unknown Role", .unknownRole)
                 return
             }
 
@@ -1124,11 +1121,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                           kind: kind,
                           usesNativeUI: usesNativeUI
                       ) else {
-                    respond(.respond(RemoteRouter.error(
-                        422,
-                        "Unsupported Workspace",
-                        code: .unsupportedWorkspace
-                    )))
+                    refuse(422, "Unsupported Workspace", .unsupportedWorkspace)
                     return
                 }
                 managedWorkspacePlan = ManagedWorkspacePlan(delivery: delivery)

@@ -283,6 +283,176 @@ final class ModelNameTests: XCTestCase {
         )
     }
 
+    /// A phone's draft, the report chat and the Mac composer all send no model to mean "the
+    /// account's default" — while showing that default's own Fast control. The gate has to
+    /// answer for the model that will run, or it refuses a speed its own catalogue offered:
+    /// a create request from the phone came back *Unsupported Speed* for exactly that.
+    func testCodexFastControlForAnOmittedModelIsTheAccountDefaultsAnswer() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("""
+            {
+              "models": [
+                {
+                  "slug": "gpt-fast",
+                  "display_name": "GPT Fast",
+                  "visibility": "list",
+                  "service_tiers": [
+                    {"id": "priority", "name": "Fast", "description": "Quick"}
+                  ]
+                },
+                {
+                  "slug": "gpt-plain",
+                  "display_name": "GPT Plain",
+                  "visibility": "list"
+                }
+              ]
+            }
+            """.utf8).write(
+                to: directory.appendingPathComponent(AgentDefaults.codexModelsCacheFile)
+            )
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .standard,
+            configPath: directory.path
+        )
+        let config = directory.appendingPathComponent(AgentDefaults.codexConfigFile)
+
+        try Data("model = \"gpt-fast\"\n".utf8).write(to: config)
+        XCTAssertTrue(AgentModels.supportsFastMode(kind: .codex, model: nil, account: account))
+        XCTAssertEqual(
+            AgentModels.supportsFastMode(kind: .codex, model: nil, account: account),
+            AgentModels.supportsFastMode(
+                kind: .codex,
+                model: AgentModels.defaultModel(for: .codex, account: account),
+                account: account
+            ),
+            "the catalogue answers per model id and the gate answers for nil; they must agree"
+        )
+
+        try Data("model = \"gpt-plain\"\n".utf8).write(to: config)
+        XCTAssertFalse(AgentModels.supportsFastMode(kind: .codex, model: nil, account: account))
+        XCTAssertTrue(
+            AgentModels.supportsFastMode(kind: .codex, model: "gpt-fast", account: account),
+            "an explicit model still answers for itself"
+        )
+
+        try FileManager.default.removeItem(at: config)
+        XCTAssertFalse(
+            AgentModels.supportsFastMode(kind: .codex, model: nil, account: account),
+            "an account naming no model is unknown, and unknown is no control"
+        )
+    }
+
+    /// The same contract on the control-channel mechanism: an omitted model resolves through the
+    /// login's own `settings.json` before the family test, and only a login naming no model at
+    /// all is still "not guessed".
+    func testClaudeFastControlForAnOmittedModelIsTheAccountDefaultsAnswer() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let account = AgentAccount(
+            provider: .claude,
+            handle: .standard,
+            configPath: directory.path
+        )
+        let settings = directory.appendingPathComponent(AgentDefaults.claudeSettingsFile)
+
+        try Data(#"{"model":"opus"}"#.utf8).write(to: settings)
+        XCTAssertTrue(AgentModels.supportsFastMode(kind: .claude, model: nil, account: account))
+
+        try Data(#"{"model":"sonnet"}"#.utf8).write(to: settings)
+        XCTAssertFalse(AgentModels.supportsFastMode(kind: .claude, model: nil, account: account))
+        XCTAssertTrue(
+            AgentModels.supportsFastMode(kind: .claude, model: "opus", account: account),
+            "an explicit model still answers for itself"
+        )
+
+        try Data("{}".utf8).write(to: settings)
+        XCTAssertFalse(AgentModels.supportsFastMode(kind: .claude, model: nil, account: account))
+        XCTAssertFalse(
+            AgentModels.supportsFastMode(kind: .claude, model: nil, account: nil),
+            "no login at all is not guessed either"
+        )
+    }
+
+    /// Codex truncates `models_cache.json` and then writes it, so for a moment every half-minute
+    /// the file is empty. That moment must not turn the catalogue into the bare configured model
+    /// — which is how a phone's chat was refused for a speed the Mac had just offered it — and
+    /// a genuinely new catalogue must still replace the remembered one.
+    func testCodexCatalogSurvivesTheCacheBeingRewrittenInPlace() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = directory.appendingPathComponent(AgentDefaults.codexModelsCacheFile)
+        try Data("model = \"gpt-first\"\n".utf8).write(
+            to: directory.appendingPathComponent(AgentDefaults.codexConfigFile)
+        )
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .standard,
+            configPath: directory.path
+        )
+
+        XCTAssertEqual(
+            AgentModels.options(for: .codex, account: account).map(\.identifier),
+            ["gpt-first"],
+            "a login Codex has not written a catalogue for still offers its configured model"
+        )
+        XCTAssertFalse(AgentModels.supportsFastMode(kind: .codex, model: nil, account: account))
+
+        try Data("""
+            {
+              "models": [
+                {
+                  "slug": "gpt-first",
+                  "display_name": "GPT First",
+                  "visibility": "list",
+                  "service_tiers": [{"id": "priority", "name": "Fast", "description": ""}],
+                  "supported_reasoning_levels": [{"effort": "low", "description": ""}]
+                }
+              ]
+            }
+            """.utf8).write(to: cache)
+        XCTAssertTrue(AgentModels.supportsFastMode(kind: .codex, model: nil, account: account))
+        XCTAssertTrue(
+            AgentModels.supports(reasoningEffort: "low", kind: .codex, model: nil, account: account)
+        )
+
+        // The truncate half of Codex's rewrite, held open: the file exists and is empty.
+        try Data().write(to: cache)
+        XCTAssertEqual(
+            AgentModels.options(for: .codex, account: account).map(\.identifier),
+            ["gpt-first"]
+        )
+        XCTAssertTrue(
+            AgentModels.supportsFastMode(kind: .codex, model: nil, account: account),
+            "an empty cache answered for the login instead of the catalogue it had proved"
+        )
+        XCTAssertTrue(
+            AgentModels.supports(reasoningEffort: "low", kind: .codex, model: nil, account: account),
+            "the effort levels went with the Fast tier"
+        )
+
+        // A half-written file is no better than an empty one.
+        try Data("{\"models\": [{\"slug\": \"gpt-".utf8).write(to: cache)
+        XCTAssertTrue(AgentModels.supportsFastMode(kind: .codex, model: nil, account: account))
+
+        // A new catalogue is read as itself, not remembered away.
+        try Data("""
+            {
+              "models": [
+                {"slug": "gpt-second", "display_name": "GPT Second", "visibility": "list"}
+              ]
+            }
+            """.utf8).write(to: cache)
+        XCTAssertEqual(
+            AgentModels.options(for: .codex, account: account).map(\.identifier),
+            ["gpt-second"]
+        )
+        XCTAssertFalse(
+            AgentModels.supportsFastMode(kind: .codex, model: "gpt-second", account: account)
+        )
+    }
+
     func testClaudeFastModeCapabilityMatchesOpusFamilyNotDatedVersions() {
         // A family match keeps a future Opus working without a code change — the point of not
         // pinning opus-4-7/4-8.
