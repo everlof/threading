@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -172,6 +173,47 @@ class VersionAllocationTests(unittest.TestCase):
         published = releases(("v0.1.0", False))
         result = run("publishable", "release", "0.1.0", "v0.1.0-retry", published=published)
         self.assertEqual(result.returncode, 1)
+
+
+class ChangelogNotesTests(unittest.TestCase):
+
+    def test_exact_section_is_extracted_without_regex_portability(self) -> None:
+        changelog = """# Changelog
+
+## [Unreleased]
+
+Not shipped.
+
+## [0.1.0]
+
+### Added
+
+- First release.
+- Stable notes.
+
+## [0.0.9]
+
+- Older notes.
+"""
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as file:
+            file.write(changelog)
+            file.flush()
+            result = run("notes", "0.1.0", file.name)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip(),
+            "### Added\n\n- First release.\n- Stable notes.",
+        )
+
+    def test_missing_section_yields_no_notes(self) -> None:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8") as file:
+            file.write("# Changelog\n\n## [0.1.0]\n\n- First release.\n")
+            file.flush()
+            result = run("notes", "9.9.9", file.name)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "")
 
 
 if __name__ == "__main__":

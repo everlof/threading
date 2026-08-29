@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# The grammar of a release tag, and the ordering rule between the channels it names.
+# The grammar of a release tag, the ordering rule between the channels it names, and the
+# changelog section that becomes its public release notes.
 #
 # A library rather than inline `case` statements in scripts/publish_release.sh, because this is
 # the part of publishing that decides *what gets built and who receives it* from a string
@@ -145,14 +146,29 @@ release_version_is_publishable() {
     fi
 }
 
+# Prints the body of one exact `## [version]` changelog section.
+#
+# Compare headings as strings, not regular expressions. Besides avoiding special meaning for
+# dotted versions, this works identically in BSD awk on the release Mac and other awk variants.
+release_notes_for_version() {
+    local version="${1:-}" changelog="${2:-}"
+    [[ -n "$version" && -f "$changelog" ]] || return 2
+    awk -v heading="## [$version]" '
+        $0 == heading { printing = 1; next }
+        printing && substr($0, 1, 4) == "## [" { exit }
+        printing { print }
+    ' "$changelog"
+}
+
 # The CLI half, so the rules above are exercisable from a test without sourcing bash into it.
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     case "${1:-}" in
         describe) release_tag_describe "${2:-}" ;;
         compare) release_version_compare "${2:-}" "${3:-}" ;;
         publishable) release_version_is_publishable "${2:-}" "${3:-}" "${4:-}" ;;
+        notes) release_notes_for_version "${2:-}" "${3:-}" ;;
         *)
-            printf 'usage: %s describe <tag> | compare <a> <b> | publishable <channel> <version> [current-tag] < releases\n' "$0" >&2
+            printf 'usage: %s describe <tag> | compare <a> <b> | publishable <channel> <version> [current-tag] < releases | notes <version> <changelog>\n' "$0" >&2
             exit 2
             ;;
     esac
