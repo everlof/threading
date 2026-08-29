@@ -463,6 +463,9 @@ struct RemoteUsageDashboardView: View {
     private func accountRail(_ accounts: [MobileUsageFleetProjection.Account]) -> some View {
         let selectedID = selectedAccount?.id
         return ScrollViewReader { proxy in
+            // The rail runs edge to edge with the page inset as scroll-content margins: a chip
+            // at either end then keeps air around its stroke instead of meeting the clip edge,
+            // which shaved the selected chip's accent border and its corner.
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: MobileDesign.Spacing.small) {
                     ForEach(accounts) { account in
@@ -470,8 +473,10 @@ struct RemoteUsageDashboardView: View {
                             .id(account.id)
                     }
                 }
-                .padding(.horizontal, MobileDesign.Spacing.hairline)
+                .padding(.vertical, MobileDesign.Spacing.hairline)
             }
+            .contentMargins(.horizontal, MobileDesign.Spacing.inset, for: .scrollContent)
+            .padding(.horizontal, -MobileDesign.Spacing.inset)
             .onAppear {
                 if let selectedID { proxy.scrollTo(selectedID, anchor: .center) }
             }
