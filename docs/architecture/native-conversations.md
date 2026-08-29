@@ -382,6 +382,17 @@ grant execution. On native launch, a leading `/` or `$` opening message waits un
 transport's catalog handshake is authoritative and then re-enters the ordinary
 `ConversationViewController.submit` path. Known commands therefore take their semantic RPC or
 native safety refusal; unknown text still follows the provider's ordinary unknown-command path.
+
+Every row Threading writes itself carries a description, because the completion row reserves a
+line for one whether or not there is text in it. The Codex terminal-only rows shipped with none,
+so `/goal` and `/logout` drew a name, a blank line, and a right-hand label reading "Command" —
+which answers nothing the person who pressed `/` was asking. The Claude expectations had four
+real descriptions and a shared "availability is checked when Claude Code starts" for the other
+ninety-two, which is a sentence about Threading rather than about the command. Both now carry
+the CLI's own summary in Threading's voice, snapshotted from Codex 0.150.1 and Claude Code
+2.1.251 on 2026-08-29; a test fails on a pre-session row whose detail is empty or is only the
+name again. The live catalogs still replace all of it, and Codex's terminal-only rows are the
+same values in both, so a description added here is not missing once app-server is up.
 Ordinary opening prose is not delayed. Grok's ACP catalog is complete in `initialize`; Cursor's
 arrives in `available_commands_update`, with a five-second fallback so an omitted optional
 notification cannot strand the opening message. Codex's built-in slash catalog becomes available
