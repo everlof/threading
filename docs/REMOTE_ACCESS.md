@@ -606,6 +606,21 @@ screen seed. The phone keeps a four-second failure escape. Compatibility remains
 older phone ignores the feature and marker; a current phone connected to an older host retains its
 one-second input-silence fallback.
 
+**A reconnect keeps the old screen until the new one has arrived whole.** Backgrounding drops the
+socket, and the reconnect on return receives the Mac's authoritative ring again, so the mounted
+SwiftTerm must be reset before that replay replaces its state. Resetting at connect time is what
+produced the resume sequence *old text → blank → "Opening chat…" → new text*. A terminal that has
+already drawn something (`hasPresentedTerminalOutput`) now holds the reset and the replay in the
+connection's buffer and delivers them together the moment hydration completes — the boundary
+above, or its timers — so the last screen becomes the new one in a single frame. While the hold
+lasts, the terminal surface stays on display dimmed and softened under a small "Reconnecting…"
+plate rather than hidden behind a full loader; a first opening, with nothing to keep, shows the
+loader on the terminal's ground as before. The hold is also released early if the SwiftTerm view
+attaches mid-reconnect (nothing to keep yet) and dropped if the connection ends first (the next one
+asks for the ring again). Separately, the session socket reconnects the moment the app becomes
+active instead of serving out a backoff that was counting while the app was suspended.
+`RemoteTerminalViewportLeaseTests` proves both the hold and the untouched first-open reset.
+
 **The chat says who can see it.** For a long time the app could report that a session was
 shared and nothing else — not who accepted a link, not whether anyone was on it, not how many
 links were still lying around unused. That was a privacy gap and a debugging one: two clients
@@ -734,6 +749,17 @@ click (the single-tap recognizer fires on it regardless), and the second tap ans
 instead of repeating the click. With the keyboard already up, or nothing tracking, a double tap
 keeps its old meanings — the program's click and word selection respectively.
 `RemoteTerminalTapTests` pins all of it.
+
+**The keyboard comes back the way the chat was left.** An interactive terminal took the keyboard
+on every creation, and a return from the background kept whatever iOS had restored — two rules
+that read as none. `TerminalKeyBridge.keyboardWantedUp` is what the person asked for: raised
+whenever the terminal takes the keyboard, lowered only by the bar's own dismiss; a pop, a sheet,
+an input-mode switch or the app going away hide the keyboard without touching it. The chat's
+continuity record keeps that answer (`terminalKeyboardWasUp`, a disposable position-like field)
+when the chat is left or the app resigns, and a reopened chat's terminal takes the keyboard on
+creation only if it was wanted last time. A chat never left before takes it, as it always did.
+Returning from the background changes nothing here: the terminal is no longer rebuilt on
+reconnect, so iOS restores the responder it had.
 
 **Selecting text had to survive the thing being selected.** SwiftTerm's iOS view cleared the
 selection on every line feed whenever the program tracked the mouse — which on the phone is

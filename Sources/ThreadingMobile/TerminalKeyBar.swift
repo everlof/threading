@@ -16,6 +16,39 @@ final class TerminalKeyBridge: ObservableObject {
         didSet { refreshKeyboardAvailability() }
     }
 
+    /// Whether the person wants the keyboard up in this terminal: raised whenever the terminal
+    /// takes the keyboard, lowered only by the bar's own dismiss. A pop, a sheet or the app
+    /// going to the background hide the keyboard without changing what was wanted, and what
+    /// was wanted is what a reopened chat restores — the keyboard used to come up on every
+    /// reopen and stay wherever iOS left it on return, which read as two different rules.
+    @Published private(set) var keyboardWantedUp = true
+    private var keyboardObserver: NSObjectProtocol?
+
+    init() {
+        keyboardObserver = NotificationCenter.default.addObserver(
+            forName: UIResponder.keyboardDidShowNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.terminalView?.isFirstResponder == true else { return }
+                self.keyboardWantedUp = true
+            }
+        }
+    }
+
+    deinit {
+        if let keyboardObserver {
+            NotificationCenter.default.removeObserver(keyboardObserver)
+        }
+    }
+
+    /// What the chat remembered from last time, applied before the terminal decides whether
+    /// to take the keyboard on creation.
+    func seedKeyboardWanted(_ wanted: Bool) {
+        keyboardWantedUp = wanted
+    }
+
     var applicationCursorActive: Bool {
         terminalView?.terminalStateSnapshot().applicationCursor ?? false
     }
@@ -133,6 +166,12 @@ final class TerminalKeyBridge: ObservableObject {
     /// ask it directly, and let the window answer for a composer or anything else that took the
     /// keyboard instead.
     func dismissKeyboard() {
+        keyboardWantedUp = false
+        dismissKeyboardForModeSwitch()
+    }
+
+    /// Puts the keyboard away for an input-mode switch, not for good: what was wanted stands.
+    func dismissKeyboardForModeSwitch() {
         if let terminalView, terminalView.isFirstResponder {
             _ = terminalView.resignFirstResponder()
         }

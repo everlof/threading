@@ -20,6 +20,10 @@ struct TerminalViewRepresentable: UIViewRepresentable {
     /// action. Defaulted so the view composes without a quote sink while the composer wiring
     /// that supplies one is being assembled.
     var quoteSelection: (@MainActor (String) -> Void)? = nil
+    /// Whether the terminal takes the keyboard as soon as it exists. The chat's memory of how
+    /// it was left decides; a chat never left before takes it, as an interactive terminal
+    /// always did.
+    var focusesOnCreation = true
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -66,7 +70,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 #endif
 
         context.coordinator.bindRenderer(to: connection)
-        if allowsDirectInput {
+        if allowsDirectInput, focusesOnCreation {
 #if DEBUG
             if ProcessInfo.processInfo.environment[
                 "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
