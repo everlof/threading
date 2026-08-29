@@ -1,5 +1,8 @@
+import PhotosUI
 import SwiftUI
 import ThreadingRemoteKit
+import UIKit
+import UniformTypeIdentifiers
 
 /// The screen a chat is written on before it exists, and the screen it is read on after.
 ///
@@ -147,6 +150,17 @@ private struct SessionDraftComposerScreen: View {
     /// lets the row fold as the keyboard drops.
     @State private var keyboardIsLeaving = false
     @State private var runPickerIsPresented = false
+    @State private var attachmentTray: ComposerAttachmentTray?
+    @State private var attachmentItems: [ComposerAttachmentItem] = []
+    @State private var attachmentNotice: String?
+    @State private var attachmentPhotoItems: [PhotosPickerItem] = []
+    @State private var attachmentPicksInFlight = 0
+    @State private var isChoosingAttachmentSource = false
+    @State private var pendingAttachmentSource: SessionDraftAttachmentSource?
+    @State private var isPickingAttachmentPhotos = false
+    @State private var isImportingAttachmentFiles = false
+    @State private var clipboardOffersFiles = false
+    @State private var presentedAttachmentEvidence = false
     @FocusState private var promptIsFocused: Bool
 
     /// What the empty prompt suggests. One is drawn per draft, so the set has to be large
@@ -352,6 +366,7 @@ private struct SessionDraftComposerScreen: View {
         }
         .onAppear {
             applyCatalogDefaults()
+            configureAttachments()
             hintAnimated = true
 #if DEBUG
             if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
@@ -371,6 +386,11 @@ private struct SessionDraftComposerScreen: View {
                     status: 422,
                     code: RemoteRESTErrorCode.unknownModel.rawValue
                 ).localizedDescription
+            }
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "new-session-attachments", !presentedAttachmentEvidence {
+                presentedAttachmentEvidence = true
+                Task { @MainActor in beginChoosingAttachmentSource() }
             }
             if ProcessInfo.processInfo.environment[
                 "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
@@ -395,6 +415,24 @@ private struct SessionDraftComposerScreen: View {
             // choice, but do not submit an identifier the current Mac catalogue has withdrawn.
             applyCatalogDefaults()
         }
+        .onChange(of: appModel.client != nil) { _, _ in
+            configureAttachments()
+        }
+        .onChange(of: supportsDraftAttachments) { _, _ in
+            configureAttachments()
+        }
+        .onChange(of: attachmentPhotoItems) { _, items in
+            beginLoadingPhotos(items)
+        }
+        .onChange(of: isChoosingAttachmentSource) { _, isPresented in
+            guard !isPresented, let source = pendingAttachmentSource else { return }
+            pendingAttachmentSource = nil
+            switch source {
+            case .photos: isPickingAttachmentPhotos = true
+            case .files: isImportingAttachmentFiles = true
+            case .clipboard: _ = stageClipboardFiles()
+            }
+        }
         .onReceive(
             NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
         ) { _ in
@@ -414,6 +452,19 @@ private struct SessionDraftComposerScreen: View {
             ),
             actions: [ThemedDialogAction("OK")]
         )
+        .photosPicker(
+            isPresented: $isPickingAttachmentPhotos,
+            selection: $attachmentPhotoItems,
+            maxSelectionCount: remainingAttachmentSlots,
+            matching: .any(of: [.images, .videos])
+        )
+        .fileImporter(
+            isPresented: $isImportingAttachmentFiles,
+            allowedContentTypes: ComposerAttachmentSources.documentTypes,
+            allowsMultipleSelection: true
+        ) { result in
+            beginImportingFiles(result)
+        }
     }
 
     /// The middle of the ground: the surface's glyph, the project as a plain dropdown, and its
@@ -472,7 +523,26 @@ private struct SessionDraftComposerScreen: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 0) {
+            if let attachmentNotice {
+                Text(attachmentNotice)
+                    .font(.caption)
+                    .foregroundStyle(theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, MobileDesign.Spacing.small)
+            }
+            if !attachmentItems.isEmpty {
+                ComposerAttachmentStrip(
+                    items: attachmentItems,
+                    theme: theme,
+                    isRemovalEnabled: !isSubmitting,
+                    remove: { attachmentTray?.remove($0) }
+                )
+                .padding(.bottom, MobileDesign.Spacing.small)
+            }
             HStack(alignment: .top, spacing: MobileDesign.Spacing.small) {
+                if attachmentTray != nil {
+                    attachmentButton
+                }
                 promptEditor
                 sendButton
             }
@@ -507,14 +577,67 @@ private struct SessionDraftComposerScreen: View {
     /// still the whole composer. Top-aligned: a longer prompt grows down from a stable first
     /// row instead of carrying the button away with every line.
     private var promptEditor: some View {
-        TextField(promptPlaceholder, text: $prompt, axis: .vertical)
-            .focused($promptIsFocused)
+        ZStack(alignment: .topLeading) {
+            SessionDraftPromptEditor(
+                text: $prompt,
+                isFocused: Binding(
+                    get: { promptIsFocused },
+                    set: { promptIsFocused = $0 }
+                ),
+                isEnabled: !isSubmitting,
+                theme: theme,
+                offersFiles: { attachmentTray?.canAcceptMore == true
+                    && ComposerClipboard.general.hasFiles },
+                pasteFiles: stageClipboardFiles
+            )
             .mobileUIEvidenceKeyboardFocus($promptIsFocused)
-            .textFieldStyle(.plain)
-            .font(.body)
-            .lineLimit(1...6)
-            .frame(minHeight: MobileDesign.Size.compactControl)
-            .disabled(isSubmitting)
+            if prompt.isEmpty {
+                Text(promptPlaceholder)
+                    .font(.body)
+                    .foregroundStyle(theme.tertiaryLabel)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .frame(minHeight: MobileDesign.Size.compactControl)
+    }
+
+    private var attachmentButton: some View {
+        Button(action: beginChoosingAttachmentSource) {
+            Image(systemName: "paperclip")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(theme.secondaryLabel)
+                .frame(
+                    width: MobileDesign.Size.compactControl,
+                    height: MobileDesign.Size.compactControl
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isSubmitting || attachmentTray?.canAcceptMore != true)
+        .accessibilityLabel(MobileL10n.string("Attachments"))
+        .themedConfirmationDialog(
+            "Attachments",
+            isPresented: $isChoosingAttachmentSource,
+            actions: attachmentSourceActions
+        )
+    }
+
+    private var attachmentSourceActions: [ThemedDialogAction] {
+        var actions: [ThemedDialogAction] = []
+        if clipboardOffersFiles {
+            actions.append(ThemedDialogAction("From Clipboard") {
+                pendingAttachmentSource = .clipboard
+            })
+        }
+        actions.append(ThemedDialogAction("Photo Library") {
+            pendingAttachmentSource = .photos
+        })
+        actions.append(ThemedDialogAction("Files") {
+            pendingAttachmentSource = .files
+        })
+        actions.append(ThemedDialogAction("Cancel", role: .cancel))
+        return actions
     }
 
     /// The run settings — how the chat will run — as one compact, non-scrolling row. Where and
@@ -859,12 +982,125 @@ private struct SessionDraftComposerScreen: View {
         return "\(project.name) · \(branch)"
     }
 
+    // MARK: - Attachments
+
+    /// An older Mac ignores the create request's additive fields. The affordance therefore
+    /// follows explicit discovery: showing it without this feature could upload successfully
+    /// against the draft UUID and then launch a first prompt that silently omitted every file.
+    private var supportsDraftAttachments: Bool {
+        if appModel.me?.features?.contains(
+            RemoteRESTFeature.sessionDraftAttachmentUploads.rawValue
+        ) == true {
+            return true
+        }
+#if DEBUG
+        return ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+            == "new-session-attachments"
+#else
+        return false
+#endif
+    }
+
+    private var remainingAttachmentSlots: Int {
+        max(
+            1,
+            RemoteAttachmentUploadLimits.maximumPerMessage
+                - (attachmentTray?.items.count ?? 0)
+        )
+    }
+
+    private func configureAttachments() {
+        guard attachmentTray == nil, supportsDraftAttachments,
+              let client = appModel.client else { return }
+        let tray = ComposerAttachmentTray(
+            client: client,
+            uploadScopeID: draft.id.uuidString
+        )
+        tray.onChange = { [weak tray] in
+            guard let tray else { return }
+            attachmentItems = tray.items
+            attachmentNotice = tray.notice
+        }
+        attachmentTray = tray
+    }
+
+    private func beginChoosingAttachmentSource() {
+        guard attachmentTray?.canAcceptMore == true else { return }
+        // This asks only for type availability. Bytes are read after an explicit Paste/source
+        // choice, preserving iOS's paste privacy prompt and keeping body recomputation cheap.
+        clipboardOffersFiles = ComposerClipboard.general.hasFiles
+        isChoosingAttachmentSource = true
+    }
+
+    @discardableResult
+    private func stageClipboardFiles() -> Bool {
+        guard let tray = attachmentTray, tray.canAcceptMore else { return false }
+        let files = ComposerClipboard.general.files()
+        guard !files.isEmpty else { return false }
+        for file in files {
+            tray.add(data: file.data, name: file.name, type: file.type)
+        }
+        return true
+    }
+
+    private func beginLoadingPhotos(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        attachmentPicksInFlight += 1
+        Task { @MainActor in
+            defer { attachmentPicksInFlight -= 1 }
+            guard let tray = attachmentTray else { return }
+            for item in items {
+                guard let data = try? await item.loadTransferable(type: Data.self),
+                      let type = item.supportedContentTypes.first else {
+                    tray.reportUnreadableFile()
+                    continue
+                }
+                tray.add(
+                    data: data,
+                    name: "photo-\(UUID().uuidString.prefix(8)).\(type.preferredFilenameExtension ?? "jpg")",
+                    type: type
+                )
+            }
+            attachmentPhotoItems = []
+        }
+    }
+
+    private func beginImportingFiles(_ result: Result<[URL], Error>) {
+        guard let urls = try? result.get() else {
+            attachmentTray?.reportUnreadableFile()
+            return
+        }
+        guard !urls.isEmpty else { return }
+        attachmentPicksInFlight += 1
+        Task { @MainActor in
+            defer { attachmentPicksInFlight -= 1 }
+            guard let tray = attachmentTray else { return }
+            for url in urls.prefix(remainingAttachmentSlots) {
+                let accessed = url.startAccessingSecurityScopedResource()
+                let loaded = await Task.detached(priority: .userInitiated) {
+                    let data = ComposerAttachmentSources.readFile(at: url)
+                    let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)
+                        ?? UTType(filenameExtension: url.pathExtension)
+                    return data.map { ($0, type ?? .data) }
+                }.value
+                if accessed { url.stopAccessingSecurityScopedResource() }
+                guard let (data, type) = loaded else {
+                    tray.reportUnreadableFile()
+                    continue
+                }
+                tray.add(data: data, name: url.lastPathComponent, type: type)
+            }
+        }
+    }
+
     // MARK: - Defaults
 
     private var canSubmit: Bool {
         !isSubmitting
             && !projectID.isEmpty
             && !agentID.isEmpty
+            && attachmentPicksInFlight == 0
+            && attachmentTray?.isSettling != true
             && !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -929,6 +1165,7 @@ private struct SessionDraftComposerScreen: View {
         guard canSubmit else { return }
         isSubmitting = true
         promptIsFocused = false
+        let openingAttachmentUploadIDs = attachmentTray?.readyUploadIDs ?? []
         Task {
             do {
                 let creation = try await appModel.createSession(
@@ -941,8 +1178,13 @@ private struct SessionDraftComposerScreen: View {
                     permissionMode: permissionID.isEmpty ? nil : permissionID,
                     surface: surface,
                     role: role.wireValue,
+                    openingAttachmentScopeID: openingAttachmentUploadIDs.isEmpty
+                        ? nil
+                        : draft.id.uuidString,
+                    openingAttachmentUploadIDs: openingAttachmentUploadIDs,
                     prompt: prompt
                 )
+                attachmentTray?.clear()
                 // Turns this screen into the session's: `SessionDraftView` fades this one
                 // out over the chat the model now says the draft became.
                 appModel.noteDraftStarted(draft, creation: creation)
@@ -963,6 +1205,118 @@ private struct SessionDraftComposerScreen: View {
             }
         }
     }
+}
+
+/// The new-session prompt's native editor.
+///
+/// SwiftUI's axis-expanding `TextField` was visually compact, but it left this one composer on a
+/// different edit-menu path from every existing-session composer. Hosting the shared
+/// `IntrinsicTextView` restores UIKit's selection, insertion-point paste, undo, accessibility,
+/// and file-paste interception while keeping SwiftUI responsible for the surrounding layout.
+struct SessionDraftPromptEditor: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    let isEnabled: Bool
+    let theme: RemoteThemePalette
+    let offersFiles: () -> Bool
+    let pasteFiles: () -> Bool
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, isFocused: $isFocused)
+    }
+
+    func makeUIView(context: Context) -> IntrinsicTextView {
+        let view = IntrinsicTextView()
+        view.delegate = context.coordinator
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.adjustsFontForContentSizeCategory = true
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.accessibilityLabel = MobileL10n.string("Prompt")
+        return view
+    }
+
+    func updateUIView(_ view: IntrinsicTextView, context: Context) {
+        if view.text != text {
+            view.text = text
+            view.invalidateIntrinsicContentSize()
+        }
+        view.font = UIFont.preferredFont(forTextStyle: .body)
+        view.textColor = theme.uiLabel
+        view.tintColor = theme.uiAccent
+        view.isEditable = isEnabled
+        view.isSelectable = true
+        view.minimumIntrinsicHeight = MobileDesign.Size.compactControl
+        view.maximumIntrinsicHeight = SessionDraftPromptMetrics.maximumHeight
+        view.offersFiles = offersFiles
+        view.pasteFiles = pasteFiles
+
+        if isFocused, !view.isFirstResponder {
+            Task { @MainActor [weak view] in
+                guard let view, isFocused, view.window != nil else { return }
+                view.becomeFirstResponder()
+            }
+        } else if !isFocused, view.isFirstResponder {
+            view.resignFirstResponder()
+        }
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: IntrinsicTextView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        let measured = uiView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        return CGSize(
+            width: width,
+            height: min(
+                max(measured.height, MobileDesign.Size.compactControl),
+                SessionDraftPromptMetrics.maximumHeight
+            )
+        )
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UITextViewDelegate {
+        private var text: Binding<String>
+        private var isFocused: Binding<Bool>
+
+        init(text: Binding<String>, isFocused: Binding<Bool>) {
+            self.text = text
+            self.isFocused = isFocused
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            text.wrappedValue = textView.text
+            textView.invalidateIntrinsicContentSize()
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            isFocused.wrappedValue = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            isFocused.wrappedValue = false
+        }
+    }
+}
+
+private enum SessionDraftPromptMetrics {
+    static let maximumLines: CGFloat = 6
+    static var maximumHeight: CGFloat {
+        ceil(UIFont.preferredFont(forTextStyle: .body).lineHeight * maximumLines)
+    }
+}
+
+private enum SessionDraftAttachmentSource {
+    case clipboard
+    case photos
+    case files
 }
 
 /// Pure catalogue repair for an already-mounted draft. Selection state lives in SwiftUI, but

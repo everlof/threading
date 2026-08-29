@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import ThreadingRemoteKit
 import UIKit
 import UniformTypeIdentifiers
@@ -47,7 +48,7 @@ struct ComposerAttachmentItem: Identifiable, Equatable {
 
 // MARK: - Tray
 
-/// The files staged beside one session's draft, and the uploads carrying them to the Mac.
+/// The files staged beside one composer draft, and the uploads carrying them to the Mac.
 ///
 /// Uploading starts when the file is picked, not when send is pressed. That is the whole reason
 /// this is a separate object: a phone photo takes a moment to travel, and doing it at send time
@@ -88,14 +89,16 @@ final class ComposerAttachmentTray {
     var canAcceptMore: Bool { items.count < RemoteAttachmentUploadLimits.maximumPerMessage }
 
     private let client: RemoteClient
-    private let sessionID: String
+    /// A live composer uses its session id. The pre-session composer uses its phone-minted draft
+    /// UUID, which the create request later proves again while atomically claiming the uploads.
+    private let uploadScopeID: String
     private var uploads: [UUID: Task<Void, Never>] = [:]
 
     // MARK: - Initialization
 
-    init(client: RemoteClient, sessionID: String) {
+    init(client: RemoteClient, uploadScopeID: String) {
         self.client = client
-        self.sessionID = sessionID
+        self.uploadScopeID = uploadScopeID
     }
 
     deinit {
@@ -179,7 +182,7 @@ final class ComposerAttachmentTray {
             guard let self else { return }
             do {
                 let uploadID = try await client.uploadAttachment(
-                    sessionID: sessionID,
+                    sessionID: uploadScopeID,
                     name: payload.name,
                     mediaType: payload.type.identifier,
                     data: payload.data,
@@ -329,6 +332,7 @@ final class ComposerAttachmentStripView: UIView {
     private let stack = UIStackView()
     private var theme: RemoteThemePalette?
     private var renderedItems: [ComposerAttachmentItem] = []
+    private var renderedRemovalEnabled = true
 
     // MARK: - Initialization
 
@@ -349,17 +353,28 @@ final class ComposerAttachmentStripView: UIView {
     /// Wholesale, and bounded by `maximumPerMessage`: at most eight chips exist, so diffing them
     /// would be more machinery than the work it saves. The early return keeps a progress tick —
     /// which arrives many times per file — from rebuilding anything when nothing visible moved.
-    func update(items: [ComposerAttachmentItem], theme: RemoteThemePalette) {
-        guard self.theme != theme || items != renderedItems else { return }
+    func update(
+        items: [ComposerAttachmentItem],
+        theme: RemoteThemePalette,
+        isRemovalEnabled: Bool = true
+    ) {
+        guard self.theme != theme
+                || items != renderedItems
+                || isRemovalEnabled != renderedRemovalEnabled else { return }
         self.theme = theme
         renderedItems = items
+        renderedRemovalEnabled = isRemovalEnabled
 
         stack.arrangedSubviews.forEach {
             stack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
         for item in items {
-            let chip = ComposerAttachmentChipView(item: item, theme: theme)
+            let chip = ComposerAttachmentChipView(
+                item: item,
+                theme: theme,
+                isRemovalEnabled: isRemovalEnabled
+            )
             chip.onRemove = { [weak self] in self?.onRemove?(item.id) }
             stack.addArrangedSubview(chip)
         }
@@ -413,10 +428,16 @@ private final class ComposerAttachmentChipView: UIView {
     private let removeButton = UIButton(type: .system)
     private var progressWidth: NSLayoutConstraint!
 
-    init(item: ComposerAttachmentItem, theme: RemoteThemePalette) {
+    init(
+        item: ComposerAttachmentItem,
+        theme: RemoteThemePalette,
+        isRemovalEnabled: Bool
+    ) {
         super.init(frame: .zero)
         setup(theme: theme)
         apply(item, theme: theme)
+        removeButton.isEnabled = isRemovalEnabled
+        removeButton.alpha = isRemovalEnabled ? 1 : MobileDesign.Opacity.disabledAction
     }
 
     @available(*, unavailable)
@@ -549,9 +570,14 @@ private final class ComposerAttachmentChipView: UIView {
             glow: nil
         )
 
-        isAccessibilityElement = true
-        accessibilityLabel = Self.accessibilityLabel(for: item)
-        removeButton.accessibilityLabel = MobileL10n.string("Remove %@", item.name)
+        // The remove control is the chip's only action. Keep it as the accessibility element so
+        // VoiceOver can perform that action instead of stopping on a descriptive parent with no
+        // way to remove the file.
+        isAccessibilityElement = false
+        removeButton.accessibilityLabel = MobileL10n.string(
+            "Remove %@",
+            Self.accessibilityLabel(for: item)
+        )
     }
 
     private static func accessibilityLabel(for item: ComposerAttachmentItem) -> String {
@@ -575,4 +601,43 @@ enum ComposerAttachmentMetrics {
     static let progressHeight: CGFloat = 3
     static let documentGlyph: CGFloat = 20
     static let removeTarget: CGFloat = 28
+}
+
+// MARK: - SwiftUI Bridge
+
+/// The one attachment strip used by SwiftUI composers. The UIKit conversation composer hosts
+/// `ComposerAttachmentStripView` directly; this bridge keeps the draft and terminal composers on
+/// the same bounded chip, progress, removal, theme, and accessibility implementation.
+struct ComposerAttachmentStrip: UIViewRepresentable {
+    let items: [ComposerAttachmentItem]
+    let theme: RemoteThemePalette
+    let isRemovalEnabled: Bool
+    let remove: (UUID) -> Void
+
+    init(
+        items: [ComposerAttachmentItem],
+        theme: RemoteThemePalette,
+        isRemovalEnabled: Bool = true,
+        remove: @escaping (UUID) -> Void
+    ) {
+        self.items = items
+        self.theme = theme
+        self.isRemovalEnabled = isRemovalEnabled
+        self.remove = remove
+    }
+
+    func makeUIView(context: Context) -> ComposerAttachmentStripView {
+        let view = ComposerAttachmentStripView()
+        view.onRemove = remove
+        return view
+    }
+
+    func updateUIView(_ view: ComposerAttachmentStripView, context: Context) {
+        view.onRemove = remove
+        view.update(
+            items: items,
+            theme: theme,
+            isRemovalEnabled: isRemovalEnabled
+        )
+    }
 }

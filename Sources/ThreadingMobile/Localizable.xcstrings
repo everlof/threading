@@ -6248,6 +6248,16 @@
         }
       }
     },
+    "Prompt": {
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Prompt"
+          }
+        }
+      }
+    },
     "Photo": {
       "localizations": {
         "sv": {

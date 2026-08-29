@@ -559,6 +559,7 @@ final class RemoteSessionMirrorRegistry {
         features.append(RemoteRESTFeature.sessionStartupHandshake.rawValue)
         if authorization.canManageHost {
             features.append(RemoteRESTFeature.reportSessionOpening.rawValue)
+            features.append(RemoteRESTFeature.sessionDraftAttachmentUploads.rawValue)
         }
         return features.isEmpty ? nil : features
     }

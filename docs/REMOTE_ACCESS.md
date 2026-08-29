@@ -1153,6 +1153,17 @@ transfer — a draft never sent, an app killed mid-upload — is reaped after th
 bytes, and staging is emptied outright when Remote Access stops. That is the property that keeps
 an interrupted attach from leaving a half-sent picture in somebody's conversation.
 
+**A new-session draft is a temporary upload scope, not a pretend session.** The phone mints its
+`MobileSessionDraft.id` and uses that UUID in the same upload route. The create request repeats the
+scope and the completed upload ids; on the server queue, creation claims that exact set for that
+exact paired device before it crosses to the main actor. The application then receives the paths
+inside `RemoteSessionLaunch.openingAttachmentPaths` and takes them into ordinary attachment
+custody as part of starting the first prompt. One missing id, a mismatched scope or a duplicate
+refuses creation without words-only fallback; a launch refusal releases the complete claim for
+retry, and success discards the staged duplicates only after custody has passed. This contract is
+advertised as `session-draft-attachment-uploads`, so a phone connected to an older Mac draws no
+new-session paperclip instead of uploading files that Mac would silently ignore.
+
 **What the host will take:**
 
 | Bound | Value | Why |

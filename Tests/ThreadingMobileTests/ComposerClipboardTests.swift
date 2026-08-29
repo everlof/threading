@@ -1,3 +1,4 @@
+import SwiftUI
 import ThreadingRemoteKit
 import UIKit
 import UniformTypeIdentifiers
@@ -182,6 +183,49 @@ final class ComposerTextViewPasteTests: XCTestCase {
         )
     }
 
+    /// The pre-session draft used to be the lone SwiftUI `TextField`, so proving the shared text
+    /// view works did not prove that screen had actually adopted it. This hosts the shipping
+    /// representable and pins the UIKit edit-menu surface plus its attachment interception.
+    func testNewSessionDraftHostsTheNativePasteSurface() throws {
+        var draft = Fixture.existingDraft
+        var isFocused = false
+        var pastedFiles = 0
+        let editor = SessionDraftPromptEditor(
+            text: Binding(get: { draft }, set: { draft = $0 }),
+            isFocused: Binding(get: { isFocused }, set: { isFocused = $0 }),
+            isEnabled: true,
+            theme: RemoteThemePalette(nil),
+            offersFiles: { true },
+            pasteFiles: {
+                pastedFiles += 1
+                return true
+            }
+        )
+        let host = UIHostingController(rootView: editor.frame(width: 240, height: 80))
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 240, height: 80)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        XCTAssertEqual(textView.text, Fixture.existingDraft)
+        XCTAssertTrue(textView.isEditable)
+        XCTAssertTrue(textView.canPerformAction(
+            #selector(UIResponderStandardEditActions.paste(_:)),
+            withSender: nil
+        ))
+
+        textView.paste(nil)
+        XCTAssertEqual(pastedFiles, 1)
+        XCTAssertEqual(draft, Fixture.existingDraft)
+    }
+
     func testAFilePasteIsTakenAsAnAttachmentAndNeverReachesTheText() {
         let textView = IntrinsicTextView()
         textView.text = Fixture.existingDraft
@@ -212,5 +256,79 @@ final class ComposerTextViewPasteTests: XCTestCase {
         textView.paste(nil)
 
         XCTAssertEqual(asked, 1, "text keeps the text view's own paste, insertion point and all")
+    }
+
+    private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
+        let own = (root as? T).map { [$0] } ?? []
+        return own + root.subviews.flatMap { descendants(of: type, in: $0) }
+    }
+}
+
+/// Once a submission has named an upload set, its chips are a frozen receipt until the host
+/// accepts or refuses it. Mutating that set in flight would either lie about what was sent or
+/// clear a newly staged file when the earlier submission is accepted.
+@MainActor
+final class ComposerAttachmentStripTests: XCTestCase {
+
+    func testRemovalCanBeFrozenWithoutChangingTheRenderedItems() throws {
+        let strip = ComposerAttachmentStripView()
+        let item = ComposerAttachmentItem(
+            name: "notes.txt",
+            thumbnail: nil,
+            systemImage: "doc"
+        )
+        let theme = RemoteThemePalette(nil)
+
+        strip.update(items: [item], theme: theme, isRemovalEnabled: false)
+
+        let removeButton = try XCTUnwrap(descendants(of: UIButton.self, in: strip).first)
+        XCTAssertFalse(removeButton.isEnabled)
+        XCTAssertLessThan(removeButton.alpha, 1)
+
+        // This deliberately changes only interactivity. The strip's bounded-render early return
+        // must include that state or the button would remain frozen after a refusal.
+        strip.update(items: [item], theme: theme, isRemovalEnabled: true)
+        let enabledButton = try XCTUnwrap(descendants(of: UIButton.self, in: strip).first)
+        XCTAssertTrue(enabledButton.isEnabled)
+        XCTAssertEqual(enabledButton.alpha, 1)
+    }
+
+    private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
+        let own = (root as? T).map { [$0] } ?? []
+        return own + root.subviews.flatMap { descendants(of: type, in: $0) }
+    }
+}
+
+/// File providers control both the metadata and the bytes behind a picked URL. The reader is the
+/// memory boundary, so the tray's later validation is defence in depth rather than the first time
+/// an oversized document is noticed.
+final class ComposerAttachmentSourceTests: XCTestCase {
+
+    func testBoundedReaderReturnsAnOrdinaryFileExactly() throws {
+        let expected = Data("release notes".utf8)
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        try expected.write(to: url)
+
+        XCTAssertEqual(ComposerAttachmentSources.readFile(at: url), expected)
+    }
+
+    func testBoundedReaderRefusesAnOversizedSparseFile() throws {
+        let url = temporaryURL()
+        defer { try? FileManager.default.removeItem(at: url) }
+        XCTAssertTrue(FileManager.default.createFile(atPath: url.path, contents: nil))
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(
+            atOffset: UInt64(RemoteAttachmentUploadLimits.maximumBytesPerFile + 1)
+        )
+        try handle.close()
+
+        XCTAssertNil(ComposerAttachmentSources.readFile(at: url))
+    }
+
+    private func temporaryURL() -> URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(
+            "composer-attachment-source-\(UUID().uuidString)"
+        )
     }
 }

@@ -1043,6 +1043,20 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        let openingAttachmentIDs = creation.openingAttachmentUploadIDs ?? []
+        guard creation.reportOpening == nil
+                || (creation.openingAttachmentScopeID == nil && openingAttachmentIDs.isEmpty) else {
+            // Reports and ordinary new-session drafts are distinct atomic openings. Combining
+            // them would evade each surface's attachment bound and give a malicious client nine
+            // paths where every composer is capped at eight.
+            respond(.respond(RemoteRouter.error(
+                400,
+                "Invalid Opening Attachments",
+                code: .invalidOpeningAttachments
+            )))
+            return
+        }
+
         // The bytes are validated and lent on the server queue before a session can exist. The
         // application receives a temporary path, takes its own durable copy before launch, and
         // this claim is discarded whichever way that transaction ends. An older Mac ignores the
@@ -1076,13 +1090,69 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             reportScreenshot = nil
         }
 
+        // A new-session composer has no host-minted session id yet, so it uploads against the
+        // phone's draft UUID. Creation is the one operation allowed to exchange that temporary
+        // scope for attachment custody. Claim every id before crossing to the main actor: two
+        // create requests racing with the same draft must not both see the files as available,
+        // and an invalid set must refuse the whole opening rather than launch with text alone.
+        let openingAttachmentPaths: [String]
+        if openingAttachmentIDs.isEmpty {
+            guard creation.openingAttachmentScopeID == nil else {
+                if let uploadID = reportScreenshot?.uploadID {
+                    attachmentUploads.discardClaimed(ids: [uploadID])
+                }
+                respond(.respond(RemoteRouter.error(
+                    400,
+                    "Invalid Opening Attachments",
+                    code: .invalidOpeningAttachments
+                )))
+                return
+            }
+            openingAttachmentPaths = []
+        } else {
+            let totalOpeningAttachmentCount = openingAttachmentIDs.count
+                + (reportScreenshot == nil ? 0 : 1)
+            guard totalOpeningAttachmentCount
+                    <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession,
+                  openingAttachmentIDs.allSatisfy(RemoteInboundPolicy.acceptsAttachmentID),
+                  let rawScopeID = creation.openingAttachmentScopeID,
+                  let scopeID = SessionID(uuidString: rawScopeID),
+                  let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+                      request.header(RemoteRouter.deviceHeader)
+                  ), let claimed = attachmentUploads.claim(
+                      ids: openingAttachmentIDs,
+                      sessionID: scopeID.uuidString,
+                      deviceID: deviceID
+                  ) else {
+                if let uploadID = reportScreenshot?.uploadID {
+                    attachmentUploads.discardClaimed(ids: [uploadID])
+                }
+                respond(.respond(RemoteRouter.error(
+                    400,
+                    "Invalid Opening Attachments",
+                    code: .invalidOpeningAttachments
+                )))
+                return
+            }
+            openingAttachmentPaths = claimed.map(\.path)
+        }
+
         DispatchQueue.main.async {
+            var acceptedOpeningAttachments = false
             defer {
                 if let uploadID = reportScreenshot?.uploadID {
                     self.queue.async {
                         self.attachmentUploads.discardClaimed(ids: [uploadID])
                     }
                 }
+                self.resolveClaim(
+                    openingAttachmentIDs,
+                    accepted: acceptedOpeningAttachments
+                )
+            }
+            guard self.authorizer?.isCurrent(authorization) == true else {
+                respond(.respond(RemoteRouter.error(403, "Forbidden")))
+                return
             }
             // A refused choice answers the phone and used to leave nothing here, so a report
             // saying "my chat would not start" could not be matched to what this Mac declined.
@@ -1201,13 +1271,15 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 usesNativeUI: usesNativeUI,
                 managedWorkspacePlan: managedWorkspacePlan,
                 role: role,
-                openingAttachmentPaths: reportScreenshot.map { [$0.url.path] } ?? [],
+                openingAttachmentPaths: (reportScreenshot.map { [$0.url.path] } ?? [])
+                    + openingAttachmentPaths,
                 prompt: prompt
             )
             guard let sessionID = self.sessionCommands?.startRemoteSession(launch) else {
                 respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                 return
             }
+            acceptedOpeningAttachments = true
 
             self.services.mirrors.noteSessionStarting(sessionID)
             let response: RemoteCreateSessionResponseDTO

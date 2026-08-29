@@ -2376,8 +2376,9 @@ session. An unknown leading Claude slash command remains at the start of the pro
 shared-chat attribution never moves it out of command position.
 
 **Attaching a photo or file from the phone.** The paperclip beside the plus attaches from your
-photo library or Files — up to eight per message, images, PDFs, HTML, archives and the common
-document formats. Each one starts travelling to your Mac the moment you pick it, so the wait
+clipboard, photo library or Files — up to eight per message, images, PDFs, HTML, archives and the
+common document formats. You can also paste a copied picture directly into the text area. Each
+one starts travelling to your Mac the moment you pick it, so the wait
 usually happens while you are still typing; a thumbnail strip above the box shows what is
 attached, with a progress hairline under each and a tap target to remove one. Send stays held
 until every attachment has arrived. Large photos are re-encoded smaller before sending, since an
@@ -2602,6 +2603,14 @@ is one thin line, the prompt and Start. Start turns that same screen into the ch
 closes and nothing is pushed — and it stays there while the Mac starts the agent: a new session
 shows "Resuming on your Mac…" for as long as that takes. The New Session navigation bar keeps its
 title above the connected Mac and state, matching the two-row chat navigation title.
+
+The prompt is a native iOS text area: touch and hold to use **Paste** at the insertion point.
+Its paperclip adds **From Clipboard** when the clipboard holds a picture or file, plus **Photo
+Library** and **Files**. You can attach up to eight items, each up to 24 MB; their strip shows
+upload progress and Start waits until every item is ready. The Mac takes the complete set into
+the first prompt when the session starts, or leaves the draft and its attachments in place if
+creation is refused.
+
 An already-running chat says "Opening chat…" while its own live stream attaches; this does not
 mean the phone lost the dashboard connection. Connection phrases scroll as a complete line with
 a short traveling fade, while Reduce Motion changes them immediately.

@@ -954,7 +954,8 @@ struct TerminalRemoteView: View {
                 toggleInputPreference: toggleInputPreference,
                 showsAttachmentKey: allowsDirectInput
                     && connection.supportsTerminalAttachmentInsertion,
-                canAttach: directAttachmentTray?.canAcceptMore == true,
+                canAttach: directAttachmentPicksInFlight == 0
+                    && directAttachmentTray?.canAcceptMore == true,
                 chooseAttachmentSource: beginChoosingDirectAttachmentSource,
                 isChoosingAttachmentSource: $isChoosingDirectAttachmentSource,
                 attachmentSourceActions: directAttachmentSourceActions
@@ -1181,6 +1182,8 @@ struct TerminalRemoteView: View {
     // MARK: - Clipboard
 
     private func beginChoosingDirectAttachmentSource() {
+        guard directAttachmentPicksInFlight == 0,
+              directAttachmentTray?.canAcceptMore == true else { return }
         clipboardOffersContent = ComposerClipboard.general.hasContent
         isChoosingDirectAttachmentSource = true
     }
@@ -1237,7 +1240,10 @@ struct TerminalRemoteView: View {
 
     private func configureDirectAttachments() {
         guard directAttachmentTray == nil, let client = model.client else { return }
-        let tray = ComposerAttachmentTray(client: client, sessionID: connection.session.id)
+        let tray = ComposerAttachmentTray(
+            client: client,
+            uploadScopeID: connection.session.id
+        )
         tray.onChange = {
             // A failed upload has no chip to be dismissed from here — this surface shows no
             // attachment strip at all — so one left in the tray holds a slot out of the
@@ -1294,16 +1300,29 @@ struct TerminalRemoteView: View {
             directAttachmentTray?.reportUnreadableFile()
             return
         }
-        for url in urls {
-            let accessed = url.startAccessingSecurityScopedResource()
-            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-            guard let data = try? Data(contentsOf: url),
-                  let type = UTType(filenameExtension: url.pathExtension),
-                  let tray = directAttachmentTray else {
-                directAttachmentTray?.reportUnreadableFile()
-                continue
+        guard !urls.isEmpty else { return }
+        directAttachmentPicksInFlight += 1
+        Task { @MainActor in
+            defer {
+                directAttachmentPicksInFlight -= 1
+                insertDirectAttachmentsIfReady()
             }
-            tray.add(data: data, name: url.lastPathComponent, type: type)
+            guard let tray = directAttachmentTray else { return }
+            for url in urls.prefix(remainingDirectAttachmentSlots) {
+                let accessed = url.startAccessingSecurityScopedResource()
+                let loaded = await Task.detached(priority: .userInitiated) {
+                    let data = ComposerAttachmentSources.readFile(at: url)
+                    let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)
+                        ?? UTType(filenameExtension: url.pathExtension)
+                    return data.flatMap { data in type.map { (data, $0) } }
+                }.value
+                if accessed { url.stopAccessingSecurityScopedResource() }
+                guard let (data, type) = loaded else {
+                    tray.reportUnreadableFile()
+                    continue
+                }
+                tray.add(data: data, name: url.lastPathComponent, type: type)
+            }
         }
     }
 
@@ -1467,6 +1486,7 @@ private struct TerminalLineComposer: View {
     @State private var attachmentTray: ComposerAttachmentTray?
     @State private var attachmentItems: [ComposerAttachmentItem] = []
     @State private var photoItems: [PhotosPickerItem] = []
+    @State private var attachmentPicksInFlight = 0
     @State private var isPickingPhotos = false
     @State private var isImportingFiles = false
     /// Whether the clipboard is holding a file worth offering. A `Menu` has no moment of
@@ -1485,9 +1505,10 @@ private struct TerminalLineComposer: View {
             }
 
             if !attachmentItems.isEmpty {
-                TerminalAttachmentStrip(
+                ComposerAttachmentStrip(
                     items: attachmentItems,
                     theme: theme,
+                    isRemovalEnabled: !connection.isPromptSubmissionPending,
                     remove: { attachmentTray?.remove($0) }
                 )
             }
@@ -1532,7 +1553,11 @@ private struct TerminalLineComposer: View {
                             height: MobileDesign.Size.minimumTapTarget
                         )
                 }
-                .disabled(attachmentTray?.canAcceptMore != true)
+                .disabled(
+                    connection.isPromptSubmissionPending
+                        || attachmentPicksInFlight > 0
+                        || attachmentTray?.canAcceptMore != true
+                )
                 .accessibilityLabel(MobileL10n.string("Attachments"))
 
                 TextField("Compose on this device…", text: $draft, axis: .vertical)
@@ -1603,21 +1628,7 @@ private struct TerminalLineComposer: View {
             allowedContentTypes: ComposerAttachmentSources.documentTypes,
             allowsMultipleSelection: true
         ) { result in
-            guard let urls = try? result.get() else {
-                attachmentTray?.reportUnreadableFile()
-                return
-            }
-            for url in urls {
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                guard let data = try? Data(contentsOf: url),
-                      let type = UTType(filenameExtension: url.pathExtension),
-                      let tray = attachmentTray else {
-                    attachmentTray?.reportUnreadableFile()
-                    continue
-                }
-                tray.add(data: data, name: url.lastPathComponent, type: type)
-            }
+            importFiles(result)
         }
     }
 
@@ -1626,6 +1637,7 @@ private struct TerminalLineComposer: View {
             && connection.capability == .interact
             && connection.inputControl?.canWrite != false
             && !connection.isPromptSubmissionPending
+            && attachmentPicksInFlight == 0
             && attachmentTray?.isSettling != true
             && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !quotes.isEmpty
@@ -1675,7 +1687,10 @@ private struct TerminalLineComposer: View {
 
     private func configureAttachments() {
         guard attachmentTray == nil, let client = model.client else { return }
-        let tray = ComposerAttachmentTray(client: client, sessionID: connection.session.id)
+        let tray = ComposerAttachmentTray(
+            client: client,
+            uploadScopeID: connection.session.id
+        )
         tray.onChange = {
             attachmentItems = tray.items
             submissionNotice = tray.notice
@@ -1702,7 +1717,9 @@ private struct TerminalLineComposer: View {
     }
 
     private func loadPhotos(_ items: [PhotosPickerItem]) async {
-        guard let tray = attachmentTray else { return }
+        guard !items.isEmpty, let tray = attachmentTray else { return }
+        attachmentPicksInFlight += 1
+        defer { attachmentPicksInFlight -= 1 }
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self),
                   let type = item.supportedContentTypes.first else {
@@ -1716,6 +1733,34 @@ private struct TerminalLineComposer: View {
             )
         }
         photoItems = []
+    }
+
+    private func importFiles(_ result: Result<[URL], Error>) {
+        guard let urls = try? result.get() else {
+            attachmentTray?.reportUnreadableFile()
+            return
+        }
+        guard !urls.isEmpty else { return }
+        attachmentPicksInFlight += 1
+        Task { @MainActor in
+            defer { attachmentPicksInFlight -= 1 }
+            guard let tray = attachmentTray else { return }
+            for url in urls.prefix(remainingAttachmentSlots) {
+                let accessed = url.startAccessingSecurityScopedResource()
+                let loaded = await Task.detached(priority: .userInitiated) {
+                    let data = ComposerAttachmentSources.readFile(at: url)
+                    let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)
+                        ?? UTType(filenameExtension: url.pathExtension)
+                    return data.flatMap { data in type.map { (data, $0) } }
+                }.value
+                if accessed { url.stopAccessingSecurityScopedResource() }
+                guard let (data, type) = loaded else {
+                    tray.reportUnreadableFile()
+                    continue
+                }
+                tray.add(data: data, name: url.lastPathComponent, type: type)
+            }
+        }
     }
 
     private func restoreDraft() {
@@ -1771,23 +1816,6 @@ private struct TerminalLineComposer: View {
         case .accepted:
             break
         }
-    }
-}
-
-private struct TerminalAttachmentStrip: UIViewRepresentable {
-    let items: [ComposerAttachmentItem]
-    let theme: RemoteThemePalette
-    let remove: (UUID) -> Void
-
-    func makeUIView(context: Context) -> ComposerAttachmentStripView {
-        let view = ComposerAttachmentStripView()
-        view.onRemove = remove
-        return view
-    }
-
-    func updateUIView(_ view: ComposerAttachmentStripView, context: Context) {
-        view.onRemove = remove
-        view.update(items: items, theme: theme)
     }
 }
 

@@ -1147,6 +1147,80 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertTrue(runtimeStatus.runningSessionIDs.contains(dormant.id))
     }
 
+    /// The first prompt has no host session yet. Its files therefore travel under the phone's
+    /// draft UUID, then the create request exchanges that temporary scope for application
+    /// attachment custody. A mismatched scope must refuse the whole opening and leave the staged
+    /// bytes available for the rightful request instead of launching words without their file.
+    func testCreateClaimsDraftScopedAttachmentsAtomically() throws {
+        let me = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "goodtoken")).body
+        )
+        XCTAssertTrue(
+            me.features?.contains(
+                RemoteRESTFeature.sessionDraftAttachmentUploads.rawValue
+            ) == true
+        )
+
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-draft-attachment-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let draftID = SessionID()
+        let png = try XCTUnwrap(Data(base64Encoded:
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        ))
+        let uploadBody = try JSONEncoder().encode(RemoteAttachmentUploadRequestDTO(
+            name: "draft-photo.png",
+            mediaType: "public.png",
+            totalBytes: png.count,
+            chunkIndex: 0,
+            chunkCount: 1,
+            chunk: png.base64EncodedString()
+        ))
+        let upload = try XCTUnwrap(post(
+            "/api/session/\(draftID.uuidString)/attachment-upload",
+            bearer: "goodtoken",
+            body: uploadBody
+        ))
+        XCTAssertEqual(upload.status, 200)
+        let uploadID = try JSONDecoder().decode(
+            RemoteAttachmentUploadResponseDTO.self,
+            from: upload.body
+        ).uploadID
+
+        func create(scopeID: SessionID) throws -> Probe {
+            let body = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
+                projectID: project.id.uuidString,
+                agentKind: AgentKind.codex.rawValue,
+                surface: .conversation,
+                openingAttachmentScopeID: scopeID.uuidString,
+                openingAttachmentUploadIDs: [uploadID],
+                prompt: "Describe the attached image"
+            ))
+            return try XCTUnwrap(post("/api/session", bearer: "goodtoken", body: body))
+        }
+
+        let mismatched = try create(scopeID: SessionID())
+        XCTAssertEqual(mismatched.status, 400)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: mismatched.body).code,
+            RemoteRESTErrorCode.invalidOpeningAttachments.rawValue
+        )
+        XCTAssertTrue(sessionCommands.launches.isEmpty)
+
+        sessionCommands.createdSessionID = SessionID()
+        let accepted = try create(scopeID: draftID)
+        XCTAssertEqual(accepted.status, 201)
+        let launch = try XCTUnwrap(sessionCommands.launches.last)
+        XCTAssertEqual(launch.prompt, "Describe the attached image")
+        XCTAssertEqual(launch.openingAttachmentPaths.count, 1)
+        XCTAssertEqual(sessionCommands.openingAttachmentPayloads.last, [png])
+    }
+
     func testReportCreateHandsReadablePromptAndClaimedScreenshotToApplicationAtomically() throws {
         let me = try JSONDecoder().decode(
             RemoteMeDTO.self,
@@ -1232,6 +1306,26 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(
             try JSONDecoder().decode(RemoteErrorDTO.self, from: malformed.body).code,
             RemoteRESTErrorCode.invalidReportOpening.rawValue
+        )
+
+        let mixedOpening = try JSONEncoder().encode(RemoteCreateSessionRequestDTO(
+            projectID: project.id.uuidString,
+            agentKind: AgentKind.codex.rawValue,
+            surface: .terminal,
+            reportOpening: RemoteReportSessionOpeningDTO(prompt: "Read the report"),
+            openingAttachmentScopeID: SessionID().uuidString,
+            openingAttachmentUploadIDs: ["draft-upload"],
+            prompt: ""
+        ))
+        let mixed = try XCTUnwrap(post(
+            "/api/session",
+            bearer: "goodtoken",
+            body: mixedOpening
+        ))
+        XCTAssertEqual(mixed.status, 400)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: mixed.body).code,
+            RemoteRESTErrorCode.invalidOpeningAttachments.rawValue
         )
         XCTAssertTrue(sessionCommands.launches.isEmpty)
     }

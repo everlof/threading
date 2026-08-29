@@ -1168,6 +1168,9 @@ public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     /// A report sent from the paired iPhone can create a session with readable opening text and
     /// one bounded screenshot that the Mac takes into attachment custody before launch.
     case reportSessionOpening = "report-session-opening"
+    /// The new-session draft may stage files before the Mac has minted the session, then name
+    /// those uploads in the atomic create request that takes them into the opening prompt.
+    case sessionDraftAttachmentUploads = "session-draft-attachment-uploads"
 }
 
 /// The size a thumbnail is asked at, and the most a Mac will answer with.
@@ -1854,6 +1857,13 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
     public let role: RemoteSessionRole?
     /// A paired-iPhone report's atomic opening. When present, `prompt` must be empty.
     public let reportOpening: RemoteReportSessionOpeningDTO?
+    /// The client-minted draft UUID used to scope uploads before a session exists. It has no
+    /// authority of its own: every upload is also bound to the paired device, and the server
+    /// claims the ids below against this exact scope during creation.
+    public let openingAttachmentScopeID: String?
+    /// Completed staged uploads to take into attachment custody before launching the session.
+    /// Nil is the legacy request and an empty array carries no files.
+    public let openingAttachmentUploadIDs: [String]?
     /// New clients ask for the one changed row. Absent keeps the original full-catalogue response
     /// for older clients whose decoder requires `me`.
     public let compactResponse: Bool?
@@ -1871,6 +1881,8 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
         role: RemoteSessionRole? = nil,
         reportOpening: RemoteReportSessionOpeningDTO? = nil,
+        openingAttachmentScopeID: String? = nil,
+        openingAttachmentUploadIDs: [String]? = nil,
         compactResponse: Bool? = nil,
         prompt: String
     ) {
@@ -1885,6 +1897,8 @@ public struct RemoteCreateSessionRequestDTO: Codable, Equatable, Sendable {
         self.managedWorkspace = managedWorkspace
         self.role = role
         self.reportOpening = reportOpening
+        self.openingAttachmentScopeID = openingAttachmentScopeID
+        self.openingAttachmentUploadIDs = openingAttachmentUploadIDs
         self.compactResponse = compactResponse
         self.prompt = prompt
     }
@@ -3256,6 +3270,7 @@ public enum RemoteRESTErrorCode: String, Codable, CaseIterable, Sendable {
     case unknownRole
     case unsupportedWorkspace
     case invalidReportOpening
+    case invalidOpeningAttachments
 
     case invalidDeviceToken
     case localDiagnosticsDisabled

@@ -408,6 +408,20 @@ the alert, and leaves the prompt intact for the retry. The account's default mod
 the wire so the runtime still owns inheritance; an explicit effort beside it is validated against
 the resolved account default, through the same admission rule local and remote creation use.
 
+That draft uses the same native `IntrinsicTextView` paste contract as an existing conversation,
+not SwiftUI's visually similar `TextField`: text keeps UIKit's insertion-point paste and undo,
+while a file-only paste stages files in the shared attachment tray. Photos and Files are explicit
+system pickers. Before a host session exists the tray uploads under the phone-minted
+`MobileSessionDraft.id`; the atomic create request repeats that scope and the completed upload ids,
+and the server claims the whole set on its queue before `SessionCoordinator` is asked to launch.
+A bad scope or one bad id starts nothing, and a refused launch releases every claim for retry.
+Only a paired managing owner is advertised `session-draft-attachment-uploads`; older Macs therefore
+show no paperclip rather than accepting uploads they would omit from the first prompt. The fixed
+scaling contract is the shared eight-file strip and 24 MB per-file ceiling, with picker reads and
+transfers outside layout callbacks. This remains a host-owned part of the protected start composer:
+extensions may customize its existing presentation hook, but not draft authority, file custody,
+admission, or launch ordering.
+
 ### Turn admission and completion checkpoints
 
 A native prompt is not placed on the provider wire immediately after the composer accepts it.

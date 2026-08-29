@@ -834,6 +834,8 @@ final class RemoteProtocolTests: XCTestCase {
             permissionMode: "acceptEdits",
             surface: .conversation,
             role: RemoteSessionRole.manager,
+            openingAttachmentScopeID: "11111111-1111-1111-1111-111111111111",
+            openingAttachmentUploadIDs: ["upload-image", "upload-document"],
             compactResponse: true,
             prompt: "Review remote access"
         )
@@ -845,6 +847,14 @@ final class RemoteProtocolTests: XCTestCase {
             creation
         )
         XCTAssertEqual(creation.role, .manager)
+        XCTAssertEqual(
+            creation.openingAttachmentScopeID,
+            "11111111-1111-1111-1111-111111111111"
+        )
+        XCTAssertEqual(
+            creation.openingAttachmentUploadIDs,
+            ["upload-image", "upload-document"]
+        )
         XCTAssertEqual(creation.compactResponse, true)
 
         let olderCreation = try JSONDecoder().decode(
@@ -856,6 +866,8 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(olderCreation.fastMode)
         XCTAssertNil(olderCreation.permissionMode)
         XCTAssertNil(olderCreation.role, "an older phone's request is a chat")
+        XCTAssertNil(olderCreation.openingAttachmentScopeID)
+        XCTAssertNil(olderCreation.openingAttachmentUploadIDs)
         XCTAssertNil(olderCreation.compactResponse)
 
         let summary = RemoteSessionSummaryDTO(

@@ -530,7 +530,7 @@ final class MobileSessionChromeTests: XCTestCase {
             client: RemoteClient(
                 link: try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#tray"))
             ),
-            sessionID: "session"
+            uploadScopeID: "session"
         )
         var changes = 0
         tray.onChange = { changes += 1 }
@@ -549,7 +549,7 @@ final class MobileSessionChromeTests: XCTestCase {
             client: RemoteClient(
                 link: try XCTUnwrap(RemoteConnectionLink(string: "https://demo.invalid/#tray"))
             ),
-            sessionID: "session"
+            uploadScopeID: "session"
         )
         let bytes = Data("staged".utf8)
         for index in 0..<RemoteAttachmentUploadLimits.maximumPerMessage {

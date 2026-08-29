@@ -98,6 +98,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     /// before the app model has necessarily resolved one, and a composer with no client simply
     /// shows no attach button.
     private var attachmentTray: ComposerAttachmentTray?
+    /// A picker has dismissed before its provider necessarily returns bytes. Send must wait for
+    /// that complete bounded selection, or the prompt can leave while its last photo is still
+    /// becoming an attachment.
+    private var attachmentPicksInFlight = 0
     private let textView = IntrinsicTextView()
     private let placeholderLabel = UILabel()
     private let sendButton = UIButton(type: .system)
@@ -858,11 +862,18 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         // better to wait a moment than to reject something the person already pressed send on.
         let tray = attachmentTray
         let hasAttachments = tray?.readyUploadIDs.isEmpty == false
-        sendButton.isEnabled = enabled && (hasText || hasAttachments) && tray?.isSettling != true
+        sendButton.isEnabled = enabled
+            && attachmentPicksInFlight == 0
+            && (hasText || hasAttachments)
+            && tray?.isSettling != true
         sendButton.backgroundColor = sendButton.isEnabled ? theme.uiAccent : theme.uiControlResting
         sendButton.tintColor = sendButton.isEnabled ? theme.uiGround : theme.uiSecondaryLabel
         placeholderLabel.isHidden = !textView.text.isEmpty
-        attachmentStrip.update(items: tray?.items ?? [], theme: theme)
+        attachmentStrip.update(
+            items: tray?.items ?? [],
+            theme: theme,
+            isRemovalEnabled: enabled
+        )
     }
 
     private func updateCapabilities() {
@@ -981,7 +992,10 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     private func configureAttachmentTray() -> Bool {
         if attachmentTray != nil { return true }
         guard let client = model.client else { return false }
-        let tray = ComposerAttachmentTray(client: client, sessionID: connection.session.id)
+        let tray = ComposerAttachmentTray(
+            client: client,
+            uploadScopeID: connection.session.id
+        )
         tray.onChange = { [weak self] in
             guard let self else { return }
             updateComposer()
@@ -1284,6 +1298,15 @@ final class IntrinsicTextView: UITextView {
     /// Takes such a paste, and answers whether it did.
     var pasteFiles: () -> Bool = { false }
 
+    /// The reply composer uses a full tap target; the compact pre-session draft shares its
+    /// first line with Start. Both still use this same native editor and paste contract.
+    var minimumIntrinsicHeight = MobileDesign.Size.minimumTapTarget {
+        didSet { invalidateIntrinsicContentSize() }
+    }
+    var maximumIntrinsicHeight: CGFloat = 132 {
+        didSet { invalidateIntrinsicContentSize() }
+    }
+
     private var measuredWidth: CGFloat = 0
 
     /// Offers Paste for a clipboard holding only files.
@@ -1313,14 +1336,14 @@ final class IntrinsicTextView: UITextView {
         guard bounds.width > 0 else {
             return CGSize(
                 width: UIView.noIntrinsicMetric,
-                height: MobileDesign.Size.minimumTapTarget
+                height: minimumIntrinsicHeight
             )
         }
         let fittingWidth = bounds.width
         let height = sizeThatFits(CGSize(width: fittingWidth, height: .greatestFiniteMagnitude)).height
         return CGSize(
             width: UIView.noIntrinsicMetric,
-            height: min(max(height, MobileDesign.Size.minimumTapTarget), 132)
+            height: min(max(height, minimumIntrinsicHeight), maximumIntrinsicHeight)
         )
     }
 
@@ -1330,7 +1353,7 @@ final class IntrinsicTextView: UITextView {
             measuredWidth = bounds.width
             invalidateIntrinsicContentSize()
         }
-        let shouldScroll = contentSize.height > 132
+        let shouldScroll = contentSize.height > maximumIntrinsicHeight
         if isScrollEnabled != shouldScroll { isScrollEnabled = shouldScroll }
     }
 }
@@ -1573,18 +1596,62 @@ enum ComposerAttachmentSources {
     /// direction.
     static let documentTypes: [UTType] = RemoteAttachmentUploadLimits.offeredFileExtensions
         .compactMap { UTType(filenameExtension: $0) }
+
+    /// Reads no more than one upload can carry, even if a provider changes the file after its
+    /// metadata was inspected. `Data(contentsOf:)` reads an attacker- or cloud-sized file in one
+    /// allocation before the tray can apply its 24 MB policy; this enforces the policy while the
+    /// bytes cross the filesystem boundary.
+    static func readFile(at url: URL) -> Data? {
+        let maximum = RemoteAttachmentUploadLimits.maximumBytesPerFile
+        if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+           let size = values.fileSize, size > maximum {
+            return nil
+        }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+
+        var data = Data()
+        data.reserveCapacity(min(maximum, 64 * 1_024))
+        do {
+            while data.count <= maximum {
+                let remaining = maximum + 1 - data.count
+                guard let chunk = try handle.read(upToCount: min(64 * 1_024, remaining)),
+                      !chunk.isEmpty else { break }
+                data.append(chunk)
+            }
+        } catch {
+            return nil
+        }
+        guard data.count <= maximum else { return nil }
+        return data
+    }
 }
 
 // MARK: - Picking
+
+/// PHPicker documents its delegate delivery and result objects as immutable for the callback,
+/// but its pre-concurrency Objective-C declaration does not express that to Swift. This wrapper
+/// makes the one transfer explicit; every use is immediately serialized onto the main actor.
+private struct SendablePHPickerResults: @unchecked Sendable {
+    let values: [PHPickerResult]
+}
 
 extension RemoteConversationViewController: PHPickerViewControllerDelegate {
     nonisolated func picker(
         _ picker: PHPickerViewController,
         didFinishPicking results: [PHPickerResult]
     ) {
+        let transferredResults = SendablePHPickerResults(values: results)
         Task { @MainActor in
             picker.dismiss(animated: true)
-            for result in results {
+            guard !transferredResults.values.isEmpty else { return }
+            attachmentPicksInFlight += 1
+            updateComposer()
+            defer {
+                attachmentPicksInFlight -= 1
+                updateComposer()
+            }
+            for result in transferredResults.values {
                 await loadPickedImage(result)
             }
         }
@@ -1622,18 +1689,32 @@ extension RemoteConversationViewController: UIDocumentPickerDelegate {
         _ controller: UIDocumentPickerViewController,
         didPickDocumentsAt urls: [URL]
     ) {
-        for url in urls {
-            // `asCopy: true` already put these in the app's own container, so no security-scoped
-            // access is needed — but a file that vanished between picking and reading still has
-            // to say so rather than silently adding nothing.
-            guard let data = try? Data(contentsOf: url) else {
-                attachmentTray?.reportUnreadableFile()
-                continue
+        guard !urls.isEmpty else { return }
+        attachmentPicksInFlight += 1
+        updateComposer()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                attachmentPicksInFlight -= 1
+                updateComposer()
             }
-            let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)
-                ?? UTType(filenameExtension: url.pathExtension)
-                ?? .data
-            attachmentTray?.add(data: data, name: url.lastPathComponent, type: type)
+            for url in urls.prefix(remainingAttachmentSlots) {
+                // `asCopy: true` already put these in the app's own container, so no
+                // security-scoped access is needed. Reading is still off the main actor and
+                // bounded at the source, since a provider controls the copied file's size.
+                let loaded = await Task.detached(priority: .userInitiated) {
+                    let data = ComposerAttachmentSources.readFile(at: url)
+                    let type = (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)
+                        ?? UTType(filenameExtension: url.pathExtension)
+                        ?? .data
+                    return data.map { ($0, type) }
+                }.value
+                guard let (data, type) = loaded else {
+                    attachmentTray?.reportUnreadableFile()
+                    continue
+                }
+                attachmentTray?.add(data: data, name: url.lastPathComponent, type: type)
+            }
         }
     }
 }

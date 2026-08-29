@@ -1311,6 +1311,8 @@ final class RemoteAppModel: ObservableObject {
         managedWorkspace: RemoteManagedWorkspacePlanDTO? = nil,
         role: RemoteSessionRole? = nil,
         reportOpening: RemoteReportSessionOpeningDTO? = nil,
+        openingAttachmentScopeID: String? = nil,
+        openingAttachmentUploadIDs: [String] = [],
         prompt: String
     ) async throws -> MobileCreatedSession {
         guard canManageSessions, let host = activeHost else {
@@ -1329,6 +1331,10 @@ final class RemoteAppModel: ObservableObject {
             managedWorkspace: managedWorkspace,
             role: role,
             reportOpening: reportOpening,
+            openingAttachmentScopeID: openingAttachmentScopeID,
+            openingAttachmentUploadIDs: openingAttachmentUploadIDs.isEmpty
+                ? nil
+                : openingAttachmentUploadIDs,
             compactResponse: true,
             prompt: prompt
         )

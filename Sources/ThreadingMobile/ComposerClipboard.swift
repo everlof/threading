@@ -151,7 +151,7 @@ struct ComposerClipboard {
         guard let size = values?.fileSize, size > 0,
               size <= RemoteAttachmentUploadLimits.maximumBytesPerFile,
               let type = values?.contentType ?? UTType(filenameExtension: url.pathExtension),
-              let data = try? Data(contentsOf: url) else { return nil }
+              let data = ComposerAttachmentSources.readFile(at: url) else { return nil }
         return ComposerClipboardFile(data: data, name: url.lastPathComponent, type: type)
     }
 
