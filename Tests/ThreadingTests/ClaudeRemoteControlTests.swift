@@ -295,12 +295,12 @@ final class ClaudeRemoteControlTests: XCTestCase {
         )
     }
 
-    /// Reporting registers a `PreToolUse` hook of its own — the one that says a question tool
-    /// opened — and it must not be mistaken for the permission broker. The two differ in every
-    /// way that matters: this one names the tools it watches, points at the lifecycle endpoint,
-    /// and throws its own output away, which is what keeps it from answering a permission
-    /// question a terminal session is already asking the user itself.
-    func testLifecycleReportingAddsOnlyAToolScopedObservationalPreToolUseHook() throws {
+    /// Reporting registers two `PreToolUse` observations: one says a question tool opened and
+    /// one carries structured plan changes. Neither may be mistaken for the permission broker.
+    /// Both name the tools they watch, point at observational endpoints, and discard their own
+    /// output, which keeps either one from answering a permission question a terminal session is
+    /// already asking the user itself.
+    func testLifecycleReportingAddsOnlyToolScopedObservationalPreToolUseHooks() throws {
         let path = try XCTUnwrap(MCPSessionRegistry.writeHookSettings(
             for: SessionID(),
             brokersPermissions: false,
@@ -313,16 +313,30 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let hooks = try XCTUnwrap(settings["hooks"] as? [String: Any])
         let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
 
-        XCTAssertEqual(preToolUse.count, 1)
+        XCTAssertEqual(preToolUse.count, 2)
+        let lifecycle = try XCTUnwrap(preToolUse.first { group in
+            commands(in: group).contains { $0.contains(MCPDefaults.lifecyclePathPrefix) }
+        })
         XCTAssertEqual(
-            preToolUse[0][HookRegistrationDefaults.matcherKey] as? String,
+            lifecycle[HookRegistrationDefaults.matcherKey] as? String,
             TurnBlockingTools.names(for: .claude).joined(separator: "|")
         )
 
-        let command = try XCTUnwrap(commands(in: preToolUse[0]).first)
+        let command = try XCTUnwrap(commands(in: lifecycle).first)
         XCTAssertTrue(command.contains(MCPDefaults.lifecyclePathPrefix))
         XCTAssertFalse(command.contains(MCPDefaults.permissionPathPrefix))
         XCTAssertTrue(command.hasSuffix(">/dev/null 2>&1 || true"))
+
+        let progress = try XCTUnwrap(preToolUse.first { group in
+            commands(in: group).contains { $0.contains(MCPDefaults.runProgressPathPrefix) }
+        })
+        XCTAssertEqual(
+            progress[HookRegistrationDefaults.matcherKey] as? String,
+            HookRunProgressPhase.toolUse.claudeRegistration.toolMatcher
+        )
+        let progressCommand = try XCTUnwrap(commands(in: progress).first)
+        XCTAssertFalse(progressCommand.contains(MCPDefaults.permissionPathPrefix))
+        XCTAssertTrue(progressCommand.hasSuffix(">/dev/null 2>&1 || true"))
     }
 
     /// A native session brokers permission on `PreToolUse` and reports asks on it too. They are
@@ -342,9 +356,10 @@ final class ClaudeRemoteControlTests: XCTestCase {
         let preToolUse = try XCTUnwrap(hooks["PreToolUse"] as? [[String: Any]])
         let commands = preToolUse.flatMap(commands(in:))
 
-        XCTAssertEqual(preToolUse.count, 2)
+        XCTAssertEqual(preToolUse.count, 3)
         XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.permissionPathPrefix) }.count, 1)
         XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.lifecyclePathPrefix) }.count, 1)
+        XCTAssertEqual(commands.filter { $0.contains(MCPDefaults.runProgressPathPrefix) }.count, 1)
 
         // The broker offers every tool; only the observational entry is scoped.
         XCTAssertEqual(

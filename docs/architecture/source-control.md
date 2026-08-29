@@ -101,12 +101,14 @@ GitLab discovery returns the repository's default branch and HTTPS/SSH clone loc
 the current branch's open merge request. Commit-status reads include `ref=<source branch>` so a
 named external status does not leak across ref-specific histories, request 100 statuses per page,
 and stop after five pages. GitLab's endpoint does not provide a total count in the response body,
-so a full fifth page carries “more results not loaded” without inventing a remainder. The six
-documented commit states remain exact: `success`, `skipped`, `pending`, `running`, `failed`, and
-`canceled`; `canceling` is also retained as an active compatibility state. A failed or canceled
-status with `allow_failure` remains a separate non-blocking allowed-failure outcome instead of
-being counted as either passed or adverse. Unfamiliar values are visible as bounded unknown
-terminal outcomes. The approvals endpoint supplies approvals and requested reviewers. Because
+so a full fifth page carries “more results not loaded” without inventing a remainder. GitLab's
+complete `CommitStatus` state machine remains exact: `created`, `preparing`, `scheduled`,
+`waiting_for_callback`, `waiting_for_resource`, `pending`, `running`, and `canceling` are active;
+`success` passes; `skipped` is non-blocking; and `manual`, `failed`, and `canceled` need attention.
+A manual, failed, or canceled status with `allow_failure` remains a separate non-blocking
+allowed-failure outcome instead of being counted as either passed or adverse. Unfamiliar values
+are visible as bounded unknown terminal outcomes. The approvals endpoint supplies approvals and
+requested reviewers. Because
 GitLab does not expose GitHub's per-review changes-requested meaning through this workflow, that
 capability is false and the adapter reports no invented count.
 

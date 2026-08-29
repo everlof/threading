@@ -1500,11 +1500,12 @@ final class ThemedIndicatorsTests: XCTestCase {
             "the corner card animated a spinner two other surfaces already draw"
         )
         // The mark is still there — it says which kind of line this is, which is the job the
-        // spinner was doing badly.
-        let marks = everything.compactMap {
-            ($0 as? ThemedFloatingGlyphView)?.semanticDescription
+        // spinner was doing badly. The reusable disclosure owns it inside its full-row button;
+        // the card no longer constructs a separate floating glyph beside that control.
+        let planButton = everything.compactMap { $0 as? ThemedButton }.first {
+            $0.image?.accessibilityDescription == L10n.string("Show plan")
         }
-        XCTAssertTrue(marks.contains("Plan"), "the plan row lost its semantic mark")
+        XCTAssertNotNil(planButton, "the plan row lost its semantic checklist mark")
     }
 
     /// Marks share one column, so the rows read as a list. The children row is a titled button

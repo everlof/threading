@@ -288,9 +288,16 @@ struct GitLabChangeRequestClient: ChangeRequestProviderClient {
         switch status {
         case "success": return .passed
         case "skipped": return .skipped
+        case "created": return .created
+        case "preparing": return .preparing
+        case "scheduled": return .scheduled
+        case "waiting_for_callback": return .waitingForCallback
+        case "waiting_for_resource": return .waitingForResource
         case "pending": return .pending
         case "running": return .running
         case "canceling": return .cancelling
+        case "manual":
+            return response.allowFailure ? .allowedFailure(original: status) : .manual
         case "failed":
             return response.allowFailure ? .allowedFailure(original: status) : .failed
         case "canceled":

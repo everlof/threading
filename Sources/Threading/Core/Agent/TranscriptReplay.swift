@@ -377,12 +377,14 @@ enum TranscriptReplay {
                   record["isSidechain"] as? Bool != true,
                   let message = record["message"] as? [String: Any],
                   let usage = message["usage"] as? [String: Any] else { return nil }
-            let input = (usage["input_tokens"] as? NSNumber)?.intValue
-            let cacheRead = (usage["cache_read_input_tokens"] as? NSNumber)?.intValue
-            let cacheCreation = (usage["cache_creation_input_tokens"] as? NSNumber)?.intValue
+            let input = contextTerm(usage["input_tokens"])
+            let cacheRead = contextTerm(usage["cache_read_input_tokens"])
+            let cacheCreation = contextTerm(usage["cache_creation_input_tokens"])
             guard input != nil || cacheRead != nil || cacheCreation != nil else { return nil }
-            let output = (usage["output_tokens"] as? NSNumber)?.intValue
-            let tokens = (input ?? 0) + (cacheRead ?? 0) + (cacheCreation ?? 0) + (output ?? 0)
+            let output = contextTerm(usage["output_tokens"])
+            guard let tokens = sum(of: [input, cacheRead, cacheCreation, output]) else {
+                return nil
+            }
             return (tokens, nil)
 
         case .codex:

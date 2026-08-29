@@ -2346,7 +2346,7 @@ final class CodexAppServerEventTests: XCTestCase {
         )
     }
 
-    func testAppServerRejectsAPartiallyMalformedPlanSnapshot() {
+    func testAppServerWithdrawsAPartiallyMalformedPlanSnapshot() throws {
         let events = CodexAppServerEvent.streamEvents(
             method: "turn/plan/updated",
             parameters: [
@@ -2359,7 +2359,25 @@ final class CodexAppServerEventTests: XCTestCase {
             ]
         )
 
-        XCTAssertTrue(events.isEmpty)
+        guard case .runPlanUpdated(let steps) = try XCTUnwrap(events.first) else {
+            return XCTFail("Expected an authoritative plan withdrawal")
+        }
+        XCTAssertTrue(steps.isEmpty)
+    }
+
+    func testAppServerWithdrawsAnOversizedPlanSnapshot() throws {
+        let plan = (0...RunProgressLimits.maximumSteps).map { index in
+            ["step": "Step \(index)", "status": "pending"]
+        }
+        let events = CodexAppServerEvent.streamEvents(
+            method: "turn/plan/updated",
+            parameters: ["threadId": "root", "plan": plan]
+        )
+
+        guard case .runPlanUpdated(let steps) = try XCTUnwrap(events.first) else {
+            return XCTFail("Expected an authoritative plan withdrawal")
+        }
+        XCTAssertTrue(steps.isEmpty)
     }
 
     func testOnlyANonRetryingAppServerErrorEndsTheTurn() throws {

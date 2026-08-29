@@ -181,6 +181,46 @@ enum TurnStatusText {
 
 // MARK: - Run Progress
 
+/// Admission limits for provider-owned checklist state.
+///
+/// The detail surfaces virtualize their rows, but the reducer, compact tooltip and remote mirror
+/// all retain the value model. These limits therefore belong at the provider-neutral boundary,
+/// before any transport or UI can accidentally turn an unbounded payload into durable state.
+enum RunProgressLimits {
+    static let maximumSteps = 256
+    static let maximumTitleUTF8Bytes = 4_096
+    static let maximumIdentifierUTF8Bytes = 1_024
+    static let maximumPendingMutations = 512
+    static let maximumObservedMutationsPerTurn = 4_096
+
+    static func title(_ value: String) -> String {
+        let ellipsis = "…"
+        let budget = maximumTitleUTF8Bytes - ellipsis.utf8.count
+        var byteCount = 0
+        var admitted = String.UnicodeScalarView()
+
+        for scalar in value.unicodeScalars {
+            let nextCount = byteCount + scalar.utf8.count
+            if nextCount > budget {
+                return String(admitted) + ellipsis
+            }
+            admitted.append(scalar)
+            byteCount = nextCount
+        }
+        return value
+    }
+
+    static func acceptsIdentifier(_ value: String) -> Bool {
+        guard !value.isEmpty else { return false }
+        var byteCount = 0
+        for scalar in value.unicodeScalars {
+            byteCount += scalar.utf8.count
+            if byteCount > maximumIdentifierUTF8Bytes { return false }
+        }
+        return true
+    }
+}
+
 /// A provider-neutral position inside the plan an agent reports while a turn is running.
 ///
 /// Codex reports complete ordered snapshots. Claude can do the same through `TodoWrite`, while
@@ -210,6 +250,12 @@ struct RunProgress: Equatable, Sendable {
         let id: String?
         let title: String
         let status: Status
+
+        init(id: String?, title: String, status: Status) {
+            self.id = id.flatMap { RunProgressLimits.acceptsIdentifier($0) ? $0 : nil }
+            self.title = RunProgressLimits.title(title)
+            self.status = status
+        }
     }
 
     private enum Presentation: Equatable, Sendable {
@@ -311,7 +357,7 @@ struct RunProgress: Equatable, Sendable {
     }
 
     init?(steps: [Step]) {
-        guard !steps.isEmpty else { return nil }
+        guard !steps.isEmpty, steps.count <= RunProgressLimits.maximumSteps else { return nil }
 
         let activeIndices = steps.indices.filter { steps[$0].status == .inProgress }
         if activeIndices.count > 1 {
@@ -361,6 +407,8 @@ struct RunProgress: Equatable, Sendable {
             return nil
         }
 
+        guard items.count <= RunProgressLimits.maximumSteps else { return nil }
+
         var steps: [Step] = []
         steps.reserveCapacity(items.count)
         for (index, item) in items.enumerated() {
@@ -371,8 +419,10 @@ struct RunProgress: Equatable, Sendable {
             let title = (item[titleKey] as? String)
                 ?? (item["activeForm"] as? String)
                 ?? "Step \(index + 1)"
+            let id = item["id"] as? String
+            if let id, !RunProgressLimits.acceptsIdentifier(id) { return nil }
             steps.append(Step(
-                id: item["id"] as? String,
+                id: id,
                 title: title,
                 status: status
             ))
@@ -397,17 +447,20 @@ struct RunProgressReducer {
     private var order: [String] = []
     private var pendingTaskKeyByToolUseID: [String: String] = [:]
     private var pendingTaskUpdateToolUseIDs: Set<String> = []
+    private var requiresSnapshot = false
 
     mutating func reset() -> Update {
         let hadProgress = progress != nil
-        tasks.removeAll(keepingCapacity: true)
-        order.removeAll(keepingCapacity: true)
-        pendingTaskKeyByToolUseID.removeAll(keepingCapacity: true)
-        pendingTaskUpdateToolUseIDs.removeAll(keepingCapacity: true)
+        clearStorage()
+        requiresSnapshot = false
         return hadProgress ? .changed(nil) : .unchanged
     }
 
     mutating func apply(plan steps: [RunProgress.Step]) -> Update {
+        guard steps.count <= RunProgressLimits.maximumSteps else {
+            return invalidateUntilSnapshot()
+        }
+        requiresSnapshot = false
         replace(with: steps)
         return .changed(progress)
     }
@@ -417,26 +470,54 @@ struct RunProgressReducer {
         tool: ToolIdentity,
         input: [String: Any]
     ) -> Update {
-        if let steps = RunProgress.steps(tool: tool, input: input) {
+        if tool == .plan || tool == .todoWrite {
+            guard let steps = RunProgress.steps(tool: tool, input: input) else {
+                return invalidateUntilSnapshot()
+            }
+            requiresSnapshot = false
             replace(with: steps)
             return .changed(progress)
         }
 
+        guard !requiresSnapshot else { return .unchanged }
+
         switch tool {
         case .taskCreate:
+            guard RunProgressLimits.acceptsIdentifier(toolUseID) else {
+                return invalidateUntilSnapshot()
+            }
             guard let title = nonEmpty(input["subject"] as? String)
                     ?? nonEmpty(input["activeForm"] as? String) else {
                 return .unchanged
             }
             let key = "pending:\(toolUseID)"
             let step = RunProgress.Step(id: nil, title: title, status: .pending)
-            if tasks[key] == nil { order.append(key) }
+            if tasks[key] == nil {
+                guard tasks.count < RunProgressLimits.maximumSteps else {
+                    return invalidateUntilSnapshot()
+                }
+                order.append(key)
+            }
             tasks[key] = step
             pendingTaskKeyByToolUseID[toolUseID] = key
             return .changed(progress)
 
         case .taskUpdate:
-            guard let taskID = taskID(in: input) else { return .unchanged }
+            guard RunProgressLimits.acceptsIdentifier(toolUseID) else {
+                return invalidateUntilSnapshot()
+            }
+            guard let taskID = nonEmpty(input["taskId"] as? String)
+                    ?? nonEmpty(input["task_id"] as? String)
+                    ?? nonEmpty(input["id"] as? String) else {
+                return .unchanged
+            }
+            guard RunProgressLimits.acceptsIdentifier(taskID) else {
+                return invalidateUntilSnapshot()
+            }
+            if !pendingTaskUpdateToolUseIDs.contains(toolUseID),
+               pendingTaskUpdateToolUseIDs.count >= RunProgressLimits.maximumPendingMutations {
+                return invalidateUntilSnapshot()
+            }
             pendingTaskUpdateToolUseIDs.insert(toolUseID)
             let key = "task:\(taskID)"
             let statusValue = input["status"] as? String
@@ -447,15 +528,26 @@ struct RunProgressReducer {
             }
 
             let existing = tasks[key]
-            let status = statusValue.flatMap(RunProgress.Step.Status.init(providerValue:))
-                ?? existing?.status
-                ?? .pending
+            let status: RunProgress.Step.Status
+            if let statusValue {
+                guard let reported = RunProgress.Step.Status(providerValue: statusValue) else {
+                    return invalidateUntilSnapshot()
+                }
+                status = reported
+            } else {
+                status = existing?.status ?? .pending
+            }
             let title = nonEmpty(input["subject"] as? String)
                 ?? nonEmpty(input["activeForm"] as? String)
                 ?? existing?.title
                 ?? taskID
 
-            if existing == nil { order.append(key) }
+            if existing == nil {
+                guard tasks.count < RunProgressLimits.maximumSteps else {
+                    return invalidateUntilSnapshot()
+                }
+                order.append(key)
+            }
             tasks[key] = RunProgress.Step(id: taskID, title: title, status: status)
             return .changed(progress)
 
@@ -465,6 +557,10 @@ struct RunProgressReducer {
     }
 
     mutating func apply(result: ToolResult) -> Update {
+        guard !requiresSnapshot else { return .unchanged }
+        guard RunProgressLimits.acceptsIdentifier(result.toolUseID) else {
+            return invalidateUntilSnapshot()
+        }
         if pendingTaskUpdateToolUseIDs.remove(result.toolUseID) != nil {
             // TaskUpdate is drawn optimistically so a live checklist moves with the tool call.
             // Its failure carries no authoritative replacement state; clearing is more honest
@@ -483,7 +579,7 @@ struct RunProgressReducer {
 
         guard let taskID = Self.createdTaskID(in: result.text),
               let pending = tasks[pendingKey] else {
-            return .unchanged
+            return invalidateUntilSnapshot()
         }
 
         pendingTaskKeyByToolUseID.removeValue(forKey: result.toolUseID)
@@ -518,10 +614,7 @@ struct RunProgressReducer {
     var snapshot: RunProgress? { progress }
 
     private mutating func replace(with steps: [RunProgress.Step]) {
-        tasks.removeAll(keepingCapacity: true)
-        order.removeAll(keepingCapacity: true)
-        pendingTaskKeyByToolUseID.removeAll(keepingCapacity: true)
-        pendingTaskUpdateToolUseIDs.removeAll(keepingCapacity: true)
+        clearStorage()
 
         for (index, step) in steps.enumerated() {
             let base = step.id.map { "task:\($0)" } ?? "snapshot:\(index)"
@@ -541,12 +634,6 @@ struct RunProgressReducer {
         order.removeAll { $0 == key }
     }
 
-    private func taskID(in input: [String: Any]) -> String? {
-        nonEmpty(input["taskId"] as? String)
-            ?? nonEmpty(input["task_id"] as? String)
-            ?? nonEmpty(input["id"] as? String)
-    }
-
     private func nonEmpty(_ value: String?) -> String? {
         guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty else { return nil }
@@ -561,6 +648,21 @@ struct RunProgressReducer {
                   range: text.index(text.startIndex, offsetBy: prefix.count)..<text.endIndex
               ) else { return nil }
         let id = text[text.index(text.startIndex, offsetBy: prefix.count)..<suffix.lowerBound]
-        return id.isEmpty ? nil : String(id)
+        let value = String(id)
+        return RunProgressLimits.acceptsIdentifier(value) ? value : nil
+    }
+
+    private mutating func clearStorage() {
+        tasks.removeAll(keepingCapacity: true)
+        order.removeAll(keepingCapacity: true)
+        pendingTaskKeyByToolUseID.removeAll(keepingCapacity: true)
+        pendingTaskUpdateToolUseIDs.removeAll(keepingCapacity: true)
+    }
+
+    private mutating func invalidateUntilSnapshot() -> Update {
+        let hadProgress = progress != nil
+        clearStorage()
+        requiresSnapshot = true
+        return hadProgress ? .changed(nil) : .unchanged
     }
 }

@@ -135,6 +135,16 @@ records, shares tool-call ids with the hook feed for idempotence, and survives t
 a turn boundary. A new process or replaced/truncated transcript resets the cursor. ANSI output,
 the emulator grid, cursor positioning, and screenshots are deliberately not inputs.
 
+Provider-owned checklist state is admitted once at that shared boundary. A complete snapshot may
+contain at most 256 rows; titles retain at most 4,096 UTF-8 bytes and identifiers at most 1,024.
+Incremental Claude state has the same row ceiling plus 512 unresolved update calls, while the
+hook/transcript dedupe ledger admits 4,096 mutations per turn. These are safety contracts, not UI
+pagination: Mac still exposes every admitted row through a reusable table and remote clients page
+the same value in 64-row slices. An oversized or malformed snapshot withdraws the old plan
+atomically, and incremental mutations cannot rebuild a plausible partial plan until a complete
+snapshot or turn boundary recovers it. Exceeding the per-turn mutation ledger similarly withdraws
+the plan and discards further mutations until the next explicit turn boundary.
+
 The hook endpoint acknowledges before delivery and malformed reports are accepted then ignored;
 an observational plan must never delay, fail, or speak into the provider's turn. The plan is
 presentation state for the open turn, not a persisted Threading task list: the activity edge

@@ -187,10 +187,16 @@ enum ChangeRequestCheckOutcome: Hashable, Sendable {
     case requested
     case queued
     case waiting
+    case created
+    case preparing
+    case scheduled
+    case waitingForCallback
+    case waitingForResource
     case pending
     case running
     case inProgress
     case cancelling
+    case manual
     case failed
     case error
     case startupFailure
@@ -207,10 +213,11 @@ enum ChangeRequestCheckOutcome: Hashable, Sendable {
             return .successful
         case .neutral, .skipped, .allowedFailure:
             return .nonBlocking
-        case .requested, .queued, .waiting, .pending, .running, .inProgress,
+        case .requested, .queued, .waiting, .created, .preparing, .scheduled,
+             .waitingForCallback, .waitingForResource, .pending, .running, .inProgress,
              .cancelling, .unknownActive:
             return .active
-        case .failed, .error, .startupFailure, .actionRequired, .timedOut, .cancelled,
+        case .manual, .failed, .error, .startupFailure, .actionRequired, .timedOut, .cancelled,
              .stale, .unknownTerminal:
             return .needsAttention
         }
@@ -226,19 +233,25 @@ enum ChangeRequestCheckOutcome: Hashable, Sendable {
         case .requested: 20
         case .queued: 21
         case .waiting: 22
-        case .pending: 23
-        case .running: 24
-        case .inProgress: 25
-        case .cancelling: 26
-        case .unknownActive: 29
-        case .failed: 30
-        case .error: 31
-        case .startupFailure: 32
-        case .actionRequired: 33
-        case .timedOut: 34
-        case .cancelled: 35
-        case .stale: 36
-        case .unknownTerminal: 39
+        case .created: 23
+        case .preparing: 24
+        case .scheduled: 25
+        case .waitingForCallback: 26
+        case .waitingForResource: 27
+        case .pending: 28
+        case .running: 29
+        case .inProgress: 30
+        case .cancelling: 31
+        case .unknownActive: 39
+        case .manual: 40
+        case .failed: 41
+        case .error: 42
+        case .startupFailure: 43
+        case .actionRequired: 44
+        case .timedOut: 45
+        case .cancelled: 46
+        case .stale: 47
+        case .unknownTerminal: 49
         }
     }
 
@@ -252,10 +265,16 @@ enum ChangeRequestCheckOutcome: Hashable, Sendable {
         case .requested: L10n.string("requested")
         case .queued: L10n.string("queued")
         case .waiting: L10n.string("waiting")
+        case .created: L10n.string("created")
+        case .preparing: L10n.string("preparing")
+        case .scheduled: L10n.string("scheduled")
+        case .waitingForCallback: L10n.string("waiting for callback")
+        case .waitingForResource: L10n.string("waiting for resource")
         case .pending: L10n.string("pending")
         case .running: L10n.string("running")
         case .inProgress: L10n.string("in progress")
         case .cancelling: L10n.string("cancelling")
+        case .manual: L10n.string("manual action")
         case .failed: L10n.string("failed")
         case .error: L10n.string("error")
         case .startupFailure: L10n.string("startup failed")
@@ -282,6 +301,7 @@ enum ChangeRequestCheckOutcome: Hashable, Sendable {
         case "failed", "failure": return L10n.string("failed")
         case "canceled", "cancelled": return L10n.string("cancelled")
         case "error": return L10n.string("error")
+        case "manual": return L10n.string("manual action")
         default: return boundedProviderValue(value)
         }
     }

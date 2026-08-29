@@ -199,6 +199,11 @@ final class RemoteConversationStoreTests: XCTestCase {
         XCTAssertEqual(connection.runPlan?.activeTitle, "Implement")
         XCTAssertEqual(connection.runPlanSteps.map(\.title), ["Inspect", "Implement"])
 
+        // A duplicated first page is older than the displayed prefix. It must not replace the
+        // rows or make a later page request appear to have completed.
+        connection.receiveServerTextForTesting(encoded(firstPage))
+        XCTAssertEqual(connection.runPlanSteps.map(\.title), ["Inspect", "Implement"])
+
         let stale = RemoteRunPlanPageDTO(
             revision: 3,
             offset: 2,
@@ -207,6 +212,73 @@ final class RemoteConversationStoreTests: XCTestCase {
         )
         connection.receiveServerTextForTesting(encoded(stale))
         XCTAssertEqual(connection.runPlanSteps.count, 2)
+
+        let outOfOrder = RemoteRunPlanPageDTO(
+            revision: 4,
+            offset: 1,
+            total: 3,
+            steps: [.init(id: "gap", title: "Gap", status: .pending)]
+        )
+        connection.receiveServerTextForTesting(encoded(outOfOrder))
+        XCTAssertEqual(connection.runPlanSteps.count, 2)
+
+        let wrongTotal = RemoteRunPlanPageDTO(
+            revision: 4,
+            offset: 2,
+            total: 4,
+            steps: [.init(id: "step-2", title: "Wrong total", status: .pending)]
+        )
+        connection.receiveServerTextForTesting(encoded(wrongTotal))
+        XCTAssertEqual(connection.runPlanSteps.count, 2)
+
+        let duplicateID = RemoteRunPlanPageDTO(
+            revision: 4,
+            offset: 2,
+            total: 3,
+            steps: [.init(id: "step-1", title: "Duplicate", status: .pending)]
+        )
+        connection.receiveServerTextForTesting(encoded(duplicateID))
+        XCTAssertEqual(connection.runPlanSteps.count, 2)
+
+        let oversizedPage = RemoteRunPlanPageDTO(
+            revision: 4,
+            offset: 2,
+            total: 3,
+            steps: [.init(
+                id: "overflow",
+                title: String(
+                    repeating: "x",
+                    count: RemoteMobileConnectionDefaults.runPlanMaximumTitleUTF8Bytes + 1
+                ),
+                status: .pending
+            )]
+        )
+        connection.receiveServerTextForTesting(encoded(oversizedPage))
+        XCTAssertEqual(connection.runPlanSteps.count, 2)
+
+        let tail = RemoteRunPlanPageDTO(
+            revision: 4,
+            offset: 2,
+            total: 3,
+            steps: [.init(id: "step-2", title: "Verify", status: .pending)]
+        )
+        connection.receiveServerTextForTesting(encoded(tail))
+        XCTAssertEqual(connection.runPlanSteps.map(\.title), ["Inspect", "Implement", "Verify"])
+
+        // A malformed newer summary cannot clear a complete, valid revision or advance the
+        // revision gate past a corrected frame carrying the same number.
+        connection.receiveServerTextForTesting(encoded(RemoteRunPlanUpdateDTO(
+            revision: 5,
+            plan: .init(
+                activeTitle: "Invalid",
+                current: 4,
+                completed: 1,
+                active: 1,
+                total: 3
+            )
+        )))
+        XCTAssertEqual(connection.runPlan?.activeTitle, "Implement")
+        XCTAssertEqual(connection.runPlanSteps.count, 3)
 
         connection.receiveServerTextForTesting(encoded(RemoteRunPlanUpdateDTO(
             revision: 5,
@@ -224,6 +296,20 @@ final class RemoteConversationStoreTests: XCTestCase {
             revision: 6,
             plan: nil
         )))
+        XCTAssertNil(connection.runPlan)
+        XCTAssertTrue(connection.runPlanSteps.isEmpty)
+
+        connection.receiveServerTextForTesting(encoded(RemoteRunPlanUpdateDTO(
+            revision: 7,
+            plan: .init(
+                activeTitle: "Do not survive disconnect",
+                current: 1,
+                completed: 0,
+                active: 1,
+                total: 1
+            )
+        )))
+        connection.disconnect(markEnded: false)
         XCTAssertNil(connection.runPlan)
         XCTAssertTrue(connection.runPlanSteps.isEmpty)
     }

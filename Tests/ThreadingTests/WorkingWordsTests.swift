@@ -144,6 +144,72 @@ final class WorkingWordsTests: XCTestCase {
         XCTAssertNil(RunProgress(tool: .plan, input: ["plan": []]))
     }
 
+    func testProviderPlanAdmissionBoundsRowsAndTextBeforeRetention() throws {
+        let oversized = (0...RunProgressLimits.maximumSteps).map { index in
+            ["step": "Step \(index)", "status": "pending"]
+        }
+        XCTAssertNil(RunProgress(tool: .plan, input: ["plan": oversized]))
+
+        let progress = try XCTUnwrap(RunProgress(tool: .plan, input: [
+            "plan": [[
+                "step": String(repeating: "é", count: RunProgressLimits.maximumTitleUTF8Bytes),
+                "status": "in_progress",
+            ]]
+        ]))
+        let title = try XCTUnwrap(progress.currentStep?.title)
+        XCTAssertLessThanOrEqual(title.utf8.count, RunProgressLimits.maximumTitleUTF8Bytes)
+        XCTAssertTrue(title.hasSuffix("…"))
+    }
+
+    func testMalformedSnapshotClearsAndRequiresACompleteSnapshotToRecover() throws {
+        var reducer = RunProgressReducer()
+        _ = reducer.apply(
+            toolUseID: "plan-1",
+            tool: .plan,
+            input: ["plan": [["step": "Inspect", "status": "in_progress"]]]
+        )
+
+        XCTAssertNil(try changedProgress(reducer.apply(
+            toolUseID: "plan-broken",
+            tool: .plan,
+            input: ["plan": [["step": "Broken", "status": "future"]]]
+        )))
+        XCTAssertNil(reducer.snapshot)
+
+        XCTAssertUnchanged(reducer.apply(
+            toolUseID: "create-ignored",
+            tool: .taskCreate,
+            input: ["subject": "Must not rebuild a partial plan"]
+        ))
+        XCTAssertNil(reducer.snapshot)
+
+        let recovered = try changedProgress(reducer.apply(
+            toolUseID: "plan-2",
+            tool: .plan,
+            input: ["plan": [["step": "Recovered", "status": "pending"]]]
+        ))
+        XCTAssertEqual(recovered?.currentStep?.title, "Recovered")
+    }
+
+    func testIncrementalTaskOverflowWithdrawsTheWholePlan() throws {
+        var reducer = RunProgressReducer()
+        for index in 0..<RunProgressLimits.maximumSteps {
+            _ = reducer.apply(
+                toolUseID: "update-\(index)",
+                tool: .taskUpdate,
+                input: ["taskId": "\(index)", "status": "pending"]
+            )
+        }
+        XCTAssertEqual(reducer.snapshot?.steps.count, RunProgressLimits.maximumSteps)
+
+        XCTAssertNil(try changedProgress(reducer.apply(
+            toolUseID: "update-overflow",
+            tool: .taskUpdate,
+            input: ["taskId": "overflow", "status": "pending"]
+        )))
+        XCTAssertNil(reducer.snapshot)
+    }
+
     func testLegacySummariesRetainTheirReportedCounts() {
         let step = RunProgress(step: 2, total: 4)
         XCTAssertEqual(step.completed, 1)
@@ -289,6 +355,16 @@ final class WorkingWordsTests: XCTestCase {
             throw ProgressTestError.unchanged
         }
         return progress
+    }
+
+    private func XCTAssertUnchanged(
+        _ update: RunProgressReducer.Update,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard case .unchanged = update else {
+            return XCTFail("Expected unchanged progress", file: file, line: line)
+        }
     }
 
     private func assertSummary(

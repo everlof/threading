@@ -363,9 +363,10 @@ final class PTYHostDaemonTests: XCTestCase {
         _ = try spawn(
             on: client,
             id: id,
-            script: "trap '' TERM; i=0; while [ \"$i\" -lt \(Fixture.stubbornChildIterations) ]; "
+            script: "trap '' TERM; printf READY; i=0; while [ \"$i\" -lt \(Fixture.stubbornChildIterations) ]; "
                 + "do i=$((i + 1)); sleep 0.2; done"
         )
+        try client.waitForOutput(containing: "READY", timeout: Fixture.childTimeout)
         client.send(.kill(PTYHostKill(id: id, escalate: true)))
 
         let exited = try nextExit(on: client)

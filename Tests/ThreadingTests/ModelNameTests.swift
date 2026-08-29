@@ -436,6 +436,14 @@ final class ModelNameTests: XCTestCase {
         try Data("{\"models\": [{\"slug\": \"gpt-".utf8).write(to: cache)
         XCTAssertTrue(AgentModels.supportsFastMode(kind: .codex, model: nil, account: account))
 
+        // Last-good is a short rewrite bridge, not a permanent fail-open cache. Once a broken
+        // file is no longer fresh, the configured-model fallback has no invented capabilities.
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -60)],
+            ofItemAtPath: cache.path
+        )
+        XCTAssertFalse(AgentModels.supportsFastMode(kind: .codex, model: nil, account: account))
+
         // A new catalogue is read as itself, not remembered away.
         try Data("""
             {
@@ -450,6 +458,14 @@ final class ModelNameTests: XCTestCase {
         )
         XCTAssertFalse(
             AgentModels.supportsFastMode(kind: .codex, model: "gpt-second", account: account)
+        )
+
+        // Removing the cache (for example, at sign-out) cannot leave the old login's models
+        // attached to a future account that happens to reuse the same directory.
+        try FileManager.default.removeItem(at: cache)
+        XCTAssertEqual(
+            AgentModels.options(for: .codex, account: account).map(\.identifier),
+            ["gpt-first"]
         )
     }
 

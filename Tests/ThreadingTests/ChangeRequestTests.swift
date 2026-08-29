@@ -743,7 +743,7 @@ final class ChangeRequestTests: XCTestCase {
             case "projects/team%2Fapp/merge_requests":
                 output = Self.gitlabMergeRequestsBody()
             case "projects/team%2Fapp/repository/commits/remote-sha/statuses":
-                output = Data(#"[{"status":"success"},{"status":"skipped"},{"status":"pending"},{"status":"running"},{"status":"canceling"},{"status":"failed"},{"status":"canceled"},{"status":"failed","allow_failure":true},{"status":"canceled","allow_failure":true}]"#.utf8)
+                output = Data(#"[{"status":"success"},{"status":"skipped"},{"status":"created"},{"status":"preparing"},{"status":"scheduled"},{"status":"waiting_for_callback"},{"status":"waiting_for_resource"},{"status":"pending"},{"status":"running"},{"status":"canceling"},{"status":"manual"},{"status":"manual","allow_failure":true},{"status":"failed"},{"status":"canceled"},{"status":"failed","allow_failure":true},{"status":"canceled","allow_failure":true}]"#.utf8)
             case "projects/team%2Fapp/merge_requests/31/approvals":
                 output = Data(#"{"approved_by":[{"user":{"id":1}},{"user":{"id":2}}]}"#.utf8)
             default:
@@ -773,9 +773,16 @@ final class ChangeRequestTests: XCTestCase {
         XCTAssertEqual(request.checks.state, .needsAttention)
         XCTAssertEqual(request.checks.passed, 1)
         XCTAssertEqual(request.checks.skipped, 1)
+        XCTAssertEqual(request.checks.count(of: .created), 1)
+        XCTAssertEqual(request.checks.count(of: .preparing), 1)
+        XCTAssertEqual(request.checks.count(of: .scheduled), 1)
+        XCTAssertEqual(request.checks.count(of: .waitingForCallback), 1)
+        XCTAssertEqual(request.checks.count(of: .waitingForResource), 1)
         XCTAssertEqual(request.checks.count(of: .pending), 1)
         XCTAssertEqual(request.checks.count(of: .running), 1)
         XCTAssertEqual(request.checks.count(of: .cancelling), 1)
+        XCTAssertEqual(request.checks.count(of: .manual), 1)
+        XCTAssertEqual(request.checks.count(of: .allowedFailure(original: "manual")), 1)
         XCTAssertEqual(request.checks.count(of: .failed), 1)
         XCTAssertEqual(request.checks.count(of: .cancelled), 1)
         XCTAssertEqual(request.checks.count(of: .allowedFailure(original: "failed")), 1)

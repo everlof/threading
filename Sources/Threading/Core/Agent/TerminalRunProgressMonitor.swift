@@ -16,6 +16,7 @@ final class TerminalRunProgressMonitor: @unchecked Sendable {
     )
     private var reducer = RunProgressReducer()
     private var seen: Set<String> = []
+    private var exceededMutationBudget = false
     private var receivedHookThisTurn = false
     private var transcriptPath: String?
     private var transcriptOffset: UInt64 = 0
@@ -24,6 +25,7 @@ final class TerminalRunProgressMonitor: @unchecked Sendable {
         queue.async { [self] in
             _ = reducer.reset()
             seen.removeAll(keepingCapacity: true)
+            exceededMutationBudget = false
             receivedHookThisTurn = false
             publish(reducer.snapshot, completion: completion)
         }
@@ -33,6 +35,7 @@ final class TerminalRunProgressMonitor: @unchecked Sendable {
         queue.async { [self] in
             _ = reducer.reset()
             seen.removeAll(keepingCapacity: true)
+            exceededMutationBudget = false
             receivedHookThisTurn = false
             transcriptPath = nil
             transcriptOffset = 0
@@ -47,6 +50,7 @@ final class TerminalRunProgressMonitor: @unchecked Sendable {
         queue.async { [self] in
             _ = reducer.reset()
             seen.removeAll(keepingCapacity: true)
+            exceededMutationBudget = false
             receivedHookThisTurn = false
             publish(nil, completion: completion)
         }
@@ -59,16 +63,20 @@ final class TerminalRunProgressMonitor: @unchecked Sendable {
         queue.async { [self] in
             switch report.mutation {
             case .toolUse(let id, let tool, let input):
-                guard seen.insert("use:\(id)").inserted else { return }
                 receivedHookThisTurn = true
+                guard admit(kind: "use", id: id, completion: completion) else { return }
                 _ = reducer.apply(
                     toolUseID: id,
                     tool: tool,
                     input: input.mapValues(\.foundationValue)
                 )
             case .result(let result):
-                guard seen.insert("result:\(result.toolUseID)").inserted else { return }
                 receivedHookThisTurn = true
+                guard admit(
+                    kind: "result",
+                    id: result.toolUseID,
+                    completion: completion
+                ) else { return }
                 _ = reducer.apply(result: result)
             }
             publish(reducer.snapshot, completion: completion)
@@ -93,11 +101,13 @@ final class TerminalRunProgressMonitor: @unchecked Sendable {
                     transcriptOffset = 0
                     _ = reducer.reset()
                     seen.removeAll(keepingCapacity: true)
+                    exceededMutationBudget = false
                 }
             } else if size < transcriptOffset {
                 transcriptOffset = 0
                 _ = reducer.reset()
                 seen.removeAll(keepingCapacity: true)
+                exceededMutationBudget = false
                 receivedHookThisTurn = false
             }
 
@@ -116,15 +126,16 @@ final class TerminalRunProgressMonitor: @unchecked Sendable {
                     guard !receivedHookThisTurn else { continue }
                     _ = reducer.reset()
                     seen.removeAll(keepingCapacity: true)
+                    exceededMutationBudget = false
                 case .toolUse(let id, let tool, let input):
-                    guard seen.insert("use:\(id)").inserted else { continue }
+                    guard admit(kind: "use", id: id) else { continue }
                     _ = reducer.apply(
                         toolUseID: id,
                         tool: tool,
                         input: input.mapValues(\.foundationValue)
                     )
                 case .result(let result):
-                    guard seen.insert("result:\(result.toolUseID)").inserted else { continue }
+                    guard admit(kind: "result", id: result.toolUseID) else { continue }
                     _ = reducer.apply(result: result)
                 }
             }
@@ -141,6 +152,39 @@ final class TerminalRunProgressMonitor: @unchecked Sendable {
         completion: @escaping @MainActor @Sendable (RunProgress?) -> Void
     ) {
         Task { @MainActor in completion(progress) }
+    }
+
+    /// Admits one provider mutation without letting a pathological turn retain identifiers
+    /// forever. Once the budget or identifier contract is violated, the current plan is
+    /// withdrawn and no incremental event can reconstruct a plausible-but-partial replacement;
+    /// the next explicit turn boundary starts cleanly.
+    private func admit(
+        kind: String,
+        id: String,
+        completion: (@MainActor @Sendable (RunProgress?) -> Void)? = nil
+    ) -> Bool {
+        guard !exceededMutationBudget else { return false }
+        guard RunProgressLimits.acceptsIdentifier(id) else {
+            exceedMutationBudget(completion: completion)
+            return false
+        }
+        let key = "\(kind):\(id)"
+        if seen.contains(key) { return false }
+        guard seen.count < RunProgressLimits.maximumObservedMutationsPerTurn else {
+            exceedMutationBudget(completion: completion)
+            return false
+        }
+        seen.insert(key)
+        return true
+    }
+
+    private func exceedMutationBudget(
+        completion: (@MainActor @Sendable (RunProgress?) -> Void)?
+    ) {
+        exceededMutationBudget = true
+        seen.removeAll(keepingCapacity: true)
+        _ = reducer.reset()
+        if let completion { publish(nil, completion: completion) }
     }
 
     private static func fileSize(_ url: URL) -> UInt64 {

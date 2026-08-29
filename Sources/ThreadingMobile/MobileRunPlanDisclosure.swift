@@ -113,6 +113,7 @@ private struct MobileRunPlanDetail: View {
                             .tint(theme.accent)
                             .frame(maxWidth: .infinity)
                             .padding(MobileDesign.Spacing.inset)
+                            .onAppear { connection.requestNextRunPlanPage() }
                     }
                 }
             }
@@ -120,10 +121,6 @@ private struct MobileRunPlanDetail: View {
         }
         .frame(width: 360)
         .background(theme.floatingSurface)
-        .task { connection.requestNextRunPlanPage() }
-        .onChange(of: connection.runPlanSteps.count) { _, _ in
-            connection.requestNextRunPlanPage()
-        }
     }
 }
 

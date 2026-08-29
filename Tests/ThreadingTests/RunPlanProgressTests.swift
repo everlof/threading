@@ -57,6 +57,60 @@ final class RunPlanProgressTests: XCTestCase {
     }
 
     @MainActor
+    func testTerminalMonitorWithdrawsAPlanAtItsPerTurnMutationBudget() async throws {
+        let monitor = TerminalRunProgressMonitor()
+        let callbacks = expectation(description: "bounded mutation callbacks")
+        callbacks.expectedFulfillmentCount = RunProgressLimits.maximumObservedMutationsPerTurn + 1
+        var nilCallbacks = 0
+
+        for index in 0...RunProgressLimits.maximumObservedMutationsPerTurn {
+            let report = try XCTUnwrap(HookRunProgressReport(
+                sessionID: SessionID(),
+                phase: .toolUse,
+                payload: [
+                    "tool_call_id": "plan-\(index)",
+                    "tool_name": "update_plan",
+                    "tool_input": [
+                        "plan": [["step": "Bounded", "status": "in_progress"]],
+                    ],
+                ]
+            ))
+            monitor.apply(report) { progress in
+                if progress == nil { nilCallbacks += 1 }
+                callbacks.fulfill()
+            }
+        }
+
+        await fulfillment(of: [callbacks], timeout: 5)
+        XCTAssertEqual(nilCallbacks, 1)
+
+        let began = expectation(description: "next turn begins")
+        monitor.beginTurn { progress in
+            XCTAssertNil(progress)
+            began.fulfill()
+        }
+        await fulfillment(of: [began], timeout: 2)
+
+        let recovery = try XCTUnwrap(HookRunProgressReport(
+            sessionID: SessionID(),
+            phase: .toolUse,
+            payload: [
+                "tool_call_id": "recovered-plan",
+                "tool_name": "update_plan",
+                "tool_input": [
+                    "plan": [["step": "Recovered", "status": "in_progress"]],
+                ],
+            ]
+        ))
+        let recovered = expectation(description: "next turn recovers")
+        monitor.apply(recovery) { progress in
+            XCTAssertEqual(progress?.currentStep?.title, "Recovered")
+            recovered.fulfill()
+        }
+        await fulfillment(of: [recovered], timeout: 2)
+    }
+
+    @MainActor
     func testTerminalMonitorKeepsItsTranscriptCursorAcrossTurnClear() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
             "threading-run-plan-\(UUID().uuidString)",

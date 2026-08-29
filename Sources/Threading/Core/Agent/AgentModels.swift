@@ -831,6 +831,11 @@ enum AgentModels {
         initialState: [String: RememberedCodexCatalog]()
     )
 
+    /// A rewrite of a 200 KB cache is over in milliseconds. Keeping the last complete reading
+    /// for a few seconds covers truncate-and-rewrite without turning a permanently malformed or
+    /// removed cache into an indefinitely stale catalogue.
+    private static let codexCatalogRewriteGrace: TimeInterval = 5
+
     /// Reads the cache Codex writes after resolving the account's live model catalog.
     ///
     /// Hidden/internal models stay hidden. A future catalog can rename the fast service-tier
@@ -846,8 +851,21 @@ enum AgentModels {
         if let remembered, let identity, remembered.identity == identity {
             return remembered.options
         }
-        guard let identity, let decoded = decodeCodexCatalog(at: url) else {
-            return remembered?.options ?? []
+        guard let identity else {
+            // A missing cache is an account with no live catalogue, not a rewrite observed in
+            // progress. Reusing a former login's entry here could offer models that no longer
+            // exist after sign-out and recreation at the same path.
+            return []
+        }
+        guard let decoded = decodeCodexCatalog(at: url) else {
+            let observedAt = Date()
+            guard let remembered,
+                  let modified = identity.modified,
+                  observedAt.timeIntervalSince(modified) >= -1,
+                  observedAt.timeIntervalSince(modified) <= codexCatalogRewriteGrace else {
+                return []
+            }
+            return remembered.options
         }
         rememberedCodexCatalogs.withLock {
             $0[key] = RememberedCodexCatalog(identity: identity, options: decoded)
