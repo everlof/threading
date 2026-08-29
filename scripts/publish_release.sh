@@ -144,11 +144,7 @@ readonly APPCAST="$BUILD_DIR/appcast.xml"
 
 # MARK: - Release notes
 
-NOTES="$(awk -v version="$VERSION" '
-    $0 ~ "^## \\[" version "\\]" { printing = 1; next }
-    printing && /^## \[/ { exit }
-    printing { print }
-' "$ROOT/CHANGELOG.md")"
+NOTES="$(release_notes_for_version "$VERSION" "$ROOT/CHANGELOG.md")"
 [[ -n "${NOTES//[[:space:]]/}" ]] || fail "CHANGELOG.md has no section for $VERSION"
 
 # The appcast is not an asset of every release, so the notes must not say it is: a beta's zip

@@ -162,11 +162,7 @@ signing_key="$("$sparkle_bin/generate_keys" -p --account "${THREADING_SPARKLE_AC
 [[ "$shipped_key" == "$signing_key" ]] \
     || fail "the Sparkle private key does not match the public key shipped by the app"
 
-notes="$(awk -v version="$VERSION" '
-    $0 ~ "^## \\[" version "\\]" { printing = 1; next }
-    printing && /^## \\[/ { exit }
-    printing { print }
-' "$ROOT/CHANGELOG.md")"
+notes="$(release_notes_for_version "$VERSION" "$ROOT/CHANGELOG.md")"
 [[ -n "${notes//[[:space:]]/}" ]] || fail "CHANGELOG.md has no release notes for $VERSION"
 
 published="$(gh release list --repo "$REPO" --limit 200 \
