@@ -1,5 +1,33 @@
 import AppKit
 
+/// Sendable search material for the unbounded archive. Filtering runs off the main actor and
+/// returns only source offsets; the AppKit/controller side keeps owning the actual session values.
+struct ArchivedSessionSearchRecord: Sendable, Equatable {
+    let sourceIndex: Int
+    let title: String
+    let projectName: String
+}
+
+enum ArchivedSessionSearch {
+    static func matchingIndexes(
+        in records: [ArchivedSessionSearchRecord],
+        query: String
+    ) -> [Int] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return records.map(\.sourceIndex) }
+        var matches: [Int] = []
+        matches.reserveCapacity(min(records.count, ArchivedDefaults.recentLimit))
+        for record in records {
+            if Task.isCancelled { return [] }
+            if record.title.localizedCaseInsensitiveContains(query)
+                || record.projectName.localizedCaseInsensitiveContains(query) {
+                matches.append(record.sourceIndex)
+            }
+        }
+        return matches
+    }
+}
+
 /// Archived-sessions preferences: the conversations filed away out of the sidebar.
 ///
 /// Archiving keeps a session's conversation but takes it off the sidebar, so this is where the
@@ -24,7 +52,11 @@ final class ArchivedPreferencesViewController: NSViewController {
     // MARK: - Properties
 
     private let rowsProvider: @MainActor () -> [Entry]
+    private var allRows: [Entry] = []
     private var rows: [Entry] = []
+    private var searchRecords: [ArchivedSessionSearchRecord] = []
+    private var searchTask: Task<Void, Never>?
+    private var searchGeneration = 0
     private let appEvents = AppEventObservations()
     private var extensionSections: [ExtensionSettingsSectionModel] = []
     private var presentationRows: [PresentationRow] = []
@@ -68,6 +100,48 @@ final class ArchivedPreferencesViewController: NSViewController {
         return scroll
     }()
 
+    private lazy var searchField: ThemedSearchField = {
+        let field = ThemedSearchField()
+        field.placeholderString = ArchivedPreferencesStrings.searchPlaceholder
+        field.setAccessibilityLabel(ArchivedPreferencesStrings.searchAccessibilityLabel)
+        field.setAccessibilityIdentifier("settings.archived.search")
+        field.delegate = self
+        field.translatesAutoresizingMaskIntoConstraints = false
+        return field
+    }()
+
+    /// Search remains available while the archive scrolls. The table stays the sole scroll
+    /// owner, preserving its viewport-bound row construction.
+    private lazy var listBody: NSView = {
+        let body = NSView()
+        searchField.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        body.addSubview(searchField)
+        body.addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            searchField.topAnchor.constraint(
+                equalTo: body.topAnchor,
+                constant: Design.Spacing.large
+            ),
+            searchField.leadingAnchor.constraint(
+                equalTo: body.leadingAnchor,
+                constant: Design.Size.glowGutter
+            ),
+            searchField.trailingAnchor.constraint(
+                equalTo: body.trailingAnchor,
+                constant: -Design.Size.glowGutter
+            ),
+            scrollView.topAnchor.constraint(
+                equalTo: searchField.bottomAnchor,
+                constant: Design.Spacing.medium
+            ),
+            scrollView.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: body.bottomAnchor),
+        ])
+        return body
+    }()
+
     init(rowsProvider: (@MainActor () -> [Entry])? = nil) {
         self.rowsProvider = rowsProvider ?? { ProjectStore.shared.archivedSessions() }
         super.init(nibName: nil, bundle: nil)
@@ -85,7 +159,7 @@ final class ArchivedPreferencesViewController: NSViewController {
         let page = SettingsUI.listPage(
             title: "Archived",
             summary: ArchivedPreferencesStrings.count(0),
-            body: scrollView
+            body: listBody
         )
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -128,10 +202,57 @@ final class ArchivedPreferencesViewController: NSViewController {
     /// Refreshes the cheap value model. An unchanged event recycles only the viewport and keeps
     /// its scroll position; no project notification rebuilds the page header or the full archive.
     private func reload() {
-        rows = rowsProvider()
+        allRows = rowsProvider()
+        searchRecords = allRows.enumerated().map { index, entry in
+            ArchivedSessionSearchRecord(
+                sourceIndex: index,
+                title: entry.session.displayTitle,
+                projectName: entry.project.name
+            )
+        }
         extensionSections = ExtensionSettingsRenderer.hostSectionModels(for: .archived)
+        pageView?.updateSummary(ArchivedPreferencesStrings.count(allRows.count))
+        applySearchQuery(searchField.stringValue)
+    }
+
+    private var isFiltering: Bool {
+        !searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Filters value records away from the main actor. Search frequency comes from typing and
+    /// archive cardinality is user-owned, so a cancelled scan checks cancellation per record and
+    /// only its final offset list crosses back into presentation.
+    private func applySearchQuery(_ query: String) {
+        searchTask?.cancel()
+        searchGeneration &+= 1
+        let generation = searchGeneration
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            applyFilteredRows(allRows)
+            return
+        }
+
+        let records = searchRecords
+        let worker = Task.detached(priority: .userInitiated) {
+            ArchivedSessionSearch.matchingIndexes(in: records, query: trimmed)
+        }
+        searchTask = Task { [weak self] in
+            let indexes = await withTaskCancellationHandler {
+                await worker.value
+            } onCancel: {
+                worker.cancel()
+            }
+            guard !Task.isCancelled, let self, generation == searchGeneration else { return }
+            let matches = indexes.compactMap { index in
+                self.allRows.indices.contains(index) ? self.allRows[index] : nil
+            }
+            applyFilteredRows(matches)
+        }
+    }
+
+    private func applyFilteredRows(_ filteredRows: [Entry]) {
+        rows = filteredRows
         presentationRows = makePresentationRows()
-        pageView?.updateSummary(ArchivedPreferencesStrings.count(rows.count))
         updateCardDecorations()
         tableView.reloadData()
     }
@@ -141,11 +262,11 @@ final class ArchivedPreferencesViewController: NSViewController {
         if rows.isEmpty {
             result.append(.empty)
         } else {
-            let visibleCount = showsOlder
+            let visibleCount = isFiltering || showsOlder
                 ? rows.count
                 : min(rows.count, ArchivedDefaults.recentLimit)
             result.append(contentsOf: (0 ..< visibleCount).map(PresentationRow.session))
-            let older = max(rows.count - ArchivedDefaults.recentLimit, 0)
+            let older = isFiltering ? 0 : max(rows.count - ArchivedDefaults.recentLimit, 0)
             if older > 0 { result.append(.olderDisclosure(older)) }
         }
         for (sectionIndex, section) in extensionSections.enumerated() {
@@ -171,7 +292,8 @@ final class ArchivedPreferencesViewController: NSViewController {
         // through the stacks and breaks the page's own pins — see SettingsUI.disclosureRow.
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let when = Self.relativeDate.localizedString(for: entry.session.lastActiveAt, relativeTo: Date())
+        let archivedAt = entry.session.archivedAt ?? entry.session.lastActiveAt
+        let when = Self.relativeDate.localizedString(for: archivedAt, relativeTo: Date())
         let manager = ControlGrantStore.shared.supervisions(forChild: entry.session.id)
             .last(where: { $0.state == .archived })
             .flatMap { ProjectStore.shared.session(withID: $0.managerID)?.displayTitle }
@@ -289,11 +411,44 @@ final class ArchivedPreferencesViewController: NSViewController {
 
     /// Stress-fixture observability: the complete cheap model versus the live AppKit viewport.
     var virtualRowCountForTesting: Int { presentationRows.count }
+    var filteredArchiveCountForTesting: Int { rows.count }
+    var searchFieldForTesting: ThemedSearchField { searchField }
+
+    /// The disclosure can sit just below a short viewport now that search is pinned above it.
+    /// Stress and behavior fixtures use the table's real scrolling path before activating it.
+    func revealOlderDisclosureForTesting() {
+        guard let row = presentationRows.firstIndex(where: {
+            if case .olderDisclosure = $0 { return true }
+            return false
+        }) else { return }
+        tableView.scrollRowToVisible(row)
+    }
 
     var materializedRowCountForTesting: Int {
         var count = 0
         tableView.enumerateAvailableRowViews { _, _ in count += 1 }
         return count
+    }
+}
+
+// MARK: - Search
+
+extension ArchivedPreferencesViewController: NSTextFieldDelegate {
+    func controlTextDidChange(_: Notification) {
+        applySearchQuery(searchField.stringValue)
+    }
+
+    /// Escape clears a filled archive query and keeps the caret in the field. An empty query
+    /// leaves Escape to the surrounding Settings surface.
+    func control(
+        _: NSControl,
+        textView _: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        guard commandSelector == #selector(NSResponder.cancelOperation(_:)),
+              !searchField.stringValue.isEmpty else { return false }
+        searchField.clear()
+        return true
     }
 }
 
@@ -335,7 +490,9 @@ extension ArchivedPreferencesViewController: NSTableViewDataSource, NSTableViewD
         case .note:
             return SettingsUI.note(ArchivedPreferencesStrings.explanation)
         case .empty:
-            return SettingsUI.note(ArchivedPreferencesStrings.empty)
+            return SettingsUI.note(
+                isFiltering ? ArchivedPreferencesStrings.noMatches : ArchivedPreferencesStrings.empty
+            )
         case let .session(index):
             guard rows.indices.contains(index) else { return NSView() }
             return makeRow(entry: rows[index], index: index)
@@ -370,6 +527,7 @@ extension ArchivedPreferencesViewController: NSTableViewDataSource, NSTableViewD
     /// and AppKit constructs the newly intersecting archive cells on demand.
     private func setShowsOlder(_ expanded: Bool) {
         guard showsOlder != expanded,
+              !isFiltering,
               rows.count > ArchivedDefaults.recentLimit else { return }
         let firstOlder = 1 + ArchivedDefaults.recentLimit
         let olderCount = rows.count - ArchivedDefaults.recentLimit
@@ -461,7 +619,9 @@ extension ArchivedPreferencesViewController: NSTableViewDataSource, NSTableViewD
             return extensionSections[sectionIndex].visibleTitle == nil
                 ? Design.Spacing.large
                 : 0
-        case .note, .empty, .extensionCaption:
+        case .note:
+            return Design.Spacing.medium
+        case .empty, .extensionCaption:
             return Design.Spacing.large
         }
     }
@@ -488,6 +648,18 @@ private enum ArchivedPreferencesStrings {
 
     static var empty: String {
         L10n.string("No archived conversations.")
+    }
+
+    static var noMatches: String {
+        L10n.string("No archived conversations match your search.")
+    }
+
+    static var searchPlaceholder: String {
+        L10n.string("Search archived conversations")
+    }
+
+    static var searchAccessibilityLabel: String {
+        L10n.string("Archived conversation search")
     }
 
     static func count(_ count: Int) -> String {

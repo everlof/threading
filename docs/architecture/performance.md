@@ -742,10 +742,21 @@ constraints. Project and extension-settings events refresh the value model and r
 viewport. Extension-contributed fields targeting Archived remain individual rows in the same
 scroll owner rather than becoming a nested page.
 
+Search keeps that boundary. The fixed `ThemedSearchField` snapshots only title and project into
+small `Sendable` records, and a cancellable detached scan returns matching indices to the main
+actor. A query presents every matching identity through the same virtual table instead of
+constructing the folded-away rows; clearing it restores the ten-row fold. Thus query work is
+linear in archive count and value-only, while AppKit construction, layout and retained hierarchy
+remain bounded by the viewport. The expected case is tens to hundreds of conversations; the
+existing 1,000-row stress is the implementation-time gate. Do not move row construction, relative
+date formatting or contributed settings work into the search task.
+
 `SettingsDisclosureRenderTests.testStressArchivedPreferencesWhenEnabled` manufactures its archive
 before the clock starts, then reports controller/view load, model render, first layout, disclosure,
-jump to the end, an unchanged project event at that end, hierarchy size and footprint. It also
-asserts the clip origin is unchanged. Run both themes with
+jump to the end, an unchanged project event at that end, hierarchy size and footprint. Its
+`search_ms` phase scans the same 1,000 value records for a match at the end before AppKit mounts,
+and the test asserts that exact source identity returns. It also asserts the clip origin is
+unchanged. Run both themes with
 `scripts/profile_threading.sh archived-settings-stress`; the workload is part of `full`.
 
 Fresh Debug processes measured:

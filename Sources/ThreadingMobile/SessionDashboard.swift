@@ -546,6 +546,26 @@ private struct DashboardProjectSection {
     let terminals: [RemoteProjectTerminalSummaryDTO]
 }
 
+enum MobileSessionOrdering {
+    static func sorted(
+        _ sessions: [RemoteSessionSummaryDTO],
+        archived: Bool
+    ) -> [RemoteSessionSummaryDTO] {
+        if archived {
+            return sessions.sorted {
+                let lhsDate = $0.archivedAt ?? $0.lastActiveAt ?? 0
+                let rhsDate = $1.archivedAt ?? $1.lastActiveAt ?? 0
+                if lhsDate != rhsDate { return lhsDate > rhsDate }
+                return $0.id < $1.id
+            }
+        }
+        return sessions.sorted {
+            if $0.isPinned != $1.isPinned { return $0.isPinned }
+            return ($0.lastActiveAt ?? 0) > ($1.lastActiveAt ?? 0)
+        }
+    }
+}
+
 private enum DashboardSessionAction {
     case pin
     case rename
@@ -590,7 +610,12 @@ struct SessionDashboard: View {
     @State private var renamingSession: RemoteSessionSummaryDTO?
     @State private var renameText = ""
     @State private var actionError: String?
-    @State private var pendingActionSessionID: String?
+    /// Per-session rather than global: filing several rows quickly must not make every later
+    /// archive press wait behind the first provider command.
+    @State private var pendingActionSessionIDs = Set<String>()
+    /// Rows removed at the press edge while the Mac stops the process and synchronizes any
+    /// provider archive. Failure drops the identity and puts that exact row back.
+    @State private var optimisticallyHiddenSessionIDs = Set<String>()
     @State private var surfaceChangeRequest: SurfaceChangeRequest?
     @State private var shareRequest: ShareChatRequest?
     @State private var showsUsage = false
@@ -642,14 +667,15 @@ struct SessionDashboard: View {
         let projectScoped = projectName.map { projectName in
             scoped.filter { $0.projectName == projectName }
         } ?? scoped
-        let filtered = searchText.isEmpty ? projectScoped : projectScoped.filter {
+        let visible = projectScoped.filter {
+            !optimisticallyHiddenSessionIDs.contains($0.id)
+                && !model.archiveMutationSessionIDs.contains($0.id)
+        }
+        let filtered = searchText.isEmpty ? visible : visible.filter {
             $0.title.localizedCaseInsensitiveContains(searchText)
                 || $0.projectName.localizedCaseInsensitiveContains(searchText)
         }
-        return filtered.sorted {
-            if $0.isPinned != $1.isPinned { return $0.isPinned }
-            return ($0.lastActiveAt ?? 0) > ($1.lastActiveAt ?? 0)
-        }
+        return MobileSessionOrdering.sorted(filtered, archived: showsArchived)
     }
 
     private var terminals: [RemoteProjectTerminalSummaryDTO] {
@@ -740,7 +766,6 @@ struct SessionDashboard: View {
                             terminals: project.terminals,
                             isArchived: showsArchived,
                             showsActions: model.canManageSessions,
-                            pendingActionSessionID: pendingActionSessionID,
                             action: perform,
                             startNewSession: model.canManageSessions && !showsArchived
                                 ? { startDraft(in: project.projectName) }
@@ -758,7 +783,6 @@ struct SessionDashboard: View {
                         showsProjectName: projectName == nil,
                         isArchived: showsArchived,
                         showsActions: model.canManageSessions,
-                        pendingActionSessionID: pendingActionSessionID,
                         action: perform
                     )
                 }
@@ -795,7 +819,6 @@ struct SessionDashboard: View {
                     showsProjectName: projectName == nil,
                     isArchived: showsArchived,
                     showsActions: model.canManageSessions,
-                    pendingActionSessionID: pendingActionSessionID,
                     action: perform
                 )
             }
@@ -830,7 +853,12 @@ struct SessionDashboard: View {
     private var dashboardNavigation: some View {
         dashboardContent
         .refreshable { await model.refresh() }
-        .searchable(text: $searchText, prompt: "Search sessions and terminals")
+        .searchable(
+            text: $searchText,
+            prompt: MobileL10n.string(
+                showsArchived ? "Search archived sessions" : "Search sessions and terminals"
+            )
+        )
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { dashboardToolbar }
@@ -947,10 +975,15 @@ struct SessionDashboard: View {
         )
         .themedAlert(
             "Remote action failed",
-            message: actionError ?? "",
+            message: actionError ?? model.archiveMutationError ?? "",
             isPresented: Binding(
-                get: { actionError != nil },
-                set: { if !$0 { actionError = nil } }
+                get: { actionError != nil || model.archiveMutationError != nil },
+                set: {
+                    if !$0 {
+                        actionError = nil
+                        model.clearArchiveMutationFailure()
+                    }
+                }
             ),
             actions: [ThemedDialogAction("OK")]
         )
@@ -1132,9 +1165,13 @@ struct SessionDashboard: View {
         case .pin:
             mutate(session) { try await model.setPinned(!session.isPinned, for: session) }
         case .archive:
-            mutate(session) { try await model.setArchived(true, for: session) }
+            mutate(session, optimisticallyHides: true) {
+                try await model.setArchived(true, for: session)
+            }
         case .restore:
-            mutate(session) { try await model.setArchived(false, for: session) }
+            mutate(session, optimisticallyHides: true) {
+                try await model.setArchived(false, for: session)
+            }
         case .snooze(let deadline):
             mutate(session) { try await model.setSnoozed(until: deadline, for: session) }
         case .surface(let surface):
@@ -1201,12 +1238,18 @@ struct SessionDashboard: View {
 
     private func mutate(
         _ session: RemoteSessionSummaryDTO,
+        optimisticallyHides: Bool = false,
         operation: @escaping @MainActor () async throws -> Void
     ) {
-        guard pendingActionSessionID == nil else { return }
-        pendingActionSessionID = session.id
+        guard pendingActionSessionIDs.insert(session.id).inserted else { return }
+        if optimisticallyHides {
+            optimisticallyHiddenSessionIDs.insert(session.id)
+        }
         Task {
-            defer { pendingActionSessionID = nil }
+            defer {
+                pendingActionSessionIDs.remove(session.id)
+                optimisticallyHiddenSessionIDs.remove(session.id)
+            }
             do {
                 try await operation()
             } catch is CancellationError {
@@ -1619,7 +1662,6 @@ private struct ProjectWorkGroup: View {
     let terminals: [RemoteProjectTerminalSummaryDTO]
     let isArchived: Bool
     let showsActions: Bool
-    let pendingActionSessionID: String?
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
     /// Starts a chat in this project from its heading. `nil` for a share that may not manage
     /// sessions, and for the archive, where nothing is started.
@@ -1669,7 +1711,6 @@ private struct ProjectWorkGroup: View {
                 showsProjectName: false,
                 isArchived: isArchived,
                 showsActions: showsActions,
-                pendingActionSessionID: pendingActionSessionID,
                 action: action
             )
         }
@@ -1693,7 +1734,6 @@ private struct DashboardRowGroup: View {
     let showsProjectName: Bool
     let isArchived: Bool
     let showsActions: Bool
-    let pendingActionSessionID: String?
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
 
     var body: some View {
@@ -1713,7 +1753,6 @@ private struct DashboardRowGroup: View {
                                 session: session,
                                 isArchived: isArchived,
                                 showsActions: showsActions,
-                                pendingActionSessionID: pendingActionSessionID,
                                 action: action
                             )
                         case .terminal(let terminal):
@@ -1754,7 +1793,6 @@ private struct SessionListItem: View {
     let session: RemoteSessionSummaryDTO
     let isArchived: Bool
     let showsActions: Bool
-    let pendingActionSessionID: String?
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme

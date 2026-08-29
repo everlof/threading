@@ -101,6 +101,8 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         host.layoutSubtreeIfNeeded()
         let scroll = try XCTUnwrap(firstScrollView(in: page))
         let collapsedRows = controller.virtualRowCountForTesting
+        controller.revealOlderDisclosureForTesting()
+        host.layoutSubtreeIfNeeded()
         let disclosure = try XCTUnwrap(
             descendants(of: page, type: ThemedDisclosureRow.self).first
         )
@@ -817,6 +819,19 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         let fixtureStarted = DispatchTime.now().uptimeNanoseconds
         let entries = archivedEntries(count: rowCount)
         let fixtureEnded = DispatchTime.now().uptimeNanoseconds
+        let searchRecords = entries.enumerated().map { index, entry in
+            ArchivedSessionSearchRecord(
+                sourceIndex: index,
+                title: entry.session.displayTitle,
+                projectName: entry.project.name
+            )
+        }
+        let searchStarted = DispatchTime.now().uptimeNanoseconds
+        let searchMatches = ArchivedSessionSearch.matchingIndexes(
+            in: searchRecords,
+            query: "conversation \(rowCount - 1) with"
+        )
+        let searchEnded = DispatchTime.now().uptimeNanoseconds
         let memoryBefore = physicalFootprintBytes()
         let controllerStarted = DispatchTime.now().uptimeNanoseconds
         let controller = ArchivedPreferencesViewController(rowsProvider: { entries })
@@ -833,6 +848,8 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         let collapsedVirtualRows = controller.virtualRowCountForTesting
         let collapsedMaterializedRows = controller.materializedRowCountForTesting
 
+        controller.revealOlderDisclosureForTesting()
+        host.layoutSubtreeIfNeeded()
         let disclosure = try XCTUnwrap(
             descendants(of: page, type: ThemedDisclosureRow.self).first
         )
@@ -870,6 +887,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
             "THREADING_PERF archived-settings "
                 + "theme=\(themeID.rawValue) rows=\(rowCount) "
                 + "fixture_ms=\(Self.milliseconds(fixtureEnded - fixtureStarted)) "
+                + "search_ms=\(Self.milliseconds(searchEnded - searchStarted)) "
                 + "controller_ms=\(Self.milliseconds(controllerEnded - controllerStarted)) "
                 + "view_load_ms=\(Self.milliseconds(viewLoaded - controllerEnded)) "
                 + "render_ms=\(Self.milliseconds(renderEnded - viewLoaded)) "
@@ -889,6 +907,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         )
 
         XCTAssertGreaterThanOrEqual(expandedVirtualRows, rowCount + 2)
+        XCTAssertEqual(searchMatches, [rowCount - 1])
         XCTAssertGreaterThan(collapsedMaterializedRows, 0)
         XCTAssertLessThan(expandedMaterializedRows, expandedVirtualRows)
         XCTAssertEqual(originAfterRefresh.x, originBeforeRefresh.x, accuracy: 0.5)
@@ -1218,6 +1237,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
             )
             session.isArchived = true
             session.lastActiveAt = now.addingTimeInterval(TimeInterval(-index * 60))
+            session.archivedAt = now.addingTimeInterval(TimeInterval(-index * 60))
             return (project, session)
         }
     }

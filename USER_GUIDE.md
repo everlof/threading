@@ -716,8 +716,11 @@ Threading's Archive/Undo pair would leave the two apps disagreeing as soon as yo
 Threading hides or restores only its own row and never turns Archive into Delete. This sync
 concerns provider coding sessions, not the archive for ordinary ChatGPT chats.
 
-**Archiving asks nothing, and hands you the way back instead.** The row leaves the sidebar
-(after Codex accepts the provider action, where applicable), and a small band appears at the
+**Archiving asks nothing, and hands you the way back instead.** The row leaves the sidebar as soon
+as you press Archive, while stopping the agent and any Codex provider work finish in the
+background. The same is true on iPhone, including Archive from inside an open chat, so you can file
+several conversations without waiting for each one to move. If the operation fails, the row (or
+open chat) returns and Threading reports the error. When it succeeds, a small band appears at the
 bottom of the sidebar naming the session, saying
 whether its agent was stopped, and where it went — with **Undo** on it. The band stays for about
 six seconds, and a thin line along its lower edge shows how much of that is left. Rest the
@@ -4324,7 +4327,12 @@ however far the page scrolls. Pages that list things rather than settings fold t
 header row — its name, its size ("31 tools", "12.4 GB"), and its one control (the group's
 switch, the checkout's **Remove All…**) — and clicking the header (or pressing Space/Return on
 it) unfolds the detail. The fold is remembered for the session, not saved. **Archived** shows
-the ten most recent conversations and folds the rest behind an "older conversations" row.
+the ten most recently archived conversations and folds the rest behind an "older conversations"
+row. Its search field finds archived conversations by title or project and includes matches behind
+that fold. Archive order is the time you pressed Archive, newest first, rather than when the chat
+was last active. Conversations already archived before this version use their last-active time as
+the best available initial order. The iPhone's Archived view follows the same order and has the
+same title/project search.
 
 Threading follows the language macOS selects for the app, with English as the per-string fallback.
 Menus, built-in Settings navigation, commands, and Settings components use the app string

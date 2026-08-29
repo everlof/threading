@@ -364,6 +364,9 @@
     "Search sessions and terminals": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sök bland sessioner och terminaler" } } }
     },
+    "Search archived sessions": {
+      "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Sök bland arkiverade sessioner" } } }
+    },
     "Share full terminal control?": {
       "localizations": { "sv": { "stringUnit": { "state": "translated", "value": "Dela full terminalkontroll?" } } }
     },

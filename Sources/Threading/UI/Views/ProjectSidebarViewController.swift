@@ -306,6 +306,11 @@ final class ProjectSidebarViewController: NSViewController {
     /// state when it scrolls out and back into view.
     private var loadingState = SessionLoadingState()
 
+    /// Archive requests that have left the visible list while process/provider work continues.
+    /// This is presentation state only: the durable store remains authoritative, and a failed
+    /// request removes the identity so the row returns from that same store value.
+    private var optimisticallyArchivedSessionIDs = Set<SessionID>()
+
     /// Sweeps loading raises nobody lowered — see `SessionLoadingState.lowerExpired`. Alive
     /// only while something is spinning, so an idle sidebar schedules nothing.
     private var loadingWatchdog: Timer?
@@ -843,7 +848,8 @@ extension ProjectSidebarViewController {
         )
         let rebuilt = SidebarTreeBuilder.rootNodes(
             from: projects,
-            visibility: sessionVisibility
+            visibility: sessionVisibility,
+            excludingSessionIDs: optimisticallyArchivedSessionIDs
         )
         treeSpan.end(metadata: ["roots": String(rebuilt.count)])
         #if DEBUG
@@ -956,7 +962,8 @@ extension ProjectSidebarViewController {
               let rebuiltProject = SidebarTreeBuilder.projectNode(
                   for: presentedProject.projectID,
                   from: projectStore.projects,
-                  visibility: sessionVisibility
+                  visibility: sessionVisibility,
+                  excludingSessionIDs: optimisticallyArchivedSessionIDs
               )
         else {
             reload()
@@ -1013,7 +1020,8 @@ extension ProjectSidebarViewController {
               let rebuiltProject = SidebarTreeBuilder.projectNode(
                   for: projectID,
                   from: projectStore.projects,
-                  visibility: sessionVisibility
+                  visibility: sessionVisibility,
+                  excludingSessionIDs: optimisticallyArchivedSessionIDs
               )
         else {
             reload()
@@ -1975,6 +1983,21 @@ extension ProjectSidebarViewController {
         for row in visibleRows.location..<upperBound {
             reconfigureRow(at: row)
         }
+    }
+
+    /// Removes a row at the archive press edge, before the bounded process stop and optional
+    /// provider command finish. Success leaves it absent through the durable `isArchived` flag;
+    /// failure drops the presentation filter and rebuilds only its owning project.
+    func setArchivePresentationPending(_ pending: Bool, for sessionID: SessionID) {
+        guard let projectID = projectStore.project(forSessionID: sessionID)?.id else { return }
+        if pending {
+            guard optimisticallyArchivedSessionIDs.insert(sessionID).inserted else { return }
+            applySessionRemoval(sessionID, from: projectID)
+            return
+        }
+
+        guard optimisticallyArchivedSessionIDs.remove(sessionID) != nil else { return }
+        applyProjectStructureChange(projectID)
     }
 
     private func refreshVisibleSessionCustomizations(

@@ -181,6 +181,11 @@ final class SessionLifecycleConfirmationTests: XCTestCase {
         store.selectedSessionID = archiving.id
         coordinator.setArchived(true, for: archiving.id)
 
+        XCTAssertNil(
+            container.currentSessionID,
+            "the visible archive waited for the provider command before leaving the UI"
+        )
+
         container.show(sessionID: selected.id)
         store.selectedSessionID = selected.id
         archiveCompletion?(.success(()))

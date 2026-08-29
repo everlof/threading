@@ -436,7 +436,7 @@ struct SessionDetailView: View {
         }
         if model.canManageSessions {
             Button(role: .destructive) {
-                mutate(dismissAfterward: true) {
+                mutate(dismissImmediately: true) {
                     try await model.setArchived(true, for: currentSession)
                 }
             } label: {
@@ -669,24 +669,33 @@ struct SessionDetailView: View {
     }
 
     private func mutate(
-        dismissAfterward: Bool = false,
+        dismissImmediately: Bool = false,
         operation: @escaping @MainActor () async throws -> Void
     ) {
         guard !isMutatingSession else { return }
         isMutatingSession = true
+        if dismissImmediately {
+            connection?.disconnect(markEnded: false)
+            dismiss()
+        }
         Task {
             defer { isMutatingSession = false }
             do {
                 try await operation()
-                if dismissAfterward {
-                    connection?.disconnect(markEnded: false)
-                    dismiss()
-                }
             } catch is CancellationError {
                 return
             } catch {
                 MobileDiagnostics.logDegraded(.sessionAction, error: error)
-                sessionActionError = error.localizedDescription
+                if dismissImmediately {
+                    model.reportArchiveMutationFailure(error)
+                    if !model.navigationPath.contains(.session(currentSession.id)) {
+                        // The presentation-only hide has also ended, so take the person back to
+                        // the chat whose archive failed instead of silently dropping the action.
+                        model.navigationPath.append(.session(currentSession.id))
+                    }
+                } else {
+                    sessionActionError = error.localizedDescription
+                }
             }
         }
     }

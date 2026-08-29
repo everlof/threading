@@ -212,7 +212,10 @@ connection status; the leading Mac button switches paired hosts, so the dashboar
 that same device as a card in its content. Project headings are destinations. Opening one replaces
 the mixed dashboard with one plain, project-scoped chat list, names the project above the same
 connection status, and scopes the navigation-bar **+** to that project. Pinned sessions stay at the
-top on both Mac and iPhone, and the archive is available from the dashboard.
+top on both Mac and iPhone. Archived sessions are ordered newest archive first and searchable by
+title or project. Archive/Restore removes a row at the press edge while the Mac finishes the
+durable provider transaction, so several sessions can be filed without serial UI stalls; a
+refusal restores the row. Archive is available from the dashboard and an open owner chat.
 
 This mobile browser is deliberately host-owned. Threading retains project/session navigation,
 launch scoping, connection truth, row actions and the native fallback; the macOS extension

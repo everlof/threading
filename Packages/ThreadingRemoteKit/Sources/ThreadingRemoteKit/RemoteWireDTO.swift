@@ -363,6 +363,8 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     public let isPinned: Bool
     /// Included so archived results can use the same row model as the active dashboard.
     public let isArchived: Bool
+    /// Unix time of the current archive action. Optional for hosts predating archive chronology.
+    public let archivedAt: Double?
     /// Optional so clients and hosts can roll forward independently.
     public let snoozedAt: Double?
     public let snoozedUntil: Double?
@@ -403,6 +405,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         lastActiveAt: Double? = nil,
         isPinned: Bool = false,
         isArchived: Bool = false,
+        archivedAt: Double? = nil,
         snoozedAt: Double? = nil,
         snoozedUntil: Double? = nil,
         wokeReason: String? = nil,
@@ -427,6 +430,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.lastActiveAt = lastActiveAt
         self.isPinned = isPinned
         self.isArchived = isArchived
+        self.archivedAt = archivedAt
         self.snoozedAt = snoozedAt
         self.snoozedUntil = snoozedUntil
         self.wokeReason = wokeReason
@@ -444,7 +448,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
 
     private enum CodingKeys: String, CodingKey {
         case id, title, agentKind, surface, state, projectName, isAvailable, lastActiveAt
-        case isPinned, isArchived, isShared
+        case isPinned, isArchived, archivedAt, isShared
         case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
         case inheritedTerminalTheme, account, accountID, limitRecovery, model
@@ -463,6 +467,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         lastActiveAt = try container.decodeIfPresent(Double.self, forKey: .lastActiveAt)
         isPinned = try container.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
         isArchived = try container.decodeIfPresent(Bool.self, forKey: .isArchived) ?? false
+        archivedAt = try container.decodeIfPresent(Double.self, forKey: .archivedAt)
         snoozedAt = try container.decodeIfPresent(Double.self, forKey: .snoozedAt)
         snoozedUntil = try container.decodeIfPresent(Double.self, forKey: .snoozedUntil)
         wokeReason = try container.decodeIfPresent(String.self, forKey: .wokeReason)

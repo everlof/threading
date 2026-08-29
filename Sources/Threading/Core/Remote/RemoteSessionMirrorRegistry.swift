@@ -590,6 +590,7 @@ final class RemoteSessionMirrorRegistry {
             lastActiveAt: session.lastActiveAt.timeIntervalSince1970,
             isPinned: session.isPinned,
             isArchived: session.isArchived,
+            archivedAt: session.archivedAt?.timeIntervalSince1970,
             snoozedAt: session.snoozedAt?.timeIntervalSince1970,
             snoozedUntil: session.snoozedUntil?.timeIntervalSince1970,
             wokeReason: session.wake?.reason.rawValue,

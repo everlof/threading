@@ -334,7 +334,9 @@ final class ManagerRoleRenderTests: HostedStoreTestCase {
 
     private func archivedSettings(_ fixture: Fixture) -> NSView {
         var archived = fixture.archived
-        archived.lastActiveAt = Date().addingTimeInterval(-3_600)
+        let archiveDate = Date().addingTimeInterval(-3_600)
+        archived.lastActiveAt = archiveDate
+        archived.archivedAt = archiveDate
         let controller = ArchivedPreferencesViewController(rowsProvider: {
             [(fixture.project, archived)]
         })

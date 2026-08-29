@@ -457,6 +457,29 @@ final class SidebarRowAnimationTests: XCTestCase {
         XCTAssertEqual(lag(fixture.controller.presentedRowView(of: below)), 0)
     }
 
+    func testPendingArchiveLeavesBeforeTheDurableProviderTransactionFinishes() throws {
+        let fixture = makeSidebar(projects: 1, sessionsEach: 3)
+        let archiving = try XCTUnwrap(fixture.projects[0].sessions[1])
+
+        fixture.controller.setArchivePresentationPending(true, for: archiving.id)
+
+        XCTAssertFalse(
+            fixture.controller.presentedRowKeys.contains(.session(archiving.id)),
+            "the row stayed visible while process/provider archive work was pending"
+        )
+        XCTAssertFalse(
+            try XCTUnwrap(fixture.store.session(withID: archiving.id)).isArchived,
+            "presentation optimism must not bypass the provider transaction"
+        )
+
+        fixture.controller.setArchivePresentationPending(false, for: archiving.id)
+
+        XCTAssertTrue(
+            fixture.controller.presentedRowKeys.contains(.session(archiving.id)),
+            "a refused archive did not restore the unchanged durable row"
+        )
+    }
+
     // MARK: - Rearranging
 
     /// The sidebar rearranges itself whenever what it sorts by changes — under Recent Activity a

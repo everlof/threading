@@ -6436,6 +6436,17 @@
         }
       }
     },
+    "Archived conversation search": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök bland arkiverade konversationer"
+          }
+        }
+      }
+    },
     "Archived conversations are kept but taken off the sidebar. Restore one to put it back where selecting it resumes the conversation, or delete it to remove it from Threading.": {
       "extractionState": "stale",
       "localizations": {
@@ -6443,6 +6454,28 @@
           "stringUnit": {
             "state": "translated",
             "value": "Arkiverade konversationer sparas men tas bort från sidofältet. Återställ en konversation för att lägga tillbaka den och kunna fortsätta den, eller radera den för att ta bort den från Threading."
+          }
+        }
+      }
+    },
+    "No archived conversations match your search.": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Inga arkiverade konversationer matchar din sökning."
+          }
+        }
+      }
+    },
+    "Search archived conversations": {
+      "extractionState": "manual",
+      "localizations": {
+        "sv": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sök bland arkiverade konversationer"
           }
         }
       }
@@ -26646,26 +26679,6 @@
         }
       }
     },
-    "Run a prompt repeatedly while the session stays open": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Kör en prompt upprepade gånger medan sessionen är öppen"
-          }
-        }
-      }
-    },
-    "Show current context usage": {
-      "localizations": {
-        "sv": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Visa aktuell kontextanvändning"
-          }
-        }
-      }
-    },
     "Choose or inspect the active model": {
       "localizations": {
         "sv": {
@@ -29447,7 +29460,147 @@
     "waiting": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "väntar"}}}},
     "Open in editor": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna i redigerare"}}}},
     "Show the remaining %lld lines": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa de återstående %lld raderna"}}}},
-    "Show %lld more lines": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa %lld rader till"}}}}
+    "Show %lld more lines": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa %lld rader till"}}}},
+    "Activate the pending plugin changes in this session": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Aktivera de väntande tilläggsändringarna i den här sessionen"}}}},
+    "Add another working directory to the session": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lägg till ytterligare en arbetskatalog i sessionen"}}}},
+    "Adjust the mouse wheel scroll speed": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Justera rullhjulets rullhastighet"}}}},
+    "Allowlist the read-only calls that keep prompting you": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Tillåtelselista de skrivskyddade anropen som ständigt frågar dig"}}}},
+    "Approve one retry of a recent auto-review denial": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Godkänn ett nytt försök efter ett nekat automatiskt granskningsanrop"}}}},
+    "Archive this session and exit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Arkivera den här sessionen och avsluta"}}}},
+    "Ask a quick side question without interrupting the main thread": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ställ en snabb sidofråga utan att avbryta huvudtråden"}}}},
+    "Branch the conversation from this point": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förgrena konversationen härifrån"}}}},
+    "Browse the installed plugins": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bläddra bland de installerade tilläggen"}}}},
+    "Browse the running and completed workflows": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bläddra bland pågående och avslutade arbetsflöden"}}}},
+    "Choose a communication style for Codex": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj en kommunikationsstil för Codex"}}}},
+    "Choose a syntax highlighting theme": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj ett tema för syntaxmarkering"}}}},
+    "Choose or hide the terminal pet": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj eller dölj terminalens husdjur"}}}},
+    "Choose the default environment for cloud agents": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj standardmiljön för molnagenter"}}}},
+    "Choose the model and reasoning effort": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj modell och resonemangsnivå"}}}},
+    "Choose the terminal UI renderer": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj renderare för terminalgränssnittet"}}}},
+    "Choose what Codex is allowed to do": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj vad Codex får göra"}}}},
+    "Choose what appears in the status line": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj vad som visas i statusraden"}}}},
+    "Choose what appears in the terminal title": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Välj vad som visas i terminalens titel"}}}},
+    "Clean the changed code up for reuse and simplicity": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Städa den ändrade koden för återanvändning och enkelhet"}}}},
+    "Clear the terminal and start a new chat": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rensa terminalen och börja en ny chatt"}}}},
+    "Configure the sandbox for shell commands": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Konfigurera sandlådan för skalkommandon"}}}},
+    "Configure usage credits, or ask your admin for them": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Konfigurera användningskrediter, eller be din administratör om dem"}}}},
+    "Configure what Codex remembers and when": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Konfigurera vad Codex minns och när"}}}},
+    "Continue this session in Claude Desktop": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fortsätt den här sessionen i Claude Desktop"}}}},
+    "Continue this session in the desktop app": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Fortsätt den här sessionen i skrivbordsappen"}}}},
+    "Control this session from your phone or claude.ai/code": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Styr den här sessionen från din telefon eller claude.ai/code"}}}},
+    "Copy Claude's last response to the clipboard": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera Claudes senaste svar till urklipp"}}}},
+    "Copy the last response, code block or quote": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera det senaste svaret, kodblocket eller citatet"}}}},
+    "Copy this conversation into a background session and keep working here": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kopiera konversationen till en bakgrundssession och fortsätt arbeta här"}}}},
+    "Create and manage scheduled cloud agents": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapa och hantera schemalagda molnagenter"}}}},
+    "Create and manage subagents": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skapa och hantera underagenter"}}}},
+    "Dump the JS heap to the desktop": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dumpa JS-heapen till skrivbordet"}}}},
+    "Edit the CLAUDE.md files and memory settings": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Redigera CLAUDE.md-filerna och minnesinställningarna"}}}},
+    "Enter plan mode, or view this session's plan": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Gå in i planläge, eller visa sessionens plan"}}}},
+    "Exercise a change end to end and observe what it really does": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kör igenom en ändring hela vägen och se vad den faktiskt gör"}}}},
+    "Export this conversation to a file or the clipboard": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Exportera konversationen till en fil eller till urklipp"}}}},
+    "Fan out web searches, verify the claims, write a cited report": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sprid ut webbsökningar, kontrollera påståendena, skriv en källhänvisad rapport"}}}},
+    "Find and verify bugs in your branch, in the cloud": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hitta och bekräfta buggar i din gren, i molnet"}}}},
+    "Fork the current chat": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Förgrena den aktuella chatten"}}}},
+    "Free up context by summarizing the conversation so far": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Frigör kontext genom att sammanfatta konversationen hittills"}}}},
+    "Grant Claude access to your Design projects": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ge Claude åtkomst till dina Design-projekt"}}}},
+    "Grant or revoke Claude's access to your Design projects": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ge eller återkalla Claudes åtkomst till dina Design-projekt"}}}},
+    "Guidance for charts and dashboards that read as one system": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Vägledning för diagram och instrumentpaneler som läses som ett system"}}}},
+    "Health-check the Claude Code setup and fix what is broken": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hälsokontrollera Claude Code-uppsättningen och laga det som är trasigt"}}}},
+    "Import setup, projects and recent chats from Claude Code": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Importera uppsättning, projekt och senaste chattar från Claude Code"}}}},
+    "Include the IDE's selection, open files and context": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ta med utvecklingsmiljöns markering, öppna filer och sammanhang"}}}},
+    "Install the Claude Slack app": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Installera Claudes Slack-app"}}}},
+    "Launch and drive this project's app to see a change working": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Starta och styr projektets app för att se en ändring fungera"}}}},
+    "Learn Claude Code features through short interactive lessons": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lär dig Claude Codes funktioner genom korta interaktiva lektioner"}}}},
+    "Leave Codex": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lämna Codex"}}}},
+    "Leave the CLI": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lämna kommandoradsverktyget"}}}},
+    "Let Claude consult a stronger model at key moments": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låt Claude rådfråga en starkare modell i avgörande stunder"}}}},
+    "Let the sandbox read one more directory": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Låt sandlådan läsa ytterligare en katalog"}}}},
+    "List the available skills": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lista de tillgängliga färdigheterna"}}}},
+    "List the background terminals": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lista bakgrundsterminalerna"}}}},
+    "List the configured MCP tools": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lista de konfigurerade MCP-verktygen"}}}},
+    "Listen to Claude FM": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Lyssna på Claude FM"}}}},
+    "Log out of Codex": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Logga ut från Codex"}}}},
+    "Manage the Claude Code plugins": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hantera Claude Codes tillägg"}}}},
+    "Manage the IDE integrations and show their status": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hantera integrationerna med utvecklingsmiljöer och visa deras status"}}}},
+    "Manage the MCP servers": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hantera MCP-servrarna"}}}},
+    "Manage the allow and deny rules for tools": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hantera tillåt- och neka-reglerna för verktyg"}}}},
+    "Manage the connected apps": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Hantera de anslutna apparna"}}}},
+    "Mention a file in the prompt": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Nämn en fil i prompten"}}}},
+    "Move this session to another working directory": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Flytta den här sessionen till en annan arbetskatalog"}}}},
+    "Open the Claude in Chrome settings": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna inställningarna för Claude i Chrome"}}}},
+    "Open the settings": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna inställningarna"}}}},
+    "Open your keyboard shortcuts file": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Öppna din fil med tangentbordsgenvägar"}}}},
+    "Order Claude Code stickers": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Beställ Claude Code-dekaler"}}}},
+    "Permanently delete this session and exit": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Radera den här sessionen permanent och avsluta"}}}},
+    "Pick up skills added or changed on disk": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Läs in färdigheter som lagts till eller ändrats på disk"}}}},
+    "Plan a large change, then run it across isolated worktree agents": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Planera en stor ändring och kör den sedan över isolerade worktree-agenter"}}}},
+    "Push a React design system to claude.ai/design": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Publicera ett React-designsystem till claude.ai/design"}}}},
+    "Reference for the Claude API and the Anthropic SDKs": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Referens för Claude API och Anthropics SDK:er"}}}},
+    "Remap the terminal shortcuts": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ändra terminalens kortkommandon"}}}},
+    "Rename the current thread": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Byt namn på den aktuella tråden"}}}},
+    "Renamed to /usage-credits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Heter numera /usage-credits"}}}},
+    "Report a bug or share this conversation": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapportera ett fel eller dela den här konversationen"}}}},
+    "Report on how your Claude Code sessions have gone": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Rapportera hur dina Claude Code-sessioner har gått"}}}},
+    "Restore the code, the conversation, or both to an earlier point": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återställ koden, konversationen eller båda till en tidigare punkt"}}}},
+    "Resume a saved chat": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återuppta en sparad chatt"}}}},
+    "Resume an earlier conversation": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återuppta en tidigare konversation"}}}},
+    "Review the branch's pending changes for security problems": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Granska grenens väntande ändringar efter säkerhetsproblem"}}}},
+    "Review the current diff or a pull request for bugs and cleanups": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Granska aktuell diff eller en pull request efter buggar och upprensningar"}}}},
+    "Revoke Claude's access to your Design projects": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Återkalla Claudes åtkomst till dina Design-projekt"}}}},
+    "Run a prompt or command again on an interval": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Kör en prompt eller ett kommando igen med jämna mellanrum"}}}},
+    "Send a subagent off with your full context": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skicka i väg en underagent med hela ditt sammanhang"}}}},
+    "Send feedback to Anthropic or report a bug": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skicka återkoppling till Anthropic eller rapportera ett fel"}}}},
+    "Send logs to the Codex maintainers": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skicka loggar till Codex underhållare"}}}},
+    "Send this session to the background and free the terminal": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skicka den här sessionen till bakgrunden och frigör terminalen"}}}},
+    "Send this session to the cloud, or bring one back": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skicka den här sessionen till molnet, eller hämta hem en"}}}},
+    "Set a goal Claude checks before it stops": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sätt ett mål som Claude kontrollerar innan den stannar"}}}},
+    "Set one setting by key": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ange en inställning med nyckel"}}}},
+    "Set or view the goal for a long-running task": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ange eller visa målet för en långvarig uppgift"}}}},
+    "Set the effort level for model usage": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ange ansträngningsnivån för modellanvändningen"}}}},
+    "Set the prompt bar color for this session": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Ange promptradens färg för den här sessionen"}}}},
+    "Set up Claude Code on the web with your GitHub account": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sätt upp Claude Code på webben med ditt GitHub-konto"}}}},
+    "Set up Claude GitHub Actions for a repository": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sätt upp Claude GitHub Actions för ett arkiv"}}}},
+    "Set up the elevated agent sandbox": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sätt upp den utökade agentsandlådan"}}}},
+    "Set up the status line": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Sätt upp statusraden"}}}},
+    "Share a free week of Claude Code with friends": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Dela en gratisvecka med Claude Code till vänner"}}}},
+    "Show help and the available commands": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa hjälpen och de tillgängliga kommandona"}}}},
+    "Show just your prompt, the summary and the response": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa bara din prompt, sammanfattningen och svaret"}}}},
+    "Show session cost, plan usage and what is filling your limits": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa sessionens kostnad, planens användning och vad som fyller dina gränser"}}}},
+    "Show the QR code for the Claude mobile app": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa QR-koden för Claudes mobilapp"}}}},
+    "Show the config layers behind each setting": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa konfigurationslagren bakom varje inställning"}}}},
+    "Show the git diff, including untracked files": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa git-diffen, inklusive ospårade filer"}}}},
+    "Show the version, model, account and tool status": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa version, modell, konto och verktygsstatus"}}}},
+    "Show this session's configuration and token usage": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa sessionens konfiguration och tokenanvändning"}}}},
+    "Show what is using the context window": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa vad som använder kontextfönstret"}}}},
+    "Sign in with your Anthropic account": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Logga in med ditt Anthropic-konto"}}}},
+    "Sign out of your Anthropic account": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Logga ut från ditt Anthropic-konto"}}}},
+    "Start a new chat without leaving Codex": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Börja en ny chatt utan att lämna Codex"}}}},
+    "Start a side conversation in an ephemeral fork": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Starta en sidokonversation i en tillfällig förgrening"}}}},
+    "Start over with empty context; this session stays resumable": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Börja om med tom kontext; den här sessionen går fortfarande att återuppta"}}}},
+    "Stop every background terminal": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stoppa alla bakgrundsterminaler"}}}},
+    "Stop this background session and keep its transcript": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Stoppa den här bakgrundssessionen och behåll dess transkript"}}}},
+    "Switch between this session's subagents": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Växla mellan sessionens underagenter"}}}},
+    "Switch to Plan mode": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Byt till planläge"}}}},
+    "Toggle raw scrollback for copy-friendly selection": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Växla rå rullningshistorik för kopieringsvänlig markering"}}}},
+    "Turn Vim mode on or off for the composer": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Slå på eller av Vim-läget i skrivfältet"}}}},
+    "Turn fast mode on or off": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Slå på eller av snabbläget"}}}},
+    "Turn on debug logging and help diagnose the problem": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Slå på felsökningsloggning och hjälp till att ställa diagnos"}}}},
+    "Turn the experimental features on or off": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Slå på eller av de experimentella funktionerna"}}}},
+    "Upgrade to Max for higher limits and more Opus": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Uppgradera till Max för högre gränser och mer Opus"}}}},
+    "Use skills to improve how Codex handles specific tasks": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Använd färdigheter för att förbättra hur Codex hanterar vissa uppgifter"}}}},
+    "View account usage, or use a usage limit reset": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa kontots användning, eller använd en återställning av användningsgränsen"}}}},
+    "View and manage everything running in the background": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa och hantera allt som körs i bakgrunden"}}}},
+    "View and manage the lifecycle hooks": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa och hantera livscykelhookarna"}}}},
+    "View and update your privacy settings": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa och uppdatera dina integritetsinställningar"}}}},
+    "View the hook configuration for tool events": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa hookkonfigurationen för verktygshändelser"}}}},
+    "View the release notes": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa versionsinformationen"}}}},
+    "View uncommitted changes and per-turn diffs": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Visa incheckade ändringar som saknas och diffar per tur"}}}},
+    "Watch the current pull request and fix what breaks": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Bevaka den aktuella pull requesten och laga det som går sönder"}}}},
+    "Write a CLAUDE.md documenting this codebase": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skriv en CLAUDE.md som dokumenterar den här kodbasen"}}}},
+    "Write a guide that helps teammates ramp on Claude Code": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skriv en guide som hjälper kollegor att komma i gång med Claude Code"}}}},
+    "Write a one-line recap of the session now": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skriv en enradig sammanfattning av sessionen nu"}}}},
+    "Write an AGENTS.md with instructions for Codex": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skriv en AGENTS.md med instruktioner för Codex"}}}},
+    "Write the per-project skill that says how to run this app": {"extractionState": "manual", "localizations": {"sv": {"stringUnit": {"state": "translated", "value": "Skriv den projektspecifika färdigheten som säger hur appen körs"}}}}
   },
   "version": "1.0"
 }

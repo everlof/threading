@@ -1877,6 +1877,45 @@ final class PromptInputTests: XCTestCase {
         )
     }
 
+    /// A completion row reserves a line for the description whether or not there is one, so an
+    /// empty string is not "no detail" — it is a blank gap under a name that already said what
+    /// it said, beside a right-hand label reading "Command". Every row Threading writes itself
+    /// therefore has to carry a sentence, and it must not be the name back again.
+    func testEveryPreSessionCommandExplainsItselfRatherThanRepeatingItsName() {
+        for kind in [AgentKind.claude, .codex] {
+            for usesNativeUI in [true, false] {
+                let capabilities = PreSessionComposerCatalog.capabilities(
+                    for: kind,
+                    usesNativeUI: usesNativeUI
+                )
+                XCTAssertFalse(capabilities.isEmpty, "\(kind) offered no pre-session commands")
+                for capability in capabilities {
+                    let detail = capability.unavailableReason ?? capability.description
+                    XCTAssertFalse(
+                        detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                        "\(kind) /\(capability.name) shows a blank completion row"
+                    )
+                    XCTAssertNotEqual(
+                        capability.description.lowercased(),
+                        capability.name.lowercased(),
+                        "\(kind) /\(capability.name) only repeats its own name"
+                    )
+                }
+            }
+        }
+    }
+
+    /// The live Codex catalog reuses the same rows, so a description added for the pre-session
+    /// composer must not be missing once app-server is up.
+    func testCodexTerminalCommandsDescribeThemselvesInTheLiveCatalog() {
+        for capability in CodexComposerCatalog.builtIns {
+            XCTAssertFalse(
+                capability.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                "/\(capability.name) has no description"
+            )
+        }
+    }
+
     func testRemoteParticipantEnvelopePreservesLeadingSlashSyntaxOnlyForClaude() {
         XCTAssertEqual(
             ConversationTransportText.message(

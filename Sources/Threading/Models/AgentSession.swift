@@ -660,6 +660,14 @@ struct AgentSession: Codable, Identifiable {
   /// filing choice.
   var isArchived: Bool
 
+  /// When the current archive action was requested.
+  ///
+  /// Kept separate from `lastActiveAt`: stopping or relaunching a runtime changes activity,
+  /// while the archive is a filing action with its own chronology. Restoring clears this value;
+  /// archiving the conversation again records a new date so the archive reads newest action
+  /// first. Records written before this field existed fall back to `lastActiveAt` while decoding.
+  var archivedAt: Date?
+
   /// The archive value on which Threading and a capable provider last agreed.
   ///
   /// Nil means the session predates synchronization, has no provider conversation yet, or uses
@@ -817,6 +825,7 @@ struct AgentSession: Codable, Identifiable {
     self.permissionMode = nil
     self.branch = nil
     self.isArchived = false
+    self.archivedAt = nil
     self.lastSynchronizedArchiveState = nil
     self.isPinned = false
     self.snoozedAt = nil
@@ -843,7 +852,8 @@ struct AgentSession: Codable, Identifiable {
     case agentTitleSource
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
     case lastLaunchFailure
-    case fastMode, remoteControl, permissionMode, archived, providerArchiveState, pinned, nativeUI
+    case fastMode, remoteControl, permissionMode, archived, archivedAt, providerArchiveState
+    case pinned, nativeUI
     case backgroundHost
     case snoozedAt, snoozedUntil, hadTurnInFlightWhenSnoozed, wake
     case forkParent
@@ -914,6 +924,8 @@ struct AgentSession: Codable, Identifiable {
     ).flatMap(AgentPermissionMode.init(rawValue:))
     branch = try container.decodeIfPresent(String.self, forKey: .branch)
     isArchived = try container.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+    archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
+      ?? (isArchived ? lastActiveAt : nil)
     lastSynchronizedArchiveState = try container.decodeIfPresent(
       Bool.self,
       forKey: .providerArchiveState
@@ -1242,6 +1254,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(permissionMode, forKey: .permissionMode)
     try container.encodeIfPresent(branch, forKey: .branch)
     try container.encode(isArchived, forKey: .archived)
+    try container.encodeIfPresent(archivedAt, forKey: .archivedAt)
     try container.encodeIfPresent(
       lastSynchronizedArchiveState,
       forKey: .providerArchiveState
@@ -1283,14 +1296,16 @@ struct AgentSession: Codable, Identifiable {
   /// Records one archive state as the value both Threading and the provider now hold.
   /// Returns whether either persisted field changed, so a batch reconciliation writes once.
   @discardableResult
-  mutating func synchronizeArchiveState(_ archived: Bool) -> Bool {
+  mutating func synchronizeArchiveState(_ archived: Bool, at date: Date = Date()) -> Bool {
     let clearsAttentionOverlay = archived
       && (snoozedAt != nil || snoozedUntil != nil || wake != nil)
+    let nextArchivedAt = archived ? (isArchived ? archivedAt ?? date : date) : nil
     guard isArchived != archived || lastSynchronizedArchiveState != archived
-      || clearsAttentionOverlay else {
+      || archivedAt != nextArchivedAt || clearsAttentionOverlay else {
       return false
     }
     isArchived = archived
+    archivedAt = nextArchivedAt
     lastSynchronizedArchiveState = archived
     if archived { clearAttentionOverlay() }
     return true

@@ -51,6 +51,7 @@ final class ProjectStoreMutationTests: XCTestCase {
         XCTAssertTrue(standing.isPinned)
         XCTAssertTrue(standing.usesNativeUI)
         XCTAssertTrue(standing.isArchived)
+        XCTAssertNotNil(standing.archivedAt)
         XCTAssertEqual(standing.remoteControl, true)
         XCTAssertEqual(standing.permissionMode, .plan)
         XCTAssertEqual(standing.notificationsMuted, true)
@@ -121,6 +122,7 @@ final class ProjectStoreMutationTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(recovery.session(withID: session.id)).usesNativeUI)
         XCTAssertEqual(recovery.setArchived(true, for: session.id), .persistenceRefused)
         XCTAssertFalse(try XCTUnwrap(recovery.session(withID: session.id)).isArchived)
+        XCTAssertNil(recovery.session(withID: session.id)?.archivedAt)
         XCTAssertEqual(recovery.setRemoteControl(true, for: session.id), .persistenceRefused)
         XCTAssertNil(recovery.session(withID: session.id)?.remoteControl)
         XCTAssertEqual(recovery.setPermissionMode(.plan, for: session.id), .persistenceRefused)
@@ -188,6 +190,57 @@ final class ProjectStoreMutationTests: XCTestCase {
         )
         XCTAssertEqual(store.setRemoteControl(true, for: openCode.id), .unsupportedValue)
         XCTAssertFalse(try XCTUnwrap(store.session(withID: openCode.id)).usesNativeUI)
+    }
+
+    func testArchivedSessionsFollowArchiveChronologyRatherThanRuntimeActivity() throws {
+        let manager = StateManager(appSupportDirectory: directory)
+        let store = ProjectStore(stateManager: manager, refusesWrites: false)
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let recentlyActive = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .claude,
+            title: "Recently active, archived first"
+        ))
+        let longIdle = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .claude,
+            title: "Long idle, archived last"
+        ))
+        store.update(sessionID: recentlyActive.id) {
+            $0.lastActiveAt = Date(timeIntervalSince1970: 9_000)
+        }
+        store.update(sessionID: longIdle.id) {
+            $0.lastActiveAt = Date(timeIntervalSince1970: 1_000)
+        }
+
+        let firstArchive = Date(timeIntervalSince1970: 10_000)
+        let secondArchive = Date(timeIntervalSince1970: 11_000)
+        XCTAssertEqual(
+            store.setArchived(true, for: recentlyActive.id, at: firstArchive),
+            .applied
+        )
+        XCTAssertEqual(
+            store.setArchived(true, for: longIdle.id, at: secondArchive),
+            .applied
+        )
+
+        XCTAssertEqual(
+            store.archivedSessions().map(\.session.id),
+            [longIdle.id, recentlyActive.id]
+        )
+        XCTAssertEqual(store.session(withID: longIdle.id)?.archivedAt, secondArchive)
+
+        XCTAssertEqual(store.setArchived(false, for: longIdle.id), .applied)
+        XCTAssertNil(store.session(withID: longIdle.id)?.archivedAt)
+        let rearchive = Date(timeIntervalSince1970: 12_000)
+        XCTAssertEqual(store.setArchived(true, for: longIdle.id, at: rearchive), .applied)
+
+        let reopened = ProjectStore(stateManager: manager, refusesWrites: false)
+        XCTAssertEqual(reopened.session(withID: longIdle.id)?.archivedAt, rearchive)
+        XCTAssertEqual(
+            reopened.archivedSessions().map(\.session.id),
+            [longIdle.id, recentlyActive.id]
+        )
     }
 
     /// Delete/close callers own live processes. A store refusal must therefore be visible before

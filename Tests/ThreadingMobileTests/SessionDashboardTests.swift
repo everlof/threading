@@ -19,6 +19,40 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(SessionOrganization.type.title, "By type")
     }
 
+    func testArchivedRowsUseArchiveChronologyAndIgnoreActiveListPinning() {
+        let archivedFirst = RemoteSessionSummaryDTO(
+            id: "first",
+            title: "Archived first",
+            agentKind: "codex",
+            surface: .terminal,
+            state: .idle,
+            projectName: "Project",
+            lastActiveAt: 9_000,
+            isPinned: true,
+            isArchived: true,
+            archivedAt: 10_000
+        )
+        let archivedLast = RemoteSessionSummaryDTO(
+            id: "last",
+            title: "Archived last",
+            agentKind: "codex",
+            surface: .terminal,
+            state: .idle,
+            projectName: "Project",
+            lastActiveAt: 1_000,
+            isArchived: true,
+            archivedAt: 11_000
+        )
+
+        XCTAssertEqual(
+            MobileSessionOrdering.sorted(
+                [archivedFirst, archivedLast],
+                archived: true
+            ).map(\.id),
+            ["last", "first"]
+        )
+    }
+
     /// The age is one narrow unit, and never a signed quantity: `RelativeDateTimeFormatter`'s
     /// abbreviated Swedish wrote yesterday as `−1 d`, which is what a duration can never do.
     func testSwedishAgeIsOneNarrowUnitWithoutAMinusSign() {

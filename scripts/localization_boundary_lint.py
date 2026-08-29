@@ -55,6 +55,9 @@ LOCALIZING_CALLS: dict[str, tuple[str | int, ...]] = {
 # Component Gallery is developer-facing UI, but still ships in the app. Its local helpers apply
 # L10n at the rendering boundary.
 LOCAL_FILE_HELPERS: dict[str, dict[str, tuple[str | int, ...]]] = {
+    "Sources/Threading/Core/Agent/CodexStreamSession.swift": {
+        "terminalCommand": ("description",),
+    },
     "Sources/Threading/UI/Preferences/SettingsPages.swift": {
         "terms": tuple(range(32)),
     },

@@ -411,10 +411,10 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
 
     /// Archiving, with the receipt left to the caller.
     ///
-    /// The order is load-bearing and shared by both routes: the agent stops first, because a
-    /// provider must not move a rollout while Threading's process is writing it. The local row
-    /// does not leave until the provider accepts the same change; on failure it stays available
-    /// and a receipt says why. The pane and row leave together only after that commit.
+    /// The process/provider order remains load-bearing: the agent stops before a provider moves
+    /// its rollout, and the durable flag changes only after both sides agree. Presentation does
+    /// not wait on that transaction. The row and, when applicable, its pane leave at the press
+    /// edge; a refusal puts the row back from the unchanged durable record.
     @discardableResult
     private func archive(
         _ sessionID: SessionID,
@@ -426,18 +426,20 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
               !session.isArchived else { return false }
 
         let wasRunning = environment.agentRuntime.isRunning(sessionID: sessionID)
+        let presentation = Self.archivePresentationResolution(
+            archivedSessionID: sessionID,
+            visibleSessionID: container.currentSessionID,
+            selectedSessionID: environment.projectStore.selectedSessionID
+        )
+        sidebar.setArchivePresentationPending(true, for: sessionID)
+        if presentation.clearsVisibleSession {
+            container.show(sessionID: nil)
+        }
         archiveStateSetter(true, sessionID) { [weak self] result in
             guard let self else { return }
+            sidebar.setArchivePresentationPending(false, for: sessionID)
             switch result {
             case .success:
-                let presentation = Self.archivePresentationResolution(
-                    archivedSessionID: sessionID,
-                    visibleSessionID: container.currentSessionID,
-                    selectedSessionID: environment.projectStore.selectedSessionID
-                )
-                if presentation.clearsVisibleSession {
-                    container.show(sessionID: nil)
-                }
                 sidebar.presentToast(receipt(session, wasRunning) { [weak self] in
                     self?.restore(
                         sessionID,
@@ -446,6 +448,14 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 })
                 onArchived()
             case .failure(let failure):
+                // A failure may arrive after another row was selected. Only rebuild the pane
+                // this archive itself cleared, and only while its persisted selection still
+                // proves nothing newer owns the workspace.
+                if presentation.clearsVisibleSession,
+                   container.currentSessionID == nil,
+                   environment.projectStore.selectedSessionID == sessionID {
+                    sidebar.select(sessionID: sessionID)
+                }
                 onArchiveFailed()
                 sidebar.presentToast(Self.archiveFailureToast(
                     for: session,
@@ -457,8 +467,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         return true
     }
 
-    /// Resolves navigation at the archive's commit edge, not when a potentially slow provider
-    /// command began. A newer selection owns the pane and must survive the older archive.
+    /// Resolves navigation at the archive presentation edge. A newer selection owns the pane
+    /// and must survive the older archive's eventual completion or failure.
     ///
     /// The archive-state event can clear the target before this completion runs. In that case
     /// the persisted sidebar selection is the evidence that this archive took the page away and

@@ -734,11 +734,18 @@ final class ProjectStore {
     /// intentional: a capability-less runtime must never turn Archive into its destructive
     /// Delete command, and tests/import migrations sometimes need to construct local state.
     @discardableResult
-    func setArchived(_ archived: Bool, for sessionID: SessionID) -> ProjectMutationResult {
+    func setArchived(
+        _ archived: Bool,
+        for sessionID: SessionID,
+        at date: Date = Date()
+    ) -> ProjectMutationResult {
         guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
         guard projects[location.projectIndex].sessions[location.sessionIndex].isArchived
             != archived else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].isArchived = archived
+        projects[location.projectIndex].sessions[location.sessionIndex].archivedAt = archived
+            ? date
+            : nil
         // Archiving ends a snooze rather than preserving it: the row leaves the list, so a
         // "Snoozed"/"Woke" overlay it carries back on restore would describe a wait nobody is
         // still having. Archive semantics themselves are unchanged.
@@ -755,12 +762,15 @@ final class ProjectStore {
     /// One save and notification for a launch reconciliation, however many retained sessions it
     /// initializes, rather than rewriting the whole project graph once per conversation.
     @discardableResult
-    func synchronizeArchiveStates(_ states: [SessionID: Bool]) -> ProjectMutationResult {
+    func synchronizeArchiveStates(
+        _ states: [SessionID: Bool],
+        at date: Date = Date()
+    ) -> ProjectMutationResult {
         var changed = false
         for (sessionID, archived) in states {
             guard let location = locate(sessionID: sessionID) else { continue }
             changed = projects[location.projectIndex].sessions[location.sessionIndex]
-                .synchronizeArchiveState(archived) || changed
+                .synchronizeArchiveState(archived, at: date) || changed
         }
 
         guard changed else { return .unchanged }
@@ -1306,12 +1316,20 @@ final class ProjectStore {
         return .applied
     }
 
-    /// Every archived session, newest first, paired with the project it belongs to.
+    /// Every archived session, newest archive action first, paired with its project.
+    ///
+    /// `lastActiveAt` is only the migration fallback for records written before archive
+    /// chronology existed. Runtime launch/exit activity must not reorder a filed conversation.
     func archivedSessions() -> [(project: Project, session: AgentSession)] {
         projects
             .flatMap { project in project.sessions.map { (project, $0) } }
             .filter { $0.1.isArchived }
-            .sorted { $0.1.lastActiveAt > $1.1.lastActiveAt }
+            .sorted {
+                let lhsDate = $0.1.archivedAt ?? $0.1.lastActiveAt
+                let rhsDate = $1.1.archivedAt ?? $1.1.lastActiveAt
+                if lhsDate != rhsDate { return lhsDate > rhsDate }
+                return $0.1.id.uuidString < $1.1.id.uuidString
+            }
     }
 
     @discardableResult

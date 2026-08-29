@@ -231,6 +231,15 @@ final class RemoteAppModel: ObservableObject {
     @Published var navigationPath: [MobileNavigationRoute] = [] {
         didSet { recordLastRoute() }
     }
+    /// Sessions whose archive/restore transaction is still being committed by the Mac.
+    ///
+    /// The phone removes these from whichever catalogue they currently occupy at the press
+    /// edge. This presentation-only state is shared by the dashboard and an open detail route,
+    /// so Archive never waits for provider cleanup before it feels complete.
+    @Published private(set) var archiveMutationSessionIDs = Set<String>()
+    /// A failed mutation that began in a detail screen already dismissed at the press edge.
+    /// The dashboard owns the themed alert because it is the surface now visible.
+    @Published private(set) var archiveMutationError: String?
     /// The session each draft on the stack became, by the draft's id. A draft route resolves
     /// through this for everything that asks which chat is open — continuity, the push
     /// dedup, a notification for the chat that was just started — so a chat that began as a
@@ -1361,6 +1370,8 @@ final class RemoteAppModel: ObservableObject {
         }
         let hostID = host.id
         if isDemo { return }
+        guard archiveMutationSessionIDs.insert(session.id).inserted else { return }
+        defer { archiveMutationSessionIDs.remove(session.id) }
         let response = try await performMutation(for: hostID) { client, requestID in
             try await client.setSessionArchived(
                 sessionID: session.id,
@@ -1370,6 +1381,14 @@ final class RemoteAppModel: ObservableObject {
         }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response
+    }
+
+    func reportArchiveMutationFailure(_ error: Error) {
+        archiveMutationError = error.localizedDescription
+    }
+
+    func clearArchiveMutationFailure() {
+        archiveMutationError = nil
     }
 
     func setSnoozed(until deadline: Date?, for session: RemoteSessionSummaryDTO) async throws {
@@ -3519,6 +3538,7 @@ private extension RemoteMeDTO {
                     lastActiveAt: session.lastActiveAt,
                     isPinned: session.isPinned,
                     isArchived: session.isArchived,
+                    archivedAt: session.archivedAt,
                     snoozedAt: session.snoozedAt,
                     snoozedUntil: session.snoozedUntil,
                     wokeReason: session.wokeReason,
@@ -3560,6 +3580,7 @@ private extension RemoteMeDTO {
                 lastActiveAt: session.lastActiveAt,
                 isPinned: session.isPinned,
                 isArchived: session.isArchived,
+                archivedAt: session.archivedAt,
                 snoozedAt: session.snoozedAt,
                 snoozedUntil: session.snoozedUntil,
                 wokeReason: session.wokeReason,

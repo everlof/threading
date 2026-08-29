@@ -414,6 +414,7 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(summary.inheritedTerminalTheme)
         XCTAssertFalse(summary.isPinned)
         XCTAssertFalse(summary.isArchived)
+        XCTAssertNil(summary.archivedAt)
         XCTAssertFalse(summary.isShared)
         XCTAssertNil(summary.snoozedAt)
         XCTAssertNil(summary.snoozedUntil)
@@ -422,6 +423,25 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(summary.accountID)
         XCTAssertNil(summary.limitRecovery)
         XCTAssertFalse(summary.isSnoozed())
+    }
+
+    func testSessionArchiveTimestampRoundTrips() throws {
+        let summary = RemoteSessionSummaryDTO(
+            id: "archived",
+            title: "Filed session",
+            agentKind: "codex",
+            surface: .conversation,
+            state: .idle,
+            projectName: "Project",
+            isArchived: true,
+            archivedAt: 2_000_000_000
+        )
+
+        let roundTrip = try JSONDecoder().decode(
+            RemoteSessionSummaryDTO.self,
+            from: JSONEncoder().encode(summary)
+        )
+        XCTAssertEqual(roundTrip, summary)
     }
 
     func testLimitRecoveryPolicyRecognizesOnlyStructurallyValidChoices() throws {
