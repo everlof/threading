@@ -125,11 +125,25 @@ Three decisions carry it:
   stay legible against the ground *and* apart from each other, which eleven roles cannot answer —
   derivation gives eight near-hues. Writing it out is what makes the pairing a decision taken
   while the theme is designed.
+- **`Rosé Moon` is the warm muted built-in.** The four original ramps are saturated primaries
+  (`Basic`, `Pro`, `Homebrew`) or Nord's cool blue-grey (`Ocean`); `Rosé Moon` fills the warm
+  low-saturation register — a blue-black ground, cool lavender text, and Rosé-Pine rose/gold/
+  sky/violet accents. Rosé Pine states no true green, so its `green` slot is a sage
+  (`#A3BE9C`) rather than the palette's teal foam: a terminal needs `git`, `ls` and an added
+  diff line to read as green and apart from `cyan`, which a teal green does not.
 - **Swiss's greys break with convention deliberately.** A light palette normally leaves `white`
   and `brightWhite` near-white, because there those indices are meant as *backgrounds* — but a
   CLI that dims its status line to index 7 then writes pale grey on paper. The four neutrals are
   a monotone ramp dark enough to read on white, still ordered black → brightBlack → white →
   brightWhite so nothing that picks one of them vanishes.
+- **Pure Black states its quiet label ramp for the same reason, one ground down.** Every other
+  theme leaves `secondaryLabel`/`tertiaryLabel`/`quaternaryLabel` to derive from `label` and lets
+  the legibility ladder floor them at the glanced-at 3:1. On a true-black ground that floor is
+  where a *small* mark disappears — a dormant session's agent icon is a thin brand glyph whose
+  strokes anti-alias into the black long before a paragraph of secondary text would. Pure Black
+  states the three tiers as an explicit ramp bright enough that the mark survives the ground, the
+  way Swiss states its neutrals; `AppThemeTests` holds them to a ratio on both the ground and the
+  sidebar surface so a revert to derivation fails rather than ships an invisible icon.
 
 **Truecolor is not the palette's, and backgrounds get normalised anyway.** Claude Code writes
 its status line and its diff in 24-bit SGR rather than ANSI indices, so those colours are the

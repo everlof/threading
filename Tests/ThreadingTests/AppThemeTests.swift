@@ -110,6 +110,28 @@ final class AppThemeTests: HostedStoreTestCase {
 
     // MARK: - The System Theme Changes Nothing
 
+    /// Pure Black is the one ground dark enough that the derived quiet tiers — `label × {0.7,
+    /// 0.45}`, floored only at the glanceable 3:1 — leave a small mark like a dormant session's
+    /// agent icon at the edge of visible: thin strokes anti-alias into the true black and it
+    /// reads as gone. It states its own quiet ramp instead; this guards that the ramp stays
+    /// legible on both the ground and the slightly lifted sidebar surface it is drawn over.
+    func testPureBlackQuietLabelTiersStayLegibleOnItsGround() {
+        let theme = AppThemeStyles.pureBlack
+        let ground = theme.resolved(.ground)
+        let surface = theme.resolved(.surface)
+        for role in [AppThemeRole.secondaryLabel, .tertiaryLabel] {
+            let ink = theme.resolved(role)
+            XCTAssertGreaterThanOrEqual(
+                ThemeContrast.ratio(ink, ground), 4.0,
+                "\(role) at \(ink.hexString) is too faint on Pure Black's ground"
+            )
+            XCTAssertGreaterThanOrEqual(
+                ThemeContrast.ratio(ink, surface), 4.0,
+                "\(role) at \(ink.hexString) is too faint on Pure Black's sidebar surface"
+            )
+        }
+    }
+
     func testSystemThemeResolvesEveryRoleToItsSystemColour() {
         AppThemePalette.set(.system)
 

@@ -41,6 +41,16 @@ extension AppThemeStyles {
             .border: hex("#2E2E2E"),
             .divider: hex("#FFFFFF").withAlphaComponent(0.10),
             .label: hex("#F2F2F2"),
+            // Stated, not derived. Every other theme lets the quiet tiers fall back to
+            // `label × {0.7, 0.45, 0.25}`, which the legibility ladder then floors against the
+            // ground. That floor is WCAG's 3:1 for a glanced-at mark, and on this theme's true
+            // black it leaves a small brand glyph — a dormant session's agent icon — at the very
+            // edge of visible: thin strokes anti-alias into the ground and the mark reads as
+            // gone. Like Swiss's greys, an extreme ground states its own quiet ramp bright enough
+            // to be seen rather than trusting a floor tuned for lighter grounds.
+            .secondaryLabel: hex("#C2C2C2"),
+            .tertiaryLabel: hex("#949494"),
+            .quaternaryLabel: hex("#6A6A6A"),
             .accent: hex("#FFFFFF"),
             .accentMuted: hex("#FFFFFF").withAlphaComponent(0.10),
             .controlResting: hex("#FFFFFF").withAlphaComponent(0.05),
