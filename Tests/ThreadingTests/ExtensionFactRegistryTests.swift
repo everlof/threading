@@ -351,6 +351,325 @@ final class ExtensionFactRegistryTests: XCTestCase {
         XCTAssertEqual(changes, [.exact([.init(subject: subject, key: key)])])
     }
 
+    func testProviderObservationAlreadyOutsideHostFreshnessWindowResolvesMissing() throws {
+        let referenceDate = Date(timeIntervalSinceReferenceDate: 10_000)
+        let registry = ExtensionFactRegistry(now: { referenceDate })
+        let source = makeSource("com.example.provider", generation: "g1", order: 0)
+        let key = ExtensionFactKey(id: "gitlab.mr.state")
+        let subject = ExtensionFactSubject.session("s1")
+        try registry.replaceDefinitions([makeDefinition(key: key)], from: source)
+        try registry.replaceFacts([
+            makeFact(
+                key: key,
+                subject: subject,
+                value: "opened",
+                observedAt: referenceDate.addingTimeInterval(
+                    -ExtensionFactRegistry.maximumProviderFactAge
+                )
+            ),
+        ], replacing: [subject], from: source)
+
+        XCTAssertNil(registry.exactFact(key, for: subject))
+        XCTAssertTrue(
+            registry.snapshot(consuming: [key]).hasProvider(for: key),
+            "staleness removes one value, not its live provider definition"
+        )
+    }
+
+    func testProviderExpiryFallsThroughToNextFreshProviderThenBecomesMissing() throws {
+        let center = NotificationCenter()
+        var referenceDate = Date(timeIntervalSinceReferenceDate: 1_000)
+        let registry = ExtensionFactRegistry(
+            notificationCenter: center,
+            now: { referenceDate }
+        )
+        let key = ExtensionFactKey(id: "gitlab.mr.state")
+        let subject = ExtensionFactSubject.session("s1")
+        let definition = makeDefinition(key: key)
+        let first = makeSource("com.example.first", generation: "g1", order: 0)
+        let second = makeSource("com.example.second", generation: "g1", order: 1)
+        try registry.replaceDefinitions([definition], from: first)
+        try registry.replaceFacts([
+            makeFact(
+                key: key,
+                subject: subject,
+                value: "first",
+                observedAt: referenceDate
+            ),
+        ], replacing: [subject], from: first)
+
+        referenceDate = referenceDate.addingTimeInterval(100)
+        try registry.replaceDefinitions([definition], from: second)
+        try registry.replaceFacts([
+            makeFact(
+                key: key,
+                subject: subject,
+                value: "second",
+                observedAt: referenceDate
+            ),
+        ], replacing: [subject], from: second)
+
+        var changes: [ExtensionFactChange] = []
+        let token = center.addObserver(
+            forName: ExtensionFactsDidChange.name,
+            object: nil,
+            queue: nil
+        ) { notification in
+            if let event = notification.object as? ExtensionFactsDidChange {
+                changes.append(event.change)
+            }
+        }
+        defer { center.removeObserver(token) }
+
+        referenceDate = Date(timeIntervalSinceReferenceDate: 1_000)
+            .addingTimeInterval(ExtensionFactRegistry.maximumProviderFactAge)
+        registry.refreshStaleness()
+        XCTAssertEqual(
+            registry.exactFact(key, for: subject)?.fact.value,
+            .string("second")
+        )
+
+        referenceDate = referenceDate.addingTimeInterval(100)
+        registry.refreshStaleness()
+        XCTAssertNil(registry.exactFact(key, for: subject))
+        XCTAssertEqual(changes, [
+            .exact([.init(subject: subject, key: key)]),
+            .exact([.init(subject: subject, key: key)]),
+        ])
+    }
+
+    func testFreshRepublishRestoresAnExpiredProviderFact() throws {
+        let center = NotificationCenter()
+        var referenceDate = Date(timeIntervalSinceReferenceDate: 1_000)
+        let registry = ExtensionFactRegistry(
+            notificationCenter: center,
+            now: { referenceDate }
+        )
+        let source = makeSource("com.example.provider", generation: "g1", order: 0)
+        let key = ExtensionFactKey(id: "gitlab.mr.state")
+        let subject = ExtensionFactSubject.session("s1")
+        try registry.replaceDefinitions([makeDefinition(key: key)], from: source)
+        try registry.replaceFacts([
+            makeFact(
+                key: key,
+                subject: subject,
+                value: "opened",
+                observedAt: referenceDate
+            ),
+        ], replacing: [subject], from: source)
+
+        referenceDate = referenceDate.addingTimeInterval(
+            ExtensionFactRegistry.maximumProviderFactAge
+        )
+        registry.refreshStaleness()
+        XCTAssertNil(registry.exactFact(key, for: subject))
+
+        referenceDate = referenceDate.addingTimeInterval(1)
+        try registry.replaceFacts([
+            makeFact(
+                key: key,
+                subject: subject,
+                value: "opened",
+                observedAt: referenceDate
+            ),
+        ], replacing: [subject], from: source)
+        XCTAssertEqual(
+            registry.exactFact(key, for: subject)?.fact.value,
+            .string("opened")
+        )
+    }
+
+    func testLargeExpiryBatchCollapsesToOneAllChange() throws {
+        let center = NotificationCenter()
+        var referenceDate = Date(timeIntervalSinceReferenceDate: 1_000)
+        let registry = ExtensionFactRegistry(
+            notificationCenter: center,
+            now: { referenceDate }
+        )
+        let source = makeSource("com.example.provider", generation: "g1", order: 0)
+        let key = ExtensionFactKey(id: "gitlab.mr.state")
+        try registry.replaceDefinitions([makeDefinition(key: key)], from: source)
+        let subjects = (0...ExtensionFactRegistry.maximumExactNotificationCells).map {
+            ExtensionFactSubject.session("s\($0)")
+        }
+        for batch in stride(from: 0, to: subjects.count, by: 128) {
+            let admitted = Array(subjects[batch..<min(batch + 128, subjects.count)])
+            try registry.replaceFacts(admitted.map { subject in
+                makeFact(
+                    key: key,
+                    subject: subject,
+                    value: "opened",
+                    observedAt: referenceDate
+                )
+            }, replacing: Set(admitted), from: source)
+        }
+
+        var changes: [ExtensionFactChange] = []
+        let token = center.addObserver(
+            forName: ExtensionFactsDidChange.name,
+            object: nil,
+            queue: nil
+        ) { notification in
+            if let event = notification.object as? ExtensionFactsDidChange {
+                changes.append(event.change)
+            }
+        }
+        defer { center.removeObserver(token) }
+
+        referenceDate = referenceDate.addingTimeInterval(
+            ExtensionFactRegistry.maximumProviderFactAge
+        )
+        registry.refreshStaleness()
+
+        XCTAssertEqual(changes, [.all])
+        XCTAssertTrue(registry.exactFacts(for: subjects[0]).isEmpty)
+        XCTAssertTrue(registry.exactFacts(for: subjects.last!).isEmpty)
+    }
+
+    func testScheduledDeadlineExpiresWithoutAnInterveningRead() throws {
+        let center = NotificationCenter()
+        let scheduler = ManualFactStalenessScheduler()
+        var referenceDate = Date(timeIntervalSinceReferenceDate: 1_000)
+        let registry = ExtensionFactRegistry(
+            notificationCenter: center,
+            now: { referenceDate },
+            stalenessTimerScheduler: scheduler.schedule
+        )
+        let source = makeSource("com.example.provider", generation: "g1", order: 0)
+        let key = ExtensionFactKey(id: "gitlab.mr.state")
+        let subject = ExtensionFactSubject.session("s1")
+        try registry.replaceDefinitions([makeDefinition(key: key)], from: source)
+        try registry.replaceFacts([
+            makeFact(
+                key: key,
+                subject: subject,
+                value: "opened",
+                observedAt: referenceDate
+            ),
+        ], replacing: [subject], from: source)
+        XCTAssertEqual(scheduler.scheduledIntervals, [
+            ExtensionFactRegistry.maximumProviderFactAge,
+        ])
+
+        var changes: [ExtensionFactChange] = []
+        let token = center.addObserver(
+            forName: ExtensionFactsDidChange.name,
+            object: nil,
+            queue: nil
+        ) { notification in
+            if let event = notification.object as? ExtensionFactsDidChange {
+                changes.append(event.change)
+            }
+        }
+        defer { center.removeObserver(token) }
+
+        referenceDate = referenceDate.addingTimeInterval(
+            ExtensionFactRegistry.maximumProviderFactAge
+        )
+        scheduler.fire()
+
+        XCTAssertEqual(changes, [.exact([.init(subject: subject, key: key)])])
+        XCTAssertNil(registry.exactFact(key, for: subject))
+    }
+
+    func testCanceledQueuedTimerCannotClearOrDuplicateANewerArm() throws {
+        let center = NotificationCenter()
+        let scheduler = ManualFactStalenessScheduler()
+        var referenceDate = Date(timeIntervalSinceReferenceDate: 1_000)
+        let registry = ExtensionFactRegistry(
+            notificationCenter: center,
+            now: { referenceDate },
+            stalenessTimerScheduler: scheduler.schedule
+        )
+        let source = makeSource("com.example.provider", generation: "g1", order: 0)
+        let key = ExtensionFactKey(id: "gitlab.mr.state")
+        let subject = ExtensionFactSubject.session("s1")
+        try registry.replaceDefinitions([makeDefinition(key: key)], from: source)
+        try registry.replaceFacts([
+            makeFact(
+                key: key,
+                subject: subject,
+                value: "opened",
+                observedAt: referenceDate
+            ),
+        ], replacing: [subject], from: source)
+
+        referenceDate = referenceDate.addingTimeInterval(100)
+        try registry.replaceFacts([
+            makeFact(
+                key: key,
+                subject: subject,
+                value: "opened",
+                observedAt: referenceDate
+            ),
+        ], replacing: [subject], from: source)
+        XCTAssertEqual(scheduler.scheduledIntervals.count, 2)
+        XCTAssertEqual(scheduler.activeCount, 1)
+
+        scheduler.fire(at: 0)
+        XCTAssertEqual(scheduler.scheduledIntervals.count, 2)
+        XCTAssertEqual(
+            scheduler.activeCount,
+            1,
+            "the canceled callback must not clear or duplicate the newer arm"
+        )
+
+        referenceDate = referenceDate.addingTimeInterval(
+            ExtensionFactRegistry.maximumProviderFactAge
+        )
+        scheduler.fire(at: 1)
+        XCTAssertNil(registry.exactFact(key, for: subject))
+        XCTAssertEqual(scheduler.activeCount, 0)
+    }
+
+    func testDeadlineIndexStaysBoundedAcrossHighRateRetainedSetRefreshes() throws {
+        let scheduler = ManualFactStalenessScheduler()
+        var referenceDate = Date(timeIntervalSinceReferenceDate: 1_000)
+        let registry = ExtensionFactRegistry(
+            now: { referenceDate },
+            stalenessTimerScheduler: scheduler.schedule
+        )
+        let source = makeSource("com.example.provider", generation: "g1", order: 0)
+        let key = ExtensionFactKey(id: "gitlab.mr.state")
+        try registry.replaceDefinitions([makeDefinition(key: key)], from: source)
+        let subjects = (0..<ExtensionFactRegistry.maximumFactsPerGeneration).map {
+            ExtensionFactSubject.session("s\($0)")
+        }
+        for batch in stride(from: 0, to: subjects.count, by: 256) {
+            let admitted = Array(subjects[batch..<min(batch + 256, subjects.count)])
+            try registry.replaceFacts(admitted.map { subject in
+                makeFact(
+                    key: key,
+                    subject: subject,
+                    value: "opened",
+                    observedAt: referenceDate
+                )
+            }, replacing: Set(admitted), from: source)
+        }
+        XCTAssertEqual(scheduler.scheduledIntervals.count, 1)
+
+        for offset in 1...600 {
+            referenceDate = Date(timeIntervalSinceReferenceDate: 1_000 + Double(offset) / 10)
+            try registry.replaceFacts([
+                makeFact(
+                    key: key,
+                    subject: subjects[0],
+                    value: "opened",
+                    observedAt: referenceDate
+                ),
+            ], replacing: [subjects[0]], from: source)
+        }
+
+        let counts = registry.stalenessDeadlineIndexCounts
+        XCTAssertEqual(counts.active, ExtensionFactRegistry.maximumFactsPerGeneration)
+        XCTAssertLessThanOrEqual(counts.indexed, counts.active * 2)
+        XCTAssertEqual(
+            scheduler.scheduledIntervals.count,
+            1,
+            "refreshing a non-earliest cell must not reset the process-wide timer"
+        )
+    }
+
     func testBulkReplacementUsesOneReceiptTimestamp() throws {
         var clockReads = 0
         let receipt = Date(timeIntervalSinceReferenceDate: 10)
@@ -695,7 +1014,7 @@ private func makeFact(
     key: ExtensionFactKey,
     subject: ExtensionFactSubject,
     value: String,
-    observedAt: Date = Date(timeIntervalSinceReferenceDate: 1)
+    observedAt: Date = .distantFuture
 ) -> ExtensionFact {
     ExtensionFact(
         key: key,
@@ -703,6 +1022,34 @@ private func makeFact(
         value: .string(value),
         observedAt: observedAt
     )
+}
+
+@MainActor
+private final class ManualFactStalenessScheduler {
+    private(set) var scheduledIntervals: [TimeInterval] = []
+    private var actions: [(@MainActor @Sendable () -> Void)?] = []
+    private var canceled: Set<Int> = []
+
+    var activeCount: Int {
+        actions.indices.count { actions[$0] != nil && !canceled.contains($0) }
+    }
+
+    func schedule(
+        _ interval: TimeInterval,
+        _ fire: @escaping @MainActor @Sendable () -> Void
+    ) -> @MainActor @Sendable () -> Void {
+        scheduledIntervals.append(interval)
+        let index = actions.count
+        actions.append(fire)
+        return { [weak self] in self?.canceled.insert(index) }
+    }
+
+    func fire(at index: Int? = nil) {
+        let index = index ?? actions.count - 1
+        let action = actions[index]
+        actions[index] = nil
+        action?()
+    }
 }
 
 private func makeSource(

@@ -36,7 +36,7 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             value: .integer(count),
             label: "\(count) open",
             status: count == 0 ? .positive : .warning,
-            observedAt: Date(timeIntervalSinceReferenceDate: 123)
+            observedAt: .distantFuture
         )
     }
 

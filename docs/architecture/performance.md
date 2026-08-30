@@ -373,6 +373,25 @@ event work without `eventActionID`. No per-edge profiler span is added because t
 the hot path at the event frequency; the bounded request and row-level assertions are the durable
 gate.
 
+### Extension-fact freshness scaling contract, 2026-08-30
+
+An extension generation may retain 4,096 facts and the navigator stress rate is 600 publications
+per minute. Freshness therefore cannot find the next expiry by scanning every retained fact after
+each publication, and it cannot allocate one timer per value.
+
+`ExtensionFactRegistry` keeps only the winning provider cell for each subject/key in a
+lazy-invalidated min-heap and arms one process timer at its root. Recomputing a changed subject
+pushes only changed deadlines; an old heap entry becomes inert when it no longer matches the
+current deadline index. The heap rebuilds only after lazy entries exceed twice the active count
+(with a 512-entry floor), making repeated refresh O(changed log retained) with bounded retained
+debris. The timer is reset only when the earliest deadline changes. At expiry, the heap yields the
+due subjects directly and the ordinary exact/256-cell notification boundary applies.
+
+`ExtensionFactRegistryTests` fills the 4,096-fact generation ceiling, republishes one non-earliest
+cell 600 times, and asserts that the heap stays below twice the active count while the timer is
+armed only once. A separately injected scheduler test advances the clock and fires that timer,
+proving stale removal and notification without an intervening registry read.
+
 ### Mobile terminal viewport-lease scaling contract, 2026-08-20
 
 A phone-owned terminal grid is recomputed on every crossed cell boundary — pinch steps, the

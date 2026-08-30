@@ -102,6 +102,11 @@ enum ExtensionFactRegistryError: Error, Equatable, LocalizedError {
 /// Publication is atomic. Lookups never call an extension and never touch disk or the network.
 @MainActor
 final class ExtensionFactRegistry {
+    typealias StalenessTimerScheduler = @MainActor (
+        _ interval: TimeInterval,
+        _ fire: @escaping @MainActor @Sendable () -> Void
+    ) -> @MainActor @Sendable () -> Void
+
     static let maximumDefinitionsPerGeneration = ExtensionFactProviderLimits.maximumDefinitions
     static let maximumSubjectsPerReplacement =
         ExtensionFactProviderLimits.maximumSubjectsPerPublication
@@ -110,6 +115,10 @@ final class ExtensionFactRegistry {
     static let maximumFactsPerGeneration = ExtensionFactProviderLimits.maximumFactsPerGeneration
     static let maximumResolvedFactsPerSubject = 128
     static let maximumExactNotificationCells = 256
+    /// Extension observations are advisory cache entries, never perpetual authority. Providers
+    /// cannot lengthen this host-owned window; the current GitLab reference refreshes every five
+    /// minutes, so three missed full-refresh opportunities make its last value unknown.
+    static let maximumProviderFactAge: TimeInterval = 15 * 60
     /// Facts which can change the subject joins used by any pipeline even when the extension did
     /// not reference the key as a presentation value. Exposed within the host so notification
     /// filtering follows the exact same inclusion boundary as snapshot construction.
@@ -128,6 +137,8 @@ final class ExtensionFactRegistry {
         let icon: ExtensionImageReference?
         let observedAt: Date
         let receivedAt: Date
+
+        var freshnessDate: Date { min(observedAt, receivedAt) }
 
         init(_ fact: ExtensionFact, receivedAt: Date) {
             value = fact.value
@@ -166,6 +177,11 @@ final class ExtensionFactRegistry {
         let source: ExtensionFactResolutionSource
     }
 
+    private struct StalenessDeadline {
+        let cell: ExtensionFactCell
+        let date: Date
+    }
+
     private struct Publication {
         let source: ComponentCustomizationSource
         var definitions: [ExtensionFactKey: ExtensionFactDefinition]
@@ -184,16 +200,39 @@ final class ExtensionFactRegistry {
     private var hostFacts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]] = [:]
     private var publications: [SourceGeneration: Publication] = [:]
     private var resolved: [ExtensionFactSubject: [ExtensionFactKey: ResolvedCell]] = [:]
+    /// Only the winning provider cell for each resolved key needs a deadline. When it expires,
+    /// recomputing that subject either selects the next fresh provider or removes the value.
+    private var stalenessDeadlines: [
+        ExtensionFactSubject: [ExtensionFactKey: Date]
+    ] = [:]
+    private var stalenessDeadlineCount = 0
+    /// Lazy-invalidated min-heap. Replacements push only changed winning cells; an old heap entry
+    /// is ignored once it no longer matches `stalenessDeadlines`.
+    private var stalenessDeadlineHeap: [StalenessDeadline] = []
+    private var nextStalenessDeadline: Date?
+    private var armedStalenessDeadline: Date?
+    private var cancelStalenessTimer: (@MainActor @Sendable () -> Void)?
+    private var stalenessTimerArmSequence: UInt64 = 0
     private var revision: UInt64 = 0
     private let notificationCenter: NotificationCenter
     private let now: () -> Date
+    private let stalenessTimerScheduler: StalenessTimerScheduler
 
     init(
         notificationCenter: NotificationCenter = .default,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        stalenessTimerScheduler: @escaping StalenessTimerScheduler = { interval, fire in
+            let timer = Timer(timeInterval: interval, repeats: false) { _ in
+                Task { @MainActor in fire() }
+            }
+            timer.tolerance = min(1, interval * 0.1)
+            RunLoop.main.add(timer, forMode: .common)
+            return { timer.invalidate() }
+        }
     ) {
         self.notificationCenter = notificationCenter
         self.now = now
+        self.stalenessTimerScheduler = stalenessTimerScheduler
     }
 
     func definition(for key: ExtensionFactKey) -> ExtensionFactDefinition? {
@@ -217,7 +256,7 @@ final class ExtensionFactRegistry {
     func exactFacts(
         for subject: ExtensionFactSubject
     ) -> [ExtensionFactKey: ExtensionResolvedFact] {
-        Dictionary(uniqueKeysWithValues: (resolved[subject] ?? [:]).map { key, cell in
+        return Dictionary(uniqueKeysWithValues: (resolved[subject] ?? [:]).map { key, cell in
             (key, ExtensionResolvedFact(
                 fact: cell.stored.fact(key: key, subject: subject),
                 definition: cell.definition,
@@ -231,6 +270,7 @@ final class ExtensionFactRegistry {
     /// Subsequent publications mutate registry storage and advance `revision`; they cannot alter
     /// the dictionaries retained by an existing value snapshot.
     func snapshot(consuming consumedKeys: Set<ExtensionFactKey>) -> ExtensionFactSnapshot {
+        settleStalenessIfNeeded(at: now())
         let includedKeys = consumedKeys.union(Self.snapshotStructuralKeys)
         var definitions = hostDefinitions.filter { includedKeys.contains($0.key) }
         var providers = Dictionary(uniqueKeysWithValues: definitions.keys.map {
@@ -286,6 +326,7 @@ final class ExtensionFactRegistry {
         exactCells: Set<ExtensionFactCell>,
         consuming consumedKeys: Set<ExtensionFactKey>
     ) -> ExtensionFactSnapshotPatch? {
+        settleStalenessIfNeeded(at: now())
         guard exactCells.allSatisfy({ !Self.snapshotStructuralKeys.contains($0.key) }) else {
             return nil
         }
@@ -317,6 +358,8 @@ final class ExtensionFactRegistry {
     }
 
     func replaceHostDefinitions(_ definitions: [ExtensionFactDefinition]) throws {
+        let referenceDate = publications.isEmpty ? Date.distantPast : now()
+        settleStalenessIfNeeded(at: referenceDate)
         let candidate = try validatedDefinitions(definitions, isHost: true)
         guard candidate != hostDefinitions else { return }
 
@@ -324,12 +367,13 @@ final class ExtensionFactRegistry {
         hostDefinitions = candidate
         do {
             try validateExistingHostFacts()
-            try recomputeAllResolvedWithoutPosting()
+            try recomputeAllResolvedWithoutPosting(at: referenceDate)
         } catch {
             hostDefinitions = oldDefinitions
-            try? recomputeAllResolvedWithoutPosting()
+            try? recomputeAllResolvedWithoutPosting(at: referenceDate)
             throw error
         }
+        scheduleStalenessTimer(at: referenceDate)
         post(.all)
     }
 
@@ -346,6 +390,7 @@ final class ExtensionFactRegistry {
     func replaceHostFacts(_ replacements: [ExtensionHostFactReplacement]) throws {
         guard !replacements.isEmpty else { return }
         let receivedAt = now()
+        settleStalenessIfNeeded(at: receivedAt)
         var candidate = hostFacts
         var affectedSubjects: Set<ExtensionFactSubject> = []
         for replacement in replacements {
@@ -371,13 +416,15 @@ final class ExtensionFactRegistry {
             try validateResolvedCaps(
                 subjects: replacement.subjects,
                 hostFacts: candidate,
-                publications: publications
+                publications: publications,
+                at: receivedAt
             )
             affectedSubjects.formUnion(replacement.subjects)
         }
         let before = resolvedCells(for: affectedSubjects)
         hostFacts = candidate
-        recompute(subjects: affectedSubjects)
+        recompute(subjects: affectedSubjects, at: receivedAt)
+        scheduleStalenessTimer(at: receivedAt)
         postDifference(before: before, subjects: affectedSubjects)
     }
 
@@ -385,6 +432,8 @@ final class ExtensionFactRegistry {
         _ definitions: [ExtensionFactDefinition],
         from source: ComponentCustomizationSource
     ) throws {
+        let referenceDate = now()
+        settleStalenessIfNeeded(at: referenceDate)
         let candidateDefinitions = try validatedDefinitions(definitions, isHost: false)
         try validateDefinitionConflicts(candidateDefinitions, excluding: SourceGeneration(source))
 
@@ -400,11 +449,13 @@ final class ExtensionFactRegistry {
         try validateResolvedCaps(
             subjects: subjects,
             hostFacts: hostFacts,
-            publications: candidatePublications
+            publications: candidatePublications,
+            at: referenceDate
         )
         guard oldPublication.definitions != candidateDefinitions else { return }
         publications = candidatePublications
-        recompute(subjects: subjects)
+        recompute(subjects: subjects, at: referenceDate)
+        scheduleStalenessTimer(at: referenceDate)
         post(.all)
     }
 
@@ -415,6 +466,7 @@ final class ExtensionFactRegistry {
     ) throws {
         let key = SourceGeneration(source)
         let receivedAt = now()
+        settleStalenessIfNeeded(at: receivedAt)
         var publication = publications[key] ?? Publication(source: source)
         let grouped = try validatedFacts(
             facts,
@@ -447,15 +499,19 @@ final class ExtensionFactRegistry {
         try validateResolvedCaps(
             subjects: subjects,
             hostFacts: hostFacts,
-            publications: candidatePublications
+            publications: candidatePublications,
+            at: receivedAt
         )
         let before = resolvedCells(for: subjects)
         publications = candidatePublications
-        recompute(subjects: subjects)
+        recompute(subjects: subjects, at: receivedAt)
+        scheduleStalenessTimer(at: receivedAt)
         postDifference(before: before, subjects: subjects)
     }
 
     func removeGeneration(extensionIdentifier: String, processGeneration: String) {
+        let referenceDate = now()
+        settleStalenessIfNeeded(at: referenceDate)
         let key = SourceGeneration(
             extensionIdentifier: extensionIdentifier,
             processGeneration: processGeneration
@@ -463,7 +519,8 @@ final class ExtensionFactRegistry {
         guard let removed = publications.removeValue(forKey: key) else { return }
         let subjects = Set(removed.facts.keys)
         let before = resolvedCells(for: subjects)
-        recompute(subjects: subjects)
+        recompute(subjects: subjects, at: referenceDate)
+        scheduleStalenessTimer(at: referenceDate)
         if removed.definitions.isEmpty {
             postDifference(before: before, subjects: subjects)
         } else {
@@ -611,7 +668,9 @@ final class ExtensionFactRegistry {
     private func resolvedCells(
         for subject: ExtensionFactSubject,
         hostFacts candidateHostFacts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]],
-        publications candidatePublications: [SourceGeneration: Publication]
+        publications candidatePublications: [SourceGeneration: Publication],
+        at referenceDate: Date,
+        includingStaleProviderFacts: Bool = false
     ) -> [ExtensionFactKey: ResolvedCell] {
         var result: [ExtensionFactKey: ResolvedCell] = [:]
         for (key, stored) in candidateHostFacts[subject] ?? [:] {
@@ -621,6 +680,8 @@ final class ExtensionFactRegistry {
         for publication in orderedPublications(candidatePublications) {
             for (key, stored) in publication.facts[subject] ?? [:] where result[key] == nil {
                 guard let definition = publication.definitions[key] else { continue }
+                guard includingStaleProviderFacts
+                        || isFreshProviderFact(stored, at: referenceDate) else { continue }
                 result[key] = ResolvedCell(
                     stored: stored,
                     definition: definition,
@@ -637,12 +698,15 @@ final class ExtensionFactRegistry {
     private func validateResolvedCaps(
         subjects: Set<ExtensionFactSubject>,
         hostFacts candidateHostFacts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]],
-        publications candidatePublications: [SourceGeneration: Publication]
+        publications candidatePublications: [SourceGeneration: Publication],
+        at referenceDate: Date
     ) throws {
         for subject in subjects where resolvedCells(
             for: subject,
             hostFacts: candidateHostFacts,
-            publications: candidatePublications
+            publications: candidatePublications,
+            at: referenceDate,
+            includingStaleProviderFacts: true
         ).count > Self.maximumResolvedFactsPerSubject {
             throw ExtensionFactRegistryError.tooManyResolvedFactsForSubject(
                 maximum: Self.maximumResolvedFactsPerSubject
@@ -650,27 +714,190 @@ final class ExtensionFactRegistry {
         }
     }
 
-    private func recompute(subjects: Set<ExtensionFactSubject>) {
+    private func recompute(subjects: Set<ExtensionFactSubject>, at referenceDate: Date) {
         for subject in subjects {
             let values = resolvedCells(
                 for: subject,
                 hostFacts: hostFacts,
-                publications: publications
+                publications: publications,
+                at: referenceDate
             )
             if values.isEmpty { resolved.removeValue(forKey: subject) }
             else { resolved[subject] = values }
+
+            let oldDeadlines = stalenessDeadlines[subject] ?? [:]
+            let deadlines = Dictionary(uniqueKeysWithValues: values.compactMap {
+                key, cell -> (ExtensionFactKey, Date)? in
+                guard case .extension = cell.source else { return nil }
+                return (
+                    key,
+                    cell.stored.freshnessDate.addingTimeInterval(
+                        Self.maximumProviderFactAge
+                    )
+                )
+            })
+            stalenessDeadlineCount += deadlines.count - oldDeadlines.count
+            if deadlines.isEmpty { stalenessDeadlines.removeValue(forKey: subject) }
+            else { stalenessDeadlines[subject] = deadlines }
+            for (key, deadline) in deadlines where oldDeadlines[key] != deadline {
+                pushStalenessDeadline(.init(
+                    cell: .init(subject: subject, key: key),
+                    date: deadline
+                ))
+            }
         }
     }
 
-    private func recomputeAllResolvedWithoutPosting() throws {
+    private func recomputeAllResolvedWithoutPosting(at referenceDate: Date) throws {
         let subjects = Set(hostFacts.keys).union(publications.values.flatMap { $0.facts.keys })
         try validateResolvedCaps(
             subjects: subjects,
             hostFacts: hostFacts,
-            publications: publications
+            publications: publications,
+            at: referenceDate
         )
         resolved.removeAll(keepingCapacity: true)
-        recompute(subjects: subjects)
+        stalenessDeadlines.removeAll(keepingCapacity: true)
+        stalenessDeadlineCount = 0
+        stalenessDeadlineHeap.removeAll(keepingCapacity: true)
+        recompute(subjects: subjects, at: referenceDate)
+    }
+
+    /// Deterministic test and wall-clock catch-up boundary. Correctness comes from stored
+    /// instants; the timer only makes the comparison happen without a read.
+    func refreshStaleness() {
+        let referenceDate = now()
+        settleStalenessIfNeeded(at: referenceDate)
+        scheduleStalenessTimer(at: referenceDate)
+    }
+
+    var stalenessDeadlineIndexCounts: (active: Int, indexed: Int) {
+        (stalenessDeadlineCount, stalenessDeadlineHeap.count)
+    }
+
+    private func isFreshProviderFact(_ fact: StoredFact, at referenceDate: Date) -> Bool {
+        referenceDate < fact.freshnessDate.addingTimeInterval(Self.maximumProviderFactAge)
+    }
+
+    private func settleStalenessIfNeeded(at referenceDate: Date) {
+        guard let nextStalenessDeadline,
+              nextStalenessDeadline <= referenceDate else { return }
+        var subjects: Set<ExtensionFactSubject> = []
+        while let deadline = firstValidStalenessDeadline(), deadline.date <= referenceDate {
+            _ = popStalenessDeadline()
+            subjects.insert(deadline.cell.subject)
+        }
+        guard !subjects.isEmpty else {
+            scheduleStalenessTimer(at: referenceDate)
+            return
+        }
+        let before = resolvedCells(for: subjects)
+        recompute(subjects: subjects, at: referenceDate)
+        scheduleStalenessTimer(at: referenceDate)
+        postDifference(before: before, subjects: subjects)
+    }
+
+    private func scheduleStalenessTimer(at referenceDate: Date) {
+        compactStalenessDeadlineHeapIfNeeded()
+        nextStalenessDeadline = firstValidStalenessDeadline()?.date
+        guard armedStalenessDeadline != nextStalenessDeadline else { return }
+        cancelStalenessTimer?()
+        cancelStalenessTimer = nil
+        armedStalenessDeadline = nil
+        stalenessTimerArmSequence &+= 1
+        guard let nextStalenessDeadline else { return }
+        let interval = max(0.05, nextStalenessDeadline.timeIntervalSince(referenceDate))
+        let armSequence = stalenessTimerArmSequence
+        armedStalenessDeadline = nextStalenessDeadline
+        cancelStalenessTimer = stalenessTimerScheduler(interval) { [weak self] in
+            guard let self,
+                  self.stalenessTimerArmSequence == armSequence,
+                  self.armedStalenessDeadline == nextStalenessDeadline else { return }
+            self.armedStalenessDeadline = nil
+            self.cancelStalenessTimer = nil
+            self.refreshStaleness()
+        }
+    }
+
+    private func currentStalenessDeadline(for cell: ExtensionFactCell) -> Date? {
+        stalenessDeadlines[cell.subject]?[cell.key]
+    }
+
+    private func firstValidStalenessDeadline() -> StalenessDeadline? {
+        while let first = stalenessDeadlineHeap.first,
+              currentStalenessDeadline(for: first.cell) != first.date {
+            _ = popStalenessDeadline()
+        }
+        return stalenessDeadlineHeap.first
+    }
+
+    private func pushStalenessDeadline(_ deadline: StalenessDeadline) {
+        stalenessDeadlineHeap.append(deadline)
+        var index = stalenessDeadlineHeap.count - 1
+        while index > 0 {
+            let parent = (index - 1) / 2
+            guard stalenessDeadlineHeap[index].date
+                    < stalenessDeadlineHeap[parent].date else { break }
+            stalenessDeadlineHeap.swapAt(index, parent)
+            index = parent
+        }
+    }
+
+    @discardableResult
+    private func popStalenessDeadline() -> StalenessDeadline? {
+        guard !stalenessDeadlineHeap.isEmpty else { return nil }
+        if stalenessDeadlineHeap.count == 1 { return stalenessDeadlineHeap.removeLast() }
+        let first = stalenessDeadlineHeap[0]
+        stalenessDeadlineHeap[0] = stalenessDeadlineHeap.removeLast()
+        var index = 0
+        while true {
+            let left = index * 2 + 1
+            guard left < stalenessDeadlineHeap.count else { break }
+            let right = left + 1
+            let child = right < stalenessDeadlineHeap.count
+                && stalenessDeadlineHeap[right].date < stalenessDeadlineHeap[left].date
+                ? right
+                : left
+            guard stalenessDeadlineHeap[child].date
+                    < stalenessDeadlineHeap[index].date else { break }
+            stalenessDeadlineHeap.swapAt(index, child)
+            index = child
+        }
+        return first
+    }
+
+    /// Lazy invalidation keeps ordinary replacements O(changed log retained). Bound the debris
+    /// so a long-lived provider refreshing the same cells cannot grow the heap without limit.
+    private func compactStalenessDeadlineHeapIfNeeded() {
+        let maximumLazyEntries = max(512, stalenessDeadlineCount * 2)
+        guard stalenessDeadlineHeap.count > maximumLazyEntries else { return }
+        stalenessDeadlineHeap = stalenessDeadlines.flatMap { subject, deadlines in
+            deadlines.map { key, date in
+                StalenessDeadline(cell: .init(subject: subject, key: key), date: date)
+            }
+        }
+        guard stalenessDeadlineHeap.count > 1 else { return }
+        for index in stride(
+            from: stalenessDeadlineHeap.count / 2 - 1,
+            through: 0,
+            by: -1
+        ) {
+            var parent = index
+            while true {
+                let left = parent * 2 + 1
+                guard left < stalenessDeadlineHeap.count else { break }
+                let right = left + 1
+                let child = right < stalenessDeadlineHeap.count
+                    && stalenessDeadlineHeap[right].date
+                        < stalenessDeadlineHeap[left].date
+                    ? right
+                    : left
+                guard stalenessDeadlineHeap[child].date
+                        < stalenessDeadlineHeap[parent].date else { break }
+                stalenessDeadlineHeap.swapAt(parent, child)
+                parent = child
+            }
+        }
     }
 
     private func resolvedCells(
