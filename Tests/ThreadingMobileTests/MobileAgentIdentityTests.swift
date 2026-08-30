@@ -536,22 +536,6 @@ final class MobileWorkspaceActivityTests: XCTestCase {
     func testToolbarBrowserActivityDotIsRenderedWholeInsideItsLabel() throws {
         let activity = makeActivity()
         activity.receive(RemoteWorkspaceChangedDTO(kind: .browser, activityID: "browser-1"))
-        let palette = RemoteThemePalette(RemoteThemeDTO(
-            id: "workspace-activity-test",
-            name: "Workspace activity test",
-            mode: .dark,
-            colors: [
-                "accent": "#FF0000",
-                "surface": "#0000FF",
-                "control_resting": "#000000",
-                "secondary_label": "#FFFFFF",
-            ],
-            material: RemoteThemeDTO.Material(
-                panelRadius: 20,
-                controlRadius: 10,
-                borderWidth: 1
-            )
-        ))
         let renderer = ImageRenderer(content:
             SessionActionsToolbarIcon(
                 activity: activity,
@@ -577,6 +561,41 @@ final class MobileWorkspaceActivityTests: XCTestCase {
         )
         XCTAssertLessThanOrEqual(badge.maxX, MobileDesign.Size.compactControl)
         XCTAssertGreaterThanOrEqual(badge.minY, 0)
+    }
+
+    func testMenuBrowserActivityGlyphRendersTheSameWholeDot() throws {
+        let image = try XCTUnwrap(
+            MobileWorkspaceActivityMenuGlyph.image(theme: palette, scale: scale)
+        )
+        let expectedSide = MobileDesign.Size.usageMenuGauge
+            + (2 * MobileDesign.Size.usageMenuGaugeInset)
+        XCTAssertEqual(image.size.width, expectedSide, accuracy: 1 / scale)
+        XCTAssertEqual(image.size.height, expectedSide, accuracy: 1 / scale)
+
+        let badge = try badgeBounds(in: image)
+        XCTAssertGreaterThanOrEqual(badge.width, MobileDesign.Size.workspaceActivityDot - 1)
+        XCTAssertGreaterThanOrEqual(badge.height, MobileDesign.Size.workspaceActivityDot - 1)
+        XCTAssertLessThanOrEqual(badge.maxX, image.size.width)
+        XCTAssertGreaterThanOrEqual(badge.minY, 0)
+    }
+
+    private var palette: RemoteThemePalette {
+        RemoteThemePalette(RemoteThemeDTO(
+            id: "workspace-activity-test",
+            name: "Workspace activity test",
+            mode: .dark,
+            colors: [
+                "accent": "#FF0000",
+                "surface": "#0000FF",
+                "control_resting": "#000000",
+                "secondary_label": "#FFFFFF",
+            ],
+            material: RemoteThemeDTO.Material(
+                panelRadius: 20,
+                controlRadius: 10,
+                borderWidth: 1
+            )
+        ))
     }
 
     private func makeActivity() -> MobileWorkspaceActivity {

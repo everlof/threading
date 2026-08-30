@@ -119,17 +119,22 @@ enum MobileSessionChrome {
         canManageSessions && hasClient
     }
 
-    /// The toolbar dot is only useful if the menu it opens carries the same state to the action
-    /// that resolves it. Name Browser activity on Workspace itself instead of leaving a person to
-    /// guess which of the menu's unrelated actions the dot referred to.
-    static func workspaceMenuTitle(hasUnseenBrowser: Bool) -> String {
+    /// Activity is a badge, not part of the action's name. Keeping this title stable prevents a
+    /// transient state from turning the menu's shortest destination into a wrapped sentence.
+    static func workspaceMenuTitle() -> String {
+        MobileL10n.string("Workspace")
+    }
+
+    static func workspaceMenuSystemImage() -> String {
+        "square.grid.2x2"
+    }
+
+    /// The visible row stays compact, while VoiceOver receives the same unseen-activity state as
+    /// the toolbar control that opened the menu.
+    static func workspaceMenuAccessibilityLabel(hasUnseenBrowser: Bool) -> String {
         MobileL10n.string(
             hasUnseenBrowser ? "Workspace · New browser activity" : "Workspace"
         )
-    }
-
-    static func workspaceMenuSystemImage(hasUnseenBrowser: Bool) -> String {
-        hasUnseenBrowser ? "square.grid.2x2.fill" : "square.grid.2x2"
     }
 
     /// A palette belongs to a terminal. A native conversation is drawn in the app theme, so the
@@ -925,23 +930,96 @@ struct SessionDetailView: View {
 }
 
 /// The one Workspace action used by the session menu and its deterministic evidence fixture.
-/// Keeping the activity wording here prevents the outer badge and the menu destination from
-/// becoming two independently maintained readings of the same state.
+/// The destination keeps its stable name and repeats the toolbar's activity dot on its own icon,
+/// so the state survives the hop into the menu without becoming a second line of prose.
 struct SessionWorkspaceMenuButton: View {
     let hasUnseenBrowser: Bool
     let action: () -> Void
 
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.remoteTheme) private var theme
+
     var body: some View {
         Button(action: action) {
-            Label(
-                MobileSessionChrome.workspaceMenuTitle(
-                    hasUnseenBrowser: hasUnseenBrowser
-                ),
-                systemImage: MobileSessionChrome.workspaceMenuSystemImage(
-                    hasUnseenBrowser: hasUnseenBrowser
-                )
-            )
+            Text(MobileSessionChrome.workspaceMenuTitle())
+            menuGlyph
         }
+        .accessibilityLabel(
+            MobileSessionChrome.workspaceMenuAccessibilityLabel(
+                hasUnseenBrowser: hasUnseenBrowser
+            )
+        )
+    }
+
+    private var menuGlyph: Image {
+        guard hasUnseenBrowser,
+              let image = MobileWorkspaceActivityMenuGlyph.image(
+                theme: theme,
+                scale: displayScale
+              ) else {
+            return Image(systemName: MobileSessionChrome.workspaceMenuSystemImage())
+        }
+        return Image(uiImage: image)
+    }
+}
+
+/// The one visual vocabulary for unseen Workspace activity, shared by the toolbar handle and the
+/// Workspace action inside its menu.
+struct MobileWorkspaceActivityDot: View {
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        Circle()
+            .fill(theme.accent)
+            .frame(
+                width: MobileDesign.Size.workspaceActivityDot,
+                height: MobileDesign.Size.workspaceActivityDot
+            )
+            .overlay {
+                Circle()
+                    .strokeBorder(
+                        theme.surface,
+                        lineWidth: MobileDesign.Size.badgeStroke
+                    )
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// `UIMenu` extracts text and one `Image` from each SwiftUI button. An arbitrary custom icon view
+/// makes the whole action disappear, so render the shared dot and Workspace symbol into the image
+/// slot the native menu explicitly supports.
+enum MobileWorkspaceActivityMenuGlyph {
+    private struct Drawn: Equatable {
+        let theme: RemoteThemePalette
+        let scale: CGFloat
+    }
+
+    @MainActor private static var lastDrawn: Drawn?
+    @MainActor private static var lastImage: UIImage?
+
+    @MainActor
+    static func image(theme: RemoteThemePalette, scale: CGFloat) -> UIImage? {
+        let drawn = Drawn(theme: theme, scale: scale)
+        if drawn == lastDrawn, let lastImage { return lastImage }
+
+        let side = MobileDesign.Size.usageMenuGauge
+        let renderer = ImageRenderer(
+            content: Image(systemName: MobileSessionChrome.workspaceMenuSystemImage())
+                .font(.system(size: side * 0.8, weight: .medium))
+                .foregroundStyle(theme.accent)
+                .frame(width: side, height: side)
+                .overlay(alignment: .topTrailing) {
+                    MobileWorkspaceActivityDot()
+                        .environment(\.remoteTheme, theme)
+                }
+                .padding(MobileDesign.Size.usageMenuGaugeInset)
+        )
+        renderer.scale = max(scale, 1)
+        let image = renderer.uiImage?.withRenderingMode(.alwaysOriginal)
+        lastDrawn = image == nil ? nil : drawn
+        lastImage = image
+        return image
     }
 }
 
@@ -957,27 +1035,14 @@ struct SessionActionsToolbarIcon: View {
     let account: RemoteSessionAccountDTO?
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.remoteTheme) private var theme
 
     var body: some View {
         disc
             .overlay(alignment: .topTrailing) {
                 if activity.hasUnseenBrowser {
-                    Circle()
-                        .fill(theme.accent)
-                        .frame(
-                            width: MobileDesign.Size.workspaceActivityDot,
-                            height: MobileDesign.Size.workspaceActivityDot
-                        )
-                        .overlay {
-                            Circle()
-                                // The toolbar clips its label to the disc's 34-point bounds. Keep
-                                // both the fill and its separating ring inside that boundary.
-                                .strokeBorder(
-                                    theme.surface,
-                                    lineWidth: MobileDesign.Size.badgeStroke
-                                )
-                        }
+                    // The toolbar clips its label to the disc's 34-point bounds. The shared dot
+                    // keeps both its fill and separating ring inside that boundary.
+                    MobileWorkspaceActivityDot()
                         .transition(.scale.combined(with: .opacity))
                 }
             }

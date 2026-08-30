@@ -282,26 +282,24 @@ final class MobileSessionChromeTests: XCTestCase {
         ))
     }
 
-    /// The toolbar dot opens a menu with several unrelated actions. Its state has to survive that
-    /// hop and name Workspace as the destination, rather than asking someone to guess which row
-    /// will resolve it.
-    func testUnseenBrowserActivityNamesWorkspaceAsItsDestination() {
+    /// The toolbar dot opens a menu with several unrelated actions. Its state survives that hop
+    /// as the same badge on Workspace, without lengthening the destination's visible title.
+    func testUnseenBrowserActivityKeepsAStableWorkspaceTitle() {
         XCTAssertEqual(
-            MobileSessionChrome.workspaceMenuTitle(hasUnseenBrowser: false),
+            MobileSessionChrome.workspaceMenuTitle(),
             MobileL10n.string("Workspace")
         )
         XCTAssertEqual(
-            MobileSessionChrome.workspaceMenuSystemImage(hasUnseenBrowser: false),
+            MobileSessionChrome.workspaceMenuSystemImage(),
             "square.grid.2x2"
         )
-
         XCTAssertEqual(
-            MobileSessionChrome.workspaceMenuTitle(hasUnseenBrowser: true),
+            MobileSessionChrome.workspaceMenuAccessibilityLabel(hasUnseenBrowser: true),
             MobileL10n.string("Workspace · New browser activity")
         )
         XCTAssertEqual(
-            MobileSessionChrome.workspaceMenuSystemImage(hasUnseenBrowser: true),
-            "square.grid.2x2.fill"
+            MobileSessionChrome.workspaceMenuAccessibilityLabel(hasUnseenBrowser: false),
+            MobileL10n.string("Workspace")
         )
     }
 
