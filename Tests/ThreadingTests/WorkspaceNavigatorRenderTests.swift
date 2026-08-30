@@ -255,6 +255,47 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
         }
 
+        let t3Selection = WorkspaceNavigatorSelection.extensionNavigator(
+            extensionIdentifier: router.t3SidebarInventory.extensionIdentifier,
+            navigatorID: router.t3SidebarInventory.navigator.id
+        )
+        for fixture in [
+            AppearanceFixture(name: "system-light", theme: .system, appearance: .aqua),
+            AppearanceFixture(name: "system-dark", theme: .system, appearance: .darkAqua),
+        ] {
+            AppThemePalette.set(fixture.theme)
+            content.appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+            controller.selectWorkspaceNavigator(t3Selection)
+            let table = try waitForPipelineTable(in: content, rowCount: 9)
+            for row in 0 ..< table.numberOfRows {
+                _ = table.view(atColumn: 0, row: row, makeIfNecessary: true)
+            }
+            let templates = descendants(of: table).compactMap {
+                $0 as? WorkspaceNavigatorPipelineTemplateView
+            }
+            XCTAssertGreaterThanOrEqual(templates.count, 7)
+            for template in templates {
+                template.setIntentControlsPresented(true)
+            }
+            let identifiers = Set(templates.flatMap { template in
+                descendants(of: template).compactMap { view in
+                    (view as? ThemedIconButton)?.accessibilityIdentifier()
+                }
+            })
+            XCTAssertTrue(identifiers.contains("workspace.navigator.intent.pin"))
+            XCTAssertTrue(identifiers.contains("workspace.navigator.intent.unpin"))
+            XCTAssertTrue(identifiers.contains("workspace.navigator.intent.archive"))
+            AppThemeRefresh.repaint(content)
+            try suppressComposerUsage(in: content)
+            content.layoutSubtreeIfNeeded()
+            content.displayIfNeeded()
+            try write(
+                content,
+                named: "workspace-navigator-t3-sidebar-\(fixture.name)-intents.png"
+            )
+            controller.selectWorkspaceNavigator(.native)
+        }
+
         print("Rendered the focused workspace navigator to \(Render.directory.path)")
     }
 
@@ -267,6 +308,10 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             ExtensionHostFactKey.sessionLastUsedAt,
             ExtensionHostFactKey.sessionIsArchived,
             ExtensionHostFactKey.sessionIsSnoozed,
+            ExtensionHostFactKey.sessionProjectID,
+            ExtensionHostFactKey.sessionIsPinned,
+            ExtensionHostFactKey.sessionHasScheduledStart,
+            ExtensionHostFactKey.projectName,
         ]
         try registry.replaceHostDefinitions(
             HostFactCatalog.definitions.filter { keys.contains($0.key) }
@@ -336,11 +381,47 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
                     value: .boolean(id == "pipeline-8"),
                     observedAt: observedAt
                 ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionProjectID,
+                    subject: subject,
+                    value: .string(id == "pipeline-4" || id == "pipeline-5"
+                        ? "project-runtime"
+                        : "project-navigator"),
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionIsPinned,
+                    subject: subject,
+                    value: .boolean(id == "pipeline-2" || id == "pipeline-8"),
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionHasScheduledStart,
+                    subject: subject,
+                    value: .boolean(id == "pipeline-7"),
+                    observedAt: observedAt
+                ),
             ]
         }
+        let projectSubjects: Set<ExtensionFactSubject> = [
+            .project("project-navigator"), .project("project-runtime"),
+        ]
         try registry.replaceHostFacts(
-            facts,
-            replacing: Set(rows.map { .session($0.0) })
+            facts + [
+                ExtensionFact(
+                    key: ExtensionHostFactKey.projectName,
+                    subject: .project("project-navigator"),
+                    value: .string("AnotherTerminal"),
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.projectName,
+                    subject: .project("project-runtime"),
+                    value: .string("Runtime Lab"),
+                    observedAt: observedAt
+                ),
+            ],
+            replacing: Set(rows.map { .session($0.0) }).union(projectSubjects)
         )
         return registry
     }
@@ -414,6 +495,7 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
     let inventory: ExtensionWorkspaceNavigatorInventoryItem
     let pipelineInventory: ExtensionWorkspaceNavigatorInventoryItem
     let activityInboxInventory: ExtensionWorkspaceNavigatorInventoryItem
+    let t3SidebarInventory: ExtensionWorkspaceNavigatorInventoryItem
 
     init() throws {
         let sections = [
@@ -590,10 +672,39 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
             optionValues: [sortOption.id: .string("recent")],
             optionPersistenceOutcome: .loaded
         )
+
+        let t3ManifestURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(
+                "Packages/ThreadingExtensionKit/Examples/T3SidebarExtension/"
+                    + "threading-extension.json"
+            )
+        let t3Manifest = try JSONDecoder().decode(
+            ExtensionManifest.self,
+            from: Data(contentsOf: t3ManifestURL)
+        )
+        try t3Manifest.validate()
+        guard let t3Sidebar = t3Manifest.workspaceNavigators.first(where: {
+            $0.id == "t3-sidebar"
+        }), let t3SortOption = t3Sidebar.options.first(where: {
+            $0.id == "sort-order"
+        }) else {
+            throw WorkspaceNavigatorEvidenceError.missingT3SidebarDeclaration
+        }
+        t3SidebarInventory = .init(
+            extensionIdentifier: t3Manifest.identifier,
+            extensionName: t3Manifest.name,
+            processGeneration: "t3-sidebar-evidence-generation",
+            navigator: t3Sidebar,
+            optionValues: [t3SortOption.id: .string("recent")],
+            optionPersistenceOutcome: .loaded
+        )
     }
 
     var extensionWorkspaceNavigatorInventory: [ExtensionWorkspaceNavigatorInventoryItem] {
-        [inventory, pipelineInventory, activityInboxInventory]
+        [inventory, pipelineInventory, activityInboxInventory, t3SidebarInventory]
     }
 
     func registeredWorkspaceNavigator(
@@ -628,4 +739,5 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
 
 private enum WorkspaceNavigatorEvidenceError: Error {
     case missingActivityInboxDeclaration
+    case missingT3SidebarDeclaration
 }

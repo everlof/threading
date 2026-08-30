@@ -4,7 +4,6 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPOSITORY_ROOT="$(dirname -- "$SCRIPT_DIR")"
 EXTENSION_PACKAGE="$REPOSITORY_ROOT/Packages/ThreadingExtensionKit"
-MANIFEST="$EXTENSION_PACKAGE/Examples/ActivityInboxExtension/threading-extension.json"
 
 if [ -n "${THREADING_SWIFT_ORG_SWIFT:-}" ]; then
   SWIFT_ORG_COMMAND="$THREADING_SWIFT_ORG_SWIFT"
@@ -13,7 +12,7 @@ elif [ -x "${HOME}/.swiftly/bin/swift" ]; then
   # selects the matching open-source toolchain while leaving the selected Xcode untouched.
   SWIFT_ORG_COMMAND="${HOME}/.swiftly/bin/swift"
 else
-  echo "Activity Inbox WASI verification requires a Swift.org Swift toolchain." >&2
+  echo "Navigator example WASI verification requires a Swift.org Swift toolchain." >&2
   echo "Set THREADING_SWIFT_ORG_SWIFT to its swift executable." >&2
   exit 69
 fi
@@ -42,33 +41,15 @@ if [ ! -x "$XCODEBUILD_COMMAND" ]; then
 fi
 
 TASK_TEMP_PARENT="$(CDPATH= cd -- "${TMPDIR:-/tmp}" && pwd)"
-TASK_TEMP_ROOT="$(mktemp -d "$TASK_TEMP_PARENT/threading-activity-wasi.XXXXXX")"
+TASK_TEMP_ROOT="$(mktemp -d "$TASK_TEMP_PARENT/threading-navigator-wasi.XXXXXX")"
 case "$TASK_TEMP_ROOT" in
-  "$TASK_TEMP_PARENT"/threading-activity-wasi.*) ;;
+  "$TASK_TEMP_PARENT"/threading-navigator-wasi.*) ;;
   *)
     echo "Unexpected temporary directory: $TASK_TEMP_ROOT" >&2
     exit 70
     ;;
 esac
 trap 'rm -rf "$TASK_TEMP_ROOT"' EXIT
-
-"$SWIFT_ORG_COMMAND" build \
-  --package-path "$EXTENSION_PACKAGE" \
-  --scratch-path "$TASK_TEMP_ROOT/activity-build" \
-  --swift-sdk "$WASM_SDK_ID" \
-  --configuration release \
-  --product ActivityInboxExtensionExample
-ACTIVITY_BIN_DIR="$("$SWIFT_ORG_COMMAND" build \
-  --package-path "$EXTENSION_PACKAGE" \
-  --scratch-path "$TASK_TEMP_ROOT/activity-build" \
-  --swift-sdk "$WASM_SDK_ID" \
-  --configuration release \
-  --show-bin-path)"
-MODULE="$ACTIVITY_BIN_DIR/ActivityInboxExtensionExample.wasm"
-if [ ! -f "$MODULE" ]; then
-  echo "Swift WASI build did not produce $MODULE" >&2
-  exit 66
-fi
 
 "$XCODEBUILD_COMMAND" \
   -quiet \
@@ -101,29 +82,55 @@ if ! /usr/bin/codesign -d --verbose=4 "$RUNNER" 2>&1 \
   exit 66
 fi
 
-REGISTER_OUTPUT="$TASK_TEMP_ROOT/register.json"
-SERVE_OUTPUT="$TASK_TEMP_ROOT/serve.json"
-"$RUNNER" --threading-register 4<"$MODULE" >"$REGISTER_OUTPUT"
-"$RUNNER" --threading-serve 4<"$MODULE" </dev/null >"$SERVE_OUTPUT"
+verify_navigator_example() {
+  EXAMPLE_NAME="$1"
+  EXAMPLE_DIRECTORY="$2"
+  EXAMPLE_PRODUCT="$3"
+  EXAMPLE_SLUG="$4"
+  MANIFEST="$EXTENSION_PACKAGE/Examples/$EXAMPLE_DIRECTORY/threading-extension.json"
 
-python3 - "$MANIFEST" "$REGISTER_OUTPUT" "$SERVE_OUTPUT" <<'PY'
+  "$SWIFT_ORG_COMMAND" build \
+    --package-path "$EXTENSION_PACKAGE" \
+    --scratch-path "$TASK_TEMP_ROOT/extension-build" \
+    --swift-sdk "$WASM_SDK_ID" \
+    --configuration release \
+    --product "$EXAMPLE_PRODUCT"
+  EXAMPLE_BIN_DIR="$($SWIFT_ORG_COMMAND build \
+    --package-path "$EXTENSION_PACKAGE" \
+    --scratch-path "$TASK_TEMP_ROOT/extension-build" \
+    --swift-sdk "$WASM_SDK_ID" \
+    --configuration release \
+    --show-bin-path)"
+  MODULE="$EXAMPLE_BIN_DIR/$EXAMPLE_PRODUCT.wasm"
+  if [ ! -f "$MODULE" ]; then
+    echo "Swift WASI build did not produce $MODULE" >&2
+    exit 66
+  fi
+
+  REGISTER_OUTPUT="$TASK_TEMP_ROOT/$EXAMPLE_SLUG-register.json"
+  SERVE_OUTPUT="$TASK_TEMP_ROOT/$EXAMPLE_SLUG-serve.json"
+  "$RUNNER" --threading-register 4<"$MODULE" >"$REGISTER_OUTPUT"
+  "$RUNNER" --threading-serve 4<"$MODULE" </dev/null >"$SERVE_OUTPUT"
+
+  python3 - "$EXAMPLE_NAME" "$MANIFEST" "$REGISTER_OUTPUT" "$SERVE_OUTPUT" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-manifest_path, register_path, serve_path = map(Path, sys.argv[1:])
+example_name = sys.argv[1]
+manifest_path, register_path, serve_path = map(Path, sys.argv[2:])
 manifest = json.loads(manifest_path.read_bytes())
 register_bytes = register_path.read_bytes()
 serve_bytes = serve_path.read_bytes()
 
 if manifest.get("runtime") != "webAssembly":
-    raise SystemExit("Activity Inbox manifest must declare the WebAssembly runtime")
+    raise SystemExit(f"{example_name} manifest must declare the WebAssembly runtime")
 if manifest.get("capabilities") != ["ui.workspace-navigation"]:
-    raise SystemExit("Activity Inbox manifest declares authority outside workspace navigation")
+    raise SystemExit(f"{example_name} manifest declares authority outside workspace navigation")
 if register_bytes != serve_bytes:
-    raise SystemExit("register and serve emitted different startup registrations")
+    raise SystemExit(f"{example_name} register and serve emitted different startup registrations")
 if not register_bytes.endswith(b"\n") or b"\n" in register_bytes[:-1]:
-    raise SystemExit("runner registration must be exactly one newline-terminated JSON value")
+    raise SystemExit(f"{example_name} registration must be one newline-terminated JSON value")
 
 registration = json.loads(register_bytes)
 canonical_registration = (
@@ -131,7 +138,7 @@ canonical_registration = (
     + b"\n"
 )
 if register_bytes != canonical_registration:
-    raise SystemExit("runner registration is not the compact sorted-key protocol encoding")
+    raise SystemExit(f"{example_name} registration is not compact sorted-key JSON")
 
 expected_empty = {
     "commands": [],
@@ -142,9 +149,9 @@ expected_empty = {
     "services": [],
 }
 if {key: registration.get(key) for key in expected_empty} != expected_empty:
-    raise SystemExit("Activity Inbox registered authority outside workspace navigation")
+    raise SystemExit(f"{example_name} registered authority outside workspace navigation")
 if set(registration) != {*expected_empty, "workspaceNavigators"}:
-    raise SystemExit("Activity Inbox emitted an unexpected registration field")
+    raise SystemExit(f"{example_name} emitted an unexpected registration field")
 
 manifest_navigators = json.dumps(
     manifest.get("workspaceNavigators"),
@@ -159,7 +166,23 @@ registered_navigators = json.dumps(
     sort_keys=True,
 ).encode()
 if registered_navigators != manifest_navigators:
-    raise SystemExit("WASI registration does not byte-semantically match the shipped manifest")
+    raise SystemExit(
+        f"{example_name} WASI registration does not match the shipped manifest"
+    )
 PY
 
-echo "Activity Inbox passed the official WASI and shipping-runner boundary ($WASM_SDK_ID)."
+  echo "$EXAMPLE_NAME passed the official WASI and shipping-runner boundary."
+}
+
+verify_navigator_example \
+  "Activity Inbox" \
+  "ActivityInboxExtension" \
+  "ActivityInboxExtensionExample" \
+  "activity-inbox"
+verify_navigator_example \
+  "T3 Sidebar" \
+  "T3SidebarExtension" \
+  "T3SidebarExtensionExample" \
+  "t3-sidebar"
+
+echo "Navigator examples passed the official WASI boundary ($WASM_SDK_ID)."

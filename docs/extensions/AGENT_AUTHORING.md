@@ -492,7 +492,9 @@ extension receives no gesture, session identity, mutation result, or Undo callba
 missing, and already archived sessions are refused; pin persistence and archive receipts use the
 same native product paths as Threading's own sidebar. See
 [`WORKSPACE_NAVIGATORS.md`](WORKSPACE_NAVIGATORS.md#host-owned-row-intents) for the full ownership
-and staleness contract.
+and staleness contract. Use
+[`T3SidebarExtension`](../../Packages/ThreadingExtensionKit/Examples/T3SidebarExtension) as the
+complete static-pipeline example.
 
 For a context-dependent panel, set `loadActionID`. Treat `root` as the immediate loading and
 fallback state. Threading sends that action once when the tab connects to each extension process

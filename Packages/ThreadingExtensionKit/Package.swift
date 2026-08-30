@@ -50,6 +50,10 @@ let package = Package(
             targets: ["ActivityInboxExtensionExample"]
         ),
         .executable(
+            name: "T3SidebarExtensionExample",
+            targets: ["T3SidebarExtensionExample"]
+        ),
+        .executable(
             name: "SimulatorRelayExtensionExample",
             targets: ["SimulatorRelayExtensionExample"]
         ),
@@ -172,6 +176,24 @@ let package = Package(
             exclude: ["Support", "threading-extension.json"],
             plugins: ["ThreadingExtensionPolicyPlugin"]
         ),
+        // The acceptance example for host-owned navigator row intents. The static pipeline
+        // builds a familiar flat session sidebar while Threading owns pin, unpin and archive.
+        .target(
+            name: "T3SidebarExtensionSupport",
+            dependencies: ["ThreadingExtensionKit"],
+            path: "Examples/T3SidebarExtension/Support",
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
+        .executableTarget(
+            name: "T3SidebarExtensionExample",
+            dependencies: [
+                "ThreadingExtensionKit",
+                "T3SidebarExtensionSupport"
+            ],
+            path: "Examples/T3SidebarExtension",
+            exclude: ["Support", "threading-extension.json"],
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
         .executableTarget(
             name: "SimulatorRelayExtensionExample",
             dependencies: ["ThreadingExtensionKit"],
@@ -200,7 +222,8 @@ let package = Package(
                 "ThreadingExtensionKit",
                 "ThreadingExtensionPolicy",
                 "GitLabStateExtensionSupport",
-                "ActivityInboxExtensionSupport"
+                "ActivityInboxExtensionSupport",
+                "T3SidebarExtensionSupport"
             ]
         )
     ]

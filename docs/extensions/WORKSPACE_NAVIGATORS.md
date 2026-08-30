@@ -223,6 +223,12 @@ host facts, shows working state from the detailed activity fact, and lets the ho
 sorting, the clock, row realization and source-session activation. There is no session snapshot
 read and no extension callback on a fact or calendar edge.
 
+[`T3SidebarExtension`](../../Packages/ThreadingExtensionKit/Examples/T3SidebarExtension) is the
+matching host-intent example. Its static pipeline presents a flat session list with project
+subtitles, a Pinned section, host search, and a persisted sort option. It declares `pin`, `unpin`,
+and `archive`, conditionally shows the applicable controls, and omits them for scheduled-start
+rows which Threading would refuse. The extension still receives no session snapshot or callback.
+
 `session.activity.detailed@1` currently publishes six named raw values through
 `ExtensionSessionDetailedActivity`: `dormant`, `idle`, `working`, `awaiting-user`,
 `needs-attention`, and `limit-reached`. Use those constants instead of reproducing private host

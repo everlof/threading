@@ -1,0 +1,428 @@
+{
+  "formatVersion": 1,
+  "identifier": "codes.threading.t3-sidebar",
+  "name": "T3 Sidebar",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/t3-sidebar.wasm",
+  "capabilities": [
+    "ui.workspace-navigation"
+  ],
+  "workspaceNavigators": [
+    {
+      "id": "t3-sidebar",
+      "intents": [
+        "pin",
+        "unpin",
+        "archive"
+      ],
+      "options": [
+        {
+          "control": {
+            "defaultValue": "recent",
+            "options": [
+              {
+                "id": "recent",
+                "title": "Recent activity"
+              },
+              {
+                "id": "name",
+                "title": "Name"
+              }
+            ],
+            "type": "choice"
+          },
+          "id": "sort-order",
+          "title": "Sort"
+        }
+      ],
+      "pipeline": {
+        "buckets": [
+          {
+            "strategy": {
+              "rules": [
+                {
+                  "id": "pinned",
+                  "predicate": {
+                    "operand": {
+                      "fact": {
+                        "key": {
+                          "id": "session.is-pinned",
+                          "version": 1
+                        },
+                        "scope": "item"
+                      },
+                      "fallback": {
+                        "type": "boolean",
+                        "value": false
+                      }
+                    },
+                    "operation": "equal",
+                    "type": "comparison",
+                    "value": {
+                      "type": "boolean",
+                      "value": true
+                    }
+                  },
+                  "title": "Pinned"
+                }
+              ],
+              "type": "rules",
+              "unmatched": {
+                "id": "sessions",
+                "title": "Sessions",
+                "type": "bucket"
+              }
+            },
+            "when": []
+          }
+        ],
+        "consumes": [
+          {
+            "key": {
+              "id": "session.title",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.project-id",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "project.name",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.is-pinned",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.is-archived",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.last-used-at",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.has-scheduled-start",
+              "version": 1
+            },
+            "requirement": "required"
+          }
+        ],
+        "filters": [
+          {
+            "predicate": {
+              "operand": {
+                "fact": {
+                  "key": {
+                    "id": "session.is-archived",
+                    "version": 1
+                  },
+                  "scope": "item"
+                },
+                "fallback": {
+                  "type": "boolean",
+                  "value": false
+                }
+              },
+              "operation": "equal",
+              "type": "comparison",
+              "value": {
+                "type": "boolean",
+                "value": false
+              }
+            },
+            "when": []
+          }
+        ],
+        "formatVersion": 1,
+        "output": {
+          "activation": "sourceSession",
+          "collectionID": "t3-sessions",
+          "emptyState": {
+            "detail": "Try changing the search or sort option.",
+            "title": "No sessions"
+          },
+          "itemLimit": 1000,
+          "layout": {
+            "type": "list"
+          },
+          "overflow": "truncateWithNotice",
+          "rowTemplate": {
+            "axis": "horizontal",
+            "children": [
+              {
+                "axis": "vertical",
+                "children": [
+                  {
+                    "binding": {
+                      "facet": "value",
+                      "fact": {
+                        "key": {
+                          "id": "session.title",
+                          "version": 1
+                        },
+                        "scope": "item"
+                      },
+                      "fallback": "Untitled session",
+                      "type": "fact"
+                    },
+                    "role": "compactBody",
+                    "type": "text"
+                  },
+                  {
+                    "binding": {
+                      "facet": "value",
+                      "fact": {
+                        "key": {
+                          "id": "project.name",
+                          "version": 1
+                        },
+                        "scope": "project"
+                      },
+                      "fallback": "No project",
+                      "type": "fact"
+                    },
+                    "role": "compactDetail",
+                    "type": "text"
+                  }
+                ],
+                "spacing": "tight",
+                "type": "stack"
+              },
+              {
+                "type": "flexibleSpacer"
+              },
+              {
+                "content": {
+                  "intent": "pin",
+                  "type": "intent"
+                },
+                "predicate": {
+                  "predicates": [
+                    {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.is-pinned",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        },
+                        "fallback": {
+                          "type": "boolean",
+                          "value": false
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "boolean",
+                        "value": false
+                      }
+                    },
+                    {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.has-scheduled-start",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        },
+                        "fallback": {
+                          "type": "boolean",
+                          "value": false
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "boolean",
+                        "value": false
+                      }
+                    }
+                  ],
+                  "type": "all"
+                },
+                "type": "conditional"
+              },
+              {
+                "content": {
+                  "intent": "unpin",
+                  "type": "intent"
+                },
+                "predicate": {
+                  "predicates": [
+                    {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.is-pinned",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        },
+                        "fallback": {
+                          "type": "boolean",
+                          "value": false
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "boolean",
+                        "value": true
+                      }
+                    },
+                    {
+                      "operand": {
+                        "fact": {
+                          "key": {
+                            "id": "session.has-scheduled-start",
+                            "version": 1
+                          },
+                          "scope": "item"
+                        },
+                        "fallback": {
+                          "type": "boolean",
+                          "value": false
+                        }
+                      },
+                      "operation": "equal",
+                      "type": "comparison",
+                      "value": {
+                        "type": "boolean",
+                        "value": false
+                      }
+                    }
+                  ],
+                  "type": "all"
+                },
+                "type": "conditional"
+              },
+              {
+                "content": {
+                  "intent": "archive",
+                  "type": "intent"
+                },
+                "predicate": {
+                  "operand": {
+                    "fact": {
+                      "key": {
+                        "id": "session.has-scheduled-start",
+                        "version": 1
+                      },
+                      "scope": "item"
+                    },
+                    "fallback": {
+                      "type": "boolean",
+                      "value": false
+                    }
+                  },
+                  "operation": "equal",
+                  "type": "comparison",
+                  "value": {
+                    "type": "boolean",
+                    "value": false
+                  }
+                },
+                "type": "conditional"
+              }
+            ],
+            "spacing": "small",
+            "type": "stack"
+          },
+          "selectionMode": "single"
+        },
+        "search": {
+          "accessibilityLabel": "Search T3 Sidebar sessions",
+          "fields": [
+            {
+              "key": {
+                "id": "session.title",
+                "version": 1
+              },
+              "scope": "item"
+            },
+            {
+              "key": {
+                "id": "project.name",
+                "version": 1
+              },
+              "scope": "project"
+            }
+          ],
+          "placeholder": "Search sessions"
+        },
+        "sort": [
+          {
+            "direction": "descending",
+            "operand": {
+              "fact": {
+                "key": {
+                  "id": "session.last-used-at",
+                  "version": 1
+                },
+                "scope": "item"
+              }
+            },
+            "when": [
+              {
+                "equals": "recent",
+                "optionID": "sort-order"
+              }
+            ]
+          },
+          {
+            "direction": "ascending",
+            "operand": {
+              "fact": {
+                "key": {
+                  "id": "session.title",
+                  "version": 1
+                },
+                "scope": "item"
+              }
+            },
+            "when": [
+              {
+                "equals": "name",
+                "optionID": "sort-order"
+              }
+            ]
+          }
+        ],
+        "source": "sessions"
+      },
+      "root": {
+        "content": {
+          "role": "neutral",
+          "text": "T3 Sidebar requires a newer Threading host.",
+          "type": "status"
+        },
+        "type": "content"
+      },
+      "title": "T3 Sidebar"
+    }
+  ]
+}
