@@ -119,6 +119,19 @@ enum MobileSessionChrome {
         canManageSessions && hasClient
     }
 
+    /// The toolbar dot is only useful if the menu it opens carries the same state to the action
+    /// that resolves it. Name Browser activity on Workspace itself instead of leaving a person to
+    /// guess which of the menu's unrelated actions the dot referred to.
+    static func workspaceMenuTitle(hasUnseenBrowser: Bool) -> String {
+        MobileL10n.string(
+            hasUnseenBrowser ? "Workspace · New browser activity" : "Workspace"
+        )
+    }
+
+    static func workspaceMenuSystemImage(hasUnseenBrowser: Bool) -> String {
+        hasUnseenBrowser ? "square.grid.2x2.fill" : "square.grid.2x2"
+    }
+
     /// A palette belongs to a terminal. A native conversation is drawn in the app theme, so the
     /// entry is absent there rather than present and inert.
     static func canChooseTerminalTheme(
@@ -455,9 +468,10 @@ struct SessionDetailView: View {
             Divider()
         }
         if canOpenWorkspace {
-            Button(action: openWorkspace) {
-                Label("Workspace", systemImage: "square.grid.2x2")
-            }
+            SessionWorkspaceMenuButton(
+                hasUnseenBrowser: workspaceActivity.hasUnseenBrowser,
+                action: openWorkspace
+            )
             Divider()
         }
         if model.canManageSessions {
@@ -888,11 +902,32 @@ struct SessionDetailView: View {
     }
 }
 
+/// The one Workspace action used by the session menu and its deterministic evidence fixture.
+/// Keeping the activity wording here prevents the outer badge and the menu destination from
+/// becoming two independently maintained readings of the same state.
+struct SessionWorkspaceMenuButton: View {
+    let hasUnseenBrowser: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(
+                MobileSessionChrome.workspaceMenuTitle(
+                    hasUnseenBrowser: hasUnseenBrowser
+                ),
+                systemImage: MobileSessionChrome.workspaceMenuSystemImage(
+                    hasUnseenBrowser: hasUnseenBrowser
+                )
+            )
+        }
+    }
+}
+
 /// The session's one trailing toolbar control.
 ///
 /// It carries the workspace's unseen-browser dot, because Workspace now lives inside the menu
 /// this opens: a milestone the phone was not watching still has to be visible from the outside.
-private struct SessionActionsToolbarIcon: View {
+struct SessionActionsToolbarIcon: View {
     @ObservedObject var activity: MobileWorkspaceActivity
     let identity: MobileAgentIdentity
     let reading: MobileAccountUsageReading?
@@ -914,12 +949,13 @@ private struct SessionActionsToolbarIcon: View {
                         )
                         .overlay {
                             Circle()
-                                .stroke(theme.surface, lineWidth: MobileDesign.Size.badgeStroke)
+                                // The toolbar clips its label to the disc's 34-point bounds. Keep
+                                // both the fill and its separating ring inside that boundary.
+                                .strokeBorder(
+                                    theme.surface,
+                                    lineWidth: MobileDesign.Size.badgeStroke
+                                )
                         }
-                        .offset(
-                            x: MobileDesign.Offset.workspaceActivityDot,
-                            y: -MobileDesign.Offset.workspaceActivityDot
-                        )
                         .transition(.scale.combined(with: .opacity))
                 }
             }

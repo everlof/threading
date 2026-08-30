@@ -484,7 +484,10 @@ tab, the phone never changes screens: the account disc takes one quiet breath (a
 since a brand mark is not a symbol and takes no symbol effect) and an unread
 dot. Opening **Browser** follows the
 Mac-owned tab through bounded, read-only snapshots; clicks, scrolling, and form entry continue to
-run only on the Mac and merely refresh an already visible follow view. Routine browser mutations
+run only on the Mac and merely refresh an already visible follow view. The pixels are the Mac's
+own, so a page the phone could never reach, such as a dev server on the Mac's localhost or a host
+inside a VPN only the Mac is on, previews like any other; the phone never resolves the page's
+URL. Routine browser mutations
 do not repeatedly animate the badge. Private tabs remain generic in the list and never send
 pixels to the phone. Browser state, checkout reads, and attachment previews are owner-only.
 Attachment metadata is fetched first and the selected image or PDF body is fetched on demand.

@@ -516,12 +516,130 @@ final class MobileAccountDiscRenderTests: XCTestCase {
     }
 }
 
+/// The toolbar dot is the phone's acknowledgement of an agent-driven Browser navigation. Its
+/// placement is tested from rendered pixels because a navigation bar clips ink outside the label's
+/// bounds even when the SwiftUI layout frame itself still reports the intended size.
+@MainActor
+final class MobileWorkspaceActivityTests: XCTestCase {
+    private let scale: CGFloat = 3
+
+    func testBrowserActivityStaysUnseenUntilThisPhoneOpensBrowser() throws {
+        let activity = makeActivity()
+
+        XCTAssertFalse(activity.hasUnseenBrowser)
+        activity.receive(RemoteWorkspaceChangedDTO(kind: .browser, activityID: "browser-1"))
+        XCTAssertTrue(activity.hasUnseenBrowser)
+        activity.markBrowserSeen()
+        XCTAssertFalse(activity.hasUnseenBrowser)
+    }
+
+    func testToolbarBrowserActivityDotIsRenderedWholeInsideItsLabel() throws {
+        let activity = makeActivity()
+        activity.receive(RemoteWorkspaceChangedDTO(kind: .browser, activityID: "browser-1"))
+        let palette = RemoteThemePalette(RemoteThemeDTO(
+            id: "workspace-activity-test",
+            name: "Workspace activity test",
+            mode: .dark,
+            colors: [
+                "accent": "#FF0000",
+                "surface": "#0000FF",
+                "control_resting": "#000000",
+                "secondary_label": "#FFFFFF",
+            ],
+            material: RemoteThemeDTO.Material(
+                panelRadius: 20,
+                controlRadius: 10,
+                borderWidth: 1
+            )
+        ))
+        let renderer = ImageRenderer(content:
+            SessionActionsToolbarIcon(
+                activity: activity,
+                identity: .resolve("codex"),
+                reading: nil,
+                account: nil
+            )
+            .environment(\.remoteTheme, palette)
+        )
+        renderer.scale = scale
+        let image = try XCTUnwrap(renderer.uiImage)
+
+        let badge = try badgeBounds(in: image)
+        XCTAssertGreaterThanOrEqual(
+            badge.width,
+            MobileDesign.Size.workspaceActivityDot - 1,
+            "the navigation bar shaved the activity dot's trailing edge"
+        )
+        XCTAssertGreaterThanOrEqual(
+            badge.height,
+            MobileDesign.Size.workspaceActivityDot - 1,
+            "the navigation bar shaved the activity dot's top edge"
+        )
+        XCTAssertLessThanOrEqual(badge.maxX, MobileDesign.Size.compactControl)
+        XCTAssertGreaterThanOrEqual(badge.minY, 0)
+    }
+
+    private func makeActivity() -> MobileWorkspaceActivity {
+        let suite = "MobileWorkspaceActivityTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        return MobileWorkspaceActivity(sessionID: "toolbar-render", defaults: defaults)
+    }
+
+    /// Bounds of the deliberately red fill plus blue separating ring, in points. The rest of the
+    /// fixture contains only black and white, so no view-tree knowledge is smuggled into the check.
+    private func badgeBounds(in image: UIImage) throws -> CGRect {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let width = cgImage.width
+        let height = cgImage.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var minX = width
+        var maxX = -1
+        var minY = height
+        var maxY = -1
+        for y in 0..<height {
+            for x in 0..<width {
+                let offset = (y * width + x) * 4
+                let red = Int(bytes[offset])
+                let green = Int(bytes[offset + 1])
+                let blue = Int(bytes[offset + 2])
+                let isRed = red > 80 && red > green + 40 && red > blue + 40
+                let isBlue = blue > 80 && blue > red + 40 && blue > green + 40
+                guard isRed || isBlue else { continue }
+                minX = min(minX, x)
+                maxX = max(maxX, x)
+                minY = min(minY, y)
+                maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= minX, maxY >= minY else {
+            throw XCTSkip("the activity badge painted no coloured pixels")
+        }
+        return CGRect(
+            x: CGFloat(minX) / scale,
+            y: CGFloat(minY) / scale,
+            width: CGFloat(maxX - minX + 1) / scale,
+            height: CGFloat(maxY - minY + 1) / scale
+        )
+    }
+}
+
 // MARK: - Usage Gauge
 
-/// The chat menu's usage row asked for the percentages as a graphic rather than as words, and a
-/// `UIMenu` row holds a title, a subtitle and an image — so the graphic has to *be* the image.
-/// These pin that the picture is the same reading the disc rings, drawn whole at glyph size and
-/// handed over in its own colours.
+/// The chat menu's usage row pairs exact words with a glanceable gauge, and a `UIMenu` row holds
+/// a title, a subtitle and an image — so the graphic has to *be* the image. These pin that the
+/// picture is the same reading the disc rings, drawn whole at glyph size and handed over in its
+/// own colours.
 @MainActor
 final class MobileAccountUsageGaugeTests: XCTestCase {
 

@@ -282,6 +282,29 @@ final class MobileSessionChromeTests: XCTestCase {
         ))
     }
 
+    /// The toolbar dot opens a menu with several unrelated actions. Its state has to survive that
+    /// hop and name Workspace as the destination, rather than asking someone to guess which row
+    /// will resolve it.
+    func testUnseenBrowserActivityNamesWorkspaceAsItsDestination() {
+        XCTAssertEqual(
+            MobileSessionChrome.workspaceMenuTitle(hasUnseenBrowser: false),
+            MobileL10n.string("Workspace")
+        )
+        XCTAssertEqual(
+            MobileSessionChrome.workspaceMenuSystemImage(hasUnseenBrowser: false),
+            "square.grid.2x2"
+        )
+
+        XCTAssertEqual(
+            MobileSessionChrome.workspaceMenuTitle(hasUnseenBrowser: true),
+            MobileL10n.string("Workspace · New browser activity")
+        )
+        XCTAssertEqual(
+            MobileSessionChrome.workspaceMenuSystemImage(hasUnseenBrowser: true),
+            "square.grid.2x2.fill"
+        )
+    }
+
     func testPaletteBelongsToATerminalRatherThanANativeConversation() {
         XCTAssertTrue(MobileSessionChrome.canChooseTerminalTheme(
             canManageThemes: true,
