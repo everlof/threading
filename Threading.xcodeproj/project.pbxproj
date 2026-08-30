@@ -361,6 +361,7 @@
 				ThreadingMobile/MobileTerminalKeyboardStore.swift,
 				ThreadingMobile/MobileTerminalWireFixture.swift,
 				ThreadingMobile/MobileTerminalWirePerformanceProbe.swift,
+				ThreadingMobile/MobileThemeCacheStore.swift,
 				ThreadingMobile/MobileThemeEnvironment.swift,
 				ThreadingMobile/MobileWorkingOrbView.swift,
 				ThreadingMobile/MobileWorkspaceActivity.swift,
