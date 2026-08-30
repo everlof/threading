@@ -12,6 +12,8 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     private let factSnapshotProvider: WorkspaceNavigatorHostViewController.FactSnapshotProvider
     private let factSnapshotPatchProvider:
         WorkspaceNavigatorHostViewController.FactSnapshotPatchProvider
+    private let registeredFactChoicesProvider:
+        WorkspaceNavigatorHostViewController.RegisteredFactChoicesProvider
     private let intentHandler: WorkspaceNavigatorHostViewController.IntentHandler
     private let onSelectNative: () -> Void
     private var visibleController: NSViewController?
@@ -36,6 +38,10 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
             @escaping WorkspaceNavigatorHostViewController.FactSnapshotPatchProvider = {
                 _, _, _ in nil
             },
+        registeredFactChoicesProvider:
+            @escaping WorkspaceNavigatorHostViewController.RegisteredFactChoicesProvider = {
+                _, selected in selected.map { [.unavailable($0)] } ?? []
+            },
         intentHandler: @escaping WorkspaceNavigatorHostViewController.IntentHandler = {
             _, _ in .targetUnavailable
         },
@@ -47,6 +53,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         self.destinationHandler = destinationHandler
         self.factSnapshotProvider = factSnapshotProvider
         self.factSnapshotPatchProvider = factSnapshotPatchProvider
+        self.registeredFactChoicesProvider = registeredFactChoicesProvider
         self.intentHandler = intentHandler
         self.onSelectNative = onSelectNative
         super.init(nibName: nil, bundle: nil)
@@ -118,6 +125,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
                 destinationHandler: destinationHandler,
                 factSnapshotProvider: factSnapshotProvider,
                 factSnapshotPatchProvider: factSnapshotPatchProvider,
+                registeredFactChoicesProvider: registeredFactChoicesProvider,
                 intentHandler: intentHandler,
                 onSelectNative: onSelectNative,
                 onUnavailable: { [weak self] in
@@ -135,6 +143,9 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         // loads it and queues the initial load action; otherwise catch-up can run first and an
         // older load response can overwrite the fresh event content with no edge left to retry.
         controller.setLiveEventDeliveryEnabled(false)
+        if !createdController {
+            controller.updateOptionValues(from: inventory)
+        }
         let catchUpSessionIDs = settingsPendingSessionIDs
         settingsPendingSessionIDs.removeAll(keepingCapacity: true)
         catchUpSessionIDs.forEach(controller.sessionDidChange)

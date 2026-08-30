@@ -392,6 +392,38 @@ cell 600 times, and asserts that the heap stays below twice the active count whi
 armed only once. A separately injected scheduler test advances the clock and fires that timer,
 proving stale removal and notification without an intervening registry read.
 
+### Registered navigator fact-catalogue scaling contract, 2026-08-30
+
+An ordinary installation exposes tens or hundreds of live fact definitions. The deterministic
+stress boundary is 5,000 winning definitions across 40 providers, below the aggregate security
+ceiling while large enough to catch catalogue work accidentally moving onto each menu open or
+snapshot refresh. A registered-fact submenu may render only the host-owned None row plus 128 fact
+rows, regardless of the registry's total size.
+
+`ExtensionFactRegistry` rebuilds one canonical winning-definition index only when a generation
+changes its definition set or the locale changes. Those lifecycle events may inspect the live
+definition set; fact publication, freshness expiry, menu opening and navigator snapshot refresh do
+not rebuild it. Each usage caches only its sorted 128-definition prefix. Reading a menu is O(128),
+including the selected-key replacement rule, and snapshotting is O(consumed keys) for definition
+and provider metadata rather than O(all definitions). The navigator host unions the selected keys
+with its declared consumption set, so exact notifications for unrelated catalogue entries do no
+work and a selected structural key schedules one bounded refresh.
+
+`ExtensionFactRegistryTests.testStressRegisteredFactCatalogWhenEnabled` registers the 5,000
+definitions within the per-provider 128-definition boundary, selects a key outside the cached
+prefix, and reports registration, catalogue-read and one-key snapshot timings. The test plan
+sanitizes custom environment variables, so build the test bundle and run this gated case through
+`xcrun xctest` with `THREADING_NAVIGATOR_FACT_CATALOG_STRESS=1`, following the direct-bundle pattern
+documented for the other opt-in macOS fixtures below. Ordinary test runs still pin the 128-row cap,
+winner precedence, unavailable-selection sentinel and selected-key inclusion without paying for
+the stress fixture.
+
+Measured on 2026-08-30 in the Debug M-series fixture: registering all 5,000 definitions across 40
+lifecycle commits took **1,487.816 ms**; the selected-outside-prefix catalogue read took
+**0.154 ms**, and the one-key snapshot took **0.152 ms**. The emitted record was
+`THREADING_PERF navigator-registered-facts definitions=5000 choices=128
+registration_ms=1487.816 catalog_ms=0.154 snapshot_ms=0.152`.
+
 ### Mobile terminal viewport-lease scaling contract, 2026-08-20
 
 A phone-owned terminal grid is recomputed on every crossed cell boundary — pinch steps, the

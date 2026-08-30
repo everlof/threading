@@ -157,9 +157,9 @@ value.
 
 ### Registered-fact controls
 
-> Contract status, 2026-08-30: the SDK, validation, localization and wire schema below are pinned.
-> Host catalogue, menu, persistence, invalidation and evaluator wiring are still in progress, so
-> declaring these controls does not yet make them appear in the shipping navigator.
+> Contract status, 2026-08-30: the SDK, validation, localization, wire schema and shipping host
+> path below are pinned. Declared controls appear in the navigator menu and are evaluated entirely
+> by Threading without invoking the extension.
 
 A pipeline may also declare at most one dynamic **Group by** control and one dynamic **Sort by**
 control with `registeredFactOptions`. These are host-owned pickers over the live fact registry,

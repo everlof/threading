@@ -41,6 +41,18 @@ struct ExtensionResolvedFact: Equatable, Sendable {
     var freshnessDate: Date { min(fact.observedAt, receivedAt) }
 }
 
+enum WorkspaceNavigatorRegisteredFactChoice: Equatable, Sendable {
+    case available(ExtensionFactDefinition)
+    case unavailable(ExtensionFactKey)
+
+    var key: ExtensionFactKey {
+        switch self {
+        case .available(let definition): definition.key
+        case .unavailable(let key): key
+        }
+    }
+}
+
 enum ExtensionFactRegistryError: Error, Equatable, LocalizedError {
     case invalidDefinition(index: Int, reason: String)
     case invalidFact(index: Int, reason: String)
@@ -119,6 +131,10 @@ final class ExtensionFactRegistry {
     /// cannot lengthen this host-owned window; the current GitLab reference refreshes every five
     /// minutes, so three missed full-refresh opportunities make its last value unknown.
     static let maximumProviderFactAge: TimeInterval = 15 * 60
+    /// An ordinary install exposes tens or hundreds of definitions. The deterministic stress
+    /// boundary is 5,000 live winning definitions, while every rendered picker remains capped at
+    /// 128 value rows. Registry mutations are occasional; menu opening reads this cached model.
+    static let registeredFactCatalogStressDefinitionCount = 5_000
     /// Facts which can change the subject joins used by any pipeline even when the extension did
     /// not reference the key as a presentation value. Exposed within the host so notification
     /// filtering follows the exact same inclusion boundary as snapshot construction.
@@ -196,9 +212,18 @@ final class ExtensionFactRegistry {
         }
     }
 
+    private struct RegisteredFactCatalogCache {
+        var winningDefinitions: [ExtensionFactKey: ExtensionFactDefinition] = [:]
+        var providersByKey: [
+            ExtensionFactKey: Set<ExtensionFactResolutionSource>
+        ] = [:]
+        var prefixesByUsage: [ExtensionFactUsage: [ExtensionFactDefinition]] = [:]
+    }
+
     private var hostDefinitions: [ExtensionFactKey: ExtensionFactDefinition] = [:]
     private var hostFacts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]] = [:]
     private var publications: [SourceGeneration: Publication] = [:]
+    private var registeredFactCatalogCache = RegisteredFactCatalogCache()
     private var resolved: [ExtensionFactSubject: [ExtensionFactKey: ResolvedCell]] = [:]
     /// Only the winning provider cell for each resolved key needs a deadline. When it expires,
     /// recomputing that subject either selects the next fresh provider or removes the value.
@@ -217,6 +242,7 @@ final class ExtensionFactRegistry {
     private let notificationCenter: NotificationCenter
     private let now: () -> Date
     private let stalenessTimerScheduler: StalenessTimerScheduler
+    private var localeObserver: NSObjectProtocol?
 
     init(
         notificationCenter: NotificationCenter = .default,
@@ -233,11 +259,70 @@ final class ExtensionFactRegistry {
         self.notificationCenter = notificationCenter
         self.now = now
         self.stalenessTimerScheduler = stalenessTimerScheduler
+        localeObserver = notificationCenter.addObserver(
+            forName: NSLocale.currentLocaleDidChangeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.rebuildRegisteredFactCatalog()
+            }
+        }
+    }
+
+    deinit {
+        if let localeObserver {
+            notificationCenter.removeObserver(localeObserver)
+        }
     }
 
     func definition(for key: ExtensionFactKey) -> ExtensionFactDefinition? {
-        if let definition = hostDefinitions[key] { return definition }
-        return orderedPublications().compactMap { $0.definitions[key] }.first
+        registeredFactCatalogCache.winningDefinitions[key]
+    }
+
+    nonisolated static func isRegisteredFactDefinitionEligible(
+        _ definition: ExtensionFactDefinition,
+        for usage: ExtensionFactUsage
+    ) -> Bool {
+        let resolvableKinds: Set<ExtensionFactSubjectKind> = [
+            .session, .repositoryBranch, .repository,
+        ]
+        return definition.usages.contains(usage)
+            && !definition.subjectKinds.isDisjoint(with: resolvableKinds)
+    }
+
+    /// Returns `None`'s bounded fact-row model. A selected key is retained even when its winning
+    /// definition disappears or becomes ineligible, so the menu can always show and clear it.
+    func registeredFactChoices(
+        for usage: ExtensionFactUsage,
+        selectedKey: ExtensionFactKey?
+    ) -> [WorkspaceNavigatorRegisteredFactChoice] {
+        let maximum = ExtensionWorkspaceNavigatorPipeline.maximumRegisteredFactChoicesPerOption
+        let definitions = registeredFactCatalogCache.prefixesByUsage[usage] ?? []
+
+        guard let selectedKey else {
+            return definitions.map(WorkspaceNavigatorRegisteredFactChoice.available)
+        }
+        guard let selectedRawDefinition = registeredFactCatalogCache
+            .winningDefinitions[selectedKey],
+              Self.isRegisteredFactDefinitionEligible(selectedRawDefinition, for: usage) else {
+            return definitions.prefix(maximum - 1).map(
+                WorkspaceNavigatorRegisteredFactChoice.available
+            ) + [.unavailable(selectedKey)]
+        }
+        let selectedDefinition = registeredFactCatalogDefinition(selectedRawDefinition)
+
+        guard !definitions.contains(where: { $0.key == selectedKey }) else {
+            return definitions.map(WorkspaceNavigatorRegisteredFactChoice.available)
+        }
+        var admitted = definitions
+        if admitted.count == maximum {
+            admitted[maximum - 1] = selectedDefinition
+        } else {
+            admitted.append(selectedDefinition)
+        }
+        admitted.sort(by: registeredFactDefinitionLessThan)
+        return admitted.map(WorkspaceNavigatorRegisteredFactChoice.available)
     }
 
     func exactFact(
@@ -272,20 +357,12 @@ final class ExtensionFactRegistry {
     func snapshot(consuming consumedKeys: Set<ExtensionFactKey>) -> ExtensionFactSnapshot {
         settleStalenessIfNeeded(at: now())
         let includedKeys = consumedKeys.union(Self.snapshotStructuralKeys)
-        var definitions = hostDefinitions.filter { includedKeys.contains($0.key) }
-        var providers = Dictionary(uniqueKeysWithValues: definitions.keys.map {
-            ($0, Set([ExtensionFactResolutionSource.host]))
+        let definitions = Dictionary(uniqueKeysWithValues: includedKeys.compactMap { key in
+            registeredFactCatalogCache.winningDefinitions[key].map { (key, $0) }
         })
-        for publication in orderedPublications() {
-            let source = ExtensionFactResolutionSource.extension(
-                identifier: publication.source.extensionIdentifier,
-                processGeneration: publication.source.processGeneration
-            )
-            for (key, definition) in publication.definitions where includedKeys.contains(key) {
-                if definitions[key] == nil { definitions[key] = definition }
-                providers[key, default: []].insert(source)
-            }
-        }
+        let providers = Dictionary(uniqueKeysWithValues: includedKeys.compactMap { key in
+            registeredFactCatalogCache.providersByKey[key].map { (key, $0) }
+        })
         let hostSessions = Set(hostFacts.keys.compactMap { subject -> ExtensionFactSubject? in
             guard case .session = subject else { return nil }
             return subject
@@ -373,6 +450,7 @@ final class ExtensionFactRegistry {
             try? recomputeAllResolvedWithoutPosting(at: referenceDate)
             throw error
         }
+        rebuildRegisteredFactCatalog()
         scheduleStalenessTimer(at: referenceDate)
         post(.all)
     }
@@ -454,6 +532,7 @@ final class ExtensionFactRegistry {
         )
         guard oldPublication.definitions != candidateDefinitions else { return }
         publications = candidatePublications
+        rebuildRegisteredFactCatalog()
         recompute(subjects: subjects, at: referenceDate)
         scheduleStalenessTimer(at: referenceDate)
         post(.all)
@@ -517,6 +596,7 @@ final class ExtensionFactRegistry {
             processGeneration: processGeneration
         )
         guard let removed = publications.removeValue(forKey: key) else { return }
+        if !removed.definitions.isEmpty { rebuildRegisteredFactCatalog() }
         let subjects = Set(removed.facts.keys)
         let before = resolvedCells(for: subjects)
         recompute(subjects: subjects, at: referenceDate)
@@ -663,6 +743,95 @@ final class ExtensionFactRegistry {
             }
             return lhs.source.processGeneration < rhs.source.processGeneration
         }
+    }
+
+    private func rebuildRegisteredFactCatalog() {
+        var winning = hostDefinitions
+        var providers = Dictionary(uniqueKeysWithValues: hostDefinitions.keys.map {
+            ($0, Set([ExtensionFactResolutionSource.host]))
+        })
+        for publication in orderedPublications() {
+            let source = ExtensionFactResolutionSource.extension(
+                identifier: publication.source.extensionIdentifier,
+                processGeneration: publication.source.processGeneration
+            )
+            for (key, definition) in publication.definitions where winning[key] == nil {
+                winning[key] = definition
+            }
+            for key in publication.definitions.keys {
+                providers[key, default: []].insert(source)
+            }
+        }
+        var prefixesByUsage: [ExtensionFactUsage: [ExtensionFactDefinition]] = [:]
+        for eligibleUsage in [ExtensionFactUsage.groupable, .sortable] {
+            prefixesByUsage[eligibleUsage] = boundedRegisteredFactPrefix(
+                winning.values.map(registeredFactCatalogDefinition),
+                usage: eligibleUsage
+            )
+        }
+        registeredFactCatalogCache = .init(
+            winningDefinitions: winning,
+            providersByKey: providers,
+            prefixesByUsage: prefixesByUsage
+        )
+    }
+
+    private func registeredFactCatalogDefinition(
+        _ definition: ExtensionFactDefinition
+    ) -> ExtensionFactDefinition {
+        guard hostDefinitions[definition.key] != nil else { return definition }
+        return ExtensionFactDefinition(
+            key: definition.key,
+            displayName: L10n.string(definition.displayName),
+            valueType: definition.valueType,
+            subjectKinds: definition.subjectKinds,
+            usages: definition.usages
+        )
+    }
+
+    /// Selects only the rows the UI can render. Once the prefix reaches 128, every later
+    /// definition compares only against that bounded ordered array; no full eligible list or
+    /// unbounded menu model is retained.
+    private func boundedRegisteredFactPrefix<S: Sequence>(
+        _ definitions: S,
+        usage: ExtensionFactUsage
+    ) -> [ExtensionFactDefinition] where S.Element == ExtensionFactDefinition {
+        let maximum = ExtensionWorkspaceNavigatorPipeline.maximumRegisteredFactChoicesPerOption
+        var admitted: [ExtensionFactDefinition] = []
+        admitted.reserveCapacity(maximum)
+        for definition in definitions where Self.isRegisteredFactDefinitionEligible(
+            definition,
+            for: usage
+        ) {
+            if admitted.count < maximum {
+                admitted.append(definition)
+                if admitted.count == maximum {
+                    admitted.sort(by: registeredFactDefinitionLessThan)
+                }
+                continue
+            }
+            guard let worst = admitted.last,
+                  registeredFactDefinitionLessThan(definition, worst) else { continue }
+            let insertion = admitted.firstIndex {
+                registeredFactDefinitionLessThan(definition, $0)
+            } ?? admitted.endIndex
+            admitted.insert(definition, at: insertion)
+            admitted.removeLast()
+        }
+        if admitted.count < maximum {
+            admitted.sort(by: registeredFactDefinitionLessThan)
+        }
+        return admitted
+    }
+
+    private func registeredFactDefinitionLessThan(
+        _ lhs: ExtensionFactDefinition,
+        _ rhs: ExtensionFactDefinition
+    ) -> Bool {
+        let nameOrder = lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName)
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        if lhs.key.id != rhs.key.id { return lhs.key.id < rhs.key.id }
+        return lhs.key.version < rhs.key.version
     }
 
     private func resolvedCells(

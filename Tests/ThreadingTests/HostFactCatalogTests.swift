@@ -36,6 +36,46 @@ final class HostFactCatalogTests: XCTestCase {
         }
     }
 
+    func testEveryRegisteredHostFactChoiceHasLocalizedPresentationCopy() throws {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let catalogURL = repositoryRoot.appendingPathComponent(
+            "Sources/Threading/Resources/Localizable.xcstrings"
+        )
+        let document = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: Data(contentsOf: catalogURL))
+                as? [String: Any]
+        )
+        let strings = try XCTUnwrap(document["strings"] as? [String: Any])
+        let choiceDefinitions = HostFactCatalog.definitions.filter { definition in
+            ExtensionFactRegistry.isRegisteredFactDefinitionEligible(
+                definition,
+                for: .groupable
+            ) || ExtensionFactRegistry.isRegisteredFactDefinitionEligible(
+                definition,
+                for: .sortable
+            )
+        }
+        XCTAssertFalse(choiceDefinitions.isEmpty)
+
+        for definition in choiceDefinitions {
+            let entry = try XCTUnwrap(
+                strings[definition.displayName] as? [String: Any],
+                "Missing localization key for \(definition.key.id)"
+            )
+            let localizations = try XCTUnwrap(entry["localizations"] as? [String: Any])
+            let swedish = try XCTUnwrap(localizations["sv"] as? [String: Any])
+            let unit = try XCTUnwrap(swedish["stringUnit"] as? [String: Any])
+            XCTAssertEqual(unit["state"] as? String, "translated", definition.key.id)
+            XCTAssertFalse(
+                (unit["value"] as? String)?.isEmpty ?? true,
+                definition.key.id
+            )
+        }
+    }
+
     func testEveryNativeDependencyHasExactlyOneDescriptor() {
         let owners = Dictionary(grouping: HostFactCatalog.all.flatMap { descriptor in
             descriptor.nativeDependencies.map { ($0, descriptor.definition.key) }

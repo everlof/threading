@@ -1344,7 +1344,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertEqual(initial.optionRevision, 0)
         XCTAssertEqual(initial.optionPersistenceOutcome, .loaded)
 
-        let firstWrite: Result<[String: ExtensionJSONValue], Error> =
+        let firstWrite: Result<WorkspaceNavigatorOptionEffectiveValues, Error> =
             await withCheckedContinuation { continuation in
                 let routed = manager.setWorkspaceNavigatorOption(
                     extensionIdentifier: initial.extensionIdentifier,
@@ -1357,13 +1357,13 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 }
                 XCTAssertTrue(routed)
             }
-        XCTAssertEqual(try firstWrite.get()["group"], .bool(false))
+        XCTAssertEqual(try firstWrite.get().optionValues["group"], .bool(false))
         XCTAssertEqual(
             manager.extensionWorkspaceNavigatorInventory.first?.optionRevision,
             1
         )
 
-        let secondWrite: Result<[String: ExtensionJSONValue], Error> =
+        let secondWrite: Result<WorkspaceNavigatorOptionEffectiveValues, Error> =
             await withCheckedContinuation { continuation in
                 let routed = manager.setWorkspaceNavigatorOption(
                     extensionIdentifier: initial.extensionIdentifier,
@@ -1376,7 +1376,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 }
                 XCTAssertTrue(routed)
             }
-        XCTAssertEqual(try secondWrite.get()["group"], .bool(true))
+        XCTAssertEqual(try secondWrite.get().optionValues["group"], .bool(true))
 
         try manager.setEnabled(false, identifier: initial.extensionIdentifier)
         XCTAssertEqual(manager.extensionWorkspaceNavigatorInventory, [])
@@ -1448,7 +1448,10 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertEqual(manager.extensionWorkspaceNavigatorInventory, [])
     }
 
-    func testManagerRejectsAnOlderNavigatorOptionCompletion() async throws {
+    func testManagerPublishesStaticAndRegisteredFactWritesAsOneRevisionedSnapshot()
+        async throws
+    {
+        let selectedKey = ExtensionFactKey(id: "example.state", version: 1)
         let navigator = ExtensionWorkspaceNavigator(
             id: "activity",
             title: "Activity",
@@ -1459,7 +1462,31 @@ final class ExtensionPackageStoreTests: XCTestCase {
                     title: "Group",
                     control: .toggle(defaultValue: false)
                 )
-            ]
+            ],
+            pipeline: .init(
+                consumes: [.init(
+                    key: ExtensionHostFactKey.sessionTitle,
+                    requirement: .required
+                )],
+                registeredFactOptions: [
+                    .init(
+                        id: "group-by",
+                        title: "Group by",
+                        application: .bucket(
+                            direction: .ascending,
+                            unknownTitle: "Unknown"
+                        )
+                    ),
+                ],
+                filters: [.init(
+                    when: [.init(optionID: "group", equals: .bool(true))],
+                    predicate: .isPresent(.init(ExtensionHostFactKey.sessionTitle))
+                )],
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .text(.literal("Session"), role: .body)
+                )
+            )
         )
         let optionStore = DeferredWorkspaceNavigatorOptionStore()
         let store = ExtensionPackageStore(
@@ -1478,21 +1505,21 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertTrue(registered)
         let initial = try XCTUnwrap(manager.extensionWorkspaceNavigatorInventory.first)
 
-        var completions: [Result<[String: ExtensionJSONValue], Error>] = []
-        XCTAssertTrue(manager.setWorkspaceNavigatorOption(
-            extensionIdentifier: initial.extensionIdentifier,
-            navigatorID: navigator.id,
-            optionID: "group",
-            value: .bool(false),
-            processGeneration: initial.processGeneration
-        ) {
-            completions.append($0)
-        })
+        var completions: [Result<WorkspaceNavigatorOptionEffectiveValues, Error>] = []
         XCTAssertTrue(manager.setWorkspaceNavigatorOption(
             extensionIdentifier: initial.extensionIdentifier,
             navigatorID: navigator.id,
             optionID: "group",
             value: .bool(true),
+            processGeneration: initial.processGeneration
+        ) {
+            completions.append($0)
+        })
+        XCTAssertTrue(manager.setWorkspaceNavigatorRegisteredFactSelection(
+            extensionIdentifier: initial.extensionIdentifier,
+            navigatorID: navigator.id,
+            optionID: "group-by",
+            key: selectedKey,
             processGeneration: initial.processGeneration
         ) {
             completions.append($0)
@@ -1505,6 +1532,9 @@ final class ExtensionPackageStoreTests: XCTestCase {
                 processGeneration: initial.processGeneration,
                 revision: 2,
                 valuesByNavigatorID: [navigator.id: ["group": .bool(true)]],
+                registeredFactSelectionsByNavigatorID: [
+                    navigator.id: ["group-by": selectedKey],
+                ],
                 persistenceOutcome: .loaded
             ))
         )
@@ -1518,7 +1548,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
             with: .success(.init(
                 processGeneration: initial.processGeneration,
                 revision: 1,
-                valuesByNavigatorID: [navigator.id: ["group": .bool(false)]],
+                valuesByNavigatorID: [navigator.id: ["group": .bool(true)]],
+                registeredFactSelectionsByNavigatorID: [navigator.id: [:]],
                 persistenceOutcome: .loaded
             ))
         )
@@ -1527,7 +1558,14 @@ final class ExtensionPackageStoreTests: XCTestCase {
         let current = try XCTUnwrap(manager.extensionWorkspaceNavigatorInventory.first)
         XCTAssertEqual(current.optionRevision, 2)
         XCTAssertEqual(current.optionValues["group"], .bool(true))
-        XCTAssertEqual(try completions.last?.get()["group"], .bool(true))
+        XCTAssertEqual(current.registeredFactSelections["group-by"], selectedKey)
+        XCTAssertEqual(completions.count, 2)
+        for completion in completions {
+            let values = try completion.get()
+            XCTAssertEqual(values.revision, 2)
+            XCTAssertEqual(values.optionValues["group"], .bool(true))
+            XCTAssertEqual(values.registeredFactSelections["group-by"], selectedKey)
+        }
     }
 
     func testManagerSuppliesPersistsAndStreamsHostRenderedSettings() async throws {
@@ -3773,6 +3811,9 @@ private final class DeferredWorkspaceNavigatorOptionStore:
             processGeneration: processGeneration,
             revision: 0,
             valuesByNavigatorID: valuesByNavigatorID,
+            registeredFactSelectionsByNavigatorID: Dictionary(
+                uniqueKeysWithValues: navigators.map { ($0.id, [:]) }
+            ),
             persistenceOutcome: .missing
         )
     }
@@ -3781,6 +3822,19 @@ private final class DeferredWorkspaceNavigatorOptionStore:
 
     func set(
         _ value: ExtensionJSONValue,
+        extensionIdentifier: String,
+        processGeneration: String,
+        navigatorID: String,
+        optionID: String,
+        completion: @escaping Completion
+    ) {
+        lock.lock()
+        completions.append(completion)
+        lock.unlock()
+    }
+
+    func setRegisteredFactSelection(
+        _ key: ExtensionFactKey?,
         extensionIdentifier: String,
         processGeneration: String,
         navigatorID: String,

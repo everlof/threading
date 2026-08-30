@@ -100,6 +100,147 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         ))
     }
 
+    func testSelectedRegisteredFactBucketReplacesStaticAndUnavailableIsAllUnknown() throws {
+        let dynamicDefinition = definition(
+            stateKey,
+            type: .string,
+            kinds: [.session],
+            usages: [.groupable]
+        )
+        let snapshot = makeSnapshot(
+            sessionIDs: ["s-b", "s-a", "s-unknown"],
+            definitions: [dynamicDefinition],
+            facts: [
+                fact(stateKey, .session("s-b"), .string("Beta")),
+                fact(stateKey, .session("s-a"), .string("Alpha")),
+            ]
+        )
+        let value = pipeline(
+            consumes: [.init(key: stateKey, requirement: .required)],
+            registeredFactOptions: [
+                .init(
+                    id: "group-by",
+                    title: "Group by",
+                    application: .bucket(direction: .ascending, unknownTitle: "Unknown")
+                ),
+            ],
+            buckets: [
+                .init(strategy: .fact(
+                    .init(.init(stateKey)),
+                    direction: .descending,
+                    explicitOrder: []
+                )),
+            ],
+            template: .text(.literal("Row"), role: .body)
+        )
+
+        let none = try ready(value, snapshot: snapshot)
+        XCTAssertEqual(
+            WorkspaceNavigatorPipelineEvaluator().evaluate(none).sections.map(\.title),
+            ["Beta", "Alpha", nil]
+        )
+
+        let selected = try ready(
+            value,
+            snapshot: snapshot,
+            registeredFactSelections: ["group-by": stateKey]
+        )
+        let sections = WorkspaceNavigatorPipelineEvaluator().evaluate(selected).sections
+        XCTAssertEqual(sections.map(\.title), ["Alpha", "Beta", "Unknown"])
+        XCTAssertEqual(sections.last?.items.map(\.sourceSessionID), ["s-unknown"])
+
+        let unavailableValue = pipeline(
+            consumes: [],
+            registeredFactOptions: value.registeredFactOptions,
+            template: .text(.literal("Row"), role: .body)
+        )
+        let unavailableSnapshot = makeSnapshot(
+            sessionIDs: ["s-b", "s-a", "s-unknown"],
+            definitions: [],
+            facts: []
+        )
+        let unavailable = try ready(
+            unavailableValue,
+            snapshot: unavailableSnapshot,
+            registeredFactSelections: ["group-by": stateKey]
+        )
+        let unavailableSections = WorkspaceNavigatorPipelineEvaluator()
+            .evaluate(unavailable).sections
+        XCTAssertEqual(unavailableSections.map(\.title), ["Unknown"])
+        XCTAssertEqual(unavailableSections.first?.items.count, 3)
+    }
+
+    func testSelectedRegisteredFactSortIsPrimaryMissingLastAndUnavailableIsNoOp() throws {
+        let stateDefinition = definition(
+            stateKey,
+            type: .string,
+            kinds: [.session],
+            usages: [.sortable]
+        )
+        let scoreDefinition = definition(
+            scoreKey,
+            type: .integer,
+            kinds: [.session],
+            usages: [.sortable]
+        )
+        let snapshot = makeSnapshot(
+            sessionIDs: ["s-beta", "s-alpha", "s-missing"],
+            definitions: [stateDefinition, scoreDefinition],
+            facts: [
+                fact(stateKey, .session("s-beta"), .string("Beta")),
+                fact(scoreKey, .session("s-beta"), .integer(0)),
+                fact(stateKey, .session("s-alpha"), .string("Alpha")),
+                fact(scoreKey, .session("s-alpha"), .integer(10)),
+                fact(scoreKey, .session("s-missing"), .integer(-1)),
+            ]
+        )
+        let value = pipeline(
+            consumes: [.init(key: scoreKey, requirement: .required)],
+            registeredFactOptions: [
+                .init(
+                    id: "sort-by",
+                    title: "Sort by",
+                    application: .sort(direction: .ascending)
+                ),
+            ],
+            sort: [.init(
+                operand: .init(.init(scoreKey)),
+                direction: .ascending
+            )],
+            template: .text(.literal("Row"), role: .body)
+        )
+        let selected = try ready(
+            value,
+            snapshot: snapshot,
+            registeredFactSelections: ["sort-by": stateKey]
+        )
+        XCTAssertEqual(
+            WorkspaceNavigatorPipelineEvaluator().evaluate(selected)
+                .sections.flatMap(\.items).map(\.sourceSessionID),
+            ["s-alpha", "s-beta", "s-missing"]
+        )
+
+        let unavailableSnapshot = makeSnapshot(
+            sessionIDs: ["s-beta", "s-alpha", "s-missing"],
+            definitions: [scoreDefinition],
+            facts: [
+                fact(scoreKey, .session("s-beta"), .integer(0)),
+                fact(scoreKey, .session("s-alpha"), .integer(10)),
+                fact(scoreKey, .session("s-missing"), .integer(-1)),
+            ]
+        )
+        let unavailable = try ready(
+            value,
+            snapshot: unavailableSnapshot,
+            registeredFactSelections: ["sort-by": stateKey]
+        )
+        XCTAssertEqual(
+            WorkspaceNavigatorPipelineEvaluator().evaluate(unavailable)
+                .sections.flatMap(\.items).map(\.sourceSessionID),
+            ["s-missing", "s-beta", "s-alpha"]
+        )
+    }
+
     func testCompilationRejectsIncompatibleRuntimeDefinitions() {
         let booleanSearch = definition(
             titleKey,
@@ -1348,6 +1489,7 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
 
     private func pipeline(
         consumes: [ExtensionWorkspaceNavigatorFactConsumption],
+        registeredFactOptions: [ExtensionWorkspaceNavigatorRegisteredFactOption] = [],
         search: ExtensionWorkspaceNavigatorSearch? = nil,
         filters: [ExtensionWorkspaceNavigatorFilterClause] = [],
         buckets: [ExtensionWorkspaceNavigatorBucketClause] = [],
@@ -1357,6 +1499,7 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
     ) -> ExtensionWorkspaceNavigatorPipeline {
         .init(
             consumes: consumes,
+            registeredFactOptions: registeredFactOptions,
             search: search,
             filters: filters,
             buckets: buckets,
@@ -1374,13 +1517,15 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         _ pipeline: ExtensionWorkspaceNavigatorPipeline,
         snapshot: ExtensionFactSnapshot,
         optionValues: [String: ExtensionJSONValue] = [:],
+        registeredFactSelections: [String: ExtensionFactKey] = [:],
         file: StaticString = #filePath,
         line: UInt = #line
     ) throws -> CompiledWorkspaceNavigatorPipeline {
         switch WorkspaceNavigatorPipelineCompiler().compile(
             pipeline,
             snapshot: snapshot,
-            optionValues: optionValues
+            optionValues: optionValues,
+            registeredFactSelections: registeredFactSelections
         ) {
         case let .ready(value):
             return value

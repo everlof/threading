@@ -403,7 +403,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
 
     private func sections(
         from candidates: [Candidate],
-        bucket: ExtensionWorkspaceNavigatorBucketStrategy?,
+        bucket: CompiledWorkspaceNavigatorBucket?,
         snapshot: ExtensionFactSnapshot,
         referenceDate: Date
     ) -> [CandidateSection] {
@@ -415,21 +415,38 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             )]
         }
         switch bucket {
-        case let .fact(operand, direction, explicitOrder):
+        case let .declared(.fact(operand, direction, explicitOrder)):
             return factSections(
                 candidates,
                 operand: operand,
                 direction: direction,
                 explicitOrder: explicitOrder,
-                snapshot: snapshot
+                snapshot: snapshot,
+                unknownTitle: nil
             )
-        case let .rules(rules, unmatched):
+        case let .declared(.rules(rules, unmatched)):
             return ruleSections(
                 candidates,
                 rules: rules,
                 unmatched: unmatched,
                 snapshot: snapshot,
                 referenceDate: referenceDate
+            )
+        case let .registeredFact(key, direction, unknownTitle, isAvailable):
+            guard isAvailable else {
+                return candidates.isEmpty ? [] : [.init(
+                    identity: .fact(key: key, value: nil),
+                    title: unknownTitle,
+                    candidates: candidates
+                )]
+            }
+            return factSections(
+                candidates,
+                operand: .init(.init(key)),
+                direction: direction,
+                explicitOrder: [],
+                snapshot: snapshot,
+                unknownTitle: unknownTitle
             )
         }
     }
@@ -439,7 +456,8 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
         operand: ExtensionWorkspaceNavigatorFactOperand,
         direction: ExtensionWorkspaceNavigatorSortDirection,
         explicitOrder: [ExtensionFactValue],
-        snapshot: ExtensionFactSnapshot
+        snapshot: ExtensionFactSnapshot,
+        unknownTitle: String?
     ) -> [CandidateSection] {
         var groups: [FactBucket: [Candidate]] = [:]
         for candidate in candidates {
@@ -480,7 +498,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             case .unknown:
                 return .init(
                     identity: .fact(key: operand.fact.key, value: nil),
-                    title: nil,
+                    title: unknownTitle,
                     candidates: members
                 )
             case let .value(value):
