@@ -65,12 +65,20 @@ stock theme with `ThemeSwatchImage.appSwatch` — a miniature window resolved fo
 appearance, so a dark chrome still previews the light themes light. Five columns of 104-point
 swatches is a measured fit, not a preference (four of 128 clipped the first row).
 
-**Accounts** presents `AgentAccountDiscovery`'s existing scan and adds the one check nothing
-else does: `AgentCLIProbe` resolves `claude`/`codex`/`grok`/`opencode` against the same login shell
+**Agents & Accounts** first presents the exhaustive fixed `AgentKind` roster, so supported runtime
+and Threading-managed multiple-login enrollment cannot be mistaken for the same capability.
+Claude Code and Codex carry **Add Login** because their isolated-home routing and official browser
+login/status commands are measured. Grok says that its single login remains in the terminal UI;
+Cursor names `agent login` and the one Mac login it keeps in the Keychain; OpenCode names
+`/connect` and retains provider credentials itself. Those three rows are deliberately informative,
+not disabled setup buttons that imply an unavailable action will eventually wake up.
+
+The page also presents `AgentAccountDiscovery`'s existing scan and adds the one check nothing
+else does: `AgentCLIProbe` resolves `claude`/`codex`/`grok`/`opencode`/`agent` against the same login shell
 `AgentLauncher` uses (`command -v`, the `ExternalAppLauncher.locate` shape), so the probe and
 the launch cannot disagree about PATH. A missing CLI is a sentence and an install command
 here, instead of `command not found` inside the first session's terminal. Each login also
-carries the Accounts settings page's enable switch (`AccountPreferencesStore.setEnabled`,
+carries the Agents & Accounts settings page's enable switch (`AccountPreferencesStore.setEnabled`,
 same dimming, same `ProjectsDidChange` signal), so an unwanted login is dealt with where it
 is first seen rather than remembered for later. The probe's "Found" answer is per-shell
 truth: a machine with several installs (a native `~/.local/bin/claude` beside a stale
@@ -78,9 +86,10 @@ truth: a machine with several installs (a native `~/.local/bin/claude` beside a 
 a session will actually run.
 
 The account page is also a complete way in for somebody who has no alternate config homes yet.
-`AccountSetupCardViewController` is shared with Settings ▸ Accounts and puts **Add a login**
-before discovery's result, so the empty state never tells a new user to leave the app and invent
-one. The person chooses Claude or Codex and gives the login a local name; the coordinator derives
+`AccountSetupCardViewController` is shared with Settings ▸ Agents & Accounts and puts the
+supported-agent roster before discovery's result, so the empty state never hides what can be
+launched or tells a new user to invent an alternate home. The person can choose **Add Login** for
+Claude or Codex and give it a local name; the coordinator derives
 a bounded `~/.claude-<slug>` or `~/.codex-<slug>` home, runs the installed provider CLI's official
 browser login under `CLAUDE_CONFIG_DIR`/`CODEX_HOME`, and verifies the result with that CLI's
 status command. Login stdin and stdout are `/dev/null`: Threading neither asks for nor captures a
@@ -89,9 +98,11 @@ the provider-owned credential remains isolated per `CODEX_HOME`; the file itself
 this flow. Cancellation terminates the login's process group, the browser wait is bounded to ten
 minutes, and a login is registered only after the provider status exits successfully.
 
+The roster is a small fixed five-case schema, so its retained rows are constant work; the
+externally sized discovered-account and conversation lists keep their existing viewport owners.
 Provider choice, naming, browser wait, missing-CLI guidance, ordinary failure and verified success
 are explicit states rather than alerts layered over the page. The same card powers **Reconnect**
-in Accounts Settings against the existing config home, without deleting credentials, transcripts
+in Agents & Accounts Settings against the existing config home, without deleting credentials, transcripts
 or presentation choices. UI evidence captures the empty, single-account, multiple-account and
 every setup/reconnect state in the real onboarding flow and production Settings page, System light
 and dark (`account-setup-layouts`).

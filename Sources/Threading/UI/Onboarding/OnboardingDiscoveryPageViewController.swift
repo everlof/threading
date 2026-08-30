@@ -12,7 +12,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         static let iconSide: CGFloat = 20
     }
 
-    var pageTitle: String { L10n.string("Accounts") }
+    var pageTitle: String { L10n.string("Agents & Accounts") }
 
     private let accountsCardHost = NSView()
     private let cliCardHost = NSView()
@@ -73,15 +73,16 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
     }
 
     private func setupViews() {
-        let heading = NSTextField(labelWithString: L10n.string("Set up your agent logins"))
+        let heading = NSTextField(labelWithString: L10n.string("Connect your coding agents"))
         heading.applyFont(.heading)
         heading.textColor = Design.Text.label
         heading.alignment = .center
 
         let caption = NSTextField(
             wrappingLabelWithString: L10n.string(
-                "Use a login already on this Mac, or add one here. The provider's own CLI "
-                    + "handles the secure browser sign-in and keeps the credential."
+                "Threading supports Claude Code, Codex, Grok, Cursor, and OpenCode. Add and "
+                    + "switch Claude Code or Codex logins here; the others keep sign-in in "
+                    + "their own tools."
             )
         )
         caption.applyFont(.body)
@@ -95,11 +96,11 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         cliHeading.applyFont(.emphasizedBody)
         cliHeading.textColor = Design.Text.label
 
-        let accountsHeading = NSTextField(labelWithString: L10n.string("Available logins"))
+        let accountsHeading = NSTextField(labelWithString: L10n.string("Managed accounts"))
         accountsHeading.applyFont(.emphasizedBody)
         accountsHeading.textColor = Design.Text.label
 
-        let setupHeading = NSTextField(labelWithString: L10n.string("Add a login"))
+        let setupHeading = NSTextField(labelWithString: L10n.string("Supported agents"))
         setupHeading.applyFont(.emphasizedBody)
         setupHeading.textColor = Design.Text.label
 
@@ -176,8 +177,8 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         if accounts.isEmpty {
             let empty = NSTextField(
                 wrappingLabelWithString: L10n.string(
-                    "No agent logins yet. Set up Claude Code or Codex, then finish the "
-                        + "provider's secure browser sign-in."
+                    "No managed logins yet. Add Claude Code or Codex here, or continue and "
+                        + "sign in with another supported agent when you launch it."
                 )
             )
             empty.applyFont(.body)
@@ -222,7 +223,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         labels.spacing = Design.Spacing.hairline
         labels.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
-        // The same switch the Accounts settings page carries, so a login the user does not
+        // The same switch the Agents & Accounts settings page carries, so a login the user does not
         // want offered never has to be visited later: off here is off there.
         let enabled = SettingsUI.toggle(
             isOn: account.isEnabled,
@@ -236,7 +237,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         )
 
         // A switched-off login stays listed and goes quiet; the switch that brings it back
-        // keeps full ink — the Accounts settings page's rule.
+        // keeps full ink — the Agents & Accounts settings page's rule.
         let dimmed = account.isEnabled ? 1 : AccountsPreferencesLayout.disabledRowAlpha
         icon.alphaValue = dimmed
         labels.alphaValue = dimmed
@@ -259,7 +260,7 @@ final class OnboardingDiscoveryPageViewController: NSViewController, OnboardingP
         AccountPreferencesStore.shared.setEnabled(sender.state == .on, for: account.id)
         rebuildAccountRows()
         // The sidebar and composer draw from the accounts a provider offers — same signal the
-        // Accounts settings page sends.
+        // Agents & Accounts settings page sends.
         NotificationCenter.default.post(ProjectsDidChange())
     }
 

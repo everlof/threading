@@ -324,6 +324,36 @@ enum AgentKind: String, Codable, CaseIterable {
     }
   }
 
+  /// The truthful sign-in boundary shown by the fixed supported-agent roster.
+  ///
+  /// Keeping the exhaustive switch beside the capability catalogue means a sixth runtime cannot
+  /// silently disappear from onboarding or inherit another runtime's account promise. The setup
+  /// action remains a separate, narrower adapter (`AgentAccountSetupProvider`).
+  var accountAccessDetail: String {
+    switch self {
+    case .claude:
+      return L10n.string("Use another Claude subscription or organization.")
+    case .codex:
+      return L10n.string("Use another ChatGPT account with Codex.")
+    case .grok:
+      return L10n.string("Sign in inside Grok's terminal UI. Threading uses one Grok login.")
+    case .openCode:
+      return L10n.string("Connect model providers inside OpenCode with /connect.")
+    case .cursor:
+      return L10n.string("Run agent login once on this Mac. Threading uses that Cursor login.")
+    }
+  }
+
+  /// Short trailing answer to who owns this runtime's sign-in flow.
+  var accountAccessOwner: String {
+    switch self {
+    case .claude, .codex: return L10n.string("Threading")
+    case .grok: return L10n.string("In Grok")
+    case .openCode: return L10n.string("In OpenCode")
+    case .cursor: return L10n.string("Mac login")
+    }
+  }
+
   /// The agent's own interactive TUI, hosted inside Threading's terminal surface.
   var originalUITitle: String { L10n.format("%@ UI", displayName) }
 

@@ -64,6 +64,23 @@ final class AgentAccountSetupTests: XCTestCase {
         XCTAssertTrue(AgentAccountSetupProvider.allCases.allSatisfy {
             $0.installationGuide.scheme == "https"
         })
+
+        XCTAssertEqual(
+            AgentKind.allCases.compactMap(AgentAccountSetupProvider.init(kind:)),
+            [.claude, .codex],
+            "Only measured isolated-home adapters may grow an Add Login action"
+        )
+    }
+
+    func testEverySupportedAgentStatesItsSignInBoundary() {
+        XCTAssertEqual(AgentKind.allCases.count, 5)
+        for kind in AgentKind.allCases {
+            XCTAssertFalse(kind.accountAccessDetail.isEmpty, kind.displayName)
+            XCTAssertFalse(kind.accountAccessOwner.isEmpty, kind.displayName)
+        }
+        XCTAssertTrue(AgentKind.grok.accountAccessDetail.contains("one Grok login"))
+        XCTAssertTrue(AgentKind.cursor.accountAccessDetail.contains("agent login"))
+        XCTAssertTrue(AgentKind.openCode.accountAccessDetail.contains("/connect"))
     }
 
     func testRegistryPersistsOnlyValidatedLocationsAndDeduplicatesAProviderPath() throws {
