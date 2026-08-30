@@ -192,6 +192,7 @@ final class TerminalThemeIdentityTests: XCTestCase {
         XCTAssertEqual(TerminalTheme.pro.id, .pro)
         XCTAssertEqual(TerminalTheme.homebrew.id, .homebrew)
         XCTAssertEqual(TerminalTheme.ocean.id, .ocean)
+        XCTAssertEqual(TerminalTheme.roseMoon.id, .roseMoon)
         XCTAssertEqual(
             Set(TerminalTheme.builtInThemes.map(\.id)).count,
             TerminalTheme.builtInThemes.count

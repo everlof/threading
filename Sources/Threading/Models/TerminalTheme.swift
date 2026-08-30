@@ -25,6 +25,7 @@ struct TerminalThemeID: Hashable, Codable, RawRepresentable, CustomStringConvert
     static let pro = TerminalThemeID("pro")
     static let homebrew = TerminalThemeID("homebrew")
     static let ocean = TerminalThemeID("ocean")
+    static let roseMoon = TerminalThemeID("rose-moon")
     static let followsAppTheme = TerminalThemeID("follow-app-theme")
 
     static func makeCustom() -> TerminalThemeID {
@@ -404,8 +405,39 @@ extension TerminalTheme {
         brightWhite: NSColor(hex: "#EFF1F5")!
     )
 
+    /// A muted, warm dark palette in the Rosé Pine register: a blue-black ground, cool
+    /// lavender text, and desaturated rose/gold/sage/sky/violet accents rather than the primary
+    /// brights the classic ramps use. Where `Ocean` is Nord's cool blue-grey, this leans warm.
+    /// Rosé Pine has no true green, so `green` is a legible sage so `git`/`ls`/added lines still
+    /// read as green rather than teal.
+    static let roseMoon = TerminalTheme(
+        id: .roseMoon,
+        name: "Rosé Moon",
+        foreground: NSColor(hex: "#E0DEF4")!,
+        boldForeground: NSColor(hex: "#F4F2FF")!,
+        background: NSColor(hex: "#1B1D2A")!,
+        cursor: NSColor(hex: "#EA9A97")!,
+        selection: NSColor(hex: "#3B3854")!,
+        black: NSColor(hex: "#393552")!,
+        red: NSColor(hex: "#EB6F92")!,
+        green: NSColor(hex: "#A3BE9C")!,
+        yellow: NSColor(hex: "#F6C177")!,
+        blue: NSColor(hex: "#7FB4CA")!,
+        magenta: NSColor(hex: "#C4A7E7")!,
+        cyan: NSColor(hex: "#9CCFD8")!,
+        white: NSColor(hex: "#C9C7DB")!,
+        brightBlack: NSColor(hex: "#6E6A86")!,
+        brightRed: NSColor(hex: "#F08FA6")!,
+        brightGreen: NSColor(hex: "#B7D1A8")!,
+        brightYellow: NSColor(hex: "#FBD9A0")!,
+        brightBlue: NSColor(hex: "#A5C9DE")!,
+        brightMagenta: NSColor(hex: "#D6BEF0")!,
+        brightCyan: NSColor(hex: "#B3E0E8")!,
+        brightWhite: NSColor(hex: "#F4F2FF")!
+    )
+
     /// All available themes (use ThemeManager.shared.allThemes for the full list including custom themes)
-    static let builtInThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean]
+    static let builtInThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean, .roseMoon]
 
     // MARK: - The System App Theme's Pair
 
