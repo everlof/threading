@@ -2709,8 +2709,8 @@ it uses that theme immediately while reconnecting or offline, then adopts and re
 theme from the Mac. Changing Mac appearance from the iPhone updates the same remembered value.
 
 On iPhone, a solo agent-UI terminal starts in **Direct** input: each key goes straight to the real
-TUI. Use the Direct/Compose control at the trailing edge of the terminal key bar when you prefer
-to write in the iOS text area and send the finished line at once. The choice is remembered for
+TUI. Use the Direct/Compose control on the terminal key bar's action row — the row above the
+keys — when you prefer to write in the iOS text area and send the finished line at once. The choice is remembered for
 that terminal on this device. **Settings → On this iPhone → Terminal keys** can make Compose the
 default for terminal sessions this phone has not seen before, without changing existing choices.
 
@@ -2731,10 +2731,12 @@ insert control types the lines at the TUI's cursor without pressing Return, so y
 the prompt first. Either way the lines arrive as one paste when the program supports it, which
 Claude Code shows as a single "[Pasted text]" token. A view-only link can copy but not quote.
 
-The key bar under the terminal is customizable per agent, per device — a Termius-style keyboard
+The key bar under the terminal is two rows: a tight run of key caps against the keyboard, and
+an action row above it carrying the paperclip, the Direct/Compose switch and the `⌨︎…` key
+editor. The caps are customizable per agent, per device — a Termius-style keyboard
 that goes further than Termius's fixed catalogue. Every bar starts from a stock layout for its
 agent (Claude Code's leads with ⇧⇥, the permission-mode cycle its TUI answers to), and the
-`⌨︎…` control at its trailing edge — or **Settings → On this iPhone → Terminal keys** — opens the
+action row's `⌨︎…` control — or **Settings → On this iPhone → Terminal keys** — opens the
 editor: add chord keys such as ⌃→ or ⇧⇥ from the catalogue, add snippet keys that type saved
 text (optionally submitting it with Return; long-press such a key to insert without running),
 relabel any key, drag to reorder with Edit, swipe to delete, and reset to the stock layout. The
@@ -2743,7 +2745,8 @@ keyboard — tap twice to lock, tap again to release. Arrows, Home and End follo
 application-cursor mode, so full-screen programs receive the sequences they asked for. Layouts
 are stored only on the device that authored them; an iPhone and an iPad keep separate bars. This
 bar is the only one over the keyboard: the terminal emulator's own fixed accessory row is
-removed, and the bar carries the control that puts the keyboard away and brings it back.
+removed, and the key row's trailing edge carries the control that puts the keyboard away and
+brings it back.
 
 **Tapping a mirrored terminal clicks it.** A full-screen TUI that draws something to click —
 Claude Code's "click to go to bottom", its option lists — receives a tap as a left click at that

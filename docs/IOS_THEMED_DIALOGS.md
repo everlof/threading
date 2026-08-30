@@ -72,9 +72,9 @@ the same "floats too much" the themed card was replaced to fix, arrived at from 
 It is held on the attachment key itself now, and the sheet stands on the key bar with its tail on
 the paperclip.
 
-Attaching it to the control does not mean presenting the *result* from there. A key inside a
-horizontally scrolling run can go away with the sheet, so Photos and Files still present from the
-owner's stable hierarchy once the chooser has dismissed.
+Attaching it to the control does not mean presenting the *result* from there. A control on the
+bar can go away with the sheet — the paperclip's whole row is conditional — so Photos and Files
+still present from the owner's stable hierarchy once the chooser has dismissed.
 
 ### A confirmation asks one question. A chooser is a stage of its own sheet.
 

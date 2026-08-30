@@ -1219,7 +1219,7 @@ whether somebody else holds the session either.
 ## Sending a file from the phone
 
 The composer's paperclip attaches a photo or a document to the next prompt. A direct-input TUI
-keeps the same paperclip as a fixed utility cap at the start of its control-key bar; picked files
+keeps the same paperclip leading its key bar's action row, above the key caps; picked files
 appear in a bounded tray above the bar, and its explicit Insert action types their quoted session
 paths at the current cursor without Return. The explicit step matters because an upload may
 finish after the person has moved the TUI cursor. Neither mode lets asynchronous transfer mutate
@@ -1521,7 +1521,11 @@ interleave individual characters. The key bar's controls remain immediate termin
 When the terminal is solo, the same bar can switch between that Compose surface and Direct TUI
 input; collaboration temporarily requires Compose and does not overwrite the saved solo choice.
 
-The key bar itself is a customizable, Termius-style keyboard, and deliberately exceeds Termius's
+The key bar is two rows. The row against the keyboard holds only the tight key caps, plus the
+way back from the keyboard at its trailing edge — small targets stay a dense strip, and reaching
+a cap never means reaching past a utility. The action row above carries everything that is not a
+keystroke: the attachment paperclip, the Direct/Compose switch and the key editor. The
+customizable run itself is a Termius-style keyboard, and deliberately exceeds Termius's
 model where agent TUIs need it: a key can be a *chord* (⇧⇥ — Claude Code's permission-mode
 cycle, which Termius cannot put on its bar at all), a snippet that types saved text and
 optionally submits it, a raw escape sequence, or a latching ⌃/⌥ that arms for the next key —
@@ -1554,9 +1558,10 @@ It is the only bar over the keyboard. SwiftTerm fits its own `TerminalAccessory`
 esc/ctrl/tab/arrow row — from `TerminalView`'s initializer, which stacked a second row of nearly
 the same keys under this one; `RemoteTerminalView.dropBuiltInKeyboardAccessory()` clears it
 through SwiftTerm's own documented assignment seam, once, because that is the only place it is
-installed. The dismiss control that row carried moves onto the key bar, where it appears only
-while a keyboard is actually up: the terminal is a first responder rather than a focusable
-SwiftUI field, so there is no other way back from the keyboard.
+installed. The dismiss control that row carried moves onto the key row's trailing edge — the row
+nearest the keyboard it controls — where it appears only while a keyboard is actually up: the
+terminal is a first responder rather than a focusable SwiftUI field, so there is no other way
+back from the keyboard.
 
 That control shipped doing nothing. It broadcast `resignFirstResponder` through
 `UIApplication.sendAction(_:to:from:for:)`, the idiom that dismisses a `UITextField`, and the
@@ -1565,13 +1570,15 @@ and keeps it measured. `TerminalKeyBridge` already holds the live terminal for D
 dismissal too: it resigns that view directly and lets the window answer for a composer that took
 the keyboard instead. Two smaller faults rode along. The bar's visibility came only from the
 keyboard notifications, which say what *changed*, so arriving at a session whose keyboard was
-already up produced no notification and no button — it now asks the bridge on appear. And both
-trailing controls are a bare `Image` in a reserved 44pt frame with no fill behind it, which
+already up produced no notification and no button — it now asks the bridge on appear. And the bar's
+icon controls are a bare `Image` in a reserved 44pt frame with no fill behind it, which
 answers taps on the glyph alone; the key caps are hit-testable across their whole cap only
 because each carries a background. `contentShape` makes the reserved area the real one.
-The two trailing SF Symbols also cannot be aligned by their equal frames: the dismissal chevron
-and customization badge extend below different keyboard-shaped motifs. Their group aligns on the
-symbols' first text baseline, which puts the shared keyboard chassis on one visible ink line.
+The action row's SF Symbols also cannot be aligned by their equal frames: the customization
+badge hangs below its keyboard chassis while the Direct-input glyph is a plain chassis of a
+different height, so centering each composite image puts the two boxes on different rows. Their
+group aligns on the symbols' first text baseline, which rests both chassis on one ground line —
+the ground line, not the tops, is the shared property, and the test asserts exactly that.
 
 iPhone and browser continuity is scoped to the exact saved Mac and session. Native and atomic
 terminal drafts are written locally as they change, pending request ids survive a reconnect, and

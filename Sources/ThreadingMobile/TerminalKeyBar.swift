@@ -281,8 +281,15 @@ enum TerminalKeyBarSymbols {
 }
 
 private enum TerminalKeyBarMetrics {
-    static let keyHeight: CGFloat = 34
-    static let keyPadding: CGFloat = 12
+    /// The key row hugs the keyboard, so its caps are deliberately shorter and tighter than a
+    /// full-height control: a cap is one of many small targets in a dense strip, and the action
+    /// row above carries the bar's full-height utilities.
+    static let keyHeight: CGFloat = 30
+    static let keyPadding: CGFloat = 8
+    /// The tight ink padding would let a lone arrow collapse to a sliver; a cap never gets
+    /// narrower than a comfortable square.
+    static let minimumKeyWidth: CGFloat = 34
+    static let actionHeight: CGFloat = MobileDesign.Size.compactControl
 }
 
 /// One press treatment for every key cap. The fill and small travel are driven by the actual
@@ -315,16 +322,12 @@ private struct TerminalKeyCapButtonStyle: ButtonStyle {
     }
 }
 
-/// The keyboard controls share a keyboard-shaped motif, but their SF Symbols do not share a
-/// bounding box: the dismissal chevron extends below one glyph and the customization badge
-/// extends below the other. Aligning the buttons by their frames therefore puts the keyboards
-/// on different rows. SF Symbols expose the common typographic baseline, so this group uses it
-/// as the single owner of their optical vertical alignment.
-struct TerminalKeyBarTrailingControls: View {
-    let isKeyboardVisible: Bool
-    let canShowKeyboard: Bool
-    let dismissKeyboard: () -> Void
-    let showKeyboard: () -> Void
+/// The action row's trailing controls. Their composite SF Symbols do not share a bounding
+/// box: the customization badge hangs below its keyboard chassis while the Direct-input glyph
+/// is a plain chassis, so aligning the buttons by their equal frames puts the two boxes on
+/// different rows. SF Symbols expose the common typographic baseline, and it stays the single
+/// owner of their optical vertical alignment.
+struct TerminalKeyBarActionControls: View {
     let customize: () -> Void
     let showsInputModeControl: Bool
     let inputPreference: MobileTerminalInputPreference
@@ -335,23 +338,6 @@ struct TerminalKeyBarTrailingControls: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
-            // Both directions, because the terminal no longer answers a tap by taking the
-            // keyboard while a TUI is tracking the mouse: that tap is the TUI's click.
-            if isKeyboardVisible || canShowKeyboard {
-                Button(action: isKeyboardVisible ? dismissKeyboard : showKeyboard) {
-                    trailingIcon(
-                        isKeyboardVisible
-                            ? TerminalKeyBarSymbols.hideKeyboard
-                            : TerminalKeyBarSymbols.showKeyboard
-                    )
-                }
-                .accessibilityLabel(
-                    isKeyboardVisible
-                        ? MobileL10n.string("Hide keyboard")
-                        : MobileL10n.string("Show keyboard")
-                )
-            }
-
             Button(action: customize) {
                 trailingIcon(TerminalKeyBarSymbols.customizeKeys)
             }
@@ -397,15 +383,17 @@ struct TerminalKeyBarTrailingControls: View {
             .foregroundStyle(theme.secondaryLabel)
             .frame(
                 width: MobileDesign.Size.minimumTapTarget,
-                height: TerminalKeyBarMetrics.keyHeight
+                height: TerminalKeyBarMetrics.actionHeight
             )
             .contentShape(Rectangle())
     }
 }
 
-/// The customizable key run under the remote terminal: layout comes from
-/// `MobileTerminalKeyboardStore` (stock per agent kind until edited), latch keys arm or lock
-/// the next press, and the trailing control opens the editor.
+/// The two-row strip under the remote terminal. The bottom row hugs the keyboard and holds
+/// only the tight key caps — layout comes from `MobileTerminalKeyboardStore` (stock per agent
+/// kind until edited), latch keys arm or lock the next press — plus the way back from the
+/// keyboard at its trailing edge. The action row above carries everything that is not a key:
+/// attachments, the Direct/Compose switch and the key editor.
 struct TerminalKeyBar: View {
     @ObservedObject var connection: RemoteSessionConnection
     @ObservedObject var bridge: TerminalKeyBridge
@@ -434,38 +422,12 @@ struct TerminalKeyBar: View {
     @State private var modifierFeedback = UISelectionFeedbackGenerator()
 
     var body: some View {
-        HStack(spacing: 0) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: MobileDesign.Spacing.small) {
-                    if showsAttachmentKey {
-                        attachmentButton
-                    }
-                    ForEach(keyboards.layout(forAgentKind: agentKind).keys) { key in
-                        button(for: key)
-                    }
-                }
-                .padding(.horizontal, TerminalKeyBarMetrics.keyPadding)
-                .padding(.vertical, MobileDesign.Spacing.small)
-            }
-            .disabled(!canSend)
+        VStack(spacing: 0) {
+            actionRow
 
-            Rectangle()
-                .fill(theme.divider)
-                .frame(width: theme.borderWidth, height: TerminalKeyBarMetrics.keyHeight)
+            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
 
-            TerminalKeyBarTrailingControls(
-                isKeyboardVisible: isKeyboardVisible,
-                canShowKeyboard: bridge.canShowKeyboard,
-                dismissKeyboard: bridge.dismissKeyboard,
-                showKeyboard: bridge.showKeyboard,
-                customize: customize,
-                showsInputModeControl: connection.supportsAtomicTerminalSubmission
-                    && effectiveInputMode != .none,
-                inputPreference: inputPreference,
-                effectiveInputMode: effectiveInputMode,
-                canChooseInputPreference: canChooseInputPreference,
-                toggleInputPreference: toggleInputPreference
-            )
+            keyRow
         }
         .background(theme.surface)
         .overlay(alignment: .top) {
@@ -494,6 +456,77 @@ struct TerminalKeyBar: View {
             && connection.inputControl?.canWrite != false
     }
 
+    /// The bar's full-height utilities: what is not a keystroke lives here, off the key row,
+    /// so the caps below can stay small.
+    private var actionRow: some View {
+        HStack(spacing: 0) {
+            if showsAttachmentKey {
+                attachmentButton
+            }
+            Spacer(minLength: 0)
+            TerminalKeyBarActionControls(
+                customize: customize,
+                showsInputModeControl: connection.supportsAtomicTerminalSubmission
+                    && effectiveInputMode != .none,
+                inputPreference: inputPreference,
+                effectiveInputMode: effectiveInputMode,
+                canChooseInputPreference: canChooseInputPreference,
+                toggleInputPreference: toggleInputPreference
+            )
+        }
+        .padding(.horizontal, MobileDesign.Spacing.tight)
+    }
+
+    /// The tight cap run closest to the keyboard, with the way back from the keyboard at its
+    /// trailing edge — on the row nearest the thing it controls.
+    private var keyRow: some View {
+        HStack(spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: MobileDesign.Spacing.tight) {
+                    ForEach(keyboards.layout(forAgentKind: agentKind).keys) { key in
+                        button(for: key)
+                    }
+                }
+                .padding(.horizontal, TerminalKeyBarMetrics.keyPadding)
+                .padding(.vertical, MobileDesign.Spacing.tight)
+            }
+            .disabled(!canSend)
+
+            keyboardToggle
+        }
+    }
+
+    /// Both directions, because the terminal no longer answers a tap by taking the keyboard
+    /// while a TUI is tracking the mouse: that tap is the TUI's click.
+    @ViewBuilder
+    private var keyboardToggle: some View {
+        if isKeyboardVisible || bridge.canShowKeyboard {
+            Rectangle()
+                .fill(theme.divider)
+                .frame(width: theme.borderWidth, height: TerminalKeyBarMetrics.keyHeight)
+
+            Button(action: isKeyboardVisible ? bridge.dismissKeyboard : bridge.showKeyboard) {
+                Image(
+                    systemName: isKeyboardVisible
+                        ? TerminalKeyBarSymbols.hideKeyboard
+                        : TerminalKeyBarSymbols.showKeyboard
+                )
+                .font(.subheadline)
+                .foregroundStyle(theme.secondaryLabel)
+                .frame(
+                    width: MobileDesign.Size.minimumTapTarget,
+                    height: TerminalKeyBarMetrics.keyHeight
+                )
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel(
+                isKeyboardVisible
+                    ? MobileL10n.string("Hide keyboard")
+                    : MobileL10n.string("Show keyboard")
+            )
+        }
+    }
+
     private var attachmentButton: some View {
         Button(action: chooseAttachmentSource) {
             Image(systemName: TerminalKeyBarSymbols.attachments)
@@ -501,14 +534,11 @@ struct TerminalKeyBar: View {
                 .foregroundStyle(theme.label)
                 .frame(
                     width: MobileDesign.Size.minimumTapTarget,
-                    height: TerminalKeyBarMetrics.keyHeight
+                    height: TerminalKeyBarMetrics.actionHeight
                 )
-                .background(
-                    theme.controlResting,
-                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                )
+                .contentShape(Rectangle())
         }
-        .disabled(!canAttach)
+        .disabled(!canAttach || !canSend)
         .accessibilityLabel(MobileL10n.string("Attachments"))
         .themedConfirmationDialog(
             "Attachments",
@@ -600,8 +630,9 @@ struct TerminalKeyBar: View {
 
     private func keyCap(_ label: String) -> some View {
         Text(label)
-            .font(.system(.subheadline, design: .monospaced).weight(.medium))
+            .font(.system(.footnote, design: .monospaced).weight(.medium))
             .padding(.horizontal, TerminalKeyBarMetrics.keyPadding)
+            .frame(minWidth: TerminalKeyBarMetrics.minimumKeyWidth)
             .frame(height: TerminalKeyBarMetrics.keyHeight)
     }
 
