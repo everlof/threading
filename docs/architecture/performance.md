@@ -344,9 +344,11 @@ and full-reload comparisons cost 244.985 ms and 51.045 ms. The performance recor
 
 ### Workspace navigator live-edge scaling contract, 2026-08-29
 
-An extension navigator may contain 1,000 items and session activity can change many times during a
-turn. A live edge therefore cannot rebuild the semantic document, scan every row, start concurrent
-process requests, or do work for a navigator hidden behind Native or Settings.
+A process-materialized extension navigator may contain 1,000 items and session activity can change
+many times during a turn. A live edge therefore cannot rebuild the semantic document, scan every
+row, start concurrent process requests, or do work for a navigator hidden behind Native or
+Settings. Host-evaluated pipeline navigators have a separate complete-output virtualization
+contract below; they do not use this event-action path.
 
 The selected navigator coalesces changed session IDs for one main-queue turn and admits at most 64
 unique IDs per request. It keeps one event action in flight; later edges stay in a set for the next
@@ -423,6 +425,38 @@ lifecycle commits took **1,487.816 ms**; the selected-outside-prefix catalogue r
 **0.154 ms**, and the one-key snapshot took **0.152 ms**. The emitted record was
 `THREADING_PERF navigator-registered-facts definitions=5000 choices=128
 registration_ms=1487.816 catalog_ms=0.154 snapshot_ms=0.152`.
+
+### Host-windowed navigator pipeline scaling contract, 2026-08-30
+
+A host-evaluated navigator commonly sees tens or hundreds of sessions; the deterministic stress
+boundary is 5,000. A pipeline whose output opts into `hostVirtualized` retains every lightweight,
+ordered row identity so the user can navigate and search the complete result, while AppKit row
+templates are realized only for the visible range. Pipeline evaluation may inspect and sort the
+whole source snapshot on its worker, but mounting and scrolling may not build a view per result.
+The existing required `itemLimit` and `truncateWithNotice` fields remain the compatibility fallback:
+an older host ignores the optional hint and still presents a bounded 1,000-row result with notice.
+
+The worker-side evaluator is O(n log n) when sorting all matching subjects. The presentation builds
+its stable row and destination indexes once off the main actor in O(n). Main-actor destination
+selection is O(1), row view ownership is O(visible), a fact patch is O(changed), and a query burst
+retains only the newest pending evaluation. Clearing a query restores the selected tail row and its
+scroll position without scanning all rows or replacing the collection view.
+
+`ExtensionRendererTests.testStressPipelineNavigatorWhenEnabled` mounts all 5,000 logical rows,
+asserts fewer than 50 live template views at both the head and tail, scrolls to and selects row
+4,999, filters that source session to row zero, then clears the query and verifies tail selection
+and visibility restoration. It also pins one exact fact patch and one 100-keystroke burst. The test
+plan sanitizes custom environment variables, so build the test bundle and run this gated case
+through `xcrun xctest` with `THREADING_NAVIGATOR_PIPELINE_STRESS=1`, following the direct-bundle
+pattern documented for the other opt-in macOS fixtures below.
+
+Measured on 2026-08-30 in the Debug M-series fixture: mounting the complete 5,000-row ordering took
+**123.46 ms**, scrolling to and realizing the tail took **8.64 ms**, and the exact one-row patch
+took **2.04 ms**. Both the head and tail held **14 live templates**. Enqueuing the final query in
+the 100-keystroke burst took **4.66 ms** and the worker/UI result settled in **66.67 ms**. The
+emitted record was `THREADING_PERF workspace-navigator-pipeline sessions=5000 logical_rows=5000
+live_templates=14 tail_live_templates=14 mount_ms=123.46 tail_ms=8.64 exact_patch_ms=2.04
+query_enqueue_ms=4.66 query_settle_ms=66.67`.
 
 ### Mobile terminal viewport-lease scaling contract, 2026-08-20
 

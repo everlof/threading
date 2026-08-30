@@ -4,9 +4,10 @@
 > can have one, built by an extension, without Threading having anticipated the shape they wanted. The
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
 > plus a host-executed intent vocabulary. Rollout steps 1–5 and the initial intent contract were
-> implemented by 2026-08-30; the three reference extensions now build from the public SDK, while
-> the dynamic provider-fact SDK contract is now pinned while its host catalogue, persistence and
-> evaluator wiring remain in progress; windowed collections and native convergence remain open.
+> implemented by 2026-08-30; the three reference extensions now build from the public SDK,
+> dynamic registered-provider facts are selectable through host-owned Group by and Sort by
+> controls, and pipeline collections may expose their complete host-virtualized ordering.
+> Native convergence remains open.
 > No part of
 > `ui.workspace-navigation` v1 is withdrawn.
 
@@ -411,10 +412,11 @@ Unchanged from v1 in shape: sections, and a list, outline or grid, with stable I
 so selection, expansion, scroll position and first responder survive a re-evaluation. What changes
 is that the host produces this by evaluating the transform rather than receiving it.
 
-Format 1 is the finite bridge: it emits at most 1,000 items and requires a host-owned overflow
-notice rather than truncating silently. Rollout step 7 replaces that aggregate bound with a
-windowed collection: the host evaluates the full ordering and realizes a range. The bound that
-matters then is the viewport, not the store.
+Format 1 keeps the finite bridge when `output.windowing` is absent: it emits at most 1,000 items
+and requires a host-owned overflow notice rather than truncating silently. The additive
+`hostVirtualized` mode retires that aggregate presentation bound without breaking an older host:
+the host evaluates the full ordering, retains lightweight identities, and realizes only the
+visible range. The bound that matters then is the viewport, not the store.
 
 ## Stage 5 — Representation
 
@@ -500,8 +502,8 @@ Per the [Scaling Gate](../../CLAUDE.md#scaling-gate), stated before implementati
   and deadline debris is compacted at twice the retained-cell count.
 - Option changes re-evaluate one navigator, not the window.
 - An opt-in deterministic stress fixture drives 5,000 sessions with a synthetic provider at the
-  stress publication rate, measuring background evaluation, main-thread mount, scroll tail, live
-  view count and footprint, per
+  stress publication rate, measuring background evaluation, main-thread mount, scroll tail and
+  live view count, per
   [`performance.md`](../architecture/performance.md).
 
 ## Acceptance criteria
@@ -621,12 +623,15 @@ does. An install must never reorder somebody's sidebar on its own.
    revealing the gesture, source session, or result to the extension. `T3SidebarExtension` proves
    the public contract with project-scoped subtitles, pinned-first sections, conditional host
    intents, a persisted sort option, and scheduled-row action omission.
-7. **Registered-fact choices — SDK contract implemented 2026-08-30, host wiring in progress.**
+7. **Registered-fact choices — implemented 2026-08-30.**
    A pipeline may declare one dynamic bucket picker and one dynamic sort picker. The contract pins
    host-owned None, selected-key retention, missing-last semantics, static composition, eligible
    subject kinds, localization, deterministic catalogue order and bounds without exposing the
    catalogue or selection to extension code.
-8. **Windowed collections**, retiring the aggregate item cap.
+8. **Windowed collections — implemented 2026-08-30.** Pipeline format 1 accepts the additive
+   `hostVirtualized` output hint. A capable host retains the complete evaluated row ordering off
+   the main actor and realizes only viewport templates; an older host ignores the hint and keeps
+   the explicit 1,000-row compatibility notice.
 9. **Native on the pipeline**, as far as it honestly goes. Full parity includes drag reorder,
    inline rename, LabelMorph titles and hover cards; the realistic target is that native's *facts*
    and *options* are the published ones, not that native is literally an extension.

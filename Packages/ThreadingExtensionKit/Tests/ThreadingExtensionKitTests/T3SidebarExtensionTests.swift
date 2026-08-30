@@ -48,6 +48,7 @@ final class T3SidebarExtensionTests: XCTestCase {
         ])
         XCTAssertEqual(pipeline.output.activation, .sourceSession)
         XCTAssertEqual(pipeline.output.collectionID, "t3-sessions")
+        XCTAssertEqual(pipeline.output.windowing, .hostVirtualized)
         XCTAssertEqual(navigator.options.map(\.id), ["sort-order"])
         XCTAssertEqual(templateIntents(in: pipeline.output.rowTemplate), [
             .pin, .unpin, .archive,

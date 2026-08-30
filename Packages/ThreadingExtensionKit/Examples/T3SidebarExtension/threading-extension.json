@@ -352,7 +352,8 @@
             "spacing": "small",
             "type": "stack"
           },
-          "selectionMode": "single"
+          "selectionMode": "single",
+          "windowing": "hostVirtualized"
         },
         "search": {
           "accessibilityLabel": "Search T3 Sidebar sessions",

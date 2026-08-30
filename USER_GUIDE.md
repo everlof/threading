@@ -320,6 +320,10 @@ outline, activity inbox, lifecycle view, grid, or a composition with its own hos
 and filters. Choose it under **View ▸ Navigator**. The choice is remembered, while **Native**
 always returns to Threading's built-in project and session list.
 
+Host-evaluated navigators can include the complete matching session catalogue, even in a large
+workspace. Threading keeps the ordering as lightweight data and creates row views only around the
+visible part of the list, so an extension does not have to cut its sidebar off at 1,000 sessions.
+
 The extension changes only the column's interior. Threading still owns the divider, collapse
 behavior, theme, accessibility, keyboard focus, and project/session navigation. If the selected
 extension stops, reloads, or returns an invalid view, the visible column immediately returns to

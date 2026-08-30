@@ -919,7 +919,7 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
         })
     }
 
-    func testOutputPinsSourceSessionRoutingAndBoundedOverflow() throws {
+    func testOutputPinsSourceSessionRoutingAndKeepsLegacyBoundsByDefault() throws {
         let output = ExtensionWorkspaceNavigatorPipelineOutput(
             collectionID: "sessions",
             itemLimit: 250,
@@ -934,6 +934,7 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
             .session(id: "session-1", projectID: "project-1")
         )
         XCTAssertEqual(output.overflow, .truncateWithNotice)
+        XCTAssertNil(output.windowing)
         XCTAssertEqual(
             try jsonObject(output)["activation"] as? String,
             "sourceSession"
@@ -961,6 +962,39 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
         XCTAssertTrue(overLimit.validationIssues().contains {
             $0.path == "pipeline.output.itemLimit"
         })
+    }
+
+    func testWindowingIsAnAdditiveFormatOneHintAndExplicitNullIsRejected() throws {
+        let output = ExtensionWorkspaceNavigatorPipelineOutput(
+            collectionID: "sessions",
+            windowing: .hostVirtualized,
+            rowTemplate: .text(
+                .fact(
+                    .init(ExtensionHostFactKey.sessionTitle),
+                    facet: .value,
+                    fallback: "Untitled"
+                ),
+                role: .body
+            )
+        )
+        let pipeline = ExtensionWorkspaceNavigatorPipeline(
+            consumes: [.init(key: ExtensionHostFactKey.sessionTitle)],
+            output: output
+        )
+
+        XCTAssertEqual(pipeline.formatVersion, 1)
+        XCTAssertEqual(pipeline.validationIssues(), [])
+        XCTAssertEqual(
+            try jsonObject(output)["windowing"] as? String,
+            "hostVirtualized"
+        )
+
+        var encoded = try jsonObject(output)
+        encoded["windowing"] = NSNull()
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ExtensionWorkspaceNavigatorPipelineOutput.self,
+            from: JSONSerialization.data(withJSONObject: encoded)
+        ))
     }
 
     func testEncodedOutputMatchesPublishedSchemaShape() throws {
@@ -998,6 +1032,11 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
             (properties["itemLimit"] as? [String: Any])?["maximum"] as? Int,
             ExtensionWorkspaceNavigatorPipeline.maximumOutputItems
         )
+        XCTAssertEqual(
+            (properties["windowing"] as? [String: Any])?["const"] as? String,
+            "hostVirtualized"
+        )
+        XCTAssertFalse(required.contains("windowing"))
     }
 
     func testPipelineRejectsInvalidLiteralAndFallbackImages() {

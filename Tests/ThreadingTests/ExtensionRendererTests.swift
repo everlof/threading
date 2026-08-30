@@ -3220,9 +3220,9 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     }
 
     /// Scaling gate: ordinary work is tens to hundreds of sessions with occasional fact edges;
-    /// this fixture holds 5,000 sessions, the 1,000-row output cap, a 100-keystroke burst, and an
-    /// exact fact edge. Preparation may scale on the worker, while enqueue is O(1), row creation
-    /// is O(visible), and the exact presentation mutation is O(changed).
+    /// this fixture holds 5,000 sessions in one host-windowed output, a 100-keystroke burst, and
+    /// an exact fact edge. Preparation may scale on the worker, while enqueue is O(1), row
+    /// creation is O(visible), and the exact presentation mutation is O(changed).
     func testStressPipelineNavigatorWhenEnabled() throws {
         guard ProcessInfo.processInfo.environment["THREADING_NAVIGATOR_PIPELINE_STRESS"] == "1"
         else {
@@ -3288,6 +3288,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
                 accessibilityLabel: "Find navigator sessions",
                 fields: [.init(titleKey)]
             ),
+            windowing: .hostVirtualized,
             template: .stack(axis: .vertical, spacing: .tight, children: [
                 .text(.fact(.init(titleKey), facet: .value, fallback: nil), role: .compactBody),
                 .status(
@@ -3319,7 +3320,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 720)
         let table = try waitForPipelineTable(
             in: host,
-            rowCount: ExtensionWorkspaceNavigatorPipeline.maximumOutputItems,
+            rowCount: sessionIDs.count,
             timeout: 5
         )
         let initialLogicalRows = table.numberOfRows
@@ -3329,6 +3330,11 @@ final class ExtensionRendererTests: HostedStoreTestCase {
             $0 as? WorkspaceNavigatorPipelineTemplateView
         }.count
         XCTAssertLessThan(liveTemplates, 50)
+        let overflow = try XCTUnwrap(descendants(in: host.view).first {
+            $0.accessibilityIdentifier() == "workspace.navigator.pipeline-overflow"
+        })
+        XCTAssertTrue(overflow.isHidden)
+        XCTAssertEqual((overflow as? NSTextField)?.stringValue, "")
 
         let patchStart = CFAbsoluteTimeGetCurrent()
         try registry.replaceHostFacts(
@@ -3355,6 +3361,25 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         XCTAssertEqual(completeSnapshots, 1)
         XCTAssertEqual(exactPatches, 1)
 
+        let tailStart = CFAbsoluteTimeGetCurrent()
+        let tailRow = sessionIDs.count - 1
+        table.scrollRowToVisible(tailRow)
+        table.layoutSubtreeIfNeeded()
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        _ = table.view(atColumn: 0, row: tailRow, makeIfNecessary: true)
+        let tailMilliseconds = (CFAbsoluteTimeGetCurrent() - tailStart) * 1_000
+        XCTAssertTrue(descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }.contains("session-4999"))
+        let tailVisibleRows = table.rows(in: table.visibleRect)
+        XCTAssertTrue(NSLocationInRange(tailRow, tailVisibleRows))
+        let tailLiveTemplates = descendants(in: host.view).compactMap {
+            $0 as? WorkspaceNavigatorPipelineTemplateView
+        }.count
+        XCTAssertLessThan(tailLiveTemplates, 50)
+        host.synchronizeSelection(with: .session(id: "session-4999", projectID: nil))
+        XCTAssertEqual(table.selectedRow, tailRow)
+
         let search = try XCTUnwrap(
             descendants(in: host.view).compactMap { $0 as? ThemedSearchField }.first
         )
@@ -3376,14 +3401,33 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         XCTAssertTrue(descendants(in: host.view).compactMap {
             ($0 as? NSTextField)?.stringValue
         }.contains("session-4999"))
+        XCTAssertEqual(filteredTable.selectedRow, 0)
+
+        search.stringValue = ""
+        search.delegate?.controlTextDidChange?(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: search
+        ))
+        let restoredTable = try waitForPipelineTable(
+            in: host,
+            rowCount: sessionIDs.count,
+            timeout: 5
+        )
+        XCTAssertTrue(restoredTable === table)
+        XCTAssertEqual(restoredTable.selectedRow, tailRow)
+        XCTAssertTrue(NSLocationInRange(
+            tailRow,
+            restoredTable.rows(in: restoredTable.visibleRect)
+        ))
         XCTAssertEqual(completeSnapshots, 1)
         XCTAssertTrue(router.invocations.isEmpty)
         print(String(format:
             "THREADING_PERF workspace-navigator-pipeline sessions=5000 logical_rows=%d "
-                + "live_templates=%d mount_ms=%.2f exact_patch_ms=%.2f "
+                + "live_templates=%d tail_live_templates=%d mount_ms=%.2f "
+                + "tail_ms=%.2f exact_patch_ms=%.2f "
                 + "query_enqueue_ms=%.2f query_settle_ms=%.2f",
-            initialLogicalRows, liveTemplates, mountMilliseconds, patchMilliseconds,
-            enqueueMilliseconds, settleMilliseconds))
+            initialLogicalRows, liveTemplates, tailLiveTemplates, mountMilliseconds,
+            tailMilliseconds, patchMilliseconds, enqueueMilliseconds, settleMilliseconds))
     }
 
     func testPipelineNavigatorBoundsOutputAndKeepsOverflowOutsideSelection() throws {
@@ -8341,6 +8385,14 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         "gallery.extension.component.project-session-ci"
       )
     )
+    XCTAssertTrue(
+      identifiers.contains("gallery.story.Workspace navigator")
+    )
+    XCTAssertTrue(identifiers.contains("workspace.navigator.search-band"))
+    XCTAssertTrue(identifiers.contains("workspace.navigator.pipeline-results"))
+    XCTAssertTrue(identifiers.contains("workspace.navigator.pipeline-template"))
+    XCTAssertTrue(identifiers.contains("workspace.navigator.pipeline-placeholder"))
+    XCTAssertTrue(identifiers.contains("workspace.navigator.pipeline-overflow"))
     XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
 
     let sessionRow = try XCTUnwrap(
@@ -9218,6 +9270,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     search: ExtensionWorkspaceNavigatorSearch? = nil,
     filters: [ExtensionWorkspaceNavigatorFilterClause] = [],
     itemLimit: Int = ExtensionWorkspaceNavigatorPipeline.maximumOutputItems,
+    windowing: ExtensionWorkspaceNavigatorPipelineWindowing? = nil,
     template: ExtensionWorkspaceNavigatorTemplateNode,
     loadActionID: String? = nil
   ) -> ExtensionWorkspaceNavigator {
@@ -9235,6 +9288,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         output: .init(
           collectionID: "pipeline-sessions",
           itemLimit: itemLimit,
+          windowing: windowing,
           rowTemplate: template,
           emptyState: .init(title: "Nothing matches")
         )

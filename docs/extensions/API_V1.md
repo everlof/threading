@@ -38,7 +38,9 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   and `archive` row intents without invoking the extension. Intent buttons are disclosed before
   enable/update, target only the current source session after host revalidation, and never expose
   the gesture, session identity, or mutation result to the extension. Materialized v1 navigators
-  remain runtime-only and compatible.
+  remain runtime-only and compatible. Pipeline output may opt into host virtualization of its
+  complete evaluated ordering; older format-1 hosts ignore that additive hint and retain the
+  bounded 1,000-row compatibility presentation.
 - Package-owned localization catalogues with host language negotiation. The selected catalogue
   localizes static Settings and runtime semantic contributions, and is also exposed through
   `ExtensionLocalizer` for dynamic messages and formatted copy.

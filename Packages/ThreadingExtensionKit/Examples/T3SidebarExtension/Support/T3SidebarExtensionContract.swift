@@ -123,6 +123,7 @@ public enum T3SidebarExtensionContract {
                 ],
                 output: .init(
                     collectionID: "t3-sessions",
+                    windowing: .hostVirtualized,
                     rowTemplate: .stack(
                         axis: .horizontal,
                         spacing: .small,

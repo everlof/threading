@@ -175,6 +175,7 @@ struct ExtensionLocalizationResolver: Sendable {
                 activation: pipeline.output.activation,
                 itemLimit: pipeline.output.itemLimit,
                 overflow: pipeline.output.overflow,
+                windowing: pipeline.output.windowing,
                 rowTemplate: workspaceNavigatorTemplate(pipeline.output.rowTemplate),
                 emptyState: pipeline.output.emptyState.map {
                     ExtensionWorkspaceNavigatorEmptyState(

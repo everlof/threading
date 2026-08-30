@@ -795,13 +795,24 @@ public enum ExtensionWorkspaceNavigatorPipelineActivation: String, Codable, Equa
     }
 }
 
-/// Format-1 behavior when more source subjects survive than its materialized output bound.
+/// Legacy behavior when more source subjects survive than its materialized output bound.
 ///
 /// The host emits the first `itemLimit` subjects in final bucket and sort order, then appends a
-/// host-localized, nonselectable notice reporting the omitted count. Rollout 7 replaces this
-/// deliberately finite bridge with a windowed output format.
+/// host-localized, nonselectable notice reporting the omitted count. A windowing-aware host
+/// ignores this compatibility behavior when `output.windowing` is present.
 public enum ExtensionWorkspaceNavigatorPipelineOverflow: String, Codable, Equatable, Sendable {
     case truncateWithNotice
+}
+
+/// An additive output hint which lets a capable host expose the complete evaluated ordering.
+///
+/// The host keeps lightweight row identities for the complete result but realizes semantic row
+/// templates only for the collection viewport. Older format-1 hosts ignore this optional field
+/// and retain the safe `itemLimit` / `truncateWithNotice` bridge.
+public enum ExtensionWorkspaceNavigatorPipelineWindowing:
+    String, Codable, Equatable, Sendable
+{
+    case hostVirtualized
 }
 
 /// How a user-selected registered fact participates in a navigator pipeline.
@@ -906,7 +917,8 @@ public struct ExtensionWorkspaceNavigatorRegisteredFactOption:
 }
 
 /// The stable collection shell produced by the pipeline. Format 1 accepts a single-select list;
-/// later output shapes remain additive enum cases rather than claims made by this first host.
+/// `windowing` is an additive host capability hint, while later output shapes remain additive
+/// enum cases rather than claims made by this first host.
 public struct ExtensionWorkspaceNavigatorPipelineOutput: Codable, Equatable, Sendable {
     public let collectionID: String
     public let layout: ExtensionWorkspaceNavigatorCollectionLayout
@@ -914,6 +926,7 @@ public struct ExtensionWorkspaceNavigatorPipelineOutput: Codable, Equatable, Sen
     public let activation: ExtensionWorkspaceNavigatorPipelineActivation
     public let itemLimit: Int
     public let overflow: ExtensionWorkspaceNavigatorPipelineOverflow
+    public let windowing: ExtensionWorkspaceNavigatorPipelineWindowing?
     public let rowTemplate: ExtensionWorkspaceNavigatorTemplateNode
     public let emptyState: ExtensionWorkspaceNavigatorEmptyState?
 
@@ -924,6 +937,7 @@ public struct ExtensionWorkspaceNavigatorPipelineOutput: Codable, Equatable, Sen
         activation: ExtensionWorkspaceNavigatorPipelineActivation = .sourceSession,
         itemLimit: Int = ExtensionWorkspaceNavigatorPipeline.maximumOutputItems,
         overflow: ExtensionWorkspaceNavigatorPipelineOverflow = .truncateWithNotice,
+        windowing: ExtensionWorkspaceNavigatorPipelineWindowing? = nil,
         rowTemplate: ExtensionWorkspaceNavigatorTemplateNode,
         emptyState: ExtensionWorkspaceNavigatorEmptyState? = nil
     ) {
@@ -933,8 +947,79 @@ public struct ExtensionWorkspaceNavigatorPipelineOutput: Codable, Equatable, Sen
         self.activation = activation
         self.itemLimit = itemLimit
         self.overflow = overflow
+        self.windowing = windowing
         self.rowTemplate = rowTemplate
         self.emptyState = emptyState
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case collectionID
+        case layout
+        case selectionMode
+        case activation
+        case itemLimit
+        case overflow
+        case windowing
+        case rowTemplate
+        case emptyState
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        collectionID = try container.decode(String.self, forKey: .collectionID)
+        layout = try container.decode(
+            ExtensionWorkspaceNavigatorCollectionLayout.self,
+            forKey: .layout
+        )
+        selectionMode = try container.decode(
+            ExtensionWorkspaceNavigatorSelectionMode.self,
+            forKey: .selectionMode
+        )
+        activation = try container.decode(
+            ExtensionWorkspaceNavigatorPipelineActivation.self,
+            forKey: .activation
+        )
+        itemLimit = try container.decode(Int.self, forKey: .itemLimit)
+        overflow = try container.decode(
+            ExtensionWorkspaceNavigatorPipelineOverflow.self,
+            forKey: .overflow
+        )
+        if container.contains(.windowing) {
+            guard try !container.decodeNil(forKey: .windowing) else {
+                throw DecodingError.dataCorruptedError(
+                    forKey: .windowing,
+                    in: container,
+                    debugDescription: "windowing must be omitted rather than null"
+                )
+            }
+            windowing = try container.decode(
+                ExtensionWorkspaceNavigatorPipelineWindowing.self,
+                forKey: .windowing
+            )
+        } else {
+            windowing = nil
+        }
+        rowTemplate = try container.decode(
+            ExtensionWorkspaceNavigatorTemplateNode.self,
+            forKey: .rowTemplate
+        )
+        emptyState = try container.decodeIfPresent(
+            ExtensionWorkspaceNavigatorEmptyState.self,
+            forKey: .emptyState
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(collectionID, forKey: .collectionID)
+        try container.encode(layout, forKey: .layout)
+        try container.encode(selectionMode, forKey: .selectionMode)
+        try container.encode(activation, forKey: .activation)
+        try container.encode(itemLimit, forKey: .itemLimit)
+        try container.encode(overflow, forKey: .overflow)
+        try container.encodeIfPresent(windowing, forKey: .windowing)
+        try container.encode(rowTemplate, forKey: .rowTemplate)
+        try container.encodeIfPresent(emptyState, forKey: .emptyState)
     }
 }
 

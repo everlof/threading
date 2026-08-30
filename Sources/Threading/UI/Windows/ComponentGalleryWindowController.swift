@@ -218,6 +218,10 @@ final class ComponentGalleryViewController: NSViewController {
         "UsageDashboardView",
         "UsageLimitLegendView",
         "UsageReadingLabel",
+        "WorkspaceNavigatorPipelinePlaceholderView",
+        "WorkspaceNavigatorPipelineResultsView",
+        "WorkspaceNavigatorPipelineSearchBandView",
+        "WorkspaceNavigatorPipelineTemplateView",
         "WorkingOrbView",
         "WindowBackdrop",
         "WindowChromeButton",
@@ -5001,6 +5005,13 @@ final class ComponentGalleryViewController: NSViewController {
                 semanticHierarchy
             ),
             story(
+                "Workspace navigator",
+                "The host-owned search band, virtualized results frame, realized semantic rows, "
+                    + "row intents, overflow notice, and zero-result answer used by focused "
+                    + "extension sidebars.",
+                makeWorkspaceNavigatorPipelineStory()
+            ),
+            story(
                 "ExtensionNode renderer",
                 "Text, status, separation, layout, actions, disabled state, and semantic roles.",
                 rendered
@@ -5020,6 +5031,130 @@ final class ComponentGalleryViewController: NSViewController {
             note: "Semantic values cross the extension boundary; the same themed controls render them.",
             rows: rows
         )
+    }
+
+    private func makeWorkspaceNavigatorPipelineStory() -> NSView {
+        func row(
+            _ node: WorkspaceNavigatorRealizedTemplateNode
+        ) -> WorkspaceNavigatorPipelineTemplateView {
+            let view = WorkspaceNavigatorPipelineTemplateView(
+                node: node,
+                imageResolver: { _ in nil },
+                onIntent: { [weak self] intent in
+                    self?.showReceipt(intent.presentationName)
+                }
+            )
+            view.setIntentControlsPresented(true)
+            view.heightAnchor.constraint(equalToConstant: 34).isActive = true
+            return view
+        }
+
+        let activeRows = [
+            row(.text(L10n.string("Review"), role: .compactDetail)),
+            row(.stack(axis: .horizontal, spacing: .small, children: [
+                .text(L10n.string("Review before publishing"), role: .compactBody),
+                .flexibleSpacer,
+                .status(L10n.string("Waiting for you"), role: .warning),
+                .intent(.pin),
+            ])),
+            row(.stack(axis: .horizontal, spacing: .small, children: [
+                .text(L10n.string("Working conversations"), role: .body),
+                .flexibleSpacer,
+                .activityIndicator(accessibilityLabel: L10n.string("Working")),
+                .intent(.archive),
+            ])),
+        ]
+        let activeRowsStack = NSStackView(views: activeRows)
+        activeRowsStack.orientation = .vertical
+        activeRowsStack.alignment = .leading
+        activeRowsStack.spacing = Design.Spacing.hairline
+        for activeRow in activeRows {
+            activeRow.widthAnchor.constraint(equalTo: activeRowsStack.widthAnchor).isActive = true
+        }
+        let activeContent = NSView()
+        activeRowsStack.translatesAutoresizingMaskIntoConstraints = false
+        activeContent.addSubview(activeRowsStack)
+        NSLayoutConstraint.activate([
+            activeRowsStack.topAnchor.constraint(
+                equalTo: activeContent.topAnchor,
+                constant: Design.Spacing.small
+            ),
+            activeRowsStack.leadingAnchor.constraint(
+                equalTo: activeContent.leadingAnchor,
+                constant: Design.Spacing.medium
+            ),
+            activeRowsStack.trailingAnchor.constraint(
+                equalTo: activeContent.trailingAnchor,
+                constant: -Design.Spacing.medium
+            ),
+            activeRowsStack.bottomAnchor.constraint(
+                lessThanOrEqualTo: activeContent.bottomAnchor,
+                constant: -Design.Spacing.small
+            ),
+        ])
+
+        let activeSearch = WorkspaceNavigatorPipelineSearchBandView()
+        activeSearch.configure(
+            placeholder: L10n.string("Search conversations"),
+            accessibilityLabel: L10n.string("Search conversations"),
+            // localization-ignore: fixed gallery query entered as fixture data.
+            query: "review"
+        )
+        activeSearch.setPresented(true)
+        let activeResults = WorkspaceNavigatorPipelineResultsView(
+            content: activeContent,
+            overflowText: L10n.format("%lld more sessions are not shown.", 2)
+        )
+
+        let emptySearch = WorkspaceNavigatorPipelineSearchBandView()
+        emptySearch.configure(
+            placeholder: L10n.string("Search conversations"),
+            accessibilityLabel: L10n.string("Search conversations"),
+            // localization-ignore: fixed gallery query entered as fixture data.
+            query: "quiet"
+        )
+        emptySearch.setPresented(true)
+        let emptyResults = WorkspaceNavigatorPipelineResultsView(
+            content: NSView(),
+            overflowText: nil
+        )
+        emptyResults.setEmptyState(
+            title: L10n.string("No sessions match this navigator."),
+            detail: L10n.string("Clear Search")
+        )
+
+        func panel(
+            search: WorkspaceNavigatorPipelineSearchBandView,
+            results: WorkspaceNavigatorPipelineResultsView
+        ) -> NSView {
+            let separator = SeparatorView()
+            let panel = NSStackView(views: [search, separator, results])
+            panel.orientation = .vertical
+            panel.alignment = .leading
+            panel.spacing = 0
+            panel.applySurface(
+                fill: Design.Surface.ground,
+                radius: .control,
+                border: Design.Surface.border
+            )
+            for child in [search, separator, results] {
+                child.widthAnchor.constraint(equalTo: panel.widthAnchor).isActive = true
+            }
+            NSLayoutConstraint.activate([
+                panel.widthAnchor.constraint(equalToConstant: 360),
+                results.heightAnchor.constraint(equalToConstant: 150),
+            ])
+            return panel
+        }
+
+        let comparison = NSStackView(views: [
+            panel(search: activeSearch, results: activeResults),
+            panel(search: emptySearch, results: emptyResults),
+        ])
+        comparison.orientation = .horizontal
+        comparison.alignment = .top
+        comparison.spacing = Design.Spacing.large
+        return comparison
     }
 
     private func makeSemanticSceneStory() -> NSView {
