@@ -302,6 +302,216 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
         ))
     }
 
+    func testRegisteredFactOptionsRoundTripWhileOlderPipelineWireDefaultsEmpty() throws {
+        XCTAssertEqual(
+            ExtensionWorkspaceNavigatorPipeline.maximumRegisteredFactChoicesPerOption,
+            128
+        )
+        let title = ExtensionWorkspaceNavigatorFactReference(ExtensionHostFactKey.sessionTitle)
+        let pipeline = ExtensionWorkspaceNavigatorPipeline(
+            consumes: [.init(key: title.key, requirement: .required)],
+            registeredFactOptions: [
+                .init(
+                    id: "group-by-fact",
+                    title: "Group by",
+                    application: .bucket(direction: .ascending, unknownTitle: "Unknown")
+                ),
+                .init(
+                    id: "sort-by-fact",
+                    title: "Sort by",
+                    application: .sort(direction: .descending)
+                ),
+            ],
+            output: output(titleFact: title.key)
+        )
+
+        XCTAssertEqual(pipeline.validationIssues(), [])
+        let data = try JSONEncoder().encode(pipeline)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertNotNil(object["registeredFactOptions"])
+        XCTAssertEqual(
+            try JSONDecoder().decode(ExtensionWorkspaceNavigatorPipeline.self, from: data),
+            pipeline
+        )
+
+        var olderWire = object
+        olderWire.removeValue(forKey: "registeredFactOptions")
+        let decodedOlderWire = try JSONDecoder().decode(
+            ExtensionWorkspaceNavigatorPipeline.self,
+            from: JSONSerialization.data(withJSONObject: olderWire)
+        )
+        XCTAssertEqual(decodedOlderWire.registeredFactOptions, [])
+
+        let pipelineWithoutControls = try XCTUnwrap(activityInboxNavigator().pipeline)
+        let oldShapeObject = try jsonObject(pipelineWithoutControls)
+        XCTAssertNil(oldShapeObject["registeredFactOptions"])
+
+        var explicitNull = object
+        explicitNull["registeredFactOptions"] = NSNull()
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ExtensionWorkspaceNavigatorPipeline.self,
+            from: JSONSerialization.data(withJSONObject: explicitNull)
+        ))
+    }
+
+    func testRegisteredFactOptionsAreBoundedAndShareTheStaticOptionNamespace() {
+        let title = ExtensionWorkspaceNavigatorFactReference(ExtensionHostFactKey.sessionTitle)
+        let pipeline = ExtensionWorkspaceNavigatorPipeline(
+            consumes: [.init(key: title.key)],
+            registeredFactOptions: [
+                .init(
+                    id: "static-option",
+                    title: " ",
+                    application: .bucket(direction: .ascending, unknownTitle: " ")
+                ),
+                .init(
+                    id: "static-option",
+                    title: "Second group",
+                    application: .bucket(direction: .descending, unknownTitle: "Unknown")
+                ),
+                .init(
+                    id: "sort-again",
+                    title: "Sort",
+                    application: .sort(direction: .ascending)
+                ),
+            ],
+            output: output(titleFact: title.key)
+        )
+        let issues = pipeline.validationIssues(
+            options: [
+                .init(
+                    id: "static-option",
+                    title: "Static",
+                    control: .toggle(defaultValue: false)
+                ),
+            ]
+        )
+
+        XCTAssertTrue(issues.contains {
+            $0.path == "pipeline.registeredFactOptions"
+                && $0.message.contains("at most 2")
+        })
+        XCTAssertTrue(issues.contains {
+            $0.path == "pipeline.registeredFactOptions"
+                && $0.message.contains("one bucket")
+        })
+        XCTAssertTrue(issues.contains {
+            $0.path == "pipeline.registeredFactOptions[0].id"
+                && $0.message.contains("static navigator option")
+        })
+        XCTAssertTrue(issues.contains {
+            $0.path == "pipeline.registeredFactOptions[1].id"
+                && $0.message.contains("unique")
+        })
+        XCTAssertTrue(issues.contains {
+            $0.path == "pipeline.registeredFactOptions[0].title"
+                && $0.message.contains("must not be empty")
+        })
+        XCTAssertTrue(issues.contains {
+            $0.path == "pipeline.registeredFactOptions[0].application.unknownTitle"
+                && $0.message.contains("must not be empty")
+        })
+    }
+
+    func testRegisteredFactOptionsAllowAtMostOneSortControl() {
+        let title = ExtensionWorkspaceNavigatorFactReference(ExtensionHostFactKey.sessionTitle)
+        let pipeline = ExtensionWorkspaceNavigatorPipeline(
+            consumes: [.init(key: title.key)],
+            registeredFactOptions: [
+                .init(
+                    id: "first-sort",
+                    title: "First sort",
+                    application: .sort(direction: .ascending)
+                ),
+                .init(
+                    id: "second-sort",
+                    title: "Second sort",
+                    application: .sort(direction: .descending)
+                ),
+            ],
+            output: output(titleFact: title.key)
+        )
+
+        XCTAssertTrue(pipeline.validationIssues().contains {
+            $0.path == "pipeline.registeredFactOptions"
+                && $0.message.contains("one sort")
+        })
+    }
+
+    func testRegisteredFactOptionIDsCannotDriveStaticConditions() {
+        let title = ExtensionWorkspaceNavigatorFactReference(ExtensionHostFactKey.sessionTitle)
+        let pipeline = ExtensionWorkspaceNavigatorPipeline(
+            consumes: [.init(key: title.key)],
+            registeredFactOptions: [
+                .init(
+                    id: "group-by-fact",
+                    title: "Group by",
+                    application: .bucket(direction: .ascending, unknownTitle: "Unknown")
+                ),
+            ],
+            sort: [
+                .init(
+                    when: [
+                        .init(optionID: "group-by-fact", equals: .string("some.fact@1")),
+                    ],
+                    operand: .init(title),
+                    direction: .ascending
+                ),
+            ],
+            output: output(titleFact: title.key)
+        )
+
+        XCTAssertTrue(pipeline.validationIssues().contains {
+            $0.path == "pipeline.sort[0].when[0].optionID"
+                && $0.message.contains("does not name a declared navigator option")
+        })
+    }
+
+    func testRegisteredFactParentRowsCountTowardTheNavigatorMenuBound() {
+        let title = ExtensionWorkspaceNavigatorFactReference(ExtensionHostFactKey.sessionTitle)
+        let choices = (0 ..< 29).map {
+            ExtensionSettingOption(id: "choice-\($0)", title: "Choice \($0)")
+        }
+        let pipeline = ExtensionWorkspaceNavigatorPipeline(
+            consumes: [.init(key: title.key)],
+            registeredFactOptions: [
+                .init(
+                    id: "group-by-fact",
+                    title: "Group by",
+                    application: .bucket(direction: .ascending, unknownTitle: "Unknown")
+                ),
+            ],
+            sort: [
+                .init(
+                    when: [.init(optionID: "static-sort", equals: .string("choice-0"))],
+                    operand: .init(title),
+                    direction: .ascending
+                ),
+            ],
+            output: output(titleFact: title.key)
+        )
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "menu-bound",
+            title: "Menu bound",
+            root: .content(.status("Requires a newer host", role: .neutral)),
+            options: [
+                .init(
+                    id: "static-sort",
+                    title: "Static sort",
+                    control: .choice(defaultValue: "choice-0", options: choices)
+                ),
+            ],
+            pipeline: pipeline
+        )
+
+        XCTAssertTrue(navigator.validationIssues(path: "navigator").contains {
+            $0.path == "navigator.options"
+                && $0.message.contains("requires 31")
+        })
+    }
+
     func testEveryTaggedPipelineWireShapeIsPinnedExactly() throws {
         let title = ExtensionWorkspaceNavigatorFactReference(ExtensionHostFactKey.sessionTitle)
         let operand = ExtensionWorkspaceNavigatorFactOperand(title)
@@ -382,6 +592,27 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
             {"type":"rules","rules":[{"id":"ready","title":"Ready","predicate":{"type":"isPresent","fact":{"key":{"id":"session.title","version":1},"scope":"item"}}}],"unmatched":{"type":"bucket","id":"other","title":"Other"}}
             """
         )
+        try assertWire(
+            ExtensionWorkspaceNavigatorRegisteredFactApplication.bucket(
+                direction: .ascending,
+                unknownTitle: "Unknown"
+            ),
+            equals: """
+            {"type":"bucket","direction":"ascending","unknownTitle":"Unknown"}
+            """
+        )
+        try assertWire(
+            ExtensionWorkspaceNavigatorRegisteredFactApplication.sort(
+                direction: .descending
+            ),
+            equals: """
+            {"type":"sort","direction":"descending"}
+            """
+        )
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ExtensionWorkspaceNavigatorRegisteredFactApplication.self,
+            from: Data(#"{"type":"filter","direction":"ascending"}"#.utf8)
+        ))
 
         try assertWire(
             ExtensionWorkspaceNavigatorTextBinding.literal("Title"),

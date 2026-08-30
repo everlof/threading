@@ -804,6 +804,107 @@ public enum ExtensionWorkspaceNavigatorPipelineOverflow: String, Codable, Equata
     case truncateWithNotice
 }
 
+/// How a user-selected registered fact participates in a navigator pipeline.
+///
+/// Threading supplies the eligible fact catalogue and persists the selected key. The extension
+/// declares only the transform shape and presentation strings; it never receives the catalogue,
+/// selected key, or resolved fact values.
+public enum ExtensionWorkspaceNavigatorRegisteredFactApplication:
+    Codable, Equatable, Sendable
+{
+    /// Replaces the pipeline's active static bucket clause when the user selects a fact. Present
+    /// scalar groups follow `direction`; subjects with no current value are retained in the named
+    /// unknown bucket, which is always last. Selecting `None` restores the static bucket clause.
+    case bucket(
+        direction: ExtensionWorkspaceNavigatorSortDirection,
+        unknownTitle: String
+    )
+    /// Adds the selected fact as the primary sort key. Missing values follow present values in
+    /// either direction, and active static sort clauses remain deterministic tie-breakers.
+    case sort(direction: ExtensionWorkspaceNavigatorSortDirection)
+
+    private enum CodingKeys: String, CodingKey {
+        case type
+        case direction
+        case unknownTitle
+    }
+
+    private enum Kind: String, Codable {
+        case bucket
+        case sort
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        switch try container.decode(Kind.self, forKey: .type) {
+        case .bucket:
+            self = try .bucket(
+                direction: container.decode(
+                    ExtensionWorkspaceNavigatorSortDirection.self,
+                    forKey: .direction
+                ),
+                unknownTitle: container.decode(String.self, forKey: .unknownTitle)
+            )
+        case .sort:
+            self = try .sort(direction: container.decode(
+                ExtensionWorkspaceNavigatorSortDirection.self,
+                forKey: .direction
+            ))
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .bucket(direction, unknownTitle):
+            try container.encode(Kind.bucket, forKey: .type)
+            try container.encode(direction, forKey: .direction)
+            try container.encode(unknownTitle, forKey: .unknownTitle)
+        case let .sort(direction):
+            try container.encode(Kind.sort, forKey: .type)
+            try container.encode(direction, forKey: .direction)
+        }
+    }
+}
+
+/// One host-rendered control for choosing an eligible fact from Threading's live registry.
+///
+/// The control always has a host-owned `None` choice plus at most 128 fact rows, including its own
+/// definitions: bucket controls require `.groupable`, sort controls require `.sortable`, and a
+/// definition must apply to sessions, repository branches, or repositories. Project-only and
+/// terminal-only definitions are not resolvable by format 1. The registry's deterministic winning
+/// definition (host first, then source order, extension identifier and process generation) is the
+/// sole source of display name, usages and eligibility for a key; metadata from lower-precedence
+/// providers is never merged. Choices are ordered by localized display name and then key.
+///
+/// A selected live eligible key is always one of those 128 rows: if it falls outside the sorted
+/// prefix, it replaces the final admitted row. If the key is unavailable or no longer eligible,
+/// one host-localized unavailable row for that key reserves a slot instead, leaving at most 127
+/// live rows. This keeps the selection visible and clearable without exceeding 129 submenu rows
+/// including `None`.
+///
+/// The selected key is retained so the user's arrangement returns when the same eligible key comes
+/// back. While unavailable, bucket application puts every subject in `unknownTitle`; sort
+/// application is a no-op before static tie-breakers. This dynamic absence never triggers the
+/// pipeline's `required` / `enhances` degradation rules.
+public struct ExtensionWorkspaceNavigatorRegisteredFactOption:
+    Codable, Equatable, Sendable
+{
+    public let id: String
+    public let title: String
+    public let application: ExtensionWorkspaceNavigatorRegisteredFactApplication
+
+    public init(
+        id: String,
+        title: String,
+        application: ExtensionWorkspaceNavigatorRegisteredFactApplication
+    ) {
+        self.id = id
+        self.title = title
+        self.application = application
+    }
+}
+
 /// The stable collection shell produced by the pipeline. Format 1 accepts a single-select list;
 /// later output shapes remain additive enum cases rather than claims made by this first host.
 public struct ExtensionWorkspaceNavigatorPipelineOutput: Codable, Equatable, Sendable {
@@ -857,10 +958,17 @@ public struct ExtensionWorkspaceNavigatorPipeline: Codable, Equatable, Sendable 
     public static let maximumTemplateNodes = 32
     public static let maximumTemplateTextLength = 1000
     public static let maximumOutputItems = 1000
+    public static let maximumRegisteredFactOptions = 2
+    public static let maximumRegisteredFactChoicesPerOption = 128
 
     public let formatVersion: Int
     public let source: ExtensionWorkspaceNavigatorPipelineSource
     public let consumes: [ExtensionWorkspaceNavigatorFactConsumption]
+    /// Bounded host controls which let the user select eligible registered facts at runtime.
+    ///
+    /// These are deliberately separate from `consumes`: their selected keys are discovered and
+    /// resolved by Threading without becoming static extension dependencies.
+    public let registeredFactOptions: [ExtensionWorkspaceNavigatorRegisteredFactOption]
     public let search: ExtensionWorkspaceNavigatorSearch?
     public let filters: [ExtensionWorkspaceNavigatorFilterClause]
     public let buckets: [ExtensionWorkspaceNavigatorBucketClause]
@@ -871,6 +979,7 @@ public struct ExtensionWorkspaceNavigatorPipeline: Codable, Equatable, Sendable 
         formatVersion: Int = Self.currentFormatVersion,
         source: ExtensionWorkspaceNavigatorPipelineSource = .sessions,
         consumes: [ExtensionWorkspaceNavigatorFactConsumption],
+        registeredFactOptions: [ExtensionWorkspaceNavigatorRegisteredFactOption] = [],
         search: ExtensionWorkspaceNavigatorSearch? = nil,
         filters: [ExtensionWorkspaceNavigatorFilterClause] = [],
         buckets: [ExtensionWorkspaceNavigatorBucketClause] = [],
@@ -880,11 +989,80 @@ public struct ExtensionWorkspaceNavigatorPipeline: Codable, Equatable, Sendable 
         self.formatVersion = formatVersion
         self.source = source
         self.consumes = consumes
+        self.registeredFactOptions = registeredFactOptions
         self.search = search
         self.filters = filters
         self.buckets = buckets
         self.sort = sort
         self.output = output
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case formatVersion
+        case source
+        case consumes
+        case registeredFactOptions
+        case search
+        case filters
+        case buckets
+        case sort
+        case output
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        formatVersion = try container.decode(Int.self, forKey: .formatVersion)
+        source = try container.decode(
+            ExtensionWorkspaceNavigatorPipelineSource.self,
+            forKey: .source
+        )
+        consumes = try container.decode(
+            [ExtensionWorkspaceNavigatorFactConsumption].self,
+            forKey: .consumes
+        )
+        registeredFactOptions = if container.contains(.registeredFactOptions) {
+            try container.decode(
+                [ExtensionWorkspaceNavigatorRegisteredFactOption].self,
+                forKey: .registeredFactOptions
+            )
+        } else {
+            []
+        }
+        search = try container.decodeIfPresent(
+            ExtensionWorkspaceNavigatorSearch.self,
+            forKey: .search
+        )
+        filters = try container.decode(
+            [ExtensionWorkspaceNavigatorFilterClause].self,
+            forKey: .filters
+        )
+        buckets = try container.decode(
+            [ExtensionWorkspaceNavigatorBucketClause].self,
+            forKey: .buckets
+        )
+        sort = try container.decode(
+            [ExtensionWorkspaceNavigatorSortClause].self,
+            forKey: .sort
+        )
+        output = try container.decode(
+            ExtensionWorkspaceNavigatorPipelineOutput.self,
+            forKey: .output
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(formatVersion, forKey: .formatVersion)
+        try container.encode(source, forKey: .source)
+        try container.encode(consumes, forKey: .consumes)
+        if !registeredFactOptions.isEmpty {
+            try container.encode(registeredFactOptions, forKey: .registeredFactOptions)
+        }
+        try container.encodeIfPresent(search, forKey: .search)
+        try container.encode(filters, forKey: .filters)
+        try container.encode(buckets, forKey: .buckets)
+        try container.encode(sort, forKey: .sort)
+        try container.encode(output, forKey: .output)
     }
 
     public func validationIssues(
@@ -931,6 +1109,7 @@ private struct WorkspaceNavigatorPipelineValidator {
             append("\(path).formatVersion", "must equal 1")
         }
         validateConsumptions()
+        validateRegisteredFactOptions()
         validateSearch()
 
         if pipeline.filters.count > ExtensionWorkspaceNavigatorPipeline.maximumFilterClauses {
@@ -982,6 +1161,58 @@ private struct WorkspaceNavigatorPipelineValidator {
             if !seen.insert(consumption.key).inserted {
                 append("\(itemPath).key", "duplicates a consumed fact key")
             }
+        }
+    }
+
+    private mutating func validateRegisteredFactOptions() {
+        let factOptions = pipeline.registeredFactOptions
+        if factOptions.count
+            > ExtensionWorkspaceNavigatorPipeline.maximumRegisteredFactOptions
+        {
+            append(
+                "\(path).registeredFactOptions",
+                "must contain at most "
+                    + "\(ExtensionWorkspaceNavigatorPipeline.maximumRegisteredFactOptions) controls"
+            )
+        }
+
+        let staticOptionIDs = Set(options.map(\.id))
+        var seenIDs = Set<String>()
+        var bucketCount = 0
+        var sortCount = 0
+        for (index, option) in factOptions.enumerated() {
+            let optionPath = "\(path).registeredFactOptions[\(index)]"
+            validateContributionID(option.id, path: "\(optionPath).id")
+            validateText(option.title, path: "\(optionPath).title", maximum: 120)
+            if !seenIDs.insert(option.id).inserted {
+                append("\(optionPath).id", "must be unique within registered fact options")
+            }
+            if staticOptionIDs.contains(option.id) {
+                append("\(optionPath).id", "duplicates a static navigator option ID")
+            }
+            switch option.application {
+            case let .bucket(_, unknownTitle):
+                bucketCount += 1
+                validateText(
+                    unknownTitle,
+                    path: "\(optionPath).application.unknownTitle",
+                    maximum: 120
+                )
+            case .sort:
+                sortCount += 1
+            }
+        }
+        if bucketCount > 1 {
+            append(
+                "\(path).registeredFactOptions",
+                "must contain at most one bucket control"
+            )
+        }
+        if sortCount > 1 {
+            append(
+                "\(path).registeredFactOptions",
+                "must contain at most one sort control"
+            )
         }
     }
 

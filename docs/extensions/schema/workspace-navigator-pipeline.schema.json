@@ -240,6 +240,49 @@
         "direction": { "enum": ["ascending", "descending"] }
       }
     },
+    "registeredFactApplication": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "direction", "unknownTitle"],
+          "properties": {
+            "type": { "const": "bucket" },
+            "direction": { "enum": ["ascending", "descending"] },
+            "unknownTitle": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "pattern": "\\S"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "direction"],
+          "properties": {
+            "type": { "const": "sort" },
+            "direction": { "enum": ["ascending", "descending"] }
+          }
+        }
+      ]
+    },
+    "registeredFactOption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "application"],
+      "properties": {
+        "id": { "$ref": "workspace-navigator.schema.json#/$defs/contributionID" },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": "\\S"
+        },
+        "application": { "$ref": "#/$defs/registeredFactApplication" }
+      }
+    },
     "textBinding": {
       "oneOf": [
         {
@@ -452,6 +495,40 @@
               "requirement": { "enum": ["required", "enhances"] }
             }
           }
+        },
+        "registeredFactOptions": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/registeredFactOption" },
+          "allOf": [
+            {
+              "contains": {
+                "properties": {
+                  "application": {
+                    "properties": { "type": { "const": "bucket" } },
+                    "required": ["type"]
+                  }
+                },
+                "required": ["application"]
+              },
+              "minContains": 0,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "properties": {
+                  "application": {
+                    "properties": { "type": { "const": "sort" } },
+                    "required": ["type"]
+                  }
+                },
+                "required": ["application"]
+              },
+              "minContains": 0,
+              "maxContains": 1
+            }
+          ]
         },
         "search": {
           "type": "object",

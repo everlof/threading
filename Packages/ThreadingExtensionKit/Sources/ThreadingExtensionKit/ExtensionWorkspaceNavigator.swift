@@ -657,12 +657,17 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
                 message: "duplicates a declared navigator intent"
             ))
         }
+        // A dynamic fact control owns one bounded parent submenu. Its live catalogue children are
+        // capped separately by the host, but the parent still consumes one of this navigator's
+        // declared option-menu rows.
         let optionEntryCost = options.reduce(0) { $0 + $1.menuEntryCost }
+            + (pipeline?.registeredFactOptions.count ?? 0)
         if optionEntryCost > Self.maximumDeclaredOptionMenuEntries {
             issues.append(.init(
                 path: "\(path).options",
                 message: """
-                must require at most \(Self.maximumDeclaredOptionMenuEntries) menu entries; \
+                static and registered fact controls must require at most \
+                \(Self.maximumDeclaredOptionMenuEntries) menu entries; \
                 requires \(optionEntryCost)
                 """
             ))

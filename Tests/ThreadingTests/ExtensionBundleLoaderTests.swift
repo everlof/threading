@@ -60,6 +60,9 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             "Refresh": "Uppdatera",
             "Running": "Kör",
             "Grouping": "Gruppering",
+            "Group by fact": "Gruppera efter fakta",
+            "Unknown fact": "Okänd fakta",
+            "Sort by fact": "Sortera efter fakta",
             "Recent activity": "Senaste aktivitet",
             "Search sessions": "Sök sessioner",
             "Priority": "Prioritet",
@@ -176,6 +179,21 @@ final class ExtensionBundleLoaderTests: XCTestCase {
                         requirement: .enhances
                     )
                 ],
+                registeredFactOptions: [
+                    .init(
+                        id: "group-by-fact",
+                        title: "Group by fact",
+                        application: .bucket(
+                            direction: .ascending,
+                            unknownTitle: "Unknown fact"
+                        )
+                    ),
+                    .init(
+                        id: "sort-by-fact",
+                        title: "Sort by fact",
+                        application: .sort(direction: .descending)
+                    ),
+                ],
                 search: .init(
                     placeholder: "Search sessions",
                     accessibilityLabel: "Search sessions",
@@ -251,6 +269,15 @@ final class ExtensionBundleLoaderTests: XCTestCase {
         }
         XCTAssertEqual(localizedChoices.map(\.title), ["Senaste aktivitet", "Name"])
         XCTAssertEqual(
+            localizedNavigator.pipeline?.registeredFactOptions.map(\.title),
+            ["Gruppera efter fakta", "Sortera efter fakta"]
+        )
+        guard case .bucket(_, let unknownTitle) =
+            localizedNavigator.pipeline?.registeredFactOptions.first?.application else {
+            return XCTFail("localized navigator lost its registered fact bucket")
+        }
+        XCTAssertEqual(unknownTitle, "Okänd fakta")
+        XCTAssertEqual(
             localizedNavigator.pipeline?.search?.accessibilityLabel,
             "Sök sessioner"
         )
@@ -287,6 +314,16 @@ final class ExtensionBundleLoaderTests: XCTestCase {
                     key: ExtensionHostFactKey.sessionTitle,
                     requirement: .required
                 )],
+                registeredFactOptions: [
+                    .init(
+                        id: "group-by-fact",
+                        title: "Group by fact",
+                        application: .bucket(
+                            direction: .ascending,
+                            unknownTitle: "Unknown fact"
+                        )
+                    ),
+                ],
                 search: .init(
                     placeholder: "Search sessions",
                     accessibilityLabel: "Search sessions",
@@ -320,12 +357,22 @@ final class ExtensionBundleLoaderTests: XCTestCase {
         try rawRegistration.validate(for: manifest)
 
         let localizedRegistration = ExtensionLocalizationResolver(strings: [
-            "Activity": "Aktivitet",
-            "Ready": "Klar",
-            "Search sessions": "Sök sessioner",
-            "Untitled": "Namnlös",
+            "Group by fact": "Gruppera efter fakta",
+            "Unknown fact": "Okänd fakta",
         ]).registration(rawRegistration)
-        XCTAssertEqual(localizedRegistration.workspaceNavigators.first?.title, "Aktivitet")
+        let localizedNavigator = try XCTUnwrap(
+            localizedRegistration.workspaceNavigators.first
+        )
+        XCTAssertEqual(localizedNavigator.title, "Activity")
+        XCTAssertEqual(
+            localizedNavigator.pipeline?.registeredFactOptions.first?.title,
+            "Gruppera efter fakta"
+        )
+        guard case .bucket(_, let unknownTitle) =
+            localizedNavigator.pipeline?.registeredFactOptions.first?.application else {
+            return XCTFail("localized registration lost its registered fact bucket")
+        }
+        XCTAssertEqual(unknownTitle, "Okänd fakta")
         XCTAssertThrowsError(try localizedRegistration.validate(for: manifest)) { error in
             XCTAssertTrue((error as? ExtensionValidationError)?.issues.contains {
                 $0.path == "workspaceNavigators"

@@ -95,6 +95,61 @@ class WorkspaceNavigatorSchemaTests(unittest.TestCase):
         legacy_navigator.pop("pipeline")
         self.assert_invalid(self.manifest_validator, legacy)
 
+    def test_registered_fact_options_are_tagged_and_bounded(self) -> None:
+        manifest = copy.deepcopy(self.activity_manifest)
+        pipeline = manifest["workspaceNavigators"][0]["pipeline"]
+        pipeline["registeredFactOptions"] = [
+            {
+                "id": "group-by-fact",
+                "title": "Group by",
+                "application": {
+                    "type": "bucket",
+                    "direction": "ascending",
+                    "unknownTitle": "Unknown",
+                },
+            },
+            {
+                "id": "sort-by-fact",
+                "title": "Sort by",
+                "application": {"type": "sort", "direction": "descending"},
+            },
+        ]
+        self.assert_valid(self.manifest_validator, manifest)
+
+        duplicate_application = copy.deepcopy(manifest)
+        duplicate_application["workspaceNavigators"][0]["pipeline"][
+            "registeredFactOptions"
+        ][1]["application"] = {
+            "type": "bucket",
+            "direction": "descending",
+            "unknownTitle": "Missing",
+        }
+        self.assert_invalid(self.manifest_validator, duplicate_application)
+
+        too_many = copy.deepcopy(manifest)
+        too_many["workspaceNavigators"][0]["pipeline"][
+            "registeredFactOptions"
+        ].append(
+            {
+                "id": "third-fact-control",
+                "title": "Third",
+                "application": {"type": "sort", "direction": "ascending"},
+            }
+        )
+        self.assert_invalid(self.manifest_validator, too_many)
+
+        unknown_tag = copy.deepcopy(manifest)
+        unknown_tag["workspaceNavigators"][0]["pipeline"][
+            "registeredFactOptions"
+        ][0]["application"]["type"] = "filter"
+        self.assert_invalid(self.manifest_validator, unknown_tag)
+
+        missing_unknown_title = copy.deepcopy(manifest)
+        del missing_unknown_title["workspaceNavigators"][0]["pipeline"][
+            "registeredFactOptions"
+        ][0]["application"]["unknownTitle"]
+        self.assert_invalid(self.manifest_validator, missing_unknown_title)
+
     def test_manifest_rejects_whitespace_navigator_title_and_v1_status(self) -> None:
         title = copy.deepcopy(self.activity_manifest)
         title["workspaceNavigators"][0]["title"] = " \n\t"
