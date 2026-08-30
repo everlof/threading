@@ -886,6 +886,21 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             checkout: environment.projectStore.checkout(onBranch:inRepositoryOf:)
         )
 
+        guard let targetProject = environment.projectStore.project(withID: targetProjectID) else {
+            presentSessionStartFailure(in: composer)
+            return false
+        }
+        if let folderFailure = ProjectLaunchPreflight.failure(
+            forFolderPath: targetProject.folderPath
+        ) {
+            environment.eventLog.record(.composer, "Session start refused", [
+                "project": targetProjectID.uuidString,
+                "cause": folderFailure.knownCause
+            ])
+            sidebar.presentToast(Self.sessionStartFolderFailureToast(folderFailure))
+            return false
+        }
+
         let task = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         var opening = NewChatOpeningMessage.compose(
             prompt: task,
@@ -914,9 +929,6 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 } else {
                     alert.runModal()
                 }
-                return false
-            }
-            guard let targetProject = environment.projectStore.project(withID: targetProjectID) else {
                 return false
             }
             do {
@@ -1433,6 +1445,23 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 identifier: "sidebar.toast.session-start.failed"
             )
         }
+    }
+
+    /// A checkout removed outside Threading is refused before a session row exists. The composer
+    /// interprets `false` as "keep everything", so the receipt says both halves: what is gone and
+    /// that the submitted brief is still available after the failed Start press.
+    static func sessionStartFolderFailureToast(
+        _ failure: ProjectLaunchPreflight.Failure
+    ) -> ToastRequest {
+        ToastRequest(
+            message: L10n.string("Session not started"),
+            detail: [
+                failure.summary,
+                L10n.string("Your brief is still here. Check the selected project and try again.")
+            ].joined(separator: " "),
+            identifier: "sidebar.toast.session-start.folder-missing",
+            persistsUntilDismissed: true
+        )
     }
 
     static func restoreFailureToast(

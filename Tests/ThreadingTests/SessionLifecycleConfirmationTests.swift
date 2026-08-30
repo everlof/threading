@@ -57,6 +57,18 @@ final class SessionLifecycleConfirmationTests: XCTestCase {
         XCTAssertTrue(toast.detail?.contains("restart Threading") == true)
     }
 
+    func testMissingProjectFolderKeepsTheBriefAndNamesTheFolder() throws {
+        let path = "/tmp/removed-worktree"
+        let toast = SessionCoordinator.sessionStartFolderFailureToast(.missing(path: path))
+
+        XCTAssertEqual(toast.message, "Session not started")
+        let detail = try XCTUnwrap(toast.detail)
+        XCTAssertTrue(detail.contains(path))
+        XCTAssertTrue(detail.contains("brief is still here"))
+        XCTAssertTrue(toast.persistsUntilDismissed)
+        XCTAssertFalse(toast.hasAction)
+    }
+
     /// Archiving asks nothing, so everything the alert used to say has to survive in the
     /// receipt: which session, what stopped with it, and where it went — the sidebar lists no
     /// archived session at all, so nothing else on screen would say.

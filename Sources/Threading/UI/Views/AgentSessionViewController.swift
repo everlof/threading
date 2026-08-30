@@ -426,6 +426,21 @@ final class AgentSessionViewController: NSViewController {
             return
         }
 
+        // A project can outlive a checkout removed outside Threading. Refuse before the login
+        // shell spends a process on a `cd` that cannot succeed; this also gives an existing row a
+        // durable, actionable failure instead of an empty exit-code-1 report.
+        if let refusal = ProjectLaunchPreflight.launchFailure(for: project) {
+            EventLog.shared.record(.session, "Refused agent launch", [
+                "session": sessionID.uuidString,
+                "cause": refusal.knownCause ?? "unrecognised"
+            ])
+            ProjectStore.shared.update(sessionID: sessionID) { stored in
+                stored.lastLaunchFailure = refusal
+            }
+            delegate?.agentSession(self, didExitWithCode: nil)
+            return
+        }
+
         // Asked before a plan exists, because the answer is that no plan should be built: the
         // conversation this row names cannot be reopened, and every command line that could be
         // built from here either fails the same way or quietly opens a different conversation.

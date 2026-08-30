@@ -60,6 +60,13 @@ and stayed up. The conversation was never lost — the file was refusable, not u
 
 Detection, evidence, refusal and repair are separate and only the first two are provider-neutral.
 
+The execution directory is also a preflight. A project record can outlive a checkout removed
+outside Threading; allowing the login shell to discover that spends a session row and loses the
+only copy of a fresh opening prompt before the provider writes a transcript. The composer asks
+`ProjectLaunchPreflight` before it creates the row and therefore keeps the brief on refusal. The
+terminal launch path asks the same check so an existing row gets a durable, named failure instead
+of an empty exit-code-1 report from the shell's failed `cd`.
+
 - **`SessionLaunchFailure`** is the record: origin (a process exit, or a preflight refusal),
   exit code, how long it lived, a summary, the bounded captured output, the conversation file,
   and an optional recognised-cause slug. It is `Codable` on `AgentSession`, so what a launch said
