@@ -3033,7 +3033,7 @@ final class ComponentGalleryViewController: NSViewController {
 
         let screen = SimulatorScreenView()
         screen.image = frame
-        screen.allowsInteraction = true
+        screen.interactionState = .ready(touch: true, keyboard: true)
         screen.setAccessibilityIdentifier("gallery.presentation.simulatorScreen")
         screen.onTap = { [weak self] point in
             self?.showReceipt(

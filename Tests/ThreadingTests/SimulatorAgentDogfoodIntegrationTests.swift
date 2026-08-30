@@ -90,6 +90,14 @@ final class SimulatorAgentDogfoodIntegrationTests: XCTestCase {
         XCTAssertFalse(screenshot.isError, screenshot.text)
         XCTAssertTrue(screenshot.text.contains(deviceID.rawValue))
 
+        let tap = await execute(
+            .simulatorTap(SimulatorTapArguments(x: 0.5, y: 0.5)),
+            coordinator: coordinator,
+            sessionID: sessionID
+        )
+        XCTAssertFalse(tap.isError, tap.text)
+        XCTAssertTrue(tap.text.contains(#""surface" : "Threading right panel""#))
+
         let home = await execute(
             .simulatorPressButton(SimulatorPressButtonArguments(button: "home")),
             coordinator: coordinator,

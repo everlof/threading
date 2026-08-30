@@ -6,6 +6,32 @@ import AppKit
 /// consent decision and transport; keeping those out of this design component means a theme or
 /// accessibility change cannot accidentally become another authority for device input.
 final class SimulatorScreenView: ThemedControl {
+    /// Whether the visible frame can accept input now or can safely use an input attempt to
+    /// recover its direct transport. Recovery is deliberately distinct from `ready`: the pane
+    /// may invite the gesture, but the feature controller must reconnect and authorize it before
+    /// anything crosses the helper boundary.
+    enum InteractionState: Equatable {
+        case unavailable
+        case recoverable
+        case ready(touch: Bool, keyboard: Bool)
+
+        var acceptsPointerRequests: Bool {
+            switch self {
+            case .unavailable: false
+            case .recoverable: true
+            case .ready(let touch, _): touch
+            }
+        }
+
+        var acceptsKeyboardRequests: Bool {
+            switch self {
+            case .unavailable: false
+            case .recoverable: true
+            case .ready(_, let keyboard): keyboard
+            }
+        }
+    }
+
     var image: NSImage? {
         didSet {
             guard image !== oldValue else { return }
@@ -14,10 +40,11 @@ final class SimulatorScreenView: ThemedControl {
         }
     }
 
-    var allowsInteraction = false {
+    var interactionState: InteractionState = .unavailable {
         didSet {
-            guard allowsInteraction != oldValue else { return }
-            if !allowsInteraction { cancelPointerGesture() }
+            guard interactionState != oldValue else { return }
+            if !interactionState.acceptsPointerRequests { cancelPointerGesture() }
+            updateAccessibilityContract()
             needsDisplay = true
         }
     }
@@ -43,6 +70,7 @@ final class SimulatorScreenView: ThemedControl {
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityRole(.image)
         setAccessibilityLabel(L10n.string("Simulator screen"))
+        updateAccessibilityContract()
     }
 
     @available(*, unavailable)
@@ -55,7 +83,10 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     override var acceptsFirstResponder: Bool {
-        isEnabled && allowsInteraction && image != nil
+        isEnabled
+            && image != nil
+            && (interactionState.acceptsPointerRequests
+                || interactionState.acceptsKeyboardRequests)
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -78,7 +109,7 @@ final class SimulatorScreenView: ThemedControl {
         )
         NSGraphicsContext.restoreGraphicsState()
 
-        if allowsInteraction, isHovered || pointerStart != nil {
+        if interactionState.acceptsPointerRequests, isHovered || pointerStart != nil {
             Design.Surface.imageHoverWash.setFill()
             shape.path.fill()
             Design.Surface.accent.setStroke()
@@ -91,7 +122,9 @@ final class SimulatorScreenView: ThemedControl {
 
     override func mouseDown(with event: NSEvent) {
         let location = convert(event.locationInWindow, from: nil)
-        guard isEnabled, allowsInteraction, imageRect.contains(location) else {
+        guard isEnabled,
+              interactionState.acceptsPointerRequests,
+              imageRect.contains(location) else {
             super.mouseDown(with: event)
             return
         }
@@ -124,7 +157,7 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     override func keyDown(with event: NSEvent) {
-        guard allowsInteraction,
+        guard interactionState.acceptsKeyboardRequests,
               event.modifierFlags.intersection([.command, .control]).isEmpty else {
             super.keyDown(with: event)
             return
@@ -141,7 +174,9 @@ final class SimulatorScreenView: ThemedControl {
     }
 
     override func performPrimaryAction() -> Bool {
-        guard allowsInteraction else { return false }
+        guard isEnabled,
+              image != nil,
+              interactionState.acceptsPointerRequests else { return false }
         onTap?(CGPoint(x: 0.5, y: 0.5))
         return true
     }
@@ -169,5 +204,19 @@ final class SimulatorScreenView: ThemedControl {
         pointerStart = nil
         pointerCurrent = nil
         needsDisplay = true
+    }
+
+    private func updateAccessibilityContract() {
+        let help: String
+        switch interactionState {
+        case .unavailable:
+            help = L10n.string("Simulator control is unavailable.")
+        case .recoverable:
+            help = L10n.string("Press to reconnect and control the Simulator.")
+        case .ready:
+            help = L10n.string("Tap, drag, or type to control the Simulator.")
+        }
+        setAccessibilityHelp(help)
+        setAccessibilityEnabled(interactionState != .unavailable)
     }
 }

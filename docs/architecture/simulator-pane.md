@@ -127,8 +127,15 @@ Read-only screenshots are available while the built-in group is enabled and the 
 lease is alive. Device HID requires one explicit user decision per exact device per app launch;
 both approval and denial are remembered so repeated calls do not pressure the user. Pointer and
 keyboard interaction in the pane and all agent input tools converge on that decision and the same
-live session. Input fails closed while screenshot fallback is active or whenever the lease,
-consent, device identity or stream generation no longer matches.
+live session. The screen component distinguishes a ready input route from a recoverable preview:
+a click on a fallback frame is allowed to express the intended tap and request one direct-stream
+reconnection, but the tap is held until the matching direct session exists and consent succeeds.
+It is never replayed through global macOS coordinates or sent over screenshot fallback. A denied
+gesture remains denied without another sheet; the ordinary Control button is the only route that
+deliberately clears that decision and asks again, and enabling control there spends no device tap.
+Input otherwise fails closed whenever the lease, consent, device identity or stream generation no
+longer matches. This control/recovery truth remains host-owned even though its button, status and
+screen invitation use shared Design components.
 
 ## Presentation and customization boundary
 
@@ -174,8 +181,9 @@ grace and refresh, input routing, backend recovery and content-free support diag
 `scripts/simulator_dogfood.sh` is the complete opt-in lane. For every selected Xcode it requires
 an already-booted available iOS device, builds `ThreadingMobile` for the exact UDID, and drives the
 shipping `AgentToolCoordinator` commands through one visible right-panel tab: prepare,
-install/launch, screenshot, and a harmless Home-button input. It then launches the exact macOS app
-bundle in a pre-workspace, activation-prohibited probe that verifies the embedded helper handshake
+install/launch, screenshot, a normalized tap, and a harmless Home-button input. It then launches
+the exact macOS app bundle in a pre-workspace, activation-prohibited probe that verifies the
+embedded helper handshake
 and first decoded frame using that Xcode's private frameworks. The probe is read-only; it cannot
 prepare, boot, install into or control a device.
 
