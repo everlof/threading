@@ -18,6 +18,12 @@ if ! python3 "${script_directory}/check_logging_boundaries.py" "${repository_dir
   failed=1
 fi
 
+if ! python3 "${script_directory}/check_navigator_fact_parity.py" "${repository_directory}"; then
+  echo "architecture-boundary: native navigator entity reads must map to a published fact" >&2
+  echo "  while options and host-owned interaction state use their typed parity lanes" >&2
+  failed=1
+fi
+
 if ! python3 "${script_directory}/check_dependency_boundaries.py" "${repository_directory}"; then
   echo "architecture-boundary: Core must depend on application capabilities, never AppDelegate," >&2
   echo "  windows, or new concrete controllers; reduce the explicit legacy debt in place" >&2
@@ -53,6 +59,11 @@ fi
 
 if ! python3 "${script_directory}/tests/test_failopen_defaults.py"; then
   echo "architecture-boundary: fail-open default checker regression tests failed" >&2
+  failed=1
+fi
+
+if ! python3 "${script_directory}/tests/test_navigator_fact_parity.py"; then
+  echo "architecture-boundary: navigator fact parity checker regression tests failed" >&2
   failed=1
 fi
 

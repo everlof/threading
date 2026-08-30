@@ -14,7 +14,7 @@ Threading is a native macOS app for organizing coding-agent sessions, built with
 `arm64` only; see [`releasing.md`](docs/architecture/releasing.md#apple-silicon-only).
 
 A single window pairs a project sidebar with the selected session's terminal. Each session
-hosts a Claude Code, Codex, Grok, or OpenCode process inside a project folder, with a shell available under it
+hosts a Claude Code, Codex, Grok, OpenCode, or Cursor process inside a project folder, with a shell available under it
 on demand. Sessions outlive their
 terminals: when the agent exits, the PTY is torn down but the session record remains so the
 conversation can be resumed later by its agent-assigned identifier.

@@ -81,6 +81,74 @@ final class MobileFloatingSurfaceTests: XCTestCase {
 }
 
 @MainActor
+final class MobileThemedPopoverChromeTests: XCTestCase {
+    func testThemeRadiusReachesTheOuterCornerAndArrowHasNoBodySeam() throws {
+        let view = MobileThemedPopoverBackgroundView(
+            frame: CGRect(x: 0, y: 0, width: 100, height: 80)
+        )
+        view.arrowDirection = .down
+        view.arrowOffset = 0
+        view.apply(.init(
+            fill: .black,
+            border: .white,
+            borderWidth: 2,
+            cornerRadius: 3
+        ))
+        view.layoutIfNeeded()
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        let image = UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { context in
+            view.layer.render(in: context.cgContext)
+        }
+
+        XCTAssertGreaterThan(
+            try rgba(in: image, at: CGPoint(x: 3, y: 1)).alpha,
+            200,
+            "a 3-point authored radius must not retain UIKit's large popover corner"
+        )
+        XCTAssertGreaterThan(
+            try rgba(in: image, at: CGPoint(x: 10, y: 67)).red,
+            200,
+            "the ordinary bottom edge keeps the theme border"
+        )
+        XCTAssertLessThan(
+            try rgba(in: image, at: CGPoint(x: 50, y: 67)).red,
+            40,
+            "the arrow repaints the body border at its base instead of leaving an internal rule"
+        )
+    }
+
+    private func rgba(in image: UIImage, at point: CGPoint) throws -> RGBA {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let cropped = try XCTUnwrap(cgImage.cropping(to: CGRect(
+            x: Int(point.x),
+            y: Int(point.y),
+            width: 1,
+            height: 1
+        )))
+        var bytes = [UInt8](repeating: 0, count: 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: 1,
+            height: 1,
+            bitsPerComponent: 8,
+            bytesPerRow: 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cropped, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        return RGBA(red: bytes[0], alpha: bytes[3])
+    }
+
+    private struct RGBA {
+        let red: UInt8
+        let alpha: UInt8
+    }
+}
+
+@MainActor
 final class MobileRootBackdropTests: XCTestCase {
     /// During an interactive pop, SwiftUI lays the destination out only above the still-focused
     /// keyboard. A background attached to that content stops at the same height, exposing the

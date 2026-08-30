@@ -234,6 +234,51 @@ public struct ExtensionWorkspaceNavigatorItem: Codable, Equatable, Sendable {
     }
 }
 
+/// One bounded content update for an existing navigator row or grid item.
+///
+/// Item patches deliberately cannot insert, remove, reorder, reparent, retarget, select, or
+/// enable an item. They are the live-reading path for facts such as activity while the complete
+/// navigator document remains the authority for structure and interaction.
+public struct ExtensionWorkspaceNavigatorItemPatch: Codable, Equatable, Sendable {
+    public let collectionID: String
+    public let itemID: String
+    public let content: ExtensionNode
+
+    public init(collectionID: String, itemID: String, content: ExtensionNode) {
+        self.collectionID = collectionID
+        self.itemID = itemID
+        self.content = content
+    }
+
+    func validationIssues(path: String) -> [ExtensionValidationIssue] {
+        var issues: [ExtensionValidationIssue] = []
+        for (field, value) in [
+            ("collectionID", collectionID),
+            ("itemID", itemID)
+        ] {
+            if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                issues.append(.init(path: "\(path).\(field)", message: "must not be empty"))
+            } else if value.count > 256 {
+                issues.append(.init(
+                    path: "\(path).\(field)",
+                    message: "must contain at most 256 characters"
+                ))
+            }
+        }
+        do {
+            try ExtensionWorkspaceNavigator.itemConstraints.validate(
+                content,
+                path: "\(path).content"
+            )
+        } catch let error as ExtensionValidationError {
+            issues.append(contentsOf: error.issues)
+        } catch {
+            issues.append(.init(path: "\(path).content", message: error.localizedDescription))
+        }
+        return issues
+    }
+}
+
 /// A bounded snapshot which the host can render with row reuse and diff by stable item ID.
 public struct ExtensionWorkspaceNavigatorCollection: Codable, Equatable, Sendable {
     public let id: String
@@ -359,6 +404,52 @@ public indirect enum ExtensionWorkspaceNavigatorNode: Codable, Equatable, Sendab
     }
 }
 
+/// One host-rendered choice which will feed a navigator transform.
+///
+/// Navigator options intentionally reuse the Settings control vocabulary, while accepting only
+/// toggles and enumerated choices. Threading owns persistence and presentation; the extension
+/// receives neither a control nor mutable preference storage.
+public struct ExtensionWorkspaceNavigatorOption: Codable, Equatable, Sendable {
+    public let id: String
+    public let title: String
+    public let control: ExtensionSettingControl
+
+    public init(id: String, title: String, control: ExtensionSettingControl) {
+        self.id = id
+        self.title = title
+        self.control = control
+    }
+
+    public func validationIssues(path: String) -> [ExtensionValidationIssue] {
+        var issues = ExtensionSettingValidator.fieldIssues(
+            ExtensionSettingField(id: id, title: title, control: control),
+            path: path
+        )
+        switch control {
+        case .toggle, .choice:
+            break
+        case .text, .integer:
+            issues.append(.init(
+                path: "\(path).control.type",
+                message: "navigator options support only toggle and choice controls"
+            ))
+        }
+        return issues
+    }
+
+    fileprivate var menuEntryCost: Int {
+        switch control {
+        case .toggle:
+            return 1
+        case .choice(_, let options):
+            return 1 + options.count
+        case .text, .integer:
+            // Invalid controls still spend one conservative parent row in the aggregate check.
+            return 1
+        }
+    }
+}
+
 /// One user-selectable replacement for the interior of the leading workspace navigator.
 ///
 /// Threading still owns resizing, collapse, focus routing, entity validation, and the always
@@ -368,6 +459,13 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
     public static let maximumStructureNodes = 128
     public static let maximumCollections = 8
     public static let maximumItems = 1_000
+    public static let maximumItemPatches = 64
+    public static let maximumOptions = 16
+    /// Includes the host-owned separator and permanent route back to the Native navigator.
+    public static let maximumOptionMenuEntries = 32
+    public static let reservedHostOptionMenuEntries = 2
+    public static let maximumDeclaredOptionMenuEntries =
+        maximumOptionMenuEntries - reservedHostOptionMenuEntries
 
     public static let chromeConstraints = ExtensionComponentNodeConstraints(
         maximumDepth: 12,
@@ -405,9 +503,24 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
     public let id: String
     public let title: String
     public let root: ExtensionWorkspaceNavigatorNode
+    /// Static, host-rendered choices scoped to this navigator identity.
+    ///
+    /// A runtime navigator replacement must repeat this declaration exactly. Only a new process
+    /// generation may change the option contract.
+    public let options: [ExtensionWorkspaceNavigatorOption]
+    /// Optional host-evaluated transform and visible-row template.
+    ///
+    /// `root` remains the complete v1 document and static fallback. Older hosts ignore this
+    /// additive key and render that fallback without executing the pipeline.
+    public let pipeline: ExtensionWorkspaceNavigatorPipeline?
     /// Optional action used when the host first presents the navigator or its project model
     /// changes. The response may carry a complete replacement snapshot with the same ID.
     public let loadActionID: String?
+    /// Optional action which receives coalesced, host-observed navigator events while selected.
+    ///
+    /// The extension must also declare `host.events`. A response may carry bounded item-content
+    /// patches so one activity edge never requires replacing the complete navigator document.
+    public let eventActionID: String?
     /// A bounded hint; the user's persisted split position and host limits remain authoritative.
     public let preferredWidth: Double?
 
@@ -415,14 +528,59 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         id: String,
         title: String,
         root: ExtensionWorkspaceNavigatorNode,
+        options: [ExtensionWorkspaceNavigatorOption] = [],
+        pipeline: ExtensionWorkspaceNavigatorPipeline? = nil,
         loadActionID: String? = nil,
+        eventActionID: String? = nil,
         preferredWidth: Double? = nil
     ) {
         self.id = id
         self.title = title
         self.root = root
+        self.options = options
+        self.pipeline = pipeline
         self.loadActionID = loadActionID
+        self.eventActionID = eventActionID
         self.preferredWidth = preferredWidth
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, root, options, pipeline, loadActionID, eventActionID, preferredWidth
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        root = try container.decode(ExtensionWorkspaceNavigatorNode.self, forKey: .root)
+        options = if container.contains(.options) {
+            try container.decode([ExtensionWorkspaceNavigatorOption].self, forKey: .options)
+        } else {
+            []
+        }
+        if container.contains(.pipeline) {
+            pipeline = try container.decode(
+                ExtensionWorkspaceNavigatorPipeline.self,
+                forKey: .pipeline
+            )
+        } else {
+            pipeline = nil
+        }
+        loadActionID = try container.decodeIfPresent(String.self, forKey: .loadActionID)
+        eventActionID = try container.decodeIfPresent(String.self, forKey: .eventActionID)
+        preferredWidth = try container.decodeIfPresent(Double.self, forKey: .preferredWidth)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(root, forKey: .root)
+        try container.encode(options, forKey: .options)
+        try container.encodeIfPresent(pipeline, forKey: .pipeline)
+        try container.encodeIfPresent(loadActionID, forKey: .loadActionID)
+        try container.encodeIfPresent(eventActionID, forKey: .eventActionID)
+        try container.encodeIfPresent(preferredWidth, forKey: .preferredWidth)
     }
 
     public func validationIssues(path: String) -> [ExtensionValidationIssue] {
@@ -442,12 +600,62 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
                 message: "must contain at most 120 characters"
             ))
         }
+        if options.count > Self.maximumOptions {
+            issues.append(.init(
+                path: "\(path).options",
+                message: "must contain at most \(Self.maximumOptions) options"
+            ))
+        }
+        issues.append(contentsOf: ExtensionSettingValidator.duplicateIssues(
+            options.map(\.id),
+            path: "\(path).options"
+        ))
+        for (index, option) in options.enumerated() {
+            issues.append(contentsOf: option.validationIssues(
+                path: "\(path).options[\(index)]"
+            ))
+        }
+        let optionEntryCost = options.reduce(0) { $0 + $1.menuEntryCost }
+        if optionEntryCost > Self.maximumDeclaredOptionMenuEntries {
+            issues.append(.init(
+                path: "\(path).options",
+                message: """
+                must require at most \(Self.maximumDeclaredOptionMenuEntries) menu entries; \
+                requires \(optionEntryCost)
+                """
+            ))
+        }
         if let loadActionID,
            !ExtensionIdentifierRules.isContributionIdentifier(loadActionID) {
             issues.append(.init(
                 path: "\(path).loadActionID",
                 message: ExtensionIdentifierRules.contributionMessage
             ))
+        }
+        if let eventActionID,
+           !ExtensionIdentifierRules.isContributionIdentifier(eventActionID) {
+            issues.append(.init(
+                path: "\(path).eventActionID",
+                message: ExtensionIdentifierRules.contributionMessage
+            ))
+        }
+        if let pipeline {
+            issues.append(contentsOf: pipeline.validationIssues(
+                path: "\(path).pipeline",
+                options: options
+            ))
+            if loadActionID != nil {
+                issues.append(.init(
+                    path: "\(path).loadActionID",
+                    message: "is not available with a host-evaluated pipeline"
+                ))
+            }
+            if eventActionID != nil {
+                issues.append(.init(
+                    path: "\(path).eventActionID",
+                    message: "is not available with a host-evaluated pipeline"
+                ))
+            }
         }
         if let preferredWidth,
            !preferredWidth.isFinite || preferredWidth < 180 || preferredWidth > 640 {

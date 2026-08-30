@@ -38,6 +38,30 @@ final class ModelEffortPickerRenderTests: XCTestCase {
         )
     }
 
+    func testAxisHighlightStaysBetweenTheThemesRestingAndHoverStates() throws {
+        let pure = try XCTUnwrap(
+            AppThemeLibrary.stock.first { $0.name == "Pure" }
+        )
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        AppThemePalette.set(pure)
+
+        appearance.performAsCurrentDrawingAppearance {
+            let matrix = ModelEffortMatrixControl(
+                presentation: presentation(),
+                onChoose: { _, _ in }
+            )
+            let resting = Design.Surface.controlResting.usingColorSpace(.sRGB)
+                ?? Design.Surface.controlResting
+            let hover = Design.Surface.controlHover.usingColorSpace(.sRGB)
+                ?? Design.Surface.controlHover
+            let axis = matrix.axisHoverFillForTesting.usingColorSpace(.sRGB)
+                ?? matrix.axisHoverFillForTesting
+
+            XCTAssertGreaterThan(axis.alphaComponent, resting.alphaComponent)
+            XCTAssertLessThan(axis.alphaComponent, hover.alphaComponent)
+        }
+    }
+
     func testRendersTheShippingPopoverUnderDissimilarThemes() throws {
         let directory = renderDirectory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -48,18 +72,27 @@ final class ModelEffortPickerRenderTests: XCTestCase {
         let win98 = try XCTUnwrap(
             AppThemeLibrary.stock.first { $0.name == "Windows 98" }
         )
-        let fixtures: [(String, AppTheme, NSAppearance.Name)] = [
-            ("system-light", .system, .aqua),
-            ("system-dark", .system, .darkAqua),
-            ("cyberpunk-dark", cyberpunk, .darkAqua),
-            ("windows-98-light", win98, .aqua),
+        let pure = try XCTUnwrap(
+            AppThemeLibrary.stock.first { $0.name == "Pure" }
+        )
+        let fixtures: [(String, AppTheme, NSAppearance.Name, (row: Int, column: Int)?)] = [
+            ("system-light", .system, .aqua, nil),
+            ("system-dark", .system, .darkAqua, nil),
+            ("cyberpunk-dark", cyberpunk, .darkAqua, nil),
+            ("windows-98-light", win98, .aqua, nil),
+            ("pure-dark", pure, .darkAqua, (row: 1, column: 5)),
+            ("pure-light", pure, .aqua, (row: 1, column: 5)),
         ]
 
-        for (name, theme, appearanceName) in fixtures {
+        for (name, theme, appearanceName, hoveredCell) in fixtures {
             let appearance = try XCTUnwrap(NSAppearance(named: appearanceName))
             var png: Data?
             appearance.performAsCurrentDrawingAppearance {
-                png = renderPopover(theme: theme, appearance: appearance)
+                png = renderPopover(
+                    theme: theme,
+                    appearance: appearance,
+                    hoveredCell: hoveredCell
+                )
             }
             try XCTUnwrap(png, "Failed to render \(name)").write(
                 to: directory.appendingPathComponent("model-effort-picker-\(name).png")
@@ -76,7 +109,11 @@ final class ModelEffortPickerRenderTests: XCTestCase {
             .appendingPathComponent("ThreadingRenders", isDirectory: true)
     }
 
-    private func renderPopover(theme: AppTheme, appearance: NSAppearance) -> Data? {
+    private func renderPopover(
+        theme: AppTheme,
+        appearance: NSAppearance,
+        hoveredCell: (row: Int, column: Int)?
+    ) -> Data? {
         AppThemePalette.set(theme)
 
         let parent = NSWindow(
@@ -109,7 +146,14 @@ final class ModelEffortPickerRenderTests: XCTestCase {
             onShowHiddenModels: {},
             onChoose: { _, _ in }
         )
-        controller.matrixView.hoverModelForTesting(at: 1)
+        if let hoveredCell {
+            controller.matrixView.hoverCellForTesting(
+                row: hoveredCell.row,
+                column: hoveredCell.column
+            )
+        } else {
+            controller.matrixView.hoverModelForTesting(at: 1)
+        }
         let popover = HostPopoverFactory.make(.composerModelEffortPicker)
         popover.animates = false
         popover.contentViewController = controller

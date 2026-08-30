@@ -31,6 +31,7 @@ public enum ThreadingExtensionAPI {
         .settings,
         .servicesProvide,
         .servicesConsume,
+        .factsProvide,
         .companionOperations,
         .componentCustomization,
         .workspaceNavigation,

@@ -388,7 +388,10 @@ struct TerminalViewRepresentable: UIViewRepresentable {
 /// as a new grid and can consequently reflow both its local emulator and the Mac's PTY dozens of
 /// times during one gesture. The structural host clips the already-laid-out terminal instead.
 /// Once a non-navigation width has held still, it commits that one useful width to SwiftTerm.
-/// Height remains live so the terminal continues to follow the keyboard and safe area.
+/// Keyboard presentation height is clipped live by this host, but SwiftTerm receives only the
+/// settled height at the end of the keyboard transaction. A terminal height is a row-grid
+/// mutation, not ordinary presentation geometry: applying every animation frame makes SwiftTerm
+/// repeatedly reconcile scrollback while the Mac is also preparing the eventual settled resize.
 final class RemoteTerminalLayoutView: UIView {
     let terminalView: RemoteTerminalView
     let contentInset: CGFloat
@@ -407,11 +410,16 @@ final class RemoteTerminalLayoutView: UIView {
 
     private(set) var settledTerminalWidth: CGFloat
     private(set) var pendingTerminalWidth: CGFloat?
+    private(set) var settledTerminalHeight: CGFloat
+    private(set) var pendingTerminalHeight: CGFloat?
+    private(set) var isKeyboardGeometryInFlight = false
 #if DEBUG
     private(set) var terminalWidthApplicationCount = 0
+    private(set) var terminalHeightApplicationCount = 0
 #endif
     private var widthSettleTask: Task<Void, Never>?
     private var observesTransitionCompletion = false
+    private let keyboardObservers = KeyboardObserverBag()
 
     init(
         frame: CGRect,
@@ -422,6 +430,7 @@ final class RemoteTerminalLayoutView: UIView {
         self.terminalView = terminalView
         self.contentInset = contentInset
         settledTerminalWidth = max(0, terminalView.bounds.width)
+        settledTerminalHeight = max(0, terminalView.bounds.height)
         super.init(frame: frame)
         clipsToBounds = true
         addSubview(terminalView)
@@ -449,6 +458,7 @@ final class RemoteTerminalLayoutView: UIView {
                 equalToConstant: MobileDesign.Size.floatingScrollTarget
             ),
         ])
+        observeKeyboardGeometry()
     }
 
     @available(*, unavailable)
@@ -492,12 +502,44 @@ final class RemoteTerminalLayoutView: UIView {
             }
         }
 
+        if settledTerminalHeight <= 0 {
+            applyTerminalHeight(proposedHeight)
+        } else if isKeyboardGeometryInFlight {
+            pendingTerminalHeight = proposedHeight
+        } else {
+            applyTerminalHeight(proposedHeight)
+        }
+
         terminalView.frame = CGRect(
             x: contentInset,
             y: contentInset,
             width: settledTerminalWidth,
-            height: proposedHeight
+            height: settledTerminalHeight
         )
+    }
+
+    /// Begins a keyboard-owned geometry transaction. Internal so a frame storm can be exercised
+    /// without manufacturing the system keyboard in a unit test.
+    func keyboardGeometryWillChange() {
+        isKeyboardGeometryInFlight = true
+        pendingTerminalHeight = max(0, bounds.height - contentInset * 2)
+    }
+
+    /// Commits exactly the final presentation height. Repeated completion notifications are
+    /// harmless, and a final height producing the same terminal frame performs no resize.
+    func keyboardGeometryDidSettle() {
+        guard isKeyboardGeometryInFlight else { return }
+        isKeyboardGeometryInFlight = false
+        let finalHeight = pendingTerminalHeight
+            ?? max(0, bounds.height - contentInset * 2)
+        applyTerminalHeight(finalHeight)
+        terminalView.frame = CGRect(
+            x: contentInset,
+            y: contentInset,
+            width: settledTerminalWidth,
+            height: settledTerminalHeight
+        )
+        pendingTerminalHeight = nil
     }
 
     func settlePendingWidth() {
@@ -512,6 +554,8 @@ final class RemoteTerminalLayoutView: UIView {
         widthSettleTask?.cancel()
         widthSettleTask = nil
         pendingTerminalWidth = nil
+        isKeyboardGeometryInFlight = false
+        pendingTerminalHeight = nil
     }
 
     /// A completed pop is teardown, not a useful terminal resize. A cancelled pop and a push both
@@ -542,6 +586,67 @@ final class RemoteTerminalLayoutView: UIView {
 #if DEBUG
         terminalWidthApplicationCount += 1
 #endif
+    }
+
+    private func applyTerminalHeight(_ height: CGFloat) {
+        guard abs(height - settledTerminalHeight) > Self.widthEpsilon else {
+            pendingTerminalHeight = nil
+            return
+        }
+        let wasAtLiveEnd = terminalView.isAtScrollbackEnd
+        let anchoredOffset = terminalView.contentOffset
+        settledTerminalHeight = height
+        pendingTerminalHeight = nil
+#if DEBUG
+        terminalHeightApplicationCount += 1
+#endif
+        terminalView.frame = CGRect(
+            x: contentInset,
+            y: contentInset,
+            width: settledTerminalWidth,
+            height: settledTerminalHeight
+        )
+        // The stable keyboard notification is the transaction boundary. Resolve SwiftTerm's
+        // grid here so its delegate report cannot drift to an unrelated later UIKit layout pass.
+        terminalView.layoutIfNeeded()
+        if wasAtLiveEnd {
+            terminalView.scroll(toPosition: 1)
+        } else {
+            let maximumY = max(0, terminalView.contentSize.height - terminalView.bounds.height)
+            terminalView.setContentOffset(
+                CGPoint(x: anchoredOffset.x, y: min(max(anchoredOffset.y, 0), maximumY)),
+                animated: false
+            )
+        }
+    }
+
+    private func observeKeyboardGeometry() {
+        let center = NotificationCenter.default
+        keyboardObservers.tokens.append(center.addObserver(
+            forName: UIResponder.keyboardWillChangeFrameNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.window != nil else { return }
+                self.keyboardGeometryWillChange()
+            }
+        })
+        for name in [
+            UIResponder.keyboardDidShowNotification,
+            UIResponder.keyboardDidHideNotification,
+        ] {
+            keyboardObservers.tokens.append(center.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.window != nil else { return }
+                    self.keyboardGeometryDidSettle()
+                }
+            })
+        }
     }
 
     private func scheduleWidthSettle() {
@@ -580,6 +685,17 @@ final class RemoteTerminalLayoutView: UIView {
                 terminalWasSource: terminalWasSource
             )
         }
+    }
+}
+
+/// NotificationCenter's Objective-C observer tokens are not declared Sendable, while UIView's
+/// deinitializer is nonisolated. The bag owns their thread-safe removal without making the view's
+/// actor-isolated state reachable from deinit.
+private final class KeyboardObserverBag: @unchecked Sendable {
+    var tokens: [NSObjectProtocol] = []
+
+    deinit {
+        tokens.forEach(NotificationCenter.default.removeObserver)
     }
 }
 

@@ -391,6 +391,7 @@ private enum MobileUIEvidenceCapture {
         static let keyboardState = "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
         static let captureMode = "THREADING_MOBILE_UI_EVIDENCE_CAPTURE_MODE"
         static let keyboardLayout = "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_LAYOUT"
+        static let hostInteraction = "THREADING_MOBILE_UI_EVIDENCE_HOST_INTERACTION"
     }
 
     private enum Contract {
@@ -418,6 +419,7 @@ private enum MobileUIEvidenceCapture {
         let keyboardState: KeyboardState?
         let captureMode: CaptureMode
         let keyboardLayout: KeyboardLayoutContract
+        let waitsForHostInteraction: Bool
 
         static func current() -> Request? {
             let environment = ProcessInfo.processInfo.environment
@@ -434,7 +436,8 @@ private enum MobileUIEvidenceCapture {
                 captureMode: environment[Environment.captureMode]
                     .flatMap(CaptureMode.init(rawValue:)) ?? .app,
                 keyboardLayout: environment[Environment.keyboardLayout]
-                    .flatMap(KeyboardLayoutContract.init(rawValue:)) ?? .frame
+                    .flatMap(KeyboardLayoutContract.init(rawValue:)) ?? .frame,
+                waitsForHostInteraction: environment[Environment.hostInteraction] == "semantic-tap"
             )
         }
 
@@ -471,12 +474,13 @@ private enum MobileUIEvidenceCapture {
         case dismissedAfterOpen = "dismissed-after-open"
     }
 
-    /// App captures prove static pixel stability. Display captures are reserved for OS-owned
-    /// pixels such as the software keyboard, whose caret and suggestion views are intentionally
-    /// animated and cannot satisfy an app-window pixel comparison.
+    /// App and stable-display captures prove static app pixels before publishing their marker.
+    /// Plain display captures are reserved for OS-owned animated pixels such as the software
+    /// keyboard, whose caret and suggestion views cannot satisfy an app-window comparison.
     private enum CaptureMode: String {
         case app
         case display
+        case stableDisplay = "stable-display"
     }
 
     /// Fixed composers recover their whole frame. A platform Form editor can retain a different
@@ -517,6 +521,21 @@ private enum MobileUIEvidenceCapture {
                 layoutContract: request.keyboardLayout,
                 in: window
             )
+            if request.waitsForHostInteraction {
+                let readyURL = directory.appendingPathComponent(
+                    "\(request.identifier).interaction-ready"
+                )
+                let preparedURL = directory.appendingPathComponent(
+                    "\(request.identifier).interaction-prepared"
+                )
+                try Data().write(to: readyURL, options: .atomic)
+                guard await waitUntil({
+                    FileManager.default.fileExists(atPath: preparedURL.path)
+                }, attempts: 400) else {
+                    throw EvidenceError.hostInteractionTimedOut
+                }
+                evidenceChecks["hostInteractionPrepared"] = true
+            }
 
             let last: Data
             let sampleCount: Int
@@ -918,6 +937,7 @@ private enum MobileUIEvidenceCapture {
         case keyboardDidNotShow
         case keyboardDidNotHide
         case editorKeptFocus
+        case hostInteractionTimedOut
     }
 
     private static func png(of window: UIWindow) throws -> Data {
@@ -941,6 +961,26 @@ extension View {
     /// Production builds erase the observers entirely.
     @ViewBuilder
     func mobileUIEvidenceKeyboardFocus(_ focus: FocusState<Bool>.Binding) -> some View {
+#if DEBUG
+        onReceive(NotificationCenter.default.publisher(
+            for: .mobileUIEvidenceFocusRequested
+        )) { _ in
+            focus.wrappedValue = true
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .mobileUIEvidenceDismissRequested
+        )) { _ in
+            focus.wrappedValue = false
+        }
+#else
+        self
+#endif
+    }
+
+    /// A UIKit editor hosted by SwiftUI owns first responder directly, so its evidence seam is a
+    /// plain binding rather than a `FocusState` with no SwiftUI focus target to register against.
+    @ViewBuilder
+    func mobileUIEvidenceKeyboardFocus(_ focus: Binding<Bool>) -> some View {
 #if DEBUG
         onReceive(NotificationCenter.default.publisher(
             for: .mobileUIEvidenceFocusRequested

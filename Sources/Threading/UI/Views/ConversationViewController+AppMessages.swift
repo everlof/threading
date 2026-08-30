@@ -28,7 +28,8 @@ extension ConversationViewController: AppMessageReceiving {
     /// wrap-up is the single message a held session still hands over.
     func acceptAppMessage(
         _ prompt: ConversationPrompt,
-        origin: ConversationOutbox.Item.Origin
+        origin: ConversationOutbox.Item.Origin,
+        attachmentIDs: [String]
     ) -> AppMessageAcceptance {
         guard !prompt.isEmpty else { return .refused(.emptyText) }
         guard RemoteSessionMirrorRegistry.shared.ownerCanWrite(to: sessionID) else {
@@ -38,7 +39,12 @@ extension ConversationViewController: AppMessageReceiving {
 
         let readyToHandOver = isViewLoaded && stream.canSend && !isPreparingTurn
             && outbox.pending.isEmpty
-        guard outbox.append(prompt, origin: origin) != nil else { return .refused(.queueFull) }
+        guard let id = outbox.append(prompt, origin: origin) else { return .refused(.queueFull) }
+        SessionAttachmentStore.shared.associate(
+            attachmentIDs: attachmentIDs,
+            withTurnID: id.wireValue,
+            for: sessionID
+        )
 
         refreshOutboxRail()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)

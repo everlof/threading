@@ -29,6 +29,57 @@ final class SessionInfoRowTests: XCTestCase {
         )
     }
 
+    /// Usage totals move while the Info pane is being read. A new total with the same rows must
+    /// update those rows in place; clearing the list here sends its scroll view straight back to
+    /// the top on every indexing event.
+    func testUsageReadingUpdateKeepsTheInfoPaneScrollPosition() throws {
+        let sessionID = SessionID()
+        var usage = usageSnapshot(sessionID: sessionID, scale: 1)
+        let controller = SessionInfoViewController(
+            sessionID: sessionID,
+            folderPath: NSTemporaryDirectory()
+        )
+        controller.readSource = { completion in completion(.empty) }
+        controller.usageSource = { usage }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 360, height: 260),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = controller.view
+        defer { window.close() }
+        controller.view.layoutSubtreeIfNeeded()
+
+        let scroll = try XCTUnwrap(
+            descendants(of: ThemedScrollView.self, in: controller.view).first
+        )
+        let document = try XCTUnwrap(scroll.documentView)
+        document.layoutSubtreeIfNeeded()
+        let furthest = max(document.frame.height - scroll.contentView.bounds.height, 0)
+        XCTAssertGreaterThan(furthest, 0)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: furthest))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        let origin = scroll.contentView.bounds.origin
+        XCTAssertGreaterThan(origin.y, 0)
+        let valuesBefore = descendants(of: CompoundValueLabel.self, in: controller.view)
+            .map(\.plainValue)
+
+        usage = usageSnapshot(sessionID: sessionID, scale: 2)
+        controller.applyUsage(usage)
+        controller.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(scroll.contentView.bounds.origin.x, origin.x, accuracy: 0.5)
+        XCTAssertEqual(scroll.contentView.bounds.origin.y, origin.y, accuracy: 0.5)
+        XCTAssertNotEqual(
+            descendants(of: CompoundValueLabel.self, in: controller.view).map(\.plainValue),
+            valuesBefore,
+            "the fixed rows kept their stale usage reading"
+        )
+    }
+
     // MARK: - Fixtures
 
     private func makeProcessRow(
@@ -100,6 +151,44 @@ final class SessionInfoRowTests: XCTestCase {
             let match = (subview as? T).map { [$0] } ?? []
             return match + descendants(of: type, in: subview)
         }
+    }
+
+    private func usageSnapshot(sessionID: SessionID, scale: Int64) -> SessionUsageSnapshot {
+        let models = (0..<SessionUsageDefaults.maximumModelRows).map { index in
+            SessionUsageSnapshot.Model(
+                name: "model-\(index)",
+                tokens: UsageTokenCounts(
+                    uncachedInput: scale * Int64(1_000 + index),
+                    cachedInput: scale * Int64(2_000 + index),
+                    output: scale * Int64(100 + index)
+                ),
+                cost: .init(catalogPricedUSD: Double(scale * Int64(index + 1)) / 10),
+                records: Int(scale) + index
+            )
+        }
+        let reading = SessionUsageSnapshot.Reading(
+            tokens: .init(
+                uncachedInput: scale * 12_000,
+                cachedInput: scale * 24_000,
+                cacheWrite: scale * 2_000,
+                output: scale * 4_000,
+                reasoning: scale * 1_000
+            ),
+            cost: .init(catalogPricedUSD: Double(scale)),
+            records: Int(scale * 10),
+            models: models
+        )
+        return SessionUsageSnapshot(
+            sessionID: sessionID,
+            total: reading,
+            main: reading,
+            subagents: .init(),
+            children: [:],
+            indexedRange: .lifetime,
+            builtAt: Date(timeIntervalSince1970: 1_800_000_000),
+            pricingCatalogVersion: UsagePricingCatalog.version,
+            coverage: nil
+        )
     }
 
     // MARK: - Redaction & Reveal

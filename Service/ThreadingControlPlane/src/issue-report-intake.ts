@@ -12,11 +12,12 @@ import {
 } from "./issue-report-contract.generated";
 
 export const ISSUE_REPORT_BOUNDS = {
-  requestBytes: 64 * 1024,
+  requestBytes: 128 * 1024,
   descriptionBytes: 10 * 1024,
   diagnosticsBytes: 24 * 1024,
   diagnosticRecords: 250,
   screenshotBytes: 12 * 1024,
+  imagePreviews: 4,
   maximumAgeMilliseconds: 31 * 24 * 60 * 60 * 1000,
   maximumFutureSkewMilliseconds: 5 * 60 * 1000,
   maximumReportsPerUTCday: 2_000,
@@ -32,7 +33,9 @@ const reportKeys = [
   "diagnostics",
   "screenshotPreviewBase64",
   "screenshotMediaType",
+  "imagePreviews",
 ];
+const imagePreviewKeys = ["jpegBase64"];
 const diagnosticsKeys = [
   "schemaVersion",
   "generatedAt",
@@ -70,6 +73,7 @@ interface NormalizedIssueReport {
   diagnostics: NormalizedDiagnostics;
   screenshotPreviewBase64?: string;
   screenshotMediaType?: "image/jpeg";
+  imagePreviews?: Array<{ jpegBase64: string }>;
 }
 
 interface NormalizedDiagnostics {
@@ -284,6 +288,30 @@ function normalizeReport(
   }
   if (screenshot !== undefined) validateJPEG(screenshot);
 
+  let imagePreviews: Array<{ jpegBase64: string }> | undefined;
+  if (value.imagePreviews !== undefined && value.imagePreviews !== null) {
+    if (!Array.isArray(value.imagePreviews)
+      || value.imagePreviews.length === 0
+      || value.imagePreviews.length > ISSUE_REPORT_BOUNDS.imagePreviews) {
+      invalid("Image previews are invalid");
+    }
+    imagePreviews = value.imagePreviews.map((candidate, index) => {
+      const preview = requiredObject(candidate, `imagePreviews[${index}]`);
+      assertExactKeys(preview, imagePreviewKeys);
+      const jpegBase64 = requiredString(
+        preview.jpegBase64,
+        `imagePreviews[${index}].jpegBase64`,
+        ISSUE_REPORT_BOUNDS.screenshotBytes * 2,
+      );
+      validateJPEG(jpegBase64);
+      return { jpegBase64 };
+    });
+  }
+  const imageCount = (screenshot === undefined ? 0 : 1) + (imagePreviews?.length ?? 0);
+  if (imageCount > ISSUE_REPORT_BOUNDS.imagePreviews) {
+    invalid("Too many image previews");
+  }
+
   return {
     schemaVersion: 1,
     id,
@@ -295,6 +323,7 @@ function normalizeReport(
       screenshotPreviewBase64: screenshot,
       screenshotMediaType: "image/jpeg" as const,
     }),
+    ...(imagePreviews === undefined ? {} : { imagePreviews }),
   };
 }
 
@@ -440,21 +469,23 @@ function validateDiagnosticFieldValue(
 }
 
 function validateJPEG(encoded: string): void {
-  if (encoded.length === 0 || !base64Pattern.test(encoded)) invalid("Screenshot is not valid base64");
+  if (encoded.length === 0 || !base64Pattern.test(encoded)) {
+    invalid("Image preview is not valid base64");
+  }
   let binary: string;
   try {
     binary = atob(encoded);
   } catch {
-    invalid("Screenshot is not valid base64");
+    invalid("Image preview is not valid base64");
   }
   if (binary.length > ISSUE_REPORT_BOUNDS.screenshotBytes) {
-    throw new HttpError(413, "screenshotTooLarge", "Screenshot preview is too large");
+    throw new HttpError(413, "imagePreviewTooLarge", "Image preview is too large");
   }
   if (binary.length < 3
     || binary.charCodeAt(0) !== 0xff
     || binary.charCodeAt(1) !== 0xd8
     || binary.charCodeAt(2) !== 0xff) {
-    invalid("Screenshot preview is not a JPEG");
+    invalid("Image preview is not a JPEG");
   }
 }
 

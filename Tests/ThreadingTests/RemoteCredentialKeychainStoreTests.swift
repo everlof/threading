@@ -1,5 +1,6 @@
 import Security
 import XCTest
+import ThreadingRemoteKit
 @testable import Threading
 
 final class RemoteCredentialKeychainStoreTests: XCTestCase {
@@ -8,6 +9,8 @@ final class RemoteCredentialKeychainStoreTests: XCTestCase {
         static let ownerAccount = "owner-devices-v1"
         static let guestService = "codes.threading.remote-guest-shares"
         static let guestAccount = "guest-shares-v1"
+        static let notificationService = "codes.threading.remote-notification-subscriptions"
+        static let notificationAccount = "notification-subscriptions-v1"
     }
 
     func testOwnerDeviceRecordMovesToTheProtectedKeychainOnlyAfterValidation() throws {
@@ -270,6 +273,90 @@ final class RemoteCredentialKeychainStoreTests: XCTestCase {
         ))
     }
 
+    func testNotificationSubscriptionMovesToProtectedKeychainAfterValidation() throws {
+        let keychain = RecordingKeychainItemAccess()
+        let expected = notificationSubscription()
+        try RemoteNotificationSubscriptionKeychainStore(
+            dataProtection: false,
+            keychain: keychain
+        ).save([expected])
+
+        XCTAssertEqual(try RemoteNotificationSubscriptionKeychainStore(
+            dataProtection: true,
+            keychain: keychain
+        ).load(), [expected])
+        XCTAssertTrue(keychain.contains(
+            service: Item.notificationService,
+            account: Item.notificationAccount,
+            dataProtection: true
+        ))
+        XCTAssertFalse(keychain.contains(
+            service: Item.notificationService,
+            account: Item.notificationAccount,
+            dataProtection: false
+        ))
+    }
+
+    func testCorruptNotificationSubscriptionFailsClosedAndRemainsUntouched() {
+        let keychain = RecordingKeychainItemAccess()
+        let corrupt = Data("not-a-notification-envelope".utf8)
+        keychain.set(
+            corrupt,
+            service: Item.notificationService,
+            account: Item.notificationAccount,
+            dataProtection: false
+        )
+
+        XCTAssertThrowsError(try RemoteNotificationSubscriptionKeychainStore(
+            dataProtection: true,
+            keychain: keychain
+        ).load()) { error in
+            guard case RemoteNotificationSubscriptionStoreError.corrupt = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(keychain.value(
+            service: Item.notificationService,
+            account: Item.notificationAccount,
+            dataProtection: false
+        ), corrupt)
+        XCTAssertFalse(keychain.contains(
+            service: Item.notificationService,
+            account: Item.notificationAccount,
+            dataProtection: true
+        ))
+    }
+
+    func testFutureNotificationSubscriptionFailsClosedAndRemainsUntouched() {
+        let keychain = RecordingKeychainItemAccess()
+        let future = Data(#"{"version":999,"subscriptions":[]}"#.utf8)
+        keychain.set(
+            future,
+            service: Item.notificationService,
+            account: Item.notificationAccount,
+            dataProtection: false
+        )
+
+        XCTAssertThrowsError(try RemoteNotificationSubscriptionKeychainStore(
+            dataProtection: true,
+            keychain: keychain
+        ).load()) { error in
+            guard case RemoteNotificationSubscriptionStoreError.unsupportedVersion(999) = error else {
+                return XCTFail("unexpected error: \(error)")
+            }
+        }
+        XCTAssertEqual(keychain.value(
+            service: Item.notificationService,
+            account: Item.notificationAccount,
+            dataProtection: false
+        ), future)
+        XCTAssertFalse(keychain.contains(
+            service: Item.notificationService,
+            account: Item.notificationAccount,
+            dataProtection: true
+        ))
+    }
+
     func testRemoteAndBrowserSurfacesReportTheSharedKeychainPolicy() {
         XCTAssertEqual(
             BrowserCredentialStore.usesDataProtectionKeychain,
@@ -323,6 +410,17 @@ final class RemoteCredentialKeychainStoreTests: XCTestCase {
             createdAt: Date(timeIntervalSince1970: 1_700_000_000),
             expiresAt: Date(timeIntervalSince1970: 1_700_003_600),
             members: []
+        )
+    }
+
+    private func notificationSubscription() -> RemoteNotificationSubscriptionRecord {
+        RemoteNotificationSubscriptionRecord(
+            shareID: "owner-1",
+            deviceID: "phone-1",
+            deviceToken: String(repeating: "ab", count: 32),
+            environment: .sandbox,
+            enabledKinds: [.agentMessage, .permissionRequest],
+            soundEnabledKinds: [.permissionRequest]
         )
     }
 }

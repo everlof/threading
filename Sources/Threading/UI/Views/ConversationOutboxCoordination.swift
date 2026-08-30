@@ -55,7 +55,7 @@ extension ConversationViewController {
     /// sat in the box. Somebody would type a follow-up, press Return, watch nothing happen, and
     /// have no way to know whether it had been taken.
     @discardableResult
-    func enqueue(_ prompt: ConversationPrompt) -> Bool {
+    func enqueue(_ prompt: ConversationPrompt, attachmentIDs: [String] = []) -> Bool {
         guard outbox.acceptsMore else {
             apply(timeline.appendNotice(
                 L10n.format(
@@ -67,7 +67,12 @@ extension ConversationViewController {
             return false
         }
 
-        guard outbox.append(prompt) != nil else { return false }
+        guard let id = outbox.append(prompt) else { return false }
+        SessionAttachmentStore.shared.associate(
+            attachmentIDs: attachmentIDs,
+            withTurnID: id.wireValue,
+            for: sessionID
+        )
 
         promptView.clear()
         SessionContinuityStore.shared.setConversationDraft("", for: sessionID)
@@ -165,15 +170,24 @@ extension ConversationViewController {
     /// it went: it joins the running turn, shares its context and settles under the same terminal
     /// event. It is deliberately *not* a queue row — there is nothing left to reorder, and drawing
     /// it under the composer would imply it was still waiting.
-    func steer(_ prompt: ConversationPrompt) {
+    func steer(_ prompt: ConversationPrompt, attachmentIDs: [String] = []) {
         let id = ConversationMessageID()
         guard stream.steer(prompt, identifiedBy: id) else {
             // The turn ended, or turned out not to be steerable, between the chord and the wire.
             // Codex's `expectedTurnId` precondition exists to make exactly this catchable. The
             // answer is not to retry against a turn that is gone: it is to queue the message,
             // which is what the user would have got a keystroke later anyway.
-            enqueue(prompt)
+            enqueue(prompt, attachmentIDs: attachmentIDs)
             return
+        }
+
+        if let turnID = GitTurnBaselineStore.shared
+            .activeCheckpoint(forSessionID: sessionID)?.userTurnID {
+            SessionAttachmentStore.shared.associate(
+                attachmentIDs: attachmentIDs,
+                withTurnID: turnID,
+                for: sessionID
+            )
         }
 
         apply(timeline.appendUserMessage(prompt.userMessage))

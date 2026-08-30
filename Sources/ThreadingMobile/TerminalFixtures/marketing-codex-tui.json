@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "threading-mobile-terminal-pty-fixture",
+  "provider": "codex",
+  "providerVersion": "0.151.0",
+  "columns": 48,
+  "rows": 24,
+  "provenance": "Installed Codex rendering of a synthetic saved session in an isolated MCP-free profile. Screenshot capture only replays these bytes and cannot spend provider usage.",
+  "payloadBase64": "G1s/MTA0OWgbWyFwG1s/Mzs0bBtbNGwbPhtbNGwbWz8xaBs9G1swbRsoQhtbMTsyNHIbW0gbWzJKG1tIG1syShtbMm3ilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIDilIANCgrigKIgG1swbUxJVkUgUFJPVklERVIgUkVTVUxUOiBUaGUgY2FwdHVyZSBub3cgb3BlbnMgYRtbNDszSHN0YW5kYXJkIGhvc3RlZCBtYWluIHdpbmRvdywgY3JlYXRlcyBhIG5vbi0NICAKbmF0aXZlIENvZGV4IHRlcm1pbmFsIHNlc3Npb24sIGFuZCBzZWxlY3RzIGl0DSAgCmluIHRoZSBzaWRlYmFyLiBUaGUgdGhlbWUgcGxheWdyb3VuZCBzd2l0Y2hlcw0gIApmcm9tIHRoZSBjaGF0LXJldmlldyBpbWFnZSB0byB0aGUgVFVJLXJldmlldw0gIApjYXB0dXJlLg0KChtbMm3igKIgG1swbVlvdSBoYXZlIDEgdXNhZ2UgbGltaXQgcmVzZXQgYXZhaWxhYmxlLiBSdW4gLw0KdXNhZ2UgdG8gdXNlIG9uZS4NCgoKG1sxbeKAuhtbQxtbMG0bWzJtQXNrIENvZGV4IHRvIGRvIGFueXRoaW5nG1sxNjszSBtbMG1ncHQtNS42LXNvbCB4aGlnaCDCtyAvdG1wL3RocmVhZGluZy1tYXJrZXRpbmct4oCmG1sxNDszSA=="
+}

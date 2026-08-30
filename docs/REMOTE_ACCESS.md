@@ -351,7 +351,13 @@ reasoning effort and UI surface. The stable default is the agent's own Claude Co
 Threading's Native UI remains an explicit experimental choice. Account choices include the Mac's
 latest normalized rate-limit usage, while credentials and config paths stay on the Mac. The
 session is created through the same Mac launch path as a local session and appears on both
-devices immediately. Owners can also rename, pin, archive, restore, move a running chat between
+devices immediately. The Mac publishes each model's account-effective effort rather than its
+generic cache fallback. On each phone, the last model and effort that started successfully are
+remembered per Mac, agent and account and beat later provider-default changes while still valid.
+Auto is resolved to concrete catalogue values at Start; refusal or abandonment writes nothing,
+and withdrawn remembered values repair to the live defaults. This bounded preference archive is
+separate from unsent-draft continuity and fails open to the live catalogue after quarantine.
+Owners can also rename, pin, archive, restore, move a running chat between
 accounts, set its limit recovery, and switch it between Native and its agent UI from either side.
 A UI or account switch stops the current process, then resumes
 the same provider conversation identifier on the other surface. The session row's **Interface**
@@ -478,7 +484,10 @@ tab, the phone never changes screens: the account disc takes one quiet breath (a
 since a brand mark is not a symbol and takes no symbol effect) and an unread
 dot. Opening **Browser** follows the
 Mac-owned tab through bounded, read-only snapshots; clicks, scrolling, and form entry continue to
-run only on the Mac and merely refresh an already visible follow view. Routine browser mutations
+run only on the Mac and merely refresh an already visible follow view. The pixels are the Mac's
+own, so a page the phone could never reach, such as a dev server on the Mac's localhost or a host
+inside a VPN only the Mac is on, previews like any other; the phone never resolves the page's
+URL. Routine browser mutations
 do not repeatedly animate the badge. Private tabs remain generic in the list and never send
 pixels to the phone. Browser state, checkout reads, and attachment previews are owner-only.
 Attachment metadata is fetched first and the selected image or PDF body is fetched on demand.
@@ -1340,6 +1349,14 @@ event sockets use separate traces across hello, failure/end and the scheduled ex
 reconnect delay; both own an explicit hello deadline rather than relying on URLSession to end a
 silent peer. Public report delivery records each 30-second HTTPS attempt and whether it was
 delivered, left idempotently queued, or terminally refused.
+
+Warm session reattachment has its own start/end trace and duration; it is not reported as the age
+of the parked WebSocket. Prompt and atomic-terminal submissions likewise pair start with the
+host's acknowledgement. A host advertising `terminalInputLatencyProbe` also acknowledges one
+sampled direct-terminal input at most every five seconds. The phone records its round trip and the
+Mac records time from frame handling through main-queue/PTY admission under the same pseudonymous
+trace. Ordinary input remains fire-and-forget, older hosts receive no probes, and neither event
+contains the input bytes or prompt text.
 They do not send it to the Mac by default. A paired interactive owner can open **Diagnostics** on
 iPhone, or use the control beside the Mac in the browser session list, and choose **Share
 diagnostics for 30 minutes**. The existing bounded history is sent first and new events follow
@@ -1409,6 +1426,15 @@ notification service never scrapes Claude Code or Codex terminal text. A structu
 permission request uses its more specific permission notification instead of also sending the
 generic response-needed event. Notification sounds have a master switch and an independent
 switch for every category, so a useful banner does not have to imply an audible interruption.
+
+The phone owns token acquisition: after notification permission and whenever APNs rotates the
+token, iOS registers it over the authenticated paired-device route together with its sandbox or
+production environment and current preferences. Nothing is copied by hand in the product path.
+The Mac persists that device-bound routing metadata separately from credentials and re-authorizes
+it against the current pairing/share records whenever Remote Access starts. A Mac restart thus
+does not require waking or foregrounding the phone; revoking the pairing or membership still
+makes the saved routing record inert immediately. The hosted service remains stateless for this
+mapping — the Mac supplies the token and environment on each bounded `/v1/push` request.
 
 Opening a notification deep-links to the relevant chat. A requested agent update may additionally
 carry one closed, authenticated destination: an attachment id, a browser-tab id, or an extension
@@ -1554,7 +1580,9 @@ another device. The records are versioned. If one is corrupt, the client preserv
 copy for diagnosis and fails closed instead of overwriting it with a new blank record. Continuity
 mutations build, prune and validate a bounded candidate, persist and verify it, and only then make
 it visible to the running UI; a refused oversized draft therefore cannot create state that appears
-saved until the next launch disproves it.
+saved until the next launch disproves it. The optional last-successful model/effort archive applies
+that contract separately, keyed by Mac, agent and account, so its corruption cannot block or
+overwrite an unsent draft.
 
 An open iOS app receives these events over its authenticated live socket. Background and
 lock-screen delivery uses APNs. Development/self-hosted builds can enable the Mac's provider
@@ -1572,6 +1600,13 @@ credentials the settings page says **Live only**: events still work while the au
 connection is alive, but a suspended app cannot receive a remote push. A distributed build
 should move the provider key behind a service it operates rather than ship it in either app.
 
+The current one-secret provider configuration requires a signing key valid for both endpoints.
+Existing unrestricted APNs keys can do that; Apple's newer team/topic-scoped keys may instead be
+restricted to one environment. The registration selects `api.sandbox.push.apple.com` for a
+development token and `api.push.apple.com` for a TestFlight/App Store token; device tokens
+themselves never cross between those environments. If the configured key is environment-scoped,
+the provider needs separate sandbox/production secrets before it can serve both.
+
 The environment-selected `.p8` file must be a regular UTF-8 file no larger than 64 KiB. It is
 read through the opened-file streaming limit before CryptoKit parses it; a metadata preflight is
 not trusted because the configured path can be replaced or grown between inspection and read.
@@ -1579,10 +1614,10 @@ not trusted because the configured path can be replaced or grown between inspect
 ### Hosted service
 
 The implemented Cloudflare Worker/D1/Durable Object service owns Sign in with Apple, bounded daily
-Apple grant validation, scoped host/device credentials, bounded ICE signaling and TURN
-provisioning. It never receives the remote HTTP/WebSocket payload carried inside WebRTC. A later
-push slice should keep the APNs key in the service, deduplicate/collapse bounded events, and store
-only sanitized notification or widget projections. Presence should remain connection-derived
+Apple grant validation, scoped host/device credentials, bounded ICE signaling, TURN provisioning,
+and APNs provider signing. It never receives the remote HTTP/WebSocket payload carried inside
+WebRTC and does not retain APNs device mappings: an authenticated Mac submits one bounded,
+sanitized event, token and environment for each delivery. Presence remains connection-derived
 rather than a database heartbeat.
 
 Scheduled expiry cleanup keeps each D1 delete to a 1,000-row page, then immediately repeats only
@@ -1646,6 +1681,10 @@ feature lock.
   and a protected empty sentinel prevents a login-Keychain item planted after the first upgraded
   launch from becoming authority. Once present, the protected item is the only item read for
   authorization.
+- **APNs routing metadata is a separate, authorization-free Keychain item.** It follows the same
+  protected-when-available storage and validation-first migration rules, but contains no bearer.
+  Startup joins each record to a current device-bound capability before making it active, so a
+  corrupt notification item cannot disable pairing and an orphan cannot restore revoked access.
 - The pairing code carries the fingerprint. `SHA-256` over the leaf certificate's DER, truncated
   to 128 bits and written base32 upper case, is 26 characters entirely inside QR's alphanumeric
   mode, and it rides as a second fragment component: `HTTPS://192.168.1.42:8760#<token>.<code>`.
@@ -1749,6 +1788,11 @@ feature lock.
   A frame and a complete reassembled message are each capped at 1 MiB. Every continuation is
   compared with the buffer's remaining capacity before `Data.append`, so the transient retained
   message never exceeds the stated cap; the server admits at most 32 connections.
+  An HTTP connection is bounded by silence rather than by age: a socket that opens and says
+  nothing, a request nobody answers, and a keep-alive connection nobody uses again are each
+  closed after 60 seconds, while one that keeps serving requests lives as long as it is used.
+  Measured from accept, that bound was a lifetime: a phone's pooled connection was cut off in
+  the middle of a browser preview capture, and the phone reported its network connection lost.
 - Native REST mutations carry a request id. The Mac coalesces concurrent duplicates and keeps the
   bounded result for five minutes, while rejecting the same id with a different path or semantic
   JSON body. JSON key order and whitespace are normalized before fingerprinting, and iOS emits

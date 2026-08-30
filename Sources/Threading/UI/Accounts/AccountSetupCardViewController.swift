@@ -64,7 +64,11 @@ final class AccountSetupCardViewController: NSViewController, NSTextFieldDelegat
     private func rows(for state: AgentAccountSetupState) -> [NSView] {
         switch state {
         case .choice:
-            return AgentAccountSetupProvider.allCases.map(providerRow)
+            // AgentKind is a fixed five-case product schema, not provider-sized data. Keeping
+            // the complete roster here makes this card the honest answer to "what does
+            // Threading support?" while the two real buttons remain limited to the login
+            // adapters whose isolated-home routing has been measured.
+            return AgentKind.allCases.map(agentRow)
         case .naming(let provider):
             return namingRows(provider: provider)
         case .running(let context):
@@ -80,27 +84,45 @@ final class AccountSetupCardViewController: NSViewController, NSTextFieldDelegat
         }
     }
 
-    private func providerRow(_ provider: AgentAccountSetupProvider) -> NSView {
-        let button = ThemedButton(
-            title: AccountSetupStrings.setUp,
-            target: self,
-            action: #selector(providerClicked(_:))
-        )
-        button.emphasis = .secondary
-        button.tag = AgentAccountSetupProvider.allCases.firstIndex(of: provider) ?? 0
-        button.setAccessibilityIdentifier("account-setup.choose.\(provider.rawValue)")
+    private func agentRow(_ kind: AgentKind) -> NSView {
+        if let provider = AgentAccountSetupProvider(kind: kind) {
+            let button = ThemedButton(
+                title: AccountSetupStrings.addLogin,
+                target: self,
+                action: #selector(providerClicked(_:))
+            )
+            button.emphasis = .secondary
+            button.tag = AgentAccountSetupProvider.allCases.firstIndex(of: provider) ?? 0
+            button.setAccessibilityIdentifier("account-setup.choose.\(provider.rawValue)")
 
-        return providerIdentityRow(
-            provider: provider,
-            title: provider.kind.displayName,
-            detail: AccountSetupStrings.providerDetail(provider),
-            control: button
+            return agentIdentityRow(
+                kind: kind,
+                title: kind.displayName,
+                detail: kind.accountAccessDetail,
+                control: button
+            )
+        }
+
+        let ownership = NSTextField(labelWithString: kind.accountAccessOwner)
+        ownership.applyFont(.caption)
+        ownership.textColor = Design.Text.tertiary
+        ownership.alignment = .right
+        ownership.setContentHuggingPriority(.required, for: .horizontal)
+        ownership.setAccessibilityLabel(
+            L10n.format("%@ sign-in: %@", kind.displayName, kind.accountAccessOwner)
+        )
+
+        return agentIdentityRow(
+            kind: kind,
+            title: kind.displayName,
+            detail: kind.accountAccessDetail,
+            control: ownership
         )
     }
 
     private func namingRows(provider: AgentAccountSetupProvider) -> [NSView] {
-        let identity = providerIdentityRow(
-            provider: provider,
+        let identity = agentIdentityRow(
+            kind: provider.kind,
             title: L10n.format("Add %@", provider.kind.displayName),
             detail: AccountSetupStrings.namingDetail(provider),
             control: nil
@@ -237,14 +259,14 @@ final class AccountSetupCardViewController: NSViewController, NSTextFieldDelegat
         return [status, actionRow([done])]
     }
 
-    private func providerIdentityRow(
-        provider: AgentAccountSetupProvider,
+    private func agentIdentityRow(
+        kind: AgentKind,
         title: String,
         detail: String,
         control: NSView?
     ) -> NSView {
         let icon = NSImageView()
-        icon.image = provider.kind.icon
+        icon.image = kind.icon
         icon.imageScaling = .scaleProportionallyDown
         icon.setAccessibilityElement(false)
         constrain(icon, side: Layout.providerIconSide)
@@ -360,7 +382,7 @@ final class AccountSetupCardViewController: NSViewController, NSTextFieldDelegat
 // MARK: - Copy
 
 enum AccountSetupStrings {
-    static var setUp: String { L10n.string("Set Up") }
+    static var addLogin: String { L10n.string("Add Login") }
     static var loginName: String { L10n.string("Login name") }
     static var namePlaceholder: String { L10n.string("Work or Personal") }
     static var nameDetail: String {
@@ -374,15 +396,6 @@ enum AccountSetupStrings {
     static var installationGuide: String { L10n.string("Installation Guide") }
     static var tryAgain: String { L10n.string("Try Again") }
     static var done: String { L10n.string("Done") }
-
-    static func providerDetail(_ provider: AgentAccountSetupProvider) -> String {
-        switch provider {
-        case .claude:
-            return L10n.string("Use another Claude subscription or organization.")
-        case .codex:
-            return L10n.string("Use another ChatGPT account with Codex.")
-        }
-    }
 
     static func namingDetail(_ provider: AgentAccountSetupProvider) -> String {
         L10n.format(
@@ -422,7 +435,7 @@ enum AccountSetupStrings {
             return L10n.string("Enter a name containing at least one letter or number.")
         case .locationAlreadyExists:
             return L10n.format(
-                "A login named %@ already exists. Reconnect it from Settings ▸ Accounts, or choose another name.",
+                "A login named %@ already exists. Reconnect it from Settings ▸ Agents & Accounts, or choose another name.",
                 attemptedName
             )
         case .couldNotPrepareLocation:

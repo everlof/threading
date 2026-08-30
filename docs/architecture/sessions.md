@@ -384,6 +384,14 @@ answer `DraftStore` is cleared on. A start that failed leaves the words where th
 used; a start that succeeded must not leave its opening prompt, and the images sent with it,
 standing in a composer the user comes back to.
 
+**A deleted checkout is a failed start, not a failed chat.** Immediately before creating the
+session, the coordinator verifies that the resolved project's `folderPath` is still a directory.
+A project may remain in Threading after its worktree was removed elsewhere; without this guard the
+login shell exits on its leading `cd`, leaving a dead row even though no provider conversation was
+ever created. Refusal keeps the composer and its attachments intact and names the missing path in
+the standing receipt. Existing rows cross the same `ProjectLaunchPreflight` at launch and receive
+a durable launch-failure surface rather than spending another process.
+
 **The pane focuses whatever it puts on screen, and the composer is not an exception.** `attach`
 hands a terminal the keyboard and `attachConversation` hands a native conversation's reply box
 the caret, so a composer that arrived unfocused was the one surface asking to be clicked before
@@ -400,13 +408,23 @@ the editor back is not the user asking for the caret to move out of the middle o
 ## The Composer
 
 The iPhone's new-session composer treats the Mac catalogue as live state, not defaults read once
-on appearance. When discovery, accounts or settings replace that catalogue, the draft preserves
-every still-advertised choice and repairs only withdrawn project, agent, account, model, effort,
-permission, speed, surface or role values. A server-side race can still reject the request between
-selection and launch; the structured REST refusal names that guard, refreshes the catalogue behind
-the alert, and leaves the prompt intact for the retry. The account's default model remains nil on
-the wire so the runtime still owns inheritance; an explicit effort beside it is validated against
-the resolved account default, through the same admission rule local and remote creation use.
+on appearance. Its first model and effort are the last values this phone started successfully for
+that exact Mac, agent and account, while those values are still advertised; otherwise it uses the
+catalogue's concrete account-effective defaults. The Mac computes that effort through the same
+`AgentModels.effectiveEffort` path as its own composer — a routed login's configured `xhigh` beats
+Sol's generic `low` model-cache fallback. This small, versioned memory is separate from draft and
+viewport continuity, bounded to 128 identities, and quarantines unreadable bytes without risking
+unsent work.
+
+When discovery, accounts or settings replace the catalogue, an open draft preserves every
+still-advertised choice and repairs only withdrawn project, agent, account, model, effort,
+permission, speed, surface or role values. Auto remains Auto while the draft is open. At Start it
+resolves to the concrete model and effort the live catalogue names; those concrete values are sent
+and remembered only after the Mac creates the session. A failed or abandoned draft changes no
+memory, and a host that cannot name a valid value still receives nil so its runtime owns the safe
+fallback. A server-side race can reject the request between selection and launch; the structured
+REST refusal names that guard, refreshes the catalogue behind the alert, and leaves the prompt
+intact for the retry.
 
 That draft uses the same native `IntrinsicTextView` paste contract as an existing conversation,
 not SwiftUI's visually similar `TextField`: text keeps UIKit's insertion-point paste and undo,
@@ -1240,11 +1258,13 @@ Delivery covers both surfaces:
   Native per-chat changes continue to ride `turn/start`, so they take effect on the next turn
   without restarting the app-server.
 
-**An omitted model is the account's default, for Fast as well as for effort.** A phone's draft,
-the report chat and the Mac composer all send no model to mean "whatever this login is configured
-to run" — while showing that model's own Fast control, because the catalogue answers
-`supportsFastMode` per model id. `handleCreateSession` asked the same question with the model it
-was sent, which was nil, and `AgentModels.supportsFastMode` answered for a model called nil:
+**An omitted model is the account's default, for Fast as well as for effort.** Report chat and the
+Mac composer send no model to mean "whatever this login is configured to run". The phone now
+materializes the live catalogue's model and effort at Start so its last successful choice remains
+stable even if the provider later changes a default; an older phone may still omit the model.
+Both forms show the effective model's own Fast control, because the catalogue answers
+`supportsFastMode` per model id. `handleCreateSession` asked the same question with the model an
+older phone sent, which was nil, and `AgentModels.supportsFastMode` answered for a model called nil:
 *Unsupported Speed*, for a speed the Mac had offered the phone seconds earlier (a Codex draft on
 `gpt-5.6-sol`, model left to the account, Fast picked). The effort check beside it had always
 resolved nil through `defaultModel(for:account:)` first; the Fast check now does the same, so the

@@ -42,6 +42,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private(set) var startupPerformance = MainWindowStartupPerformance()
     private var isMeasuringStartupToolbarItems = false
     private let environment: AppEnvironment
+    private let workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting
 
     /// Installed by the application composition root. Sheets inject this further into their
     /// submission closures, so neither UI surface reaches into account or diagnostic state.
@@ -72,9 +73,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         },
         defersInitialTreeMount: true
     )
+    private weak var workspaceNavigatorFactRegistry: ExtensionFactRegistry?
     private lazy var workspaceSidebarViewController = WorkspaceSidebarContainerViewController(
         nativeController: sidebarViewController,
-        routing: ExtensionManager.shared,
+        routing: workspaceNavigatorRouting,
         contextProvider: { [weak self] in
             ExtensionCommandContext(
                 projectID: self?.currentProjectID?.uuidString.lowercased(),
@@ -84,6 +86,19 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         destinationHandler: { [weak self] destination in
             self?.openWorkspaceNavigatorDestination(destination)
                 ?? L10n.string("The workspace window is no longer available.")
+        },
+        factSnapshotProvider: { [weak self] consumedKeys in
+            self?.workspaceNavigatorFactRegistry?.snapshot(consuming: consumedKeys)
+        },
+        factSnapshotPatchProvider: { [weak self] snapshot, cells, consumedKeys in
+            self?.workspaceNavigatorFactRegistry?.patch(
+                snapshot,
+                exactCells: cells,
+                consuming: consumedKeys
+            )
+        },
+        onSelectNative: { [weak self] in
+            self?.selectWorkspaceNavigator(.native)
         }
     )
     lazy var containerViewController = TerminalContainerViewController()
@@ -424,8 +439,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     // MARK: - Initialization
 
-    private init(window: NSWindow?, environment: AppEnvironment) {
+    private init(
+        window: NSWindow?,
+        environment: AppEnvironment,
+        workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting
+    ) {
         self.environment = environment
+        self.workspaceNavigatorRouting = workspaceNavigatorRouting
         super.init(window: window)
         // Stated after `super.init` rather than in the window factory, which is static: the
         // strip is chrome and the report is the controller's, so the window holds a closure
@@ -439,14 +459,23 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         fatalError("init(coder:) has not been implemented")
     }
 
+    func installWorkspaceNavigatorFactRegistry(_ registry: ExtensionFactRegistry) {
+        workspaceNavigatorFactRegistry = registry
+    }
+
     convenience init(
         environment: AppEnvironment,
-        initialFramePlan: MainWindowInitialFramePlan
+        initialFramePlan: MainWindowInitialFramePlan,
+        workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting = ExtensionManager.shared
     ) {
         let constructionStarted = DispatchTime.now().uptimeNanoseconds
         let createdWindow = Self.createWindow()
         let windowCreated = DispatchTime.now().uptimeNanoseconds
-        self.init(window: createdWindow, environment: environment)
+        self.init(
+            window: createdWindow,
+            environment: environment,
+            workspaceNavigatorRouting: workspaceNavigatorRouting
+        )
         let baseInitialized = DispatchTime.now().uptimeNanoseconds
         startupPerformance.createWindowNanoseconds = windowCreated - constructionStarted
         startupPerformance.baseInitializationNanoseconds = baseInitialized - windowCreated
@@ -903,6 +932,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
             self?.workspaceSidebarViewController.refreshDocument()
+        }
+        appEvents.observe(SessionActivityDidChange.self) { [weak self] event in
+            self?.workspaceSidebarViewController.sessionDidChange(event.sessionID)
         }
     }
 
@@ -2097,7 +2129,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             with: currentWorkspaceNavigatorDestination
         )
         if case .extensionNavigator(let extensionIdentifier, let navigatorID) = selection,
-           let width = ExtensionManager.shared.registeredWorkspaceNavigator(
+           let width = workspaceNavigatorRouting.registeredWorkspaceNavigator(
                extensionIdentifier: extensionIdentifier,
                navigatorID: navigatorID
            )?.navigator.preferredWidth {
@@ -3427,7 +3459,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             .browser,
               browser.contextKind == .shared,
               browser.currentURL != nil,
-              let capture = await browser.screenshot(),
+              let capture = try? await browser.screenshot(),
               capture.data.count <= RemoteWorkspaceDefaults.maximumPreviewBytes else {
             return nil
         }

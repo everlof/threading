@@ -355,12 +355,17 @@ struct ClaudeSubagentEventAdapter {
                   trackedTaskIDs.contains(taskID)
             else { return [] }
 
-            if let agentID = nonempty(metadata?.agentID) {
+            let agentID = nonempty(metadata?.agentID)
+            if let agentID {
                 taskIDByAgentID[agentID] = taskID
+            }
+            let alternateThreadIDs = agentID.flatMap { id in
+                id == taskID ? nil : [id]
             }
 
             var events = discover(SubagentDescriptor(
                 threadID: taskID,
+                alternateThreadIDs: alternateThreadIDs,
                 nickname: nonempty(metadata?.description),
                 prompt: nonempty(metadata?.prompt),
                 model: nonempty(metadata?.resolvedModel)

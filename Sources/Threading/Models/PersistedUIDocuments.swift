@@ -273,6 +273,10 @@ struct PersistedSessionAttachment: Codable {
   /// checkout's own document identical to what earlier builds wrote.
   let isOutsideProject: Bool?
   let isImmutableSnapshot: Bool?
+  let turnID: String?
+  /// Optional for forward-compatible decoding and migration of documents written before turns
+  /// were visible in the attachment chronology.
+  let turnPlacement: SessionAttachment.TurnPlacement?
   let referencedAt: Date
 
   private enum CodingKeys: String, CodingKey {
@@ -284,6 +288,8 @@ struct PersistedSessionAttachment: Codable {
     case origin
     case isOutsideProject
     case isImmutableSnapshot
+    case turnID
+    case turnPlacement
     case referencedAt
   }
 
@@ -296,6 +302,8 @@ struct PersistedSessionAttachment: Codable {
     origin: SessionAttachment.Origin?,
     isOutsideProject: Bool?,
     isImmutableSnapshot: Bool?,
+    turnID: String?,
+    turnPlacement: SessionAttachment.TurnPlacement?,
     referencedAt: Date
   ) {
     self.id = id
@@ -306,6 +314,8 @@ struct PersistedSessionAttachment: Codable {
     self.origin = origin
     self.isOutsideProject = isOutsideProject
     self.isImmutableSnapshot = isImmutableSnapshot
+    self.turnID = turnID
+    self.turnPlacement = turnPlacement
     self.referencedAt = referencedAt
   }
 
@@ -323,13 +333,16 @@ struct PersistedSessionAttachment: Codable {
       .flatMap(SessionAttachment.Origin.init(rawValue:))
     isOutsideProject = try container.decodeIfPresent(Bool.self, forKey: .isOutsideProject)
     isImmutableSnapshot = try container.decodeIfPresent(Bool.self, forKey: .isImmutableSnapshot)
+    turnID = try container.decodeIfPresent(String.self, forKey: .turnID)
+    turnPlacement = (try container.decodeIfPresent(String.self, forKey: .turnPlacement))
+      .flatMap(SessionAttachment.TurnPlacement.init(rawValue:))
     referencedAt = try container.decode(Date.self, forKey: .referencedAt)
   }
 }
 
 /// A versioned attachment document with an explicit legacy-array migration.
 struct PersistedSessionAttachments: Codable {
-  static let currentFormatVersion = 2
+  static let currentFormatVersion = 3
 
   var entries: [PersistedSessionAttachment]
 

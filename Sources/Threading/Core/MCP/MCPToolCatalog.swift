@@ -128,6 +128,11 @@ enum MCPInstructionDefaults {
   /// Codex may make its initial server-routing decision from only this leading slice of the
   /// MCP `instructions` field. Keep the decision prefix self-contained inside the budget.
   static let decisionPrefixCharacterLimit = 512
+
+  /// The complete initialize payload is repeated by some lazy MCP clients beside every
+  /// discovered tool. Keep it a routing catalogue; detailed mechanics belong to the tool
+  /// description loaded for the action being considered.
+  static let initializeInstructionCharacterLimit = 4_096
 }
 
 // MARK: - Tool Catalogue
@@ -280,7 +285,7 @@ enum MCPToolCatalog {
       a scoped browser_snapshot when a large page truncates before the region you need. Use \
       browser_fill_form when filling several fields from one snapshot; it validates the \
       complete batch and is faster and more reliable than repeated single-field calls. Use \
-      browser_select with the bounded option list shown for one select control and \
+      browser_select with the bounded option list for one native select or ARIA combobox and \
       browser_set_checked for one checkbox, radio, or switch. browser_history goes back, \
       forward, reloads, or uses reload_from_origin for server revalidation without losing \
       the shared browsing context; Back closes a pop-up with no earlier history and returns \
@@ -322,7 +327,9 @@ enum MCPToolCatalog {
       Scroll or use browser_wait for text, URL, and target-state changes, and read the fresh \
       snapshot returned after every action. \
       browser_screenshot supplies CSS-pixel-resolution visual evidence when layout matters; \
-      pass a ref to isolate one element and omit surrounding page content. browser_console \
+      pass a ref to isolate one element and omit surrounding page content. Captures stay \
+      quiet by default; set show=true only when the screenshot itself is user-facing. \
+      browser_console \
       and browser_network report page errors and failed requests without exposing headers, \
       cookies, or bodies. Use browser_performance for a bounded current-document timing \
       summary and the slowest resources; it is lighter than a raw performance trace and \
@@ -814,8 +821,7 @@ enum MCPToolCatalog {
       group.builtInFamily != .supervision || group.tools.contains { names.contains($0.name) }
     }
     guard !enabled.isEmpty else { return "" }
-    return ([decisionPrefix(for: enabled)] + enabled.map(\.instruction))
-      .joined(separator: "\n\n")
+    return compactInstructions(for: enabled)
   }
 
   // MARK: Scoped Access
@@ -856,12 +862,13 @@ enum MCPToolCatalog {
   static func decisionPrefix(for enabledGroups: [MCPToolGroup]) -> String {
     let toolNames = Set(enabledGroups.flatMap { $0.tools.map(\.name) })
     var sentences = [
-      "Tools may load lazily; discover a matching tool before saying an action is unavailable.",
+      "Tools may load lazily; discover a matching tool.",
     ]
 
     if toolNames.contains(MCPBuiltInTool.browserNavigate.rawValue) {
       sentences.append(
-        "Threading's Browser: browser_navigate, browser_snapshot."
+        "Threading's Browser is connected: browser_navigate/browser_snapshot; do not "
+          + "bootstrap another runtime."
       )
     }
     if toolNames.contains(MCPBuiltInTool.watchSession.rawValue) {
@@ -871,7 +878,8 @@ enum MCPToolCatalog {
     }
     if toolNames.contains(MCPBuiltInTool.respondToPermission.rawValue) {
       sentences.append(
-        "Child permission: respond_to_permission; inspect first."
+        "You are a manager only through supervision; inspect before "
+          + "respond_to_permission."
       )
     }
     if toolNames.contains(MCPBuiltInTool.displayImage.rawValue) {
@@ -881,17 +889,17 @@ enum MCPToolCatalog {
     }
     if toolNames.contains(MCPBuiltInTool.archiveSession.rawValue) {
       sentences.append(
-        "For close/archive/finish: call archive_session after your reply."
+        "For close/archive/finish: archive_session after your reply."
       )
     }
     if toolNames.contains(MCPBuiltInTool.setSessionName.rawValue) {
       sentences.append(
-        "For rename/re-title, discover and call set_session_name."
+        "For rename/re-title: call set_session_name."
       )
     }
     if toolNames.contains(MCPBuiltInTool.listReclaimableStorage.rawValue) {
       sentences.append(
-        "On ENOSPC, call list_reclaimable_storage; never delete build output."
+        "On ENOSPC: list_reclaimable_storage; never delete builds."
       )
     }
 
@@ -907,8 +915,17 @@ enum MCPToolCatalog {
     let enabled = enabledGroups
     guard !enabled.isEmpty else { return "" }
 
-    return ([decisionPrefix(for: enabled)] + enabled.map(\.instruction))
-      .joined(separator: "\n\n")
+    return compactInstructions(for: enabled)
+  }
+
+  /// A small initialize catalogue that survives clients which prepend it to every deferred tool.
+  /// The long group instructions remain the authoring source for scoped helpers and Settings;
+  /// normal sessions load the exact tool description before acting.
+  private static func compactInstructions(for enabledGroups: [MCPToolGroup]) -> String {
+    let groups = enabledGroups.map { "- \($0.title): \($0.summary)" }
+    return ([decisionPrefix(for: enabledGroups), "Enabled tool groups:"] + groups + [
+      "Discover the matching tool to read its detailed contract before calling it."
+    ]).joined(separator: "\n")
   }
 
   @MainActor

@@ -1421,7 +1421,8 @@ final class BrowserViewController: NSViewController {
     func agentSnapshot(
         maximumNodes: Int = BrowserAgentDefaults.maximumSnapshotNodes,
         ref: String? = nil,
-        selector: String? = nil
+        selector: String? = nil,
+        viewportOnly: Bool = false
     ) async throws
         -> BrowserSnapshot {
         try await callAgentScript(
@@ -1429,7 +1430,8 @@ final class BrowserViewController: NSViewController {
             arguments: [
                 "maxNodes": maximumNodes,
                 "scopeRef": ref ?? "",
-                "scopeSelector": selector ?? ""
+                "scopeSelector": selector ?? "",
+                "viewportOnly": viewportOnly
             ]
         )
     }
@@ -1626,7 +1628,8 @@ final class BrowserViewController: NSViewController {
         arguments["clickCount"] = 1
         let click: BrowserActionOutcome = try await callAgentScript(
             BrowserAgentScripts.click,
-            arguments: arguments
+            arguments: arguments,
+            timeout: nil
         )
         guard click.ok else {
             request.finish(.cancelled(click.message))
@@ -1688,7 +1691,8 @@ final class BrowserViewController: NSViewController {
         arguments["clickCount"] = 1
         let click: BrowserActionOutcome = try await callAgentScript(
             BrowserAgentScripts.click,
-            arguments: arguments
+            arguments: arguments,
+            timeout: nil
         )
         guard click.ok else {
             request.finish(.failure(click.message))
@@ -2039,18 +2043,75 @@ final class BrowserViewController: NSViewController {
 
     private func callAgentScript<Value: Decodable>(
         _ script: String,
-        arguments: [String: Any]
+        arguments: [String: Any],
+        timeout: TimeInterval? = BrowserDefaults.agentBridgeTimeout,
+        onLateCompletion: (@MainActor () -> Void)? = nil
     ) async throws -> Value {
-        let result = try await webView.callAsyncJavaScript(
-            script,
-            arguments: arguments,
-            in: nil,
-            contentWorld: .defaultClient
-        )
+        let startedAt = Date()
+        let result: Any = try await withCheckedThrowingContinuation { continuation in
+            let completion = BrowserBridgeCallCompletion(
+                continuation,
+                onLateCompletion: onLateCompletion
+            )
+            webView.callAsyncJavaScript(
+                script,
+                arguments: arguments,
+                in: nil,
+                in: .defaultClient
+            ) { [weak self] result in
+                Task { @MainActor in
+                    let accepted = completion.finish(result)
+                    let outcome: String
+                    let detail: String?
+                    switch result {
+                    case .success:
+                        outcome = accepted ? "success" : "late-success"
+                        detail = nil
+                    case .failure(let error):
+                        outcome = accepted ? "webkit-error" : "late-webkit-error"
+                        let nsError = error as NSError
+                        detail = "\(nsError.domain) \(nsError.code)"
+                    }
+                    self?.recordAgentBridgePhase(
+                        "javascript.dispatch",
+                        startedAt: startedAt,
+                        outcome: outcome,
+                        detail: detail
+                    )
+                }
+            }
+            if let timeout {
+                DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
+                    guard completion.timeout(
+                        BrowserBridgeError.timedOut(seconds: timeout)
+                    ) else { return }
+                    self?.recordAgentBridgePhase(
+                        "javascript.dispatch",
+                        startedAt: startedAt,
+                        outcome: "timeout",
+                        detail: "limit \(Int(timeout))s"
+                    )
+                }
+            }
+        }
         guard let json = result as? String, let data = json.data(using: .utf8) else {
+            recordAgentBridgePhase(
+                "javascript.decode",
+                startedAt: startedAt,
+                outcome: "invalid-result"
+            )
             throw BrowserBridgeError.invalidResult
         }
-        return try JSONDecoder().decode(Value.self, from: data)
+        do {
+            return try JSONDecoder().decode(Value.self, from: data)
+        } catch {
+            recordAgentBridgePhase(
+                "javascript.decode",
+                startedAt: startedAt,
+                outcome: "decoding-error"
+            )
+            throw error
+        }
     }
 
     /// Marks a bounded page mutation as agent-owned so the navigation delegate can enforce the
@@ -2065,12 +2126,37 @@ final class BrowserViewController: NSViewController {
         let actionID = agentNavigationPolicy.beginAction(
             allowsFormSubmission: allowsFormSubmission
         )
-        defer { agentNavigationPolicy.endAction(actionID) }
+        var endsSynchronously = true
+        defer {
+            if endsSynchronously { agentNavigationPolicy.endAction(actionID) }
+        }
 
         let outcome: BrowserActionOutcome
         do {
-            outcome = try await callAgentScript(script, arguments: arguments)
+            outcome = try await callAgentScript(
+                script,
+                arguments: arguments,
+                onLateCompletion: { [weak self] in
+                    DispatchQueue.main.asyncAfter(
+                        deadline: .now()
+                          + Double(BrowserDefaults.agentNavigationGuardNanoseconds) / 1_000_000_000
+                    ) {
+                        self?.agentNavigationPolicy.endAction(actionID)
+                    }
+                }
+            )
         } catch {
+            if let bridgeError = error as? BrowserBridgeError,
+               case .timedOut = bridgeError {
+                // The WebKit request can finish after Swift's timeout. Keep the browser-level
+                // submission guard attached to that late mutation until its callback plus the
+                // ordinary deferred-submit window; a timeout must not become a policy bypass.
+                endsSynchronously = false
+                // A WebKit process can also disappear without ever invoking its callback. Do not
+                // leave ordinary user submissions blocked for the lifetime of the tab in that
+                // case. A late callback and this fallback race safely through the action id.
+                agentNavigationPolicy.retireTimedOutAction(actionID)
+            }
             if agentNavigationPolicy.wasFormSubmissionBlocked(during: actionID) {
                 return BrowserActionOutcome(
                     ok: false,
@@ -2118,7 +2204,7 @@ final class BrowserViewController: NSViewController {
 
     /// A PNG snapshot the agent can consume and the panel can optionally preserve.
     @MainActor
-    func screenshot(fullPage: Bool = false) async -> BrowserScreenshotCapture? {
+    func screenshot(fullPage: Bool = false) async throws -> BrowserScreenshotCapture {
         var rect: CGRect?
         var captureSize = webView.bounds.size
         // `WKSnapshotConfiguration.rect` is in the *view's* coordinates, where (0, 0) is the current
@@ -2162,7 +2248,7 @@ final class BrowserViewController: NSViewController {
             rect = captureRect
             captureSize = captureRect.size
         }
-        return await captureScreenshot(rect: rect, captureSize: captureSize)
+        return try await captureScreenshot(rect: rect, captureSize: captureSize)
     }
 
     /// Captures the visible pixels belonging to one current semantic target.
@@ -2207,7 +2293,7 @@ final class BrowserViewController: NSViewController {
                 nil
             )
         }
-        let capture = await captureScreenshot(rect: rect, captureSize: rect.size)
+        let capture = try await captureScreenshot(rect: rect, captureSize: rect.size)
         return (target, capture)
     }
 
@@ -2215,7 +2301,8 @@ final class BrowserViewController: NSViewController {
     private func captureScreenshot(
         rect: CGRect?,
         captureSize: CGSize
-    ) async -> BrowserScreenshotCapture? {
+    ) async throws -> BrowserScreenshotCapture {
+        let startedAt = Date()
         let config = WKSnapshotConfiguration()
         config.afterScreenUpdates = true
         if let rect {
@@ -2223,27 +2310,70 @@ final class BrowserViewController: NSViewController {
         }
         let pixelWidth = max(1, Int(captureSize.width.rounded()))
         let pixelHeight = max(1, Int(captureSize.height.rounded()))
-        return await withCheckedContinuation { continuation in
+        return try await withCheckedThrowingContinuation { continuation in
             let completion = BrowserScreenshotCompletion(continuation)
-            webView.takeSnapshot(with: config) { image, _ in
+            webView.takeSnapshot(with: config) { [weak self] image, error in
                 Task { @MainActor in
-                    guard let image,
-                          let data = image.pngData(
-                            pixelWidth: pixelWidth,
-                            pixelHeight: pixelHeight
-                          ) else {
-                        completion.finish(nil)
+                    if let error {
+                        if completion.finish(.failure(
+                            BrowserScreenshotError.webKit(error as NSError)
+                        )) {
+                            self?.recordAgentBridgePhase(
+                                "screenshot.render",
+                                startedAt: startedAt,
+                                outcome: "webkit-error",
+                                detail: "\((error as NSError).domain) \((error as NSError).code)"
+                            )
+                        }
                         return
                     }
-                    completion.finish(BrowserScreenshotCapture(
+                    guard let image else {
+                        if completion.finish(.failure(BrowserScreenshotError.missingImage)) {
+                            self?.recordAgentBridgePhase(
+                                "screenshot.render",
+                                startedAt: startedAt,
+                                outcome: "missing-image"
+                            )
+                        }
+                        return
+                    }
+                    guard let data = image.pngData(
+                        pixelWidth: pixelWidth,
+                        pixelHeight: pixelHeight
+                    ) else {
+                        if completion.finish(.failure(BrowserScreenshotError.encodingFailed)) {
+                            self?.recordAgentBridgePhase(
+                                "screenshot.encode",
+                                startedAt: startedAt,
+                                outcome: "encoding-error"
+                            )
+                        }
+                        return
+                    }
+                    if completion.finish(.success(BrowserScreenshotCapture(
                         data: data,
                         width: pixelWidth,
                         height: pixelHeight
-                    ))
+                    ))) {
+                        self?.recordAgentBridgePhase(
+                            "screenshot.render-and-encode",
+                            startedAt: startedAt,
+                            outcome: "success"
+                        )
+                    }
                 }
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + BrowserDefaults.snapshotTimeout) {
-                completion.finish(nil)
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + BrowserDefaults.snapshotTimeout
+            ) { [weak self] in
+                if completion.finish(.failure(BrowserScreenshotError.timedOut)) {
+                    self?.recordAgentBridgePhase(
+                        "screenshot.render",
+                        startedAt: startedAt,
+                        outcome: "timeout",
+                        detail: "limit \(Int(BrowserDefaults.snapshotTimeout))s"
+                    )
+                }
             }
         }
     }
@@ -3919,6 +4049,7 @@ enum BrowserDefaults {
     /// How long an agent's navigate waits before returning whatever has rendered, so a hung or
     /// endlessly-streaming page does not block the tool call forever.
     static let loadTimeout: TimeInterval = 20
+    static let agentBridgeTimeout: TimeInterval = 15
     static let snapshotTimeout: TimeInterval = 10
 }
 
@@ -4072,9 +4203,42 @@ private final class WeakBrowserScriptMessageHandler: NSObject, WKScriptMessageHa
 
 private enum BrowserBridgeError: LocalizedError {
     case invalidResult
+    case timedOut(seconds: TimeInterval)
 
     var errorDescription: String? {
-        "The page returned an invalid browser-bridge result."
+        switch self {
+        case .invalidResult:
+            return "The page returned an invalid browser-bridge result."
+        case .timedOut(let seconds):
+            return """
+                WebKit did not answer the browser JavaScript bridge within \(Int(seconds)) \
+                seconds. The page remains open; wait for it to settle or stop/reload it, then retry.
+                """
+        }
+    }
+}
+
+private enum BrowserScreenshotError: LocalizedError {
+    case timedOut
+    case webKit(NSError)
+    case missingImage
+    case encodingFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .timedOut:
+            return """
+                WebKit did not finish rendering the screenshot within \
+                \(Int(BrowserDefaults.snapshotTimeout)) seconds. The page is still available; \
+                wait for it to settle or stop/reload it, then retry.
+                """
+        case .webKit(let error):
+            return "WebKit snapshot failed (\(error.domain) \(error.code))."
+        case .missingImage:
+            return "WebKit completed snapshot rendering without an image."
+        case .encodingFailed:
+            return "The rendered screenshot could not be encoded as PNG."
+        }
     }
 }
 
@@ -4090,16 +4254,58 @@ private enum BrowserConsoleLevel {
 }
 
 @MainActor
-private final class BrowserScreenshotCompletion {
-    private var continuation: CheckedContinuation<BrowserScreenshotCapture?, Never>?
+private final class BrowserBridgeCallCompletion {
+    private var continuation: CheckedContinuation<Any, Error>?
+    private var timedOut = false
+    private var onLateCompletion: (@MainActor () -> Void)?
 
-    init(_ continuation: CheckedContinuation<BrowserScreenshotCapture?, Never>) {
+    init(
+        _ continuation: CheckedContinuation<Any, Error>,
+        onLateCompletion: (@MainActor () -> Void)?
+    ) {
+        self.continuation = continuation
+        self.onLateCompletion = onLateCompletion
+    }
+
+    @discardableResult
+    func finish(_ result: Result<Any, Error>) -> Bool {
+        guard let continuation else {
+            if timedOut {
+                let callback = onLateCompletion
+                onLateCompletion = nil
+                callback?()
+            }
+            return false
+        }
+        self.continuation = nil
+        onLateCompletion = nil
+        continuation.resume(with: result)
+        return true
+    }
+
+    @discardableResult
+    func timeout(_ error: Error) -> Bool {
+        guard let continuation else { return false }
+        self.continuation = nil
+        timedOut = true
+        continuation.resume(throwing: error)
+        return true
+    }
+}
+
+@MainActor
+private final class BrowserScreenshotCompletion {
+    private var continuation: CheckedContinuation<BrowserScreenshotCapture, Error>?
+
+    init(_ continuation: CheckedContinuation<BrowserScreenshotCapture, Error>) {
         self.continuation = continuation
     }
 
-    func finish(_ capture: BrowserScreenshotCapture?) {
-        guard let continuation else { return }
+    @discardableResult
+    func finish(_ result: Result<BrowserScreenshotCapture, Error>) -> Bool {
+        guard let continuation else { return false }
         self.continuation = nil
-        continuation.resume(returning: capture)
+        continuation.resume(with: result)
+        return true
     }
 }

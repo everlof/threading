@@ -269,8 +269,21 @@ must have that exact native scale. The ordinary capture is app-owned, so it does
 full-display recording or require the macOS Screen Recording grant. A fixture whose
 `captureMode` is `display` uses `simctl io screenshot` after the app publishes its ready marker;
 this is reserved for the keyboard-open state where OS-owned pixels are required and still captures
-only the simulator display. Keyboard-dismissed evidence returns to app-owned, pixel-stable capture.
-Simulator status furniture is fixed for repeatability.
+only the simulator display. `stable-display` performs the ordinary app-window pixel-stability gate
+before that same display capture; the marketing set uses it so every frame has identical Simulator
+status furniture. Keyboard-dismissed evidence returns to app-owned, pixel-stable capture. Simulator
+status furniture and each fixture's Dynamic Type category are fixed for repeatability.
+
+The five-shot App Store/website story is the `ios-marketing-flow` entry in that same manifest, not
+a parallel snapshot target. `scripts/capture_marketing_ios.sh --theme <id>` applies one declared
+theme and its authored light/dark simulator appearance to every checkpoint. Provider screens replay
+privacy-reviewed PTY bytes that were emitted by the installed Claude/Codex TUIs from synthetic
+saved sessions. The keyboard-plus-session-menu checkpoint adds a host interaction handshake: the
+app first proves the real keyboard is visible, `idb` finds and presses the shipping session-action
+control by accessibility label, and the host releases capture only after the account, Workspace,
+Interface, and Archive labels all exist. The companion video is assembled offline from integer
+frame counts; its timing therefore cannot inherit launch, network, menu-animation, or
+theme-rendering lag.
 
 Each run writes a unique static report under `.build/ui-evidence-ios-reports/` using the same
 design-review and regression-approval pages as macOS. Approved iOS references live separately under

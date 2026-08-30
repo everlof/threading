@@ -133,6 +133,16 @@ enum UsageCostSource: String, Codable, Sendable {
     case unpriced
 }
 
+/// The transcript that owns a response, independently of which Threading surface observed it.
+///
+/// `parentSessionID` below is optional because older Codex child rollouts identify themselves as
+/// delegated work without always naming their parent. Keeping the role even then is what lets the
+/// machine-wide ledger remain exact without inventing a parent association.
+enum UsageSessionKind: String, Codable, Equatable, Hashable, Sendable {
+    case root
+    case subagent
+}
+
 /// One runtime may route to a different company for inference. OpenCode using OpenRouter is the
 /// motivating case: the runtime owns the session and transcript while OpenRouter owns the bill.
 struct UsageOrigin: Codable, Equatable, Hashable, Sendable {
@@ -214,6 +224,10 @@ struct UsageLedgerRecord: Codable, Equatable, Sendable {
     let workingDirectory: String
     let tokens: UsageTokenCounts
     let reportedCostUSD: Double?
+    /// Optional for decoding ledger rows written before transcript provenance was retained.
+    let sessionKind: UsageSessionKind?
+    /// Provider transcript identity of the parent when the durable source states it.
+    let parentSessionID: String?
 
     var costUSD: Double?
     var costSource: UsageCostSource
@@ -230,6 +244,8 @@ struct UsageLedgerRecord: Codable, Equatable, Sendable {
         workingDirectory: String,
         tokens: UsageTokenCounts,
         reportedCostUSD: Double? = nil,
+        sessionKind: UsageSessionKind = .root,
+        parentSessionID: String? = nil,
         costUSD: Double? = nil,
         costSource: UsageCostSource = .unpriced,
         cacheSavingsUSD: Double = 0
@@ -244,6 +260,8 @@ struct UsageLedgerRecord: Codable, Equatable, Sendable {
         self.workingDirectory = workingDirectory
         self.tokens = tokens
         self.reportedCostUSD = reportedCostUSD
+        self.sessionKind = sessionKind
+        self.parentSessionID = parentSessionID
         self.costUSD = costUSD
         self.costSource = costSource
         self.cacheSavingsUSD = max(0, cacheSavingsUSD)
@@ -267,7 +285,9 @@ struct UsageLedgerRecord: Codable, Equatable, Sendable {
             model: later.model,
             workingDirectory: later.workingDirectory,
             tokens: tokens.mergingMaximums(with: later.tokens),
-            reportedCostUSD: reported
+            reportedCostUSD: reported,
+            sessionKind: later.sessionKind ?? sessionKind ?? .root,
+            parentSessionID: later.parentSessionID ?? parentSessionID
         )
     }
 }

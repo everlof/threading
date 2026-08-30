@@ -37,6 +37,8 @@ struct BrowserSnapshot: Decodable, Equatable {
     let viewport: Viewport
     let nodes: [Node]
     let truncated: Bool
+    let visitedElements: Int?
+    let truncationReason: String?
     let scope: String?
     let scopeError: String?
     let isPopup: Bool?
@@ -84,9 +86,14 @@ struct BrowserSnapshot: Decodable, Equatable {
         }
 
         if truncated {
-            lines.append(
-                "… snapshot truncated; request a scoped snapshot using a ref or selector."
-            )
+            var detail = "… snapshot truncated"
+            if let visitedElements {
+                detail += " after visiting \(visitedElements) elements"
+            }
+            if let truncationReason, !truncationReason.isEmpty {
+                detail += " (\(Self.singleLine(truncationReason)))"
+            }
+            lines.append(detail + "; request a scoped snapshot or scroll to the region you need.")
         }
         return lines.joined(separator: "\n")
     }
@@ -618,6 +625,14 @@ enum BrowserAgentScripts {
 
     static let snapshot = #"""
         const limit = Math.max(1, Math.min(Number(maxNodes || 180), 400));
+        const viewportMode = Boolean(viewportOnly) && !scopeRef && !scopeSelector;
+        // Output cardinality is not a work bound: a page may contain thousands of invisible or
+        // semantically empty wrappers before producing one node. Keep both axes explicit.
+        const maximumVisitedElements = Math.max(600, Math.min(8000, limit * 20));
+        const workStartedAt = performance.now();
+        const workBudgetMilliseconds = 50;
+        let visitedElements = 0;
+        let truncationReason = null;
         let state = globalThis.__threadingAgentState;
         if (!state || state.document !== document) {
           state = {
@@ -707,19 +722,46 @@ enum BrowserAgentScripts {
           }
         }
 
-        function visible(element) {
-          const elementView = element?.ownerDocument?.defaultView;
-          if (!elementView || !(element instanceof elementView.Element)) return false;
+        const ancestorVisibilityCache = new WeakMap();
+        function ancestorsAllowVisibility(element) {
+          if (ancestorVisibilityCache.has(element)) {
+            return ancestorVisibilityCache.get(element);
+          }
+          const lineage = [];
           let current = element;
+          let allowed = true;
           while (current) {
+            if (ancestorVisibilityCache.has(current)) {
+              allowed = ancestorVisibilityCache.get(current);
+              break;
+            }
+            const currentView = current?.ownerDocument?.defaultView;
+            if (!currentView || !(current instanceof currentView.Element)) {
+              allowed = false;
+              break;
+            }
+            lineage.push(current);
             if (current.hasAttribute?.('hidden')
-                || current.getAttribute?.('aria-hidden') === 'true') return false;
-            const view = current.ownerDocument?.defaultView || globalThis;
-            const style = view.getComputedStyle(current);
+                || current.getAttribute?.('aria-hidden') === 'true') {
+              allowed = false;
+              break;
+            }
+            const style = currentView.getComputedStyle(current);
             if (style.display === 'none' || style.visibility === 'hidden'
-                || style.visibility === 'collapse' || Number(style.opacity) === 0) return false;
+                || style.visibility === 'collapse' || Number(style.opacity) === 0) {
+              allowed = false;
+              break;
+            }
             current = composedParent(current);
           }
+          for (const member of lineage) ancestorVisibilityCache.set(member, allowed);
+          return allowed;
+        }
+
+        function visible(element) {
+          if (!ancestorsAllowVisibility(element)) return false;
+          // Only the candidate needs a box. Zero-sized portal/layout ancestors commonly own
+          // fixed or absolutely positioned controls whose own rectangles are fully visible.
           const rect = element.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
         }
@@ -854,6 +896,21 @@ enum BrowserAgentScripts {
 
         const nodes = [];
         let meaningfulCount = 0;
+        const seenElements = new WeakSet();
+
+        function hasWorkBudget() {
+          if (visitedElements >= maximumVisitedElements) {
+            truncationReason ||= `visit limit ${maximumVisitedElements}`;
+            return false;
+          }
+          if ((visitedElements & 31) === 0
+              && performance.now() - workStartedAt >= workBudgetMilliseconds) {
+            truncationReason ||= `time budget ${workBudgetMilliseconds}ms`;
+            return false;
+          }
+          visitedElements += 1;
+          return true;
+        }
 
         function frameOffset(element) {
           let x = 0;
@@ -872,7 +929,22 @@ enum BrowserAgentScripts {
         }
 
         function visitElement(element, depth) {
-          if (!element || nodes.length >= limit || !visible(element)) return;
+          if (!element || nodes.length >= limit || seenElements.has(element)) return;
+          seenElements.add(element);
+          if (!hasWorkBudget() || !visible(element)) return;
+
+          const rect = element.getBoundingClientRect();
+          const offset = frameOffset(element);
+          const globalRect = {
+            left: rect.left + offset.x,
+            top: rect.top + offset.y,
+            right: rect.right + offset.x,
+            bottom: rect.bottom + offset.y
+          };
+          if (viewportMode && (
+            globalRect.right <= 0 || globalRect.bottom <= 0
+              || globalRect.left >= innerWidth || globalRect.top >= innerHeight
+          )) return;
 
           const role = roleOf(element);
           const isDragTarget = element.matches(
@@ -891,8 +963,6 @@ enum BrowserAgentScripts {
 
           if (meaningful) {
             meaningfulCount += 1;
-            const rect = element.getBoundingClientRect();
-            const offset = frameOffset(element);
             nodes.push({
               depth: Math.max(0, depth),
               role: role || 'text',
@@ -920,17 +990,59 @@ enum BrowserAgentScripts {
         }
 
         function visit(root, depth) {
-          if (!root || nodes.length >= limit) return;
+          if (!root || nodes.length >= limit || truncationReason) return;
           for (const element of Array.from(root.children || [])) {
-            if (nodes.length >= limit) return;
+            if (nodes.length >= limit || truncationReason) return;
             visitElement(element, depth);
           }
         }
 
+        // A modal is the page the user is acting on, even when a portal appended it after a
+        // large background tree. Resolve visible modal ancestors from bounded viewport hit tests
+        // and the focused element, then traverse those roots before document order.
+        function modalAncestor(element) {
+          let current = element;
+          for (let depth = 0; current && depth < 16; depth += 1) {
+            const role = clean(current.getAttribute?.('role')).split(' ')[0];
+            if (current.tagName?.toLowerCase() === 'dialog'
+                || role === 'dialog' || role === 'alertdialog'
+                || current.getAttribute?.('aria-modal') === 'true') return current;
+            current = composedParent(current);
+          }
+          return null;
+        }
+
+        function visibleModalRoots() {
+          const roots = [];
+          const added = new WeakSet();
+          const add = candidate => {
+            if (candidate && !added.has(candidate) && visible(candidate)) {
+              added.add(candidate);
+              roots.push(candidate);
+            }
+          };
+          add(modalAncestor(document.activeElement));
+          for (const xFraction of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+            for (const yFraction of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+              const stack = document.elementsFromPoint(
+                Math.max(0, Math.min(innerWidth - 1, innerWidth * xFraction)),
+                Math.max(0, Math.min(innerHeight - 1, innerHeight * yFraction))
+              );
+              for (const element of stack.slice(0, 6)) add(modalAncestor(element));
+            }
+          }
+          try { add(document.querySelector(':modal')); } catch (_) {}
+          return roots;
+        }
+
         if (!scopeError) {
           if (scopeElement) visitElement(scopeElement, 0);
-          else visit(document.body || document.documentElement, 0);
+          else {
+            for (const modal of visibleModalRoots()) visitElement(modal, 0);
+            visit(document.body || document.documentElement, 0);
+          }
         }
+        if (nodes.length >= limit) truncationReason ||= `node limit ${limit}`;
         const root = document.documentElement;
         return JSON.stringify({
           url: location.href,
@@ -944,7 +1056,9 @@ enum BrowserAgentScripts {
             documentHeight: Math.round(Math.max(root?.scrollHeight || 0, document.body?.scrollHeight || 0))
           },
           nodes: nodes,
-          truncated: nodes.length >= limit,
+          truncated: Boolean(truncationReason),
+          visitedElements: visitedElements,
+          truncationReason: truncationReason,
           scope: requestedScopeRef
             ? `ref ${requestedScopeRef}`
             : (requestedScopeSelector ? `selector ${requestedScopeSelector}` : null),
@@ -1851,6 +1965,15 @@ enum BrowserAgentScripts {
           });
         }
 
+        const elementView = element.ownerDocument?.defaultView || globalThis;
+        if (element instanceof elementView.HTMLSelectElement) {
+          return JSON.stringify({
+            ok: false,
+            message: 'Use browser_select with one of this control\'s bounded option labels or '
+              + 'values instead of opening the native picker with browser_click.'
+          });
+        }
+
         const actionability = await actionabilityIssue(element, {
           enabled: true, stable: true, receivesEvents: true, scroll: !point
         });
@@ -2469,48 +2592,173 @@ enum BrowserAgentScripts {
           return JSON.stringify({ ok: false, message: targetFailure() });
         }
         const view = element.ownerDocument?.defaultView || globalThis;
-        if (!(element instanceof view.HTMLSelectElement)) {
-          return JSON.stringify({ ok: false, message: 'The target is not a native select control.' });
-        }
-
         const requested = String(choice ?? '');
         const mode = String(matchBy || '');
-        const options = Array.from(element.options);
-        const option = options.find(candidate => mode === 'value'
-          ? candidate.value === requested
-          : clean(candidate.label || candidate.textContent, 240) === clean(requested, 240));
-        if (!option) {
+        if (element instanceof view.HTMLSelectElement) {
+          const options = Array.from(element.options);
+          const option = options.find(candidate => mode === 'value'
+            ? candidate.value === requested
+            : clean(candidate.label || candidate.textContent, 240)
+              === clean(requested, 240));
+          if (!option) {
+            return JSON.stringify({
+              ok: false,
+              message: mode === 'value'
+                ? `No option has value "${clean(requested)}".`
+                : `No option has label "${clean(requested)}".`
+            });
+          }
+          if (option.disabled
+              || (option.parentElement instanceof view.HTMLOptGroupElement
+                && option.parentElement.disabled)) {
+            return JSON.stringify({ ok: false, message: 'That option is disabled.' });
+          }
+
+          const actionability = await actionabilityIssue(element, {
+            enabled: true, receivesEvents: true
+          });
+          if (actionability) {
+            return JSON.stringify({ ok: false, message: actionability });
+          }
+          element.focus({ preventScroll: true });
+          for (const candidate of options) {
+            candidate.selected = candidate === option;
+          }
+          element.dispatchEvent(new view.Event('input', { bubbles: true, composed: true }));
+          element.dispatchEvent(new view.Event('change', { bubbles: true, composed: true }));
+
+          const label = clean(option.label || option.textContent) || '(unnamed)';
           return JSON.stringify({
-            ok: false,
-            message: mode === 'value'
-              ? `No option has value "${clean(requested)}".`
-              : `No option has label "${clean(requested)}".`
+            ok: true,
+            message: `Selected "${label}"${option.value && option.value !== label
+              ? ` (${clean(option.value)})` : ''}`
           });
         }
-        if (option.disabled
-            || (option.parentElement instanceof view.HTMLOptGroupElement
-              && option.parentElement.disabled)) {
-          return JSON.stringify({ ok: false, message: 'That option is disabled.' });
+
+        const role = roleOf(element);
+        if (!['combobox', 'listbox'].includes(role)) {
+          return JSON.stringify({
+            ok: false,
+            message: 'The target is not a native select, ARIA combobox, or ARIA listbox.'
+          });
         }
 
         const actionability = await actionabilityIssue(element, {
           enabled: true, receivesEvents: true
         });
-        if (actionability) {
-          return JSON.stringify({ ok: false, message: actionability });
-        }
+        if (actionability) return JSON.stringify({ ok: false, message: actionability });
         element.focus({ preventScroll: true });
-        for (const candidate of options) {
-          candidate.selected = candidate === option;
-        }
-        element.dispatchEvent(new view.Event('input', { bubbles: true, composed: true }));
-        element.dispatchEvent(new view.Event('change', { bubbles: true, composed: true }));
+        if (role === 'combobox' && typeof element.click === 'function') element.click();
 
-        const label = clean(option.label || option.textContent) || '(unnamed)';
+        function optionValue(option) {
+          return clean(option.getAttribute?.('data-value') || option.value || '', 240);
+        }
+        function optionLabel(option) {
+          return clean(option.getAttribute?.('aria-label') || option.innerText
+            || option.textContent, 240);
+        }
+        const maximumOptionElements = 5000;
+        let optionElementsVisited = 0;
+        function currentOptionCandidates() {
+          const candidates = [];
+          const seen = new WeakSet();
+          const controlledIDs = clean(
+            `${element.getAttribute?.('aria-controls') || ''} `
+              + `${element.getAttribute?.('aria-owns') || ''}`
+          ).split(' ').filter(Boolean);
+          const roots = controlledIDs.map(id => element.ownerDocument?.getElementById(id))
+            .filter(Boolean);
+          if (role === 'listbox') roots.unshift(element);
+          if (!roots.length) roots.push(element.ownerDocument);
+
+          function visit(root) {
+            for (const candidate of Array.from(root?.children || [])) {
+              if (optionElementsVisited >= maximumOptionElements) return true;
+              optionElementsVisited += 1;
+              const candidateRole = roleOf(candidate);
+              const id = clean(candidate.id, 240);
+              const idPrefix = clean(element.id, 240).replace(/-input$/, '');
+              const isOption = candidateRole === 'option'
+                || (idPrefix && id.startsWith(`${idPrefix}-option-`));
+              if (isOption && !seen.has(candidate) && visibilityIssue(candidate) === null) {
+                seen.add(candidate);
+                candidates.push(candidate);
+              }
+              if (candidate.shadowRoot && visit(candidate.shadowRoot)) return true;
+              if (candidate.tagName?.toLowerCase() === 'iframe') {
+                try {
+                  if (candidate.contentDocument?.documentElement
+                      && visit(candidate.contentDocument)) return true;
+                } catch (_) {}
+              }
+              if (visit(candidate)) return true;
+            }
+            return false;
+          }
+          for (const root of roots) {
+            if (visit(root)) break;
+          }
+          return candidates;
+        }
+
+        const matchesRequested = option => mode === 'value'
+          ? optionValue(option) === requested
+          : optionLabel(option) === clean(requested, 240);
+        async function waitForOptions() {
+          let candidates = [];
+          for (let attempt = 0; attempt < 20; attempt += 1) {
+            candidates = currentOptionCandidates();
+            const match = candidates.find(matchesRequested);
+            if (match) return { match, candidates };
+            if (optionElementsVisited >= maximumOptionElements) break;
+            await new Promise(resolve => setTimeout(resolve, 50));
+          }
+          return { match: null, candidates };
+        }
+
+        let resolution = await waitForOptions();
+        if (!resolution.match && mode === 'label'
+            && element instanceof view.HTMLInputElement) {
+          const setter = Object.getOwnPropertyDescriptor(
+            view.HTMLInputElement.prototype, 'value'
+          )?.set;
+          setter ? setter.call(element, requested) : (element.value = requested);
+          element.dispatchEvent(new view.InputEvent('input', {
+            bubbles: true, composed: true, inputType: 'insertText', data: requested
+          }));
+          resolution = await waitForOptions();
+        }
+        const option = resolution.match;
+        if (!option) {
+          const available = resolution.candidates.slice(0, 12)
+            .map(candidate => `"${optionLabel(candidate) || '(unnamed)'}"`)
+            .join(', ');
+          return JSON.stringify({
+            ok: false,
+            message: (mode === 'value'
+              ? `No current ARIA option has value "${clean(requested)}".`
+              : `No current ARIA option has label "${clean(requested)}".`)
+              + (available ? ` Available options: ${available}.` : '')
+          });
+        }
+        if (option.matches?.(':disabled,[aria-disabled="true"]')) {
+          return JSON.stringify({ ok: false, message: 'That option is disabled.' });
+        }
+        const optionActionability = await actionabilityIssue(option, {
+          enabled: true, stable: true, receivesEvents: true
+        });
+        if (optionActionability) {
+          return JSON.stringify({ ok: false, message: optionActionability });
+        }
+        option.focus?.({ preventScroll: true });
+        if (typeof option.click === 'function') option.click();
+        else option.dispatchEvent(new view.MouseEvent('click', { bubbles: true, composed: true }));
+        await new Promise(resolve => setTimeout(resolve, 50));
+        const label = optionLabel(option) || '(unnamed)';
+        const value = optionValue(option);
         return JSON.stringify({
           ok: true,
-          message: `Selected "${label}"${option.value && option.value !== label
-            ? ` (${clean(option.value)})` : ''}`
+          message: `Selected "${label}"${value && value !== label ? ` (${value})` : ''}`
         });
         """#
 

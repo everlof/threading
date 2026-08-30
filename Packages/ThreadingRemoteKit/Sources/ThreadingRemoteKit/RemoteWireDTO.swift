@@ -704,6 +704,8 @@ public struct RemoteModelChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
     public let reasoning: [RemoteReasoningChoiceDTO]
+    /// The account-effective inherited effort for this model, after the host has applied the
+    /// routed login's config and validated it against the advertised reasoning levels.
     public let defaultReasoningID: String?
     /// Nil when decoded from a host predating remote speed selection.
     public let supportsFastMode: Bool?
@@ -2444,6 +2446,9 @@ public enum RemoteWebSocketFeature: String, Codable, CaseIterable, Sendable {
     case submitAcknowledgement
     /// A terminal client may compose locally and submit one complete line atomically.
     case atomicTerminalSubmission
+    /// Direct terminal input may carry one sampled request id and receive a content-free host
+    /// admission acknowledgement. Clients keep ordinary input fire-and-forget when absent.
+    case terminalInputLatencyProbe
     /// Human attention is a separate app-owned action and never prompt text or PTY input.
     case attentionRequests
     /// The host can make one person the writer without discarding anybody else's draft.
@@ -2964,6 +2969,24 @@ public struct RemotePromptSubmissionResultDTO: Codable, Equatable, Sendable {
         self.type = "submitResult"
         self.requestID = requestID
         self.status = status
+    }
+}
+
+/// A rate-limited acknowledgement for one sampled direct-terminal input write.
+///
+/// The ordinary input stream remains fire-and-forget. A current client adds a request id to at
+/// most one input every few seconds so diagnostics can distinguish phone/network delay from the
+/// Mac main-queue admission that precedes the PTY write. Neither the request nor this reply
+/// carries the input bytes.
+public struct RemoteTerminalInputProbeResultDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let requestID: String
+    public let accepted: Bool
+
+    public init(requestID: String, accepted: Bool) {
+        self.type = "inputProbeResult"
+        self.requestID = requestID
+        self.accepted = accepted
     }
 }
 

@@ -57,7 +57,13 @@ final class ExtensionBundleLoaderTests: XCTestCase {
         try JSONEncoder().encode([
             "Status": "Status på svenska",
             "Ready": "Klar",
-            "Refresh": "Uppdatera"
+            "Refresh": "Uppdatera",
+            "Running": "Kör",
+            "Grouping": "Gruppering",
+            "Recent activity": "Senaste aktivitet",
+            "Search sessions": "Sök sessioner",
+            "Priority": "Prioritet",
+            "No sessions": "Inga sessioner"
         ]).write(to: localizationDirectory.appendingPathComponent("sv.json"))
 
         let manifest = ExtensionManifest(
@@ -130,6 +136,202 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             "sv"
         )
         XCTAssertNotNil(environment[ExtensionLocalizationEnvironment.stringsJSON])
+
+        let localizedPatch = resolver.workspaceNavigatorActionResponse(.init(
+            requestID: "event",
+            navigatorID: "activity",
+            itemPatches: [.init(
+                collectionID: "sessions",
+                itemID: "one",
+                content: .status("Running", role: .positive)
+            )]
+        ))
+        XCTAssertEqual(
+            localizedPatch.itemPatches?.first?.content,
+            .status("Kör", role: .positive)
+        )
+
+        let localizedNavigator = resolver.workspaceNavigator(.init(
+            id: "activity",
+            title: "Status",
+            root: .content(.status("Ready", role: .positive)),
+            options: [
+                .init(
+                    id: "sort",
+                    title: "Grouping",
+                    control: .choice(
+                        defaultValue: "recent",
+                        options: [
+                            .init(id: "recent", title: "Recent activity"),
+                            .init(id: "name", title: "Name")
+                        ]
+                    )
+                )
+            ],
+            pipeline: .init(
+                consumes: [
+                    .init(key: ExtensionHostFactKey.sessionTitle, requirement: .required),
+                    .init(
+                        key: ExtensionHostFactKey.sessionDetailedActivity,
+                        requirement: .enhances
+                    )
+                ],
+                search: .init(
+                    placeholder: "Search sessions",
+                    accessibilityLabel: "Search sessions",
+                    fields: [.init(ExtensionHostFactKey.sessionTitle)]
+                ),
+                buckets: [
+                    .init(strategy: .rules(
+                        [
+                            .init(
+                                id: "priority",
+                                title: "Priority",
+                                predicate: .comparison(
+                                    .init(.init(
+                                        ExtensionHostFactKey.sessionDetailedActivity
+                                    )),
+                                    .equal,
+                                    .string("working")
+                                )
+                            )
+                        ],
+                        unmatched: .omit
+                    ))
+                ],
+                sort: [
+                    .init(
+                        when: [.init(optionID: "sort", equals: .string("recent"))],
+                        operand: .init(.init(ExtensionHostFactKey.sessionTitle)),
+                        direction: .ascending
+                    ),
+                    .init(
+                        when: [.init(optionID: "sort", equals: .string("name"))],
+                        operand: .init(.init(ExtensionHostFactKey.sessionTitle)),
+                        direction: .descending
+                    )
+                ],
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .stack(
+                        axis: .horizontal,
+                        spacing: .small,
+                        children: [
+                            .text(
+                                .fact(
+                                    .init(ExtensionHostFactKey.sessionTitle),
+                                    facet: .value,
+                                    fallback: "Ready"
+                                ),
+                                role: .body
+                            ),
+                            .conditional(
+                                .comparison(
+                                    .init(.init(
+                                        ExtensionHostFactKey.sessionDetailedActivity
+                                    )),
+                                    .equal,
+                                    .string("working")
+                                ),
+                                content: .activityIndicator(
+                                    accessibilityLabel: "Running"
+                                )
+                            )
+                        ]
+                    ),
+                    emptyState: .init(title: "No sessions")
+                )
+            )
+        ))
+        XCTAssertEqual(localizedNavigator.title, "Status på svenska")
+        XCTAssertEqual(localizedNavigator.options.first?.title, "Gruppering")
+        guard case .choice(_, let localizedChoices) = localizedNavigator.options.first?.control
+        else {
+            return XCTFail("localized navigator lost its choice control")
+        }
+        XCTAssertEqual(localizedChoices.map(\.title), ["Senaste aktivitet", "Name"])
+        XCTAssertEqual(
+            localizedNavigator.pipeline?.search?.accessibilityLabel,
+            "Sök sessioner"
+        )
+        guard case .rules(let localizedRules, _) =
+            localizedNavigator.pipeline?.buckets.first?.strategy else {
+            return XCTFail("localized navigator lost its rule buckets")
+        }
+        XCTAssertEqual(localizedRules.map(\.title), ["Prioritet"])
+        XCTAssertEqual(localizedNavigator.pipeline?.output.emptyState?.title, "Inga sessioner")
+        XCTAssertEqual(localizedNavigator.pipeline?.output.activation, .sourceSession)
+        XCTAssertEqual(
+            localizedNavigator.pipeline?.output.itemLimit,
+            ExtensionWorkspaceNavigatorPipeline.maximumOutputItems
+        )
+        XCTAssertEqual(localizedNavigator.pipeline?.output.overflow, .truncateWithNotice)
+        guard case .stack(_, _, let localizedTemplateChildren) =
+            localizedNavigator.pipeline?.output.rowTemplate,
+              case .text(.fact(_, _, let fallback), _) = localizedTemplateChildren.first,
+              case .conditional(_, let indicator) = localizedTemplateChildren.last,
+              case .activityIndicator(let label) = indicator else {
+            return XCTFail("localized navigator lost its row template")
+        }
+        XCTAssertEqual(fallback, "Klar")
+        XCTAssertEqual(label, "Kör")
+    }
+
+    func testPipelineManifestParityUsesRawBaseLanguageBeforeLocalization() throws {
+        let rawNavigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Ready", role: .neutral)),
+            pipeline: .init(
+                consumes: [.init(
+                    key: ExtensionHostFactKey.sessionTitle,
+                    requirement: .required
+                )],
+                search: .init(
+                    placeholder: "Search sessions",
+                    accessibilityLabel: "Search sessions",
+                    fields: [.init(ExtensionHostFactKey.sessionTitle)]
+                ),
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .text(
+                        .fact(
+                            .init(ExtensionHostFactKey.sessionTitle),
+                            facet: .value,
+                            fallback: "Untitled"
+                        ),
+                        role: .body
+                    )
+                )
+            )
+        )
+        let manifest = ExtensionManifest(
+            identifier: "com.example.localized-pipeline",
+            name: "Localized Pipeline",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/extension",
+            capabilities: [.workspaceNavigation],
+            workspaceNavigators: [rawNavigator]
+        )
+        let rawRegistration = ExtensionRegistration(
+            workspaceNavigators: [rawNavigator]
+        )
+        try rawRegistration.validate(for: manifest)
+
+        let localizedRegistration = ExtensionLocalizationResolver(strings: [
+            "Activity": "Aktivitet",
+            "Ready": "Klar",
+            "Search sessions": "Sök sessioner",
+            "Untitled": "Namnlös",
+        ]).registration(rawRegistration)
+        XCTAssertEqual(localizedRegistration.workspaceNavigators.first?.title, "Aktivitet")
+        XCTAssertThrowsError(try localizedRegistration.validate(for: manifest)) { error in
+            XCTAssertTrue((error as? ExtensionValidationError)?.issues.contains {
+                $0.path == "workspaceNavigators"
+                    && $0.message.contains("manifest declarations exactly")
+            } == true)
+        }
     }
 
     func testInspectorRejectsLocalizationFilesThatAreNotFlatStringCatalogues() throws {

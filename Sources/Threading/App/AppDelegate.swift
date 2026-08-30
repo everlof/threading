@@ -149,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var componentGalleryWindowController: ComponentGalleryWindowController?
     private var aboutWindowController: AboutWindowController?
     private var componentCustomizationRegistry: ComponentCustomizationRegistry?
+    private var hostFactPipeline: HostFactPipeline?
     private var workspaceNavigatorMenu: NSMenu?
     private var commandPaletteController: CommandPaletteViewController?
     private var agentCLIUpdateCoordinator: AgentCLIUpdateCoordinator?
@@ -639,6 +640,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         if plan.startsExtensions {
+            let factPipeline = installHostFactPipeline()
+            mainWindowController.installWorkspaceNavigatorFactRegistry(factPipeline.registry)
             ExtensionHostService.shared.installSessionRuntimeShellRootProvider {
                 [weak mainWindowController] sessionID in
                 mainWindowController?.extensionShellRootPid(for: sessionID)
@@ -647,15 +650,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // Installed extensions get a separate, tokenized host-data/service channel. It must
             // be ready before a host-capable process starts, because that process receives the
             // short-lived endpoint and bearer token only in its launch environment.
-            if let componentCustomizationRegistry {
-                ExtensionHostService.shared.start(
-                    registry: componentCustomizationRegistry,
-                    identityRegistry: .shared
-                ) {
-                    ExtensionManager.shared.startEnabledExtensions()
-                    LaunchLedger.shared.record(.extensionsStarted)
-                }
-            } else {
+            ExtensionHostService.shared.start(
+                registry: componentCustomizationRegistry,
+                factRegistry: factPipeline.registry,
+                identityRegistry: .shared
+            ) {
                 ExtensionManager.shared.startEnabledExtensions()
                 LaunchLedger.shared.record(.extensionsStarted)
             }
@@ -1596,6 +1595,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         ComponentCustomizationProviderSlot.shared.actionHandler = { action in
             ExtensionManager.shared.invokeComponentAction(action)
         }
+    }
+
+    /// Creates the public navigator fact plane only for launches that allow extensions. The
+    /// caller is below the startup-profile return and after the first window has been ordered;
+    /// the pipeline crosses one more main-queue turn before doing its bounded initial snapshot.
+    @MainActor
+    private func installHostFactPipeline() -> HostFactPipeline {
+        let source = LiveHostFactProjectionSource.live(
+            projectStore: environment.projectStore,
+            agentRuntime: environment.agentRuntime
+        )
+        let pipeline = HostFactPipeline(
+            publisherDependencies: source.publisherDependencies()
+        )
+        hostFactPipeline = pipeline
+        pipeline.startAfterFirstWindowVisible()
+        return pipeline
     }
 
     // MARK: - Single Instance Triage

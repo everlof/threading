@@ -72,7 +72,10 @@ Upgrading the zone plan and setting the period to 60 is the whole fix; no code c
   `https://remote.threading.codes/v1/auth/apple/events` for server-to-server account events.
 - [ ] Create a separate APNs token key authorized for `codes.threading.mobile`; install
   `APNS_TEAM_ID`, `APNS_KEY_ID`, and `APNS_PRIVATE_KEY`. The `.p8` must not ship in either app or
-  be installed on a user's Mac.
+  be installed on a user's Mac. The current single-secret Worker requires an existing/unrestricted
+  key valid in both environments; newer environment-scoped Apple keys require separate Worker
+  secrets and selection support. Verify one accepted delivery against each endpoint because the
+  device tokens remain environment-specific.
 - [ ] Generate independent 32-byte-or-longer values for session signing, stored Apple-token
   encryption, report pickup and triage webhook authentication. Install every name pinned by
   `wrangler.jsonc` and retain operator copies only where explicitly required.

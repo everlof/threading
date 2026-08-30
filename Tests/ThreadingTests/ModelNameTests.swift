@@ -91,6 +91,45 @@ final class ModelNameTests: XCTestCase {
         XCTAssertEqual(AgentModels.defaultEffort(for: .codex, account: account), "high")
     }
 
+    /// The model cache describes Sol's generic fallback, while this routed login explicitly
+    /// chooses Extra High. The remote catalogue must publish the login-effective value because
+    /// older phones materialize this field into their create request.
+    @MainActor
+    func testRemoteCatalogPublishesAccountEffectiveEffortInsteadOfModelCacheFallback() throws {
+        let directory = try temporaryAccountDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try Data("""
+            model = "gpt-5.6-sol"
+            model_reasoning_effort = "xhigh"
+            """.utf8).write(
+                to: directory.appendingPathComponent(AgentDefaults.codexConfigFile)
+            )
+        try Data("""
+            {"models":[{
+              "slug":"gpt-5.6-sol",
+              "display_name":"GPT-5.6 Sol",
+              "visibility":"list",
+              "default_reasoning_level":"low",
+              "supported_reasoning_levels":[
+                {"effort":"low","description":"Quick"},
+                {"effort":"xhigh","description":"Deep"}
+              ]
+            }]}
+            """.utf8).write(
+                to: directory.appendingPathComponent(AgentDefaults.codexModelsCacheFile)
+            )
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .standard,
+            configPath: directory.path
+        )
+
+        let choices = RemoteNewSessionModelCatalog.choices(for: .codex, account: account)
+
+        XCTAssertEqual(choices.first?.id, "gpt-5.6-sol")
+        XCTAssertEqual(choices.first?.defaultReasoningID, "xhigh")
+    }
+
     func testCodexModelsAndFastTierComeFromTheRoutedAccountsCatalog() throws {
         let directory = try temporaryAccountDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -14,6 +14,11 @@ import Foundation
 /// half that decides custody and spelling is here where every composer can share it.
 enum ComposerAttachmentHandover {
 
+    struct RecordedHandover {
+        let paths: [String]
+        let attachments: [SessionAttachment]
+    }
+
     /// Files the user handed to a session, filed so they sit beside what the agent made of them.
     ///
     /// The one rename: a pasted screenshot is written under a generated name, which is right for
@@ -30,6 +35,8 @@ enum ComposerAttachmentHandover {
         paths: [String],
         sessionID: SessionID,
         projectRoot: URL,
+        turnID: String? = nil,
+        turnPlacement: SessionAttachment.TurnPlacement = .none,
         store: SessionAttachmentStore = .shared
     ) -> [SessionAttachment] {
         paths.compactMap { path in
@@ -42,7 +49,9 @@ enum ComposerAttachmentHandover {
                 sessionID: sessionID,
                 projectRoot: projectRoot,
                 origin: .user,
-                preferredName: isGenerated ? L10n.string("Pasted image") : nil
+                preferredName: isGenerated ? L10n.string("Pasted image") : nil,
+                turnID: turnID,
+                turnPlacement: turnPlacement
             )
         }
     }
@@ -54,20 +63,39 @@ enum ComposerAttachmentHandover {
     /// those is a picture the agent opens after it has gone. Falls back to what it was given if
     /// custody could not be taken, because a path that might still work beats no picture at all.
     @MainActor
+    static func handOverRecording(
+        paths: [String],
+        sessionID: SessionID,
+        projectRoot: URL,
+        store: SessionAttachmentStore = .shared
+    ) -> RecordedHandover {
+        guard !paths.isEmpty else { return RecordedHandover(paths: [], attachments: []) }
+        let recorded = record(
+            paths: paths,
+            sessionID: sessionID,
+            projectRoot: projectRoot,
+            turnPlacement: .next,
+            store: store
+        )
+        return RecordedHandover(
+            paths: recorded.isEmpty ? paths : recorded.map(\.url.path),
+            attachments: recorded
+        )
+    }
+
+    @MainActor
     static func handOver(
         paths: [String],
         sessionID: SessionID,
         projectRoot: URL,
         store: SessionAttachmentStore = .shared
     ) -> [String] {
-        guard !paths.isEmpty else { return [] }
-        let recorded = record(
+        handOverRecording(
             paths: paths,
             sessionID: sessionID,
             projectRoot: projectRoot,
             store: store
-        )
-        return recorded.isEmpty ? paths : recorded.map(\.url.path)
+        ).paths
     }
 
     /// Takes custody of server-owned staging files, or refuses the whole handoff.
@@ -84,14 +112,14 @@ enum ComposerAttachmentHandover {
         store: SessionAttachmentStore = .shared
     ) -> [String]? {
         guard !paths.isEmpty else { return [] }
-        let handed = handOver(
+        let handover = handOverRecording(
             paths: paths,
             sessionID: sessionID,
             projectRoot: projectRoot,
             store: store
         )
-        guard handed.count == paths.count, handed != paths else { return nil }
-        return handed
+        guard handover.paths.count == paths.count, handover.paths != paths else { return nil }
+        return handover.paths
     }
 
     /// The words followed by quoted paths — the only form of an image either CLI can open.

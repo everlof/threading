@@ -181,14 +181,27 @@ struct RowConductSummary: Equatable, Sendable {
         now: Date = Date()
     ) -> RowConductSummary? {
         let project = store.project(forSessionID: session.id)
+        let park = CustomLimitParkPolicy.hold(sessionID: session.id, at: now)
 
+        return forSession(session, project: project, park: park, now: now)
+    }
+
+    /// The same rule with its already-resolved project and account hold. Whole-catalog
+    /// projections use this form so one account's limit state is resolved once rather than once
+    /// per session, while visible rows keep using the store convenience above.
+    @MainActor
+    static func forSession(
+        _ session: AgentSession,
+        project: Project?,
+        park: CustomLimitHold,
+        now: Date
+    ) -> RowConductSummary? {
         // A park by one of the user's own limits belongs in this family and **not** on the
         // warning triangle. `ThemedWarningMark` means "the provider stopped this and you cannot
         // answer it"; a self-imposed line is conduct — the same kind of fact as a session that
         // mutes itself or recovers differently, which is what this mark already says. The
         // process really is idle and the provider really would accept a turn, so there is no new
         // `SessionActivity` case either.
-        let park = CustomLimitParkPolicy.hold(sessionID: session.id, at: now)
 
         return self.session(
             muted: session.notificationsMuted,

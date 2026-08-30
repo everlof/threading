@@ -729,7 +729,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         case "auth":
             authenticate(connection, message: parsed)
         case "input":
-            handleInput(connection, data: parsed.data)
+            handleInput(connection, data: parsed.data, requestID: parsed.requestID)
         case "submit":
             handleSubmit(
                 connection,
@@ -1324,30 +1324,38 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         DispatchQueue.main.async {
-            guard let result = self.services.notifications.register(
+            let registrationResult = self.services.notifications.register(
                 registration,
                 deviceID: deviceID,
                 authorization: authorization
-            ) else {
+            )
+            switch registrationResult {
+            case .invalid:
                 respond(.respond(RemoteRouter.error(
                     422,
                     "Invalid Device Token",
                     code: .invalidDeviceToken
                 )))
-                return
+            case .persistenceUnavailable:
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Persistence Unavailable",
+                    code: .persistenceUnavailable
+                )))
+            case .registered(let result):
+                self.services.eventLog.recordRemoteEvent("Remote notifications registered", [
+                    .share: authorization.shareID,
+                    .device: deviceID,
+                    .delivery: result.delivery.rawValue,
+                ])
+                MacRemoteDiagnostics.record(.notificationRegistrationReceived, fields: [
+                    .peer: MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
+                    .transport: result.delivery.rawValue,
+                    .capability: authorization.capability.rawValue,
+                    .enabledKindCount: String(registration.enabledKinds.count),
+                ])
+                respond(.respond(RemoteRouter.json(result)))
             }
-            self.services.eventLog.recordRemoteEvent("Remote notifications registered", [
-                .share: authorization.shareID,
-                .device: deviceID,
-                .delivery: result.delivery.rawValue,
-            ])
-            MacRemoteDiagnostics.record(.notificationRegistrationReceived, fields: [
-                .peer: MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
-                .transport: result.delivery.rawValue,
-                .capability: authorization.capability.rawValue,
-                .enabledKindCount: String(registration.enabledKinds.count),
-            ])
-            respond(.respond(RemoteRouter.json(result)))
         }
     }
 
@@ -3197,7 +3205,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         MacRemoteDiagnostics.record(.socketConnected, fields: fields)
     }
 
-    private func handleInput(_ connection: RemoteConnection, data: String?) {
+    private func handleInput(
+        _ connection: RemoteConnection,
+        data: String?,
+        requestID rawRequestID: String?
+    ) {
         guard let authorization = connection.authorization, authorization.capability == .interact else {
             connection.sendText(#"{"type":"error","code":"forbidden"}"#)
             self.services.eventLog.recordRemoteEvent("Remote input refused", [.reason: "view-only"])
@@ -3209,11 +3221,30 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        // A request id is diagnostic sampling, not part of terminal input semantics. Invalid ids
+        // are ignored so a stale or malformed probe can never make an otherwise valid key fail.
+        let requestID = rawRequestID.flatMap(RemoteInboundPolicy.normalizedMutationRequestID)
+        let startedAt = requestID.map { requestID in
+            beginHostLatencyDiagnostic(
+                event: .terminalInputProbeStarted,
+                requestID: requestID,
+                connection: connection,
+                kind: "terminal"
+            )
+        }
         let bytes = Array(data.utf8)
         let device = connection.deviceID
         DispatchQueue.main.async {
+            self.applyTerminalWireAdmissionDelayIfEnabled()
             guard self.authorizer?.isCurrent(authorization) == true else {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
+                self.finishTerminalInputProbe(
+                    connection,
+                    requestID: requestID,
+                    startedAt: startedAt,
+                    accepted: false,
+                    result: "forbidden"
+                )
                 return
             }
             let accepted: Bool
@@ -3239,7 +3270,115 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             if !accepted {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "controlHeld")))
             }
+            self.finishTerminalInputProbe(
+                connection,
+                requestID: requestID,
+                startedAt: startedAt,
+                accepted: accepted,
+                result: accepted ? "accepted" : "controlHeld"
+            )
         }
+    }
+
+    private func finishTerminalInputProbe(
+        _ connection: RemoteConnection,
+        requestID: String?,
+        startedAt: UInt64?,
+        accepted: Bool,
+        result: String
+    ) {
+        guard let requestID, let startedAt else { return }
+        finishHostLatencyDiagnostic(
+            event: .terminalInputProbeEnded,
+            requestID: requestID,
+            connection: connection,
+            kind: "terminal",
+            result: result,
+            startedAt: startedAt
+        )
+        connection.sendText(encode(RemoteTerminalInputProbeResultDTO(
+            requestID: requestID,
+            accepted: accepted
+        )))
+    }
+
+    private func beginHostLatencyDiagnostic(
+        event: RemoteDiagnosticEvent,
+        requestID: String,
+        connection: RemoteConnection,
+        kind: String
+    ) -> UInt64 {
+        let startedAt = MacRemoteDiagnostics.monotonicNow()
+        MacRemoteDiagnostics.recordInteraction(event, fields: hostLatencyDiagnosticFields(
+            requestID: requestID,
+            connection: connection,
+            kind: kind,
+            result: "started"
+        ))
+        return startedAt
+    }
+
+    private func finishHostLatencyDiagnostic(
+        event: RemoteDiagnosticEvent,
+        requestID: String,
+        connection: RemoteConnection,
+        kind: String,
+        result: String,
+        startedAt: UInt64
+    ) {
+        var fields = hostLatencyDiagnosticFields(
+            requestID: requestID,
+            connection: connection,
+            kind: kind,
+            result: result
+        )
+        fields[.durationMS] = MacRemoteDiagnostics.elapsedMilliseconds(since: startedAt)
+        MacRemoteDiagnostics.recordInteraction(
+            event,
+            level: result == RemotePromptSubmissionStatus.accepted.rawValue ? .info : .warning,
+            fields: fields
+        )
+    }
+
+    private func hostLatencyDiagnosticFields(
+        requestID: String,
+        connection: RemoteConnection,
+        kind: String,
+        result: String
+    ) -> [RemoteDiagnosticField: String] {
+        var fields: [RemoteDiagnosticField: String] = [
+            .trace: MacRemoteDiagnostics.pseudonym(requestID, prefix: "trace"),
+            .phase: "hostAdmission",
+            .kind: kind,
+            .result: result,
+        ]
+        if let routed = connection.routedSessionID,
+           let sessionID = SessionID(uuidString: routed) {
+            fields[.session] = MacRemoteDiagnostics.pseudonym(
+                sessionID.uuidString,
+                prefix: "session"
+            )
+        }
+        if let device = connection.deviceID {
+            fields[.peer] = MacRemoteDiagnostics.pseudonym(device, prefix: "device")
+        }
+        return fields
+    }
+
+    /// The real-wire simulator lab can reproduce a busy host without changing production
+    /// behavior or relying on ambient load. Delaying inside the main-queue admission block has
+    /// the same boundary as the stalls that made the reported terminal interaction sluggish.
+    private func applyTerminalWireAdmissionDelayIfEnabled() {
+#if DEBUG
+        guard ProcessInfo.processInfo.environment["THREADING_REMOTE_TERMINAL_WIRE_FIXTURE"] == "1",
+              let raw = ProcessInfo.processInfo.environment[
+                "THREADING_REMOTE_TERMINAL_WIRE_ADMISSION_DELAY_MS"
+              ],
+              let milliseconds = UInt64(raw),
+              milliseconds > 0,
+              milliseconds <= 5_000 else { return }
+        Thread.sleep(forTimeInterval: Double(milliseconds) / 1_000)
+#endif
     }
 
     private func handleViewport(
@@ -3562,6 +3701,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         let device = connection.deviceID
+        let diagnosticStartedAt = requestID.map { requestID in
+            beginHostLatencyDiagnostic(
+                event: .promptSubmissionStarted,
+                requestID: requestID,
+                connection: connection,
+                kind: "conversation"
+            )
+        }
 
         // Claimed here, on the queue that owns staging, and never on the main actor: the hop
         // below is asynchronous, and two submits racing for the same upload would otherwise
@@ -3587,6 +3734,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                         requestID: requestID,
                         status: .rejected
                     )))
+                    if let diagnosticStartedAt {
+                        finishHostLatencyDiagnostic(
+                            event: .promptSubmissionEnded,
+                            requestID: requestID,
+                            connection: connection,
+                            kind: "conversation",
+                            result: RemotePromptSubmissionStatus.rejected.rawValue,
+                            startedAt: diagnosticStartedAt
+                        )
+                    }
                 }
                 return
             }
@@ -3597,9 +3754,20 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         let claimedIDs = stagedPaths.isEmpty ? [] : (attachmentUploadIDs ?? [])
         DispatchQueue.main.async {
+            self.applyTerminalWireAdmissionDelayIfEnabled()
             guard self.authorizer?.isCurrent(authorization) == true else {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 self.resolveClaim(claimedIDs, accepted: false)
+                if let requestID, let diagnosticStartedAt {
+                    self.finishHostLatencyDiagnostic(
+                        event: .promptSubmissionEnded,
+                        requestID: requestID,
+                        connection: connection,
+                        kind: "conversation",
+                        result: "forbidden",
+                        startedAt: diagnosticStartedAt
+                    )
+                }
                 return
             }
             let status = self.services.mirrors.submitPrompt(
@@ -3616,6 +3784,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             // composer is still showing can be sent again without re-uploading a thing.
             self.resolveClaim(claimedIDs, accepted: status == .accepted)
             guard let requestID else { return }
+            if let diagnosticStartedAt {
+                self.finishHostLatencyDiagnostic(
+                    event: .promptSubmissionEnded,
+                    requestID: requestID,
+                    connection: connection,
+                    kind: "conversation",
+                    result: status.rawValue,
+                    startedAt: diagnosticStartedAt
+                )
+            }
             connection.sendText(self.encode(RemotePromptSubmissionResultDTO(
                 requestID: requestID,
                 status: status
@@ -3668,6 +3846,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         let device = connection.deviceID
+        let diagnosticStartedAt = beginHostLatencyDiagnostic(
+            event: .promptSubmissionStarted,
+            requestID: requestID,
+            connection: connection,
+            kind: "terminal"
+        )
         let stagedPaths: [String]
         if let attachmentUploadIDs, !attachmentUploadIDs.isEmpty {
             guard let deviceID = device,
@@ -3685,6 +3869,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     requestID: requestID,
                     status: .rejected
                 )))
+                finishHostLatencyDiagnostic(
+                    event: .promptSubmissionEnded,
+                    requestID: requestID,
+                    connection: connection,
+                    kind: "terminal",
+                    result: RemotePromptSubmissionStatus.rejected.rawValue,
+                    startedAt: diagnosticStartedAt
+                )
                 return
             }
             stagedPaths = claimed.map(\.path)
@@ -3693,9 +3885,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
         let claimedIDs = stagedPaths.isEmpty ? [] : (attachmentUploadIDs ?? [])
         DispatchQueue.main.async {
+            self.applyTerminalWireAdmissionDelayIfEnabled()
             guard self.authorizer?.isCurrent(authorization) == true else {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 self.resolveClaim(claimedIDs, accepted: false)
+                self.finishHostLatencyDiagnostic(
+                    event: .promptSubmissionEnded,
+                    requestID: requestID,
+                    connection: connection,
+                    kind: "terminal",
+                    result: "forbidden",
+                    startedAt: diagnosticStartedAt
+                )
                 return
             }
             let status = self.services.mirrors.submitTerminalLine(
@@ -3705,6 +3906,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 device: device,
                 authorization: authorization,
                 requestID: requestID
+            )
+            self.finishHostLatencyDiagnostic(
+                event: .promptSubmissionEnded,
+                requestID: requestID,
+                connection: connection,
+                kind: "terminal",
+                result: status.rawValue,
+                startedAt: diagnosticStartedAt
             )
             connection.sendText(self.encode(RemotePromptSubmissionResultDTO(
                 requestID: requestID,
@@ -3741,6 +3950,12 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidRequestID")))
             return
         }
+        let diagnosticStartedAt = beginHostLatencyDiagnostic(
+            event: .promptSubmissionStarted,
+            requestID: requestID,
+            connection: connection,
+            kind: "terminalAttachment"
+        )
         guard let deviceID = connection.deviceID,
               authorization.principal == .ownerDevice,
               authorization.scope == .allSessions,
@@ -3754,14 +3969,31 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 requestID: requestID,
                 status: .rejected
             )))
+            finishHostLatencyDiagnostic(
+                event: .promptSubmissionEnded,
+                requestID: requestID,
+                connection: connection,
+                kind: "terminalAttachment",
+                result: RemotePromptSubmissionStatus.rejected.rawValue,
+                startedAt: diagnosticStartedAt
+            )
             return
         }
 
         let stagedPaths = claimed.map(\.path)
         DispatchQueue.main.async {
+            self.applyTerminalWireAdmissionDelayIfEnabled()
             guard self.authorizer?.isCurrent(authorization) == true else {
                 connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
                 self.resolveClaim(attachmentUploadIDs, accepted: false)
+                self.finishHostLatencyDiagnostic(
+                    event: .promptSubmissionEnded,
+                    requestID: requestID,
+                    connection: connection,
+                    kind: "terminalAttachment",
+                    result: "forbidden",
+                    startedAt: diagnosticStartedAt
+                )
                 return
             }
             let status = self.services.mirrors.insertTerminalAttachments(
@@ -3770,6 +4002,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 device: connection.deviceID,
                 authorization: authorization,
                 requestID: requestID
+            )
+            self.finishHostLatencyDiagnostic(
+                event: .promptSubmissionEnded,
+                requestID: requestID,
+                connection: connection,
+                kind: "terminalAttachment",
+                result: status.rawValue,
+                startedAt: diagnosticStartedAt
             )
             connection.sendText(self.encode(RemotePromptSubmissionResultDTO(
                 requestID: requestID,

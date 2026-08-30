@@ -306,7 +306,7 @@ final class AppIconRenderTests: XCTestCase {
             "newsprint": "Newsprint",
             "botanical": "Botanical",
             "industrial": "Industrial",
-            "pure-black": "PureBlack",
+            "pure": "Pure",
             "cappuccino": "Cappuccino",
             "solarized": "Solarized",
             "nord": "Nord",

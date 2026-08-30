@@ -107,6 +107,7 @@ final class DemoSessionScript {
                 RemoteWebSocketFeature.submitAcknowledgement.rawValue,
                 RemoteWebSocketFeature.conversationContextAttachments.rawValue,
                 RemoteWebSocketFeature.atomicTerminalSubmission.rawValue,
+                RemoteWebSocketFeature.terminalInputLatencyProbe.rawValue,
                 RemoteWebSocketFeature.terminalHydrationBoundary.rawValue,
             ]
         ))
@@ -135,6 +136,12 @@ final class DemoSessionScript {
             echoTerminal(text + "\r")
         case "input":
             echoTerminal(message.data ?? "")
+            if let requestID = message.requestID {
+                deliver(RemoteTerminalInputProbeResultDTO(
+                    requestID: requestID,
+                    accepted: true
+                ))
+            }
         case "viewport":
             if let cols = message.cols, let rows = message.rows {
                 deliver(RemoteResizeDTO(cols: cols, rows: rows))

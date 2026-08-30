@@ -171,7 +171,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
                 if let onCustomizationAction {
                     onCustomizationAction(action)
                 } else {
-                    ComponentCustomizationProviderSlot.shared.perform(action)
+                    NativeSidebarParity.host(
+                        .customizationPresentation,
+                        ComponentCustomizationProviderSlot.shared.perform(action)
+                    )
                 }
             },
             onProperties: { [weak self] properties in
@@ -230,11 +233,17 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     override init(frame frameRect: NSRect) {
         defersCustomizationUntilNeeded = true
         customizationLookup = {
-            ComponentCustomizationProviderSlot.shared.customization(for: $0)
+            NativeSidebarParity.host(
+                .customizationPresentation,
+                ComponentCustomizationProviderSlot.shared.customization(for: $0)
+            )
         }
         sessionHoverInfoProvider = SessionInfoPopoverViewController.Info.init
         sessionHoverContentProvider = Self.nativeSessionHoverContent(for:)
-        sessionAccountProvider = AgentAccountDiscovery.account(for:handle:)
+        sessionAccountProvider = NativeSidebarParity.host(
+            .identityPresentation,
+            AgentAccountDiscovery.account(for:handle:)
+        )
         super.init(frame: frameRect)
         setupViews()
     }
@@ -249,7 +258,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         sessionHoverInfoProvider: @escaping SessionHoverInfoProvider =
             SessionInfoPopoverViewController.Info.init,
         sessionAccountProvider: @escaping SessionAccountProvider =
-            AgentAccountDiscovery.account(for:handle:)
+            NativeSidebarParity.host(
+                .identityPresentation,
+                AgentAccountDiscovery.account(for:handle:)
+            )
     ) {
         self.defersCustomizationUntilNeeded = defersCustomizationUntilNeeded
         self.customizationLookup = customizationLookup
@@ -804,9 +816,14 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         session: AgentSession,
         activity: SessionActivity
     ) -> NSViewController? {
-        makeSessionHoverCard(
-            info: sessionHoverInfoProvider(session, activity),
-            sessionID: session.id
+        let hoverSession = NativeSidebarParity.host(.hoverContent, session)
+        let hoverSessionID = NativeSidebarParity.host(.entityIdentity, hoverSession.id)
+        return makeSessionHoverCard(
+            info: NativeSidebarParity.host(
+                .hoverContent,
+                sessionHoverInfoProvider(hoverSession, activity)
+            ),
+            sessionID: hoverSessionID
         )
     }
 
@@ -841,7 +858,10 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
                 if let onCustomizationAction {
                     onCustomizationAction(action)
                 } else {
-                    ComponentCustomizationProviderSlot.shared.perform(action)
+                    NativeSidebarParity.host(
+                        .customizationPresentation,
+                        ComponentCustomizationProviderSlot.shared.perform(action)
+                    )
                 }
             },
             onResolution: { [weak self] resolution in
@@ -935,49 +955,80 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         conduct: RowConductSummary? = nil,
         isScheduledStart: Bool = false
     ) {
+        let hoverSession = NativeSidebarParity.host(.hoverContent, session)
+        let rowID = NativeSidebarParity.host(.entityIdentity, session.id)
+        let rowTitle = NativeSidebarParity.fact(.sessionTitle, session.displayTitle)
+        let rowIsPinned = NativeSidebarParity.fact(.sessionPinned, session.isPinned)
+        let rowActivity = NativeSidebarParity.fact(.sessionActivity, activity)
+        let rowIsLoading = NativeSidebarParity.host(.transientLoading, isLoading)
+        let rowIsScheduled = NativeSidebarParity.fact(
+            .sessionScheduledStart,
+            isScheduledStart
+        )
+        let rowWake = NativeSidebarParity.fact(.sessionWake, session.wake)
+        let hasCustomConduct = NativeSidebarParity.fact(.sessionConduct, conduct != nil)
+        let conductDetail = NativeSidebarParity.host(.conductDetail, conduct)
+        let provider = NativeSidebarParity.fact(.sessionProvider, session.kind)
+        let accountHandle = NativeSidebarParity.fact(.sessionAccount, session.accountHandle)
+        let isSideChat = NativeSidebarParity.fact(.sessionParent, session.isSideChat)
+
         // Rows reconfigure constantly while an agent works, so an open popover survives a
         // same-session refresh; only reuse for a different session dismisses it.
-        if sessionID != session.id {
+        if sessionID != rowID {
             dismissPopover()
         }
-        popoverSession = session
-        popoverActivity = activity
+        popoverSession = hoverSession
+        popoverActivity = rowActivity
 
         // Read before the id is overwritten: a morph is only honest when the name being
         // replaced is the one this row is showing, which means the *same* session with a
         // *different* title. Everything else — a first fill, a row reconfigured while an
         // agent works, a cell recycled from another session — lands the title directly.
-        animatesNextTitle = sessionID == session.id
-            && titleLabel.stringValue != session.displayTitle
+        animatesNextTitle = sessionID == rowID
+            && titleLabel.stringValue != rowTitle
 
-        sessionID = session.id
-        nativeTitle = session.displayTitle
+        sessionID = rowID
+        nativeTitle = rowTitle
         nativeToolTip = nil
-        setPinned(session.isPinned)
-        let supervision = ControlGrantStore.shared.overview(for: session.id)
-        setManager(ControlGrantStore.shared.isManager(session.id))
-        setConductMark(conduct)
+        setPinned(rowIsPinned)
+        let supervision = NativeSidebarParity.fact(
+            .sessionManagerRelationship,
+            ControlGrantStore.shared.overview(for: rowID)
+        )
+        let isManager = NativeSidebarParity.fact(
+            .sessionManagerRole,
+            ControlGrantStore.shared.isManager(rowID)
+        )
+        setManager(isManager)
+        setConductMark(hasCustomConduct ? conductDetail : nil)
         if let managerID = supervision.managedBy,
-           let manager = ProjectStore.shared.session(withID: managerID) {
+           let manager: AgentSession = NativeSidebarParity.fact(
+               .sessionTitle,
+               ProjectStore.shared.session(withID: managerID)
+           ) {
+            let managerTitle = NativeSidebarParity.fact(.sessionTitle, manager.displayTitle)
             titleLabel.setAccessibilityLabel(
-                L10n.format("%@, managed by %@", session.displayTitle, manager.displayTitle)
+                L10n.format("%@, managed by %@", rowTitle, managerTitle)
             )
-        } else if ControlGrantStore.shared.isManager(session.id) {
-            titleLabel.setAccessibilityLabel(L10n.format("%@, manager", session.displayTitle))
+        } else if isManager {
+            titleLabel.setAccessibilityLabel(L10n.format("%@, manager", rowTitle))
         } else {
-            titleLabel.setAccessibilityLabel(session.displayTitle)
+            titleLabel.setAccessibilityLabel(rowTitle)
         }
-        if isScheduledStart {
+        if rowIsScheduled {
             let label = attentionLabelForPresentation()
             label.stringValue = L10n.string("Scheduled")
             label.setAccessibilityLabel(L10n.string("Session is scheduled to start automatically"))
             label.isHidden = false
-        } else if session.wake != nil {
+        } else if rowWake != nil {
             let label = attentionLabelForPresentation()
             label.stringValue = L10n.string("Woke")
             label.setAccessibilityLabel(L10n.string("Session woke from snooze"))
             label.isHidden = false
-        } else if session.isSnoozed(at: Date()) {
+        } else if NativeSidebarParity.fact(
+            .sessionSnoozed,
+            session.isSnoozed(at: NativeSidebarParity.host(.clock, Date()))
+        ) {
             let label = attentionLabelForPresentation()
             label.stringValue = L10n.string("Snoozed")
             label.setAccessibilityLabel(L10n.string("Session is snoozed"))
@@ -991,14 +1042,14 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // outlives the row it started on — `ThemedIconButton` completes the gesture even after
         // the sidebar has recycled this view into another session's row — and a late release
         // reading `sessionID` would archive whichever session the row had become.
-        archiveButton.isHidden = isScheduledStart
-        archiveButton.onPress = isScheduledStart
+        archiveButton.isHidden = rowIsScheduled
+        archiveButton.onPress = rowIsScheduled
             ? nil
-            : { [weak self] in self?.onArchive?(session.id) }
+            : { [weak self] in self?.onArchive?(rowID) }
 
-        isDormant = activity == .dormant && !isScheduledStart
+        isDormant = rowActivity == .dormant && !rowIsScheduled
 
-        updateStatus(for: activity, isLoading: isLoading)
+        updateStatus(for: rowActivity, isLoading: rowIsLoading)
 
         // Rows are reconfigured while the pointer sits on them (activity changes as an
         // agent works), so the hover state is reasserted rather than reset.
@@ -1010,10 +1061,13 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // visible row scan every account directory and parse shell aliases during cold launch.
         // Alternate rows still resolve synchronously because their chip is visible content;
         // the hover card performs its own complete lookup only when requested.
-        let account = session.accountHandle.isStandard
+        let account = accountHandle.isStandard
             ? nil
-            : sessionAccountProvider(session.kind, session.accountHandle)
-        applyAgentIcon(for: session, account: account)
+            : NativeSidebarParity.host(
+                .identityPresentation,
+                sessionAccountProvider(provider, accountHandle)
+            )
+        applyAgentIcon(provider: provider, isSideChat: isSideChat, account: account)
         applyTextColors()
 
         refreshCustomizations()
@@ -1109,36 +1163,43 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// Symbols and template marks dim for dormancy through their tint. Claude's mark and
     /// the chip keep their own colours — tinting does not touch a non-template image — so
     /// they dim through their view's alpha instead.
-    private func applyAgentIcon(for session: AgentSession, account: AgentAccount?) {
-        let builtInProviderImage = session.kind.icon
+    private func applyAgentIcon(
+        provider: AgentKind,
+        isSideChat: Bool,
+        account: AgentAccount?
+    ) {
+        let builtInProviderImage = provider.icon
         let image: NSImage?
         let knownMarkTone: CGFloat?
-        if session.isSideChat {
+        if isSideChat {
             image = NSImage(
                 systemSymbolName: SidebarRowDefaults.sideChatSymbol,
                 accessibilityDescription: SidebarRowDefaults.sideChatAccessibilityLabel
             )
             knownMarkTone = nil
-        } else if let resolution = ExtensionIdentityResolverProviderSlot.shared.providerIcon(
-            providerID: session.kind.rawValue
+        } else if let resolution = NativeSidebarParity.host(
+            .identityPresentation,
+            ExtensionIdentityResolverProviderSlot.shared.providerIcon(
+                providerID: provider.rawValue
+            )
         ) {
             let resolved = resolveIdentityImage(
                 resolution.image,
                 extensionIdentifier: resolution.extensionIdentifier
             )
             image = resolved ?? builtInProviderImage
-            knownMarkTone = resolved == nil ? session.kind.brandIconTone : nil
+            knownMarkTone = resolved == nil ? provider.brandIconTone : nil
         } else {
             image = builtInProviderImage
-            knownMarkTone = session.kind.brandIconTone
+            knownMarkTone = provider.brandIconTone
         }
         agentMark = image.map(slotSized)
         agentMarkTone = knownMarkTone
         iconView.image = plated(agentMark)
         iconView.setAccessibilityLabel(
-            session.isSideChat
+            isSideChat
                 ? SidebarRowDefaults.sideChatAccessibilityLabel
-                : session.kind.displayName
+                : provider.displayName
         )
         iconView.contentTintColor = isDormant ? Design.Text.tertiary : Design.Text.secondary
 
@@ -1148,8 +1209,11 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         let builtInChip = AccountBadge.chip(for: account)
         let chip: NSImage?
         if let account, account.emoji == nil,
-           let resolution = ExtensionIdentityResolverProviderSlot.shared.accountIcon(
-               accountID: account.id.rawValue
+           let resolution = NativeSidebarParity.host(
+               .identityPresentation,
+               ExtensionIdentityResolverProviderSlot.shared.accountIcon(
+                   accountID: account.id.rawValue
+               )
            ) {
             chip = resolveIdentityImage(
                 resolution.image,
@@ -1266,9 +1330,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             return NSImage(systemSymbolName: name, accessibilityDescription: name)
 
         case .extensionResource(let relativePath):
-            guard let url = ExtensionManager.shared.imageResourceURL(
-                relativePath: relativePath,
-                extensionIdentifier: extensionIdentifier
+            guard let url = NativeSidebarParity.host(
+                .identityPresentation,
+                ExtensionManager.shared.imageResourceURL(
+                    relativePath: relativePath,
+                    extensionIdentifier: extensionIdentifier
+                )
             ) else {
                 return nil
             }
@@ -1281,9 +1348,12 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
             }
             if let accountID = ExtensionIdentityAssetID.accountID(from: assetID),
                let parsed = AccountID(rawValue: accountID),
-               let account = AgentAccountDiscovery.account(
-                   for: parsed.provider,
-                   handle: parsed.handle
+               let account = NativeSidebarParity.host(
+                   .identityPresentation,
+                   AgentAccountDiscovery.account(
+                       for: parsed.provider,
+                       handle: parsed.handle
+                   )
                ) {
                 return AccountBadge.chip(for: account)
             }

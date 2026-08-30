@@ -1257,6 +1257,235 @@ final class ExtensionPackageStoreTests: XCTestCase {
         ))
     }
 
+    func testManagerHydratesNavigatorOptionsBeforePublishingAndPersistsWrites() async throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Ready", role: .neutral)),
+            options: [
+                .init(
+                    id: "group",
+                    title: "Group",
+                    control: .toggle(defaultValue: false)
+                )
+            ]
+        )
+        let source = try makePackage(navigator: navigator)
+        let store = ExtensionPackageStore(
+            rootURL: temporaryDirectory("manager-navigator-options")
+        )
+        _ = try store.install(from: source)
+
+        let optionFile = store.storageStore.settingsURL
+            .appendingPathComponent("com.example.installed-test", isDirectory: true)
+            .appendingPathComponent("navigator-options.json", isDirectory: false)
+        try FileManager.default.createDirectory(
+            at: optionFile.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(
+            #"{"formatVersion":1,"value":{"formatVersion":1,"values":{"activity":{"group":true}}}}"#.utf8
+        ).write(to: optionFile)
+
+        let manager = ExtensionManager(store: store)
+        defer { manager.terminateAll() }
+        try manager.setEnabled(true, identifier: "com.example.installed-test")
+
+        let hydrated = await waitUntil {
+            manager.extensionWorkspaceNavigatorInventory.count == 1
+        }
+        XCTAssertTrue(hydrated)
+        let initial = try XCTUnwrap(manager.extensionWorkspaceNavigatorInventory.first)
+        XCTAssertEqual(initial.optionValues["group"], .bool(true))
+        XCTAssertEqual(initial.optionRevision, 0)
+        XCTAssertEqual(initial.optionPersistenceOutcome, .loaded)
+
+        let firstWrite: Result<[String: ExtensionJSONValue], Error> =
+            await withCheckedContinuation { continuation in
+                let routed = manager.setWorkspaceNavigatorOption(
+                    extensionIdentifier: initial.extensionIdentifier,
+                    navigatorID: navigator.id,
+                    optionID: "group",
+                    value: .bool(false),
+                    processGeneration: initial.processGeneration
+                ) {
+                    continuation.resume(returning: $0)
+                }
+                XCTAssertTrue(routed)
+            }
+        XCTAssertEqual(try firstWrite.get()["group"], .bool(false))
+        XCTAssertEqual(
+            manager.extensionWorkspaceNavigatorInventory.first?.optionRevision,
+            1
+        )
+
+        let secondWrite: Result<[String: ExtensionJSONValue], Error> =
+            await withCheckedContinuation { continuation in
+                let routed = manager.setWorkspaceNavigatorOption(
+                    extensionIdentifier: initial.extensionIdentifier,
+                    navigatorID: navigator.id,
+                    optionID: "group",
+                    value: .bool(true),
+                    processGeneration: initial.processGeneration
+                ) {
+                    continuation.resume(returning: $0)
+                }
+                XCTAssertTrue(routed)
+            }
+        XCTAssertEqual(try secondWrite.get()["group"], .bool(true))
+
+        try manager.setEnabled(false, identifier: initial.extensionIdentifier)
+        XCTAssertEqual(manager.extensionWorkspaceNavigatorInventory, [])
+        try manager.setEnabled(true, identifier: initial.extensionIdentifier)
+        let reopened = await waitUntil {
+            guard let item = manager.extensionWorkspaceNavigatorInventory.first else {
+                return false
+            }
+            return item.processGeneration != initial.processGeneration
+                && item.optionValues["group"] == .bool(true)
+        }
+        XCTAssertTrue(reopened)
+        XCTAssertEqual(
+            manager.extensionWorkspaceNavigatorInventory.first?.optionPersistenceOutcome,
+            .loaded
+        )
+    }
+
+    func testStaticPipelineMetadataIsNeverInventoriedWithoutALiveMatchedGeneration()
+        async throws
+    {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Host evaluated", role: .neutral)),
+            pipeline: .init(
+                consumes: [.init(
+                    key: ExtensionHostFactKey.sessionTitle,
+                    requirement: .required
+                )],
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .text(
+                        .fact(
+                            .init(ExtensionHostFactKey.sessionTitle),
+                            facet: .value,
+                            fallback: nil
+                        ),
+                        role: .body
+                    )
+                )
+            )
+        )
+        let source = try makePackage(
+            navigator: navigator,
+            exitsAfterRegistration: true
+        )
+        let store = ExtensionPackageStore(
+            rootURL: temporaryDirectory("manager-static-navigator-lifecycle")
+        )
+        _ = try store.install(from: source)
+        let manager = ExtensionManager(store: store)
+        defer { manager.terminateAll() }
+
+        XCTAssertEqual(
+            manager.extensionWorkspaceNavigatorInventory,
+            [],
+            "inspected manifest metadata is not a render inventory"
+        )
+        try manager.setEnabled(true, identifier: "com.example.installed-test")
+        let terminated = await waitUntil {
+            guard let installed = manager.installedExtensions.first else { return false }
+            if case .failed = installed.status {
+                return manager.extensionWorkspaceNavigatorInventory.isEmpty
+            }
+            return false
+        }
+        XCTAssertTrue(terminated)
+        XCTAssertEqual(manager.extensionWorkspaceNavigatorInventory, [])
+    }
+
+    func testManagerRejectsAnOlderNavigatorOptionCompletion() async throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Ready", role: .neutral)),
+            options: [
+                .init(
+                    id: "group",
+                    title: "Group",
+                    control: .toggle(defaultValue: false)
+                )
+            ]
+        )
+        let optionStore = DeferredWorkspaceNavigatorOptionStore()
+        let store = ExtensionPackageStore(
+            rootURL: temporaryDirectory("manager-navigator-option-revision")
+        )
+        _ = try store.install(from: makePackage(navigator: navigator))
+        let manager = ExtensionManager(
+            store: store,
+            workspaceNavigatorOptionStore: optionStore
+        )
+        defer { manager.terminateAll() }
+        try manager.setEnabled(true, identifier: "com.example.installed-test")
+        let registered = await waitUntil {
+            manager.extensionWorkspaceNavigatorInventory.count == 1
+        }
+        XCTAssertTrue(registered)
+        let initial = try XCTUnwrap(manager.extensionWorkspaceNavigatorInventory.first)
+
+        var completions: [Result<[String: ExtensionJSONValue], Error>] = []
+        XCTAssertTrue(manager.setWorkspaceNavigatorOption(
+            extensionIdentifier: initial.extensionIdentifier,
+            navigatorID: navigator.id,
+            optionID: "group",
+            value: .bool(false),
+            processGeneration: initial.processGeneration
+        ) {
+            completions.append($0)
+        })
+        XCTAssertTrue(manager.setWorkspaceNavigatorOption(
+            extensionIdentifier: initial.extensionIdentifier,
+            navigatorID: navigator.id,
+            optionID: "group",
+            value: .bool(true),
+            processGeneration: initial.processGeneration
+        ) {
+            completions.append($0)
+        })
+        XCTAssertEqual(optionStore.pendingCount, 2)
+
+        optionStore.complete(
+            at: 1,
+            with: .success(.init(
+                processGeneration: initial.processGeneration,
+                revision: 2,
+                valuesByNavigatorID: [navigator.id: ["group": .bool(true)]],
+                persistenceOutcome: .loaded
+            ))
+        )
+        let newerPublished = await waitUntil {
+            manager.extensionWorkspaceNavigatorInventory.first?.optionRevision == 2
+        }
+        XCTAssertTrue(newerPublished)
+
+        optionStore.complete(
+            at: 0,
+            with: .success(.init(
+                processGeneration: initial.processGeneration,
+                revision: 1,
+                valuesByNavigatorID: [navigator.id: ["group": .bool(false)]],
+                persistenceOutcome: .loaded
+            ))
+        )
+        let bothCompleted = await waitUntil { completions.count == 2 }
+        XCTAssertTrue(bothCompleted)
+        let current = try XCTUnwrap(manager.extensionWorkspaceNavigatorInventory.first)
+        XCTAssertEqual(current.optionRevision, 2)
+        XCTAssertEqual(current.optionValues["group"], .bool(true))
+        XCTAssertEqual(try completions.last?.get()["group"], .bool(true))
+    }
+
     func testManagerSuppliesPersistsAndStreamsHostRenderedSettings() async throws {
         let field = ExtensionSettingField(
             id: "show-status",
@@ -3044,11 +3273,13 @@ final class ExtensionPackageStoreTests: XCTestCase {
         commandResponse: ExtensionCommandResponse? = nil,
         panel: ExtensionPanel? = nil,
         panelResponse: ExtensionActionResponse? = nil,
+        navigator: ExtensionWorkspaceNavigator? = nil,
         capabilities requestedCapabilities: Set<ExtensionCapability> = [],
         requiresStorageEnvironment: Bool = false,
         settings: ExtensionSettingsContribution = .init(),
         settingsResponseIDs: [String] = [],
-        settingsResponseError: String? = nil
+        settingsResponseError: String? = nil,
+        exitsAfterRegistration: Bool = false
     ) throws -> URL {
         let root = temporaryDirectory("source")
         let bin = root.appendingPathComponent("bin", isDirectory: true)
@@ -3077,6 +3308,10 @@ final class ExtensionPackageStoreTests: XCTestCase {
         if !panels.isEmpty {
             capabilities.insert(.panels)
         }
+        let navigators = navigator.map { [$0] } ?? []
+        if !navigators.isEmpty {
+            capabilities.insert(.workspaceNavigation)
+        }
         if !settings.isEmpty {
             capabilities.insert(.settings)
         }
@@ -3087,6 +3322,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             runtime: .native,
             executable: "bin/extension",
             capabilities: capabilities,
+            workspaceNavigators: navigators.filter { $0.pipeline != nil },
             mcpTools: tools,
             settings: settings,
             services: services,
@@ -3100,13 +3336,16 @@ final class ExtensionPackageStoreTests: XCTestCase {
             decoding: try JSONEncoder().encode(ExtensionRegistration(
                 commands: commands,
                 panels: panels,
+                workspaceNavigators: navigators,
                 mcpTools: tools,
                 services: services
             )),
             as: UTF8.self
         )
         let serveBody: String
-        if !settingsResponseIDs.isEmpty {
+        if exitsAfterRegistration {
+            serveBody = "exit 73"
+        } else if !settingsResponseIDs.isEmpty {
             let ids = String(
                 decoding: try JSONEncoder().encode(settingsResponseIDs),
                 as: UTF8.self
@@ -3374,5 +3613,70 @@ final class ExtensionPackageStoreTests: XCTestCase {
         )
         window.contentView = host
         return window
+    }
+}
+
+private final class DeferredWorkspaceNavigatorOptionStore:
+    WorkspaceNavigatorOptionValueStoring,
+    @unchecked Sendable
+{
+    typealias Completion = @Sendable (
+        Result<WorkspaceNavigatorOptionSnapshot, Error>
+    ) -> Void
+
+    private let lock = NSLock()
+    private var completions: [Completion?] = []
+
+    var pendingCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return completions.compactMap { $0 }.count
+    }
+
+    func activate(
+        extensionIdentifier: String,
+        processGeneration: String,
+        navigators: [ExtensionWorkspaceNavigator]
+    ) throws -> WorkspaceNavigatorOptionSnapshot {
+        var valuesByNavigatorID: [String: [String: ExtensionJSONValue]] = [:]
+        for navigator in navigators {
+            valuesByNavigatorID[navigator.id] = Dictionary(
+                uniqueKeysWithValues: navigator.options.map {
+                    ($0.id, $0.control.defaultValue)
+                }
+            )
+        }
+        return .init(
+            processGeneration: processGeneration,
+            revision: 0,
+            valuesByNavigatorID: valuesByNavigatorID,
+            persistenceOutcome: .missing
+        )
+    }
+
+    func deactivate(extensionIdentifier: String, processGeneration: String) {}
+
+    func set(
+        _ value: ExtensionJSONValue,
+        extensionIdentifier: String,
+        processGeneration: String,
+        navigatorID: String,
+        optionID: String,
+        completion: @escaping Completion
+    ) {
+        lock.lock()
+        completions.append(completion)
+        lock.unlock()
+    }
+
+    func complete(
+        at index: Int,
+        with result: Result<WorkspaceNavigatorOptionSnapshot, Error>
+    ) {
+        lock.lock()
+        let completion = completions[index]
+        completions[index] = nil
+        lock.unlock()
+        completion?(result)
     }
 }

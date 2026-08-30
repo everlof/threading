@@ -376,11 +376,19 @@ items.
 - Declare `services.provide` and static `services` metadata before registering services.
 - Declare `services.consume` and every exact `serviceDependencies` authority before calling
   another extension.
+- Declare `facts.provide` and the same static `factDefinitions` in the manifest and registration
+  before calling `publishFacts(_:replacing:)`. Provider subjects are canonical repositories or
+  repository branches, never guessed project, session, or terminal IDs. Each call is a complete
+  replacement for its named subjects; an empty fact list clears those subjects.
 - Declare `ui.components` before constructing `ExtensionHostClient` or publishing component
   patches.
 - Declare `ui.workspace-navigation` before registering workspace navigators. This capability
   grants no project or session data by itself; request the applicable host-read capabilities
-  separately.
+  separately. Put every navigator with a host-evaluated `pipeline` in the manifest's static
+  `workspaceNavigators` list and repeat the exact raw base-language list during registration.
+  Keep materialized v1 navigators runtime-only.
+- Declare `host.events` when a workspace navigator sets `eventActionID`. The selected navigator
+  then receives bounded host-observed session IDs even if it never pages the general event journal.
 - Declare `host.projects.read` before calling `projects()` or `project(id:)`.
 - Declare `host.project.files.read` before calling `projectFiles(_:)`. It is **not** implied by
   `host.projects.read`: that authority returns a sanitized snapshot with no filesystem in it, and
@@ -449,6 +457,31 @@ user chooses a live contribution under **View → Navigator**. Threading virtual
 routes project/session destinations through the native navigation coordinator, and returns to
 Native if the owning process generation stops or its document cannot be rendered.
 
+A navigator may declare up to 16 `ExtensionWorkspaceNavigatorOption` values with a `.toggle` or
+enumerated `.choice` control. Their IDs, titles, defaults, and choice lists are one static contract
+for the process generation: every complete runtime replacement must repeat them exactly. The
+combined declaration may require at most 30 menu entries, reserving two more for Threading's
+separator and permanent Native route. Option titles and choice titles are localizable. Declaring
+an option does not give the extension preference-file access or a mutable AppKit control.
+
+The v1 materialized-document renderer does not expose inert option rows. Threading puts them in
+the navigator menu only when a host-side pipeline consumes their values.
+
+For the additive host-evaluated format, set `pipeline` and keep `root` as the useful fallback for
+hosts which do not implement that format. `@2` is the contract revision, not a new capability;
+continue declaring `ui.workspace-navigation`. Pipeline navigators may not set `loadActionID` or
+`eventActionID`, every fact reference must appear in `consumes`, and every option must gate at
+least one transform clause. Read
+[`WORKSPACE_NAVIGATORS.md`](WORKSPACE_NAVIGATORS.md#host-evaluated-pipeline-declarations) for the
+exact required/enhancing degradation boundaries, explicit project join, source-session activation,
+static-generation rule, and the format-1 1,000-item overflow notice before authoring one.
+The static manifest list is inspection metadata, not a render source. Threading validates the
+complete raw registration against it before localization and inventories only the matched live
+generation. A mismatch or process termination exposes no navigator from that generation.
+`session.activity.detailed@1` currently publishes the public
+`ExtensionSessionDetailedActivity` raw values `dormant`, `idle`, `working`, `awaiting-user`,
+`needs-attention`, and `limit-reached`; unknown future raw values remain decodable.
+
 For a context-dependent panel, set `loadActionID`. Treat `root` as the immediate loading and
 fallback state. Threading sends that action once when the tab connects to each extension process
 generation, using the same opaque project/session context as a button. Return a replacement
@@ -473,6 +506,23 @@ restore selection, expansion, scroll position, and focus. Collection `.action` a
 the item ID as `value`; semantic inputs carry their native string or choice value. Every
 actionable grid item requires a localized `accessibilityLabel`, because the complete cell is its
 host-owned activation surface.
+
+For live content on existing session rows, set `eventActionID` and declare `host.events`.
+Threading coalesces `session.changed` edges while this navigator is selected and puts at most 64
+session IDs in an `ExtensionWorkspaceNavigatorHostEvent` encoded as the action request's `value`.
+Return at most 64 `ExtensionWorkspaceNavigatorItemPatch` values. Each patch may replace only the
+semantic `content` of an existing collection item; it cannot change structure, identity,
+selection, enabled state, activation, or accessibility ownership. Keep the event action cheap and
+idempotent. Threading permits one in flight, queues later unique IDs, validates all targets before
+applying any, and reloads only the affected virtual rows. Use a full replacement from an ordinary
+action when structure must change. Call `validateForHostEvent()` before writing an event response;
+the stricter validator rejects complete navigator replacements even though the shared action wire
+type also serves ordinary actions and refreshes. Settings pauses process dispatch and preserves a
+bounded, container-owned catch-up set across process replacement. When the navigator returns,
+Threading completes its initial load or deferred document refresh before delivering the catch-up
+event. A project refresh observed under Settings is latched without waking the extension process.
+The host retains at most 256 pending IDs beyond the in-flight batch; overflow or any event-action
+failure returns the selected generation to Native.
 
 ## Required package policy
 
@@ -929,11 +979,14 @@ The persistent sequence is:
 8. A selected navigator's load action, semantic control, or collection action produces an
    `ExtensionWorkspaceNavigatorActionRequest`. Return one
    `ExtensionWorkspaceNavigatorActionResponse` with the same request ID and navigator ID.
-9. For a contributed MCP tool, Threading writes an `ExtensionMCPToolRequest`; the extension copies
+9. If that navigator declares `eventActionID`, coalesced `session.changed` edges use the same
+   request type with `ExtensionWorkspaceNavigatorHostEvent` in `value`; the response may carry
+   bounded content-only item patches.
+10. For a contributed MCP tool, Threading writes an `ExtensionMCPToolRequest`; the extension copies
    its `requestID` into one `ExtensionMCPToolResponse`.
-10. For a user settings change, Threading writes an `ExtensionSettingsUpdateRequest`; the extension
+11. For a user settings change, Threading writes an `ExtensionSettingsUpdateRequest`; the extension
    applies it and returns one `ExtensionSettingsUpdateResponse` with the same `requestID`.
-11. For a brokered call, Threading writes an `ExtensionServiceRequest` to the declared provider;
+12. For a brokered call, Threading writes an `ExtensionServiceRequest` to the declared provider;
     it returns one `ExtensionServiceResponse` matching request ID, service ID, and version.
 
 Component state does not share that sequential stream. A process with `ui.components` receives
@@ -1202,8 +1255,10 @@ responses.
 Likewise, decode navigator requests with
 `ExtensionWorkspaceNavigatorActionRequest` and answer with
 `ExtensionWorkspaceNavigatorActionResponse`. Its optional `navigator` is a complete replacement
-document and must keep the originating ID. A navigator response may carry that document, a
-success `message`, both, or an `error` by itself.
+document and must keep the originating ID. An ordinary navigator response may carry that document,
+bounded `itemPatches`, a success `message`, or a compatible combination; `error` is exclusive. A
+live host-event response may carry only patches and/or a message; call
+`validateForHostEvent()` before encoding it.
 
 For a command, decode `ExtensionCommandRequest` before falling back to action requests. The
 context contains optional opaque `projectID` and `sessionID` values according to the declared

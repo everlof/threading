@@ -20,6 +20,41 @@ import AppKit
 ///   goes away; otherwise the numbers are written into the rows already on screen.
 final class SessionInfoViewController: NSViewController {
 
+    private enum UsageRowID: Hashable {
+        case total
+        case mainAgent
+        case subagents
+        case input
+        case cache
+        case output
+        case cost
+        case pending
+        case model(String)
+    }
+
+    private struct UsageRowPresentation {
+        let id: UsageRowID
+        let symbolName: String
+        let primary: String
+        let secondary: String
+        let values: [String]
+
+        var accessibilityLabel: String {
+            ([primary, secondary] + values)
+                .filter { !$0.isEmpty }
+                .joined(separator: " · ")
+        }
+    }
+
+    private struct UsagePresentation {
+        let leading: [UsageRowPresentation]
+        let breakdown: [UsageRowPresentation]
+        let models: [UsageRowPresentation]
+        let remainingModelCount: Int
+
+        var rows: [UsageRowPresentation] { leading + breakdown + models }
+    }
+
     // MARK: - Properties
 
     let sessionID: SessionID
@@ -49,6 +84,9 @@ final class SessionInfoViewController: NSViewController {
     private var lastSnapshot: SessionInfoSnapshot?
     private var lastIsRunning = false
     private var usageSnapshot: SessionUsageSnapshot?
+    private var usageRows: [UsageRowID: SessionInfoRowView] = [:]
+    private weak var remainingModelsNote: NSTextField?
+    private weak var usageIndexNote: NSTextField?
 
     private lazy var directoryLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
@@ -271,10 +309,16 @@ final class SessionInfoViewController: NSViewController {
     func applyUsage(_ snapshot: SessionUsageSnapshot?) {
         guard snapshot != usageSnapshot else { return }
         usageSnapshot = snapshot
-        renderedShape = nil
-        if let lastSnapshot {
-            apply(lastSnapshot, isRunning: lastIsRunning)
+        guard let lastSnapshot else { return }
+
+        let shape = self.shape(of: lastSnapshot, isRunning: lastIsRunning)
+        guard shape != renderedShape else {
+            updateUsageValues(snapshot)
+            return
         }
+
+        renderedShape = shape
+        rebuild(lastSnapshot, isRunning: lastIsRunning)
     }
 
     /// Everything about a reading except the facts that move. Two readings with the same shape
@@ -282,7 +326,7 @@ final class SessionInfoViewController: NSViewController {
     /// set at construction — while state, readings and tooltips deliberately are not: a process
     /// stopping must not cost the pointer its hover or the panel its scroll position.
     private func shape(of snapshot: SessionInfoSnapshot, isRunning: Bool) -> String {
-        var parts = ["running:\(isRunning)"]
+        var parts = ["running:\(isRunning)", usageShape(of: usageSnapshot)]
 
         for group in snapshot.processGroups {
             let pids = group.processes.map { "\($0.pid):\($0.depth):\($0.command)" }.joined(separator: ",")
@@ -295,6 +339,24 @@ final class SessionInfoViewController: NSViewController {
         }
 
         return parts.joined(separator: "|")
+    }
+
+    /// Row identity only. Counts, tokens, costs, provenance and freshness are values written
+    /// into those rows; treating them as shape is what rebuilt the scroll document on every
+    /// usage event.
+    private func usageShape(of snapshot: SessionUsageSnapshot?) -> String {
+        guard let snapshot else { return "u/indexing" }
+        guard !snapshot.total.isEmpty else { return "u/empty" }
+
+        var rows = ["u/full", "total", "main"]
+        if !snapshot.children.isEmpty || !snapshot.subagents.isEmpty {
+            rows.append("subagents")
+        }
+        rows.append(contentsOf: ["input", "cache", "output", "cost"])
+        if snapshot.total.unindexedTokens > 0 { rows.append("pending") }
+        rows.append(contentsOf: snapshot.total.models.map { "model:\($0.name)" })
+        rows.append("remaining:\(snapshot.total.remainingModelCount > 0)")
+        return rows.joined(separator: "/")
     }
 
     private func updateValues(_ snapshot: SessionInfoSnapshot) {
@@ -351,6 +413,9 @@ final class SessionInfoViewController: NSViewController {
     private func rebuild(_ snapshot: SessionInfoSnapshot, isRunning: Bool) {
         list.clear()
         processRows.removeAll()
+        usageRows.removeAll()
+        remainingModelsNote = nil
+        usageIndexNote = nil
 
         addUsage(usageSnapshot)
 
@@ -396,98 +461,126 @@ final class SessionInfoViewController: NSViewController {
         let total = snapshot.total
         guard !total.isEmpty else {
             list.addNote(L10n.string("No usage recorded yet"))
-            addUsageIndexNote(snapshot)
+            usageIndexNote = list.addNote(usageIndexText(snapshot))
             return
         }
 
-        addUsageRow(
-            symbolName: SessionInfoSymbols.usage,
-            primary: L10n.string("Total"),
-            secondary: SessionUsageFormat.responseCount(total.records),
-            values: usageValues(total)
-        )
-        addUsageRow(
-            symbolName: SessionInfoSymbols.mainAgent,
-            primary: L10n.string("Main agent"),
-            secondary: SessionUsageFormat.responseCount(snapshot.main.records),
-            values: usageValues(snapshot.main)
-        )
+        let presentation = usagePresentation(for: snapshot)
+        presentation.leading.forEach(addUsageRow)
+
+        addUsageSubheading(L10n.string("Token breakdown"))
+        presentation.breakdown.forEach(addUsageRow)
+
+        if !presentation.models.isEmpty {
+            addUsageSubheading(L10n.string("Models"))
+            presentation.models.forEach(addUsageRow)
+            if presentation.remainingModelCount > 0 {
+                remainingModelsNote = list.addNote(L10n.format(
+                    "%lld more models are included in the total.",
+                    Int64(presentation.remainingModelCount)
+                ))
+            }
+        }
+        usageIndexNote = list.addNote(usageIndexText(snapshot))
+    }
+
+    private func usagePresentation(for snapshot: SessionUsageSnapshot) -> UsagePresentation {
+        let total = snapshot.total
+        var leading = [
+            UsageRowPresentation(
+                id: .total,
+                symbolName: SessionInfoSymbols.usage,
+                primary: L10n.string("Total"),
+                secondary: SessionUsageFormat.responseCount(total.records),
+                values: usageValues(total)
+            ),
+            UsageRowPresentation(
+                id: .mainAgent,
+                symbolName: SessionInfoSymbols.mainAgent,
+                primary: L10n.string("Main agent"),
+                secondary: SessionUsageFormat.responseCount(snapshot.main.records),
+                values: usageValues(snapshot.main)
+            )
+        ]
         if !snapshot.children.isEmpty || !snapshot.subagents.isEmpty {
-            addUsageRow(
+            leading.append(UsageRowPresentation(
+                id: .subagents,
                 symbolName: SessionInfoSymbols.subagents,
                 primary: L10n.string("Subagents"),
                 secondary: SessionUsageFormat.responseCount(snapshot.subagents.records),
                 values: usageValues(snapshot.subagents)
-            )
+            ))
         }
 
-        addUsageSubheading(L10n.string("Token breakdown"))
-        addUsageRow(
-            symbolName: SessionInfoSymbols.input,
-            primary: L10n.string("Input"),
-            secondary: L10n.string("Uncached input"),
-            values: [SessionUsageFormat.tokenCount(total.tokens.uncachedInput)]
-        )
-        addUsageRow(
-            symbolName: SessionInfoSymbols.cache,
-            primary: L10n.string("Cache"),
-            secondary: L10n.format(
-                "%@ read · %@ written",
-                UsageFormat.tokens(total.tokens.cachedInput),
-                UsageFormat.tokens(total.tokens.cacheWrite)
+        var breakdown = [
+            UsageRowPresentation(
+                id: .input,
+                symbolName: SessionInfoSymbols.input,
+                primary: L10n.string("Input"),
+                secondary: L10n.string("Uncached input"),
+                values: [SessionUsageFormat.tokenCount(total.tokens.uncachedInput)]
             ),
-            values: [SessionUsageFormat.tokenCount(
-                total.tokens.cachedInput + total.tokens.cacheWrite
-            )]
-        )
-        addUsageRow(
-            symbolName: SessionInfoSymbols.output,
-            primary: L10n.string("Output"),
-            secondary: total.tokens.reasoning > 0
-                ? L10n.format("%@ reasoning", UsageFormat.tokens(total.tokens.reasoning))
-                : "",
-            values: [SessionUsageFormat.tokenCount(total.tokens.output)]
-        )
-        addUsageRow(
-            symbolName: SessionInfoSymbols.cost,
-            primary: L10n.string("Cost"),
-            secondary: L10n.string(
-                "Provider-reported cost where available; catalog estimate otherwise."
+            UsageRowPresentation(
+                id: .cache,
+                symbolName: SessionInfoSymbols.cache,
+                primary: L10n.string("Cache"),
+                secondary: L10n.format(
+                    "%@ read · %@ written",
+                    UsageFormat.tokens(total.tokens.cachedInput),
+                    UsageFormat.tokens(total.tokens.cacheWrite)
+                ),
+                values: [SessionUsageFormat.tokenCount(
+                    total.tokens.cachedInput + total.tokens.cacheWrite
+                )]
             ),
-            values: [SessionUsageFormat.detailedCost(total)]
-        )
+            UsageRowPresentation(
+                id: .output,
+                symbolName: SessionInfoSymbols.output,
+                primary: L10n.string("Output"),
+                secondary: total.tokens.reasoning > 0
+                    ? L10n.format("%@ reasoning", UsageFormat.tokens(total.tokens.reasoning))
+                    : "",
+                values: [SessionUsageFormat.tokenCount(total.tokens.output)]
+            ),
+            UsageRowPresentation(
+                id: .cost,
+                symbolName: SessionInfoSymbols.cost,
+                primary: L10n.string("Cost"),
+                secondary: L10n.string(
+                    "Provider-reported cost where available; catalog estimate otherwise."
+                ),
+                values: [SessionUsageFormat.detailedCost(total)]
+            )
+        ]
         if total.unindexedTokens > 0 {
-            addUsageRow(
+            breakdown.append(UsageRowPresentation(
+                id: .pending,
                 symbolName: SessionInfoSymbols.pending,
                 primary: L10n.string("Awaiting index"),
                 secondary: L10n.string("Live child total; category and cost not available yet"),
                 values: [SessionUsageFormat.tokenCount(total.unindexedTokens)]
-            )
+            ))
         }
 
-        if !total.models.isEmpty {
-            addUsageSubheading(L10n.string("Models"))
-            for model in total.models {
-                let reading = SessionUsageSnapshot.Reading(
+        let models = total.models.map { model in
+            UsageRowPresentation(
+                id: .model(model.name),
+                symbolName: SessionInfoSymbols.model,
+                primary: ModelName.display(for: model.name),
+                secondary: SessionUsageFormat.responseCount(model.records),
+                values: usageValues(SessionUsageSnapshot.Reading(
                     tokens: model.tokens,
                     cost: model.cost,
                     records: model.records
-                )
-                addUsageRow(
-                    symbolName: SessionInfoSymbols.model,
-                    primary: ModelName.display(for: model.name),
-                    secondary: SessionUsageFormat.responseCount(model.records),
-                    values: usageValues(reading)
-                )
-            }
-            if total.remainingModelCount > 0 {
-                list.addNote(L10n.format(
-                    "%lld more models are included in the total.",
-                    Int64(total.remainingModelCount)
                 ))
-            }
+            )
         }
-        addUsageIndexNote(snapshot)
+        return UsagePresentation(
+            leading: leading,
+            breakdown: breakdown,
+            models: models,
+            remainingModelCount: total.remainingModelCount
+        )
     }
 
     private func usageValues(_ reading: SessionUsageSnapshot.Reading) -> [String] {
@@ -496,23 +589,42 @@ final class SessionInfoViewController: NSViewController {
         return values
     }
 
-    private func addUsageRow(
-        symbolName: String,
-        primary: String,
-        secondary: String,
-        values: [String]
-    ) {
-        let spoken = ([primary, secondary] + values)
-            .filter { !$0.isEmpty }
-            .joined(separator: " · ")
-        list.addRow(SessionInfoRowView(
-            symbolName: symbolName,
+    private func addUsageRow(_ presentation: UsageRowPresentation) {
+        let row = SessionInfoRowView(
+            symbolName: presentation.symbolName,
             symbolColor: Design.Text.secondary,
-            primary: primary,
-            secondary: secondary,
-            valueSegments: values,
-            accessibilityLabel: spoken
-        ))
+            primary: presentation.primary,
+            secondary: presentation.secondary,
+            valueSegments: presentation.values,
+            accessibilityLabel: presentation.accessibilityLabel
+        )
+        usageRows[presentation.id] = row
+        list.addRow(row)
+    }
+
+    private func updateUsageValues(_ snapshot: SessionUsageSnapshot?) {
+        guard let snapshot else { return }
+        usageIndexNote?.stringValue = usageIndexText(snapshot)
+        guard !snapshot.total.isEmpty else { return }
+
+        let presentation = usagePresentation(for: snapshot)
+        for value in presentation.rows {
+            guard let row = usageRows[value.id] else {
+                assertionFailure("Usage shape matched without row \(value.id)")
+                continue
+            }
+            row.updateSummary(
+                secondary: value.secondary,
+                valueSegments: value.values,
+                accessibilityLabel: value.accessibilityLabel
+            )
+        }
+        if presentation.remainingModelCount > 0 {
+            remainingModelsNote?.stringValue = L10n.format(
+                "%lld more models are included in the total.",
+                Int64(presentation.remainingModelCount)
+            )
+        }
     }
 
     private func addUsageSubheading(_ text: String) {
@@ -533,7 +645,7 @@ final class SessionInfoViewController: NSViewController {
         list.addRow(host)
     }
 
-    private func addUsageIndexNote(_ snapshot: SessionUsageSnapshot) {
+    private func usageIndexText(_ snapshot: SessionUsageSnapshot) -> String {
         var parts: [String] = []
         switch snapshot.indexedRange {
         case .lifetime:
@@ -552,9 +664,9 @@ final class SessionInfoViewController: NSViewController {
         if let coverage = snapshot.coverage, coverage.state != .complete {
             parts.append(coverage.detail ?? L10n.string("Partial"))
         }
-        guard let scope = parts.first else { return }
+        guard let scope = parts.first else { return "" }
         let provenance = parts.dropFirst().joined(separator: " · ")
-        list.addNote([scope, provenance].filter { !$0.isEmpty }.joined(separator: "\n"))
+        return [scope, provenance].filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     private func add(process: SessionProcess) {

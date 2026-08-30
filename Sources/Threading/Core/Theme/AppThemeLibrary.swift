@@ -119,8 +119,13 @@ enum AppThemeLibrary {
         return sections
     }
 
+    /// The catalogue's answer for an id, or the successor of a retired stock id
+    /// (`AppThemeStyles.retiredIDs`) — so a choice recorded under a slug a stock theme no longer
+    /// carries keeps resolving to the theme it meant.
     static func theme(withID id: AppThemeID) -> AppTheme? {
-        all.first { $0.id == id }
+        if let theme = all.first(where: { $0.id == id }) { return theme }
+        guard let successor = AppThemeStyles.retiredIDs[id] else { return nil }
+        return stock.first { $0.id == successor }
     }
 
     static func isStock(_ theme: AppTheme) -> Bool {
@@ -157,8 +162,10 @@ enum AppThemeLibrary {
             )
             apply(defaultTheme)
         } else if let stored = defaults.string(forKey: Keys.currentThemeID),
-                  stored != current.id.rawValue,
-                  let standing = theme(withID: AppThemeID(stored)) {
+                  let standing = theme(withID: AppThemeID(stored)),
+                  standing.id != current.id {
+            // Compared by the *resolved* id: a stored retired slug resolves to the theme already
+            // in force, and re-applying it here would only rewrite the preference.
             apply(standing)
         } else if let refreshed = theme(withID: current.id), refreshed != current {
             // The active theme kept its identity and changed its answers — a live-reloaded

@@ -25,8 +25,11 @@ delegation, and review.
 
 - **Attention state.** See which sessions are working, waiting for you, or
   ready to review without reading every line of output.
-- **Native conversations.** Follow agent messages, tool activity, questions,
-  permissions, and results in one structured transcript.
+- **Provider TUI.** Keep the provider's established terminal interface for
+  every supported session.
+- **Experimental native conversations.** Where a structured transport exists,
+  preview messages, tool activity, questions, permissions, and results in one
+  structured transcript.
 - **Visible delegation.** Inspect subagents as a tree instead of losing their
   work inside one flattened log.
 - **Review surfaces.** Move from the conversation to the exact Git or image

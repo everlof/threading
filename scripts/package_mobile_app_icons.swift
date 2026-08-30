@@ -20,7 +20,7 @@ private let themes: [ThemeIcon] = [
     .init(id: "newsprint", suffix: "Newsprint"),
     .init(id: "botanical", suffix: "Botanical"),
     .init(id: "industrial", suffix: "Industrial"),
-    .init(id: "pure-black", suffix: "PureBlack"),
+    .init(id: "pure", suffix: "Pure"),
     .init(id: "cappuccino", suffix: "Cappuccino"),
     .init(id: "solarized", suffix: "Solarized"),
     .init(id: "nord", suffix: "Nord"),

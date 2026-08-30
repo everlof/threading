@@ -79,9 +79,13 @@ extension MobileDemoScene {
         "terminal-ansi",
         "terminal-scrollback",
         "terminal-attachments",
+        "terminal-browser-activity",
         "terminal-selection",
         "terminal-codex-tui",
         "terminal-claude-tui",
+        "marketing-claude-tui",
+        "marketing-claude-usage-menu",
+        "marketing-codex-tui",
     ]
 
     private static let attachmentDetailPrefix = "attachment-detail-"
@@ -104,7 +108,7 @@ extension MobileDemoScene {
         case let id where id.hasPrefix("conversation"): return .conversation
         case "pairing": return .pairing
         case let id where id.hasPrefix("welcome"): return .welcome
-        case "settings": return .settings
+        case "settings", "marketing-settings": return .settings
         case "connection-progress-lab": return .connectionProgressLab
         case "connection-status": return .connectionStatus
         case "app-icon-settings": return .appIconSettings
@@ -161,12 +165,21 @@ enum MobileDemoFixture: String, CaseIterable {
     /// The mirrored terminal, one id per captured terminal state.
     case terminalANSI = "terminal-ansi"
     case terminalAttachments = "terminal-attachments"
+    case terminalBrowserActivity = "terminal-browser-activity"
     case terminalClaudeTUI = "terminal-claude-tui"
     case terminalCodexTUI = "terminal-codex-tui"
     case terminalCollaboration = "terminal-collaboration"
     case terminalCompose = "terminal-compose"
     case terminalScrollback = "terminal-scrollback"
     case terminalSelection = "terminal-selection"
+
+    /// The five App Store/website checkpoints. They share one fixture story and are deliberately
+    /// separate from the broader regression gallery so marketing copy can iterate independently.
+    case marketingSessions = "marketing-sessions"
+    case marketingClaudeTUI = "marketing-claude-tui"
+    case marketingCodexTUI = "marketing-codex-tui"
+    case marketingClaudeUsageMenu = "marketing-claude-usage-menu"
+    case marketingSettings = "marketing-settings"
 
     /// The demo conversation. Everything after the prefix is read by the surface it configures.
     case conversation = "conversation"
@@ -225,8 +238,11 @@ enum MobileDemoFixture: String, CaseIterable {
 
     /// The new-session draft; the suffix chooses which state it opens in.
     case newSession = "new-session"
+    case newSessionDraftMatrix = "new-session-draft-matrix"
     case newSessionModelEffortPicker = "new-session-model-effort-picker"
     case newSessionMultiline = "new-session-multiline"
+    case newSessionSingleCharacter = "new-session-single-character"
+    case newSessionScrollOverflow = "new-session-scroll-overflow"
     case newSessionStructuredError = "new-session-structured-error"
 
     case themedDialogAlert = "themed-dialog-alert"
@@ -271,11 +287,22 @@ enum MobileDemoFixture: String, CaseIterable {
 
     /// The issue report, presented over whatever the root already shows.
     case report = "report"
-    case reportReceipt = "report-receipt"
     case reportScreenshot = "report-screenshot"
 
     /// The root scene this id reaches.
     var scene: MobileDemoScene { MobileDemoScene.resolve(rawValue) }
+
+    static let marketingIDs: Set<String> = [
+        marketingSessions.rawValue,
+        marketingClaudeTUI.rawValue,
+        marketingCodexTUI.rawValue,
+        marketingClaudeUsageMenu.rawValue,
+        marketingSettings.rawValue,
+    ]
+
+    static func isMarketing(_ id: String?) -> Bool {
+        id.map(marketingIDs.contains) ?? false
+    }
 }
 #endif
 
@@ -296,6 +323,12 @@ struct RootView: View {
     private var demoTerminalName: String { demoTerminal.session.title }
     private var demoConversationName: String { demoConversation.session.title }
     private var demoPermissionName: String { demoPermission.session.title }
+    private var isMarketingTerminalFixture: Bool {
+        let id = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+        return id == MobileDemoFixture.marketingClaudeTUI.rawValue
+            || id == MobileDemoFixture.marketingCodexTUI.rawValue
+            || id == MobileDemoFixture.marketingClaudeUsageMenu.rawValue
+    }
 #endif
 
     var body: some View {
@@ -368,9 +401,24 @@ struct RootView: View {
         switch MobileDemoScene.current {
         case .terminal:
             NavigationStack {
-                TerminalRemoteView(connection: demoTerminal)
-                    .navigationTitle(demoTerminalName)
-                    .navigationBarTitleDisplayMode(.inline)
+                if isMarketingTerminalFixture {
+                    // Use the shipping detail chrome so the capture proves the actual account,
+                    // usage, Workspace and session-actions menu rather than a fixture facsimile.
+                    SessionDetailView(evidenceConnection: demoTerminal)
+                } else {
+                    TerminalRemoteView(connection: demoTerminal)
+                        .navigationTitle(demoTerminalName)
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar { demoTerminalToolbar }
+                }
+            }
+            .task {
+                guard ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                        == MobileDemoFixture.terminalBrowserActivity.rawValue else { return }
+                workspaceDemoActivity.receive(RemoteWorkspaceChangedDTO(
+                    kind: .browser,
+                    activityID: "terminal-browser-activity"
+                ))
             }
         case .attentionRequest:
             AttentionRequestSheet(connection: demoConversation)
@@ -544,6 +592,34 @@ struct RootView: View {
             standardRoot
         }
     }
+
+    @ToolbarContentBuilder
+    private var demoTerminalToolbar: some ToolbarContent {
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+            == MobileDemoFixture.terminalBrowserActivity.rawValue {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    SessionWorkspaceMenuButton(
+                        hasUnseenBrowser: workspaceDemoActivity.hasUnseenBrowser,
+                        action: {}
+                    )
+                } label: {
+                    SessionActionsToolbarIcon(
+                        activity: workspaceDemoActivity,
+                        identity: .resolve("codex"),
+                        reading: MobileAccountUsageReading(
+                            rings: [.init(id: "7d", fraction: 0.56)],
+                            summary: "7d 56%"
+                        ),
+                        account: nil
+                    )
+                }
+                .accessibilityLabel(
+                    MobileL10n.string("Session actions, new browser activity")
+                )
+            }
+        }
+    }
 #endif
 
     private var theme: RemoteThemePalette {
@@ -579,7 +655,7 @@ struct RootView: View {
             return RemoteThemePalette(demoConversation.theme ?? model.me?.theme)
         }
 #endif
-        return RemoteThemePalette(model.me?.theme)
+        return RemoteThemePalette(model.appTheme)
     }
 
     private func openShakeReport(screenshot: UIImage?) {
@@ -704,14 +780,12 @@ struct RootView: View {
     @MainActor
     private func openIssueReportDemoIfNeeded() async {
         let mode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-        guard mode == "report"
-                || mode == "report-receipt"
-                || mode == "report-screenshot" else {
+        guard mode == "report" || mode == "report-screenshot" else {
             return
         }
         try? await Task.sleep(for: .milliseconds(650))
         switch mode {
-        case "report", "report-receipt":
+        case "report":
             issueReportRequest = MobileIssueReportRequest(
                 trigger: .diagnostics,
                 screenshot: nil,

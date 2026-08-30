@@ -154,6 +154,13 @@ by id later, so startup records `containsUnkeyedRows` and only skipping the tabl
 it. The project and session rows stay all-or-nothing and eagerly decoded because those are the copy
 of record.
 
+**The attachment document's `formatVersion` is 3.** Version 3 adds the optional exact turn id and
+the current/next/neither placement used by the collapsible attachment chronology. The version bump
+prevents an older build from silently rewriting a row while discarding that grouping metadata.
+Within a readable version the fields remain migration-safe: an older user attachment points to the
+next turn, an older agent attachment points to the current turn, and an unknown future placement
+falls back through that same origin rule.
+
 Authoritative session rows remain eager, but their healthy decode is **bounded and batched**.
 `ProjectDatabase` joins at most 256 stored JSON objects into one temporary array and invokes the
 top-level `JSONDecoder` once for that group instead of constructing a parser for every row. Indexed
@@ -688,6 +695,18 @@ follows the same candidate-first, bounded rule. No continuity archive is synchro
 clients, because merging partial human input, moving another person's viewport or inheriting their
 input preference would turn private continuity into collaboration state.
 
+The iPhone's last resolved Mac app theme is a separate optional cache, not another field in that
+continuity archive. `MobileThemeCacheStore` keeps at most 64 complete `RemoteThemeDTO` records,
+scoped to the paired Mac, under a 256 KiB archive ceiling. A candidate is validated, written, and
+read back before it becomes visible; corrupt bytes are quarantined, and a future version is left
+untouched with writes disabled. `RemoteAppModel` consults it only while live `/api/me` state is
+absent and records every later authoritative or local-preview theme replacement. Keeping this
+derived appearance state separate means a malformed theme can never make an unsent draft or saved
+viewport unreadable. The normal scale is 1–5 Macs: a palette read checks at most the stable and
+pairing identities against the hard 64-record ceiling, and a write occurs only when the resolved
+theme actually changes, never on a session or terminal hot callback. See
+[`themes.md`](themes.md#2026-08-30--the-iphone-keeps-the-last-resolved-mac-theme-through-reconnect).
+
 The crash itself was in the SwiftTerm fork: `LocalProcess.processTerminated()` reaps the
 child with `waitpid`, which destroys the kernel event its `DispatchSourceProcess` is
 registered for. Left active, that knote is reported `EV_VANISHED` the next time the workloop
@@ -810,6 +829,21 @@ records, including their 256-bit bearers, each live in one versioned generic-pas
 Keychain. Both Mac stores use the data-protection Keychain when the signed build can access it,
 under the same shared probe as the browser vault below. An ad-hoc build falls back to the login
 Keychain and Settings states that weaker boundary rather than claiming the Release guarantee.
+
+APNs registrations use a third, separate versioned Keychain item under the same storage policy.
+It contains only device-bound delivery metadata — share id, device id, APNs token, environment,
+and enabled/sounding kinds — never a bearer or authorization. On every Remote Access start the
+complete record set is rebound to the current owner-device and accepted-member stores; expired,
+revoked, and wrong-device records stay inert and are pruned. Registration persists a validated
+candidate before making it live, while revocation commits to the authority store first and then
+drops live delivery even if this secondary cleanup fails. A corrupt notification item therefore
+fails notification registration closed without disabling pairing. Reset Everything names and
+deletes it explicitly. Load, write, prune, revoke-cleanup, and reset-delete failures enter the
+share-safe remote diagnostic journal with only a fixed stage and reason. The store is bounded to
+288 records and 1 MiB: at expected cardinality it
+contains 1–5 records. Persistence scans are O(total) only at registration, revocation, or Remote
+Access startup. Notification fan-out is O(active subscriptions), bounded by the same 288-record
+ceiling, and neither path runs on a session or terminal hot callback.
 
 The move from the old login-Keychain items is validation-first. With no protected item, a valid
 legacy envelope is written to the protected Keychain before the obsolete item is removed; corrupt

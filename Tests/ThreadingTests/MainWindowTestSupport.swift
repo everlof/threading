@@ -43,6 +43,7 @@ extension HostedStoreTestCase {
     @MainActor
     func makeMainWindowController(
         initialFramePlan: MainWindowInitialFramePlan = .restoreSavedFrame,
+        workspaceNavigatorRouting: any ExtensionWorkspaceNavigatorRouting = ExtensionManager.shared,
         file _: StaticString = #filePath,
         line _: UInt = #line
     ) -> MainWindowController {
@@ -57,7 +58,8 @@ extension HostedStoreTestCase {
         )
         let controller = MainWindowController(
             environment: environment,
-            initialFramePlan: initialFramePlan
+            initialFramePlan: initialFramePlan,
+            workspaceNavigatorRouting: workspaceNavigatorRouting
         )
         retainMainWindowFixture(
             MainWindowTestFixtureOwner(controller: controller, directory: directory)

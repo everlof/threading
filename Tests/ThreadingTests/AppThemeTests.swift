@@ -110,26 +110,73 @@ final class AppThemeTests: HostedStoreTestCase {
 
     // MARK: - The System Theme Changes Nothing
 
-    /// Pure Black is the one ground dark enough that the derived quiet tiers — `label × {0.7,
-    /// 0.45}`, floored only at the glanceable 3:1 — leave a small mark like a dormant session's
-    /// agent icon at the edge of visible: thin strokes anti-alias into the true black and it
-    /// reads as gone. It states its own quiet ramp instead; this guards that the ramp stays
-    /// legible on both the ground and the slightly lifted sidebar surface it is drawn over.
-    func testPureBlackQuietLabelTiersStayLegibleOnItsGround() {
-        let theme = AppThemeStyles.pureBlack
-        let ground = theme.resolved(.ground)
-        let surface = theme.resolved(.surface)
-        for role in [AppThemeRole.secondaryLabel, .tertiaryLabel] {
-            let ink = theme.resolved(role)
-            XCTAssertGreaterThanOrEqual(
-                ThemeContrast.ratio(ink, ground), 4.0,
-                "\(role) at \(ink.hexString) is too faint on Pure Black's ground"
-            )
-            XCTAssertGreaterThanOrEqual(
-                ThemeContrast.ratio(ink, surface), 4.0,
-                "\(role) at \(ink.hexString) is too faint on Pure Black's sidebar surface"
-            )
+    /// Pure fixes both its grounds at the extremes, and true black is the one ground dark
+    /// enough that the derived quiet tiers — `label × {0.7, 0.45}`, floored only at the
+    /// glanceable 3:1 — leave a small mark like a dormant session's agent icon at the edge of
+    /// visible: thin strokes anti-alias into the black and it reads as gone. Both variants state
+    /// their own quiet ramp instead; this guards that each ramp stays legible on its ground and
+    /// on the slightly shifted sidebar surface it is drawn over, so a revert to derivation fails
+    /// rather than ships an invisible icon.
+    func testPureQuietLabelTiersStayLegibleOnBothOfItsGrounds() throws {
+        let theme = AppThemeStyles.pure
+        for kind in AppTheme.VariantKind.allCases {
+            let appearance = try XCTUnwrap(kind.appearance)
+            let ground = theme.resolved(.ground, appearance: appearance)
+            let surface = theme.resolved(.surface, appearance: appearance)
+            for role in [AppThemeRole.secondaryLabel, .tertiaryLabel] {
+                let ink = theme.resolved(role, appearance: appearance)
+                XCTAssertGreaterThanOrEqual(
+                    ThemeContrast.ratio(ink, ground), 4.0,
+                    "\(role) at \(ink.hexString) is too faint on Pure's \(kind.rawValue) ground"
+                )
+                XCTAssertGreaterThanOrEqual(
+                    ThemeContrast.ratio(ink, surface), 4.0,
+                    "\(role) at \(ink.hexString) is too faint on Pure's \(kind.rawValue) sidebar surface"
+                )
+            }
         }
+    }
+
+    /// Pure shipped as the fixed dark "Pure Black" under the id `pure-black`, and a stock id
+    /// is persistence identity: every Mac that chose it has that slug on disk. The retired id
+    /// resolves to its successor without becoming a catalogue entry of its own.
+    func testARetiredStockIDResolvesToItsSuccessorWithoutJoiningTheCatalogue() {
+        let retired = AppThemeStyles.retiredPureBlackID
+
+        XCTAssertEqual(AppThemeLibrary.theme(withID: retired)?.id, AppThemeStyles.pure.id)
+        XCTAssertFalse(
+            AppThemeLibrary.all.contains { $0.id == retired },
+            "a retired id is an alias, not a second row in the picker"
+        )
+        XCTAssertNil(
+            AppThemeLibrary.theme(withID: AppThemeID("pure-white")),
+            "only a retired id is redirected; an unknown one still misses"
+        )
+    }
+
+    /// The standing choice recorded before the rename still comes back as Pure at launch.
+    /// `restore` deliberately writes nothing, so the old slug is left on disk and keeps
+    /// resolving through the alias until the next deliberate pick records the successor.
+    func testAStoredRetiredIDRestoresItsSuccessor() {
+        let store = PreferenceStore.shared
+        let preserved = store.string(forKey: "appThemeID")
+        defer {
+            if let preserved {
+                store.set(preserved, forKey: "appThemeID")
+            } else {
+                store.removeObject(forKey: "appThemeID")
+            }
+            AppThemeLibrary.restore()
+        }
+
+        store.set(AppThemeStyles.retiredPureBlackID.rawValue, forKey: "appThemeID")
+        AppThemeLibrary.restore()
+
+        XCTAssertEqual(AppThemeLibrary.current.id, AppThemeStyles.pure.id)
+        XCTAssertEqual(
+            store.string(forKey: "appThemeID"), AppThemeStyles.retiredPureBlackID.rawValue,
+            "restore does not write"
+        )
     }
 
     func testSystemThemeResolvesEveryRoleToItsSystemColour() {

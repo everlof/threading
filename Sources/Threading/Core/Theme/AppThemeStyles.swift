@@ -47,7 +47,7 @@ enum AppThemeStyles {
         // The palette-first family: a colour language rather than a chrome. See
         // `docs/architecture/themes.md`.
         AppThemeSection(L10n.string("Palettes"), [
-            pureBlack,
+            pure,
             cappuccino,
             solarized,
             nord,
@@ -85,6 +85,19 @@ enum AppThemeStyles {
     /// had already drifted once — see `takeovers`, which learned the same lesson one property
     /// along.
     static let all: [AppTheme] = families.flatMap(\.themes)
+
+    /// Stock ids retired by a rename, each pointing at the theme that replaced it.
+    ///
+    /// A theme's id is its persistence identity (`AppThemeID`), so a stock theme cannot simply
+    /// change its slug: the standing choice on every Mac that picked it, the phone's icon
+    /// recommendation and any `set_app_theme` call an agent learned would all fall through to the
+    /// product default. `AppThemeLibrary.theme(withID:)` consults this after the catalogue
+    /// misses, so a retired id keeps resolving without ever appearing as a catalogue entry of its
+    /// own. Restore never writes, so the old id can stay on disk indefinitely; the next
+    /// deliberate pick records the successor.
+    static let retiredIDs: [AppThemeID: AppThemeID] = [
+        retiredPureBlackID: pure.id
+    ]
 
     /// The stock themes that draw the window frame themselves, derived from the one fact
     /// that defines them (`takesOverWindowChrome`) rather than listed again by hand.

@@ -313,31 +313,38 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             // Read before submitting, which is what clears the strip. Recorded here rather than
             // when the image was attached: an attachment removed before sending was never handed
             // over, and listing it would be the pane reporting an intention.
-            PromptAttachment.record(
+            let attachments = PromptAttachment.record(
                 paths: self.promptView.attachmentPaths,
                 sessionID: self.sessionID,
                 projectRoot: URL(
                     fileURLWithPath: session.workingDirectory(in: self.project),
                     isDirectory: true
-                )
+                ),
+                turnPlacement: .next
             )
-            _ = self.submit(text, context: self.promptView.contextAttachments)
+            _ = self.submit(
+                text,
+                context: self.promptView.contextAttachments,
+                attachmentIDs: attachments.map(\.id)
+            )
         }
         prompt.onSteer = { [weak self] text in
             guard let self, let session = self.currentSession else { return }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             let context = self.promptView.contextAttachments
             guard !trimmed.isEmpty || !context.isEmpty else { return }
-            PromptAttachment.record(
+            let attachments = PromptAttachment.record(
                 paths: self.promptView.attachmentPaths,
                 sessionID: self.sessionID,
                 projectRoot: URL(
                     fileURLWithPath: session.workingDirectory(in: self.project),
                     isDirectory: true
-                )
+                ),
+                turnPlacement: .current
             )
             self.steerValidatingWorkspaceFiles(
-                ConversationPrompt(text: trimmed, context: context)
+                ConversationPrompt(text: trimmed, context: context),
+                attachmentIDs: attachments.map(\.id)
             )
         }
         prompt.onStop = { [weak self] in
@@ -2282,8 +2289,12 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// cannot see, correct, or account for when the reply arrives, and this one costs them a
     /// turn of their own usage.
     @discardableResult
-    func sendAppPrompt(_ text: String, context: [ConversationContextAttachment] = []) -> Bool {
-        submit(text, context: context)
+    func sendAppPrompt(
+        _ text: String,
+        context: [ConversationContextAttachment] = [],
+        attachmentIDs: [String] = []
+    ) -> Bool {
+        submit(text, context: context, attachmentIDs: attachmentIDs)
     }
 
     /// Provider-neutral rows for mobile/web conversation clients. Tool inputs have already
@@ -2541,7 +2552,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         _ text: String,
         context: [ConversationContextAttachment] = [],
         authorization: RemoteAuthorization? = nil,
-        workspaceFilesValidated: Bool = false
+        workspaceFilesValidated: Bool = false,
+        attachmentIDs: [String] = []
     ) -> Bool {
         guard currentSession != nil else { return false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2570,7 +2582,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                         text,
                         context: context,
                         authorization: authorization,
-                        workspaceFilesValidated: true
+                        workspaceFilesValidated: true,
+                        attachmentIDs: attachmentIDs
                     )
                 case .failure(let failure):
                     self.presentWorkspaceFileFailure(failure)
@@ -2624,7 +2637,10 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // which is the whole point of the outbox.
         guard stream.canSend else {
             guard authorization == nil else { return false }
-            return enqueue(ConversationPrompt(text: trimmed, context: context))
+            return enqueue(
+                ConversationPrompt(text: trimmed, context: context),
+                attachmentIDs: attachmentIDs
+            )
         }
 
         let localPrompt = ConversationPrompt(text: trimmed, context: context)
@@ -2650,6 +2666,11 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         let transportedPrompt = ConversationPrompt(text: transportedText, context: context)
 
         let messageID = ConversationMessageID()
+        SessionAttachmentStore.shared.associate(
+            attachmentIDs: attachmentIDs,
+            withTurnID: messageID.wireValue,
+            for: sessionID
+        )
         isPreparingTurn = true
         refreshInputControl()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
@@ -2703,10 +2724,13 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         )
     }
 
-    private func steerValidatingWorkspaceFiles(_ prompt: ConversationPrompt) {
+    private func steerValidatingWorkspaceFiles(
+        _ prompt: ConversationPrompt,
+        attachmentIDs: [String] = []
+    ) {
         let references = workspaceReferences(in: prompt.context)
         guard !references.isEmpty else {
-            steer(prompt)
+            steer(prompt, attachmentIDs: attachmentIDs)
             return
         }
         guard !isPreparingTurn else { return }
@@ -2717,7 +2741,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             self.isPreparingTurn = false
             switch result {
             case .success:
-                self.steer(prompt)
+                self.steer(prompt, attachmentIDs: attachmentIDs)
             case .failure(let failure):
                 self.presentWorkspaceFileFailure(failure)
                 self.refreshInputControl()

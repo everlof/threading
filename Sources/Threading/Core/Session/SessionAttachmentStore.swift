@@ -52,6 +52,19 @@ struct SessionAttachment: Equatable, Identifiable {
         case user
     }
 
+    /// How this file is placed against the session's durable turn ledger.
+    ///
+    /// Agent output is recorded while its turn is current. A user attachment is normally filed
+    /// just before the provider admits the turn that will carry it, so it points forward instead.
+    /// Local-only actions in the Attachments pane point at neither: comparing a dropped picture
+    /// must not make the next unrelated prompt claim it. `turnID` upgrades either temporal answer
+    /// to the exact provider-neutral user-turn identity whenever the submission path has one.
+    enum TurnPlacement: String, Codable, Sendable {
+        case current
+        case next
+        case none
+    }
+
     /// Opaque identity used by notifications and remote fetches. A path remains presentation
     /// metadata; it is neither authority nor identity once two captures can come from one file.
     let id: String
@@ -81,6 +94,8 @@ struct SessionAttachment: Equatable, Identifiable {
     let isOutsideProject: Bool
     /// Generated display output is copied once and never refreshed underneath its row.
     let isImmutableSnapshot: Bool
+    let turnID: String?
+    let turnPlacement: TurnPlacement
     let referencedAt: Date
 
     init(
@@ -94,6 +109,8 @@ struct SessionAttachment: Equatable, Identifiable {
         origin: Origin,
         isOutsideProject: Bool = false,
         isImmutableSnapshot: Bool = false,
+        turnID: String? = nil,
+        turnPlacement: TurnPlacement = .current,
         referencedAt: Date
     ) {
         self.sessionID = sessionID
@@ -106,6 +123,8 @@ struct SessionAttachment: Equatable, Identifiable {
         self.origin = origin
         self.isOutsideProject = isOutsideProject
         self.isImmutableSnapshot = isImmutableSnapshot
+        self.turnID = turnID
+        self.turnPlacement = turnPlacement
         self.referencedAt = referencedAt
     }
 
@@ -789,7 +808,9 @@ final class SessionAttachmentStore {
         sessionID: SessionID,
         projectRoot: URL,
         origin: SessionAttachment.Origin,
-        preferredName: String? = nil
+        preferredName: String? = nil,
+        turnID: String? = nil,
+        turnPlacement: SessionAttachment.TurnPlacement = .current
     ) -> [SessionAttachment] {
         // Loaded before anything is built: a second mention of the same source is matched against
         // the list as it stands, so a regenerated chart overwrites its copy in place.
@@ -803,6 +824,8 @@ final class SessionAttachmentStore {
                 projectRoot: projectRoot,
                 origin: origin,
                 preferredName: preferredName,
+                turnID: turnID,
+                turnPlacement: turnPlacement,
                 referencedAt: timestamp
             )
         }
@@ -816,14 +839,18 @@ final class SessionAttachmentStore {
         sessionID: SessionID,
         projectRoot: URL,
         origin: SessionAttachment.Origin,
-        preferredName: String? = nil
+        preferredName: String? = nil,
+        turnID: String? = nil,
+        turnPlacement: SessionAttachment.TurnPlacement = .current
     ) -> SessionAttachment? {
         record(
             declared: [url],
             sessionID: sessionID,
             projectRoot: projectRoot,
             origin: origin,
-            preferredName: preferredName
+            preferredName: preferredName,
+            turnID: turnID,
+            turnPlacement: turnPlacement
         ).first
     }
 
@@ -1120,6 +1147,8 @@ final class SessionAttachmentStore {
                 isOutsideProject: $0.isOutsideProject,
                 id: $0.id,
                 isImmutableSnapshot: $0.isImmutableSnapshot,
+                turnID: $0.turnID,
+                turnPlacement: $0.turnPlacement,
                 referencedAt: $0.referencedAt
             )
         }
@@ -1139,6 +1168,46 @@ final class SessionAttachmentStore {
 
     func attachment(for sessionID: SessionID, id: String) -> SessionAttachment? {
         attachments(for: sessionID).first { $0.id == id }
+    }
+
+    /// Pins already-recorded prompt files to the provider-neutral turn identity minted by the
+    /// native submission path. Recording has to happen before admission, while the turn id is
+    /// only known after admission, so this is deliberately one small atomic upgrade rather than
+    /// a second attachment record (which would copy bytes and reorder rows).
+    func associate(
+        attachmentIDs: [String],
+        withTurnID turnID: String,
+        for sessionID: SessionID
+    ) {
+        guard !attachmentIDs.isEmpty, !turnID.isEmpty else { return }
+        loadIfNeeded(sessionID)
+        let ids = Set(attachmentIDs)
+        guard var attachments = attachmentsBySession[sessionID] else { return }
+        var changed = false
+        for index in attachments.indices where ids.contains(attachments[index].id) {
+            let attachment = attachments[index]
+            guard attachment.turnID != turnID else { continue }
+            attachments[index] = SessionAttachment(
+                sessionID: attachment.sessionID,
+                id: attachment.id,
+                root: attachment.root,
+                url: attachment.url,
+                relativePath: attachment.relativePath,
+                sourcePath: attachment.sourcePath,
+                kind: attachment.kind,
+                origin: attachment.origin,
+                isOutsideProject: attachment.isOutsideProject,
+                isImmutableSnapshot: attachment.isImmutableSnapshot,
+                turnID: turnID,
+                turnPlacement: attachment.turnPlacement,
+                referencedAt: attachment.referencedAt
+            )
+            changed = true
+        }
+        guard changed else { return }
+        attachmentsBySession[sessionID] = attachments
+        persist(attachments, for: sessionID)
+        NotificationCenter.default.post(SessionAttachmentsDidChange(sessionID: sessionID))
     }
 
     func retainOnly(sessionIDs: Set<SessionID>) {
@@ -1214,6 +1283,11 @@ final class SessionAttachmentStore {
                 // passed the narrow rule, so absent reads as "inside" rather than as unknown.
                 isOutsideProject: entry.isOutsideProject ?? false,
                 isImmutableSnapshot: entry.isImmutableSnapshot ?? false,
+                turnID: entry.turnID,
+                // Before this field existed, deliberate user handoffs were always recorded just
+                // before the turn they belonged to; agent discoveries happened during a turn.
+                turnPlacement: entry.turnPlacement
+                    ?? ((entry.origin ?? .agent) == .user ? .next : .current),
                 referencedAt: entry.referencedAt
             )
         }
@@ -1231,6 +1305,8 @@ final class SessionAttachmentStore {
                 origin: $0.origin,
                 isOutsideProject: $0.isOutsideProject ? true : nil,
                 isImmutableSnapshot: $0.isImmutableSnapshot ? true : nil,
+                turnID: $0.turnID,
+                turnPlacement: $0.turnPlacement,
                 referencedAt: $0.referencedAt
             )
         }
@@ -1264,6 +1340,8 @@ final class SessionAttachmentStore {
         isOutsideProject: Bool = false,
         id: String? = nil,
         isImmutableSnapshot: Bool = false,
+        turnID: String? = nil,
+        turnPlacement: SessionAttachment.TurnPlacement = .current,
         referencedAt: Date
     ) -> SessionAttachment? {
         let base = root.standardizedFileURL.resolvingSymlinksInPath()
@@ -1290,6 +1368,8 @@ final class SessionAttachmentStore {
             origin: origin,
             isOutsideProject: isOutsideProject,
             isImmutableSnapshot: isImmutableSnapshot,
+            turnID: turnID,
+            turnPlacement: turnPlacement,
             referencedAt: referencedAt
         )
     }
@@ -1302,6 +1382,8 @@ final class SessionAttachmentStore {
         projectRoot: URL,
         origin: SessionAttachment.Origin,
         preferredName: String?,
+        turnID: String?,
+        turnPlacement: SessionAttachment.TurnPlacement,
         referencedAt: Date
     ) -> SessionAttachment? {
         let file = url.standardizedFileURL.resolvingSymlinksInPath()
@@ -1313,6 +1395,8 @@ final class SessionAttachmentStore {
                 sessionID: sessionID,
                 root: checkout,
                 origin: origin,
+                turnID: turnID,
+                turnPlacement: turnPlacement,
                 referencedAt: referencedAt
             )
         }
@@ -1323,6 +1407,8 @@ final class SessionAttachmentStore {
             origin: origin,
             preferredName: preferredName,
             isOutsideProject: false,
+            turnID: turnID,
+            turnPlacement: turnPlacement,
             referencedAt: referencedAt
         )
     }
@@ -1338,6 +1424,8 @@ final class SessionAttachmentStore {
         origin: SessionAttachment.Origin,
         preferredName: String?,
         isOutsideProject: Bool,
+        turnID: String? = nil,
+        turnPlacement: SessionAttachment.TurnPlacement = .current,
         referencedAt: Date,
         isImmutableSnapshot: Bool = false,
         snapshotData: Data? = nil
@@ -1384,6 +1472,8 @@ final class SessionAttachmentStore {
             origin: origin,
             isOutsideProject: isOutsideProject,
             isImmutableSnapshot: isImmutableSnapshot,
+            turnID: turnID,
+            turnPlacement: turnPlacement,
             referencedAt: referencedAt
         )
     }

@@ -41,6 +41,23 @@ final class AccountSetupRenderTests: XCTestCase {
         super.tearDown()
     }
 
+    func testChoiceShowsEverySupportedAgentAndOnlyMeasuredLoginActions() {
+        let controller = AccountSetupCardViewController(
+            coordinator: AgentAccountSetupCoordinator(initialState: .choice)
+        )
+        let views = descendants(of: controller.view)
+        let text = Set(views.compactMap { ($0 as? NSTextField)?.stringValue })
+
+        XCTAssertTrue(AgentKind.allCases.allSatisfy { text.contains($0.displayName) })
+        let setupButtons = views.compactMap { $0 as? ThemedButton }.filter {
+            $0.accessibilityIdentifier().hasPrefix("account-setup.choose.")
+        }
+        XCTAssertEqual(
+            Set(setupButtons.map { $0.accessibilityIdentifier() }),
+            ["account-setup.choose.claude", "account-setup.choose.codex"]
+        )
+    }
+
     func testRendersEveryAccountSetupStateInOnboardingAndSettings() throws {
         try FileManager.default.createDirectory(
             at: Render.directory,
@@ -170,7 +187,10 @@ final class AccountSetupRenderTests: XCTestCase {
                 accountsProvider: { story.accounts },
                 cliResults: [
                     AgentCLIProbe.Result(executable: "claude", resolvedPath: "/usr/local/bin/claude"),
-                    AgentCLIProbe.Result(executable: "codex", resolvedPath: "/usr/local/bin/codex")
+                    AgentCLIProbe.Result(executable: "codex", resolvedPath: "/usr/local/bin/codex"),
+                    AgentCLIProbe.Result(executable: "grok", resolvedPath: "/usr/local/bin/grok"),
+                    AgentCLIProbe.Result(executable: "opencode", resolvedPath: "/usr/local/bin/opencode"),
+                    AgentCLIProbe.Result(executable: "agent", resolvedPath: "/usr/local/bin/agent")
                 ],
                 setupCoordinator: coordinator
             )
@@ -234,5 +254,9 @@ final class AccountSetupRenderTests: XCTestCase {
         host.layer?.backgroundColor = background.cgColor
         host.cacheDisplay(in: host.bounds, to: rep)
         return rep.representation(using: .png, properties: [:])
+    }
+
+    private func descendants(of view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap { descendants(of: $0) }
     }
 }

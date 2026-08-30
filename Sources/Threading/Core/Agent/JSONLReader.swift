@@ -41,9 +41,14 @@ enum JSONLReader {
         limit: Int,
         _ handle: ([String: Any]) -> Bool
     ) -> UInt64 {
-        scanForward(at: url, from: offset, limit: limit, deliversTrailingRecord: false) { line in
+        (try? scanForward(
+            at: url,
+            from: offset,
+            limit: limit,
+            deliversTrailingRecord: false
+        ) { line in
             deliver(line, to: handle)
-        }
+        }) ?? offset
     }
 
     /// The same stream, **unparsed**.
@@ -57,7 +62,34 @@ enum JSONLReader {
     /// The chunking, the newline handling and the never-truncate-a-record rule stay here, so
     /// the two views cannot drift apart.
     static func forEachLine(at url: URL, limit: Int, _ handle: (Data) -> Bool) {
-        _ = scanForward(at: url, from: 0, limit: limit, deliversTrailingRecord: true, handle)
+        _ = try? scanForward(
+            at: url,
+            from: 0,
+            limit: limit,
+            deliversTrailingRecord: true,
+            handle
+        )
+    }
+
+    /// The usage ledger's strict sibling to `forEachLine`.
+    ///
+    /// Replay and discovery are recovery readers: an unreadable line can be omitted while the
+    /// rest of the conversation remains useful. A bill is different. Its caller must be able to
+    /// distinguish a complete source from a file that could not be opened, stopped reading, or
+    /// contained a usage record it could not parse. The streaming implementation remains shared;
+    /// only this entry point lets those failures escape.
+    static func forEachLineStrict(
+        at url: URL,
+        limit: Int,
+        _ handle: (Data) throws -> Bool
+    ) throws {
+        _ = try scanForward(
+            at: url,
+            from: 0,
+            limit: limit,
+            deliversTrailingRecord: true,
+            handle
+        )
     }
 
     /// The one forward implementation, so the chunking, the newline handling, the
@@ -69,13 +101,13 @@ enum JSONLReader {
         from offset: UInt64,
         limit: Int,
         deliversTrailingRecord: Bool,
-        _ handle: (Data) -> Bool
-    ) -> UInt64 {
-        guard let file = try? FileHandle(forReadingFrom: url) else { return offset }
+        _ handle: (Data) throws -> Bool
+    ) throws -> UInt64 {
+        let file = try FileHandle(forReadingFrom: url)
         defer { try? file.close() }
 
         if offset > 0 {
-            guard (try? file.seek(toOffset: offset)) != nil else { return offset }
+            try file.seek(toOffset: offset)
         }
 
         var buffer = Data()
@@ -85,7 +117,7 @@ enum JSONLReader {
         let newline = UInt8(ascii: "\n")
 
         while consumed < limit {
-            guard let chunk = try? file.read(upToCount: JSONLDefaults.chunkBytes),
+            guard let chunk = try file.read(upToCount: JSONLDefaults.chunkBytes),
                   !chunk.isEmpty else { reachedEndOfFile = true; break }
 
             consumed += chunk.count
@@ -100,7 +132,7 @@ enum JSONLReader {
                 let line = buffer[lineStart..<index]
                 let next = buffer.index(after: index)
 
-                if !line.isEmpty, !handle(line) {
+                if !line.isEmpty, try !handle(line) {
                     return delivered + UInt64(next - buffer.startIndex)
                 }
                 lineStart = next
@@ -120,7 +152,7 @@ enum JSONLReader {
         //
         // A resumable scan declines it even at end of file, and `delivered` stays behind it: see
         // `forEachRecord(at:from:limit:)`.
-        if deliversTrailingRecord, reachedEndOfFile, !buffer.isEmpty { _ = handle(buffer) }
+        if deliversTrailingRecord, reachedEndOfFile, !buffer.isEmpty { _ = try handle(buffer) }
         return delivered
     }
 

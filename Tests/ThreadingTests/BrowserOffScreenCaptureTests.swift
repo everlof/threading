@@ -130,7 +130,7 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
     }
 
     private func capture(_ browser: BrowserViewController) async -> Reading {
-        guard let shot = await browser.screenshot(),
+        guard let shot = try? await browser.screenshot(),
               let bitmap = NSBitmapImageRep(data: shot.data),
               let colour = bitmap.colorAt(x: bitmap.pixelsWide / 2, y: bitmap.pixelsHigh / 2)
         else { return .none }

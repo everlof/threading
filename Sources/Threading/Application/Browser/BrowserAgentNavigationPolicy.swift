@@ -8,6 +8,8 @@ import Foundation
 /// verified without constructing a web view.
 @MainActor
 final class BrowserAgentNavigationPolicy {
+    private static let timedOutActionLifetime: TimeInterval = 30
+
     struct ActionID: Equatable, Sendable {
         fileprivate let rawValue: Int
     }
@@ -40,6 +42,15 @@ final class BrowserAgentNavigationPolicy {
     func endAction(_ id: ActionID) {
         guard activeAction?.id == id else { return }
         activeAction = nil
+    }
+
+    /// A WebKit process can disappear without invoking the JavaScript callback which normally
+    /// ends an action. Keep the policy around briefly for a late page mutation, but never let a
+    /// missing callback block the user's own form submissions for the lifetime of the tab.
+    func retireTimedOutAction(_ id: ActionID) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.timedOutActionLifetime) {
+            [weak self] in self?.endAction(id)
+        }
     }
 
     /// User-initiated submissions remain ordinary browser navigation. An active agent action may

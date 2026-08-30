@@ -9,7 +9,7 @@ import AppKit
 /// of its own (the silhouette gate refuses a pure tint), but the differences are a few points of
 /// radius, never new furniture.
 ///
-/// Provenance is split, deliberately. Pure Black and Cappuccino are our own palettes, authored
+/// Provenance is split, deliberately. Pure and Cappuccino are our own palettes, authored
 /// like every design-movement style. Solarized, Nord, and Dracula are the community's: their
 /// identity *is* their exact values, so the values are reproduced from the published MIT-licensed
 /// definitions rather than approximated —
@@ -21,18 +21,94 @@ import AppKit
 /// so at the definition.
 extension AppThemeStyles {
 
-    /// True black, not the system's elevated grey — the ground a self-lit display turns off.
+    /// The extreme ground either way up: true black at night, true white by day.
     ///
-    /// The style is *absence*: an achromatic chrome whose accent is white, so nothing in the
-    /// window competes with the content's own colour. The syntax roles are a grey ramp for the
-    /// same reason — code keeps its hierarchy in lightness, and the terminal palette below is
-    /// where colour lives. The ANSI hues are kept slightly muted because fully saturated
-    /// primaries bloom against true black.
-    static let pureBlack = AppTheme(
-        id: AppThemeID("pure-black"),
-        name: "Pure Black",
-        mode: .dark,
-        summary: "True black, white ink, colour only where a program asks for it.",
+    /// The style is *absence*: an achromatic chrome whose accent is the opposite pole, so
+    /// nothing in the window competes with the content's own colour. Adaptive like Cappuccino
+    /// and for the same reason — the identity is the absence, not one of the two grounds it is
+    /// absent on — so a person who wants black all day sets macOS to Dark, the way every other
+    /// adaptive style here works. It shipped as the fixed dark "Pure Black" (`pure-black`); that
+    /// id is retired and resolves here through `AppThemeStyles.retiredIDs`, so a standing
+    /// choice made before the rename keeps its theme.
+    ///
+    /// The syntax roles are a grey ramp in both variants — code keeps its hierarchy in
+    /// lightness, and the terminal palette is where colour lives. Both ANSI ramps are kept
+    /// slightly muted: fully saturated primaries bloom against true black, and the same hues
+    /// wash out against true white, so the day ramp is the night ramp brought down to read on
+    /// paper rather than the night ramp inverted.
+    static let pure = AppTheme(
+        id: AppThemeID("pure"),
+        name: "Pure",
+        mode: .system,
+        summary: "True white by day, true black by night, colour only where a program asks for it.",
+        variants: [
+            .light: pureDay,
+            .dark: pureNight
+        ]
+    )
+
+    /// The stock id "Pure" shipped under before it learned to follow the system.
+    static let retiredPureBlackID = AppThemeID("pure-black")
+
+    private static let pureDay = AppTheme.Variant(
+        roles: [
+            .ground: hex("#FFFFFF"),
+            // The light convention across this family: the sidebar surface sits a step *below*
+            // the ground and the panel a step above it — but there is nothing above true
+            // white, so the panel is the faintest grey the eye still tells from the ground and
+            // `elevated` is the ground itself, the way a light popover has always been paper.
+            .surface: hex("#F4F4F4"),
+            .panel: hex("#FAFAFA"),
+            .elevated: hex("#FFFFFF"),
+            .border: hex("#D1D1D1"),
+            .divider: hex("#000000").withAlphaComponent(0.10),
+            .label: hex("#0D0D0D"),
+            // Stated for the same reason the night variant states its tiers: a theme that
+            // fixes its grounds at the extremes states its own quiet ramp rather than trusting a
+            // floor tuned for lighter grounds. On paper the danger is the opposite one — a
+            // derived tier landing so dark it reads as body copy — so the ramp is held to the
+            // same ratios as the night ramp and to nothing louder.
+            .secondaryLabel: hex("#3D3D3D"),
+            .tertiaryLabel: hex("#6B6B6B"),
+            .quaternaryLabel: hex("#8A8A8A"),
+            .accent: hex("#000000"),
+            .accentMuted: hex("#000000").withAlphaComponent(0.10),
+            .controlResting: hex("#000000").withAlphaComponent(0.05),
+            .controlHover: hex("#000000").withAlphaComponent(0.10),
+            // Opaque for the night variant's reason, mirrored: a translucent black wash is
+            // invisible over any dark ground it is composited onto.
+            .selection: hex("#D6D6D6"),
+            .statusPositive: hex("#1B8250"),
+            .statusWarning: hex("#9A6A00"),
+            .statusNegative: hex("#C8323A"),
+            .syntaxKeyword: hex("#0D0D0D"),
+            .syntaxType: hex("#3A3A3A"),
+            .syntaxString: hex("#6E6E6E"),
+            .syntaxNumber: hex("#525252")
+        ],
+        // The body steps back from the ramp's black so the heading can have it, landing between
+        // `black` and `brightBlack` — the System light rule. The neutrals are the monotone ramp
+        // a light palette needs here, dark enough to read on white and still ordered
+        // black → brightBlack → white → brightWhite, so nothing that picks one of them vanishes.
+        terminalPalette: terminal(
+            id: "app-pure-terminal-light",
+            name: "Pure",
+            foreground: "#333333",
+            boldForeground: "#000000",  // The one colour this variant allows itself
+            background: "#FFFFFF",
+            cursor: "#333333",
+            selection: "#CCCCCC",
+            ansi: [
+                "#1A1A1A", "#C8323A", "#1B8250", "#9A6A00",
+                "#2E6DB4", "#9C4F97", "#1E7F8B", "#808080",
+                "#666666", "#DE4A4E", "#2FA06A", "#B4820F",
+                "#4A88CC", "#B36AAE", "#3A98A5", "#999999"
+            ]
+        ),
+        material: pureMaterial
+    )
+
+    private static let pureNight = AppTheme.Variant(
         roles: [
             .ground: hex("#000000"),
             .surface: hex("#0A0A0A"),
@@ -68,10 +144,10 @@ extension AppThemeStyles {
             .syntaxNumber: hex("#A8A8A8")
         ],
         terminalPalette: terminal(
-            id: "app-pure-black-terminal",
-            name: "Pure Black",
+            id: "app-pure-terminal-dark",
+            name: "Pure",
             foreground: "#B3B3B3",
-            boldForeground: "#FFFFFF",  // The one colour this theme allows itself
+            boldForeground: "#FFFFFF",  // The one colour this variant allows itself
             background: "#000000",
             cursor: "#B3B3B3",
             selection: "#333333",
@@ -82,11 +158,15 @@ extension AppThemeStyles {
                 "#91BDF0", "#D9A6E8", "#7FD6E0", "#F2F2F2"
             ]
         ),
-        material: AppTheme.Material(
-            panelRadius: 8,
-            controlRadius: 5,
-            borderWidth: 1
-        )
+        material: pureMaterial
+    )
+
+    /// A shade tighter than the app's default: the silhouette of a theme that draws nothing it
+    /// does not have to.
+    private static let pureMaterial = AppTheme.Material(
+        panelRadius: 8,
+        controlRadius: 5,
+        borderWidth: 1
     )
 
     /// Coffee, both ways up: steamed milk with espresso ink by day, espresso with cream ink by

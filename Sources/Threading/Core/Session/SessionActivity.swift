@@ -4,7 +4,7 @@ import OSLog
 // MARK: - Session Activity
 
 /// What a session is currently doing, as shown in the sidebar.
-enum SessionActivity {
+enum SessionActivity: Sendable {
     /// No terminal allocated; the session can be resumed.
     case dormant
 

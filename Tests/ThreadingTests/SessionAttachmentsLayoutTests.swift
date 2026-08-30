@@ -103,6 +103,53 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
         return controller
     }
 
+    private func laidOutTurnPane(
+        showing urls: [URL],
+        size: NSSize
+    ) throws -> (
+        pane: SessionAttachmentsViewController,
+        latest: SessionAttachmentTurnBoundary,
+        previous: SessionAttachmentTurnBoundary
+    ) {
+        let sessionID = SessionID()
+        let recorded = SessionAttachmentStore.shared.record(
+            urls: urls, sessionID: sessionID, projectRoot: root
+        )
+        XCTAssertEqual(recorded.count, urls.count, "a fixture attachment was refused")
+
+        let now = Date()
+        let previous = SessionAttachmentTurnBoundary(
+            id: GitTurnCheckpointID(),
+            ordinal: 1,
+            userTurnID: "previous-turn",
+            requestedAt: now.addingTimeInterval(-2)
+        )
+        let latest = SessionAttachmentTurnBoundary(
+            id: GitTurnCheckpointID(),
+            ordinal: 2,
+            userTurnID: "latest-turn",
+            requestedAt: now.addingTimeInterval(-1)
+        )
+        SessionAttachmentStore.shared.associate(
+            attachmentIDs: Array(recorded.prefix(2)).map(\.id),
+            withTurnID: latest.userTurnID,
+            for: sessionID
+        )
+        SessionAttachmentStore.shared.associate(
+            attachmentIDs: Array(recorded.dropFirst(2)).map(\.id),
+            withTurnID: previous.userTurnID,
+            for: sessionID
+        )
+
+        let controller = SessionAttachmentsViewController(sessionID: sessionID)
+        controller.turnBoundariesProvider = { [latest, previous] in [latest, previous] }
+        controller.view.frame = NSRect(origin: .zero, size: size)
+        controller.view.autoresizingMask = []
+        controller.view.layoutSubtreeIfNeeded()
+        controller.view.layoutSubtreeIfNeeded()
+        return (controller, latest, previous)
+    }
+
     private func writePNG(size: NSSize) throws -> URL {
         try writePNG(named: "picture.png", size: size)
     }
@@ -1606,6 +1653,37 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
     }
 
     // MARK: - The Rows
+
+    func testTurnHeadersSeparateAndCollapseVirtualAttachmentRows() throws {
+        let fixture = try laidOutTurnPane(
+            showing: try writePNGs(count: 3, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 900)
+        )
+        let table = fixture.pane.tableViewForTesting
+
+        XCTAssertEqual(table.numberOfRows, 5, "two headers did not separate the three files")
+        let latestHeader = try XCTUnwrap(
+            table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+                as? SessionAttachmentTurnHeaderView
+        )
+        XCTAssertEqual(latestHeader.sectionID, .checkpoint(fixture.latest.id))
+        XCTAssertFalse(fixture.pane.tableView(table, shouldSelectRow: 0))
+        XCTAssertTrue(fixture.pane.tableView(table, shouldSelectRow: 1))
+
+        let previousHeader = try XCTUnwrap(
+            table.view(atColumn: 0, row: 3, makeIfNecessary: true)
+                as? SessionAttachmentTurnHeaderView
+        )
+        XCTAssertEqual(previousHeader.sectionID, .checkpoint(fixture.previous.id))
+        XCTAssertTrue(previousHeader.disclosure.performPrimaryAction())
+
+        XCTAssertEqual(table.numberOfRows, 4, "collapse still constructed the hidden file row")
+        XCTAssertEqual(
+            (table.view(atColumn: 0, row: 3, makeIfNecessary: true)
+                as? SessionAttachmentTurnHeaderView)?.sectionID,
+            .checkpoint(fixture.previous.id)
+        )
+    }
 
     /// A row shows the picture it is about. This list is the panel's visual history now — the
     /// tab strip's column of identical `photo` glyphs is exactly what it replaced — so a row

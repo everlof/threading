@@ -269,10 +269,13 @@ enum SettingsPages {
         Page(
             id: accountsID,
             hostPage: .accounts,
-            title: L10n.string("Accounts"),
+            title: L10n.string("Agents & Accounts"),
             symbol: "person.2",
             group: agentsGroup,
-            searchTerms: terms("Claude", "Codex", "login", "avatar", "emoji", "name", "enabled")
+            searchTerms: terms(
+                "Claude", "Codex", "Grok", "Cursor", "OpenCode", "login", "account",
+                "avatar", "emoji", "name", "enabled", "connect"
+            )
         ) { AccountsPreferencesViewController() },
         Page(
             id: toolsID,

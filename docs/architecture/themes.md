@@ -136,14 +136,16 @@ Three decisions carry it:
   CLI that dims its status line to index 7 then writes pale grey on paper. The four neutrals are
   a monotone ramp dark enough to read on white, still ordered black → brightBlack → white →
   brightWhite so nothing that picks one of them vanishes.
-- **Pure Black states its quiet label ramp for the same reason, one ground down.** Every other
+- **Pure states its quiet label ramp for the same reason, at both extremes.** Every other
   theme leaves `secondaryLabel`/`tertiaryLabel`/`quaternaryLabel` to derive from `label` and lets
   the legibility ladder floor them at the glanced-at 3:1. On a true-black ground that floor is
   where a *small* mark disappears — a dormant session's agent icon is a thin brand glyph whose
-  strokes anti-alias into the black long before a paragraph of secondary text would. Pure Black
-  states the three tiers as an explicit ramp bright enough that the mark survives the ground, the
-  way Swiss states its neutrals; `AppThemeTests` holds them to a ratio on both the ground and the
-  sidebar surface so a revert to derivation fails rather than ships an invisible icon.
+  strokes anti-alias into the black long before a paragraph of secondary text would. Pure's night
+  variant states the three tiers as an explicit ramp bright enough that the mark survives the
+  ground, the way Swiss states its neutrals, and its day variant states the mirrored ramp on true
+  white so the two halves are held to the same ratios rather than one derived and one authored;
+  `AppThemeTests` holds both to a ratio on the ground and the sidebar surface so a revert to
+  derivation fails rather than ships an invisible icon.
 
 **Truecolor is not the palette's, and backgrounds get normalised anyway.** Claude Code writes
 its status line and its diff in 24-bit SGR rather than ANSI indices, so those colours are the
@@ -1390,7 +1392,7 @@ The theme matrix renders both Threading appearances automatically because it is 
 
 ## 2026-08-14 — the palette-first family
 
-Five stock styles — **Pure Black**, **Cappuccino**, **Solarized**, **Nord**, **Dracula**
+Five stock styles — **Pure** (then the fixed dark *Pure Black*; see 2026-08-30), **Cappuccino**, **Solarized**, **Nord**, **Dracula**
 (`AppThemeStyles+Palettes.swift`) — are themes in the sense most terminal users mean the word: a
 colour language, not a chrome. Everything before them changes the window's material somewhere —
 a takeover frame, a printed rule system, a glow, a typeface. These keep the app's modern
@@ -1408,23 +1410,25 @@ rule — palettes are our own values, authored against public aesthetics — gai
 carve-out here: Solarized, Nord, and Dracula are community schemes whose identity *is* their
 exact published values, so approximating them would ship a theme wearing a name it does not
 match. Their values are reproduced from the MIT-licensed definitions and credited in the file
-(Schoonover, Greb, the Dracula contributors). Pure Black and Cappuccino are ours, authored like
+(Schoonover, Greb, the Dracula contributors). Pure and Cappuccino are ours, authored like
 every other style. Where a scheme states fewer surfaces than the app has roles — none of the
 three defines a third panel tone — the missing steps are interpolated inside the scheme's own
 ramp and commented as ours at the definition.
 
 Decisions worth knowing before touching one:
 
-- **Pure Black's chrome is achromatic on purpose**, down to a white accent and a grey syntax
-  ramp: the style is absence, and colour belongs to the programs in the terminal. Its ANSI hues
-  are slightly muted because saturated primaries bloom against a true `#000000` ground. This is
-  the theme for the "not the system grey" ask — the ground is the one macOS's elevated dark
-  surfaces never give you.
-- **Pure Black's `selection` is stated opaque (`#292929`)** — the colour its natural
+- **Pure's chrome is achromatic on purpose**, down to an accent at the opposite pole and a grey
+  syntax ramp: the style is absence, and colour belongs to the programs in the terminal. Its ANSI
+  hues are slightly muted because saturated primaries bloom against a true `#000000` ground.
+  This is the theme for the "not the system grey" ask — the ground is the one macOS's elevated
+  dark surfaces never give you. (It shipped fixed-dark as Pure Black; the light half and the
+  rename are the 2026-08-30 entry.)
+- **Pure's night `selection` is stated opaque (`#292929`)** — the colour its natural
   white-at-16% wash renders to over this chrome. The wash form failed
   `ThemedTableRowSelectionTests` by painting literally nothing on that fixture's white ground,
   which is the honest reading of a translucent *white* selection: it only exists over dark
-  pixels. Stating the rendered value keeps the appearance and makes it true everywhere.
+  pixels. Stating the rendered value keeps the appearance and makes it true everywhere. The day
+  variant states `#D6D6D6` for the mirrored reason.
 - **Cappuccino and Solarized are adaptive**, the second and third stock styles after Christmas
   to author both appearances — for Christmas's reason: the identity is a pairing (milk and
   espresso; one hue set over two grounds), and pinning either appearance would make half the
@@ -1581,7 +1585,7 @@ The families, and why the two odd ones are their own group:
 |---|---|
 | *(none)* | System and Threading — a head over the two entries the app ships with would name a group nobody browses to |
 | Design styles | The eleven movements and genres |
-| Palettes | The palette-first family: Pure Black, Cappuccino, Solarized, Nord, Dracula |
+| Palettes | The palette-first family: Pure, Cappuccino, Solarized, Nord, Dracula |
 | Classic desktops | The eight shipped desktops with a reference ledger under `docs/references/chrome/` |
 | Classic software | Classic Player and TUI, which reproduce *software* of the same period rather than a desktop — which is why Classic Player moved out from between Workbench and Windows 98 |
 | Seasonal | Christmas |
@@ -1710,7 +1714,7 @@ The exception is keyed by palette id, carries that reason as its text, and
 
 **Fifteen palettes moved their body one step to make room**, and the move is always in the same
 direction: the heading keeps the extreme, the body steps back. On a dark palette the body takes
-the ramp's own `white` (index 7), which is what Threading, Basic, System dark, Pure Black, BeOS,
+the ramp's own `white` (index 7), which is what Threading, Basic, System dark, Pure dark, BeOS,
 IRIX and Cappuccino dark now do, and the relationship that leaves is Terminal.app's Pro exactly.
 On a light palette whose foreground already *was* the ramp's black there is nothing below it, so
 the body steps to `#333333`, which in every one of those palettes sits strictly between the
@@ -1770,7 +1774,8 @@ unstated bold is the foreground.
 | industrial | (unchanged) | #2D3436 | #0B1113 | 16.5 | magenta 46.5 | 15.0:1 | 10.0:1 |
 | irix-indigo-magic | #E8E8E8 | #BDBDBD | #FFFFFF | 23.4 | bright cyan 37.3 | 19.0:1 | 10.1:1 |
 | openstep-42 | #101010 | #333333 | #101010 | 16.6 | cyan 39.2 | 19.0:1 | 12.6:1 |
-| pure-black | #F2F2F2 | #B3B3B3 | #FFFFFF | 27.1 | bright cyan 33.2 | 21.0:1 | 10.0:1 |
+| pure-light | (new, 2026-08-30) | #333333 | #000000 | 21.2 | cyan 55.5 | 21.0:1 | 12.6:1 |
+| pure-dark | #F2F2F2 | #B3B3B3 | #FFFFFF | 27.1 | bright cyan 33.2 | 21.0:1 | 10.0:1 |
 | cappuccino-light | (unchanged) | #3B2E25 | #120D09 | 17.5 | magenta 48.1 | 16.4:1 | 11.1:1 |
 | cappuccino-dark | #EFE3D5 | #CFC0B0 | #FFF7EC | 19.5 | bright cyan 28.1 | 17.5:1 | 10.5:1 |
 | solarized-light | (unchanged) | #657B83 | #073642 | 30.5 | bright green 25.4 | 12.1:1 | 4.1:1 |
@@ -1816,3 +1821,73 @@ means for a theme author, including an agent writing one through `create_app_the
 
 See `docs/architecture/design-system.md` (2026-08-23) for the defect, the measurements and the
 ladder rule.
+
+## 2026-08-30 — Pure follows the system, and a stock id can retire
+
+**Pure Black is now Pure**, an adaptive style with a true-white day variant beside its
+true-black night one (`AppThemeStyles.pure`). The question that prompted it was "do we have pure
+white, and should we?", and the catalogue's own rule answered the second half before anyone
+authored a colour: Cappuccino and Solarized are single adaptive entries because their identity is
+the scheme, not one of its two grounds. Pure's identity is *absence* — an extreme ground, an
+achromatic chrome, colour only where a program asks for it — and that holds exactly as well on
+paper as on black. So it is one row that follows macOS, not a "Pure White" beside a "Pure
+Black"; a person who wants black all day sets macOS to Dark, the way every other adaptive style
+here already works.
+
+Three decisions carry it:
+
+- **The day palette is the night ramp brought down to read on paper, not the night ramp
+  inverted.** Inverting `#E5B454` gives a blue, and leaving it alone gives a yellow at 1.9:1 on
+  white. Each of the six hues keeps its family and drops its lightness until it clears 4.4:1
+  (the bright slots 3.3:1) — the same muting the night ramp does for the opposite reason, since
+  the primaries that bloom against black wash out against white. The neutrals follow the Swiss
+  monotone-ramp rule (`#1A1A1A → #666666 → #808080 → #999999`), the body steps to `#333333` so
+  the heading can keep `#000000` — the System light rule, and the light body joins
+  `steppedBodies` in the bold sweep — and the chrome's four surfaces run `#FFFFFF` ground,
+  `#F4F4F4` sidebar surface, `#FAFAFA` panel, `#FFFFFF` elevated: this family's light
+  convention puts the panel *above* the ground and there is nothing above white, so the panel is
+  the faintest grey the eye still separates and a popover is paper.
+- **Both variants state their quiet label tiers.** The night ramp's reason is the 2026-08-23
+  entry: on true black the derived tiers leave a dormant session's mark at the edge of visible.
+  The day ramp is stated so the two halves are held to the *same* ratios (`#3D3D3D`, `#6B6B6B`,
+  `#8A8A8A`, each ≥ 4.8:1 on both the ground and the sidebar surface for the two tiers the test
+  measures) rather than one half authored and the other left to arithmetic. The day selection is
+  opaque `#D6D6D6` for the mirrored reason the night one is opaque `#292929`.
+- **The id changed, and a stock id is persistence identity.** `pure-black` was on disk as the
+  standing choice on every Mac that picked it, is the key the phone's icon recommendation matches
+  on, and is what an agent that once called `set_app_theme` learned. Renaming the slug outright
+  would have dropped all three to the product default on the next launch. `AppThemeStyles.retiredIDs`
+  maps a retired stock id to its successor and `AppThemeLibrary.theme(withID:)` consults it
+  after the catalogue misses — so `pure-black` resolves to Pure everywhere an id is looked up
+  (restore, the Settings page, the remote bridge, MCP) without ever appearing as a catalogue entry.
+  `restore` still writes nothing, so the old slug stays on disk and keeps resolving; the next
+  deliberate pick records `pure`. `contributedThemesDidChange` compares the *resolved* id
+  against the current one for the same reason — a stored retired slug resolves to the theme
+  already in force, and re-applying it would only rewrite the preference.
+
+The paired terminal palettes are `app-pure-terminal-light` and `app-pure-terminal-dark`, named
+the way Cappuccino's are. The phone's alternate icon is one set, `AppIconThemePure`, carrying a
+light and a dark luminosity asset like Cappuccino's, regenerated with
+`scripts/generate_mobile_theme_icons.sh`.
+
+## 2026-08-30 — the iPhone keeps the last resolved Mac theme through reconnect
+
+The iPhone's root used to resolve app chrome from `RemoteAppModel.me?.theme` alone. That payload is
+authoritative, but it is deliberately absent between process launch and the first authenticated
+`/api/me` response, so every cold launch painted the built-in mobile fallback and then changed
+appearance when the Mac answered. A slow or unavailable route made the wrong appearance a standing
+offline state.
+
+`MobileThemeCacheStore` now keeps the last complete resolved `RemoteThemeDTO` per paired Mac. The
+paired-host record is available synchronously at launch, so `RemoteAppModel.appTheme` uses that
+cached palette until live state arrives; a live `/api/me` or `appTheme` update always wins and is
+then recorded for the next launch. The local Mac-appearance picker flows through the same `me`
+replacement path, so its preview is remembered immediately and a refused mutation restores and
+re-records the previous authoritative value.
+
+The cache is a bounded, versioned, candidate-first `UserDefaults` document, separate from session
+continuity so unreadable optional appearance data cannot endanger drafts or reading positions. It
+is scoped by both stable Mac identity and the local pairing identity: current pairings share the
+Mac answer, while an older pairing that predates stable host ids still finds its own record. Demo
+and terminal-wire fixtures never write it. Corrupt bytes are quarantined before replacement and a
+future archive remains untouched with writes disabled.

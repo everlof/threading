@@ -21,6 +21,7 @@ final class ExtensionHostRouteTests: XCTestCase {
     /// Path, and the case it must produce. Both halves are literal.
     private static let table: [(path: String, route: ExtensionHostService.Route)] = [
         ("/v1/component-patches", .componentPatches),
+        ("/v1/facts", .facts),
         ("/v1/identity-resolutions", .identityResolutions),
         ("/v1/network/fetch", .networkFetch),
         ("/v1/project-files/query", .projectFilesQuery),
@@ -79,6 +80,7 @@ final class ExtensionHostRouteTests: XCTestCase {
     ) -> String {
         switch route {
         case .componentPatches: return "componentPatches"
+        case .facts: return "facts"
         case .identityResolutions: return "identityResolutions"
         case .services: return "services"
         case .companions: return "companions"
@@ -106,6 +108,7 @@ final class ExtensionHostRouteTests: XCTestCase {
     func testTheTableCoversEveryRouteCase() {
         let expected: Set<String> = [
             "componentPatches",
+            "facts",
             "identityResolutions",
             "services",
             "companions",
@@ -164,6 +167,8 @@ final class ExtensionHostRouteTests: XCTestCase {
             "/v2/projects",
             "/V1/PROJECTS",         // the table is case-sensitive
             "/v1/component-patch",
+            "/v1/fact",
+            "/v1/facts/",
             "/v1/network",
             "/v1/network/fetches",
             "/v1/project-files"

@@ -60,7 +60,10 @@ struct SessionDraftView: View {
                 )
             }
             if draftIsMounted {
-                SessionDraftComposerScreen(draft: draft)
+                SessionDraftComposerScreen(
+                    draft: draft,
+                    showsNavigationChrome: isDrafting
+                )
                     .opacity(isDrafting ? 1 : 0)
                     .scaleEffect(
                         isDrafting || reduceMotion ? 1 : SessionDraftMotion.recedeScale
@@ -134,12 +137,20 @@ private struct SessionDraftComposerScreen: View {
     @Environment(\.remoteTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let draft: MobileSessionDraft
+    /// The draft content remains mounted while it fades over the session it became, but its
+    /// toolbar cannot: SwiftUI merges toolbar items from both children in that overlap and drew
+    /// two account/usage discs until the fade completed.
+    let showsNavigationChrome: Bool
 
     @State private var projectID = ""
     @State private var agentID = ""
     @State private var accountID = ""
     @State private var modelID = ""
     @State private var reasoningID = ""
+    /// Last-successful choices are scoped to this exact identity. A catalogue refresh repairs
+    /// the open draft in place; changing Mac, agent, or account loads that identity's memory.
+    @State private var runChoiceIdentity: MobileNewSessionChoiceIdentity?
+    @State private var didInitializeRunChoice = false
     @State private var speedID = ""
     @State private var permissionID = ""
     /// The agent's supported UI is the safe default; Native stays an explicit experimental opt-in.
@@ -168,7 +179,13 @@ private struct SessionDraftComposerScreen: View {
     @State private var presentedAttachmentEvidence = false
     @State private var speedChooserIsPresented = false
     @State private var permissionChooserIsPresented = false
-    @FocusState private var promptIsFocused: Bool
+    /// UIKit owns the actual first-responder lifecycle. This is plain view state rather than
+    /// `FocusState`: no SwiftUI text control exists here for a focus binding to register against.
+    @State private var promptIsFocused = false
+    /// Once the native editor reaches its cap, its document moves independently of this shell.
+    /// The first-line actions then need their own fixed row instead of remaining over the scroll
+    /// viewport while the line whose exclusions they share disappears above it.
+    @State private var promptIsOverflowing = false
 
     /// What the empty prompt suggests. One is drawn per draft, so the set has to be large
     /// enough that a person starting several chats in a sitting does not see the same line
@@ -205,11 +222,17 @@ private struct SessionDraftComposerScreen: View {
         MobileL10n.string("Make the error message useful…"),
     ]
 
-    init(draft: MobileSessionDraft) {
+    init(draft: MobileSessionDraft, showsNavigationChrome: Bool) {
         self.draft = draft
+        self.showsNavigationChrome = showsNavigationChrome
         let evidenceID = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
         let suggestion: String
-        if let evidenceID {
+        if evidenceID?.contains("new-session-draft-matrix-") == true {
+            // Cross-product evidence holds presentation inputs still. The ordinary evidence id
+            // deliberately rotates suggestions, but that would make attachment/keyboard columns
+            // differ for a reason unrelated to the requested draft state.
+            suggestion = Self.promptSuggestions[0]
+        } else if let evidenceID {
             let index = evidenceID.unicodeScalars.reduce(0) { $0 + Int($1.value) }
                 % Self.promptSuggestions.count
             suggestion = Self.promptSuggestions[index]
@@ -343,7 +366,7 @@ private struct SessionDraftComposerScreen: View {
     // MARK: - Body
 
     var body: some View {
-        GeometryReader { proxy in
+        navigationChrome(around: GeometryReader { proxy in
             // The ground fills what the composer and the keyboard leave, so the hint centres in
             // the space that is actually empty and a drag anywhere on it reaches the keyboard.
             ScrollView {
@@ -359,26 +382,29 @@ private struct SessionDraftComposerScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                MobileConnectionStatusButton(
-                    title: MobileL10n.string("New session"),
-                    status: appModel.activeHost?.name ?? MobileL10n.string("Connected"),
-                    statusColor: hostStatusColor
-                )
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                identityMenu
-            }
-        }
+        )
         .onAppear {
             applyCatalogDefaults()
             configureAttachments()
             hintAnimated = true
 #if DEBUG
+            configureDraftMatrixPrompt()
             if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "new-session-multiline" {
                 prompt = "Review the keyboard lifecycle, compare the open and dismissed layouts, and summarize any remaining spacing regressions before you make changes."
+            }
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "new-session-scroll-overflow" {
+                // Long enough to put the insertion point below the capped viewport: this proves
+                // the fixed first-row controls still own clear space after TextKit scrolls away
+                // from the document's original first line.
+                prompt = Array(repeating: "G", count: 12).joined(separator: "\n")
+            }
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "new-session-single-character" {
+                // The first glyph used to add line-two clearance despite there being no line
+                // two, increasing the editor's fitted height until that glyph was deleted.
+                prompt = "G"
             }
             if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "new-session-model-effort-picker" {
@@ -471,6 +497,28 @@ private struct SessionDraftComposerScreen: View {
             allowsMultipleSelection: true
         ) { result in
             beginImportingFiles(result)
+        }
+    }
+
+    /// Removing the modifier itself matters here. Leaving an empty `.toolbar` attached while the
+    /// draft fades lets SwiftUI retain its previous items and merge them with the session's bar.
+    @ViewBuilder
+    private func navigationChrome<Content: View>(around content: Content) -> some View {
+        if showsNavigationChrome {
+            content.toolbar {
+                ToolbarItem(placement: .principal) {
+                    MobileConnectionStatusButton(
+                        title: MobileL10n.string("New session"),
+                        status: appModel.activeHost?.name ?? MobileL10n.string("Connected"),
+                        statusColor: hostStatusColor
+                    )
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    identityMenu
+                }
+            }
+        } else {
+            content
         }
     }
 
@@ -567,12 +615,25 @@ private struct SessionDraftComposerScreen: View {
                 )
                 .padding(.bottom, MobileDesign.Spacing.small)
             }
-            HStack(alignment: .top, spacing: MobileDesign.Spacing.small) {
-                if attachmentTray != nil {
-                    attachmentButton
+            VStack(alignment: .leading, spacing: 0) {
+                if promptIsOverflowing {
+                    HStack(spacing: MobileDesign.Spacing.small) {
+                        if attachmentTray != nil { attachmentButton }
+                        Spacer(minLength: 0)
+                        sendButton
+                    }
+                    .frame(height: MobileDesign.Size.compactControl)
                 }
                 promptEditor
-                sendButton
+            }
+            // The actions belong to the first line, not to two permanent columns beside the
+            // whole draft. TextKit excludes their footprints from that line; every later line
+            // reclaims the composer's full width beneath them.
+            .overlay(alignment: .topLeading) {
+                if !promptIsOverflowing, attachmentTray != nil { attachmentButton }
+            }
+            .overlay(alignment: .topTrailing) {
+                if !promptIsOverflowing { sendButton }
             }
             // Folded to nothing rather than removed: the chips are menus, and a menu that is
             // unmounted under a finger cannot finish what it was asked. Clipping keeps the
@@ -628,15 +689,16 @@ private struct SessionDraftComposerScreen: View {
         ZStack(alignment: .topLeading) {
             SessionDraftPromptEditor(
                 text: $prompt,
-                isFocused: Binding(
-                    get: { promptIsFocused },
-                    set: { promptIsFocused = $0 }
-                ),
+                isFocused: $promptIsFocused,
+                isOverflowing: $promptIsOverflowing,
                 isEnabled: !isSubmitting,
                 theme: theme,
                 offersFiles: { attachmentTray?.canAcceptMore == true
                     && ComposerClipboard.general.hasFiles },
-                pasteFiles: stageClipboardFiles
+                pasteFiles: stageClipboardFiles,
+                firstLineLeadingAccessoryWidth: promptFirstLineLeadingAccessoryWidth,
+                firstLineTrailingAccessoryWidth: promptFirstLineTrailingAccessoryWidth,
+                firstLineAccessoryHeight: promptFirstLineAccessoryHeight
             )
             .mobileUIEvidenceKeyboardFocus($promptIsFocused)
             // Drawn here rather than by the editor: the field's own placeholder takes the
@@ -647,11 +709,35 @@ private struct SessionDraftComposerScreen: View {
                     .font(.body)
                     .foregroundStyle(theme.tertiaryLabel)
                     .lineLimit(1)
+                    .padding(
+                        .top,
+                        SessionDraftPromptMetrics.textInsets(
+                            for: UIFont.preferredFont(forTextStyle: .body)
+                        ).top
+                    )
+                    .padding(.leading, promptFirstLineLeadingAccessoryWidth)
+                    .padding(.trailing, promptFirstLineTrailingAccessoryWidth)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
         }
         .frame(minHeight: MobileDesign.Size.compactControl)
+    }
+
+    /// The inline actions own exclusions only while they actually overlap the editor. Once the
+    /// document scrolls, those controls move into the fixed row above it; carrying their old
+    /// footprint into the text container would indent a line whose paperclip is no longer there.
+    private var promptFirstLineLeadingAccessoryWidth: CGFloat {
+        guard !promptIsOverflowing, attachmentTray != nil else { return 0 }
+        return SessionDraftPromptMetrics.accessoryExclusionWidth
+    }
+
+    private var promptFirstLineTrailingAccessoryWidth: CGFloat {
+        promptIsOverflowing ? 0 : SessionDraftPromptMetrics.accessoryExclusionWidth
+    }
+
+    private var promptFirstLineAccessoryHeight: CGFloat {
+        promptIsOverflowing ? 0 : MobileDesign.Size.compactControl
     }
 
     private var attachmentButton: some View {
@@ -893,9 +979,9 @@ private struct SessionDraftComposerScreen: View {
         .disabled(models.isEmpty && selectedModel == nil)
         .accessibilityLabel(MobileL10n.string("Model and effort"))
         .accessibilityValue(runSummary)
-        .popover(
+        .mobileThemedPopover(
             isPresented: $runPickerIsPresented,
-            attachmentAnchor: .rect(.bounds),
+            theme: theme,
             arrowEdge: .bottom
         ) {
             MobileModelEffortPicker(
@@ -909,10 +995,6 @@ private struct SessionDraftComposerScreen: View {
                     runPickerIsPresented = false
                 }
             )
-            .mobileTheme(theme)
-            .presentationBackground(theme.floatingSurface)
-            .presentationCornerRadius(theme.panelRadius)
-            .presentationCompactAdaptation(.popover)
         }
     }
 
@@ -1108,8 +1190,11 @@ private struct SessionDraftComposerScreen: View {
             return true
         }
 #if DEBUG
-        return ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-            == "new-session-attachments"
+        let demo = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+        return demo == "new-session-attachments"
+            || demo == "new-session-draft-matrix"
+            || demo == "new-session-single-character"
+            || demo == "new-session-scroll-overflow"
 #else
         return false
 #endif
@@ -1136,7 +1221,41 @@ private struct SessionDraftComposerScreen: View {
             attachmentNotice = tray.notice
         }
         attachmentTray = tray
+#if DEBUG
+        configureDraftMatrixAttachments(tray)
+#endif
     }
+
+#if DEBUG
+    /// The requested visual cross-product shares one product fixture. The evidence id chooses
+    /// only bounded state; keyboard ownership remains with the catalogue runner.
+    private func configureDraftMatrixPrompt() {
+        guard ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "new-session-draft-matrix",
+              let evidenceID = ProcessInfo.processInfo.environment[
+                "THREADING_MOBILE_UI_EVIDENCE_ID"
+              ] else { return }
+        if evidenceID.contains("-empty-") {
+            prompt = ""
+        } else if evidenceID.contains("-words-") {
+            prompt = "Review the notification flow"
+        } else if evidenceID.contains("-scroll-") {
+            prompt = (1...12)
+                .map { "Draft line \(String(format: "%02d", $0))" }
+                .joined(separator: "\n")
+        }
+    }
+
+    private func configureDraftMatrixAttachments(_ tray: ComposerAttachmentTray) {
+        guard ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "new-session-draft-matrix",
+              let evidenceID = ProcessInfo.processInfo.environment[
+                "THREADING_MOBILE_UI_EVIDENCE_ID"
+              ] else { return }
+        let count = evidenceID.contains("-a4-") ? 4 : (evidenceID.contains("-a1-") ? 1 : 0)
+        tray.configureEvidenceItems(count: count)
+    }
+#endif
 
     private func beginChoosingAttachmentSource() {
         guard attachmentTray?.canAcceptMore == true else { return }
@@ -1247,11 +1366,32 @@ private struct SessionDraftComposerScreen: View {
     }
 
     private func applyAccountDefaults() {
-        if !models.contains(where: { $0.id == modelID }) {
-            modelID = defaultModelID.flatMap { id in
-                models.contains(where: { $0.id == id }) ? id : nil
-            } ?? ""
+        let identity = appModel.newSessionChoiceIdentity(
+            agentID: agentID,
+            accountID: accountID
+        )
+        let current = MobileNewSessionRunChoice(
+            modelID: modelID,
+            reasoningID: reasoningID
+        )
+        let resolved: MobileNewSessionRunChoice
+        if !didInitializeRunChoice || identity != runChoiceIdentity {
+            resolved = SessionDraftRunChoiceResolution.initial(
+                remembered: identity.flatMap { appModel.rememberedNewSessionChoice(for: $0) },
+                defaultModelID: defaultModelID,
+                models: models
+            )
+            runChoiceIdentity = identity
+            didInitializeRunChoice = true
+        } else {
+            resolved = SessionDraftRunChoiceResolution.repair(
+                current: current,
+                defaultModelID: defaultModelID,
+                models: models
+            )
         }
+        modelID = resolved.modelID ?? ""
+        reasoningID = resolved.reasoningID ?? ""
         applyModelDefaults()
     }
 
@@ -1261,7 +1401,10 @@ private struct SessionDraftComposerScreen: View {
             speedID = ""
             return
         }
-        if !selectedModel.reasoning.contains(where: { $0.id == reasoningID }) {
+        // Empty is the deliberate Auto column. Bootstrap and withdrawal repair materialize the
+        // live effective default elsewhere; changing a model must not erase an Auto choice.
+        if !reasoningID.isEmpty,
+           !selectedModel.reasoning.contains(where: { $0.id == reasoningID }) {
             reasoningID = selectedModel.defaultReasoningID.flatMap { id in
                 selectedModel.reasoning.contains(where: { $0.id == id }) ? id : nil
             } ?? ""
@@ -1280,14 +1423,23 @@ private struct SessionDraftComposerScreen: View {
         isSubmitting = true
         promptIsFocused = false
         let openingAttachmentUploadIDs = attachmentTray?.readyUploadIDs ?? []
+        let launchChoice = SessionDraftRunChoiceResolution.launch(
+            current: MobileNewSessionRunChoice(modelID: modelID, reasoningID: reasoningID),
+            defaultModelID: defaultModelID,
+            models: models
+        )
+        let launchIdentity = appModel.newSessionChoiceIdentity(
+            agentID: agentID,
+            accountID: accountID
+        )
         Task {
             do {
                 let creation = try await appModel.createSession(
                     projectID: projectID,
                     agentKind: agentID,
                     accountHandle: accountID.isEmpty ? nil : accountID,
-                    model: modelID.isEmpty ? nil : modelID,
-                    reasoningEffort: reasoningID.isEmpty ? nil : reasoningID,
+                    model: launchChoice.modelID,
+                    reasoningEffort: launchChoice.reasoningID,
                     fastMode: speedID == "fast" ? true : (speedID == "standard" ? false : nil),
                     permissionMode: permissionID.isEmpty ? nil : permissionID,
                     surface: surface,
@@ -1298,6 +1450,9 @@ private struct SessionDraftComposerScreen: View {
                     openingAttachmentUploadIDs: openingAttachmentUploadIDs,
                     prompt: prompt
                 )
+                if let launchIdentity {
+                    appModel.rememberNewSessionChoice(launchChoice, for: launchIdentity)
+                }
                 attachmentTray?.clear()
                 // Turns this screen into the session's: `SessionDraftView` fades this one
                 // out over the chat the model now says the draft became.
@@ -1327,28 +1482,48 @@ private struct SessionDraftComposerScreen: View {
 /// different edit-menu path from every existing-session composer. Hosting the shared
 /// `IntrinsicTextView` restores UIKit's selection, insertion-point paste, undo, accessibility,
 /// and file-paste interception while keeping SwiftUI responsible for the surrounding layout.
+/// Focus is an explicit binding because the UIKit view, not a SwiftUI text control, is the focus
+/// target; the coordinator reports user focus and `updateUIView` applies programmatic requests.
 struct SessionDraftPromptEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    @Binding var isOverflowing: Bool
     let isEnabled: Bool
     let theme: RemoteThemePalette
     let offersFiles: () -> Bool
     let pasteFiles: () -> Bool
+    let firstLineLeadingAccessoryWidth: CGFloat
+    let firstLineTrailingAccessoryWidth: CGFloat
+    let firstLineAccessoryHeight: CGFloat
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, isFocused: $isFocused)
+        Coordinator(
+            text: $text,
+            isFocused: $isFocused,
+            isOverflowing: $isOverflowing
+        )
     }
 
     func makeUIView(context: Context) -> IntrinsicTextView {
         let view = IntrinsicTextView()
+        let font = UIFont.preferredFont(forTextStyle: .body)
         view.delegate = context.coordinator
         view.backgroundColor = .clear
         view.isOpaque = false
-        view.textContainerInset = .zero
+        view.font = font
+        view.textContainerInset = SessionDraftPromptMetrics.textInsets(for: font)
         view.textContainer.lineFragmentPadding = 0
+        view.isScrollEnabled = false
         view.adjustsFontForContentSizeCategory = true
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityLabel = MobileL10n.string("Prompt")
+        view.minimumIntrinsicHeight = MobileDesign.Size.compactControl
+        view.maximumIntrinsicHeight = SessionDraftPromptMetrics.maximumHeight(for: font)
+        view.firstLineLeadingAccessoryWidth = firstLineLeadingAccessoryWidth
+        view.firstLineTrailingAccessoryWidth = firstLineTrailingAccessoryWidth
+        view.firstLineAccessoryHeight = firstLineAccessoryHeight
+        view.preferredCaretHeight = font.pointSize
+        view.onScrollabilityChange = context.coordinator.reportScrollability
         return view
     }
 
@@ -1357,13 +1532,19 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
             view.text = text
             view.invalidateIntrinsicContentSize()
         }
-        view.font = UIFont.preferredFont(forTextStyle: .body)
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        view.font = font
+        view.textContainerInset = SessionDraftPromptMetrics.textInsets(for: font)
         view.textColor = theme.uiLabel
         view.tintColor = theme.uiAccent
         view.isEditable = isEnabled
         view.isSelectable = true
         view.minimumIntrinsicHeight = MobileDesign.Size.compactControl
-        view.maximumIntrinsicHeight = SessionDraftPromptMetrics.maximumHeight
+        view.maximumIntrinsicHeight = SessionDraftPromptMetrics.maximumHeight(for: font)
+        view.firstLineLeadingAccessoryWidth = firstLineLeadingAccessoryWidth
+        view.firstLineTrailingAccessoryWidth = firstLineTrailingAccessoryWidth
+        view.firstLineAccessoryHeight = firstLineAccessoryHeight
+        view.preferredCaretHeight = font.pointSize
         view.offersFiles = offersFiles
         view.pasteFiles = pasteFiles
 
@@ -1383,6 +1564,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         context: Context
     ) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
+        uiView.updateFirstLineAccessoryExclusions(for: width)
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
@@ -1390,7 +1572,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
             width: width,
             height: min(
                 max(measured.height, MobileDesign.Size.compactControl),
-                SessionDraftPromptMetrics.maximumHeight
+                uiView.maximumIntrinsicHeight
             )
         )
     }
@@ -1399,10 +1581,27 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         private var text: Binding<String>
         private var isFocused: Binding<Bool>
+        private var isOverflowing: Binding<Bool>
 
-        init(text: Binding<String>, isFocused: Binding<Bool>) {
+        init(
+            text: Binding<String>,
+            isFocused: Binding<Bool>,
+            isOverflowing: Binding<Bool>
+        ) {
             self.text = text
             self.isFocused = isFocused
+            self.isOverflowing = isOverflowing
+        }
+
+        func reportScrollability(_ scrollable: Bool) {
+            guard isOverflowing.wrappedValue != scrollable else { return }
+            // Layout is in progress when the native view discovers the threshold. Move the
+            // SwiftUI state change to the next main-actor turn instead of mutating the shell
+            // from inside its representable's layout pass.
+            Task { @MainActor [weak self] in
+                guard let self, self.isOverflowing.wrappedValue != scrollable else { return }
+                self.isOverflowing.wrappedValue = scrollable
+            }
         }
 
         func textViewDidChange(_ textView: UITextView) {
@@ -1422,8 +1621,27 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
 
 private enum SessionDraftPromptMetrics {
     static let maximumLines: CGFloat = 6
-    static var maximumHeight: CGFloat {
-        ceil(UIFont.preferredFont(forTextStyle: .body).lineHeight * maximumLines)
+
+    /// The compact control plus the gap the old horizontal stack held beside it. The exclusion
+    /// preserves that first-line air while allowing every later line to use those points.
+    static let accessoryExclusionWidth =
+        MobileDesign.Size.compactControl + MobileDesign.Spacing.small
+
+    /// A compact editor shares its first row with two compact controls. `UITextView` otherwise
+    /// puts a zero-inset line against the row's top while both glyphs are centred, which is the
+    /// visual split in the issue report. Keep equal air around a single line; larger Dynamic Type
+    /// lines consume the row instead of gaining negative inset.
+    static func textInsets(for font: UIFont) -> UIEdgeInsets {
+        let vertical = max(
+            0,
+            (MobileDesign.Size.compactControl - font.lineHeight) / 2
+        )
+        return UIEdgeInsets(top: vertical, left: 0, bottom: vertical, right: 0)
+    }
+
+    static func maximumHeight(for font: UIFont) -> CGFloat {
+        let insets = textInsets(for: font)
+        return ceil(font.lineHeight * maximumLines + insets.top + insets.bottom)
     }
 }
 

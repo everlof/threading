@@ -141,6 +141,7 @@ final class ExtensionHostService {
         }
 
         case componentPatches
+        case facts
         case identityResolutions
         /// The suffix after `/v1/services/`, still unparsed: the handler answers a malformed
         /// one with 400 *after* its capability check, which a refusal here would turn into 404.
@@ -158,6 +159,7 @@ final class ExtensionHostService {
         init?(path: String) {
             switch path {
             case "/v1/component-patches": self = .componentPatches
+            case "/v1/facts": self = .facts
             case "/v1/identity-resolutions": self = .identityResolutions
             case "/v1/network/fetch": self = .networkFetch
             case "/v1/project-files/query": self = .projectFilesQuery
@@ -230,6 +232,7 @@ final class ExtensionHostService {
     private static let maximumEventPageSize = 200
     private static let hostCapabilities: Set<ExtensionCapability> = [
         .componentCustomization,
+        .factsProvide,
         .hostProjectsRead,
         .hostProjectFilesRead,
         .hostSessionsRead,
@@ -266,6 +269,7 @@ final class ExtensionHostService {
     ]
 
     private weak var registry: ComponentCustomizationRegistry?
+    private weak var factRegistry: ExtensionFactRegistry?
     private weak var identityRegistry: ExtensionIdentityResolverRegistry?
     private weak var serviceRouter: ExtensionServiceRouting?
     private weak var companionRouter: ExtensionCompanionRouting?
@@ -308,7 +312,8 @@ final class ExtensionHostService {
 
     /// Test seam which exercises authentication and routing without opening a listener.
     init(
-        registry: ComponentCustomizationRegistry,
+        registry: ComponentCustomizationRegistry? = nil,
+        factRegistry: ExtensionFactRegistry? = nil,
         baseURL: URL,
         snapshotProvider: ExtensionHostSnapshotProviding? = nil,
         runtimeSnapshotProvider: ExtensionSessionRuntimeSnapshotProviding? = nil,
@@ -322,6 +327,7 @@ final class ExtensionHostService {
         entropySource: @escaping EntropySource = ExtensionHostService.secureEntropy
     ) {
         self.registry = registry
+        self.factRegistry = factRegistry
         self.identityRegistry = identityRegistry ?? .shared
         self.serviceRouter = serviceRouter
         self.companionRouter = companionRouter
@@ -349,11 +355,13 @@ final class ExtensionHostService {
     }
 
     func start(
-        registry: ComponentCustomizationRegistry,
+        registry: ComponentCustomizationRegistry?,
+        factRegistry: ExtensionFactRegistry? = nil,
         identityRegistry: ExtensionIdentityResolverRegistry? = nil,
         completion: @escaping () -> Void
     ) {
         self.registry = registry
+        self.factRegistry = factRegistry
         self.identityRegistry = identityRegistry ?? .shared
         guard listener == nil else {
             completion()
@@ -418,6 +426,10 @@ final class ExtensionHostService {
                 extensionIdentifier: authority.extensionIdentifier,
                 processGeneration: authority.processGeneration
             )
+            factRegistry?.removeGeneration(
+                extensionIdentifier: authority.extensionIdentifier,
+                processGeneration: authority.processGeneration
+            )
             identityRegistry?.remove(
                 extensionIdentifier: authority.extensionIdentifier,
                 processGeneration: authority.processGeneration
@@ -454,6 +466,7 @@ final class ExtensionHostService {
         order: Int,
         capabilities: Set<ExtensionCapability>,
         serviceDependencies: [ExtensionServiceDependency] = [],
+        factDefinitions: [ExtensionFactDefinition] = [],
         networkGrants: [ExtensionNetworkGrant] = [],
         localization: ExtensionLocalizationResolver = .init(strings: [:]),
         transport: ExtensionHostTransport = .loopback
@@ -472,8 +485,30 @@ final class ExtensionHostService {
             : nil) else {
             throw ExtensionHostServiceError.unavailable
         }
+        try Self.validateFactAuthorization(
+            capabilities: capabilities,
+            definitions: factDefinitions
+        )
         guard let token = Self.randomToken(using: entropySource) else {
             throw ExtensionHostServiceError.secureTokenUnavailable
+        }
+        let factSource = ComponentCustomizationSource(
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: processGeneration,
+            // Persisted user ordering arrives in rollout 8. Until then every provider has the
+            // same priority and the registry's identifier tie-break is independent of start order.
+            order: 0
+        )
+        let installedFactDefinitions: Bool
+        if capabilities.contains(.factsProvide) {
+            guard let factRegistry else { throw ExtensionHostServiceError.unavailable }
+            try factRegistry.replaceDefinitions(
+                factDefinitions.map(localization.factDefinition),
+                from: factSource
+            )
+            installedFactDefinitions = true
+        } else {
+            installedFactDefinitions = false
         }
         if !capabilities.isDisjoint(with: Self.hostDataCapabilities) {
             beginObservingHostData()
@@ -516,6 +551,12 @@ final class ExtensionHostService {
                 }
             ) else {
                 authorities.removeValue(forKey: token)
+                if installedFactDefinitions {
+                    factRegistry?.removeGeneration(
+                        extensionIdentifier: extensionIdentifier,
+                        processGeneration: processGeneration
+                    )
+                }
                 throw ExtensionHostServiceError.unavailable
             }
             descriptorConnections[token] = pair.connection
@@ -532,6 +573,46 @@ final class ExtensionHostService {
                 ],
                 childDescriptor: pair.childDescriptor
             )
+        }
+    }
+
+    /// The package loader validates the manifest first, but authorization is the trust boundary:
+    /// tests and future launch paths must not be able to install a broader declaration directly.
+    private static func validateFactAuthorization(
+        capabilities: Set<ExtensionCapability>,
+        definitions: [ExtensionFactDefinition]
+    ) throws {
+        let providesFacts = capabilities.contains(.factsProvide)
+        var issues: [ExtensionValidationIssue] = []
+        if !definitions.isEmpty, !providesFacts {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'facts.provide' when fact definitions are declared"
+            ))
+        }
+        if providesFacts, definitions.isEmpty {
+            issues.append(.init(
+                path: "factDefinitions",
+                message: "must declare at least one definition for 'facts.provide'"
+            ))
+        }
+        if definitions.count > ExtensionFactProviderLimits.maximumDefinitions {
+            issues.append(.init(
+                path: "factDefinitions",
+                message: "must contain at most "
+                    + "\(ExtensionFactProviderLimits.maximumDefinitions) definitions"
+            ))
+        }
+        var seenKeys: Set<ExtensionFactKey> = []
+        for (index, definition) in definitions.enumerated() {
+            let path = "factDefinitions[\(index)]"
+            issues.append(contentsOf: definition.providerValidationIssues(path: path))
+            if !seenKeys.insert(definition.key).inserted {
+                issues.append(.init(path: "\(path).key", message: "duplicates this fact key"))
+            }
+        }
+        if !issues.isEmpty {
+            throw ExtensionValidationError(issues: issues)
         }
     }
 
@@ -553,6 +634,10 @@ final class ExtensionHostService {
             descriptorConnections.removeValue(forKey: token)?.cancel()
         }
         registry?.removePatches(
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: processGeneration
+        )
+        factRegistry?.removeGeneration(
             extensionIdentifier: extensionIdentifier,
             processGeneration: processGeneration
         )
@@ -597,6 +682,13 @@ final class ExtensionHostService {
                 return
             }
             routeComponentPublication(request, authority: authority, respond: respond)
+
+        case .facts:
+            guard request.method == "PUT" else {
+                respond(Self.unsupportedMethod(request))
+                return
+            }
+            routeFactPublication(request, authority: authority, respond: respond)
 
         case .identityResolutions:
             guard request.method == "PUT" else {
@@ -1471,6 +1563,71 @@ final class ExtensionHostService {
         sessionSnapshots = nextSessions
         providerSnapshots = nextProviders
         accountSnapshots = nextAccounts
+    }
+
+    private func routeFactPublication(
+        _ request: HTTPRequest,
+        authority: Authority,
+        respond: @escaping @Sendable (HTTPResponse) -> Void
+    ) {
+        guard require(.factsProvide, for: authority, respond: respond) else { return }
+        guard request.header("content-type")?
+            .lowercased()
+            .hasPrefix("application/json") == true else {
+            respond(jsonFailure(
+                status: 415,
+                reason: "Unsupported Media Type",
+                "Expected application/json."
+            ))
+            return
+        }
+        guard request.body.count <= Self.maximumPublicationBytes else {
+            respond(jsonFailure(
+                status: 413,
+                reason: "Payload Too Large",
+                "A fact publication may not exceed 1 MiB."
+            ))
+            return
+        }
+        guard let factRegistry else {
+            respond(jsonFailure(
+                status: 503,
+                reason: "Service Unavailable",
+                "The fact registry is unavailable."
+            ))
+            return
+        }
+
+        do {
+            let publication = try JSONDecoder().decode(
+                ExtensionFactPublication.self,
+                from: request.body
+            )
+            try publication.validate()
+            try factRegistry.replaceFacts(
+                publication.facts.map(authority.localization.fact),
+                replacing: Set(publication.replacingSubjects),
+                from: ComponentCustomizationSource(
+                    extensionIdentifier: authority.extensionIdentifier,
+                    processGeneration: authority.processGeneration,
+                    order: 0
+                )
+            )
+            respond(HTTPResponse(
+                status: 204,
+                reason: "No Content",
+                contentType: nil,
+                body: Data()
+            ))
+        } catch {
+            let message = (error as? ExtensionValidationError)?.description
+                ?? error.localizedDescription
+            respond(jsonFailure(
+                status: 422,
+                reason: "Unprocessable Content",
+                message
+            ))
+        }
     }
 
     private func routeComponentPublication(

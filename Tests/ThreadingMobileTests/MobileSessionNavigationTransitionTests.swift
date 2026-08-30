@@ -1,4 +1,6 @@
 import ThreadingRemoteKit
+import SwiftUI
+import UIKit
 import XCTest
 @testable import ThreadingMobile
 
@@ -148,6 +150,56 @@ final class MobileSessionOpeningTests: XCTestCase {
         XCTAssertEqual(continuity.lastRoute?.hostID, model.activeHostID)
     }
 
+    /// The draft fades over the session for 0.35 seconds. Both children are mounted during that
+    /// interval, but only the destination may contribute navigation chrome; otherwise SwiftUI
+    /// places the draft's usage disc beside the session's identical disc until the fade retires.
+    func testStartingADraftImmediatelyHandsTheNavigationBarToTheSession() throws {
+        let model = makeModel()
+        model.startDemo()
+        let draft = MobileSessionDraft()
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        let keyboards = MobileTerminalKeyboardStore()
+        let notifications = RemoteNotificationManager()
+        let screen = NavigationStack {
+            SessionDraftView(draft: draft)
+        }
+        .environmentObject(model)
+        .environmentObject(continuity)
+        .environmentObject(keyboards)
+        .environmentObject(notifications)
+        .mobileTheme(RemoteThemePalette(nil))
+        let controller = UIHostingController(rootView: screen)
+        let window = hostedWindow(rootViewController: controller)
+        defer { window.isHidden = true }
+
+        XCTAssertEqual(accessibilityViews(labelled: MobileL10n.string("Agent"), in: window).count, 1)
+        XCTAssertTrue(
+            accessibilityViews(labelled: MobileL10n.string("Session actions"), in: window).isEmpty
+        )
+
+        let session = try XCTUnwrap(model.me?.sessions.first)
+        model.noteDraftStarted(
+            draft,
+            creation: MobileCreatedSession(
+                session: session,
+                openingStrategy: .awaitCreatedSession
+            )
+        )
+        settle(window, for: 0.1)
+
+        XCTAssertTrue(
+            accessibilityViews(labelled: MobileL10n.string("Agent"), in: window).isEmpty,
+            "the fading draft still owns a toolbar item"
+        )
+        XCTAssertEqual(
+            accessibilityViews(labelled: MobileL10n.string("Session actions"), in: window).count,
+            1,
+            "the draft and session contributed two usage controls during their overlap"
+        )
+        let overlapFrame = render(window)
+        attach(overlapFrame, named: "draft-session-navbar-overlap")
+    }
+
     private func makeModel() -> RemoteAppModel {
         RemoteAppModel(continuity: MobileSessionContinuityStore(defaults: defaults))
     }
@@ -169,6 +221,45 @@ final class MobileSessionOpeningTests: XCTestCase {
             openingStrategy: .awaitCreatedSession
         )
     }
+
+    private func hostedWindow(rootViewController: UIViewController) -> UIWindow {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = rootViewController
+        window.makeKeyAndVisible()
+        settle(window)
+        return window
+    }
+
+    private func settle(_ window: UIWindow, for interval: TimeInterval = 0.1) {
+        RunLoop.current.run(until: Date().addingTimeInterval(interval))
+        window.layoutIfNeeded()
+    }
+
+    private func accessibilityViews(labelled label: String, in view: UIView) -> [UIView] {
+        var result = view.accessibilityLabel == label ? [view] : []
+        result.append(
+            contentsOf: view.subviews.flatMap { self.accessibilityViews(labelled: label, in: $0) }
+        )
+        return result
+    }
+
+    private func render(_ window: UIWindow) -> UIImage {
+        UIGraphicsImageRenderer(bounds: window.bounds).image { context in
+            window.layer.render(in: context.cgContext)
+        }
+    }
+
+    private func attach(_ image: UIImage, named name: String) {
+        let attachment = XCTAttachment(image: image)
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
 }
 
 /// The draft's model and effort are one line of text, while speed owns its neighbouring menu.

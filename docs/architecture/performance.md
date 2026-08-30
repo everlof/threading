@@ -342,6 +342,37 @@ outline insertion. In the same after-process, the deliberately retained whole-gr
 and full-reload comparisons cost 244.985 ms and 51.045 ms. The performance record is
 `/tmp/threading-profiles/20260823T211000Z-created-session-add/project-sidebar-stress.log`.
 
+### Workspace navigator live-edge scaling contract, 2026-08-29
+
+An extension navigator may contain 1,000 items and session activity can change many times during a
+turn. A live edge therefore cannot rebuild the semantic document, scan every row, start concurrent
+process requests, or do work for a navigator hidden behind Native or Settings.
+
+The selected navigator coalesces changed session IDs for one main-queue turn and admits at most 64
+unique IDs per request. It keeps one event action in flight; later edges stay in a set for the next
+bounded request. The extension may return at most 64 content-only item patches. Collection and
+item membership are indexed by stable ID, grid items retain their row index, and the host reloads
+only the named outline or grid rows. Patch validation is atomic: an unknown target changes no row
+and fails that process generation back to Native. Full replacements and ordinary action patches
+increment a shared content revision; a live answer overtaken by either is retried rather than
+applied over newer content.
+
+Pending invalidations are bounded to four batches (256 unique session IDs) in addition to the
+single in-flight batch. Crossing that bound, a timeout, or any other event-action failure returns
+the selected generation to Native rather than leaving stale content presented. A Settings
+override stops process dispatch while retaining a bounded set of changed IDs; reopening the
+navigator performs its initial load or deferred document refresh first, then drains that catch-up
+set through the same single-flight path. A project refresh observed while Settings is visible is
+latched without waking the extension process. The catch-up set is container-owned, so replacing a
+process generation while Settings is visible cannot silently discard invalidations.
+
+The regression target is a maximum-size 1,000-item virtual collection with a 64-ID burst. The
+contract and renderer tests pin request/response ceilings, duplicate coalescing, targeted row
+content replacement, retained collection identity, unknown-target failback, and the absence of
+event work without `eventActionID`. No per-edge profiler span is added because that would instrument
+the hot path at the event frequency; the bounded request and row-level assertions are the durable
+gate.
+
 ### Mobile terminal viewport-lease scaling contract, 2026-08-20
 
 A phone-owned terminal grid is recomputed on every crossed cell boundary — pinch steps, the
@@ -365,7 +396,11 @@ pinch stays live), but navigation motion is not a sequence of terminal widths.
 destination for both push and interactive Back; its update is O(1), retains one terminal view,
 and commits only the final width after the coordinator completes with that terminal still on
 screen (or after the same quiet period when UIKit exposes no coordinator). A completed Back
-discards the outgoing width before teardown. Height stays live for the keyboard and safe area. The wire
+discards the outgoing width before teardown. Keyboard presentation height is clipped live by the
+structural host, but SwiftTerm keeps its last committed row grid through the animation and
+receives the final height once at `keyboardDidShow` or `keyboardDidHide`. A cancelled transition
+that returns to the committed height produces no resize, and teardown discards pending height.
+The wire
 sees only the first grid of a lease — entering still sizes the agent at once — and after that the
 grid that has held still for
 `RemoteMobileConnectionDefaults.viewportSettleDelay` (150 ms; crossings inside a moving gesture
@@ -375,8 +410,8 @@ dismissed chat never resizes the Mac afterwards. The browser client has debounce
 `RemoteTerminalViewportLeaseTests` holds the boundary: a storm leases once, with the settled
 grid; the first grid is immediate; release cancels. `RemoteTerminalLayoutViewTests` holds the
 local half: a navigation-width storm leaves SwiftTerm on one grid, a coordinator-less storm
-commits only its last width, and keyboard height still follows its container without changing
-columns.
+commits only its last width, and 10,000 keyboard presentation frames retain one terminal, report
+no intermediate grid, and report exactly one final grid at the stable keyboard state.
 
 The return-to-live-end control shares that frequency boundary. Every accepted UIKit offset can
 re-evaluate it, so the check reads only `contentOffset`, the cached cell size/reachable maximum,
@@ -462,13 +497,13 @@ lease, SIGWINCH and the TUI's resize repaint. Running a live provider for every 
 that fidelity problem by introducing account state, network variance, private transcript data
 and paid turns. Neither is an acceptable performance baseline.
 
-`scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [simulator]` now runs the
-middle path under the shipping boundaries. An isolated hosted XCTest creates two real terminal
-sessions, starts the generated Codex- and Claude-shaped helpers on real raw-mode PTYs, and serves
-them through `RemoteAccessServer` and `RemoteSessionMirrorRegistry`. A Debug `-O` iOS build gets a
-loopback-only ephemeral pairing and uses the ordinary dashboard, session navigation,
-`RemoteSessionConnection`, WebSocket and SwiftTerm surface. The pairing, continuity, discovery
-and notification state are isolated from the simulator's ordinary app data. The bearer is a
+`scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [simulator] [admission-delay-ms]`
+now runs the middle path under the shipping boundaries. An isolated hosted XCTest creates two
+real terminal sessions, starts the generated Codex- and Claude-shaped helpers on real raw-mode
+PTYs, and serves them through `RemoteAccessServer` and `RemoteSessionMirrorRegistry`. A Debug
+`-O` iOS build gets a loopback-only ephemeral pairing and uses the ordinary dashboard, session
+navigation, `RemoteSessionConnection`, WebSocket and SwiftTerm surface. The pairing, continuity,
+discovery and notification state are isolated from the simulator's ordinary app data. The bearer is a
 fixed test authority and no provider executable, credential, API or token is consulted.
 
 The two workloads deliberately disagree where provider behavior changes the cost model:
@@ -491,6 +526,15 @@ clear-history and alternate-screen sequences during entry. The driver copies the
 final real-shell screenshot into the run directory under `/tmp/threading-profiles` when Return is
 pressed in its terminal. Re-enter both chats in one run: successive `attempt` values are the
 push/pop comparison rather than separate process launches with different caches.
+
+The optional admission delay is a deterministic reproduction for remote typing that feels
+sticky while the socket itself is healthy. A value such as `750` pauses the hosted Debug Mac at
+the same main-queue boundary used by direct terminal input and atomic prompt submission. Run the
+lab once with `0` and once with `750`; the delayed run reports
+`ios-terminal-input-probe round_trip_ms`, `ios-terminal-typing first_response_ms`, and
+`ios-terminal-turn submit_to_first_bytes_ms` without consulting a provider or carrying typed
+bytes in the measurements. The fixture is accepted only by the token-free hosted test and is
+compiled out of Release builds.
 
 The first real Codex run exposed the remaining flicker as scheduling, not parser cost. Its resize
 repair arrived in 154 binary frames over 2.0 seconds; SwiftTerm spent only 61 ms feeding them, but

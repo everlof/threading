@@ -1,16 +1,17 @@
 ---
 title: Conversations, permissions, and subagents
-description: Keep messages, consequential actions, and delegated work legible.
+description: Preview structured messages, consequential actions, and delegated work.
 group: Supervise
 order: 40
 ---
 
 # Conversations, permissions, and subagents
 
-The conversation view turns a provider event stream into a structured,
-native transcript. Human messages, agent responses, tool activity, questions,
-permissions, and delegation remain distinct instead of becoming one long
-terminal log.
+The experimental conversation view turns a supported provider event stream
+into a structured, native transcript. Human messages, agent responses, tool
+activity, questions, permissions, and delegation remain distinct instead of
+becoming one long terminal log. The provider TUI remains the established
+interface.
 
 ## Conversations
 

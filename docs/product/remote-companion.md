@@ -60,7 +60,7 @@ The mobile and browser interfaces prioritize attention, conversation, and
 decisions over full desktop parity. Detailed local workflows such as broad
 repository navigation remain better suited to the Mac.
 
-Native conversations also carry their live command and skill catalog to the iPhone. Type `/` or
+Experimental native conversations also carry their live command and skill catalog to the iPhone. Type `/` or
 `$` to filter it, or use the composer’s plus button to browse everything the current Claude or
 Codex session exposes. Choosing `/skills` narrows the list to skills. The Mac remains
 authoritative when an action is submitted; skill instructions and local filesystem paths stay on

@@ -137,6 +137,26 @@ reads nothing and does its work on nobody. Build the actions from the item and l
 capture it, the way `SessionDashboard.surfaceChangeActions(for:)` does. Three call sites depended
 on the old ordering and all three would have silently stopped working.
 
+## Anchored application popovers
+
+`mobileThemedPopover` is the boundary for an anchored transient surface whose chrome belongs to
+Threading. SwiftUI applies `presentationBackground` to a compact popover on iOS 26 but ignores
+`presentationCornerRadius`, leaving UIKit's large system mask around an authored theme. The
+shared presenter therefore uses the public `UIPopoverPresentationController` background-view
+seam and draws the body and arrow from `RemoteThemePalette`: floating surface, border, border
+weight and panel radius. UIKit still owns anchor placement, edge adaptation and outside-tap
+dismissal.
+
+The content supplies no second plate or outer border. It receives the complete theme through
+`mobileTheme(_:)`, just like a sheet crossing the hosting boundary below. Use this primitive for
+application-owned popovers only; action sheets, document pickers, permission prompts and other
+iOS trust surfaces keep their native chrome.
+
+The new-session model-and-effort chooser is the first consumer. This is a correction to an
+existing host-only surface, not a new extension component: Threading continues to own catalogue
+validity, inherited/default resolution and the choice submitted to the runtime. Themes own its
+presentation material, while extensions do not replace that operational decision surface.
+
 ## Settings surfaces
 
 A `List` or `Form` gets its *rows* from UIKit, not from the theme. Hiding the scroll background

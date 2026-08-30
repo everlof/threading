@@ -597,11 +597,11 @@ final class ExtensionNodeHostView: NSView, ThemedComponent {
         let side: CGFloat
         switch role {
         case .identity:
-            side = 18
+            side = Design.Size.extensionIdentityImage
         case .icon:
-            side = 14
+            side = Design.Size.extensionIconImage
         case .decoration:
-            side = 12
+            side = Design.Size.extensionDecorationImage
         }
 
         NSLayoutConstraint.activate([

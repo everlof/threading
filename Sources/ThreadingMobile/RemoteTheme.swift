@@ -127,7 +127,6 @@ enum MobileDesign {
     }
 
     enum Offset {
-        static let workspaceActivityDot: CGFloat = 3
         /// The short rise traversed as a return-to-end control enters or leaves the surface.
         static let floatingScrollLift: CGFloat = 12
         /// How far the account chip hangs past the mark's corner. Flush inside the tile it covered

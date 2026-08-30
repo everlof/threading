@@ -159,6 +159,36 @@ final class UsageScanCacheTests: XCTestCase {
         XCTAssertEqual(streamed.map(\.identity), ["shared"])
     }
 
+    func testFailedReplacementRemovesStaleCompleteSourceFromLedger() throws {
+        enum FixtureFailure: Error { case unreadable }
+
+        let cacheDirectory = directory.appendingPathComponent("strict-index")
+        let index = try UsageLedgerIndex(directory: cacheDirectory)
+        index.beginScan()
+        _ = try index.update(source: source, parserID: "fixture-v1") {
+            UsageScanCache.Result(
+                records: [makeRecord(identity: "old-complete")],
+                wasCacheHit: false
+            )
+        }
+        XCTAssertEqual(try index.finishScan(), 1)
+
+        try Data("changed unreadable revision".utf8).write(to: source, options: .atomic)
+        index.beginScan()
+        XCTAssertThrowsError(try index.update(source: source, parserID: "fixture-v1") {
+            throw FixtureFailure.unreadable
+        })
+        XCTAssertEqual(
+            try index.finishScan(),
+            0,
+            "a partial scan must not retain the previous revision as current usage"
+        )
+
+        var streamed: [UsageLedgerRecord] = []
+        try index.forEachRecord { streamed.append($0) }
+        XCTAssertTrue(streamed.isEmpty)
+    }
+
     func testCacheEnforcesOneAggregateDirectoryBound() throws {
         let cacheDirectory = directory.appendingPathComponent("bounded-cache")
         let maximumBytes: Int64 = 2_500

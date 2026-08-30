@@ -368,32 +368,7 @@ struct MobileIssueReportView: View {
             ]
         )
         .presentationDetents([.large])
-#if DEBUG
-        .task {
-            await presentReceiptEvidenceIfNeeded()
-        }
-#endif
     }
-
-#if DEBUG
-    /// Opens the shipping receipt over a populated form so UI evidence can prove that the
-    /// floating plate—not a translucent page panel—owns everything behind its text.
-    @MainActor
-    private func presentReceiptEvidenceIfNeeded() async {
-        guard ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-                == "report-receipt" else { return }
-        reporterNote = "The receipt looked transparent and the report text remained visible "
-            + "beneath it."
-        try? await Task.sleep(for: .milliseconds(250))
-        guard !Task.isCancelled else { return }
-        notice = Notice(
-            title: "Sent to your Mac",
-            message: "A new Codex task is investigating this report in Threading.\n\n"
-                + "Fix transparent report receipt",
-            dismissReport: true
-        )
-    }
-#endif
 
     private var canSend: Bool {
         !reporterNote.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -551,7 +526,7 @@ struct MobileIssueReportView: View {
                     ) == true
                 )
                 let launch = destination.launch
-                let creation = try await model.createSession(
+                _ = try await model.createSession(
                     projectID: destination.project.id,
                     agentKind: destination.agent.id,
                     accountHandle: destination.accountHandle,
@@ -564,22 +539,7 @@ struct MobileIssueReportView: View {
                     reportOpening: handoff.reportOpening,
                     prompt: handoff.legacyPrompt
                 )
-                // Worth its own line: an isolated workspace is the difference between a task
-                // that may edit the checkout on the Mac right now and one that cannot.
-                let workspaceNote = launch?.managedWorkspace == nil
-                    ? ""
-                    : "\n\n" + MobileL10n.string(
-                        "It has a workspace of its own, so the checkout on your Mac is untouched."
-                    )
-                notice = Notice(
-                    title: MobileL10n.string("Sent to your Mac"),
-                    message: MobileL10n.string(
-                        "A new %@ task is investigating this report in %@.",
-                        destination.agent.name,
-                        destination.project.name
-                    ) + "\n\n" + creation.session.title + workspaceNote,
-                    dismissReport: true
-                )
+                dismiss()
             } catch is CancellationError {
                 return
             } catch {

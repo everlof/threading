@@ -55,12 +55,74 @@ public struct ExtensionWorkspaceNavigatorActionRequest: Codable, Equatable, Send
             throw ExtensionValidationError(issues: issues)
         }
     }
+
 }
 
-/// The atomic result of a navigator action or refresh.
+/// A bounded host-observed fact delivered to the selected workspace navigator.
+///
+/// This is intentionally a small event vocabulary. It tells the extension which existing
+/// sessions may have changed; the extension remains responsible for deriving presentation from
+/// its own state and may answer with content-only item patches.
+public struct ExtensionWorkspaceNavigatorHostEvent: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Equatable, Sendable {
+        case sessionChanged = "session.changed"
+    }
+
+    public static let maximumSessionIDs = 64
+
+    public let kind: Kind
+    public let sessionIDs: [String]
+
+    public init(kind: Kind, sessionIDs: [String]) {
+        self.kind = kind
+        self.sessionIDs = sessionIDs
+    }
+
+    public var actionValue: ExtensionJSONValue {
+        get throws {
+            try validate()
+            return try ExtensionJSONValue.encoding(self)
+        }
+    }
+
+    public init(actionValue: ExtensionJSONValue) throws {
+        self = try actionValue.decoded(as: Self.self)
+        try validate()
+    }
+
+    public func validate() throws {
+        var issues: [ExtensionValidationIssue] = []
+        if sessionIDs.isEmpty {
+            issues.append(.init(path: "sessionIDs", message: "must not be empty"))
+        } else if sessionIDs.count > Self.maximumSessionIDs {
+            issues.append(.init(
+                path: "sessionIDs",
+                message: "must contain at most \(Self.maximumSessionIDs) identifiers"
+            ))
+        }
+        var seen = Set<String>()
+        for (index, sessionID) in sessionIDs.enumerated() {
+            let path = "sessionIDs[\(index)]"
+            if sessionID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                issues.append(.init(path: path, message: "must not be empty"))
+            } else if sessionID.count > 256 {
+                issues.append(.init(path: path, message: "must contain at most 256 characters"))
+            } else if !seen.insert(sessionID).inserted {
+                issues.append(.init(path: path, message: "must be unique"))
+            }
+        }
+        if !issues.isEmpty {
+            throw ExtensionValidationError(issues: issues)
+        }
+    }
+}
+
+/// The atomic result of a navigator action, refresh, or live host event.
 ///
 /// A replacement snapshot must retain the navigator ID that raised the action. Threading checks
 /// the ID, capability, complete document validation, and process generation before presenting it.
+/// A response may instead patch bounded item content, but never combines patches with a complete
+/// replacement.
 public struct ExtensionWorkspaceNavigatorActionResponse: Codable, Equatable, Sendable {
     public static let currentProtocolVersion = 1
 
@@ -68,6 +130,8 @@ public struct ExtensionWorkspaceNavigatorActionResponse: Codable, Equatable, Sen
     public let requestID: String
     public let navigatorID: String
     public let navigator: ExtensionWorkspaceNavigator?
+    /// Bounded content replacements for existing items in the currently presented navigator.
+    public let itemPatches: [ExtensionWorkspaceNavigatorItemPatch]?
     public let message: String?
     public let error: String?
 
@@ -76,6 +140,7 @@ public struct ExtensionWorkspaceNavigatorActionResponse: Codable, Equatable, Sen
         requestID: String,
         navigatorID: String,
         navigator: ExtensionWorkspaceNavigator? = nil,
+        itemPatches: [ExtensionWorkspaceNavigatorItemPatch]? = nil,
         message: String? = nil,
         error: String? = nil
     ) {
@@ -83,6 +148,7 @@ public struct ExtensionWorkspaceNavigatorActionResponse: Codable, Equatable, Sen
         self.requestID = requestID
         self.navigatorID = navigatorID
         self.navigator = navigator
+        self.itemPatches = itemPatches
         self.message = message
         self.error = error
     }
@@ -107,19 +173,60 @@ public struct ExtensionWorkspaceNavigatorActionResponse: Codable, Equatable, Sen
         if let navigator {
             issues.append(contentsOf: navigator.validationIssues(path: "navigator"))
         }
+        if let itemPatches {
+            if itemPatches.isEmpty {
+                issues.append(.init(path: "itemPatches", message: "must not be empty when present"))
+            } else if itemPatches.count > ExtensionWorkspaceNavigator.maximumItemPatches {
+                issues.append(.init(
+                    path: "itemPatches",
+                    message: "must contain at most "
+                        + "\(ExtensionWorkspaceNavigator.maximumItemPatches) patches"
+                ))
+            }
+            var targets = Set<String>()
+            for (index, patch) in itemPatches.enumerated() {
+                let path = "itemPatches[\(index)]"
+                issues.append(contentsOf: patch.validationIssues(path: path))
+                let target = "\(patch.collectionID)\u{0}\(patch.itemID)"
+                if !targets.insert(target).inserted {
+                    issues.append(.init(path: path, message: "duplicates an earlier patch target"))
+                }
+            }
+            if navigator != nil {
+                issues.append(.init(
+                    path: "itemPatches",
+                    message: "cannot be combined with a complete navigator replacement"
+                ))
+            }
+        }
         if let error {
             if error.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 issues.append(.init(path: "error", message: "must not be empty when present"))
             }
-            if navigator != nil || message != nil {
+            if navigator != nil || itemPatches != nil || message != nil {
                 issues.append(.init(
                     path: "error",
-                    message: "cannot be combined with a navigator or success message"
+                    message: "cannot be combined with navigator output or a success message"
                 ))
             }
         }
         if !issues.isEmpty {
             throw ExtensionValidationError(issues: issues)
+        }
+    }
+
+    /// Validates the stricter response shape accepted for `eventActionID` requests.
+    ///
+    /// Live host events may update existing item content or present a message. They may not
+    /// replace navigator structure; ordinary actions and `loadActionID` remain the full-document
+    /// replacement path.
+    public func validateForHostEvent() throws {
+        try validate()
+        guard navigator == nil else {
+            throw ExtensionValidationError(issues: [.init(
+                path: "navigator",
+                message: "a host event response may return only item patches or a message"
+            )])
         }
     }
 }

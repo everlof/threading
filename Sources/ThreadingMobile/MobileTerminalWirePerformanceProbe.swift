@@ -110,6 +110,7 @@ enum MobileTerminalWirePerformanceProbe {
         scheduleEntryQuiet(for: session.id, run: run)
 
         if let typing = run.typing {
+            typing.firstOutputAt = typing.firstOutputAt ?? now
             typing.outputFrames += 1
             typing.outputBytes += data.count
         }
@@ -220,6 +221,7 @@ enum MobileTerminalWirePerformanceProbe {
             if let typing = run.typing {
                 writeMetric("ios-terminal-typing", run: run, fields: [
                     "duration_ms": milliseconds(now - typing.startedAt),
+                    "first_response_ms": interval(typing.startedAt, typing.firstOutputAt),
                     "keystrokes": String(typing.keystrokes),
                     "output_frames": String(typing.outputFrames),
                     "output_bytes": String(typing.outputBytes),
@@ -239,6 +241,18 @@ enum MobileTerminalWirePerformanceProbe {
         let typing = run.typing ?? Typing(startedAt: now)
         typing.keystrokes += printableCount
         run.typing = typing
+    }
+
+    static func inputProbeCompleted(
+        session: RemoteSessionSummaryDTO,
+        result: String,
+        durationMS: String
+    ) {
+        guard let run = runs[session.id] else { return }
+        writeMetric("ios-terminal-input-probe", run: run, fields: [
+            "result": result,
+            "round_trip_ms": durationMS,
+        ])
     }
 
     static func viewportSent(
@@ -567,6 +581,7 @@ enum MobileTerminalWirePerformanceProbe {
 
     private final class Typing {
         let startedAt: CFTimeInterval
+        var firstOutputAt: CFTimeInterval?
         var keystrokes = 0
         var outputFrames = 0
         var outputBytes = 0

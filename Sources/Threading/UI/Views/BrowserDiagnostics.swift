@@ -135,6 +135,57 @@ extension BrowserViewController {
         )
     }
 
+    /// Bridge timings are the evidence needed after a stall, so they keep a small rolling history
+    /// even when the broader network/navigation trace was not armed in advance. The payload is
+    /// deliberately phase names and durations only; page content and targets never enter it.
+    func recordAgentBridgePhase(
+        _ name: String,
+        startedAt: Date,
+        outcome: String,
+        detail: String? = nil
+    ) {
+        recordAgentTraceEvent(
+            category: "bridge",
+            name: name,
+            outcome: outcome,
+            durationMilliseconds: Date().timeIntervalSince(startedAt) * 1_000,
+            detail: detail,
+            always: true
+        )
+    }
+
+    /// Let synchronous handlers and a resulting navigation settle without letting an endlessly
+    /// streaming page hold the action result forever.
+    func settleAfterAgentAction() async {
+        let startedAt = Date()
+        let deadline = Date().addingTimeInterval(5)
+        repeat {
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        } while webView.isLoading && Date() < deadline
+        recordAgentBridgePhase(
+            "action.load-settle",
+            startedAt: startedAt,
+            outcome: webView.isLoading ? "bounded-while-loading" : "settled"
+        )
+    }
+
+    func recordAgentAuthorizationPhase(startedAt: Date, allowed: Bool) {
+        recordAgentBridgePhase(
+            "action.origin-authorization",
+            startedAt: startedAt,
+            outcome: allowed ? "allowed" : "denied"
+        )
+    }
+
+    func recordAgentActionSnapshotPhase(startedAt: Date, snapshot: BrowserSnapshot?) {
+        recordAgentBridgePhase(
+            "action.viewport-snapshot",
+            startedAt: startedAt,
+            outcome: snapshot.map { $0.truncated ? "truncated" : "success" } ?? "error",
+            detail: snapshot.map { "\($0.nodes.count) nodes; \($0.visitedElements ?? 0) visited" }
+        )
+    }
+
     func recordAgentNavigationTrace(_ phase: String, error: Bool = false) {
         recordAgentTraceEvent(
             category: "navigation",
@@ -160,9 +211,10 @@ extension BrowserViewController {
         outcome: String? = nil,
         durationMilliseconds: Double? = nil,
         url explicitURL: String? = nil,
-        detail: String? = nil
+        detail: String? = nil,
+        always: Bool = false
     ) {
-        guard agentTraceRecording else { return }
+        guard agentTraceRecording || always else { return }
         let url = explicitURL.map(BrowserURLRedactor.redact)
         let event = BrowserTraceEvent(
             sequence: agentTraceNextSequence,

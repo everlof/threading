@@ -1,9 +1,10 @@
 # The Navigator Pipeline
 
-> Status: feature draft — the product goal is that a user who wants a different sidebar can have
-> one, built by an extension, without Threading having anticipated the shape they wanted. The
+> Status: active feature draft — the product goal is that a user who wants a different sidebar
+> can have one, built by an extension, without Threading having anticipated the shape they wanted. The
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
-> plus a host-executed intent vocabulary. Nothing here is scheduled, and no part of
+> plus a host-executed intent vocabulary. Rollout steps 1–5 were implemented by 2026-08-30.
+> No part of
 > `ui.workspace-navigation` v1 is withdrawn.
 
 ## Decision
@@ -62,15 +63,17 @@ correct call for a published vocabulary installed extensions already switch on, 
 "Priority" section cannot tell *a turn stopped waiting on you* from *finished and unread* from
 *the account is spent*.
 
-**3. The document is pull-only, and refreshed by the wrong signal.** `loadActionID` fires when the
-host asks; the host asks on `ProjectsDidChange` (`MainWindowController.swift:844`). Activity
-changes never re-render a navigator, and the process has no way to push one — the SDK has
+**3. Before rollout step 1, the document was pull-only and refreshed by the wrong signal.**
+`loadActionID` fires when the host asks; the host asks on `ProjectsDidChange`. Activity changes did
+not re-render a navigator, and the process had no way to push one — the SDK has
 unsolicited publication for other surfaces (`ExtensionHostClient.publishComponentPatches`,
 `publishIdentityResolutions`), but a navigator only ever arrives as a field of an action
-*response*. A live spinner in an extension navigator is frozen. The irony is that the host
-**already** journals exactly this edge for extensions: `ExtensionHostService.swift:1969` observes
+*response*. A live spinner in an extension navigator was frozen. The host
+**already** journals exactly this edge for extensions: `ExtensionHostService` observes
 `SessionActivityDidChange` and emits `session.changed` into the cursor-paged event stream. The
-data path exists and is not wired to the surface that needs it.
+first rollout slice now forwards that edge to the selected v1 navigator and accepts bounded
+content-only item patches; the durable contract is in
+[`WORKSPACE_NAVIGATORS.md`](../extensions/WORKSPACE_NAVIGATORS.md#live-session-edges).
 
 **4. Rows can navigate; they cannot act.** The host capability list in `ExtensionManifest.swift`
 grants reads and event subscription (`host.events`) and nothing else — no mutation authority of
@@ -178,6 +181,30 @@ Activity fidelity is versioned rather than changed: `session.activity` keeps pub
 existing four-value vocabulary, and `session.activity.detailed` publishes all six. An extension
 built against v1 sees exactly what it saw before.
 
+### Rollout step 2 implementation
+
+The host-only fact foundation now ships as three bounded pieces:
+
+- `HostFactCatalog` is the canonical, versioned inventory of 41 host facts and 31 exact native
+  sidebar dependencies. `HostFactPublisher` projects live session, project and terminal state into
+  the bounded, generation-aware `ExtensionFactRegistry`; application launch starts the pipeline
+  only after the stores are ready.
+- `SessionRowView` and `SidebarTreeBuilder` classify every value they draw or order through eager
+  identity markers for published facts, user options and deliberately host-owned state. Local
+  shared-git-directory paths remain host-only, and manager relationship and manager role remain
+  separate facts.
+- `check_navigator_fact_parity.py`, run by the architecture boundary build phase, derives its
+  accepted vocabulary from compiler-visible Swift inventories. Model members, provider methods,
+  entry inputs and option/host sources all have exact owners. A new native read without an owner
+  fails; typed option, host and entry-input owners without an audited occurrence also fail. Its 82
+  adversarial fixtures cover aliases, lexical shadowing, dependency injection, closures, key paths
+  and local collection projections; generated SDK references, comments and strings cannot satisfy
+  the audit.
+
+The markers add no rendering work beyond inline identity calls. The supported sidebar stress
+profile passed with 10 projects and 5,000 sessions: 5,059 ordered rows, 33 instantiated views and
+149.428 ms navigator load. This slice intentionally changes no appearance or interaction.
+
 ### Extension facts, and why the key matters
 
 A GitLab extension does not know what a session is. It knows repositories, branches and merge
@@ -189,7 +216,7 @@ So facts are keyed by **domain key**, and the host performs the join:
 | Subject | Inherited by |
 |---|---|
 | `.session(id)` | that session |
-| `.project(id)` | that project and, by default, its sessions |
+| `.project(id)` | that project only; a later transform may opt into project-to-session inheritance |
 | `.repositoryBranch(repository:branch:)` | every session, checkout and project on that branch |
 | `.repository(identity)` | everything in that repository |
 
@@ -327,13 +354,26 @@ question that started this draft — *should pinned rows be sorted by activity w
 block?* — an option a user picks rather than a policy the app holds.
 
 Absence has two pinned meanings, and the distinction is what makes degradation graceful. A fact
-missing **for a subject** while its key has a live provider is unknown: the predicate does not
-match, the sort orders the row after every present value, the bucket is `unknown`. A fact key
+missing **for a subject** while its key has a live provider uses the operand's declared fallback
+before predicate, sort, or fact-bucket evaluation. Without a fallback it is unknown: the predicate
+does not match, the sort orders the row after every present value, the bucket is `unknown`. A fact key
 with **no registered provider at all** degrades at the stanza instead: the predicate is dropped
 rather than excluding everything, the sort key leaves the key list, the bucket grouping
 collapses. An uninstall must widen a navigator back toward "all sessions", never empty it.
 Nothing is left to the evaluator's judgement; a transform wanting different behaviour declares a
 default on the binding.
+
+The format-1 declaration makes “stanza” exact. An unavailable `enhances` key removes one search
+field, filter clause, sort clause, fact-bucket clause, rule-bucket rule, or conditional template
+node. Nested predicates never simplify piecemeal. Presentation leaves use their fallback and are
+omitted without one; an empty realized row is not selectable. Search disappears only when all its
+fields are gone, rule buckets collapse only when no rules survive, and a fact bucket collapses as
+one unit. A missing `required` provider disables the complete navigator. Subject-level absence
+continues to use unknown/fallback semantics even for a `required` key whose provider is live.
+
+Project facts do not inherit to sessions by default. A format-1 reference opts into `.project`
+scope and must consume `session.project-id` as the explicit join. A session without that join has
+an unknown project-scoped value; it does not make the project fact provider unavailable.
 
 The one primitive that cannot be faked is the relative-date bucket. *Today*, *Yesterday*,
 *Last 7 days* are relative to a clock, and if each navigator brought its own they would disagree
@@ -344,7 +384,7 @@ this primitive exists.
 ### Search is a host control feeding the transform
 
 v1 keeps continuous search deliberately explicit — a text input action, one IPC round trip per
-keystroke ([`WORKSPACE_NAVIGATORS.md:139`](../extensions/WORKSPACE_NAVIGATORS.md)). The pipeline
+keystroke ([`WORKSPACE_NAVIGATORS.md`](../extensions/WORKSPACE_NAVIGATORS.md#search-and-privacy)). The pipeline
 earns its per-keystroke claim only if search is part of the vocabulary: the navigator declares a
 search field and which facts are searchable, the host owns the control and its live text, and the
 query enters the transform through `match` the way an option value does. No keystroke ever
@@ -364,8 +404,10 @@ Unchanged from v1 in shape: sections, and a list, outline or grid, with stable I
 so selection, expansion, scroll position and first responder survive a re-evaluation. What changes
 is that the host produces this by evaluating the transform rather than receiving it.
 
-The aggregate item cap is replaced by a windowed collection: the host evaluates the full ordering
-and realizes a range. The bound that matters is the viewport, not the store.
+Format 1 is the finite bridge: it emits at most 1,000 items and requires a host-owned overflow
+notice rather than truncating silently. Rollout step 7 replaces that aggregate bound with a
+windowed collection: the host evaluates the full ordering and realizes a range. The bound that
+matters then is the viewport, not the store.
 
 ## Stage 5 — Representation
 
@@ -540,15 +582,27 @@ does. An install must never reorder somebody's sidebar on its own.
 
 ## Rollout
 
-1. **Live edges on v1.** Forward `session.changed` to the selected navigator and accept a row patch
-   in reply. Ships the live spinner, proves the diff path, no new vocabulary.
-2. **The fact registry**, host facts only, plus the parity lint. Nothing consumes it yet.
-3. **Extension fact providers** and the domain-key join. `GitLabStateExtension` becomes buildable
-   and is the test.
-4. **Options**, rendered in the navigator menu and persisted.
-5. **Transform and templates** — `ui.workspace-navigation@2`, with the `consumes` declarations,
-   the degradation tiers and the host-owned search control. v1 documents keep working; a
-   materialized item list is a degenerate template.
+1. **Live edges on v1 — implemented 2026-08-29.** The selected navigator may opt into coalesced
+   `session.changed` actions and return bounded content-only item patches. This ships the live
+   spinner path and proves targeted virtual-row replacement without giving the extension
+   structural or interaction authority.
+2. **The fact registry — implemented 2026-08-30.** Host facts only, plus the fail-closed parity
+   lint. Nothing outside the host consumes it yet.
+3. **Extension fact providers and the domain-key join — implemented 2026-08-30.** Providers
+   publish generation-bound facts only on canonical repository subjects. The host synchronously
+   resolves exact, repository-branch, then repository facts from its in-memory catalogue without
+   exposing project or session identifiers. `GitLabStateExtension` is the buildable public test:
+   no UI, no session authority, exact anonymous `gitlab.com` network access, a stable maximum of
+   32 repositories and 4,096 retained facts, bounded paging/concurrency/retry, atomic removal, and
+   preservation of the last observation across non-authoritative refresh failures.
+4. **Options — implemented 2026-08-30**, rendered in the navigator menu and persisted.
+5. **Transform and templates — implemented 2026-08-30.** The
+   `ui.workspace-navigation@2` contract adds `consumes` declarations, exact degradation tiers,
+   host-owned search and calendar invalidation, background transform evaluation, virtualized
+   visible-row template realization and source-session activation. v1 documents keep working; a
+   materialized item list is a degenerate template. `ActivityInboxExtension` is the buildable
+   public test: it requests only `ui.workspace-navigation`, while the host produces Priority and
+   relative-date sections, persists its sort option and repaints working state from facts.
 6. **Intents**, declared per navigator in the manifest. `T3SidebarExtension` becomes buildable.
 7. **Windowed collections**, retiring the aggregate item cap.
 8. **Native on the pipeline**, as far as it honestly goes. Full parity includes drag reorder,
@@ -557,7 +611,6 @@ does. An install must never reorder somebody's sidebar on its own.
 
 ## Open questions
 
-- Do project-subject facts inherit to sessions by default, or only when the transform says so?
 - Is there a scope between "this user" and "this project" that navigator options need, given
   checkouts of one repository behave as separate projects here?
 

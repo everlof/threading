@@ -535,9 +535,12 @@ the child timeline.
 transports, rather than provider cases in the view. Terminal mode receives `SubagentStart` and
 `SubagentStop` from the same routed Claude/Codex lifecycle hooks that report turn boundaries.
 Those reports provide provider child id, role, final message, and durable transcript path.
-`SubagentUsageReader` then reads the child's own token records: Claude through the stable usage
-index, Codex by summing per-request `last_token_usage` after the child communication boundary
-instead of misattributing the copied parent `total_token_usage`.
+`SubagentUsageReader` then reads the child's own token records through the same strict Claude and
+Codex adapters as the account ledger. Codex per-request `last_token_usage` begins after the first
+child communication boundary when one exists, so the copied parent prefix is not attributed to
+the child; current rollouts also retain `session_meta.parent_thread_id` as durable accounting
+provenance. Claude's native tool result immediately adds its `agentId` as an alias of the spawning
+tool-use id, so the live renderer can join the child JSONL's ledger identity before history replay.
 
 Claude also implements `SubagentHistoryConversation`.
 Its `<session>/subagents/agent-*.meta.json` files provide a cheap hierarchy index: tool-use id,

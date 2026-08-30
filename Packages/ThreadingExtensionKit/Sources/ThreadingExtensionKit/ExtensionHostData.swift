@@ -61,6 +61,32 @@ public struct ExtensionSessionActivity: RawRepresentable, Codable, Hashable, Sen
     public static let needsAttention: Self = "needs-attention"
 }
 
+/// The six-value vocabulary published by `session.activity.detailed`.
+///
+/// This remains distinct from `ExtensionSessionActivity`, whose four values are frozen into the
+/// v1 sanitized session snapshot. A raw-value type keeps future host values decodable while these
+/// named constants prevent navigator authors from having to reproduce Threading's wire spelling.
+public struct ExtensionSessionDetailedActivity: RawRepresentable, Codable, Hashable, Sendable,
+    ExpressibleByStringLiteral
+{
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+
+    public init(stringLiteral value: String) {
+        rawValue = value
+    }
+
+    public static let dormant: Self = "dormant"
+    public static let idle: Self = "idle"
+    public static let working: Self = "working"
+    public static let awaitingUser: Self = "awaiting-user"
+    public static let needsAttention: Self = "needs-attention"
+    public static let limitReached: Self = "limit-reached"
+}
+
 public struct ExtensionSessionSnapshot: Codable, Equatable, Sendable {
     public static let currentVersion = 1
 

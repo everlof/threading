@@ -97,9 +97,7 @@ extension BrowserViewController {
                 target: result.target
             )
         case .fullPage, .viewport:
-            guard let pageCapture = await screenshot(fullPage: kind == .fullPage) else {
-                throw BrowserBaselineCaptureError.captureFailed
-            }
+            let pageCapture = try await screenshot(fullPage: kind == .fullPage)
             capture = pageCapture
             // A full-page capture is bounded by `maximumSnapshotHeight`; a document taller than
             // that is captured down to the cap and says so rather than pretending to be complete.

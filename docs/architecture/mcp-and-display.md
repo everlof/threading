@@ -263,11 +263,23 @@ cross-tool sequencing and constraints. State each rule once at the narrowest lay
 it, and promote it into the decision prefix only when an agent must know the route before its
 schema is loaded.
 
+The remainder of `initialize.instructions` is a compact routing catalogue, not the concatenation
+of every group's full workflow prose. Some deferred-tool clients repeat the entire initialize
+field beside each discovered schema; sending the long form there made one ordinary Browser turn
+carry the same instructions dozens of times. `MCPInstructionDefaults.initializeInstructionCharacterLimit`
+holds the all-groups payload to 4,096 characters. The prefix says that Threading's Browser is
+already connected and explicitly forbids bootstrapping another browser runtime; the group title
+and summary make the route discoverable; the exact tool description supplies the mechanics after
+discovery. Scoped ad-hoc endpoints keep their narrow long-form group instructions because they
+advertise only the few tools that scope admits.
+
 Tool results are **plain text, with one exception**. A display tool has already drawn its image,
 so the result costs a sentence rather than an image's worth of tokens — and it sidesteps the
 undocumented question of what Claude Code does with an image returned from a tool.
 `browser_screenshot` is the exception, because visual inspection is the tool's whole purpose: it
-returns a standard MCP image block as well as caching and optionally displaying the PNG. See
+returns a standard MCP image block and caches the PNG. Capture is quiet by default: it leaves the
+live Browser tab selected, while `show: true` deliberately preserves a user-visible image tab.
+The agent seeing pixels and the user being navigated to evidence are separate actions. See
 [`agent-browser.md`](agent-browser.md).
 
 ## Command contract
@@ -534,8 +546,10 @@ list is the chronology — newest first, dated, capped, persisted, pruned when a
 pane's preview and `MediaInspectorView` are the closeup. HTML is the same kind of durable evidence:
 `display_html` writes the supplied bytes into the session attachment store and the Attachments pane
 previews them in a non-persistent `WKWebView`. `display_scene` and `display_compare_files` remain
-live panel documents, and so does a **browser capture** (`browser_screenshot`, an isolated run's
-final frame): those are panel state rather than a file this session exchanged.
+live panel documents. A **browser capture** becomes one only when its call explicitly sets
+`show: true`; the default `browser_screenshot` caches and returns pixels to the agent without
+replacing the live Browser tab. An isolated run's final frame is explicitly presented. These are
+panel state rather than a file this session exchanged.
 
 This distinction is the notification boundary too. A generated image or HTML document is copied
 as an **immutable capture**, even when its source is already in the checkout. Reusing
@@ -1270,6 +1284,18 @@ merge and its no-project fallback. The list had to become two things it was not 
   for today, the day otherwise — and inside the row's single spoken sentence. A chronology whose
   rows carry no time is a list whose order has to be taken on trust, and the order is the whole
   reason the images stopped being tabs.
+
+**Turn disclosures make that chronology navigable without making transcript rows its authority.**
+`SessionAttachmentTurnSectioning` projects the bounded attachment values against the bounded,
+provider-neutral `GitTurnBaselineStore` checkpoint ledger. Exact native message/outbox identities
+win; agent output otherwise points back to the current checkpoint, prompt handoffs point forward
+to the next admitted checkpoint, and a comparison dropped directly on this pane remains **Between
+turns** so a later unrelated prompt cannot claim it. Headers are `ThemedDisclosureRow` controls:
+Latest turn stays explicit even when it has no files, and collapsing a turn removes its attachment
+items before `NSTableView` asks for cells. The build cost remains O(attachments log turns), with the
+store and ledger ceilings still doing the bounding. The grouping, collapse state, selection repair
+and chronology labels stay host-owned beside the list; `attachments.preview@1` still replaces only
+the selected file's preview body.
 
 **The pane is two panes, and the footer is a band.** The list is one half, its preview the
 other — a full-bleed `SeparatorView` folds them apart, and the preview is the layout's one

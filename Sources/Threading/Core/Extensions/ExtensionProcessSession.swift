@@ -191,6 +191,10 @@ final class ExtensionProcessSession: @unchecked Sendable {
     )
 
     private var startupResult: Result<ExtensionRegistration, Error>?
+    /// The raw, validated registration for this exact child generation. Localized inventory is
+    /// deliberately not stored here: action responses must be compared with the wire contract
+    /// accepted before host presentation transforms it.
+    private var acceptedRegistration: ExtensionRegistration?
     private var pendingActions: [String: PendingAction] = [:]
     private var pendingNavigators: [String: PendingNavigator] = [:]
     private var pendingAttachmentPreviews: [String: PendingAttachmentPreview] = [:]
@@ -1141,10 +1145,22 @@ final class ExtensionProcessSession: @unchecked Sendable {
                 )
                 return
             }
+            guard let original = acceptedNavigator(id: pending.navigatorID) else {
+                deliverNavigator(
+                    .failure(ExtensionProcessError.invalidMessage(
+                        "navigator '\(pending.navigatorID)' was not registered by this process"
+                    )),
+                    to: pending.completion
+                )
+                return
+            }
             do {
                 try ExtensionRegistration(
                     workspaceNavigators: [navigator]
-                ).validate(for: bundle.manifest)
+                ).validateWorkspaceNavigatorReplacement(
+                    for: bundle.manifest,
+                    replacing: original
+                )
             } catch {
                 let detail = (error as? ExtensionValidationError)?.description
                     ?? error.localizedDescription
@@ -1374,6 +1390,9 @@ final class ExtensionProcessSession: @unchecked Sendable {
             lock.unlock()
             return
         }
+        if case .success(let registration) = result {
+            acceptedRegistration = registration
+        }
         startupResult = result
         lock.unlock()
         startupSemaphore.signal()
@@ -1538,6 +1557,12 @@ final class ExtensionProcessSession: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return startupResult
+    }
+
+    private func acceptedNavigator(id: String) -> ExtensionWorkspaceNavigator? {
+        lock.lock()
+        defer { lock.unlock() }
+        return acceptedRegistration?.workspaceNavigators.first { $0.id == id }
     }
 
     private var hasCompletedStartup: Bool {

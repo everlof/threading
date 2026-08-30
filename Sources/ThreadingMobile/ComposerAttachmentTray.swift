@@ -175,6 +175,34 @@ final class ComposerAttachmentTray {
         notice = MobileL10n.string("That file couldn’t be read.")
     }
 
+#if DEBUG
+    /// Bounded, settled attachment inventory for the real composer evidence surface. This skips
+    /// transport timing only; the shipping tray, strip, capacity, removal, and layout paths still
+    /// render the state. It is deliberately unavailable outside DEBUG builds.
+    func configureEvidenceItems(count: Int) {
+        precondition((0...RemoteAttachmentUploadLimits.maximumPerMessage).contains(count))
+        uploads.values.forEach { $0.cancel() }
+        uploads.removeAll()
+        let fixtures: [(name: String, symbol: String)] = [
+            ("Screenshot.png", "photo"),
+            ("Notes.txt", "doc.text"),
+            ("Design.pdf", "doc.richtext"),
+            ("Logs.json", "curlybraces"),
+        ]
+        items = fixtures.prefix(count).enumerated().map { index, fixture in
+            var item = ComposerAttachmentItem(
+                id: UUID(uuidString: "00000000-0000-0000-0000-00000000000\(index + 1)")!,
+                name: fixture.name,
+                thumbnail: nil,
+                systemImage: fixture.symbol
+            )
+            item.state = .ready(uploadID: "evidence-upload-\(index + 1)")
+            return item
+        }
+        notice = nil
+    }
+#endif
+
     // MARK: - Private Methods
 
     private func upload(_ payload: ComposerAttachmentPayload, for id: UUID) {
@@ -639,5 +667,14 @@ struct ComposerAttachmentStrip: UIViewRepresentable {
             theme: theme,
             isRemovalEnabled: isRemovalEnabled
         )
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: ComposerAttachmentStripView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        return CGSize(width: width, height: ComposerAttachmentMetrics.stripHeight)
     }
 }

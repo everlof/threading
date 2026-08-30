@@ -9,7 +9,7 @@ export type DiagnosticFieldValidation =
   | "unsignedInteger"
 
 export const diagnosticContractSchemaVersion = 1 as const;
-export const diagnosticContractFingerprint = "756fa2d35dc0b4a20aae8ef8c71d2774512d621f70ab9303a335f5981f2b8da5";
+export const diagnosticContractFingerprint = "9ffae11e3c5442caca28e713df815fc1c1ecab8195524d62c98ed68727e75cb0";
 
 export const diagnosticEvents = new Set<string>([
   "appLaunched",
@@ -44,6 +44,12 @@ export const diagnosticEvents = new Set<string>([
   "socketEnded",
   "socketFailed",
   "socketReconnectScheduled",
+  "sessionResumeStarted",
+  "sessionResumeEnded",
+  "promptSubmissionStarted",
+  "promptSubmissionEnded",
+  "terminalInputProbeStarted",
+  "terminalInputProbeEnded",
   "permissionDecisionSent",
   "permissionDecisionReceived",
   "notificationAuthorization",
@@ -94,6 +100,12 @@ const iOSClientDiagnosticEvents = new Set<string>([
   "socketEnded",
   "socketFailed",
   "socketReconnectScheduled",
+  "sessionResumeStarted",
+  "sessionResumeEnded",
+  "promptSubmissionStarted",
+  "promptSubmissionEnded",
+  "terminalInputProbeStarted",
+  "terminalInputProbeEnded",
   "permissionDecisionSent",
   "notificationAuthorization",
   "apnsRegistrationSucceeded",

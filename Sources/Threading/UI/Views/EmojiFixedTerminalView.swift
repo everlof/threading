@@ -621,7 +621,8 @@ final class EmojiFixedTerminalView: LocalProcessTerminalView {
             PromptAttachment.record(
                 paths: readable,
                 sessionID: sessionID,
-                projectRoot: URL(fileURLWithPath: project.folderPath, isDirectory: true)
+                projectRoot: URL(fileURLWithPath: project.folderPath, isDirectory: true),
+                turnPlacement: .next
             )
         }
         return true

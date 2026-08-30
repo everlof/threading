@@ -158,8 +158,10 @@ Every report is written to disk before anything is sent, and delivery never cons
 directories under `~/Library/Application Support/Threading/IssueReports/`:
 
 - **`Outbox/<id>/`** — the record. `report.md` is the report as it reads to someone standing on
-  this machine, `screenshot.png` is the capture at the size it was taken, and `submission.json`
-  and `receipt.json` join it once a package has actually been delivered. Unbounded on purpose:
+  this machine, `screenshot.png` is an inspector capture, `attachment-01.<ext>` through
+  `attachment-04.<ext>` are explicitly selected images at their original size, and
+  `submission.json` and `receipt.json` join it once a package has actually been delivered.
+  Unbounded on purpose:
   filing a hundred of these and having an agent triage the folder is a supported way to work, and
   no code path reads the folder as a whole beyond a bounded count for a status line.
 - **`Pending/<id>.json`** — the delivery queue. The bounded wire package, present only while
@@ -167,11 +169,17 @@ directories under `~/Library/Application Support/Threading/IssueReports/`:
   `didBecomeActive`. Same UUID on every attempt, so a lost response returns the first receipt.
 
 **The record and the package are two documents, not one truncated twice.** The package is bounded
-(64 KB, a 12 KB JPEG preview, the capture's path stripped) because an intake service is entitled
-to an opinion about size and a temporary path here means nothing to it. The record keeps the
-full-resolution PNG and the path, because it is read by a person in Finder or an agent with
-`cat`, and a UI defect is often a few pixels that a 480-point preview has already thrown away.
-A report too large to send is therefore still a report that was kept.
+(128 KB; at most four JPEG previews of 12 KB each; every local path stripped) because an intake
+service is entitled to an opinion about size and a temporary path here means nothing to it. Image
+inspection, rasterization and compression happen off the main thread. The record keeps each
+full-resolution original and its path because it is read by a person in Finder or an agent with
+`cat`, and a UI defect is often a few pixels that a 480-pixel preview has already thrown away. A
+report too large to send is therefore still a report that was kept.
+
+The manual form is deliberately host-only. Threading owns image selection and paste handling,
+the four-image refusal, visible review and removal, local original-file custody, the backend
+projection and delivery receipt; an extension cannot replace presentation while those behaviors
+remain security- and privacy-relevant host authority.
 
 **Delivery is attempted only against a configured endpoint.** There is no compiled-in fallback
 URL: `THREADING_REPORT_INTAKE_URL` (Debug only, what `./dev` sets) or `ThreadingReportIntakeURL`

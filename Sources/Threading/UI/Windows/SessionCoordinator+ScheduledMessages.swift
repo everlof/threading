@@ -279,11 +279,12 @@ extension SessionCoordinator {
         // else it exists: nobody is watching, and `complete` deletes the only durable copy.
         // The provenance rides with the words: a curfew's wrap-up is the one row a held outbox
         // still hands over, and the drain reads that off the item rather than re-deriving it.
-        let prompt = handingOverImages(of: message, to: sessionID)
+        let handover = handingOverImages(of: message, to: sessionID)
         SessionMessageDelivery.deliver(
-            prompt,
+            handover.prompt,
             to: sessionID,
-            origin: message.purpose == .curfewWindDown ? .curfewWindDown : .user
+            origin: message.purpose == .curfewWindDown ? .curfewWindDown : .user,
+            attachmentIDs: handover.attachmentIDs
         ) { [weak self] outcome in
             guard let self else { return }
             switch outcome {
@@ -351,7 +352,8 @@ extension SessionCoordinator {
 
         guard container.launchInBackground(
             sessionID: session.id,
-            initialPrompt: handingOverImages(of: message, to: session.id).transportTextForWake
+            initialPrompt: handingOverImages(of: message, to: session.id)
+                .prompt.transportTextForWake
         ) else {
             return finish(message, failedBecause: L10n.string(
                 "Its agent could not be started."
@@ -426,7 +428,7 @@ extension SessionCoordinator {
         // be filed against a session that has a folder — and the paths that go into the opening
         // prompt have to be the ones that filing produced.
         var opening = NewChatOpeningMessage.compose(
-            prompt: handingOverImages(of: message, to: session.id).text,
+            prompt: handingOverImages(of: message, to: session.id).prompt.text,
             prefix: environment.settings.newChatOpeningPrefix,
             suffix: environment.settings.newChatOpeningSuffix
         )
@@ -460,6 +462,11 @@ extension SessionCoordinator {
 
     // MARK: - The Pictures It Was Carrying
 
+    private struct ScheduledPromptHandover {
+        let prompt: ConversationPrompt
+        let attachmentIDs: [String]
+    }
+
     /// Hands a scheduled send's images to the session receiving it, and answers the prompt with
     /// their paths on the end.
     ///
@@ -476,20 +483,23 @@ extension SessionCoordinator {
     private func handingOverImages(
         of message: ScheduledMessage,
         to sessionID: SessionID
-    ) -> ConversationPrompt {
+    ) -> ScheduledPromptHandover {
         let held = ScheduledMessageStore.shared.attachments.urls(for: message)
         guard !held.isEmpty,
               let folder = environment.projectStore.workingDirectory(forSessionID: sessionID)
-        else { return message.prompt }
+        else { return ScheduledPromptHandover(prompt: message.prompt, attachmentIDs: []) }
 
-        let handed = PromptAttachment.handOver(
+        let handover = PromptAttachment.handOverRecording(
             paths: held.map(\.path),
             sessionID: sessionID,
             projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
         )
-        return ConversationPrompt(
-            text: PromptAttachment.appending(paths: handed, to: message.text),
-            context: message.context
+        return ScheduledPromptHandover(
+            prompt: ConversationPrompt(
+                text: PromptAttachment.appending(paths: handover.paths, to: message.text),
+                context: message.context
+            ),
+            attachmentIDs: handover.attachments.map(\.id)
         )
     }
 

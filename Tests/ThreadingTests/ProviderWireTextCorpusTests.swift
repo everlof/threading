@@ -162,7 +162,7 @@ final class ProviderWireTextCorpusTests: XCTestCase {
         {"type":"assistant","timestamp":"2026-08-27T10:00:00Z","requestId":"r1","costUSD":false,"cwd":"/tmp","message":{"id":"m1","model":"claude-sonnet-4-5","usage":{"input_tokens":1000,"output_tokens":200}}}
         """#.write(to: url, atomically: true, encoding: .utf8)
 
-        let records = ClaudeUsageAdapter.records(
+        let records = try ClaudeUsageAdapter.records(
             inTranscriptAt: url, accountID: "a", accountName: "A"
         )
         XCTAssertEqual(records.count, 1)
@@ -741,10 +741,14 @@ enum ProviderWireTextCorpus {
             guard let url = write(text, to: directory, named: "claude-\(name).jsonl") else {
                 continue
             }
-            let records = ClaudeUsageAdapter.records(
-                inTranscriptAt: url, accountID: "a", accountName: "A"
-            )
-            lines.append("\(name) -> [\(records.map(describe).joined(separator: ", "))]")
+            do {
+                let records = try ClaudeUsageAdapter.records(
+                    inTranscriptAt: url, accountID: "a", accountName: "A"
+                )
+                lines.append("\(name) -> [\(records.map(describe).joined(separator: ", "))]")
+            } catch {
+                lines.append("\(name) -> threw \(error)")
+            }
         }
 
         lines.append("")
@@ -753,10 +757,14 @@ enum ProviderWireTextCorpus {
             guard let url = write(text, to: directory, named: "codex-\(name).jsonl") else {
                 continue
             }
-            let records = CodexUsageAdapter.records(
-                inRolloutAt: url, accountID: "a", accountName: "A"
-            )
-            lines.append("\(name) -> [\(records.map(describe).joined(separator: ", "))]")
+            do {
+                let records = try CodexUsageAdapter.records(
+                    inRolloutAt: url, accountID: "a", accountName: "A"
+                )
+                lines.append("\(name) -> [\(records.map(describe).joined(separator: ", "))]")
+            } catch {
+                lines.append("\(name) -> threw \(error)")
+            }
         }
 
         lines.append("")

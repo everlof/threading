@@ -28,8 +28,14 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   complete Settings pages and built-in Settings sections.
 - Validated `ui.workspace-navigation` registrations describing a complete semantic navigator
   interior with virtualized list, outline, and grid snapshots, optional initial load actions,
-  correlated runtime replacements, host-routed project/session destinations, persistent user
-  selection, and generation-scoped Native failback.
+  correlated runtime replacements, opt-in coalesced live session edges with bounded content-only
+  row patches, host-routed project/session destinations, persistent user selection, and
+  generation-scoped Native failback. A navigator may also declare a bounded, localized, static
+  set of toggle and choice options plus a host-evaluated pipeline. Pipeline navigators are pinned
+  as raw base-language values in the manifest and exact startup registration before localization;
+  the host owns fact snapshots, search, filtering, bucketing, sorting, relative-date invalidation,
+  virtualized visible-row realization, and source-session activation without invoking the
+  extension. Materialized v1 navigators remain runtime-only and compatible.
 - Package-owned localization catalogues with host language negotiation. The selected catalogue
   localizes static Settings and runtime semantic contributions, and is also exposed through
   `ExtensionLocalizer` for dynamic messages and formatted copy.
@@ -94,6 +100,9 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   only over HTTPS on the same exact host and method; any other redirect returns its 3xx for an
   independently granted re-request. The response's optional `finalURL` reports the URL that
   answered after same-host redirects without breaking decoding from an older host.
+- Domain-keyed fact publication (`facts.provide`) with static manifest and registration
+  definitions. Providers may replace bounded values only for canonical repository and
+  repository-branch subjects; this capability grants no opaque project or session identifiers.
 
 `ThreadingExtensionAPI.safeCapabilities` is the normative capability set. `network.client` is
 not a safe-v1 capability: it remains decodable for deprecated native format-1 compatibility,

@@ -282,6 +282,29 @@ final class MobileSessionChromeTests: XCTestCase {
         ))
     }
 
+    /// The toolbar dot opens a menu with several unrelated actions. Its state has to survive that
+    /// hop and name Workspace as the destination, rather than asking someone to guess which row
+    /// will resolve it.
+    func testUnseenBrowserActivityNamesWorkspaceAsItsDestination() {
+        XCTAssertEqual(
+            MobileSessionChrome.workspaceMenuTitle(hasUnseenBrowser: false),
+            MobileL10n.string("Workspace")
+        )
+        XCTAssertEqual(
+            MobileSessionChrome.workspaceMenuSystemImage(hasUnseenBrowser: false),
+            "square.grid.2x2"
+        )
+
+        XCTAssertEqual(
+            MobileSessionChrome.workspaceMenuTitle(hasUnseenBrowser: true),
+            MobileL10n.string("Workspace · New browser activity")
+        )
+        XCTAssertEqual(
+            MobileSessionChrome.workspaceMenuSystemImage(hasUnseenBrowser: true),
+            "square.grid.2x2.fill"
+        )
+    }
+
     func testPaletteBelongsToATerminalRatherThanANativeConversation() {
         XCTAssertTrue(MobileSessionChrome.canChooseTerminalTheme(
             canManageThemes: true,
@@ -794,9 +817,8 @@ final class RemoteAttachmentGalleryTests: XCTestCase {
     }
 }
 
-/// The chat menu's usage row. Its glyph is the reading now — the same rings the disc that opens
-/// the menu wears — so its words must stop repeating the percentages and start saying the one
-/// thing a ring cannot, without going silent on a host that rings nothing.
+/// The chat menu's usage row keeps exact values beside the glanceable gauge and follows them with
+/// the first reset from the same model-relevant window set.
 final class MobileSessionUsageMenuRowTests: XCTestCase {
 
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
@@ -804,75 +826,36 @@ final class MobileSessionUsageMenuRowTests: XCTestCase {
     private var ringed: MobileAccountUsageReading {
         MobileAccountUsageReading(
             rings: [.init(id: "7d", fraction: 0.34)],
-            summary: "7d 34%"
+            summary: "7d 34%",
+            nextReset: now.addingTimeInterval(5 * 60 * 60)
         )
     }
 
-    private func window(resetsIn seconds: Double) -> RemoteAccountUsageWindowDTO {
-        .init(
-            id: "7d",
-            name: "7d",
-            fraction: 0.34,
-            resetsAt: now.timeIntervalSince1970 + seconds,
-            windowDuration: 7 * 24 * 60 * 60
-        )
+    func testTheWordsKeepExactUsageAndTheRelevantReset() {
+        let detail = MobileSessionChrome.usageMenuDetail(reading: ringed, now: now)
+
+        XCTAssertTrue(detail.contains("7d 34%"))
+        XCTAssertTrue(detail.contains("5"), "when the window comes back is also stated")
     }
 
-    /// The report this row was changed for: "7d 34% · Next reset in 5 hours", where the first
-    /// half is a number the gauge beside it now draws.
-    func testTheWordsGiveUpThePercentagesToTheGauge() {
-        let detail = MobileSessionChrome.usageMenuDetail(
-            reading: ringed,
-            windows: [window(resetsIn: 5 * 60 * 60)],
-            now: now
-        )
-
-        XCTAssertFalse(detail.contains("%"), "the gauge draws the percentage; the words do not")
-        XCTAssertFalse(detail.contains("34"))
-        XCTAssertTrue(detail.contains("5"), "when the window comes back is what is left to say")
-    }
-
-    /// The nearest window still ahead is the one worth naming; a window that has already reset
-    /// is a leftover, exactly as it is for the ring it would have drawn.
-    func testTheNearestResetStillAheadIsTheOneNamed() {
-        let detail = MobileSessionChrome.usageMenuDetail(
-            reading: ringed,
-            windows: [
-                window(resetsIn: -60),
-                window(resetsIn: 3 * 24 * 60 * 60),
-                window(resetsIn: 2 * 60 * 60),
-            ],
-            now: now
-        )
-
-        XCTAssertTrue(detail.contains("2"), "two hours away, not three days")
-        XCTAssertFalse(detail.contains("%"))
-    }
-
-    /// A host that reports no reset time leaves the row with a gauge and nothing to say. The
-    /// reading in words is better than a login's name alone.
+    /// A host that reports no reset time still states the exact reading.
     func testAHostThatNamesNoResetKeepsTheReadingInWords() {
-        XCTAssertEqual(
-            MobileSessionChrome.usageMenuDetail(reading: ringed, windows: nil, now: now),
-            "7d 34%"
+        let noReset = MobileAccountUsageReading(
+            rings: ringed.rings,
+            summary: ringed.summary
         )
         XCTAssertEqual(
-            MobileSessionChrome.usageMenuDetail(reading: ringed, windows: [], now: now),
+            MobileSessionChrome.usageMenuDetail(reading: noReset, now: now),
             "7d 34%"
         )
     }
 
-    /// An older host sends a summary and no windows to ring. There is no gauge to hand the
-    /// percentages to, so the words keep them even when a reset is known.
+    /// An older host sends a summary and no per-window reset metadata.
     func testAReadingWithNothingToRingKeepsItsPercentagesInTheWords() {
         let wordsOnly = MobileAccountUsageReading(rings: [], summary: "5h 43% · 7d 73%")
 
         XCTAssertEqual(
-            MobileSessionChrome.usageMenuDetail(
-                reading: wordsOnly,
-                windows: [window(resetsIn: 5 * 60 * 60)],
-                now: now
-            ),
+            MobileSessionChrome.usageMenuDetail(reading: wordsOnly, now: now),
             "5h 43% · 7d 73%"
         )
     }
@@ -880,10 +863,13 @@ final class MobileSessionUsageMenuRowTests: XCTestCase {
     /// A fraction with no words behind it still draws; the row shows the dash the rest of the
     /// app uses rather than an empty second line.
     func testAGaugeWithNoWordsBehindItSaysSoRatherThanNothing() {
-        let mute = MobileAccountUsageReading(rings: [.init(id: "binding", fraction: 0.2)], summary: nil)
+        let mute = MobileAccountUsageReading(
+            rings: [.init(id: "binding", fraction: 0.2)],
+            summary: nil
+        )
 
         XCTAssertEqual(
-            MobileSessionChrome.usageMenuDetail(reading: mute, windows: nil, now: now),
+            MobileSessionChrome.usageMenuDetail(reading: mute, now: now),
             MobileUsageDefaults.unknownValue
         )
     }

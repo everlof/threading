@@ -166,6 +166,139 @@ public struct ExtensionSettingField: Codable, Equatable, Sendable {
     }
 }
 
+/// Shared validation for every host-rendered control declaration.
+///
+/// Settings pages and navigator option menus deliberately use the same semantic controls. Keeping
+/// their field validation here prevents the two public surfaces from accepting subtly different
+/// identifiers, titles, defaults, or choice lists as the vocabulary grows.
+enum ExtensionSettingValidator {
+    static func fieldIssues(
+        _ field: ExtensionSettingField,
+        path: String
+    ) -> [ExtensionValidationIssue] {
+        var issues = contributionIDIssues(field.id, path: "\(path).id")
+        issues.append(contentsOf: textIssues(field.title, path: "\(path).title", maximum: 120))
+        if let description = field.description {
+            issues.append(contentsOf: textIssues(
+                description,
+                path: "\(path).description",
+                maximum: 500
+            ))
+        }
+        issues.append(contentsOf: controlIssues(field.control, path: "\(path).control"))
+        return issues
+    }
+
+    static func controlIssues(
+        _ control: ExtensionSettingControl,
+        path: String
+    ) -> [ExtensionValidationIssue] {
+        var issues: [ExtensionValidationIssue] = []
+        switch control {
+        case .toggle:
+            break
+        case .text(let defaultValue, let placeholder, let maximumLength):
+            if !(1...4_096).contains(maximumLength) {
+                issues.append(.init(
+                    path: "\(path).maximumLength",
+                    message: "must be between 1 and 4096"
+                ))
+            }
+            if defaultValue.count > maximumLength {
+                issues.append(.init(
+                    path: "\(path).defaultValue",
+                    message: "must not exceed maximumLength"
+                ))
+            }
+            if let placeholder, placeholder.count > 200 {
+                issues.append(.init(
+                    path: "\(path).placeholder",
+                    message: "must contain at most 200 characters"
+                ))
+            }
+        case .choice(let defaultValue, let options):
+            if options.isEmpty {
+                issues.append(.init(path: "\(path).options", message: "must not be empty"))
+            }
+            issues.append(contentsOf: duplicateIssues(
+                options.map(\.id),
+                path: "\(path).options"
+            ))
+            for (optionIndex, option) in options.enumerated() {
+                let optionPath = "\(path).options[\(optionIndex)]"
+                issues.append(contentsOf: contributionIDIssues(
+                    option.id,
+                    path: "\(optionPath).id"
+                ))
+                issues.append(contentsOf: textIssues(
+                    option.title,
+                    path: "\(optionPath).title",
+                    maximum: 120
+                ))
+            }
+            if !options.contains(where: { $0.id == defaultValue }) {
+                issues.append(.init(
+                    path: "\(path).defaultValue",
+                    message: "must name one of the declared options"
+                ))
+            }
+        case .integer(let defaultValue, let minimum, let maximum, let step):
+            if minimum > maximum {
+                issues.append(.init(
+                    path: "\(path).minimum",
+                    message: "must not exceed maximum"
+                ))
+            }
+            if step <= 0 {
+                issues.append(.init(path: "\(path).step", message: "must be positive"))
+            } else if defaultValue < minimum
+                        || defaultValue > maximum
+                        || !(defaultValue - minimum).isMultiple(of: step) {
+                issues.append(.init(
+                    path: "\(path).defaultValue",
+                    message: "must be an in-range step value"
+                ))
+            }
+        }
+        return issues
+    }
+
+    static func contributionIDIssues(
+        _ value: String,
+        path: String
+    ) -> [ExtensionValidationIssue] {
+        guard ExtensionIdentifierRules.isContributionIdentifier(value) else {
+            return [.init(path: path, message: ExtensionIdentifierRules.contributionMessage)]
+        }
+        return []
+    }
+
+    static func textIssues(
+        _ value: String,
+        path: String,
+        maximum: Int
+    ) -> [ExtensionValidationIssue] {
+        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return [.init(path: path, message: "must not be empty")]
+        }
+        if value.count > maximum {
+            return [.init(path: path, message: "must contain at most \(maximum) characters")]
+        }
+        return []
+    }
+
+    static func duplicateIssues(
+        _ identifiers: [String],
+        path: String
+    ) -> [ExtensionValidationIssue] {
+        var seen: Set<String> = []
+        return identifiers.enumerated().compactMap { index, identifier in
+            guard !seen.insert(identifier).inserted else { return nil }
+            return .init(path: "\(path)[\(index)].id", message: "duplicates '\(identifier)'")
+        }
+    }
+}
+
 public struct ExtensionSettingsSection: Codable, Equatable, Sendable {
     public let id: String
     public let title: String?
@@ -283,24 +416,35 @@ public struct ExtensionSettingsContribution: Codable, Equatable, Sendable {
             ))
         }
 
-        issues.append(contentsOf: duplicateIssues(
+        issues.append(contentsOf: ExtensionSettingValidator.duplicateIssues(
             pages.map(\.id),
             path: "\(path).pages"
         ))
-        issues.append(contentsOf: duplicateIssues(
+        issues.append(contentsOf: ExtensionSettingValidator.duplicateIssues(
             pages.flatMap(\.sections).map(\.id) + sections.map(\.id),
             path: "\(path).sections"
         ))
-        issues.append(contentsOf: duplicateIssues(
+        issues.append(contentsOf: ExtensionSettingValidator.duplicateIssues(
             fields.map(\.id),
             path: "\(path).fields"
         ))
 
         for (pageIndex, page) in pages.enumerated() {
             let pagePath = "\(path).pages[\(pageIndex)]"
-            issues.append(contentsOf: contributionIDIssues(page.id, path: "\(pagePath).id"))
-            issues.append(contentsOf: textIssues(page.title, path: "\(pagePath).title", maximum: 120))
-            issues.append(contentsOf: textIssues(page.symbol, path: "\(pagePath).symbol", maximum: 120))
+            issues.append(contentsOf: ExtensionSettingValidator.contributionIDIssues(
+                page.id,
+                path: "\(pagePath).id"
+            ))
+            issues.append(contentsOf: ExtensionSettingValidator.textIssues(
+                page.title,
+                path: "\(pagePath).title",
+                maximum: 120
+            ))
+            issues.append(contentsOf: ExtensionSettingValidator.textIssues(
+                page.symbol,
+                path: "\(pagePath).symbol",
+                maximum: 120
+            ))
             if page.sections.isEmpty {
                 issues.append(.init(path: "\(pagePath).sections", message: "must not be empty"))
             }
@@ -331,9 +475,9 @@ public struct ExtensionSettingsContribution: Codable, Equatable, Sendable {
         fields: [ExtensionSettingField],
         path: String
     ) -> [ExtensionValidationIssue] {
-        var issues = contributionIDIssues(id, path: "\(path).id")
+        var issues = ExtensionSettingValidator.contributionIDIssues(id, path: "\(path).id")
         if let title {
-            issues.append(contentsOf: textIssues(
+            issues.append(contentsOf: ExtensionSettingValidator.textIssues(
                 title,
                 path: "\(path).title",
                 maximum: 120
@@ -343,7 +487,7 @@ public struct ExtensionSettingsContribution: Codable, Equatable, Sendable {
             issues.append(.init(path: "\(path).fields", message: "must not be empty"))
         }
         for (fieldIndex, field) in fields.enumerated() {
-            issues.append(contentsOf: fieldIssues(
+            issues.append(contentsOf: ExtensionSettingValidator.fieldIssues(
                 field,
                 path: "\(path).fields[\(fieldIndex)]"
             ))
@@ -351,123 +495,6 @@ public struct ExtensionSettingsContribution: Codable, Equatable, Sendable {
         return issues
     }
 
-    private func fieldIssues(
-        _ field: ExtensionSettingField,
-        path: String
-    ) -> [ExtensionValidationIssue] {
-        var issues = contributionIDIssues(field.id, path: "\(path).id")
-        issues.append(contentsOf: textIssues(field.title, path: "\(path).title", maximum: 120))
-        if let description = field.description {
-            issues.append(contentsOf: textIssues(
-                description,
-                path: "\(path).description",
-                maximum: 500
-            ))
-        }
-
-        switch field.control {
-        case .toggle:
-            break
-        case .text(let defaultValue, let placeholder, let maximumLength):
-            if !(1...4_096).contains(maximumLength) {
-                issues.append(.init(
-                    path: "\(path).control.maximumLength",
-                    message: "must be between 1 and 4096"
-                ))
-            }
-            if defaultValue.count > maximumLength {
-                issues.append(.init(
-                    path: "\(path).control.defaultValue",
-                    message: "must not exceed maximumLength"
-                ))
-            }
-            if let placeholder, placeholder.count > 200 {
-                issues.append(.init(
-                    path: "\(path).control.placeholder",
-                    message: "must contain at most 200 characters"
-                ))
-            }
-        case .choice(let defaultValue, let options):
-            if options.isEmpty {
-                issues.append(.init(path: "\(path).control.options", message: "must not be empty"))
-            }
-            issues.append(contentsOf: duplicateIssues(
-                options.map(\.id),
-                path: "\(path).control.options"
-            ))
-            for (optionIndex, option) in options.enumerated() {
-                let optionPath = "\(path).control.options[\(optionIndex)]"
-                issues.append(contentsOf: contributionIDIssues(
-                    option.id,
-                    path: "\(optionPath).id"
-                ))
-                issues.append(contentsOf: textIssues(
-                    option.title,
-                    path: "\(optionPath).title",
-                    maximum: 120
-                ))
-            }
-            if !options.contains(where: { $0.id == defaultValue }) {
-                issues.append(.init(
-                    path: "\(path).control.defaultValue",
-                    message: "must name one of the declared options"
-                ))
-            }
-        case .integer(let defaultValue, let minimum, let maximum, let step):
-            if minimum > maximum {
-                issues.append(.init(
-                    path: "\(path).control.minimum",
-                    message: "must not exceed maximum"
-                ))
-            }
-            if step <= 0 {
-                issues.append(.init(path: "\(path).control.step", message: "must be positive"))
-            } else if defaultValue < minimum
-                        || defaultValue > maximum
-                        || !(defaultValue - minimum).isMultiple(of: step) {
-                issues.append(.init(
-                    path: "\(path).control.defaultValue",
-                    message: "must be an in-range step value"
-                ))
-            }
-        }
-        return issues
-    }
-
-    private func contributionIDIssues(
-        _ value: String,
-        path: String
-    ) -> [ExtensionValidationIssue] {
-        guard ExtensionIdentifierRules.isContributionIdentifier(value) else {
-            return [.init(path: path, message: ExtensionIdentifierRules.contributionMessage)]
-        }
-        return []
-    }
-
-    private func textIssues(
-        _ value: String,
-        path: String,
-        maximum: Int
-    ) -> [ExtensionValidationIssue] {
-        if value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return [.init(path: path, message: "must not be empty")]
-        }
-        if value.count > maximum {
-            return [.init(path: path, message: "must contain at most \(maximum) characters")]
-        }
-        return []
-    }
-
-    private func duplicateIssues(
-        _ identifiers: [String],
-        path: String
-    ) -> [ExtensionValidationIssue] {
-        var seen: Set<String> = []
-        return identifiers.enumerated().compactMap { index, identifier in
-            guard !seen.insert(identifier).inserted else { return nil }
-            return .init(path: "\(path)[\(index)].id", message: "duplicates '\(identifier)'")
-        }
-    }
 }
 
 /// Environment payload available before an extension writes its registration.

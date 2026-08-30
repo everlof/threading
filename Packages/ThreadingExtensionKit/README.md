@@ -10,6 +10,7 @@ The package contains:
 - statically declared and runtime-registered MCP tool contributions;
 - statically inspectable, host-rendered Settings pages and built-in-page sections;
 - versioned, manifest-declared extension services brokered without shared storage;
+- versioned, domain-keyed fact providers with bounded atomic publication;
 - host-scoped persistent key-value and disposable cache storage;
 - a tokenized host client for atomic component and primitive identity publications plus safe
   project/session/provider/account snapshots, separately gated session-runtime telemetry, and
@@ -48,6 +49,8 @@ swift build
 swift test
 swift run HelloStatusExtensionExample --threading-register
 swift run HelloStatusConsumerExtensionExample --threading-register
+swift run GitLabStateExtensionExample --threading-register
+swift run ActivityInboxExtensionExample --threading-register
 ```
 
 Threading links this package, renders `ExtensionNode` through its own AppKit design system, and
@@ -79,8 +82,19 @@ carrying stable IDs and host project/session destinations. Users select a live n
 **View → Navigator**; Threading persists the identity, routes value-bearing actions through the
 owning process, atomically installs returned snapshots, preserves collection presentation state,
 and falls back to Native if that process generation disappears or cannot render. Actionable grid
-items supply an `accessibilityLabel` for the host-owned cell. See
+items supply an `accessibilityLabel` for the host-owned cell. A navigator may declare up to 16
+localized `ExtensionWorkspaceNavigatorOption` toggle or choice values. Their complete declaration
+is immutable within one process generation and fits within a 30-entry extension-owned menu budget;
+the v1 renderer keeps these controls hidden until the host-evaluated v2 transform consumes them. See
 [`docs/extensions/WORKSPACE_NAVIGATORS.md`](../docs/extensions/WORKSPACE_NAVIGATORS.md).
+
+For a host-evaluated navigator, set `pipeline`, put that complete navigator in the manifest's
+static `workspaceNavigators` list, and repeat the exact raw base-language declaration in the live
+registration. Threading checks parity before localizing it and exposes only the matched running
+generation; materialized v1 navigators remain runtime-only. `Examples/ActivityInboxExtension` is
+the public reference: it requests only `ui.workspace-navigation`, while Threading owns its search,
+Priority/relative-date sections, sorting, working indicator updates, row realization, and
+source-session activation.
 
 Settings contributions are declared in the manifest under the `settings` capability. Threading
 renders complete pages and sections appended to stable built-in pages using toggle, bounded text,
@@ -95,6 +109,19 @@ Brokered services use `services.provide` plus runtime-registered
 JSON object through Threading's generation-bound host channel; Threading authenticates the caller
 from its token and forwards an `ExtensionServiceRequest` to the matching running provider
 process. The provider never receives the consumer token or access to its package/storage.
+
+Fact providers use `facts.provide` and repeat their manifest's `factDefinitions` in the live
+registration. `ExtensionHostClient.publishFacts(_:replacing:)` atomically replaces values for
+explicit repository or repository-branch subjects. The bearer supplies provider identity and
+process generation; no opaque project or session identifier is accepted by this capability.
+`Examples/GitLabStateExtension` is the data-only reference: it discovers public GitLab merge
+request state through an exact `gitlab.com` brokered-network grant and publishes
+`gitlab.mr.state@1` on canonical repository-branch subjects. It declares no navigator, component,
+session, settings, or storage capability. Its stable 32-repository admission set, four-request
+concurrency ceiling, two-page repository limit, and 128-fact repository limit bound both remote
+work and retained generation state. Authoritative refreshes replace complete repository scopes;
+transient or truncated refreshes preserve the last observation so the host, not the provider,
+decides when it is stale.
 
 Component customization is connected end to end. A process declaring `ui.components` receives a
 short-lived host URL and bearer token, then uses `ExtensionHostClient` to atomically replace its

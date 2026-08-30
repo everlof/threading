@@ -103,7 +103,7 @@ final class AccountsPreferencesViewController: NSViewController {
         limits.onPresentationChange = { [weak self] in self?.reloadPresentationRows() }
 
         let page = SettingsUI.listPage(
-            title: "Accounts",
+            title: "Agents & Accounts",
             body: scrollView
         )
         page.translatesAutoresizingMaskIntoConstraints = false
@@ -458,9 +458,9 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
     private func content(for row: PresentationRow) -> NSView {
         switch row {
         case .setup:
-            return SettingsUI.section("Add or Reconnect", setupController.view)
+            return SettingsUI.section("Supported agents", setupController.view)
         case .accountCaption:
-            return SettingsUI.caption("Agent Accounts")
+            return SettingsUI.caption("Managed accounts")
         case .emptyAccount:
             return makeEmptyRow()
         case .account(let index):
@@ -619,11 +619,11 @@ enum AccountsPreferencesLayout {
 enum AccountsPreferencesStrings {
     static var explanation: String {
         L10n.string("""
-            Add and reconnect logins with the provider's own secure browser flow; Threading \
-            stores only the isolated config location, never a credential. Existing Claude and \
-            Codex config directories are still found automatically. Click an icon or rename a \
-            login to tell them apart. Switch one off to stop offering it for new sessions — \
-            nothing is deleted, and sessions already running on it keep working.
+            Threading can add, reconnect, and switch between Claude Code and Codex logins. The \
+            provider owns the secure browser flow and credential; Threading stores only the \
+            isolated config location. Grok, Cursor, and OpenCode keep sign-in in their own \
+            tools, as shown above. Rename a managed login or choose an icon to tell it apart, \
+            or switch it off without deleting it.
             """)
     }
     static var iconWellTooltip: String { L10n.string("Choose an icon") }
@@ -641,7 +641,7 @@ enum AccountsPreferencesStrings {
         L10n.string("Run this provider's secure sign-in again")
     }
     static var emptyMessage: String {
-        L10n.string("No agent accounts yet. Set up one to get started.")
+        L10n.string("No managed accounts yet. Add a Claude Code or Codex login above.")
     }
 
     static func enabledLabel(_ accountName: String) -> String {

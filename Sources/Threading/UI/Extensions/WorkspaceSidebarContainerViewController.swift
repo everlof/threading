@@ -9,10 +9,16 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     private let routing: ExtensionWorkspaceNavigatorRouting
     private let contextProvider: WorkspaceNavigatorHostViewController.ContextProvider
     private let destinationHandler: WorkspaceNavigatorHostViewController.DestinationHandler
+    private let factSnapshotProvider: WorkspaceNavigatorHostViewController.FactSnapshotProvider
+    private let factSnapshotPatchProvider:
+        WorkspaceNavigatorHostViewController.FactSnapshotPatchProvider
+    private let onSelectNative: () -> Void
     private var visibleController: NSViewController?
     private var extensionController: WorkspaceNavigatorHostViewController?
     private var desiredSelection: WorkspaceNavigatorSelection = .native
     private var settingsOverride = false
+    private var settingsPendingSessionIDs = Set<SessionID>()
+    private var documentRefreshPending = false
     private var unavailableGeneration: String?
 
     private(set) var effectiveSelection: WorkspaceNavigatorSelection = .native
@@ -21,12 +27,23 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         nativeController: ProjectSidebarViewController,
         routing: ExtensionWorkspaceNavigatorRouting,
         contextProvider: @escaping WorkspaceNavigatorHostViewController.ContextProvider,
-        destinationHandler: @escaping WorkspaceNavigatorHostViewController.DestinationHandler
+        destinationHandler: @escaping WorkspaceNavigatorHostViewController.DestinationHandler,
+        factSnapshotProvider: @escaping WorkspaceNavigatorHostViewController.FactSnapshotProvider = {
+            _ in nil
+        },
+        factSnapshotPatchProvider:
+            @escaping WorkspaceNavigatorHostViewController.FactSnapshotPatchProvider = {
+                _, _, _ in nil
+            },
+        onSelectNative: @escaping () -> Void = {}
     ) {
         self.nativeController = nativeController
         self.routing = routing
         self.contextProvider = contextProvider
         self.destinationHandler = destinationHandler
+        self.factSnapshotProvider = factSnapshotProvider
+        self.factSnapshotPatchProvider = factSnapshotPatchProvider
+        self.onSelectNative = onSelectNative
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -43,13 +60,19 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     func activate(_ selection: WorkspaceNavigatorSelection) {
         if selection != desiredSelection {
             unavailableGeneration = nil
+            settingsPendingSessionIDs.removeAll(keepingCapacity: true)
+            documentRefreshPending = false
         }
         desiredSelection = selection
         refreshAvailability()
     }
 
     func setSettingsOverride(_ enabled: Bool) {
+        guard enabled != settingsOverride else { return }
         settingsOverride = enabled
+        if enabled, let controller = extensionController {
+            guard retainForSettings(controller.suspendLiveEventDelivery()) else { return }
+        }
         refreshAvailability()
     }
 
@@ -66,6 +89,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
                   navigatorID: navigatorID
               ),
               inventory.processGeneration != unavailableGeneration else {
+            extensionController?.setLiveEventDeliveryEnabled(false)
             effectiveSelection = .native
             extensionController = nil
             show(nativeController)
@@ -74,17 +98,22 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         unavailableGeneration = nil
 
         let controller: WorkspaceNavigatorHostViewController
+        let createdController: Bool
         if let current = extensionController,
            current.extensionIdentifier == extensionIdentifier,
            current.navigatorID == navigatorID,
            current.processGeneration == inventory.processGeneration {
             controller = current
+            createdController = false
         } else {
             controller = WorkspaceNavigatorHostViewController(
                 inventory: inventory,
                 routing: routing,
                 contextProvider: contextProvider,
                 destinationHandler: destinationHandler,
+                factSnapshotProvider: factSnapshotProvider,
+                factSnapshotPatchProvider: factSnapshotPatchProvider,
+                onSelectNative: onSelectNative,
                 onUnavailable: { [weak self] in
                     self?.failBack(
                         extensionIdentifier: extensionIdentifier,
@@ -94,13 +123,45 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
                 }
             )
             extensionController = controller
+            createdController = true
         }
+        // A replacement controller has not loaded its view yet. Keep events paused while `show`
+        // loads it and queues the initial load action; otherwise catch-up can run first and an
+        // older load response can overwrite the fresh event content with no edge left to retry.
+        controller.setLiveEventDeliveryEnabled(false)
+        let catchUpSessionIDs = settingsPendingSessionIDs
+        settingsPendingSessionIDs.removeAll(keepingCapacity: true)
+        catchUpSessionIDs.forEach(controller.sessionDidChange)
         effectiveSelection = desiredSelection
         show(controller)
+        if createdController {
+            // `viewDidLoad` queued the initial load, which subsumes any hidden project refresh.
+            documentRefreshPending = false
+        } else if documentRefreshPending {
+            documentRefreshPending = false
+            controller.refresh()
+        }
+        controller.setLiveEventDeliveryEnabled(true)
     }
 
     func refreshDocument() {
+        guard !settingsOverride,
+              case .extensionNavigator = effectiveSelection else {
+            if case .extensionNavigator = desiredSelection {
+                documentRefreshPending = true
+            }
+            return
+        }
         extensionController?.refresh()
+    }
+
+    func sessionDidChange(_ sessionID: SessionID) {
+        guard case .extensionNavigator = desiredSelection else { return }
+        if settingsOverride {
+            _ = retainForSettings([sessionID])
+            return
+        }
+        extensionController?.sessionDidChange(sessionID)
     }
 
     func synchronizeSelection(with destination: ExtensionWorkspaceNavigatorDestination?) {
@@ -119,9 +180,34 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
             return
         }
         unavailableGeneration = processGeneration
+        current.setLiveEventDeliveryEnabled(false)
         extensionController = nil
         effectiveSelection = .native
         show(nativeController)
+    }
+
+    @discardableResult
+    private func retainForSettings<S: Sequence>(_ sessionIDs: S) -> Bool
+    where S.Element == SessionID {
+        var retained = settingsPendingSessionIDs
+        retained.formUnion(sessionIDs)
+        guard retained.count <= WorkspaceNavigatorHostViewController.maximumPendingSessionIDs
+        else {
+            settingsPendingSessionIDs.removeAll(keepingCapacity: true)
+            extensionController?.setLiveEventDeliveryEnabled(false)
+            if case .extensionNavigator(let extensionIdentifier, let navigatorID) = desiredSelection {
+                unavailableGeneration = routing.registeredWorkspaceNavigator(
+                    extensionIdentifier: extensionIdentifier,
+                    navigatorID: navigatorID
+                )?.processGeneration ?? extensionController?.processGeneration
+            }
+            extensionController = nil
+            effectiveSelection = .native
+            show(nativeController)
+            return false
+        }
+        settingsPendingSessionIDs = retained
+        return true
     }
 
     /// Adds the replacement before removing the old controller, so failback and process reloads
@@ -134,6 +220,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         guard visibleController !== controller else { return }
 
         let previous = visibleController
+        (previous as? WorkspaceNavigatorHostViewController)?.dismissPresentedMenu()
         addChild(controller)
         let presented = controller.view
         presented.translatesAutoresizingMaskIntoConstraints = false

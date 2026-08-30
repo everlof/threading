@@ -187,14 +187,9 @@ final class ComposerTextViewPasteTests: XCTestCase {
     /// view works did not prove that screen had actually adopted it. This hosts the shipping
     /// representable and pins the UIKit edit-menu surface plus its attachment interception.
     func testNewSessionDraftHostsTheNativePasteSurface() throws {
-        var draft = Fixture.existingDraft
-        var isFocused = false
         var pastedFiles = 0
-        let editor = SessionDraftPromptEditor(
-            text: Binding(get: { draft }, set: { draft = $0 }),
-            isFocused: Binding(get: { isFocused }, set: { isFocused = $0 }),
-            isEnabled: true,
-            theme: RemoteThemePalette(nil),
+        let editor = DraftFocusHarness(
+            initialDraft: Fixture.existingDraft,
             offersFiles: { true },
             pasteFiles: {
                 pastedFiles += 1
@@ -223,7 +218,185 @@ final class ComposerTextViewPasteTests: XCTestCase {
 
         textView.paste(nil)
         XCTAssertEqual(pastedFiles, 1)
-        XCTAssertEqual(draft, Fixture.existingDraft)
+        XCTAssertEqual(textView.text, Fixture.existingDraft)
+    }
+
+    /// The draft's UIKit editor reports focus through SwiftUI view state. A character changes the
+    /// SwiftUI draft and therefore updates the representable while the keyboard is still up;
+    /// that render must keep the editor first responder rather than treating the update as a
+    /// dismissal request.
+    func testNewSessionDraftKeepsFocusAcrossATypedCharacter() throws {
+        let host = UIHostingController(rootView: DraftFocusHarness())
+        let window = makeWindow(hosting: host, size: CGSize(width: 240, height: 120))
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        textView.insertText("x")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertEqual(textView.text, "x")
+        XCTAssertTrue(
+            textView.isFirstResponder,
+            "updating the SwiftUI draft for one character must not dismiss its keyboard"
+        )
+    }
+
+    /// The compact prompt shares a row with two centred controls. Its first line therefore owns
+    /// equal top and bottom air inside that same compact row rather than starting at its top.
+    func testNewSessionDraftCentersOneLineInTheCompactComposerRow() throws {
+        let host = UIHostingController(rootView: DraftFocusHarness(
+            initialDraft: "S",
+            editorHeight: MobileDesign.Size.compactControl
+        ))
+        let window = makeWindow(hosting: host, size: CGSize(width: 240, height: 120))
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        let font = try XCTUnwrap(textView.font)
+        XCTAssertEqual(
+            textView.textContainerInset.top,
+            textView.textContainerInset.bottom,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(
+            font.lineHeight + textView.textContainerInset.top + textView.textContainerInset.bottom,
+            MobileDesign.Size.compactControl,
+            accuracy: 0.5,
+            "the first text line and the neighbouring controls must share one optical centre"
+        )
+    }
+
+    /// SwiftUI grows the representable through intermediate heights before it reaches the native
+    /// editor's fitted height. None of those transient frames is the authored scroll cap: treating
+    /// one as such activates the separate action row shown in the physical empty-draft screenshot.
+    func testEmptyNewSessionDraftKeepsActionsInItsCompactRow() throws {
+        var overflowTransitions: [Bool] = []
+        let host = UIHostingController(rootView: DraftFocusHarness(
+            editorHeight: MobileDesign.Size.compactControl,
+            firstLineAccessoryWidth: 42,
+            onOverflowChange: { overflowTransitions.append($0) }
+        ))
+        let window = makeWindow(hosting: host, size: CGSize(width: 240, height: 120))
+        defer { window.isHidden = true }
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        XCTAssertFalse(textView.isScrollEnabled)
+        XCTAssertFalse(
+            overflowTransitions.contains(true),
+            "the empty draft entered its overflow shell: \(overflowTransitions); "
+                + "content=\(textView.contentSize.height) "
+                + "bounds=\(textView.bounds.height) "
+                + "fit=\(textView.sizeThatFits(CGSize(width: textView.bounds.width, height: .greatestFiniteMagnitude)).height) "
+                + "maximum=\(textView.maximumIntrinsicHeight)"
+        )
+    }
+
+    /// The first glyph does not create a second line. Its line fragment must therefore have the
+    /// same measured height as the empty insertion line; otherwise typing and deleting one
+    /// character repeatedly moves the entire composer and stretches its caret.
+    func testFirstCharacterAndDeletionKeepTheCompactDraftHeightAndCaret() throws {
+        let host = UIHostingController(rootView: DraftFocusHarness(
+            editorHeight: MobileDesign.Size.compactControl,
+            firstLineAccessoryWidth: 42
+        ))
+        let window = makeWindow(hosting: host, size: CGSize(width: 240, height: 120))
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        let font = try XCTUnwrap(textView.font)
+        let fittingHeight = {
+            textView.sizeThatFits(CGSize(
+                width: textView.bounds.width,
+                height: .greatestFiniteMagnitude
+            )).height
+        }
+        let emptyHeight = fittingHeight()
+
+        textView.text = "G"
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let oneCharacterHeight = fittingHeight()
+        let caretHeight = textView.caretRect(for: textView.endOfDocument).height
+
+        textView.text = ""
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let deletedHeight = fittingHeight()
+
+        XCTAssertEqual(
+            oneCharacterHeight,
+            emptyHeight,
+            accuracy: 0.5,
+            "one glyph changed the compact editor from \(emptyHeight) to \(oneCharacterHeight)"
+        )
+        XCTAssertEqual(deletedHeight, emptyHeight, accuracy: 0.5)
+        XCTAssertEqual(
+            caretHeight,
+            font.pointSize,
+            accuracy: 0.5,
+            "the caret was \(caretHeight) points beside \(font.pointSize)-point text"
+        )
+    }
+
+    /// The paperclip and Start control occupy the first line only. Keeping them as horizontal
+    /// stack siblings narrowed every line in the screenshot even after the terminal composer had
+    /// adopted TextKit exclusions.
+    func testNewSessionDraftWrappedLinesReclaimBothAccessoryColumns() throws {
+        let host = UIHostingController(rootView: DraftFocusHarness(
+            initialDraft: "We have properly set up push certificates, but what does it take for development notifications to reach the app while we test the complete flow?",
+            editorHeight: 120,
+            firstLineAccessoryWidth: 42
+        ))
+        let window = makeWindow(hosting: host, size: CGSize(width: 240, height: 160))
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+
+        var lineRects: [CGRect] = []
+        let glyphRange = textView.layoutManager.glyphRange(for: textView.textContainer)
+        textView.layoutManager.enumerateLineFragments(
+            forGlyphRange: glyphRange
+        ) { rect, _, _, _, _ in
+            lineRects.append(rect)
+        }
+
+        XCTAssertGreaterThanOrEqual(lineRects.count, 2)
+        XCTAssertEqual(lineRects[0].minX, 42, accuracy: 0.5)
+        XCTAssertEqual(lineRects[1].minX, 0, accuracy: 0.5)
+        XCTAssertGreaterThan(
+            lineRects[1].width,
+            lineRects[0].width,
+            "later lines must fill beneath both first-line controls"
+        )
+    }
+
+    /// Exclusion paths belong to document coordinates and therefore cannot protect fixed
+    /// controls after the first line scrolls away. The native editor reports the moment it owns
+    /// a scroll viewport so its SwiftUI shell can move those controls into a separate row.
+    func testCappedNewSessionDraftReportsOverflowToItsShell() {
+        var reportedOverflow = false
+        let host = UIHostingController(rootView: DraftFocusHarness(
+            initialDraft: Array(repeating: "G", count: 12).joined(separator: "\n"),
+            editorHeight: 120,
+            firstLineAccessoryWidth: 42,
+            onOverflowChange: { reportedOverflow = $0 }
+        ))
+        let window = makeWindow(hosting: host, size: CGSize(width: 240, height: 160))
+        defer { window.isHidden = true }
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        let textView = descendants(of: IntrinsicTextView.self, in: window).first
+        let nativeScroll = textView.map { String($0.isScrollEnabled) } ?? "missing"
+        XCTAssertTrue(
+            reportedOverflow,
+            "the shell kept its fixed controls over a document that had begun scrolling; "
+                + "native scroll=\(nativeScroll) "
+                + "content=\(textView?.contentSize.height ?? -1) "
+                + "bounds=\(textView?.bounds.height ?? -1)"
+        )
     }
 
     func testAFilePasteIsTakenAsAnAttachmentAndNeverReachesTheText() {
@@ -262,6 +435,231 @@ final class ComposerTextViewPasteTests: XCTestCase {
         let own = (root as? T).map { [$0] } ?? []
         return own + root.subviews.flatMap { descendants(of: type, in: $0) }
     }
+
+    private func makeWindow<Content: View>(
+        hosting host: UIHostingController<Content>,
+        size: CGSize
+    ) -> UIWindow {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+        return window
+    }
+
+    private struct DraftFocusHarness: View {
+        @State private var draft: String
+        @State private var isFocused = false
+        @State private var isOverflowing = false
+        let offersFiles: () -> Bool
+        let pasteFiles: () -> Bool
+        let editorHeight: CGFloat
+        let firstLineAccessoryWidth: CGFloat
+        let onOverflowChange: (Bool) -> Void
+
+        init(
+            initialDraft: String = "",
+            editorHeight: CGFloat = 80,
+            offersFiles: @escaping () -> Bool = { false },
+            pasteFiles: @escaping () -> Bool = { false },
+            firstLineAccessoryWidth: CGFloat = 0,
+            onOverflowChange: @escaping (Bool) -> Void = { _ in }
+        ) {
+            _draft = State(initialValue: initialDraft)
+            self.editorHeight = editorHeight
+            self.offersFiles = offersFiles
+            self.pasteFiles = pasteFiles
+            self.firstLineAccessoryWidth = firstLineAccessoryWidth
+            self.onOverflowChange = onOverflowChange
+        }
+
+        var body: some View {
+            SessionDraftPromptEditor(
+                text: $draft,
+                isFocused: $isFocused,
+                isOverflowing: $isOverflowing,
+                isEnabled: true,
+                theme: RemoteThemePalette(nil),
+                offersFiles: offersFiles,
+                pasteFiles: pasteFiles,
+                firstLineLeadingAccessoryWidth: firstLineAccessoryWidth,
+                firstLineTrailingAccessoryWidth: firstLineAccessoryWidth,
+                firstLineAccessoryHeight: firstLineAccessoryWidth > 0
+                    ? MobileDesign.Size.compactControl
+                    : 0
+            )
+            .frame(width: 240, height: editorHeight)
+            .onChange(of: isOverflowing) { _, value in onOverflowChange(value) }
+        }
+    }
+}
+
+/// The terminal's controls belong to the first line, not to two permanent columns beside the
+/// whole paragraph. This pins the TextKit geometry that lets later lines reclaim that width.
+@MainActor
+final class TerminalLineTextLayoutTests: XCTestCase {
+
+    func testWrappedLinesRunUnderTheFirstLineAccessories() {
+        let textView = IntrinsicTextView(frame: CGRect(x: 0, y: 0, width: 240, height: 160))
+        textView.font = UIFont.preferredFont(forTextStyle: .body)
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.firstLineLeadingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        textView.firstLineTrailingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        textView.firstLineAccessoryHeight = MobileDesign.Size.minimumTapTarget
+        textView.text = "Review the attachment spacing, then let every wrapped line use the full composer width."
+
+        textView.setNeedsLayout()
+        textView.layoutIfNeeded()
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+
+        var lineRects: [CGRect] = []
+        let glyphRange = textView.layoutManager.glyphRange(for: textView.textContainer)
+        textView.layoutManager.enumerateLineFragments(
+            forGlyphRange: glyphRange
+        ) { rect, _, _, _, _ in
+            lineRects.append(rect)
+        }
+
+        XCTAssertGreaterThanOrEqual(lineRects.count, 2)
+        XCTAssertEqual(
+            lineRects[0].minX,
+            MobileDesign.Size.minimumTapTarget,
+            accuracy: 0.5,
+            "only the first line flows around the paperclip"
+        )
+        XCTAssertEqual(
+            lineRects[1].minX,
+            0,
+            accuracy: 0.5,
+            "the next line starts beneath the paperclip instead of keeping its empty column"
+        )
+        XCTAssertGreaterThan(
+            lineRects[1].width,
+            lineRects[0].width,
+            "later lines also reclaim the send button's column"
+        )
+        XCTAssertGreaterThanOrEqual(
+            lineRects[1].minY,
+            MobileDesign.Size.minimumTapTarget,
+            "the full-width line begins below both 44-point hit targets"
+        )
+    }
+
+    func testTerminalEditorKeepsFocusAcrossATypedCharacter() throws {
+        let host = UIHostingController(rootView: TerminalEditorHarness())
+        let window = makeWindow(hosting: host)
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        textView.insertText("x")
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        XCTAssertEqual(textView.text, "x")
+        XCTAssertTrue(
+            textView.isFirstResponder,
+            "the binding update for one character must not dismiss the terminal keyboard"
+        )
+    }
+
+    /// Once the editor reaches its five-line cap, the text view—not the surrounding terminal
+    /// screen—owns the rest of the draft. Pin the actual UIKit scroll range: wrapping correctly
+    /// around the two first-line controls is not enough if the capped view still declines pans.
+    func testTerminalEditorScrollsPastItsVisibleLineCap() throws {
+        let host = UIHostingController(rootView: TerminalEditorHarness(
+            initialDraft: Array(repeating: "a draft line", count: 20).joined(separator: "\n")
+        ))
+        let window = makeWindow(hosting: host)
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        textView.layoutIfNeeded()
+
+        XCTAssertTrue(textView.isScrollEnabled, "the capped editor must accept its own pan")
+        XCTAssertGreaterThan(
+            textView.contentSize.height,
+            textView.bounds.height,
+            "the hidden draft lines must remain inside the text view's scrollable document"
+        )
+
+        let maximumOffset = textView.contentSize.height - textView.bounds.height
+        textView.setContentOffset(CGPoint(x: 0, y: maximumOffset / 2), animated: false)
+        XCTAssertGreaterThan(
+            textView.contentOffset.y,
+            0,
+            "UIKit constrained an attempted draft scroll back to its first five lines"
+        )
+    }
+
+    func testTerminalEditorReturnSubmitsWithoutAddingANewline() throws {
+        var submissionCount = 0
+        let host = UIHostingController(rootView: TerminalEditorHarness {
+            submissionCount += 1
+        })
+        let window = makeWindow(hosting: host)
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        textView.text = "ship it"
+        let acceptsReturn = textView.delegate?.textView?(
+            textView,
+            shouldChangeTextIn: NSRange(location: textView.text.utf16.count, length: 0),
+            replacementText: "\n"
+        )
+
+        XCTAssertEqual(acceptsReturn, false)
+        XCTAssertEqual(submissionCount, 1)
+        XCTAssertEqual(textView.text, "ship it")
+    }
+
+    private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
+        let own = (root as? T).map { [$0] } ?? []
+        return own + root.subviews.flatMap { descendants(of: type, in: $0) }
+    }
+
+    private func makeWindow<Content: View>(
+        hosting host: UIHostingController<Content>
+    ) -> UIWindow {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 140)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+        return window
+    }
+
+    private struct TerminalEditorHarness: View {
+        @State private var draft: String
+        @State private var isFocused = false
+        let onSubmit: () -> Void
+
+        init(initialDraft: String = "", onSubmit: @escaping () -> Void = {}) {
+            _draft = State(initialValue: initialDraft)
+            self.onSubmit = onSubmit
+        }
+
+        var body: some View {
+            TerminalLinePromptEditor(
+                text: $draft,
+                isFocused: $isFocused,
+                theme: RemoteThemePalette(nil),
+                onSubmit: onSubmit
+            )
+            .frame(width: 288, height: 100)
+        }
+    }
 }
 
 /// Once a submission has named an upload set, its chips are a frozen receipt until the host
@@ -293,9 +691,58 @@ final class ComposerAttachmentStripTests: XCTestCase {
         XCTAssertEqual(enabledButton.alpha, 1)
     }
 
+    func testSwiftUIBridgeKeepsTheStripToItsOwnedHeight() throws {
+        let item = ComposerAttachmentItem(
+            name: "notes.txt",
+            thumbnail: nil,
+            systemImage: "doc"
+        )
+        let bridge = ComposerAttachmentStrip(
+            items: [item],
+            theme: RemoteThemePalette(nil),
+            remove: { _ in }
+        )
+        let host = UIHostingController(rootView:
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                bridge
+                Color.clear.frame(height: 44)
+            }
+            .frame(width: 240, height: 400)
+        )
+        let window = makeWindow(hosting: host, size: CGSize(width: 240, height: 400))
+        defer { window.isHidden = true }
+
+        let strip = try XCTUnwrap(
+            descendants(of: ComposerAttachmentStripView.self, in: window).first
+        )
+        XCTAssertEqual(
+            strip.frame.height,
+            ComposerAttachmentMetrics.stripHeight,
+            accuracy: 0.5,
+            "the bridge must not absorb the composer's remaining vertical space"
+        )
+    }
+
     private func descendants<T: UIView>(of type: T.Type, in root: UIView) -> [T] {
         let own = (root as? T).map { [$0] } ?? []
         return own + root.subviews.flatMap { descendants(of: type, in: $0) }
+    }
+
+    private func makeWindow<Content: View>(
+        hosting host: UIHostingController<Content>,
+        size: CGSize
+    ) -> UIWindow {
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(origin: .zero, size: size)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+        return window
     }
 }
 

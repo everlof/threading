@@ -47,7 +47,7 @@ struct MobileSettingsView: View {
                             SettingsNavigationRow(
                                 symbol: "paintpalette",
                                 title: "Mac appearance",
-                                detail: model.me?.theme.map { LocalizedStringKey($0.name) }
+                                detail: model.appTheme.map { LocalizedStringKey($0.name) }
                             ) {
                                 MacAppearanceSettingsView()
                             }
@@ -614,7 +614,7 @@ struct MobileAppIconChoice: Identifiable, Equatable {
         themed("newsprint", "Newsprint", "Newsprint"),
         themed("botanical", "Botanical", "Botanical"),
         themed("industrial", "Industrial", "Industrial"),
-        themed("pure-black", "Pure Black", "PureBlack"),
+        themed("pure", "Pure", "Pure"),
         themed("cappuccino", "Cappuccino", "Cappuccino"),
         themed("solarized", "Solarized", "Solarized"),
         themed("nord", "Nord", "Nord"),

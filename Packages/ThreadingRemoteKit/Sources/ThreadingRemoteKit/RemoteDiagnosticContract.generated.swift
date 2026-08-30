@@ -50,6 +50,19 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
     case socketFailed
     /// A failed live socket scheduled one bounded exponential retry.
     case socketReconnectScheduled
+    /// A parked authenticated session socket began reattaching to its live surface.
+    case sessionResumeStarted
+    /// A parked session reattach reached a terminal result with its own duration, separate from
+    /// socket age.
+    case sessionResumeEnded
+    /// A content-free prompt or atomic terminal submission began.
+    case promptSubmissionStarted
+    /// A prompt or atomic terminal submission reached an acknowledgement or terminal failure.
+    case promptSubmissionEnded
+    /// One rate-limited direct-terminal input latency probe began; it contains no input bytes.
+    case terminalInputProbeStarted
+    /// A sampled direct-terminal input reached host admission or timed out.
+    case terminalInputProbeEnded
     case permissionDecisionSent
     case permissionDecisionReceived
     case notificationAuthorization
@@ -86,6 +99,8 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
         .hostRefreshFailed, .hostRouteStarted, .hostRouteProgress, .hostRouteEnded,
         .hostDiscoveryFound, .hostDiscoveryMatched, .hostDiscoveryIgnored, .socketConnecting,
         .socketConnected, .socketEnded, .socketFailed, .socketReconnectScheduled,
+        .sessionResumeStarted, .sessionResumeEnded, .promptSubmissionStarted,
+        .promptSubmissionEnded, .terminalInputProbeStarted, .terminalInputProbeEnded,
         .permissionDecisionSent, .notificationAuthorization, .apnsRegistrationSucceeded,
         .apnsRegistrationFailed, .notificationRegistrationStarted,
         .notificationRegistrationSucceeded, .notificationRegistrationFailed,
@@ -250,5 +265,5 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Hashable, Sendable
 
 public enum RemoteDiagnosticContract {
     public static let schemaVersion = 1
-    public static let fingerprint = "756fa2d35dc0b4a20aae8ef8c71d2774512d621f70ab9303a335f5981f2b8da5"
+    public static let fingerprint = "9ffae11e3c5442caca28e713df815fc1c1ecab8195524d62c98ed68727e75cb0"
 }

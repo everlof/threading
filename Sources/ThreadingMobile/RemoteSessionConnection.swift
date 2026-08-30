@@ -4,6 +4,12 @@ import ThreadingRemoteKit
 import UIKit
 #endif
 
+/// Interaction timing writes are ordered, but never run on the phone UI actor whose latency they
+/// measure. `RemoteDiagnosticJournal.record` performs a synchronous file append.
+private let remoteInteractionDiagnosticQueue = DispatchQueue(
+    label: "codes.threading.mobile-diagnostics.interaction"
+)
+
 enum RemoteMobileConnectionDefaults {
     static let conversationPageRows = 64
     static let runPlanPageSteps = 64
@@ -22,6 +28,11 @@ enum RemoteMobileConnectionDefaults {
     /// How long a return from the background waits for the socket to answer a ping before
     /// treating it as dead and reconnecting.
     static let resumeLivenessDeadline: Duration = .seconds(1)
+    /// Direct terminal input stays fire-and-forget. One write per interval carries an opaque
+    /// diagnostic request id so a support capture can measure host admission without adding an
+    /// acknowledgement or journal record for every keystroke.
+    static let terminalInputProbeIntervalNanoseconds: UInt64 = 5_000_000_000
+    static let terminalInputProbeTimeout: Duration = .seconds(10)
     /// A background longer than this has almost certainly cost the socket on the Mac's side
     /// while the phone's side still looks alive; asking is slower than reconnecting.
     static let reconnectOutrightAfterBackground: TimeInterval = 30
@@ -152,6 +163,12 @@ private struct PendingRemoteSubmission {
     let contextAttachments: [RemoteConversationContextAttachmentDTO]
     let attachmentUploadIDs: [String]
     let createdAt: Date
+    let startedAtNanoseconds: UInt64
+}
+
+private struct PendingTerminalInputProbe {
+    let requestID: String
+    let startedAtNanoseconds: UInt64
 }
 
 private struct PendingAttentionRequest {
@@ -287,6 +304,8 @@ final class RemoteSessionConnection: ObservableObject {
     private var socketTrace: String?
     private var socketStartedAt: UInt64?
     private var socketAttempt = 1
+    private var sessionResumeTrace: String?
+    private var sessionResumeStartedAt: UInt64?
     private var stopped = false
     private var connectionGeneration = 0
     private var pendingTerminalOutput = Data()
@@ -315,6 +334,9 @@ final class RemoteSessionConnection: ObservableObject {
     private var viewportSettleTask: Task<Void, Never>?
     private var typingIdleTask: Task<Void, Never>?
     private var isReportingTyping = false
+    private var pendingTerminalInputProbe: PendingTerminalInputProbe?
+    private var terminalInputProbeTimeoutTask: Task<Void, Never>?
+    private var nextTerminalInputProbeAt: UInt64 = 0
     private var serverFeatures: Set<String> = []
     private var runPlanRevision: Int?
     private var runPlanPagePending = false
@@ -625,6 +647,8 @@ final class RemoteSessionConnection: ObservableObject {
 
     func disconnect(markEnded: Bool = true) {
         reportTyping(false)
+        finishSessionResume(result: "cancelled")
+        finishTerminalInputProbe(result: "cancelled")
         if markEnded { isAwaitingResume = false }
         resumeProbeGeneration = nil
         terminalHydrationQuietTask?.cancel()
@@ -727,6 +751,12 @@ final class RemoteSessionConnection: ObservableObject {
         }
         warmTransportState = .resuming
         phase = .connecting
+        sessionResumeTrace = MobileDiagnostics.connectivityTrace()
+        sessionResumeStartedAt = MobileDiagnostics.monotonicNow()
+        recordInteractionDiagnostic(
+            .sessionResumeStarted,
+            fields: sessionResumeFields(result: "started")
+        )
         clearRunPlanState(resetFeature: true)
         beginTerminalHydration()
         lastSentTerminalViewport = nil
@@ -740,6 +770,7 @@ final class RemoteSessionConnection: ObservableObject {
         } catch {
             cancelHelloDeadline()
             warmTransportState = .active
+            finishSessionResume(result: "failed", code: MobileDiagnostics.errorCode(error))
             return false
         }
     }
@@ -929,14 +960,25 @@ final class RemoteSessionConnection: ObservableObject {
         guard phase == .connected, capability == .interact,
               inputControl?.canWrite != false else { return }
         reportTyping(true)
-        try? send(RemoteClientMessage(type: "input", data: String(decoding: data, as: UTF8.self)))
+        sendTerminalInputMessage(String(decoding: data, as: UTF8.self))
     }
 
     func sendTerminalKey(_ text: String) {
         guard phase == .connected, capability == .interact,
               inputControl?.canWrite != false else { return }
         reportTyping(true)
-        try? send(RemoteClientMessage(type: "input", data: text))
+        sendTerminalInputMessage(text)
+    }
+
+    private func sendTerminalInputMessage(_ text: String) {
+        let probeID = beginTerminalInputProbeIfEligible()
+        do {
+            try send(RemoteClientMessage(type: "input", data: text, requestID: probeID))
+        } catch {
+            if let probeID {
+                finishTerminalInputProbe(requestID: probeID, result: "sendFailed")
+            }
+        }
     }
 
     /// Reports the grid SwiftTerm can actually display on this phone. The latest value is kept
@@ -1121,8 +1163,10 @@ final class RemoteSessionConnection: ObservableObject {
                 text: text,
                 contextAttachments: contextAttachments,
                 attachmentUploadIDs: attachmentUploadIDs,
-                createdAt: Date()
+                createdAt: Date(),
+                startedAtNanoseconds: MobileDiagnostics.monotonicNow()
             )
+            recordPromptSubmissionStarted(requestID: requestID, messageType: type)
             isPromptSubmissionPending = supportsAcknowledgement
             try send(RemoteClientMessage(
                 type: type,
@@ -1132,17 +1176,14 @@ final class RemoteSessionConnection: ObservableObject {
                 attachmentUploadIDs: attachmentUploadIDs.isEmpty ? nil : attachmentUploadIDs
             ))
             if !supportsAcknowledgement {
-                pendingPromptSubmission = nil
-                Task { @MainActor [weak self] in
-                    self?.promptSubmissionFeedback = RemotePromptSubmissionFeedback(
-                        requestID: requestID,
-                        text: text,
-                        status: .accepted
-                    )
-                }
+                finishPendingPrompt(with: .accepted)
             }
             return requestID
         } catch {
+            recordPromptSubmissionEnded(
+                pendingPromptSubmission,
+                result: "sendFailed"
+            )
             pendingPromptSubmission = nil
             isPromptSubmissionPending = false
             fail(with: RemoteConnectionFailure.transport(error, host: destinationHost))
@@ -1470,6 +1511,7 @@ final class RemoteSessionConnection: ObservableObject {
             )
         case "hello":
             guard let hello = try? JSONDecoder().decode(RemoteHelloDTO.self, from: data) else { return }
+            let wasResumingParkedSession = warmTransportState == .resuming
             mirroredCaption = hello.title.isEmpty ? mirroredCaption : hello.title
             surface = hello.surface
             if surface != .terminal {
@@ -1513,14 +1555,18 @@ final class RemoteSessionConnection: ObservableObject {
                 )
             )
 #endif
-            MobileDiagnostics.recordConnectivity(.socketConnected, fields: socketFields(
-                phase: "hello"
-            ).merging([
-                .result: "succeeded",
-                .attempt: String(socketAttempt),
-                .capability: hello.capability.rawValue,
-                .surface: hello.surface.rawValue,
-            ]) { current, _ in current })
+            if wasResumingParkedSession {
+                finishSessionResume(result: "succeeded")
+            } else {
+                MobileDiagnostics.recordConnectivity(.socketConnected, fields: socketFields(
+                    phase: "hello"
+                ).merging([
+                    .result: "succeeded",
+                    .attempt: String(socketAttempt),
+                    .capability: hello.capability.rawValue,
+                    .surface: hello.surface.rawValue,
+                ]) { current, _ in current })
+            }
             reconnectAttempt = 0
             reconnectSequence = 0
             if let pendingViewport, capability == .interact,
@@ -1715,12 +1761,15 @@ final class RemoteSessionConnection: ObservableObject {
                 from: data
             ), let pending = pendingPromptSubmission,
                pending.requestID == result.requestID else { return }
-            pendingPromptSubmission = nil
-            isPromptSubmissionPending = false
-            promptSubmissionFeedback = RemotePromptSubmissionFeedback(
+            finishPendingPrompt(with: result.status)
+        case "inputProbeResult":
+            guard let result = try? JSONDecoder().decode(
+                RemoteTerminalInputProbeResultDTO.self,
+                from: data
+            ) else { return }
+            finishTerminalInputProbe(
                 requestID: result.requestID,
-                text: pending.text,
-                status: result.status
+                result: result.accepted ? "accepted" : "refused"
             )
         case "ended":
             let ended = try? JSONDecoder().decode(RemoteEndedDTO.self, from: data)
@@ -1830,12 +1879,15 @@ final class RemoteSessionConnection: ObservableObject {
         httpStatus: Int? = nil
     ) {
         let failedPhase = phase == .connected ? "session" : "hello"
+        let failureCode = code ?? "connection.\(failure.cause.rawValue)"
+        finishSessionResume(result: "failed", code: failureCode)
+        finishTerminalInputProbe(result: "failed")
         clearRunPlanState(resetFeature: true)
         phase = .failed(failure)
         var fields = socketFields(phase: failedPhase)
         fields[.result] = "failed"
         fields[.attempt] = String(socketAttempt)
-        fields[.code] = code ?? "connection.\(failure.cause.rawValue)"
+        fields[.code] = failureCode
         fields[.reason] = failure.cause.rawValue
         // Whether the identity check passed, refused, or never ran. A token, never a
         // fingerprint: the certificate is not a fact a support bundle carries, and without this
@@ -1904,6 +1956,177 @@ final class RemoteSessionConnection: ObservableObject {
         }
         return fields
     }
+
+    private func sessionResumeFields(
+        result: String,
+        code: String? = nil
+    ) -> [RemoteDiagnosticField: String] {
+        var fields = destinationFields
+        fields[.phase] = "resume"
+        fields[.result] = result
+        if let sessionResumeTrace { fields[.trace] = sessionResumeTrace }
+        if let sessionResumeStartedAt {
+            fields[.durationMS] = MobileDiagnostics.elapsedMilliseconds(
+                since: sessionResumeStartedAt
+            )
+        }
+        if let code { fields[.code] = code }
+        return fields
+    }
+
+    private func finishSessionResume(result: String, code: String? = nil) {
+        guard sessionResumeTrace != nil else { return }
+        recordInteractionDiagnostic(
+            .sessionResumeEnded,
+            level: result == "succeeded" || result == "cancelled" ? .info : .warning,
+            fields: sessionResumeFields(result: result, code: code)
+        )
+        sessionResumeTrace = nil
+        sessionResumeStartedAt = nil
+    }
+
+    private func beginTerminalInputProbeIfEligible() -> String? {
+        let now = MobileDiagnostics.monotonicNow()
+        guard serverFeatures.contains(
+            RemoteWebSocketFeature.terminalInputLatencyProbe.rawValue
+        ), pendingTerminalInputProbe == nil, now >= nextTerminalInputProbeAt else {
+            return nil
+        }
+        let requestID = UUID().uuidString.lowercased()
+        pendingTerminalInputProbe = PendingTerminalInputProbe(
+            requestID: requestID,
+            startedAtNanoseconds: now
+        )
+        let (next, overflow) = now.addingReportingOverflow(
+            RemoteMobileConnectionDefaults.terminalInputProbeIntervalNanoseconds
+        )
+        nextTerminalInputProbeAt = overflow ? UInt64.max : next
+        recordInteractionDiagnostic(
+            .terminalInputProbeStarted,
+            fields: terminalInputProbeFields(
+                requestID: requestID,
+                startedAtNanoseconds: now,
+                result: "started"
+            )
+        )
+        terminalInputProbeTimeoutTask?.cancel()
+        terminalInputProbeTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(
+                for: RemoteMobileConnectionDefaults.terminalInputProbeTimeout
+            )
+            guard !Task.isCancelled else { return }
+            self?.finishTerminalInputProbe(requestID: requestID, result: "timedOut")
+        }
+        return requestID
+    }
+
+    private func finishTerminalInputProbe(
+        requestID: String? = nil,
+        result: String
+    ) {
+        guard let pending = pendingTerminalInputProbe,
+              requestID == nil || requestID == pending.requestID else { return }
+        terminalInputProbeTimeoutTask?.cancel()
+        terminalInputProbeTimeoutTask = nil
+        pendingTerminalInputProbe = nil
+        let durationMS = MobileDiagnostics.elapsedMilliseconds(
+            since: pending.startedAtNanoseconds
+        )
+        recordInteractionDiagnostic(
+            .terminalInputProbeEnded,
+            level: result == "accepted" || result == "cancelled" ? .info : .warning,
+            fields: terminalInputProbeFields(
+                requestID: pending.requestID,
+                startedAtNanoseconds: pending.startedAtNanoseconds,
+                result: result
+            )
+        )
+#if DEBUG
+        MobileTerminalWirePerformanceProbe.inputProbeCompleted(
+            session: session,
+            result: result,
+            durationMS: durationMS
+        )
+#endif
+    }
+
+    private func terminalInputProbeFields(
+        requestID: String,
+        startedAtNanoseconds: UInt64,
+        result: String
+    ) -> [RemoteDiagnosticField: String] {
+        var fields = destinationFields
+        fields[.trace] = MobileDiagnostics.pseudonym(requestID, prefix: "trace")
+        fields[.phase] = "clientRoundTrip"
+        fields[.kind] = "terminal"
+        fields[.result] = result
+        fields[.durationMS] = MobileDiagnostics.elapsedMilliseconds(
+            since: startedAtNanoseconds
+        )
+        return fields
+    }
+
+    private func recordPromptSubmissionStarted(requestID: String, messageType: String) {
+        var fields = destinationFields
+        fields[.trace] = MobileDiagnostics.pseudonym(requestID, prefix: "trace")
+        fields[.phase] = "clientRoundTrip"
+        fields[.kind] = submissionKind(messageType)
+        fields[.result] = "started"
+        recordInteractionDiagnostic(.promptSubmissionStarted, fields: fields)
+    }
+
+    private func recordPromptSubmissionEnded(
+        _ pending: PendingRemoteSubmission?,
+        result: String
+    ) {
+        guard let pending else { return }
+        var fields = destinationFields
+        fields[.trace] = MobileDiagnostics.pseudonym(
+            pending.requestID,
+            prefix: "trace"
+        )
+        fields[.phase] = "clientRoundTrip"
+        fields[.kind] = submissionKind(pending.messageType)
+        fields[.result] = result
+        fields[.durationMS] = MobileDiagnostics.elapsedMilliseconds(
+            since: pending.startedAtNanoseconds
+        )
+        recordInteractionDiagnostic(
+            .promptSubmissionEnded,
+            level: result == RemotePromptSubmissionStatus.accepted.rawValue ? .info : .warning,
+            fields: fields
+        )
+    }
+
+    private func submissionKind(_ messageType: String) -> String {
+        switch messageType {
+        case "terminalSubmit": "terminal"
+        case "terminalAttachmentInsert": "terminalAttachment"
+        default: "conversation"
+        }
+    }
+
+    private func recordInteractionDiagnostic(
+        _ event: RemoteDiagnosticEvent,
+        level: RemoteDiagnosticLevel = .info,
+        fields: [RemoteDiagnosticField: String]
+    ) {
+        remoteInteractionDiagnosticQueue.async {
+            MobileDiagnostics.recordConnectivity(event, level: level, fields: fields)
+        }
+    }
+
+#if DEBUG
+    /// Lets a focused test cross the asynchronous writer boundary without repeatedly reading the
+    /// bounded on-disk journal (which can itself take long enough to starve the writer queue).
+    func waitForInteractionDiagnosticsForTesting() async {
+        await withCheckedContinuation { continuation in
+            remoteInteractionDiagnosticQueue.async {
+                continuation.resume()
+            }
+        }
+    }
+#endif
 
     /// Which session, which kind of address, and which address, as a hash.
     ///
@@ -2008,6 +2231,7 @@ final class RemoteSessionConnection: ObservableObject {
 
     private func finishPendingPrompt(with status: RemotePromptSubmissionStatus) {
         guard let pending = pendingPromptSubmission else { return }
+        recordPromptSubmissionEnded(pending, result: status.rawValue)
         pendingPromptSubmission = nil
         isPromptSubmissionPending = false
         promptSubmissionFeedback = RemotePromptSubmissionFeedback(
@@ -2039,19 +2263,37 @@ final class RemoteSessionConnection: ObservableObject {
 
     static func demoTerminal() -> RemoteSessionConnection {
         let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] ?? ""
+        let marketingProvider: MobileMarketingTerminalFixture.Provider? = switch demoMode {
+        case MobileDemoFixture.marketingClaudeTUI.rawValue,
+             MobileDemoFixture.marketingClaudeUsageMenu.rawValue:
+            .claude
+        case MobileDemoFixture.marketingCodexTUI.rawValue:
+            .codex
+        default:
+            nil
+        }
         let isCodexFixture = demoMode == "terminal-ansi"
             || demoMode == "terminal-attachments"
             || demoMode == "terminal-codex-tui"
             || demoMode == "terminal-scrollback"
+            || marketingProvider == .codex
         let agentName = isCodexFixture ? "Codex" : "Claude Code"
-        let session = RemoteSessionSummaryDTO(
-            id: "f50c77da-5716-470b-933c-d68310644b4f",
-            title: "\(agentName) · AnotherTerminal",
-            agentKind: isCodexFixture ? "codex" : "claude",
-            surface: .terminal,
-            state: .idle,
-            projectName: "AnotherTerminal"
-        )
+        let session: RemoteSessionSummaryDTO
+        if let marketingProvider {
+            session = RemoteAppModel.marketingTerminalSession(
+                provider: marketingProvider,
+                now: Date().timeIntervalSince1970
+            )
+        } else {
+            session = RemoteSessionSummaryDTO(
+                id: "f50c77da-5716-470b-933c-d68310644b4f",
+                title: "\(agentName) · AnotherTerminal",
+                agentKind: isCodexFixture ? "codex" : "claude",
+                surface: .terminal,
+                state: .idle,
+                projectName: "AnotherTerminal"
+            )
+        }
         let link = RemoteConnectionLink(string: "https://demo.invalid/#terminal-preview")!
         let connection = RemoteSessionConnection(
             session: session,
@@ -2060,12 +2302,24 @@ final class RemoteSessionConnection: ObservableObject {
         connection.phase = .connected
         connection.surface = .terminal
         connection.capability = .interact
-        let usesThreadingTheme = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"]
-            == "threading"
-        connection.theme = usesThreadingTheme
-            ? RemoteAppModel.demoThreadingTheme
-            : RemoteAppModel.demoTheme
-        connection.terminalTheme = usesThreadingTheme
+        let requestedTheme = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"]
+        switch requestedTheme {
+        case "fallback":
+            connection.theme = nil
+        case "light":
+            connection.theme = RemoteAppModel.demoLightTheme
+        case "threading":
+            connection.theme = RemoteAppModel.demoThreadingTheme
+        case "system-remote":
+            connection.theme = RemoteAppModel.demoSystemRemoteTheme
+        case let requested?:
+            connection.theme = RemoteAppModel.demoCatalogThemes.first(where: {
+                $0.id == requested
+            }) ?? RemoteAppModel.demoTheme
+        case nil:
+            connection.theme = RemoteAppModel.demoTheme
+        }
+        connection.terminalTheme = requestedTheme == "threading"
             ? RemoteAppModel.demoThreadingTerminalTheme
             : RemoteAppModel.demoTerminalTheme
         connection.terminalColumns = 48
@@ -2085,6 +2339,33 @@ final class RemoteSessionConnection: ObservableObject {
         connection.supportsComposerAttachmentUploads = true
         connection.supportsTerminalAttachmentInsertion = true
         connection.inputControl = ownerOnlyInputControlState()
+        if let marketingProvider {
+            let fixture: MobileMarketingTerminalFixture
+            do {
+                fixture = try MobileMarketingTerminalFixture.load(marketingProvider)
+            } catch {
+                fatalError("Invalid marketing terminal fixture: \(error)")
+            }
+            connection.terminalColumns = fixture.columns
+            connection.terminalRows = fixture.rows
+            connection.pendingTerminalOutput = fixture.payload
+            if marketingProvider == .claude {
+                connection.runPlanRevision = 1
+                connection.runPlan = RemoteRunPlanSummaryDTO(
+                    activeTitle: "Render theme variants",
+                    current: 3,
+                    completed: 2,
+                    active: 1,
+                    total: 3
+                )
+                connection.runPlanSteps = [
+                    .init(id: "0", title: "Build deterministic provider fixtures", status: .completed),
+                    .init(id: "1", title: "Capture five marketing checkpoints", status: .completed),
+                    .init(id: "2", title: "Render theme variants", status: .inProgress),
+                ]
+            }
+            return connection
+        }
         let lines: [String]
         switch demoMode {
         case "terminal-selection":

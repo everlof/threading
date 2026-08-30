@@ -301,6 +301,33 @@ final class PromptView: NSView, ThemedComponent {
     /// the meaning of the field rather than improve its presentation.
     var showsImageAttachments = false
 
+    /// The most preview attachments this particular surface may retain.
+    ///
+    /// The shared composer ceiling remains authoritative even if a caller supplies a larger
+    /// number. A report form uses the smaller backend count; chat composers keep the full rail.
+    var maximumImageAttachmentCount = PromptViewDefaults.maximumImageAttachments
+
+    /// What happens when a supplied file cannot become one of the visible image attachments.
+    ///
+    /// Agent composers keep the path as useful prompt text. A report form rejects it instead:
+    /// local filesystem paths are not report prose and must never leak into the private wire DTO.
+    enum UnpreviewableImageBehavior {
+        case insertLiteralPath
+        case reject
+    }
+    var unpreviewableImageBehavior: UnpreviewableImageBehavior = .insertLiteralPath
+
+    enum ImageAttachmentRejection: Equatable {
+        case overLimit(maximum: Int, rejected: Int)
+        case unreadable(count: Int)
+    }
+
+    /// Reports a bounded refusal so a host can explain why no thumbnail appeared.
+    var onImageAttachmentRejection: ((ImageAttachmentRejection) -> Void)?
+
+    /// Notifies a fitted sheet when attachment or text content changes this control's height.
+    var onContentHeightChange: ((CGFloat) -> Void)?
+
     var stringValue: String {
         get { textView.string }
         set {
@@ -1166,9 +1193,14 @@ final class PromptView: NSView, ThemedComponent {
         }
 
         // Thumbnails are convenience, not a reason to create one view and one retained bitmap
-        // per dropped path forever. Overflow remains fully sendable as ordinary quoted paths.
-        let available = max(
+        // per dropped path forever. Each host decides whether overflow remains a quoted path or
+        // is refused; a private-report surface must refuse it to keep local paths out of prose.
+        let maximum = min(
+            max(maximumImageAttachmentCount, 0),
             PromptViewDefaults.maximumImageAttachments
+        )
+        let available = max(
+            maximum
                 - attachments.count
                 - pendingAttachmentPaths.count,
             0
@@ -1176,7 +1208,10 @@ final class PromptView: NSView, ThemedComponent {
         let candidates = Array(paths.prefix(available))
         let overflow = Array(paths.dropFirst(candidates.count))
         pendingAttachmentPaths.append(contentsOf: candidates)
-        insertLiteralPaths(overflow)
+        handleUnpreviewableImagePaths(
+            overflow,
+            rejection: .overLimit(maximum: maximum, rejected: overflow.count)
+        )
         updateSubmitState()
         updateHeight()
         prepareNextAttachmentIfNeeded()
@@ -1212,7 +1247,10 @@ final class PromptView: NSView, ThemedComponent {
                 if let frame {
                     self.installAttachment(path: path, frame: frame)
                 } else {
-                    self.insertLiteralPaths([path])
+                    self.handleUnpreviewableImagePaths(
+                        [path],
+                        rejection: .unreadable(count: 1)
+                    )
                 }
                 self.updateSubmitState()
                 self.updateHeight()
@@ -1277,6 +1315,19 @@ final class PromptView: NSView, ThemedComponent {
 
         textView.insertText(addition, replacementRange: textView.selectedRange())
         textDidChange(Notification(name: NSText.didChangeNotification, object: textView))
+    }
+
+    private func handleUnpreviewableImagePaths(
+        _ paths: [String],
+        rejection: ImageAttachmentRejection
+    ) {
+        guard !paths.isEmpty else { return }
+        switch unpreviewableImageBehavior {
+        case .insertLiteralPath:
+            insertLiteralPaths(paths)
+        case .reject:
+            onImageAttachmentRejection?(rejection)
+        }
     }
 
     private func removeAttachment(id: UUID, thumbnail: PromptAttachmentThumbnail) {
@@ -1558,6 +1609,7 @@ final class PromptView: NSView, ThemedComponent {
 
         guard heightConstraint?.constant != fitted else { return }
         heightConstraint?.constant = fitted
+        onContentHeightChange?(fitted)
     }
 }
 
@@ -2169,9 +2221,26 @@ enum PromptAttachment {
     static func record(
         paths: [String],
         sessionID: SessionID,
-        projectRoot: URL
+        projectRoot: URL,
+        turnID: String? = nil,
+        turnPlacement: SessionAttachment.TurnPlacement = .none
     ) -> [SessionAttachment] {
         ComposerAttachmentHandover.record(
+            paths: paths,
+            sessionID: sessionID,
+            projectRoot: projectRoot,
+            turnID: turnID,
+            turnPlacement: turnPlacement
+        )
+    }
+
+    @MainActor
+    static func handOverRecording(
+        paths: [String],
+        sessionID: SessionID,
+        projectRoot: URL
+    ) -> ComposerAttachmentHandover.RecordedHandover {
+        ComposerAttachmentHandover.handOverRecording(
             paths: paths,
             sessionID: sessionID,
             projectRoot: projectRoot

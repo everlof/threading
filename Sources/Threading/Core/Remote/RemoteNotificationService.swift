@@ -10,11 +10,27 @@ import ThreadingRemoteKit
 @MainActor
 final class RemoteNotificationService {
 
-    static let shared = RemoteNotificationService()
+    static let shared: RemoteNotificationService = {
+        let store: RemoteNotificationSubscriptionPersisting =
+            NSClassFromString("XCTestCase") == nil
+                ? RemoteNotificationSubscriptionKeychainStore()
+                : InMemoryRemoteNotificationSubscriptionStore()
+        return RemoteNotificationService(
+            subscriptionStore: store,
+            localPushSender: RemoteAPNSPushSender.fromEnvironment(),
+            recordsPersistenceDiagnostics: true
+        )
+    }()
 
     enum RequestedDeliveryResult: Equatable {
         case delivered(recipient: String)
         case unavailable(reason: String)
+    }
+
+    enum RegistrationResult: Equatable {
+        case registered(RemoteNotificationRegistrationResponseDTO)
+        case invalid
+        case persistenceUnavailable
     }
 
     private enum InteractionActor: Equatable {
@@ -62,7 +78,10 @@ final class RemoteNotificationService {
         var isReachable: Bool { liveRecipients > 0 || pushTargets > 0 }
     }
 
-    private var subscriptions: [String: Subscription] = [:]
+    private var subscriptions: [RemoteNotificationSubscriptionKey: Subscription] = [:]
+    private var persistedSubscriptions: [
+        RemoteNotificationSubscriptionKey: RemoteNotificationSubscriptionRecord
+    ] = [:]
     typealias HostedPushSender = @MainActor (
         RemoteNotificationEventDTO,
         String,
@@ -70,15 +89,43 @@ final class RemoteNotificationService {
         Bool
     ) async -> RemoteAPNSDeliveryResult
 
-    private let localPushSender = RemoteAPNSPushSender.fromEnvironment()
+    private let subscriptionStore: RemoteNotificationSubscriptionPersisting
+    private let localPushSender: RemoteAPNSPushSender?
+    private let recordsPersistenceDiagnostics: Bool
     private var hostedPushSender: HostedPushSender?
     private var hostedPushAvailability: (@MainActor () -> Bool)?
     private let observations = AppEventObservations()
     private var announcedGuestShares: Set<String> = []
     private var currentActorBySession: [SessionID: InteractionActor] = [:]
     private var lastActivityBySession: [SessionID: SessionActivity] = [:]
+    private(set) var persistenceError: String?
+    private var persistenceWritesBlocked = false
 
-    private init() {
+    init(
+        subscriptionStore: RemoteNotificationSubscriptionPersisting,
+        localPushSender: RemoteAPNSPushSender? = nil,
+        recordsPersistenceDiagnostics: Bool = false
+    ) {
+        self.subscriptionStore = subscriptionStore
+        self.localPushSender = localPushSender
+        self.recordsPersistenceDiagnostics = recordsPersistenceDiagnostics
+        do {
+            let restored = try subscriptionStore.load()
+            persistedSubscriptions = Dictionary(
+                restored.map { ($0.key, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            ThreadingLogger.remote.info(
+                "Remote notification registrations restored count=\(restored.count, privacy: .public)"
+            )
+        } catch {
+            persistenceError = error.localizedDescription
+            persistenceWritesBlocked = true
+            ThreadingLogger.remote.error(
+                "Remote notification persistence failed stage=load error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceDiagnostic(stage: "load")
+        }
         observations.observe(SessionActivityDidChange.self) { [weak self] event in
             Task { @MainActor in self?.activityChanged(sessionID: event.sessionID) }
         }
@@ -89,6 +136,46 @@ final class RemoteNotificationService {
 
     var supportsPush: Bool {
         localPushSender != nil || (hostedPushAvailability?() == true && hostedPushSender != nil)
+    }
+
+    var activeSubscriptionCount: Int { subscriptions.count }
+
+    /// Rebinds durable device preferences to the capability stores that are authoritative for
+    /// this Remote Access lifetime. Orphans remain inert even if their best-effort cleanup fails.
+    @discardableResult
+    func activate(authorizations: [RemoteAuthorization]) -> Int {
+        var current: [RemoteNotificationSubscriptionKey: RemoteAuthorization] = [:]
+        for authorization in authorizations where !authorization.isExpired {
+            guard let deviceID = authorization.boundDeviceID else { continue }
+            current[RemoteNotificationSubscriptionKey(
+                shareID: authorization.shareID,
+                deviceID: deviceID
+            )] = authorization
+        }
+
+        subscriptions = persistedSubscriptions.reduce(into: [:]) { result, entry in
+            guard let authorization = current[entry.key],
+                  let subscription = Self.subscription(
+                      from: entry.value,
+                      authorization: authorization
+                  ) else { return }
+            result[entry.key] = subscription
+        }
+
+        let validPersisted = persistedSubscriptions.filter { current[$0.key] != nil }
+        if validPersisted.count != persistedSubscriptions.count, !persistenceWritesBlocked {
+            do {
+                try subscriptionStore.save(Self.sortedRecords(validPersisted.values))
+                persistedSubscriptions = validPersisted
+                persistenceError = nil
+            } catch {
+                recordPersistenceFailure(error, stage: "prune")
+            }
+        }
+        ThreadingLogger.remote.info(
+            "Remote notification registrations activated count=\(self.subscriptions.count, privacy: .public)"
+        )
+        return subscriptions.count
     }
 
     func configureHostedPushSender(
@@ -138,33 +225,68 @@ final class RemoteNotificationService {
         _ registration: RemoteNotificationRegistrationDTO,
         deviceID: String,
         authorization: RemoteAuthorization
-    ) -> RemoteNotificationRegistrationResponseDTO? {
+    ) -> RegistrationResult {
+        let deviceToken = registration.deviceToken.lowercased()
+        let enabledKinds = Set(registration.enabledKinds)
+        let soundEnabledKinds = Set(
+            registration.soundEnabledKinds ?? registration.enabledKinds
+        )
         guard let environment = RemoteAPNSPushSender.Environment(
             rawValue: registration.environment.rawValue
-        ), Self.acceptsDeviceToken(registration.deviceToken) else {
-            return nil
+        ), !authorization.isExpired,
+           authorization.boundDeviceID == deviceID,
+           RemoteInboundPolicy.normalizedDeviceID(deviceID) == deviceID,
+           RemoteNotificationSubscriptionDefaults.acceptsDeviceToken(deviceToken),
+           enabledKinds.count == registration.enabledKinds.count,
+           soundEnabledKinds.isSubset(of: enabledKinds) else {
+            return .invalid
         }
 
-        let key = "\(authorization.shareID):\(deviceID)"
-        subscriptions[key] = Subscription(
+        let record = RemoteNotificationSubscriptionRecord(
+            shareID: authorization.shareID,
             deviceID: deviceID,
-            deviceToken: registration.deviceToken.lowercased(),
+            deviceToken: deviceToken,
+            environment: registration.environment,
+            enabledKinds: enabledKinds.sorted { $0.rawValue < $1.rawValue },
+            soundEnabledKinds: soundEnabledKinds.sorted { $0.rawValue < $1.rawValue }
+        )
+        guard RemoteNotificationSubscriptionDefaults.isValid([record]),
+              !persistenceWritesBlocked else {
+            return persistenceWritesBlocked ? .persistenceUnavailable : .invalid
+        }
+        var candidate = persistedSubscriptions
+        guard candidate[record.key] != nil
+                || candidate.count < RemoteNotificationSubscriptionDefaults.maximumSubscriptions
+        else {
+            return .persistenceUnavailable
+        }
+        candidate[record.key] = record
+        do {
+            try subscriptionStore.save(Self.sortedRecords(candidate.values))
+            persistenceError = nil
+        } catch {
+            recordPersistenceFailure(error, stage: "save")
+            return .persistenceUnavailable
+        }
+
+        persistedSubscriptions = candidate
+        subscriptions[record.key] = Subscription(
+            deviceID: record.deviceID,
+            deviceToken: record.deviceToken,
             environment: environment,
             authorization: authorization,
-            enabledKinds: Set(registration.enabledKinds),
-            soundEnabledKinds: Set(
-                registration.soundEnabledKinds ?? registration.enabledKinds
-            )
+            enabledKinds: enabledKinds,
+            soundEnabledKinds: soundEnabledKinds
         )
 
         // A guest cannot be notified before accepting a capability: there is no account or
         // device identity to target yet. Registration is that acceptance boundary, so announce
         // the newly shared chat exactly once here.
         if authorization.principal == .guest,
-           !announcedGuestShares.contains(key),
+           !announcedGuestShares.contains(Self.announcementKey(record.key)),
            case .session(let sessionID) = authorization.scope,
            let session = ProjectStore.shared.session(withID: sessionID) {
-            announcedGuestShares.insert(key)
+            announcedGuestShares.insert(Self.announcementKey(record.key))
             let event = RemoteNotificationEventDTO(
                 kind: .sharedSession,
                 hostID: RemoteHostIdentity.current.id,
@@ -182,9 +304,9 @@ final class RemoteNotificationService {
             }
         }
 
-        return RemoteNotificationRegistrationResponseDTO(
+        return .registered(RemoteNotificationRegistrationResponseDTO(
             delivery: supportsPush ? .push : .live
-        )
+        ))
     }
 
     func permissionRequested(
@@ -424,14 +546,45 @@ final class RemoteNotificationService {
     }
 
     func revoke(shareID: String) {
+        // Authorization was already revoked in its owning Keychain store. Drop live delivery
+        // unconditionally; a secondary-store refusal may leave inert cleanup work, never access.
         subscriptions = subscriptions.filter { $0.value.authorization.shareID != shareID }
         announcedGuestShares = announcedGuestShares.filter { !$0.hasPrefix("\(shareID):") }
+        guard !persistenceWritesBlocked else { return }
+        let candidate = persistedSubscriptions.filter { $0.key.shareID != shareID }
+        guard candidate.count != persistedSubscriptions.count else { return }
+        do {
+            try subscriptionStore.save(Self.sortedRecords(candidate.values))
+            persistedSubscriptions = candidate
+            persistenceError = nil
+        } catch {
+            recordPersistenceFailure(error, stage: "revoke")
+        }
     }
 
     func reset() {
         subscriptions.removeAll()
         announcedGuestShares.removeAll()
         currentActorBySession.removeAll()
+    }
+
+    /// `Reset Everything` is explicit authority to erase even an unreadable Keychain item.
+    func deleteAllForAppReset() throws {
+        do {
+            try subscriptionStore.deleteAll()
+        } catch {
+            ThreadingLogger.remote.error(
+                "Remote notification persistence failed stage=delete error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceDiagnostic(stage: "delete")
+            throw error
+        }
+        subscriptions.removeAll()
+        persistedSubscriptions.removeAll()
+        announcedGuestShares.removeAll()
+        persistenceError = nil
+        persistenceWritesBlocked = false
+        ThreadingLogger.remote.notice("Remote notification registrations deleted for app reset")
     }
 
     @discardableResult
@@ -448,7 +601,10 @@ final class RemoteNotificationService {
             // notification consent. One opted-in owner device must not opt every owner device in.
             guard let deviceID,
                   let subscription = subscriptions[
-                    "\(authorization.shareID):\(deviceID)"
+                    RemoteNotificationSubscriptionKey(
+                        shareID: authorization.shareID,
+                        deviceID: deviceID
+                    )
                   ],
                   subscription.enabledKinds.contains(event.kind) else {
                 return false
@@ -556,15 +712,58 @@ final class RemoteNotificationService {
         return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    private static func acceptsDeviceToken(_ value: String) -> Bool {
-        let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !token.isEmpty
-            && token.utf8.count <= RemoteAccessDefaults.maximumPushDeviceTokenBytes
-            && token.unicodeScalars.allSatisfy {
-                (48...57).contains($0.value)
-                    || (65...70).contains($0.value)
-                    || (97...102).contains($0.value)
-            }
+    private static func subscription(
+        from record: RemoteNotificationSubscriptionRecord,
+        authorization: RemoteAuthorization
+    ) -> Subscription? {
+        guard authorization.shareID == record.shareID,
+              authorization.boundDeviceID == record.deviceID,
+              !authorization.isExpired,
+              let environment = RemoteAPNSPushSender.Environment(
+                  rawValue: record.environment.rawValue
+              ) else { return nil }
+        return Subscription(
+            deviceID: record.deviceID,
+            deviceToken: record.deviceToken,
+            environment: environment,
+            authorization: authorization,
+            enabledKinds: Set(record.enabledKinds),
+            soundEnabledKinds: Set(record.soundEnabledKinds)
+        )
+    }
+
+    private static func sortedRecords<S: Sequence>(
+        _ records: S
+    ) -> [RemoteNotificationSubscriptionRecord]
+    where S.Element == RemoteNotificationSubscriptionRecord {
+        records.sorted {
+            if $0.shareID != $1.shareID { return $0.shareID < $1.shareID }
+            return $0.deviceID < $1.deviceID
+        }
+    }
+
+    private static func announcementKey(_ key: RemoteNotificationSubscriptionKey) -> String {
+        "\(key.shareID):\(key.deviceID)"
+    }
+
+    private func recordPersistenceFailure(_ error: Error, stage: String) {
+        persistenceError = error.localizedDescription
+        ThreadingLogger.remote.error(
+            "Remote notification persistence failed stage=\(stage, privacy: .public) error=\(error.localizedDescription, privacy: .private(mask: .hash))"
+        )
+        recordPersistenceDiagnostic(stage: stage)
+    }
+
+    private func recordPersistenceDiagnostic(stage: String) {
+        guard recordsPersistenceDiagnostics else { return }
+        MacRemoteDiagnostics.record(
+            .notificationRegistrationFailed,
+            level: .error,
+            fields: [
+                .phase: stage,
+                .reason: "persistenceUnavailable",
+            ]
+        )
     }
 
     nonisolated private static func diagnosticID(

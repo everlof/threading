@@ -368,7 +368,7 @@ and half the configuration formats in a modern checkout.
 | | |
 |---|---|
 | Authority | replacement of the preview body only |
-| Host retains | the chronology list, the All/Agent/You filter, selection, `Open in`, reveal, delete and pruning, the too-large refusal, the inspector rail |
+| Host retains | the turn-grouped chronology and collapse state, the All/Agent/You filter, selection, `Open in`, reveal, delete and pruning, the too-large refusal, the inspector rail |
 | Context payload | opaque attachment ID, name, kind, `contentHint`, byte size, origin, session ID. **Not** the path, **not** the bytes |
 | Vocabulary | text, status, picker, textInput, button, scene, `media`; no overlay and no `.proceed` |
 | Failback | native preview, bounded source text, or an explicit unavailable message |
@@ -474,6 +474,15 @@ weekday and time; rows up to one year old keep day and month; older rows keep mo
 days are evaluated in the user's current time zone, so midnight — not an elapsed 24-hour interval —
 moves a row out of "today". The same localized value remains part of the row's one accessibility
 sentence.
+
+The rows are separated by collapsible turns from `GitTurnBaselineStore`, not by transcript
+indexes. A recorded file carries an optional exact user-turn identity plus a temporal placement:
+agent output points to the current turn, prompt attachments point to the next turn until admission
+can pin them exactly, and pane-local comparison input points to neither. This distinction is what
+keeps a file staged for a queued prompt out of the response that happened to be running when it
+was recorded. A collapsed section contributes one disclosure row and no file-row views; an empty
+latest checkpoint remains visible so “nothing attached this turn” is not confused with an older
+turn being latest.
 
 ### Two places that are easy to miss
 

@@ -92,6 +92,8 @@
 		A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */; };
 		A70800010000000000000001 /* MobileDeveloperReportHandoffTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70800010000000000000002 /* MobileDeveloperReportHandoffTests.swift */; };
 		A70900010000000000000001 /* MobileConnectionStatusTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A70900010000000000000002 /* MobileConnectionStatusTests.swift */; };
+		A71000010000000000000001 /* MobileNewSessionDefaultsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71000010000000000000002 /* MobileNewSessionDefaultsStoreTests.swift */; };
+		A71100010000000000000001 /* MobileThemeCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
@@ -311,6 +313,8 @@
 		A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RemoteAttachmentThumbnailRequestStateTests.swift; sourceTree = "<group>"; };
 		A70800010000000000000002 /* MobileDeveloperReportHandoffTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDeveloperReportHandoffTests.swift; sourceTree = "<group>"; };
 		A70900010000000000000002 /* MobileConnectionStatusTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileConnectionStatusTests.swift; sourceTree = "<group>"; };
+		A71000010000000000000002 /* MobileNewSessionDefaultsStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileNewSessionDefaultsStoreTests.swift; sourceTree = "<group>"; };
+		A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileThemeCacheStoreTests.swift; sourceTree = "<group>"; };
 		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -346,6 +350,7 @@
 				ThreadingMobile/MobileLoadingPlaceholder.swift,
 				ThreadingMobile/MobileMorphingTitle.swift,
 				ThreadingMobile/MobileNetworkInterfaces.swift,
+				ThreadingMobile/MobileNewSessionDefaultsStore.swift,
 				ThreadingMobile/MobileRowSwipe.swift,
 				ThreadingMobile/MobileSessionConnectionPool.swift,
 				ThreadingMobile/MobileSessionContinuityStore.swift,
@@ -629,6 +634,8 @@
 				A70700010000000000000002 /* RemoteAttachmentThumbnailRequestStateTests.swift */,
 				A70800010000000000000002 /* MobileDeveloperReportHandoffTests.swift */,
 				A70900010000000000000002 /* MobileConnectionStatusTests.swift */,
+				A71000010000000000000002 /* MobileNewSessionDefaultsStoreTests.swift */,
+				A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -1124,6 +1131,8 @@
 				"$(SRCROOT)/scripts/check_theme_boundaries.sh",
 				"$(SRCROOT)/scripts/check_architecture_boundaries.sh",
 				"$(SRCROOT)/scripts/check_logging_boundaries.py",
+				"$(SRCROOT)/scripts/check_navigator_fact_parity.py",
+				"$(SRCROOT)/scripts/tests/test_navigator_fact_parity.py",
 				"$(SRCROOT)/scripts/theme_boundary_lint.swift",
 				"$(SRCROOT)/docs/THEME_BOUNDARY.md",
 				"$(SRCROOT)/AGENTS.md",
@@ -1345,6 +1354,8 @@
 				A70700010000000000000001 /* RemoteAttachmentThumbnailRequestStateTests.swift in Sources */,
 				A70800010000000000000001 /* MobileDeveloperReportHandoffTests.swift in Sources */,
 				A70900010000000000000001 /* MobileConnectionStatusTests.swift in Sources */,
+				A71000010000000000000001 /* MobileNewSessionDefaultsStoreTests.swift in Sources */,
+				A71100010000000000000001 /* MobileThemeCacheStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1716,7 +1727,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APS_ENVIRONMENT = development;
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconThemeThreading AppIconThemeEditorial AppIconThemeCyberpunk AppIconThemeSwissMinimalist AppIconThemeBauhaus AppIconThemeArtDeco AppIconThemeNeoBrutalism AppIconThemeClaymorphism AppIconThemeVaporwave AppIconThemeNewsprint AppIconThemeBotanical AppIconThemeIndustrial AppIconThemePureBlack AppIconThemeCappuccino AppIconThemeSolarized AppIconThemeNord AppIconThemeDracula AppIconThemePlatinum AppIconThemeAqua AppIconThemeTiger AppIconThemeBeOS AppIconThemeOpenStep AppIconThemeIRIX AppIconThemeAmiga AppIconThemeWindows98 AppIconThemeTUI AppIconThemeClassicPlayer AppIconThemeChristmas";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconThemeThreading AppIconThemeEditorial AppIconThemeCyberpunk AppIconThemeSwissMinimalist AppIconThemeBauhaus AppIconThemeArtDeco AppIconThemeNeoBrutalism AppIconThemeClaymorphism AppIconThemeVaporwave AppIconThemeNewsprint AppIconThemeBotanical AppIconThemeIndustrial AppIconThemePure AppIconThemeCappuccino AppIconThemeSolarized AppIconThemeNord AppIconThemeDracula AppIconThemePlatinum AppIconThemeAqua AppIconThemeTiger AppIconThemeBeOS AppIconThemeOpenStep AppIconThemeIRIX AppIconThemeAmiga AppIconThemeWindows98 AppIconThemeTUI AppIconThemeClassicPlayer AppIconThemeChristmas";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Sources/ThreadingMobile/ThreadingMobile.entitlements;
@@ -1756,7 +1767,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				APS_ENVIRONMENT = production;
-				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconThemeThreading AppIconThemeEditorial AppIconThemeCyberpunk AppIconThemeSwissMinimalist AppIconThemeBauhaus AppIconThemeArtDeco AppIconThemeNeoBrutalism AppIconThemeClaymorphism AppIconThemeVaporwave AppIconThemeNewsprint AppIconThemeBotanical AppIconThemeIndustrial AppIconThemePureBlack AppIconThemeCappuccino AppIconThemeSolarized AppIconThemeNord AppIconThemeDracula AppIconThemePlatinum AppIconThemeAqua AppIconThemeTiger AppIconThemeBeOS AppIconThemeOpenStep AppIconThemeIRIX AppIconThemeAmiga AppIconThemeWindows98 AppIconThemeTUI AppIconThemeClassicPlayer AppIconThemeChristmas";
+				ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES = "AppIconThemeThreading AppIconThemeEditorial AppIconThemeCyberpunk AppIconThemeSwissMinimalist AppIconThemeBauhaus AppIconThemeArtDeco AppIconThemeNeoBrutalism AppIconThemeClaymorphism AppIconThemeVaporwave AppIconThemeNewsprint AppIconThemeBotanical AppIconThemeIndustrial AppIconThemePure AppIconThemeCappuccino AppIconThemeSolarized AppIconThemeNord AppIconThemeDracula AppIconThemePlatinum AppIconThemeAqua AppIconThemeTiger AppIconThemeBeOS AppIconThemeOpenStep AppIconThemeIRIX AppIconThemeAmiga AppIconThemeWindows98 AppIconThemeTUI AppIconThemeClassicPlayer AppIconThemeChristmas";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_ENTITLEMENTS = Sources/ThreadingMobile/ThreadingMobile.entitlements;

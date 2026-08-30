@@ -22,7 +22,11 @@ status, scenes, and one or more collections.
 - localization of titles and embedded semantic content;
 - a persisted user choice under **View → Navigator**, with Native always outside the replaceable
   surface;
+- a host-owned localized title band over every extension navigator, with a permanent overflow
+  menu route back to Native;
 - correlated, value-bearing runtime actions and optional `loadActionID` refreshes;
+- optional `eventActionID` delivery of coalesced `session.changed` edges, with bounded
+  content-only item patches in reply;
 - atomic snapshot replacement while preserving selection, outline expansion, visible position,
   and first responder by stable semantic ID;
 - live generation-bound inventory and immediate Native failback when a selected process stops,
@@ -37,6 +41,10 @@ virtualization, focus, user selection, and the authority to navigate to live hos
 Those host responsibilities are deliberately split in source. `WorkspaceSidebarContainerViewController`
 owns selection persistence, process-generation replacement and atomic Native failback;
 `WorkspaceNavigatorHostViewController` owns one validated document and its virtualized renderers.
+A Native selection from the host-owned overflow menu is persisted before the sidebar swaps. The
+container dismisses any open menu before settings override, Native failback, navigator selection,
+or process-generation replacement, so the menu session cannot outlive the document which opened
+it.
 A list or grid item that throws while being realized is a document render failure, not an empty
 cell: the renderer escalates it to the container, which replaces that exact process generation
 with Native. A stale failure from an old generation cannot evict its replacement.
@@ -98,6 +106,128 @@ button, so the label names that activation independently of whatever visual comp
 cell contains. List and outline rows can derive their semantics from their rendered content,
 though an explicit label is available there too.
 
+## Declared options
+
+`ExtensionWorkspaceNavigatorOption` declares a host-rendered toggle or enumerated choice using the
+same control vocabulary as extension Settings:
+
+```swift
+options: [
+    .init(
+        id: "group-branches",
+        title: "Group by branch",
+        control: .toggle(defaultValue: true)
+    ),
+    .init(
+        id: "sort",
+        title: "Sort",
+        control: .choice(
+            defaultValue: "recent",
+            options: [
+                .init(id: "recent", title: "Recent activity"),
+                .init(id: "name", title: "Name")
+            ]
+        )
+    )
+]
+```
+
+The contract permits at most 16 options and 30 declared menu entries after expanding choice
+submenus; Threading reserves the final two entries for the divider and Native route. IDs and
+defaults are durable values. Titles and choice titles are localized copy. A complete runtime
+navigator replacement must repeat the raw option declaration accepted from that process
+generation exactly, so only a new generation can change the meaning of a stored value. Threading
+localizes the accepted declaration afterward for presentation.
+
+Option values are host-owned state. Threading hydrates one recoverable file per extension on the
+background activation path, then publishes only a generation-matched in-memory snapshot to the
+navigator host. The render and menu paths never read the filesystem. Writes are serialized per
+extension and revalidated against the active immutable declaration. A lifecycle fence drains user
+changes the host already accepted, then retires that process generation without blocking the main
+actor on disk; later work from the retired generation cannot write or publish. Invalid stored values
+fall back to declaration defaults, while unknown navigator and option IDs are retained so a
+temporarily removed declaration does not destroy user state. Corrupt data is quarantined before a
+new file is saved, and a newer format is kept byte-for-byte with writes disabled.
+
+These declarations are forward-compatible groundwork for the host-evaluated
+`ui.workspace-navigation@2` transform. The v1 materialized-document renderer does not show option
+rows which nothing in the host consumes. Declaring an option does not invoke the extension, and
+the host does not create a preference file until a user-visible control changes a non-default
+value.
+
+## Host-evaluated pipeline declarations
+
+The optional `pipeline` is the additive `ui.workspace-navigation@2` contract revision. The `@2`
+names the navigator format, not a second permission: it remains under the existing
+`ui.workspace-navigation` capability because it adds no authority beyond occupying the same
+user-selected surface. An older host can still decode the navigator and present its required
+`root` fallback; requiring an unknown second capability would make that compatibility path
+impossible.
+
+Format 1 evaluates the host's session catalogue, realizes a single-select list from one bounded
+row template, and routes every generated row to its source session without calling the extension.
+The declaration names every fact it consumes as `required` or `enhances`, and every declared
+option must participate in a filter, bucket, or sort condition. `loadActionID` and
+`eventActionID` are unavailable on a pipeline navigator: facts and option values invalidate it
+inside the host. A runtime action replacement must repeat the raw registered pipeline exactly;
+only a new process generation may add, remove, or change it.
+
+Pipeline declarations cross two matched boundaries. Put every pipeline navigator in the
+manifest's `workspaceNavigators` array so Threading can inspect the package without launching it,
+then register the exact same raw base-language values, in the same order, during the process
+handshake. The host validates that complete list before localization. Runtime-only v1 navigators
+stay out of the manifest and may coexist in the same registration. An absent manifest member
+decodes as `[]` for old packages; explicit `null` is invalid.
+
+The manifest list is inspection metadata, never render inventory. Threading exposes only the
+localized navigator values belonging to a currently running generation whose complete raw list
+matched the manifest. A mismatch, startup failure, disable, or process termination exposes none
+of that generation's navigators and restores the host-owned Native route.
+
+Provider absence and subject absence are different:
+
+- no provider for a `required` key makes the complete navigator unavailable;
+- no provider for an `enhances` key removes the smallest unit which uses it: one search field,
+  filter clause, sort clause, fact-bucket clause, rule-bucket rule, or conditional template node;
+- a fact-bound text/image/status leaf uses its declared fallback when an `enhances` provider is
+  absent and omits that leaf if it has no fallback; if removing children empties the row template,
+  the host shows the navigator's empty state rather than a blank selectable row;
+- if a key has a live provider but one source session has no value, an operand fallback is
+  substituted before comparison, relative-date, sort, or fact-bucket evaluation. Without an
+  operand fallback, predicates do not match, sort places the subject after present values, and a
+  fact bucket uses its unknown path. `isPresent` remains false because it has no operand. Text,
+  image, and status bindings independently use their presentation fallback.
+
+Nested `all`, `any`, and `not` expressions do not partially simplify when a provider is absent;
+the enclosing filter clause, bucket rule, or conditional template node is the degradation unit.
+Search stays visible while at least one declared field remains and disappears when none do.
+Rule buckets keep their surviving rules and configured unmatched behavior, collapsing only when
+no rules survive. Fact buckets collapse as one unit.
+
+Project-scoped lookup is explicit, never implicit inheritance. It follows the current session's
+`session.project-id`, so a declaration using it must also consume that join key. A session without
+a project ID simply has no project-scoped value and follows the per-subject unknown/fallback rules
+above; provider availability is not inferred from whether any particular session joins.
+
+Until windowed collections ship, format 1 requires `itemLimit` in `1...1000` and
+`overflow: .truncateWithNotice`. After filtering, bucketing, and sorting, the host emits the first
+`itemLimit` source sessions in that final order and appends a localized, nonselectable notice with
+the omitted count. This is an explicit finite bridge, not silent truncation or a claim that format
+1 has already implemented windowing. The complete machine-readable contract is
+[`schema/workspace-navigator-pipeline.schema.json`](schema/workspace-navigator-pipeline.schema.json).
+
+[`ActivityInboxExtension`](../../Packages/ThreadingExtensionKit/Examples/ActivityInboxExtension)
+is the complete safe-extension example. Its manifest requests only `ui.workspace-navigation`; its
+static pipeline produces Priority, Today, Yesterday and Last 7 days sections from published
+host facts, shows working state from the detailed activity fact, and lets the host own search,
+sorting, the clock, row realization and source-session activation. There is no session snapshot
+read and no extension callback on a fact or calendar edge.
+
+`session.activity.detailed@1` currently publishes six named raw values through
+`ExtensionSessionDetailedActivity`: `dormant`, `idle`, `working`, `awaiting-user`,
+`needs-attention`, and `limit-reached`. Use those constants instead of reproducing private host
+model strings. The raw-value type deliberately keeps unknown future values decodable.
+
 ## Runtime snapshots and actions
 
 Set `loadActionID` when the static registration is only a useful initial or loading document.
@@ -110,20 +240,94 @@ ExtensionWorkspaceNavigator(
     id: "project-outline",
     title: "Project outline",
     root: .content(.status("Loading projects…", role: .neutral)),
-    preferredWidth: 280,
-    loadActionID: "refresh"
+    loadActionID: "refresh",
+    preferredWidth: 280
 )
 ```
 
 The process receives an `ExtensionWorkspaceNavigatorActionRequest` with `navigatorID`,
 `actionID`, optional `value`, and the current opaque project/session context. Return an
 `ExtensionWorkspaceNavigatorActionResponse` naming the same navigator. A response may contain a
-complete replacement navigator and/or a message, or an error by itself.
+complete replacement navigator or bounded content-only item patches, and/or a message; an error is
+exclusive. Complete replacement and patches are mutually exclusive.
 
-Replacement is intentionally whole-document rather than imperative mutation. Stable collection
-and item IDs let Threading carry presentation state across the swap without exposing AppKit or
-locking the API to today's sidebar structure. Out-of-order responses, responses from an older
-process generation, mismatched navigator IDs, and invalid replacement documents are rejected.
+Structural replacement is intentionally whole-document rather than imperative mutation. Stable
+collection and item IDs let Threading carry presentation state across a replacement or patch
+without exposing AppKit or locking the API to today's sidebar structure. Out-of-order responses,
+responses from an older process generation, mismatched navigator IDs, and invalid output are
+rejected.
+
+### Live session edges
+
+Set `eventActionID` when existing rows expose live session state such as an activity spinner.
+This opt-in also requires the `host.events` capability because the request identifies sessions
+whose host-observed state changed:
+
+```swift
+ExtensionWorkspaceNavigator(
+    id: "activity",
+    title: "Activity",
+    root: .collection(.init(
+        id: "sessions",
+        layout: .list,
+        items: [
+            .init(
+                id: "session:s1",
+                content: .status("Idle", role: .neutral),
+                activation: .destination(.session(id: "s1", projectID: nil))
+            )
+        ]
+    )),
+    eventActionID: "session-event"
+)
+```
+
+While that navigator is selected, Threading coalesces `SessionActivityDidChange` edges by session
+ID and sends at most 64 IDs in one `ExtensionWorkspaceNavigatorHostEvent`. Decode the action's
+`value`, refresh the affected presentation facts, and return at most 64
+`ExtensionWorkspaceNavigatorItemPatch` values. For example, using the stable session-to-item map
+that produced the current document:
+
+```swift
+let event = try ExtensionWorkspaceNavigatorHostEvent(
+    actionValue: request.value ?? .emptyObject
+)
+let patches = event.sessionIDs.compactMap { sessionID in
+    itemIDBySessionID[sessionID].map { itemID in
+        ExtensionWorkspaceNavigatorItemPatch(
+            collectionID: "sessions",
+            itemID: itemID,
+            content: .status("Running", role: .positive)
+        )
+    }
+}
+let response = ExtensionWorkspaceNavigatorActionResponse(
+    requestID: request.requestID,
+    navigatorID: request.navigatorID,
+    itemPatches: patches.isEmpty ? nil : patches
+)
+```
+
+An item patch replaces only `content` on an existing item. It cannot insert, remove, reorder,
+reparent, select, enable, or change activation. Threading validates every target before applying
+any patch, then reloads only affected virtual rows. An unknown collection or item fails the
+selected process generation back to Native; structural change still requires a complete navigator
+replacement. Only one event action is in flight, later edges remain coalesced, and a response
+overtaken by newer document or action content is retried against the current document. Settings
+pauses process dispatch and retains a bounded, container-owned catch-up set even if the process is
+replaced. When the navigator returns, Threading performs its initial load or a document refresh
+deferred under Settings before draining that catch-up set. A project refresh observed while
+Settings is visible is latched without waking the extension process. The host retains at most 256
+pending IDs beyond the in-flight batch; overflow or any event-action failure returns to Native
+rather than presenting content which may be stale.
+
+Call `validateForHostEvent()` on the response before encoding it. The shared response wire type
+also serves ordinary actions, so its general `validate()` method permits a complete replacement;
+the event-specific validator deliberately does not.
+
+An event can name a session that the current document does not show, so return patches only for
+IDs mapped to existing items. Declare `host.sessions.read` as well when the action reads sanitized
+session snapshots to derive the new content; `host.events` alone grants the edge, not session data.
 
 ## Host destinations
 
@@ -135,6 +339,8 @@ remain consistent whether Native or an extension navigator is visible.
 Use `.action(id:)` for extension-owned behavior such as filters, inbox state, or changing the
 document. Host destinations do not grant project/session read access; request the applicable
 `host.*.read` capabilities if the extension needs to construct its snapshot from host data.
+
+### Search and privacy
 
 Continuous search remains intentionally explicit: use a text input action and return snapshots.
 The protocol does not expose keystrokes, arbitrary timers, AppKit views, or a private route around

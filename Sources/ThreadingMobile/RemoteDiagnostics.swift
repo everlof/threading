@@ -32,6 +32,7 @@ enum MobileDiagnosticSurface: String {
     case issueReportDelivery = "issue_report_delivery"
     case issueReportExport = "issue_report_export"
     case keyboardStorage = "keyboard_storage"
+    case newSessionDefaultsStorage = "new_session_defaults_storage"
     case sessionAction = "session_action"
     case sessionRefusal = "session_refusal"
     case themeSelection = "theme_selection"

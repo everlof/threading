@@ -80,6 +80,7 @@ enum SessionUsageProjector {
     /// then visit only the parent and child identities they own rather than every session cell.
     struct Index: Sendable {
         fileprivate let cellsBySessionID: [String: [TranscriptUsageReport.SessionCell]]
+        fileprivate let childCellsByParentSessionID: [String: [TranscriptUsageReport.SessionCell]]
         fileprivate let indexedRange: SessionUsageSnapshot.IndexedRange
         fileprivate let builtAt: Date?
         fileprivate let pricingCatalogVersion: String?
@@ -116,6 +117,13 @@ enum SessionUsageProjector {
             cellsBySessionID = Dictionary(grouping: cells) {
                 SessionUsageProjector.normalize($0.sessionID)
             }
+            var childrenByParent: [String: [TranscriptUsageReport.SessionCell]] = [:]
+            for cell in cells where cell.sessionKind == .subagent {
+                guard let parent = cell.parentSessionID.map(SessionUsageProjector.normalize),
+                      !parent.isEmpty else { continue }
+                childrenByParent[parent, default: []].append(cell)
+            }
+            childCellsByParentSessionID = childrenByParent
             builtAt = report?.builtAt
             pricingCatalogVersion = report?.pricingCatalogVersion
             coverage = report?.coverage ?? []
@@ -183,6 +191,24 @@ enum SessionUsageProjector {
         case child(String)
     }
 
+    private struct IndexedCellKey: Hashable {
+        let sessionID: String
+        let origin: UsageOrigin
+        let accountID: String
+        let model: String
+        let sessionKind: UsageSessionKind?
+        let parentSessionID: String?
+
+        init(_ cell: TranscriptUsageReport.SessionCell) {
+            sessionID = SessionUsageProjector.normalize(cell.sessionID)
+            origin = cell.origin
+            accountID = cell.accountID
+            model = cell.model
+            sessionKind = cell.sessionKind
+            parentSessionID = cell.parentSessionID.map(SessionUsageProjector.normalize)
+        }
+    }
+
     nonisolated static func project(
         report: TranscriptUsageReport?,
         input: Input
@@ -211,16 +237,15 @@ enum SessionUsageProjector {
             }
         }
 
-        let cells = Set(owners.keys).flatMap { index.cellsBySessionID[$0] ?? [] }
-
         var main = Accumulator()
         var subagents = Accumulator()
         var total = Accumulator()
         var children: [String: Accumulator] = [:]
         for child in input.children { children[child.id] = Accumulator() }
 
-        for cell in cells {
-            guard let owner = owners[normalize(cell.sessionID)] else { continue }
+        var admitted = Set<IndexedCellKey>()
+        func add(_ cell: TranscriptUsageReport.SessionCell, owner: Owner?) {
+            guard admitted.insert(IndexedCellKey(cell)).inserted else { return }
             switch owner {
             case .main:
                 main.add(cell)
@@ -229,6 +254,31 @@ enum SessionUsageProjector {
                 children[id, default: Accumulator()].add(cell)
                 subagents.add(cell)
                 total.add(cell)
+            case nil:
+                // The transcript proves this is delegated work for the parent, but no live or
+                // persisted navigator identity currently names a row for it. Keep the exact
+                // parent/subagent receipt without manufacturing presentation state.
+                subagents.add(cell)
+                total.add(cell)
+            }
+        }
+
+        let parentIdentities = Set(input.mainIdentities.map(normalize).filter { !$0.isEmpty })
+        for parent in parentIdentities {
+            for cell in index.childCellsByParentSessionID[parent] ?? [] {
+                let explicitOwner: Owner?
+                if case .child(let id)? = owners[normalize(cell.sessionID)] {
+                    explicitOwner = .child(id)
+                } else {
+                    explicitOwner = nil
+                }
+                add(cell, owner: explicitOwner)
+            }
+        }
+        for identity in Set(owners.keys) {
+            for cell in index.cellsBySessionID[identity] ?? [] {
+                guard let owner = owners[normalize(cell.sessionID)] else { continue }
+                add(cell, owner: owner)
             }
         }
 

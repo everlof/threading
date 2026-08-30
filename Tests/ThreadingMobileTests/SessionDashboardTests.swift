@@ -508,6 +508,33 @@ final class SessionDashboardTests: XCTestCase {
 /// the real app, which photographs cleanly and passes review while showing the wrong screen — so
 /// the mapping is worth spelling out rather than reading back from the code that performs it.
 final class MobileDemoSceneTests: XCTestCase {
+    func testMarketingProviderFixturesAreBundledPrivatePTYRecordings() throws {
+        for provider in MobileMarketingTerminalFixture.Provider.allCases {
+            let fixture = try MobileMarketingTerminalFixture.load(provider)
+            XCTAssertEqual(fixture.provider, provider.rawValue)
+            XCTAssertEqual(fixture.columns, 48)
+            XCTAssertFalse(fixture.payload.isEmpty)
+            XCTAssertTrue(fixture.payload.contains(0x1B))
+            XCTAssertFalse(fixture.payload.contains(Data("/Users/".utf8)))
+            XCTAssertFalse(fixture.payload.contains(Data("/home/".utf8)))
+        }
+    }
+
+    @MainActor
+    func testMarketingStoryHasOneProjectFourMixedChatsAndNoStandaloneTerminal() {
+        let response = RemoteAppModel.marketingResponse
+        XCTAssertEqual(response.newSessionCatalog?.projects.map(\.name), ["Threading"])
+        XCTAssertEqual(response.sessions.count, 4)
+        XCTAssertEqual(response.terminals, [])
+        XCTAssertEqual(Set(response.sessions.map(\.agentKind)), ["claude", "codex"])
+        XCTAssertEqual(Set(response.sessions.compactMap(\.accountID)), [
+            "codex-work", "default", "keller",
+        ])
+        XCTAssertEqual(Set(response.sessions.map(\.state)), [
+            .dormant, .idle, .needsAttention, .working,
+        ])
+    }
+
     @MainActor
     func testRunPlanFixtureBuildsTheStructuredPlanItPhotographs() {
         let key = MobileDemoScene.environmentKey
@@ -541,12 +568,20 @@ final class MobileDemoSceneTests: XCTestCase {
             switch fixture {
             case .terminalANSI: expected = ("terminal-ansi", .terminal)
             case .terminalAttachments: expected = ("terminal-attachments", .terminal)
+            case .terminalBrowserActivity:
+                expected = ("terminal-browser-activity", .terminal)
             case .terminalClaudeTUI: expected = ("terminal-claude-tui", .terminal)
             case .terminalCodexTUI: expected = ("terminal-codex-tui", .terminal)
             case .terminalCollaboration: expected = ("terminal-collaboration", .terminal)
             case .terminalCompose: expected = ("terminal-compose", .terminal)
             case .terminalScrollback: expected = ("terminal-scrollback", .terminal)
             case .terminalSelection: expected = ("terminal-selection", .terminal)
+            case .marketingSessions: expected = ("marketing-sessions", .shippingRoot)
+            case .marketingClaudeTUI: expected = ("marketing-claude-tui", .terminal)
+            case .marketingCodexTUI: expected = ("marketing-codex-tui", .terminal)
+            case .marketingClaudeUsageMenu:
+                expected = ("marketing-claude-usage-menu", .terminal)
+            case .marketingSettings: expected = ("marketing-settings", .settings)
             case .conversation: expected = ("conversation", .conversation)
             case .conversationAttachments: expected = ("conversation-attachments", .conversation)
             case .conversationAwayFromLatest:
@@ -598,9 +633,15 @@ final class MobileDemoSceneTests: XCTestCase {
             case .permission: expected = ("permission", .permission)
             case .permissionLong: expected = ("permission-long", .permission)
             case .newSession: expected = ("new-session", .newSession)
+            case .newSessionDraftMatrix:
+                expected = ("new-session-draft-matrix", .newSession)
             case .newSessionModelEffortPicker:
                 expected = ("new-session-model-effort-picker", .newSession)
             case .newSessionMultiline: expected = ("new-session-multiline", .newSession)
+            case .newSessionSingleCharacter:
+                expected = ("new-session-single-character", .newSession)
+            case .newSessionScrollOverflow:
+                expected = ("new-session-scroll-overflow", .newSession)
             case .newSessionStructuredError:
                 expected = ("new-session-structured-error", .newSession)
             case .themedDialogAlert: expected = ("themed-dialog-alert", .themedDialogAlert)
@@ -637,7 +678,6 @@ final class MobileDemoSceneTests: XCTestCase {
             case .sessionsOffline: expected = ("sessions-offline", .shippingRoot)
             case .projectSessions: expected = ("project-sessions", .shippingRoot)
             case .report: expected = ("report", .shippingRoot)
-            case .reportReceipt: expected = ("report-receipt", .shippingRoot)
             case .reportScreenshot: expected = ("report-screenshot", .shippingRoot)
             }
 
@@ -683,11 +723,15 @@ final class MobileDemoSceneTests: XCTestCase {
         )
     }
 
-    /// The eight ids that share the mirrored terminal screen, spelled out.
-    func testTheTerminalFamilyIsTheEightIDsThatShareOneScreen() {
+    /// Every id that shares the mirrored terminal screen, spelled out.
+    func testTheTerminalFamilyContainsOnlyTerminalScreens() {
         XCTAssertEqual(MobileDemoScene.terminalFixtureIDs, [
+            "marketing-claude-tui",
+            "marketing-claude-usage-menu",
+            "marketing-codex-tui",
             "terminal-ansi",
             "terminal-attachments",
+            "terminal-browser-activity",
             "terminal-claude-tui",
             "terminal-codex-tui",
             "terminal-collaboration",

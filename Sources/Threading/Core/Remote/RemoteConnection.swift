@@ -90,12 +90,22 @@ final class RemoteConnection: @unchecked Sendable {
     private var pingTimer: DispatchSourceTimer?
     private var missedPongs = 0
 
+    /// How long one silent stretch of the HTTP phase may last; see `armIdleTimer()`.
+    /// Injectable so a test can watch the bound land in a fraction of a second.
+    private let httpIdleInterval: TimeInterval
+
     // MARK: - Initialization
 
-    init(connection: NWConnection, queue: DispatchQueue, delegate: Delegate) {
+    init(
+        connection: NWConnection,
+        queue: DispatchQueue,
+        delegate: Delegate,
+        httpIdleInterval: TimeInterval = RemoteAccessDefaults.httpIdleSeconds
+    ) {
         self.connection = connection
         self.queue = queue
         self.delegate = delegate
+        self.httpIdleInterval = httpIdleInterval
     }
 
     // MARK: - Lifecycle
@@ -212,6 +222,8 @@ final class RemoteConnection: @unchecked Sendable {
         case .request(let request, let consumed):
             buffer = Data(buffer.dropFirst(consumed))
             isHandling = true
+            // A complete head ends the stretch the timer was bounding; the answer gets its own.
+            armIdleTimer()
             handle(request)
         }
     }
@@ -223,6 +235,10 @@ final class RemoteConnection: @unchecked Sendable {
                 guard !self.isClosed else { return }
                 switch decision {
                 case .respond(let response):
+                    // The answer is leaving, so the connection is no longer waiting on this
+                    // Mac: the fresh stretch bounds the body's transfer and, after a keep-alive
+                    // response, the silence before the next request.
+                    self.armIdleTimer()
                     self.write(
                         response.serialized,
                         thenClose: response.closesConnection,
@@ -364,9 +380,20 @@ final class RemoteConnection: @unchecked Sendable {
 
     // MARK: - Timers
 
+    /// (Re)starts the bound on the current silent stretch of the HTTP phase.
+    ///
+    /// Armed at accept and again at each transition, a complete request head and a response
+    /// leaving, so it measures how long the connection has gone without progress, never how old
+    /// it is. Armed once at accept, it was a 60-second lifetime: a phone's pooled keep-alive
+    /// connection was cut off when its sixtieth second fell inside a browser preview capture,
+    /// and the phone reported the network connection lost over a page that was fine. A socket
+    /// that opens and says nothing, a request nobody answers, and a keep-alive connection nobody
+    /// uses again are still closed after one interval each. Partial request bytes do not re-arm
+    /// it: a drip-fed head is silence with extra steps.
     private func armIdleTimer() {
+        idleTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + RemoteAccessDefaults.httpIdleSeconds)
+        timer.schedule(deadline: .now() + httpIdleInterval)
         timer.setEventHandler { [weak self] in
             guard let self, self.mode == .http else { return }
             self.forceClose()

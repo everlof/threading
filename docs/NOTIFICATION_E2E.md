@@ -31,6 +31,11 @@ check because Focus, notification summaries, and foreground state can affect pre
 Development builds use the APNs sandbox. A TestFlight/App Store token requires
 `THREADING_E2E_APNS_ENVIRONMENT=production`.
 
+Copying is specific to this provider-only test harness, which deliberately bypasses pairing and
+the Mac registration route. The shipping app obtains the APNs token from iOS and registers it
+automatically; the Mac persists it with the device binding and forwards it to the hosted provider
+when an event is sent.
+
 ## Run
 
 Set the following variables in the invoking shell or through a local secret manager. Never

@@ -119,6 +119,19 @@ enum MobileSessionChrome {
         canManageSessions && hasClient
     }
 
+    /// The toolbar dot is only useful if the menu it opens carries the same state to the action
+    /// that resolves it. Name Browser activity on Workspace itself instead of leaving a person to
+    /// guess which of the menu's unrelated actions the dot referred to.
+    static func workspaceMenuTitle(hasUnseenBrowser: Bool) -> String {
+        MobileL10n.string(
+            hasUnseenBrowser ? "Workspace · New browser activity" : "Workspace"
+        )
+    }
+
+    static func workspaceMenuSystemImage(hasUnseenBrowser: Bool) -> String {
+        hasUnseenBrowser ? "square.grid.2x2.fill" : "square.grid.2x2"
+    }
+
     /// A palette belongs to a terminal. A native conversation is drawn in the app theme, so the
     /// entry is absent there rather than present and inert.
     static func canChooseTerminalTheme(
@@ -158,36 +171,30 @@ enum MobileSessionChrome {
 
     /// What that row says under the login's name.
     ///
-    /// The gauge beside it carries the percentages, so the words are spent on the one thing a
-    /// ring cannot show: when the nearest window still ahead comes back. Two cases keep the
-    /// reading in words instead — a host that sends no reset time, and one that sends no window
-    /// to ring — because a row reduced to a name and an undrawable gauge has lost the reason it
-    /// is in the menu.
+    /// The row keeps the exact percentages beside its glanceable gauge, then names when the
+    /// first model-relevant window comes back. The reset was once selected independently from
+    /// every account window, which let an unrelated Spark limit replace the reset for the model
+    /// this chat actually runs; `MobileAccountUsageReading` now owns both facts.
     static func usageMenuDetail(
         reading: MobileAccountUsageReading,
-        windows: [RemoteAccountUsageWindowDTO]?,
         now: Date = Date()
     ) -> String {
-        let nextReset = (windows ?? [])
-            .compactMap(\.resetsAt)
-            .map { Date(timeIntervalSince1970: $0) }
-            .filter { $0 > now }
-            .min()
-        guard let nextReset, !reading.rings.isEmpty else {
-            // A gauge with no words at all is a host that sent a fraction and no reading; the
-            // row keeps the dash the rest of the app uses for a value it does not know rather
-            // than an empty second line.
-            return reading.summary ?? MobileUsageDefaults.unknownValue
+        var parts = reading.summary.map { [$0] } ?? []
+        if let nextReset = reading.nextReset {
+            // Relative to the same instant the window ahead was chosen against, and in the
+            // usage dashboard's own words for the same fact. `Date.formatted(.relative:)` is
+            // always relative to the real clock instead, which is a second reading of "now" in
+            // one line.
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            parts.append(MobileL10n.string(
+                "Next reset %@",
+                formatter.localizedString(for: nextReset, relativeTo: now)
+            ))
         }
-        // Relative to the same instant the window ahead was chosen against, and in the usage
-        // dashboard's own words for the same fact. `Date.formatted(.relative:)` is always
-        // relative to the real clock instead, which is a second reading of "now" in one line.
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return MobileL10n.string(
-            "Next reset %@",
-            formatter.localizedString(for: nextReset, relativeTo: now)
-        )
+        return parts.isEmpty
+            ? MobileUsageDefaults.unknownValue
+            : parts.joined(separator: MobileUsageDefaults.segmentSeparator)
     }
 }
 
@@ -195,7 +202,7 @@ enum MobileSessionChrome {
 /// be photographed from one build. Ships as `.reset`; a DEBUG run names another through
 /// `THREADING_MOBILE_USAGE_MENU`. Delete with the three shapes that are not chosen.
 enum MobileUsageMenuShape: String {
-    /// What ships today: the login, and when its nearest window comes back.
+    /// What ships today: the login, its exact usage, and the next relevant reset.
     case reset
     /// The address joined onto the same line.
     case address
@@ -264,6 +271,19 @@ struct SessionDetailView: View {
             sessionID: session.id
         ))
     }
+
+#if DEBUG
+    /// Installs an already-connected, local PTY fixture behind the shipping session chrome.
+    /// Evidence can therefore exercise the real toolbar/menu without opening a socket.
+    init(evidenceConnection: RemoteSessionConnection) {
+        session = evidenceConnection.session
+        openingStrategy = .resumeIfNeeded
+        _workspaceActivity = StateObject(wrappedValue: MobileWorkspaceActivity(
+            sessionID: evidenceConnection.session.id
+        ))
+        _connection = State(initialValue: evidenceConnection)
+    }
+#endif
 
     var body: some View {
         Group {
@@ -452,7 +472,7 @@ struct SessionDetailView: View {
     @ViewBuilder
     private var sessionMenuContent: some View {
         // The disc that opens this menu is ringed by the account's usage; the row leads with
-        // that same drawing at glyph size, says when the nearest window comes back, and takes
+        // that same drawing at glyph size, states its exact values and relevant reset, and takes
         // the reader to the dashboard for the rest.
         if let account = sessionAccount,
            let reading = sessionUsageReading,
@@ -461,9 +481,10 @@ struct SessionDetailView: View {
             Divider()
         }
         if canOpenWorkspace {
-            Button(action: openWorkspace) {
-                Label("Workspace", systemImage: "square.grid.2x2")
-            }
+            SessionWorkspaceMenuButton(
+                hasUnseenBrowser: workspaceActivity.hasUnseenBrowser,
+                action: openWorkspace
+            )
             Divider()
         }
         if model.canManageSessions {
@@ -515,7 +536,7 @@ struct SessionDetailView: View {
                         Label("Chat Settings", systemImage: "gearshape")
                     }
                 }
-                Section("Interface") {
+                Menu {
                     Button {
                         confirmSurfaceSwitch(to: .conversation)
                     } label: {
@@ -537,6 +558,8 @@ struct SessionDetailView: View {
                                 : "terminal"
                         )
                     }
+                } label: {
+                    Label("Interface", systemImage: "rectangle.2.swap")
                 }
             }
             .disabled(isMutatingSession)
@@ -621,10 +644,7 @@ struct SessionDetailView: View {
         account: RemoteAccountChoiceDTO,
         reading: MobileAccountUsageReading
     ) -> some View {
-        let detail = MobileSessionChrome.usageMenuDetail(
-            reading: reading,
-            windows: account.usageWindows
-        )
+        let detail = MobileSessionChrome.usageMenuDetail(reading: reading)
         let address = MobileSessionChrome.usageMenuAddress(for: account)
         switch MobileUsageMenuShape.current {
         case .reset:
@@ -654,7 +674,7 @@ struct SessionDetailView: View {
         }
     }
 
-    /// One row: the login, what is left to say in words, and the reading drawn beside them.
+    /// One row: the login, its exact reading and relevant reset, and the glanceable gauge.
     private func usageRow(
         title: String,
         detail: String,
@@ -669,10 +689,10 @@ struct SessionDetailView: View {
             Text(detail)
             usageMenuGlyph(for: reading)
         }
-        // The rings carry the percentages now. VoiceOver still hears them, here and on the
-        // disc that opens this menu, because a gauge read aloud is not a reading.
+        // The visible detail and VoiceOver value stay identical: both include the exact
+        // percentages and the relevant reset, while the rings remain the glanceable path.
         .accessibilityLabel(title)
-        .accessibilityValue(reading.summary ?? "")
+        .accessibilityValue(detail)
     }
 
     /// The reading as the menu row's glyph: its rings, or the gauge symbol when a host reports
@@ -742,6 +762,13 @@ struct SessionDetailView: View {
 
     private func open() async {
 #if DEBUG
+        // The marketing terminal is a privacy-reviewed PTY resource already installed by the
+        // DEBUG initializer above. Treating it as a dormant row would replace it with a socket.
+        if MobileDemoFixture.isMarketing(
+            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+        ), connection != nil {
+            return
+        }
         // An evidence run asks for one opening state and stays in it; nothing connects.
         if let fixture = MobileSessionOpeningFixture.current {
             launchError = fixture.launchError
@@ -897,11 +924,32 @@ struct SessionDetailView: View {
     }
 }
 
+/// The one Workspace action used by the session menu and its deterministic evidence fixture.
+/// Keeping the activity wording here prevents the outer badge and the menu destination from
+/// becoming two independently maintained readings of the same state.
+struct SessionWorkspaceMenuButton: View {
+    let hasUnseenBrowser: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(
+                MobileSessionChrome.workspaceMenuTitle(
+                    hasUnseenBrowser: hasUnseenBrowser
+                ),
+                systemImage: MobileSessionChrome.workspaceMenuSystemImage(
+                    hasUnseenBrowser: hasUnseenBrowser
+                )
+            )
+        }
+    }
+}
+
 /// The session's one trailing toolbar control.
 ///
 /// It carries the workspace's unseen-browser dot, because Workspace now lives inside the menu
 /// this opens: a milestone the phone was not watching still has to be visible from the outside.
-private struct SessionActionsToolbarIcon: View {
+struct SessionActionsToolbarIcon: View {
     @ObservedObject var activity: MobileWorkspaceActivity
     let identity: MobileAgentIdentity
     let reading: MobileAccountUsageReading?
@@ -923,12 +971,13 @@ private struct SessionActionsToolbarIcon: View {
                         )
                         .overlay {
                             Circle()
-                                .stroke(theme.surface, lineWidth: MobileDesign.Size.badgeStroke)
+                                // The toolbar clips its label to the disc's 34-point bounds. Keep
+                                // both the fill and its separating ring inside that boundary.
+                                .strokeBorder(
+                                    theme.surface,
+                                    lineWidth: MobileDesign.Size.badgeStroke
+                                )
                         }
-                        .offset(
-                            x: MobileDesign.Offset.workspaceActivityDot,
-                            y: -MobileDesign.Offset.workspaceActivityDot
-                        )
                         .transition(.scale.combined(with: .opacity))
                 }
             }
@@ -1815,7 +1864,8 @@ private struct TerminalLineComposer: View {
     /// whenever the pasteboard could have changed — rather than on every body evaluation, which
     /// a live terminal performs constantly.
     @State private var clipboardOffersFiles = false
-    @FocusState private var draftIsFocused: Bool
+    /// The editor is UIKit-owned, so first-responder truth comes back through a plain binding.
+    @State private var draftIsFocused = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1841,71 +1891,29 @@ private struct TerminalLineComposer: View {
                 )
             }
 
-            HStack(alignment: .center, spacing: MobileDesign.Spacing.small) {
-                Menu {
-                    // Text pastes into the draft itself, at the insertion point, the way the
-                    // system has always done it. This entry is for what that cannot carry: a
-                    // picture has no text to insert, and a copied one is in neither picker.
-                    if clipboardOffersFiles {
-                        Button(action: stageClipboardFiles) {
-                            Label(
-                                MobileL10n.string("From Clipboard"),
-                                systemImage: "doc.on.clipboard"
-                            )
-                        }
-                    }
-                    // A PhotosPicker inside a Menu is torn down with the menu before its sheet
-                    // can present; the item requests presentation and .photosPicker below shows it.
-                    Button {
-                        isPickingPhotos = true
-                    } label: {
-                        Label(MobileL10n.string("Photo Library"), systemImage: "photo.on.rectangle")
-                    }
-                    Button {
-                        isImportingFiles = true
-                    } label: {
-                        Label("Files", systemImage: "folder")
-                    }
-                } label: {
-                    Image(systemName: "paperclip")
-                        .font(.headline)
-                        .frame(
-                            width: MobileDesign.Size.minimumTapTarget,
-                            height: MobileDesign.Size.minimumTapTarget
-                        )
-                }
-                .disabled(
-                    connection.isPromptSubmissionPending
-                        || attachmentPicksInFlight > 0
-                        || attachmentTray?.canAcceptMore != true
+            ZStack(alignment: .topLeading) {
+                TerminalLinePromptEditor(
+                    text: $draft,
+                    isFocused: $draftIsFocused,
+                    theme: theme,
+                    onSubmit: submit
                 )
-                .accessibilityLabel(MobileL10n.string("Attachments"))
+                .mobileUIEvidenceKeyboardFocus($draftIsFocused)
 
-                TextField("Compose on this device…", text: $draft, axis: .vertical)
-                    .focused($draftIsFocused)
-                    .mobileUIEvidenceKeyboardFocus($draftIsFocused)
-                    .lineLimit(1...5)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.send)
-                    .onSubmit(submit)
-
-                Button(action: submit) {
-                    Image(systemName: "arrow.up")
-                        .font(.headline)
-                        .frame(
-                            width: MobileDesign.Size.minimumTapTarget,
-                            height: MobileDesign.Size.minimumTapTarget
-                        )
-                        .background(
-                            canSubmit ? theme.accent : theme.controlResting,
-                            in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                        )
-                        .foregroundStyle(canSubmit ? theme.ground : theme.secondaryLabel)
+                if draft.isEmpty {
+                    Text("Compose on this device…")
+                        .font(.body)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .padding(.top, TerminalLinePromptMetrics.textInsets.top)
+                        .padding(.leading, MobileDesign.Size.minimumTapTarget)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-                .disabled(!canSubmit)
-                .accessibilityLabel(MobileL10n.string("Send terminal line"))
             }
+            // Both controls retain their full 44-point targets. They occupy only the first line,
+            // while the editor's text-container exclusions let every later line run beneath.
+            .overlay(alignment: .topLeading) { attachmentMenu }
+            .overlay(alignment: .topTrailing) { sendButton }
             .padding(.horizontal, MobileDesign.Spacing.inset)
             .padding(.vertical, MobileDesign.Spacing.small)
         }
@@ -1967,6 +1975,65 @@ private struct TerminalLineComposer: View {
             && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !quotes.isEmpty
                 || attachmentTray?.readyUploadIDs.isEmpty == false)
+    }
+
+    private var attachmentMenu: some View {
+        Menu {
+            // Text pastes into the draft itself, at the insertion point, the way the system has
+            // always done it. This entry is for what that cannot carry: a picture has no text to
+            // insert, and a copied one is in neither picker.
+            if clipboardOffersFiles {
+                Button(action: stageClipboardFiles) {
+                    Label(
+                        MobileL10n.string("From Clipboard"),
+                        systemImage: "doc.on.clipboard"
+                    )
+                }
+            }
+            // A PhotosPicker inside a Menu is torn down with the menu before its sheet can
+            // present; the item requests presentation and .photosPicker below shows it.
+            Button {
+                isPickingPhotos = true
+            } label: {
+                Label(MobileL10n.string("Photo Library"), systemImage: "photo.on.rectangle")
+            }
+            Button {
+                isImportingFiles = true
+            } label: {
+                Label("Files", systemImage: "folder")
+            }
+        } label: {
+            Image(systemName: "paperclip")
+                .font(.headline)
+                .frame(
+                    width: MobileDesign.Size.minimumTapTarget,
+                    height: MobileDesign.Size.minimumTapTarget
+                )
+        }
+        .disabled(
+            connection.isPromptSubmissionPending
+                || attachmentPicksInFlight > 0
+                || attachmentTray?.canAcceptMore != true
+        )
+        .accessibilityLabel(MobileL10n.string("Attachments"))
+    }
+
+    private var sendButton: some View {
+        Button(action: submit) {
+            Image(systemName: "arrow.up")
+                .font(.headline)
+                .frame(
+                    width: MobileDesign.Size.minimumTapTarget,
+                    height: MobileDesign.Size.minimumTapTarget
+                )
+                .background(
+                    canSubmit ? theme.accent : theme.controlResting,
+                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                )
+                .foregroundStyle(canSubmit ? theme.ground : theme.secondaryLabel)
+        }
+        .disabled(!canSubmit)
+        .accessibilityLabel(MobileL10n.string("Send terminal line"))
     }
 
     private func statusLabel(
@@ -2089,6 +2156,13 @@ private struct TerminalLineComposer: View {
     }
 
     private func restoreDraft() {
+#if DEBUG
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+            == "terminal-compose" {
+            draft = "Review the attachment spacing, then let every wrapped line use the full composer width."
+            return
+        }
+#endif
         guard draft.isEmpty, let hostID = model.activeHostID else { return }
         draft = continuity.draft(
             surface: .terminal,
@@ -2141,6 +2215,144 @@ private struct TerminalLineComposer: View {
         case .accepted:
             break
         }
+    }
+}
+
+/// The atomic terminal composer uses one native text container so its first line can flow around
+/// overlaid actions and its later lines can reclaim their width. A SwiftUI multiline `TextField`
+/// is a single rectangular layout item and therefore cannot express this first-line-only shape.
+struct TerminalLinePromptEditor: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    let theme: RemoteThemePalette
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, isFocused: $isFocused, onSubmit: onSubmit)
+    }
+
+    func makeUIView(context: Context) -> IntrinsicTextView {
+        let view = IntrinsicTextView()
+        view.delegate = context.coordinator
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        view.font = TerminalLinePromptMetrics.font
+        view.textContainerInset = TerminalLinePromptMetrics.textInsets
+        view.textContainer.lineFragmentPadding = 0
+        view.isScrollEnabled = false
+        view.adjustsFontForContentSizeCategory = true
+        view.autocapitalizationType = .none
+        view.autocorrectionType = .no
+        view.returnKeyType = .send
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.accessibilityLabel = MobileL10n.string("Compose on this device…")
+        view.minimumIntrinsicHeight = MobileDesign.Size.minimumTapTarget
+        view.maximumIntrinsicHeight = TerminalLinePromptMetrics.maximumHeight
+        view.firstLineLeadingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineTrailingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineAccessoryHeight = MobileDesign.Size.minimumTapTarget
+        return view
+    }
+
+    func updateUIView(_ view: IntrinsicTextView, context: Context) {
+        context.coordinator.onSubmit = onSubmit
+        if view.text != text {
+            view.text = text
+            view.invalidateIntrinsicContentSize()
+        }
+        view.font = TerminalLinePromptMetrics.font
+        view.textContainerInset = TerminalLinePromptMetrics.textInsets
+        view.textColor = theme.uiLabel
+        view.tintColor = theme.uiAccent
+        view.minimumIntrinsicHeight = MobileDesign.Size.minimumTapTarget
+        view.maximumIntrinsicHeight = TerminalLinePromptMetrics.maximumHeight
+        view.firstLineLeadingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineTrailingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineAccessoryHeight = MobileDesign.Size.minimumTapTarget
+
+        if isFocused, !view.isFirstResponder {
+            Task { @MainActor [weak view] in
+                guard let view, isFocused, view.window != nil else { return }
+                view.becomeFirstResponder()
+            }
+        } else if !isFocused, view.isFirstResponder {
+            view.resignFirstResponder()
+        }
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: IntrinsicTextView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        uiView.updateFirstLineAccessoryExclusions(for: width)
+        let measured = uiView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        return CGSize(
+            width: width,
+            height: min(
+                max(measured.height, MobileDesign.Size.minimumTapTarget),
+                uiView.maximumIntrinsicHeight
+            )
+        )
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UITextViewDelegate {
+        private var text: Binding<String>
+        private var isFocused: Binding<Bool>
+        var onSubmit: () -> Void
+
+        init(
+            text: Binding<String>,
+            isFocused: Binding<Bool>,
+            onSubmit: @escaping () -> Void
+        ) {
+            self.text = text
+            self.isFocused = isFocused
+            self.onSubmit = onSubmit
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            text.wrappedValue = textView.text
+            textView.invalidateIntrinsicContentSize()
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            isFocused.wrappedValue = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            isFocused.wrappedValue = false
+        }
+
+        func textView(
+            _ textView: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText replacement: String
+        ) -> Bool {
+            guard replacement == "\n", textView.markedTextRange == nil else { return true }
+            onSubmit()
+            return false
+        }
+    }
+}
+
+private enum TerminalLinePromptMetrics {
+    static let maximumLines: CGFloat = 5
+    static var font: UIFont { .preferredFont(forTextStyle: .body) }
+    static var textInsets: UIEdgeInsets {
+        let vertical = max(
+            0,
+            (MobileDesign.Size.minimumTapTarget - font.lineHeight) / 2
+        )
+        return UIEdgeInsets(top: vertical, left: 0, bottom: vertical, right: 0)
+    }
+    static var maximumHeight: CGFloat {
+        let insets = textInsets
+        return ceil(font.lineHeight * maximumLines + insets.top + insets.bottom)
     }
 }
 

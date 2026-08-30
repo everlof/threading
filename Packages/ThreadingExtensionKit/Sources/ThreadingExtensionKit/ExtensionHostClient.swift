@@ -152,6 +152,23 @@ public struct ExtensionHostClient: Sendable {
         )
     }
 
+    /// Atomically replaces this process generation's facts for the named domain subjects.
+    public func publishFacts(
+        _ facts: [ExtensionFact],
+        replacing subjects: [ExtensionFactSubject]
+    ) async throws {
+        let publication = ExtensionFactPublication(
+            replacingSubjects: subjects,
+            facts: facts
+        )
+        try publication.validate()
+        _ = try await request(
+            path: "facts",
+            method: "PUT",
+            body: JSONEncoder().encode(publication)
+        )
+    }
+
     public func publishIdentityResolutions(
         providerIcons: [ExtensionProviderIconResolution] = [],
         accountIcons: [ExtensionAccountIconResolution] = []

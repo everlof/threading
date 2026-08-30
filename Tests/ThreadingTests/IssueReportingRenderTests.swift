@@ -505,6 +505,105 @@ final class IssueReportingRenderTests: XCTestCase {
     }
 
     @MainActor
+    func testThePickerAddsAReviewedImageWithoutPuttingItsPathInPublicProse() throws {
+        let imageURL = try makeImageFile(named: "report-picker.png")
+        defer { try? FileManager.default.removeItem(at: imageURL) }
+        let sheet = ReportProblemViewController()
+        sheet.imagePicker = { completion in completion([imageURL]) }
+        let host = laidOut(sheet)
+
+        let picker = try XCTUnwrap(
+            view(withIdentifier: ReportProblemIdentifiers.attach, under: host) as? ThemedButton
+        )
+        XCTAssertTrue(picker.accessibilityPerformPress())
+        let prompt = try XCTUnwrap(
+            view(withIdentifier: ReportProblemIdentifiers.detail, under: host) as? PromptView
+        )
+        waitForAttachmentPreparation(prompt)
+
+        let draft = sheet.reportDraft()
+        XCTAssertEqual(draft.attachmentURLs, [imageURL])
+        XCTAssertFalse(sheet.draftIsEmpty, "an image-only report was treated as blank")
+        XCTAssertFalse(draft.description.contains(imageURL.path))
+        XCTAssertTrue(draft.localDescription.contains(imageURL.path))
+    }
+
+    @MainActor
+    func testMacSubmissionCopiesTheOriginalAndSendsABoundedImagePreview() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mac-report-images-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let imageURL = try makeImageFile(named: "attachment.png", in: directory)
+        let capture = IssueReportRequestCapture()
+        let diagnostics = makeSubmission().diagnostics
+        let outbox = MacIssueReportOutbox(
+            directory: directory,
+            endpoint: URL(string: "https://reports.example/v1/reports")!,
+            transport: { request in
+                await capture.record(request)
+                let body = try XCTUnwrap(request.httpBody)
+                let submission = try JSONDecoder().decode(
+                    PublicIssueReportSubmissionDTO.self,
+                    from: body
+                )
+                return (
+                    try JSONEncoder().encode(PublicIssueReportReceiptDTO(
+                        reportID: submission.id,
+                        reference: "RPT-IMAGE",
+                        wasAlreadyReceived: false
+                    )),
+                    HTTPURLResponse(
+                        url: request.url!,
+                        statusCode: 201,
+                        httpVersion: nil,
+                        headerFields: nil
+                    )!
+                )
+            }
+        )
+        let submitter = MacIssueReportSubmitter(
+            diagnosticsProvider: { diagnostics },
+            outbox: outbox
+        )
+
+        let outcome = await submitter.submit(
+            trigger: .manual,
+            draft: DeveloperIssueReportDraft(
+                kind: .problem,
+                title: "Toolbar is clipped",
+                details: "The top-right corner is missing.",
+                attachmentURLs: [imageURL]
+            )
+        )
+        guard case .delivered(let reference) = outcome else {
+            return XCTFail("image report was not delivered: \(outcome)")
+        }
+        XCTAssertEqual(reference, "RPT-IMAGE")
+
+        let capturedRequest = await capture.request
+        let request = try XCTUnwrap(capturedRequest)
+        let submission = try JSONDecoder().decode(
+            PublicIssueReportSubmissionDTO.self,
+            from: XCTUnwrap(request.httpBody)
+        )
+        let preview = try XCTUnwrap(submission.imagePreviews?.first)
+        let jpeg = try XCTUnwrap(Data(base64Encoded: preview.jpegBase64))
+        XCTAssertTrue(jpeg.starts(with: [0xff, 0xd8, 0xff]))
+        XCTAssertLessThanOrEqual(
+            jpeg.count,
+            PublicIssueReportPolicy.maximumScreenshotPreviewBytes
+        )
+        XCTAssertFalse(submission.description.contains(imageURL.path))
+
+        let record = directory
+            .appendingPathComponent("Outbox", isDirectory: true)
+            .appendingPathComponent(submission.id, isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: record.appendingPathComponent("attachment-01.png").path
+        ))
+    }
+
+    @MainActor
     func testAnEmptyReportIsRefusedBeforeItReachesTheDeveloperInbox() {
         let sheet = ReportProblemViewController()
         _ = laidOut(sheet)
@@ -584,7 +683,12 @@ final class IssueReportingRenderTests: XCTestCase {
                     ("issue-report-annotated", sheetImage(appearance: name) {
                         self.makeAnnotatedInspectorSheet()
                     }),
-                    ("issue-report-problem", sheetImage(appearance: name) { ReportProblemViewController() })
+                    ("issue-report-problem", sheetImage(appearance: name) {
+                        ReportProblemViewController()
+                    }),
+                    ("issue-report-problem-attached", sheetImage(appearance: name) {
+                        try! self.makeAttachedProblemSheet()
+                    })
                 ] {
                     guard let image else {
                         XCTFail("no image for \(label) \(suffix) \(mode)")
@@ -599,9 +703,9 @@ final class IssueReportingRenderTests: XCTestCase {
             }
         }
 
-        // Three sheets — empty inspector, marked-up inspector, Report a Problem — in two
+        // Four sheets — empty inspector, marked-up inspector, and both Report a Problem states — in two
         // appearances under three themes.
-        XCTAssertEqual(written, 18)
+        XCTAssertEqual(written, 24)
     }
 
     // MARK: - Helpers
@@ -921,6 +1025,46 @@ final class IssueReportingRenderTests: XCTestCase {
             description: "The composer stopped responding.",
             diagnostics: PublicIssueReportDiagnosticsDTO(bounding: report)
         )
+    }
+
+    @MainActor
+    private func makeImageFile(named name: String, in directory: URL? = nil) throws -> URL {
+        let target = directory ?? FileManager.default.temporaryDirectory
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let image = NSImage(size: NSSize(width: 320, height: 180))
+        image.lockFocus()
+        NSColor.systemTeal.drawSwatch(in: NSRect(x: 0, y: 0, width: 160, height: 180))
+        NSColor.systemOrange.drawSwatch(in: NSRect(x: 160, y: 0, width: 160, height: 180))
+        image.unlockFocus()
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: XCTUnwrap(image.tiffRepresentation)))
+        let data = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+        let url = target.appendingPathComponent("\(UUID().uuidString)-\(name)")
+        try data.write(to: url, options: .atomic)
+        return url
+    }
+
+    @MainActor
+    private func makeAttachedProblemSheet() throws -> ReportProblemViewController {
+        let sheet = ReportProblemViewController()
+        _ = sheet.view
+        sheet.attachImages(at: [try makeImageFile(named: "visual-evidence.png")])
+        guard let prompt = view(
+            withIdentifier: ReportProblemIdentifiers.detail,
+            under: sheet.view
+        ) as? PromptView else {
+            throw CocoaError(.coderInvalidValue)
+        }
+        waitForAttachmentPreparation(prompt)
+        return sheet
+    }
+
+    @MainActor
+    private func waitForAttachmentPreparation(_ prompt: PromptView, timeout: TimeInterval = 5) {
+        let deadline = Date().addingTimeInterval(timeout)
+        while prompt.isPreparingAttachments, Date() < deadline {
+            RunLoop.main.run(until: min(deadline, Date().addingTimeInterval(0.005)))
+        }
+        XCTAssertFalse(prompt.isPreparingAttachments)
     }
 
     /// Fixed text rather than a live `InspectorEnvironment.capture`: the renders are compared

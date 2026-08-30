@@ -1069,6 +1069,8 @@ final class MCPWireTests: XCTestCase {
     XCTAssertTrue(prefix.contains("may load lazily"))
     XCTAssertTrue(prefix.contains("discover a matching tool"))
     XCTAssertTrue(prefix.contains("Threading's Browser"))
+    XCTAssertTrue(prefix.contains("is connected"))
+    XCTAssertTrue(prefix.contains("do not bootstrap another runtime"))
     XCTAssertTrue(prefix.contains("browser_navigate"))
     XCTAssertTrue(prefix.contains("browser_snapshot"))
     XCTAssertTrue(prefix.contains("another chat/session"))
@@ -1081,6 +1083,23 @@ final class MCPWireTests: XCTestCase {
     XCTAssertTrue(prefix.contains("set_session_name"))
     XCTAssertTrue(prefix.contains("list_reclaimable_storage"))
     XCTAssertTrue(prefix.hasSuffix("."), "the bounded prefix must stand on its own")
+  }
+
+  @MainActor
+  func testInitializeInstructionsStayCompactForDeferredToolDiscovery() {
+    let instructions = MCPToolCatalog.instructions
+
+    XCTAssertLessThanOrEqual(
+      instructions.count,
+      MCPInstructionDefaults.initializeInstructionCharacterLimit,
+      "some clients repeat initialize instructions beside every discovered tool"
+    )
+    XCTAssertTrue(instructions.contains("Enabled tool groups:"))
+    XCTAssertTrue(instructions.contains("Browser:"))
+    XCTAssertFalse(
+      instructions.contains("browser_attach_chrome"),
+      "per-tool mechanics belong to deferred tool descriptions, not initialize"
+    )
   }
 
   func testServerDecisionPrefixOnlyNamesEnabledExceptionalCapabilities() {

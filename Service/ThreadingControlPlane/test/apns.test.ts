@@ -84,6 +84,23 @@ describe("hosted APNs broker", () => {
     expect(response.status).toBe(403);
     expect(upstream).not.toHaveBeenCalled();
   });
+
+  it("routes production registrations to the production APNs endpoint", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const credential = await enrollHost(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, {
+      status: 200,
+    }));
+
+    const response = await sendPush(
+      credential,
+      pushBody(hostID, crypto.randomUUID().toLowerCase(), "production"),
+    );
+
+    expect(response.status).toBe(200);
+    const [url] = upstream.mock.calls[0] ?? [];
+    expect(String(url)).toBe(`https://api.push.apple.com/3/device/${"ab".repeat(32)}`);
+  });
 });
 
 async function enrollHost(hostID: string): Promise<string> {
@@ -123,10 +140,14 @@ async function sendPush(credential: string, body: Record<string, unknown>): Prom
   }), configured as Env);
 }
 
-function pushBody(hostID: string, eventID: string): Record<string, unknown> {
+function pushBody(
+  hostID: string,
+  eventID: string,
+  environment = "sandbox",
+): Record<string, unknown> {
   return {
     deviceToken: "ab".repeat(32),
-    environment: "sandbox",
+    environment,
     playsSound: true,
     event: {
       type: "notification",

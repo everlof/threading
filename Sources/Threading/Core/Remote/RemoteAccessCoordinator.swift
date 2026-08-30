@@ -138,6 +138,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private let server: RemoteAccessServer
     private let identityStore: RemoteAccessIdentityStore
     private let mirrors: RemoteSessionMirrorRegistry
+    private let notifications: RemoteNotificationService
     /// The `tailscale` CLI: the facts behind the tailnet door, and the Serve sub-option.
     private let tailscale: any RemoteTailnetTransport
     private let hostedService: RemoteHostedServiceController
@@ -184,6 +185,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         tailscale = tailnetTransport ?? Self.defaultTailnetTransport()
         let services = serverServices ?? Self.makeServerServices(appSettings: appSettings)
         mirrors = services.mirrors
+        notifications = services.notifications
         let identity = identityStore ?? RemoteAccessIdentityStore.shared
         self.identityStore = identity
         server = RemoteAccessServer(services: services, identityProvider: identity)
@@ -192,7 +194,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         self.hostedService = hostedService ?? RemoteHostedServiceController()
         self.processActivity = processActivity ?? RemoteAccessProcessActivity()
         let hostedPushService = self.hostedService
-        services.notifications.configureHostedPushSender(
+        notifications.configureHostedPushSender(
             isAvailable: { [weak hostedPushService] in
                 hostedPushService?.canSendHostedPush == true
             },
@@ -1313,7 +1315,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             return false
         }
         authority.set(nil, forToken: record.token)
-        RemoteNotificationService.shared.revoke(shareID: record.id)
+        notifications.revoke(shareID: record.id)
         server.revokeConnections(shareID: record.id)
         hostedService.revokeDevice(deviceID: record.deviceID)
         NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
@@ -1340,6 +1342,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         sessionShares.removeAll()
         terminalShares.removeAll()
         guestSharePersistenceError = nil
+        try notifications.deleteAllForAppReset()
         ThreadingLogger.remote.notice(
             "Remote guest shares deleted for app reset count=\(removedShareCount, privacy: .public)"
         )
@@ -1428,7 +1431,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     private func revoke(_ member: MemberRecord) {
         authority.set(nil, forToken: member.token)
-        RemoteNotificationService.shared.revoke(shareID: member.authorization.shareID)
+        notifications.revoke(shareID: member.authorization.shareID)
         server.revokeConnections(shareID: member.authorization.shareID)
     }
 
@@ -1644,7 +1647,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         sessionShares = candidate
         for member in share.members.values {
             authority.set(nil, forToken: member.token)
-            RemoteNotificationService.shared.revoke(
+            notifications.revoke(
                 shareID: member.authorization.shareID
             )
             server.revokeConnections(shareID: member.authorization.shareID)
@@ -1735,15 +1738,16 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         startTransports(port: port)
     }
 
-    /// Stops every network door and clears runtime capabilities. Durable owner-device and
-    /// accepted one-chat records remain in Keychain and are rehydrated on the next start.
+    /// Stops every network door and clears runtime capabilities. Durable owner-device,
+    /// accepted one-chat, and re-authorizable notification records remain in Keychain and are
+    /// rehydrated on the next start.
     func stop() {
         lifecycleGeneration += 1
         stopTransports()
         server.stop()
         listenerStatus = .idle
         mirrors.remoteAccessStopped()
-        RemoteNotificationService.shared.reset()
+        notifications.reset()
         authority.removeAll()
         pairingBootstrapToken = nil
         pairingRedemptions.removeAll()
@@ -1752,6 +1756,17 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     // MARK: - Start
+
+    private var notificationAuthorizations: [RemoteAuthorization] {
+        var result = ownerDevices.devices.map(\.authorization)
+        result.append(contentsOf: sessionShares.values.flatMap { shares in
+            shares.flatMap { $0.members.values.map(\.authorization) }
+        })
+        result.append(contentsOf: terminalShares.values.flatMap { shares in
+            shares.flatMap { $0.members.values.map(\.authorization) }
+        })
+        return result
+    }
 
     private func start() {
         // This is the last runtime boundary, not a UI assumption. Distributed builds clamp the
@@ -1807,7 +1822,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 }
             }
         }
-
         server.start(configuration: listenerConfiguration()) { [weak self] outcome in
             guard let self else { return }
             guard self.lifecycleGeneration == generation,
@@ -1816,6 +1830,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             }
             switch outcome {
             case .listening(let port):
+                self.notifications.activate(authorizations: self.notificationAuthorizations)
                 self.status = .listening(port: port)
                 self.applyListenerStatus(self.server.listenerStatus)
                 self.mirrors.remoteAccessStarted()
@@ -1832,6 +1847,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 ])
             case .failed(let failure):
                 self.stopTransports()
+                self.notifications.reset()
                 self.authority.removeAll()
                 self.pairingBootstrapToken = nil
                 self.pairingRedemptions.removeAll()

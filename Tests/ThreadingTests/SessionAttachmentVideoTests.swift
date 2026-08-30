@@ -522,7 +522,63 @@ final class SessionAttachmentVideoTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(written, themes.count * appearances.count * 3)
+        // Turn grouping is a property of the shipping pane, so keep its evidence beside the
+        // pane's existing movie states. Exact identities make the fixture deterministic even
+        // though every file was recorded before these synthetic checkpoint dates existed.
+        let recorded = SessionAttachmentStore.shared.attachments(for: pane.sessionID)
+        let latestFiles = recorded.filter {
+            $0.url.standardizedFileURL == movie.standardizedFileURL
+                || $0.name == "evidence-shot-0.png"
+        }
+        let previousFiles = recorded.filter { attachment in
+            !latestFiles.contains { $0.id == attachment.id }
+        }
+        let previous = SessionAttachmentTurnBoundary(
+            id: GitTurnCheckpointID(),
+            ordinal: 1,
+            userTurnID: "evidence-previous-turn",
+            requestedAt: Date(timeIntervalSince1970: 1)
+        )
+        let latest = SessionAttachmentTurnBoundary(
+            id: GitTurnCheckpointID(),
+            ordinal: 2,
+            userTurnID: "evidence-latest-turn",
+            requestedAt: Date(timeIntervalSince1970: 2)
+        )
+        SessionAttachmentStore.shared.associate(
+            attachmentIDs: latestFiles.map(\.id),
+            withTurnID: latest.userTurnID,
+            for: pane.sessionID
+        )
+        SessionAttachmentStore.shared.associate(
+            attachmentIDs: previousFiles.map(\.id),
+            withTurnID: previous.userTurnID,
+            for: pane.sessionID
+        )
+        pane.turnBoundariesProvider = { [previous, latest] in [previous, latest] }
+        pane.refresh()
+        pane.showAttachment(at: movie)
+        pane.foldDidReset()
+        AppThemePalette.set(.system)
+        pane.tableViewForTesting.scrollRowToVisible(0)
+        layout(host, appearance: .aqua)
+        try writeRender(
+            host,
+            to: directory,
+            named: "attachment-video-turn-groups-expanded-system-light"
+        )
+
+        pane.setTurnSection(.checkpoint(previous.id), expanded: false)
+        pane.tableViewForTesting.scrollRowToVisible(0)
+        layout(host, appearance: .aqua)
+        try writeRender(
+            host,
+            to: directory,
+            named: "attachment-video-turn-groups-collapsed-system-light"
+        )
+        written += 2
+
+        XCTAssertEqual(written, themes.count * appearances.count * 3 + 2)
         print("Rendered attachment video playback to \(directory.path)")
     }
 

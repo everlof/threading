@@ -190,6 +190,198 @@ final class ExtensionProcessSessionTests: XCTestCase {
         XCTAssertEqual(request.context, context)
     }
 
+    func testLegacyNavigatorReplacementDoesNotReapplyCompletePipelineManifestParity() throws {
+        let pipelineNavigator = ExtensionWorkspaceNavigator(
+            id: "pipeline",
+            title: "Pipeline",
+            root: .content(.status("Host evaluated", role: .neutral)),
+            pipeline: .init(
+                consumes: [.init(
+                    key: ExtensionHostFactKey.sessionTitle,
+                    requirement: .required
+                )],
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .text(
+                        .fact(
+                            .init(ExtensionHostFactKey.sessionTitle),
+                            facet: .value,
+                            fallback: nil
+                        ),
+                        role: .body
+                    )
+                )
+            )
+        )
+        let legacyNavigator = ExtensionWorkspaceNavigator(
+            id: "legacy",
+            title: "Legacy",
+            root: .content(.status("Loading", role: .neutral)),
+            loadActionID: "refresh"
+        )
+        let replacement = ExtensionWorkspaceNavigator(
+            id: legacyNavigator.id,
+            title: legacyNavigator.title,
+            root: .content(.status("Refreshed", role: .positive)),
+            loadActionID: legacyNavigator.loadActionID
+        )
+        let response = ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "hybrid-navigator-request",
+            navigatorID: legacyNavigator.id,
+            navigator: replacement
+        )
+        let directory = try makeBundle(
+            registration: .init(workspaceNavigators: [pipelineNavigator, legacyNavigator]),
+            scriptAfterRegistration: """
+            IFS= read -r request || exit 65
+            printf '%s\\n' \(shellQuoted(try json(response)))
+            while IFS= read -r request; do :; done
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let started = try ExtensionProcessSession.start(
+            bundle: ExtensionBundleInspector.inspect(at: directory)
+        )
+        defer { started.session.terminate() }
+
+        let completed = expectation(description: "hybrid navigator response")
+        started.session.invokeWorkspaceNavigatorAction(
+            navigatorID: legacyNavigator.id,
+            actionID: "refresh",
+            requestID: response.requestID
+        ) { result in
+            XCTAssertEqual(try? result.get(), response)
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 2)
+    }
+
+    func testProcessStartupRejectsPipelineRegistrationThatDiffersFromStaticManifest() throws {
+        func navigator(title: String) -> ExtensionWorkspaceNavigator {
+            ExtensionWorkspaceNavigator(
+                id: "pipeline",
+                title: title,
+                root: .content(.status("Host evaluated", role: .neutral)),
+                pipeline: .init(
+                    consumes: [.init(
+                        key: ExtensionHostFactKey.sessionTitle,
+                        requirement: .required
+                    )],
+                    output: .init(
+                        collectionID: "sessions",
+                        rowTemplate: .text(
+                            .fact(
+                                .init(ExtensionHostFactKey.sessionTitle),
+                                facet: .value,
+                                fallback: nil
+                            ),
+                            role: .body
+                        )
+                    )
+                )
+            )
+        }
+        let staticNavigator = navigator(title: "Inspected title")
+        let runtimeNavigator = navigator(title: "Changed at startup")
+        let directory = try makeBundle(
+            registration: .init(workspaceNavigators: [runtimeNavigator]),
+            manifestWorkspaceNavigators: [staticNavigator],
+            scriptAfterRegistration: "while IFS= read -r request; do :; done"
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        XCTAssertThrowsError(try ExtensionProcessSession.start(
+            bundle: ExtensionBundleInspector.inspect(at: directory)
+        )) { error in
+            guard case .invalidMessage(let detail) = error as? ExtensionProcessError else {
+                return XCTFail("unexpected error: \(error)")
+            }
+            XCTAssertTrue(detail.contains("manifest declarations exactly"))
+        }
+    }
+
+    func testPersistentProcessRoutesWorkspaceNavigatorHostEventsAndItemPatches() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .collection(.init(
+                id: "threads",
+                layout: .list,
+                items: [.init(
+                    id: "thread-1",
+                    content: .status("Idle", role: .neutral)
+                )]
+            )),
+            eventActionID: "session-event"
+        )
+        let patch = ExtensionWorkspaceNavigatorItemPatch(
+            collectionID: "threads",
+            itemID: "thread-1",
+            content: .status("Running", role: .positive)
+        )
+        let response = ExtensionWorkspaceNavigatorActionResponse(
+            requestID: "navigator-event-1",
+            navigatorID: navigator.id,
+            itemPatches: [patch]
+        )
+        let storage = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ThreadingNavigatorEvent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: storage,
+            withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(at: storage) }
+        let directory = try makeBundle(
+            registration: .init(workspaceNavigators: [navigator]),
+            additionalCapabilities: [.hostEvents, .keyValueStorage],
+            scriptAfterRegistration: """
+            IFS= read -r request || exit 65
+            printf '%s\\n' "$request" > "$THREADING_EXTENSION_KEY_VALUE_DIRECTORY/navigator-event.json"
+            printf '%s\\n' \(shellQuoted(try json(response)))
+            while IFS= read -r request; do :; done
+            """
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let started = try ExtensionProcessSession.start(
+            bundle: ExtensionBundleInspector.inspect(at: directory),
+            additionalEnvironment: [
+                ExtensionStorageEnvironment.keyValueDirectory: storage.path
+            ]
+        )
+        defer { started.session.terminate() }
+
+        let event = ExtensionWorkspaceNavigatorHostEvent(
+            kind: .sessionChanged,
+            sessionIDs: ["session-1"]
+        )
+        let completed = expectation(description: "navigator item patch")
+        started.session.invokeWorkspaceNavigatorAction(
+            navigatorID: navigator.id,
+            actionID: "session-event",
+            value: try event.actionValue,
+            requestID: response.requestID
+        ) { result in
+            XCTAssertEqual(try? result.get(), response)
+            completed.fulfill()
+        }
+        wait(for: [completed], timeout: 2)
+
+        let request = try JSONDecoder().decode(
+            ExtensionWorkspaceNavigatorActionRequest.self,
+            from: Data(
+                contentsOf: storage.appendingPathComponent("navigator-event.json")
+            )
+        )
+        XCTAssertEqual(request.actionID, navigator.eventActionID)
+        let requestValue = try XCTUnwrap(request.value)
+        XCTAssertEqual(
+            try ExtensionWorkspaceNavigatorHostEvent(actionValue: requestValue),
+            event
+        )
+    }
+
     func testWorkspaceNavigatorResponseMustNameTheInvokedNavigator() throws {
         let navigator = ExtensionWorkspaceNavigator(
             id: "activity",
@@ -685,6 +877,7 @@ final class ExtensionProcessSessionTests: XCTestCase {
     private func makeBundle(
         registration: ExtensionRegistration,
         writesRegistration: Bool = true,
+        manifestWorkspaceNavigators: [ExtensionWorkspaceNavigator]? = nil,
         additionalCapabilities: Set<ExtensionCapability> = [],
         settings: ExtensionSettingsContribution = .init(),
         preRegistrationScript: String = "",
@@ -722,6 +915,8 @@ final class ExtensionProcessSessionTests: XCTestCase {
             runtime: .native,
             executable: "bin/extension",
             capabilities: capabilities,
+            workspaceNavigators: manifestWorkspaceNavigators
+                ?? registration.workspaceNavigators.filter { $0.pipeline != nil },
             mcpTools: registration.mcpTools,
             settings: settings,
             services: registration.services

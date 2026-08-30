@@ -116,23 +116,127 @@ final class RemoteTerminalLayoutViewTests: XCTestCase {
         XCTAssertNil(fixture.host.pendingTerminalWidth)
     }
 
-    func testHeightContinuesToFollowTheKeyboardWithoutChangingColumns() {
+    func testKeyboardFrameStormClipsOneGridAndCommitsOnlyTheSettledHeight() {
         let fixture = makeFixture()
         let terminalWidth = fixture.terminal.frame.width
+        let originalHeight = fixture.terminal.frame.height
 
-        fixture.host.updateTerminalFrame(
-            for: CGSize(width: Fixture.containerWidth, height: 380),
-            holdsWidth: false
+        fixture.host.keyboardGeometryWillChange()
+        for height in stride(from: 700.0, through: 380.0, by: -2.0) {
+            fixture.host.updateTerminalFrame(
+                for: CGSize(width: Fixture.containerWidth, height: height),
+                holdsWidth: false
+            )
+        }
+
+        XCTAssertEqual(fixture.terminal.frame.height, originalHeight, accuracy: 0.01)
+        XCTAssertEqual(fixture.terminal.frame.width, terminalWidth, accuracy: 0.01)
+        XCTAssertEqual(fixture.host.terminalHeightApplicationCount, 0)
+        XCTAssertEqual(
+            fixture.host.pendingTerminalHeight ?? -1,
+            380 - Fixture.contentInset * 2,
+            accuracy: 0.01
         )
 
-        XCTAssertEqual(fixture.terminal.frame.width, terminalWidth, accuracy: 0.01)
+        fixture.host.keyboardGeometryDidSettle()
+
         XCTAssertEqual(
             fixture.terminal.frame.height,
             380 - Fixture.contentInset * 2,
             accuracy: 0.01
         )
+        XCTAssertEqual(fixture.host.terminalHeightApplicationCount, 1)
         XCTAssertEqual(fixture.terminal.frame.origin.x, Fixture.contentInset, accuracy: 0.01)
         XCTAssertEqual(fixture.terminal.frame.origin.y, Fixture.contentInset, accuracy: 0.01)
+    }
+
+    func testTenThousandKeyboardFramesRetainOneViewAndReportOnlyTheFinalGrid() {
+        let fixture = makeFixture()
+        let terminalIdentity = ObjectIdentifier(fixture.terminal)
+        let recorder = TerminalSizeRecorder()
+        fixture.terminal.terminalDelegate = recorder
+        fixture.terminal.setUsesLocalViewport(true)
+        recorder.sizeReports.removeAll()
+
+        fixture.host.keyboardGeometryWillChange()
+        for step in 0..<10_000 {
+            let height = CGFloat(380 + step % 321)
+            fixture.host.updateTerminalFrame(
+                for: CGSize(width: Fixture.containerWidth, height: height),
+                holdsWidth: false
+            )
+        }
+
+        XCTAssertEqual(ObjectIdentifier(fixture.host.terminalView), terminalIdentity)
+        XCTAssertTrue(
+            recorder.sizeReports.isEmpty,
+            "presentation frames must not become terminal grids: \(recorder.sizeReports)"
+        )
+        XCTAssertEqual(fixture.host.terminalHeightApplicationCount, 0)
+
+        fixture.host.keyboardGeometryDidSettle()
+
+        XCTAssertEqual(ObjectIdentifier(fixture.host.terminalView), terminalIdentity)
+        XCTAssertEqual(fixture.host.terminalHeightApplicationCount, 1)
+        XCTAssertEqual(
+            recorder.sizeReports.count,
+            1,
+            "one stable keyboard state must produce exactly one grid: \(recorder.sizeReports)"
+        )
+        XCTAssertEqual(recorder.sizeReports.last, fixture.terminal.terminalDimensions.rows)
+    }
+
+    func testRepeatedKeyboardCompletionAndDuplicateFinalHeightDoNotResizeAgain() {
+        let fixture = makeFixture()
+        fixture.host.keyboardGeometryWillChange()
+        fixture.host.updateTerminalFrame(
+            for: CGSize(width: Fixture.containerWidth, height: 380),
+            holdsWidth: false
+        )
+        fixture.host.keyboardGeometryDidSettle()
+        fixture.host.keyboardGeometryDidSettle()
+        fixture.host.updateTerminalFrame(
+            for: CGSize(width: Fixture.containerWidth, height: 380),
+            holdsWidth: false
+        )
+
+        XCTAssertEqual(fixture.host.terminalHeightApplicationCount, 1)
+    }
+
+    func testCancelledKeyboardTransitionThatReturnsToItsCommittedHeightDoesNotResize() {
+        let fixture = makeFixture()
+        fixture.host.keyboardGeometryWillChange()
+        fixture.host.updateTerminalFrame(
+            for: CGSize(width: Fixture.containerWidth, height: 380),
+            holdsWidth: false
+        )
+        fixture.host.updateTerminalFrame(
+            for: CGSize(width: Fixture.containerWidth, height: Fixture.containerHeight),
+            holdsWidth: false
+        )
+        fixture.host.keyboardGeometryDidSettle()
+
+        XCTAssertEqual(fixture.host.terminalHeightApplicationCount, 0)
+        XCTAssertEqual(
+            fixture.terminal.frame.height,
+            Fixture.containerHeight - Fixture.contentInset * 2,
+            accuracy: 0.01
+        )
+    }
+
+    func testTeardownCancelsAKeyboardHeightCommit() {
+        let fixture = makeFixture()
+        fixture.host.keyboardGeometryWillChange()
+        fixture.host.updateTerminalFrame(
+            for: CGSize(width: Fixture.containerWidth, height: 380),
+            holdsWidth: false
+        )
+
+        fixture.host.cancelPendingLayout()
+        fixture.host.keyboardGeometryDidSettle()
+
+        XCTAssertEqual(fixture.host.terminalHeightApplicationCount, 0)
+        XCTAssertNil(fixture.host.pendingTerminalHeight)
     }
 
     func testCompletedBackDiscardsTheOutgoingWidthInsteadOfResizingBeforeTeardown() {
@@ -205,4 +309,26 @@ final class RemoteTerminalLayoutViewTests: XCTestCase {
         static let containerHeight: CGFloat = 720
         static let contentInset = MobileDesign.Spacing.small
     }
+}
+
+private final class TerminalSizeRecorder: NSObject, TerminalViewDelegate {
+    var sizeReports: [Int] = []
+
+    nonisolated func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
+        MainActor.assumeIsolated { sizeReports.append(newRows) }
+    }
+
+    nonisolated func send(source: TerminalView, data: ArraySlice<UInt8>) {}
+    nonisolated func setTerminalTitle(source: TerminalView, title: String) {}
+    nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
+    nonisolated func scrolled(source: TerminalView, position: Double) {}
+    nonisolated func requestOpenLink(
+        source: TerminalView,
+        link: String,
+        params: [String: String]
+    ) {}
+    nonisolated func bell(source: TerminalView) {}
+    nonisolated func clipboardCopy(source: TerminalView, content: Data) {}
+    nonisolated func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
+    nonisolated func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }

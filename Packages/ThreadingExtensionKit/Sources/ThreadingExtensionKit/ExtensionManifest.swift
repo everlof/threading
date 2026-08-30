@@ -15,9 +15,15 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     public let runtime: ExtensionRuntime
     public let executable: String
     public let capabilities: Set<ExtensionCapability>
+    /// Host-evaluated navigator declarations inspectable before the process starts.
+    ///
+    /// Materialized v1 navigators remain runtime-only for compatibility. Every pipeline
+    /// navigator must appear here and the running generation must register the exact same value.
+    public let workspaceNavigators: [ExtensionWorkspaceNavigator]
     public let mcpTools: [ExtensionMCPTool]
     public let settings: ExtensionSettingsContribution
     public let services: [ExtensionServiceDefinition]
+    public let factDefinitions: [ExtensionFactDefinition]
     public let serviceDependencies: [ExtensionServiceDependency]
     public let companions: [ExtensionCompanion]
     public let themes: [ExtensionThemeContribution]
@@ -34,9 +40,11 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         runtime: ExtensionRuntime,
         executable: String,
         capabilities: Set<ExtensionCapability> = [],
+        workspaceNavigators: [ExtensionWorkspaceNavigator] = [],
         mcpTools: [ExtensionMCPTool] = [],
         settings: ExtensionSettingsContribution = .init(),
         services: [ExtensionServiceDefinition] = [],
+        factDefinitions: [ExtensionFactDefinition] = [],
         serviceDependencies: [ExtensionServiceDependency] = [],
         companions: [ExtensionCompanion] = [],
         themes: [ExtensionThemeContribution] = [],
@@ -52,9 +60,11 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         self.runtime = runtime
         self.executable = executable
         self.capabilities = capabilities
+        self.workspaceNavigators = workspaceNavigators
         self.mcpTools = mcpTools
         self.settings = settings
         self.services = services
+        self.factDefinitions = factDefinitions
         self.serviceDependencies = serviceDependencies
         self.companions = companions
         self.themes = themes
@@ -64,8 +74,10 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities, mcpTools, settings
-        case services, serviceDependencies, companions, themes, fonts, localizations, networkGrants
+        case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities
+        case workspaceNavigators, mcpTools, settings
+        case services, factDefinitions, serviceDependencies, companions, themes, fonts
+        case localizations, networkGrants
     }
 
     public init(from decoder: Decoder) throws {
@@ -78,6 +90,14 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         runtime = try container.decode(ExtensionRuntime.self, forKey: .runtime)
         executable = try container.decode(String.self, forKey: .executable)
         capabilities = try container.decode(Set<ExtensionCapability>.self, forKey: .capabilities)
+        workspaceNavigators = if container.contains(.workspaceNavigators) {
+            try container.decode(
+                [ExtensionWorkspaceNavigator].self,
+                forKey: .workspaceNavigators
+            )
+        } else {
+            []
+        }
         mcpTools = try container.decodeIfPresent([ExtensionMCPTool].self, forKey: .mcpTools) ?? []
         settings = try container.decodeIfPresent(
             ExtensionSettingsContribution.self,
@@ -86,6 +106,10 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         services = try container.decodeIfPresent(
             [ExtensionServiceDefinition].self,
             forKey: .services
+        ) ?? []
+        factDefinitions = try container.decodeIfPresent(
+            [ExtensionFactDefinition].self,
+            forKey: .factDefinitions
         ) ?? []
         serviceDependencies = try container.decodeIfPresent(
             [ExtensionServiceDependency].self,
@@ -166,6 +190,34 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
             )
         }
 
+        var seenNavigatorIDs: Set<String> = []
+        for (index, navigator) in workspaceNavigators.enumerated() {
+            let path = "workspaceNavigators[\(index)]"
+            issues.append(contentsOf: navigator.validationIssues(path: path))
+            if navigator.pipeline == nil {
+                issues.append(.init(
+                    path: "\(path).pipeline",
+                    message: "must declare a host-evaluated pipeline; v1 navigators stay runtime-only"
+                ))
+            }
+            if !seenNavigatorIDs.insert(navigator.id).inserted {
+                issues.append(.init(path: "\(path).id", message: "duplicates '\(navigator.id)'"))
+            }
+        }
+        if workspaceNavigators.count > 8 {
+            issues.append(.init(
+                path: "workspaceNavigators",
+                message: "must contain at most 8 navigators"
+            ))
+        }
+        if !workspaceNavigators.isEmpty,
+           !capabilities.contains(.workspaceNavigation) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'ui.workspace-navigation' when pipeline navigators are declared"
+            ))
+        }
+
         var seenToolIDs: Set<String> = []
         for (index, tool) in mcpTools.enumerated() {
             let path = "mcpTools[\(index)]"
@@ -214,6 +266,34 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
             issues.append(.init(
                 path: "capabilities",
                 message: "must contain 'services.provide' when services are declared"
+            ))
+        }
+
+        var seenFactKeys: Set<ExtensionFactKey> = []
+        for (index, definition) in factDefinitions.enumerated() {
+            let path = "factDefinitions[\(index)]"
+            issues.append(contentsOf: definition.providerValidationIssues(path: path))
+            if !seenFactKeys.insert(definition.key).inserted {
+                issues.append(.init(path: "\(path).key", message: "duplicates this fact key"))
+            }
+        }
+        if factDefinitions.count > ExtensionFactProviderLimits.maximumDefinitions {
+            issues.append(.init(
+                path: "factDefinitions",
+                message: "must contain at most "
+                    + "\(ExtensionFactProviderLimits.maximumDefinitions) definitions"
+            ))
+        }
+        if !factDefinitions.isEmpty, !capabilities.contains(.factsProvide) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'facts.provide' when fact definitions are declared"
+            ))
+        }
+        if capabilities.contains(.factsProvide), factDefinitions.isEmpty {
+            issues.append(.init(
+                path: "factDefinitions",
+                message: "must declare at least one definition for 'facts.provide'"
             ))
         }
 
@@ -521,6 +601,7 @@ public struct ExtensionCapability: RawRepresentable, Codable, Hashable, Sendable
     public static let settings = Self(rawValue: "settings")
     public static let servicesProvide = Self(rawValue: "services.provide")
     public static let servicesConsume = Self(rawValue: "services.consume")
+    public static let factsProvide = Self(rawValue: "facts.provide")
     public static let companionOperations = Self(rawValue: "companions.invoke")
     public static let componentCustomization = Self(rawValue: "ui.components")
     public static let workspaceNavigation = Self(rawValue: "ui.workspace-navigation")

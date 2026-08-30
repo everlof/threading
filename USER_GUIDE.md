@@ -11,10 +11,12 @@ optional beyond the first click:
 1. **Appearance** — pick the app's look from every built-in theme. The walkthrough itself
    restyles the moment you click a tile, and everything is changeable later under
    **Settings ▸ Themes**.
-2. **Accounts** — the Claude Code and Codex logins found on this Mac, each with a switch that
-   takes it out of use on the spot (the same switch as **Settings ▸ Accounts**), and whether
-   the `claude`/`codex`/`grok`/`opencode` commands are actually reachable from your shell; a missing one shows
-   the install command instead of failing later inside a terminal.
+2. **Agents & Accounts** — the complete supported roster: Claude Code, Codex, Grok, Cursor,
+   and OpenCode. Claude Code and Codex can add and switch isolated logins here. Grok uses its
+   terminal login, Cursor uses the Mac login created by `agent login`, and OpenCode owns provider
+   sign-in through `/connect`. Existing managed logins each have the same enable switch as
+   **Settings ▸ Agents & Accounts**. The page also checks whether all five agent commands are
+   reachable from your shell; a missing one shows the install command instead of failing later.
 3. **Conversations** — chats you already have on disk, one list newest first, with the last
    two days pre-checked. Importing creates a project for each checked conversation's folder
    implicitly and adopts the conversations so they resume in place; **Skip for now** leaves
@@ -1073,6 +1075,11 @@ opens the same sheet on the picture, where clicking the image marks a place and 
 written into the report as prose and as coordinates. The sheet opens with the caret already in
 the description, so you can start typing what went wrong without clicking into it first.
 
+In the form, choose **Choose files** to attach images, or paste an image directly into the
+details box. Each image appears as a removable thumbnail before anything is sent. A report can
+carry up to four images; Threading keeps the originals in the local report record and sends only
+small reviewed previews to the private inbox.
+
 **A screenshot you took yourself opens the sheet too.** Drop an image file on Threading's icon in
 the Dock, or on the strip beside the traffic lights at the top of the window, and the report sheet
 opens on that picture with the marking and the description already there. When the strip can take
@@ -1735,7 +1742,22 @@ Both surfaces offer it: a session running in Threading's own chat view shows the
 composer, and one running in the agent's terminal shows it under the terminal, where you would
 have typed the answer yourself. Sessions whose agent has only one login never see it.
 
-## Accounts
+## Agents & Accounts
+
+Threading supports five coding-agent runtimes, but each runtime does not expose the same account
+model:
+
+| Agent | Threading-managed logins | Sign-in ownership |
+|-------|---------------------------|-------------------|
+| Claude Code | Multiple | **Add Login** in Threading; Claude owns the browser flow and credential |
+| Codex | Multiple | **Add Login** in Threading; Codex owns the browser flow and credential |
+| Grok | One | Sign in inside Grok's terminal UI |
+| Cursor | One | Run `agent login`; Threading uses that Mac login |
+| OpenCode | Provider accounts stay inside OpenCode | Use `/connect` in OpenCode |
+
+The complete roster appears in onboarding and **Settings ▸ Agents & Accounts**, so a missing
+**Add Login** button means that runtime does not expose a routed multi-account home—it does not
+mean Threading lacks support for the agent.
 
 Both CLIs support multiple logins by pointing an environment variable at an alternate config
 directory. Threading finds these automatically and offers each one when you create a session.
@@ -1759,7 +1781,7 @@ same person fall back to showing the addresses, since that is the one thing guar
 differ.
 
 Your alias still names sessions started on that account, and is still what you edit in
-**Settings ▸ Accounts**.
+**Settings ▸ Agents & Accounts**.
 
 Each account in that menu also carries a **ring** showing how much of its most-pressed window
 is spent — grey while there is room, orange past three quarters, red when it is nearly gone.
@@ -1782,7 +1804,7 @@ emoji if you have chosen one, otherwise a lettered badge from the account's name
 the row shows the full account name.
 
 ### Icons and names
-**Settings > Accounts** lists every account that was found. Click an account's icon to open
+**Settings > Agents & Accounts** lists every account that was found. Click an account's icon to open
 the emoji picker — choose from the grid, type any other emoji into its field, or **Remove**
 the current one. The icon tells accounts apart at a glance in the sidebar.
 
@@ -1808,8 +1830,11 @@ turns the whole thing off. Rename an account
 if the discovered name is not what you call it; clearing a name restores the one from your
 shell alias, and **Restore Name & Icon** clears both custom choices.
 
-Accounts cannot be added or removed here — they come from your config directories. Log in to a
-new one from the terminal, e.g. `CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude`.
+**Add Login** creates a bounded isolated home for Claude Code or Codex, launches that provider's
+official browser sign-in, and registers the location only after the provider verifies it. Threading
+never receives or stores the credential. Existing `~/.claude-*` and `~/.codex-*` homes are still
+found automatically. Threading does not delete provider homes; switch a login off when you no
+longer want it offered.
 
 ### Switching an account off
 Each row carries a **switch**. Turning it off withdraws that login from everywhere an account
@@ -1922,7 +1947,7 @@ if a token has expired the tooltip says so and the CLI is the place to sign in a
 
 ### Your own limits
 
-**Settings ▸ Accounts ▸ Your Own Limits.** No limits until you draw one.
+**Settings ▸ Agents & Accounts ▸ Your Own Limits.** No limits until you draw one.
 
 The provider's limit is the only line the readings carry, and it only speaks at the end. A limit
 you draw here is your own, ahead of it: pick a window on one account, pick a percentage, and
@@ -2597,7 +2622,10 @@ innermost when the draft will run a model the plan meters separately), with the 
 figures in its menu. The composer at the bottom holds the prompt and, under
 it, one line for the run — **GPT-5.6 Sol · High**, a menu of model, effort and speed — and two
 glyphs for permissions and interface, each a menu; a glyph takes the accent colour once its
-choice departs from the default. The composer sits on
+choice departs from the default. This iPhone remembers the model and effort of the last chat that
+started successfully for each Mac, agent and account, even when you chose Auto; a failed or
+abandoned draft does not replace it. If that model or effort is later withdrawn, the next draft
+uses the Mac's current account defaults safely. The composer sits on
 the keyboard's top edge while you type and follows the keyboard down; with the keyboard away it
 is one thin line, the prompt and Start. Start turns that same screen into the chat's own — nothing
 closes and nothing is pushed — and it stays there while the Mac starts the agent: a new session
@@ -2671,6 +2699,10 @@ agent-UI terminals; the Mac restores each Native conversation's draft and readin
 state is device-local rather than collaborative: another person or one of your other devices does
 not inherit half-written text, your terminal input choice, or pull your view away from where you
 left it. Drafts are retained until sent or cleared; older position-only records may be pruned.
+
+The iPhone also remembers the last app appearance received from each paired Mac. After restarting,
+it uses that theme immediately while reconnecting or offline, then adopts and remembers any newer
+theme from the Mac. Changing Mac appearance from the iPhone updates the same remembered value.
 
 On iPhone, a solo agent-UI terminal starts in **Direct** input: each key goes straight to the real
 TUI. Use the Direct/Compose control at the trailing edge of the terminal key bar when you prefer
@@ -2783,8 +2815,10 @@ reviewed on the Mac, so a remote device can never approve from a partial preview
 On iPhone, the session's menu is the **account disc** at the top right — the agent's mark ringed
 by how much of that login's allowance is used, one ring per limit window: the week on the
 outside, the five hours inside it, and, for a chat running a model the plan meters separately,
-that model's own window innermost. It is the same disc the New session screen wears, so it stays
-put when a draft becomes a chat. Open it and choose **Workspace** for **Browser**,
+that model's own window innermost. Open the menu and the account row spells out those exact
+percentages followed by their next reset. A model-specific reset such as Codex Spark appears only
+when that chat runs the model it meters. It is the same disc the New session screen wears, so it
+stays put when a draft becomes a chat. Open it and choose **Workspace** for **Browser**,
 **Review**, **Files**, and **Attachments**; a swipe in from the right edge of the session opens
 the same thing. Workspace is a drawer: it slides in from the right over the chat and follows your finger
 as you pull it, leaving a sliver of the chat visible at the left edge; drag the panel back to the
@@ -2795,7 +2829,9 @@ Mac draws the thumbnails for images and PDFs; other kinds show their glyph). If 
 page, Threading does not pull you away from the chat. The account
 disc takes one quiet breath and keeps a small dot until you open Browser. Browser is a
 read-only follow view of the Mac tab: the Mac still owns navigation and interaction, and private
-tabs never send a preview. The Workspace is available only to a paired owner device, not one-chat
+tabs never send a preview. The picture is taken on the Mac, so a page only the Mac can reach, such
+as a dev server on its own localhost, shows on the phone like any other. The Workspace is
+available only to a paired owner device, not one-chat
 guest links. Attachment files are still fetched only when you choose one, and only if the file
 remains inside that session's checkout.
 
@@ -2812,6 +2848,12 @@ whoever wrote the current turn; an explicit request can instead target the owner
 this chat, or a named member. Open sessions show the device-aware live roster and **Name is
 typing…** without locking anyone out of a composer; the iPhone exposes separate switches for
 both indicators.
+
+The iPhone obtains and registers its APNs token automatically after you enable notifications;
+there is no token to copy in ordinary use. The Mac keeps that registration with the pairing and
+restores it when Remote Access starts, so restarting the Mac does not require opening the iPhone
+app again. Development builds register a sandbox token and TestFlight/App Store builds register a
+production token; the hosted provider routes each to the matching Apple endpoint.
 
 The iPhone and browser keep their own bounded, content-free connection history; it is not sent to
 the Mac by default. From **Diagnostics** on iPhone, or beside the Mac on the browser dashboard, a
@@ -3228,6 +3270,12 @@ year after that. Rows are also marked **Agent** or **You**; when a session has b
 **All / Agent / You** filter appears beside the count. It stays hidden while everything came from
 one side. A picture the agent shows opens this tab and selects its row, and resets that filter if it
 would have hidden it: being asked to show something outranks a filter you left set.
+
+Files are separated into **Latest turn**, **Previous turn**, and older turn groups. Click a turn's
+chevron to collapse or expand it; the latest turn stays named even when it has no files, so the top
+file from an earlier answer cannot look current. A file already attached to a prompt waiting in the
+queue follows that prompt's turn. A picture dropped directly onto this list for comparison appears
+under **Between turns** instead of being claimed by the next prompt.
 
 A marked image carries a pin count in its row and a saved-annotations receipt below its preview.
 That receipt remains after the inspector closes: use **Edit** to reopen the editable document, or
@@ -4133,10 +4181,11 @@ than a step: nothing moved into a submenu, so every theme is still one press awa
 what freed the rows to be plain names, since where a theme comes from is now said once over the
 group instead of on every line.
 
-**Some themes are a palette rather than a look.** Pure Black, Cappuccino, Solarized, Nord, and
-Dracula keep the app's modern shape and spend their identity on colour: Pure Black is a true
-`#000000` ground rather than the system's elevated grey, with colour reserved for the terminal;
-Cappuccino and Solarized adapt with macOS light and dark; Solarized, Nord, and Dracula ship the
+**Some themes are a palette rather than a look.** Pure, Cappuccino, Solarized, Nord, and
+Dracula keep the app's modern shape and spend their identity on colour: Pure is a true `#FFFFFF`
+ground by day and a true `#000000` ground by night rather than the system's greys, with colour
+reserved for the terminal; Pure, Cappuccino and Solarized adapt with macOS light and dark
+(set macOS to Dark to keep Pure black all day); Solarized, Nord, and Dracula ship the
 community schemes' exact published values, chrome and terminal palette alike, so a terminal set
 to **Follow App Theme** gets the real sixteen colours.
 
@@ -4589,17 +4638,17 @@ cancelled, and once preparing starts the sheet says so instead of offering a Can
 no longer work — and the final step asks before the app quits and reopens as the new version.
 The menu command can also be given a keyboard shortcut under **Settings ▸ Keyboard**.
 
-**Reporting something.** **Help ▸ Report a Problem…** files an issue on Threading's GitHub
-without leaving the app. Pick whether it is a **Problem** or an **Improvement** — that is the
-label the ticket arrives with — give it a title and the details, and press Submit; ⌘Return in
-the details field does the same. Three facts travel with it and they are named on screen before
-you send: Threading's version, its build, and your macOS version. Nothing else. The issue opens
-in your browser once it is filed, and if this Mac has no GitHub sign-in, the form opens
-prefilled instead so your browser session can file it.
+**Reporting something.** **Help ▸ Report a Problem…** writes a private report without leaving
+the app. Pick whether it is a **Problem** or an **Improvement**, give it a title and details, and
+press Send; ⌘Return in the details field does the same. Choose images with **Choose files**, or
+paste them into the details box, then review or remove their thumbnails. Threading names the
+version, build and macOS version that travel with the report before you send. If this build has
+no private intake configured, the report and its original images are saved to the local outbox
+instead of being presented as delivered.
 
-To report a *visual* problem, use **View ▸ Inspect…** instead and press **Submit Issue**
-on the capture: the ticket then carries the view, its frame, the measured spacing and a
-screenshot ready to paste.
+To report a *visual* problem inside Threading, use **View ▸ Inspect…** instead and send the
+capture: the report then carries the view, its frame, the measured spacing and a screenshot
+preview.
 
 **Getting help.** **Help ▸ Create Remote Support Report…** writes a file and reveals it in the
 Finder. It holds versions, counts, and which OS grants Threading has, together with how many
