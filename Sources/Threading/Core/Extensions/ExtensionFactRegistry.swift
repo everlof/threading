@@ -35,6 +35,10 @@ struct ExtensionResolvedFact: Equatable, Sendable {
     let fact: ExtensionFact
     let definition: ExtensionFactDefinition
     let source: ExtensionFactResolutionSource
+    /// Host receipt time for freshness decisions. Provider time may make a fact older, never newer.
+    let receivedAt: Date
+
+    var freshnessDate: Date { min(fact.observedAt, receivedAt) }
 }
 
 enum ExtensionFactRegistryError: Error, Equatable, LocalizedError {
@@ -113,13 +117,15 @@ final class ExtensionFactRegistry {
         let status: ExtensionStatusRole?
         let icon: ExtensionImageReference?
         let observedAt: Date
+        let receivedAt: Date
 
-        init(_ fact: ExtensionFact) {
+        init(_ fact: ExtensionFact, receivedAt: Date) {
             value = fact.value
             label = fact.label
             status = fact.status
             icon = fact.icon
             observedAt = fact.observedAt
+            self.receivedAt = receivedAt
         }
 
         func fact(key: ExtensionFactKey, subject: ExtensionFactSubject) -> ExtensionFact {
@@ -169,9 +175,14 @@ final class ExtensionFactRegistry {
     private var publications: [SourceGeneration: Publication] = [:]
     private var resolved: [ExtensionFactSubject: [ExtensionFactKey: ResolvedCell]] = [:]
     private let notificationCenter: NotificationCenter
+    private let now: () -> Date
 
-    init(notificationCenter: NotificationCenter = .default) {
+    init(
+        notificationCenter: NotificationCenter = .default,
+        now: @escaping () -> Date = Date.init
+    ) {
         self.notificationCenter = notificationCenter
+        self.now = now
     }
 
     func definition(for key: ExtensionFactKey) -> ExtensionFactDefinition? {
@@ -179,7 +190,7 @@ final class ExtensionFactRegistry {
         return orderedPublications().compactMap { $0.definitions[key] }.first
     }
 
-    func fact(
+    func exactFact(
         _ key: ExtensionFactKey,
         for subject: ExtensionFactSubject
     ) -> ExtensionResolvedFact? {
@@ -187,18 +198,20 @@ final class ExtensionFactRegistry {
         return ExtensionResolvedFact(
             fact: cell.stored.fact(key: key, subject: subject),
             definition: cell.definition,
-            source: cell.source
+            source: cell.source,
+            receivedAt: cell.stored.receivedAt
         )
     }
 
-    func facts(
+    func exactFacts(
         for subject: ExtensionFactSubject
     ) -> [ExtensionFactKey: ExtensionResolvedFact] {
         Dictionary(uniqueKeysWithValues: (resolved[subject] ?? [:]).map { key, cell in
             (key, ExtensionResolvedFact(
                 fact: cell.stored.fact(key: key, subject: subject),
                 definition: cell.definition,
-                source: cell.source
+                source: cell.source,
+                receivedAt: cell.stored.receivedAt
             ))
         })
     }
@@ -232,6 +245,7 @@ final class ExtensionFactRegistry {
     /// staging boundary, not a way to raise them.
     func replaceHostFacts(_ replacements: [ExtensionHostFactReplacement]) throws {
         guard !replacements.isEmpty else { return }
+        let receivedAt = now()
         var candidate = hostFacts
         var affectedSubjects: Set<ExtensionFactSubject> = []
         for replacement in replacements {
@@ -239,7 +253,8 @@ final class ExtensionFactRegistry {
                 replacement.facts,
                 replacing: replacement.subjects,
                 definitions: hostDefinitions,
-                isHost: true
+                isHost: true,
+                receivedAt: receivedAt
             )
             for subject in replacement.subjects {
                 let old = candidate[subject] ?? [:]
@@ -299,12 +314,14 @@ final class ExtensionFactRegistry {
         from source: ComponentCustomizationSource
     ) throws {
         let key = SourceGeneration(source)
+        let receivedAt = now()
         var publication = publications[key] ?? Publication(source: source)
         let grouped = try validatedFacts(
             facts,
             replacing: subjects,
             definitions: publication.definitions,
-            isHost: false
+            isHost: false,
+            receivedAt: receivedAt
         )
         let replacedCount = subjects.reduce(into: 0) { count, subject in
             count += publication.facts[subject]?.count ?? 0
@@ -389,7 +406,8 @@ final class ExtensionFactRegistry {
         _ facts: [ExtensionFact],
         replacing subjects: Set<ExtensionFactSubject>,
         definitions: [ExtensionFactKey: ExtensionFactDefinition],
-        isHost: Bool
+        isHost: Bool,
+        receivedAt: Date
     ) throws -> [ExtensionFactSubject: [ExtensionFactKey: StoredFact]] {
         guard facts.count <= Self.maximumFactsPerReplacement else {
             throw ExtensionFactRegistryError.tooManyReplacementFacts(
@@ -428,7 +446,7 @@ final class ExtensionFactRegistry {
             }
             let cell = ExtensionFactCell(subject: fact.subject, key: fact.key)
             guard grouped[fact.subject, default: [:]].updateValue(
-                StoredFact(fact),
+                StoredFact(fact, receivedAt: receivedAt),
                 forKey: fact.key
             ) == nil else {
                 throw ExtensionFactRegistryError.duplicateFact(cell)

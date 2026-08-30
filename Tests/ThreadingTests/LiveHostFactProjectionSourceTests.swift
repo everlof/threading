@@ -179,7 +179,10 @@ final class LiveHostFactProjectionSourceTests: XCTestCase {
 
         let secondSubject = ExtensionFactSubject.session(second.id.uuidString.lowercased())
         XCTAssertEqual(
-            registry.fact(ExtensionHostFactKey.sessionManualOrder, for: secondSubject)?.fact.value,
+            registry.exactFact(
+                ExtensionHostFactKey.sessionManualOrder,
+                for: secondSubject
+            )?.fact.value,
             .integer(1)
         )
 
@@ -191,9 +194,12 @@ final class LiveHostFactProjectionSourceTests: XCTestCase {
         )))
 
         let firstSubject = ExtensionFactSubject.session(first.id.uuidString.lowercased())
-        XCTAssertTrue(registry.facts(for: firstSubject).isEmpty)
+        XCTAssertTrue(registry.exactFacts(for: firstSubject).isEmpty)
         XCTAssertEqual(
-            registry.fact(ExtensionHostFactKey.sessionManualOrder, for: secondSubject)?.fact.value,
+            registry.exactFact(
+                ExtensionHostFactKey.sessionManualOrder,
+                for: secondSubject
+            )?.fact.value,
             .integer(0)
         )
     }

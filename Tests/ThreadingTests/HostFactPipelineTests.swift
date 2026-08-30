@@ -66,7 +66,7 @@ final class HostFactPipelineTests: XCTestCase {
         refusedStart()
 
         let subject = ExtensionFactSubject.project(projectID)
-        XCTAssertNil(registry.fact(ExtensionHostFactKey.projectName, for: subject))
+        XCTAssertNil(registry.exactFact(ExtensionHostFactKey.projectName, for: subject))
         XCTAssertEqual(scheduleCalls, 1)
         XCTAssertEqual(projectionCalls, 1)
 
@@ -79,7 +79,7 @@ final class HostFactPipelineTests: XCTestCase {
         repairedStart()
 
         XCTAssertEqual(
-            registry.fact(ExtensionHostFactKey.projectName, for: subject)?.fact.value,
+            registry.exactFact(ExtensionHostFactKey.projectName, for: subject)?.fact.value,
             .string("Repaired")
         )
         XCTAssertEqual(projectionCalls, 2)

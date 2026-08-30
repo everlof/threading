@@ -21,9 +21,9 @@ final class HostFactPublisherTests: XCTestCase {
         try publisher.start()
 
         XCTAssertEqual(registry.definition(for: ExtensionHostFactKey.sessionTitle)?.valueType, .string)
-        XCTAssertEqual(registry.facts(for: .session(Self.opaque(sessionID))).count, 19)
-        XCTAssertEqual(registry.facts(for: .project(Self.opaque(projectID))).count, 4)
-        XCTAssertEqual(registry.facts(for: .terminal(Self.opaque(terminalID))).count, 4)
+        XCTAssertEqual(registry.exactFacts(for: .session(Self.opaque(sessionID))).count, 19)
+        XCTAssertEqual(registry.exactFacts(for: .project(Self.opaque(projectID))).count, 4)
+        XCTAssertEqual(registry.exactFacts(for: .terminal(Self.opaque(terminalID))).count, 4)
         XCTAssertEqual(harness.allProjectionCalls, 1)
         XCTAssertEqual(harness.prepareScheduledCalls, 1)
         XCTAssertEqual(harness.prepareControlCalls, 1)
@@ -50,7 +50,7 @@ final class HostFactPublisherTests: XCTestCase {
                 && $0.subjects <= ExtensionFactRegistry.maximumSubjectsPerReplacement
         })
         XCTAssertEqual(harness.batches.reduce(0) { $0 + $1.facts }, 5_000 * 19)
-        XCTAssertEqual(registry.facts(for: .session(Self.opaque(sessionIDs.last!))).count, 19)
+        XCTAssertEqual(registry.exactFacts(for: .session(Self.opaque(sessionIDs.last!))).count, 19)
 
         harness.batches.removeAll()
         harness.sessionProjectionCalls = 0
@@ -67,7 +67,7 @@ final class HostFactPublisherTests: XCTestCase {
         XCTAssertEqual(harness.allProjectionCalls, allCallsBeforeEdge)
         XCTAssertEqual(harness.batches, [Batch(facts: 19, subjects: 1)])
         XCTAssertEqual(
-            registry.fact(
+            registry.exactFact(
                 ExtensionHostFactKey.sessionDetailedActivity,
                 for: .session(Self.opaque(sessionIDs[2_500]))
             )?.fact.value,
@@ -82,7 +82,7 @@ final class HostFactPublisherTests: XCTestCase {
             Batch(facts: 0, subjects: 2_048),
             Batch(facts: 0, subjects: 904),
         ])
-        XCTAssertTrue(registry.facts(for: .session(Self.opaque(sessionIDs[2_500]))).isEmpty)
+        XCTAssertTrue(registry.exactFacts(for: .session(Self.opaque(sessionIDs[2_500]))).isEmpty)
     }
 
     func testLateBatchFailureIsAtomicAndARepairedStartCanRetry() throws {
@@ -106,15 +106,15 @@ final class HostFactPublisherTests: XCTestCase {
 
         XCTAssertThrowsError(try publisher.start())
         XCTAssertTrue(harness.batches.isEmpty)
-        XCTAssertTrue(registry.facts(for: .session(Self.opaque(validIDs[0]))).isEmpty)
-        XCTAssertTrue(registry.facts(for: .session(Self.opaque(validIDs[107]))).isEmpty)
+        XCTAssertTrue(registry.exactFacts(for: .session(Self.opaque(validIDs[0]))).isEmpty)
+        XCTAssertTrue(registry.exactFacts(for: .session(Self.opaque(validIDs[107]))).isEmpty)
 
         harness.remove(.session(Self.opaque(invalidID)))
         try publisher.start()
         XCTAssertEqual(harness.batches.count, 2)
         XCTAssertEqual(harness.batches.reduce(0) { $0 + $1.facts }, validIDs.count * 19)
-        XCTAssertEqual(registry.facts(for: .session(Self.opaque(validIDs[107]))).count, 19)
-        XCTAssertTrue(registry.facts(for: .session(Self.opaque(invalidID))).isEmpty)
+        XCTAssertEqual(registry.exactFacts(for: .session(Self.opaque(validIDs[107]))).count, 19)
+        XCTAssertTrue(registry.exactFacts(for: .session(Self.opaque(invalidID))).isEmpty)
 
         let allProjectionCallsAfterSuccess = harness.allProjectionCalls
         try publisher.start()
@@ -146,8 +146,8 @@ final class HostFactPublisherTests: XCTestCase {
             sessionID: removedID
         )))
 
-        XCTAssertTrue(registry.facts(for: .session(Self.opaque(removedID))).isEmpty)
-        XCTAssertEqual(registry.facts(for: .session(Self.opaque(standingID))).count, 19)
+        XCTAssertTrue(registry.exactFacts(for: .session(Self.opaque(removedID))).isEmpty)
+        XCTAssertEqual(registry.exactFacts(for: .session(Self.opaque(standingID))).count, 19)
         XCTAssertEqual(harness.batches, [Batch(facts: 19, subjects: 2)])
     }
 
@@ -166,7 +166,7 @@ final class HostFactPublisherTests: XCTestCase {
                 .duplicateSubject(.session(Self.opaque(sessionID)))
             )
         }
-        XCTAssertTrue(registry.facts(for: .session(Self.opaque(sessionID))).isEmpty)
+        XCTAssertTrue(registry.exactFacts(for: .session(Self.opaque(sessionID))).isEmpty)
         XCTAssertTrue(harness.batches.isEmpty)
     }
 

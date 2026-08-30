@@ -17,6 +17,7 @@ final class HostFactPipeline {
     }
 
     let registry: ExtensionFactRegistry
+    let resolver: ExtensionFactResolver
 
     private let publisher: HostFactPublisher
     private let schedule: Scheduler
@@ -32,6 +33,7 @@ final class HostFactPipeline {
         }
     ) {
         self.registry = registry
+        resolver = ExtensionFactResolver(registry: registry)
         publisher = HostFactPublisher(
             registry: registry,
             dependencies: publisherDependencies

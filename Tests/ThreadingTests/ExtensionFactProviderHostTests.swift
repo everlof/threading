@@ -204,7 +204,7 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             try route(through: host, token: factsToken, body: Data("{}".utf8)).status,
             422
         )
-        XCTAssertNil(registry.fact(key, for: subject))
+        XCTAssertNil(registry.exactFact(key, for: subject))
     }
 
     func testPublicationIsAtomicSupportsScopedClearingAndRevokesTheExactGeneration() throws {
@@ -217,7 +217,7 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             try route(through: host, token: token, body: publication(facts: [fact(3)])).status,
             204
         )
-        XCTAssertEqual(registry.fact(key, for: subject)?.fact.value, .integer(3))
+        XCTAssertEqual(registry.exactFact(key, for: subject)?.fact.value, .integer(3))
 
         let undeclared = ExtensionFact(
             key: .init(id: "gitlab.pipeline-count"),
@@ -234,7 +234,7 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             422
         )
         XCTAssertEqual(
-            registry.fact(key, for: subject)?.fact.value,
+            registry.exactFact(key, for: subject)?.fact.value,
             .integer(3),
             "a rejected replacement must preserve the accepted publication"
         )
@@ -243,7 +243,7 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             try route(through: host, token: token, body: publication(facts: [])).status,
             204
         )
-        XCTAssertNil(registry.fact(key, for: subject))
+        XCTAssertNil(registry.exactFact(key, for: subject))
 
         XCTAssertEqual(
             try route(through: host, token: token, body: publication(facts: [fact(4)])).status,
@@ -254,7 +254,7 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             processGeneration: "one"
         )
         XCTAssertNil(registry.definition(for: key))
-        XCTAssertNil(registry.fact(key, for: subject))
+        XCTAssertNil(registry.exactFact(key, for: subject))
         XCTAssertEqual(
             try route(through: host, token: token, body: publication(facts: [fact(5)])).status,
             401
@@ -291,9 +291,9 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             ).status,
             204
         )
-        XCTAssertEqual(registry.fact(key, for: subject)?.fact.value, .integer(1))
+        XCTAssertEqual(registry.exactFact(key, for: subject)?.fact.value, .integer(1))
         XCTAssertEqual(
-            registry.fact(key, for: subject)?.source,
+            registry.exactFact(key, for: subject)?.source,
             .extension(
                 identifier: "com.example.alpha",
                 processGeneration: "alpha-generation"
@@ -304,9 +304,9 @@ final class ExtensionFactProviderHostTests: XCTestCase {
             extensionIdentifier: "com.example.alpha",
             processGeneration: "alpha-generation"
         )
-        XCTAssertEqual(registry.fact(key, for: subject)?.fact.value, .integer(9))
+        XCTAssertEqual(registry.exactFact(key, for: subject)?.fact.value, .integer(9))
         XCTAssertEqual(
-            registry.fact(key, for: subject)?.source,
+            registry.exactFact(key, for: subject)?.source,
             .extension(
                 identifier: "com.example.zulu",
                 processGeneration: "zulu-generation"
@@ -315,6 +315,6 @@ final class ExtensionFactProviderHostTests: XCTestCase {
 
         host.stop()
         XCTAssertNil(registry.definition(for: key))
-        XCTAssertNil(registry.fact(key, for: subject))
+        XCTAssertNil(registry.exactFact(key, for: subject))
     }
 }

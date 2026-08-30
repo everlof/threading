@@ -6,7 +6,8 @@ import ThreadingExtensionKit
 @MainActor
 final class ExtensionFactRegistryTests: XCTestCase {
     func testHostFactsAreSynchronouslyReadableWithTheirDefinition() throws {
-        let registry = ExtensionFactRegistry()
+        let receivedAt = Date(timeIntervalSinceReferenceDate: 2)
+        let registry = ExtensionFactRegistry(now: { receivedAt })
         let definition = makeDefinition(key: ExtensionHostFactKey.sessionTitle)
         try registry.replaceHostDefinitions([definition])
         let fact = makeFact(
@@ -17,12 +18,13 @@ final class ExtensionFactRegistryTests: XCTestCase {
         try registry.replaceHostFacts([fact], replacing: [.session("s1")])
 
         XCTAssertEqual(registry.definition(for: definition.key), definition)
-        XCTAssertEqual(registry.fact(definition.key, for: .session("s1")), .init(
+        XCTAssertEqual(registry.exactFact(definition.key, for: .session("s1")), .init(
             fact: fact,
             definition: definition,
-            source: .host
+            source: .host,
+            receivedAt: receivedAt
         ))
-        XCTAssertEqual(registry.facts(for: .session("s1")).count, 1)
+        XCTAssertEqual(registry.exactFacts(for: .session("s1")).count, 1)
     }
 
     func testInvalidReplacementIsAtomic() throws {
@@ -52,7 +54,7 @@ final class ExtensionFactRegistryTests: XCTestCase {
             )
         }
         XCTAssertEqual(
-            registry.fact(definition.key, for: .session("s1"))?.fact.value,
+            registry.exactFact(definition.key, for: .session("s1"))?.fact.value,
             .string("Original")
         )
     }
@@ -95,8 +97,8 @@ final class ExtensionFactRegistryTests: XCTestCase {
             )
         }
 
-        XCTAssertTrue(registry.facts(for: .session("first")).isEmpty)
-        XCTAssertTrue(registry.facts(for: .session("second")).isEmpty)
+        XCTAssertTrue(registry.exactFacts(for: .session("first")).isEmpty)
+        XCTAssertTrue(registry.exactFacts(for: .session("second")).isEmpty)
         XCTAssertTrue(changes.isEmpty)
     }
 
@@ -192,7 +194,7 @@ final class ExtensionFactRegistryTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            registry.fact(key, for: .session("s1"))?.fact.value,
+            registry.exactFact(key, for: .session("s1"))?.fact.value,
             .string("first")
         )
         registry.removeGeneration(
@@ -200,7 +202,7 @@ final class ExtensionFactRegistryTests: XCTestCase {
             processGeneration: first.processGeneration
         )
         XCTAssertEqual(
-            registry.fact(key, for: .session("s1"))?.fact.value,
+            registry.exactFact(key, for: .session("s1"))?.fact.value,
             .string("second")
         )
     }
@@ -226,7 +228,7 @@ final class ExtensionFactRegistryTests: XCTestCase {
         )
 
         XCTAssertEqual(
-            registry.fact(key, for: .session("s1"))?.fact.value,
+            registry.exactFact(key, for: .session("s1"))?.fact.value,
             .string("alpha")
         )
     }
@@ -242,16 +244,20 @@ final class ExtensionFactRegistryTests: XCTestCase {
         ], replacing: [.session("s1"), .session("s2")], from: source)
 
         try registry.replaceFacts([], replacing: [.session("s1")], from: source)
-        XCTAssertNil(registry.fact(key, for: .session("s1")))
+        XCTAssertNil(registry.exactFact(key, for: .session("s1")))
         XCTAssertEqual(
-            registry.fact(key, for: .session("s2"))?.fact.value,
+            registry.exactFact(key, for: .session("s2"))?.fact.value,
             .string("two")
         )
     }
 
     func testUnchangedHostFactPreservesObservationAndPostsNoChange() throws {
         let center = NotificationCenter()
-        let registry = ExtensionFactRegistry(notificationCenter: center)
+        var receipt = Date(timeIntervalSinceReferenceDate: 10)
+        let registry = ExtensionFactRegistry(
+            notificationCenter: center,
+            now: { receipt }
+        )
         let definition = makeDefinition(key: ExtensionHostFactKey.sessionTitle)
         try registry.replaceHostDefinitions([definition])
         let firstDate = Date(timeIntervalSinceReferenceDate: 1)
@@ -276,6 +282,7 @@ final class ExtensionFactRegistryTests: XCTestCase {
         }
         defer { center.removeObserver(token) }
 
+        receipt = Date(timeIntervalSinceReferenceDate: 20)
         try registry.replaceHostFacts([
             makeFact(
                 key: definition.key,
@@ -286,9 +293,87 @@ final class ExtensionFactRegistryTests: XCTestCase {
         ], replacing: [.session("s1")])
         XCTAssertTrue(events.isEmpty)
         XCTAssertEqual(
-            registry.fact(definition.key, for: .session("s1"))?.fact.observedAt,
+            registry.exactFact(definition.key, for: .session("s1"))?.fact.observedAt,
             firstDate
         )
+        XCTAssertEqual(
+            registry.exactFact(definition.key, for: .session("s1"))?.receivedAt,
+            Date(timeIntervalSinceReferenceDate: 10)
+        )
+    }
+
+    func testProviderReceiptBoundsFreshnessAndAdvancesOnRepublish() throws {
+        let center = NotificationCenter()
+        var receipt = Date(timeIntervalSinceReferenceDate: 10)
+        let registry = ExtensionFactRegistry(
+            notificationCenter: center,
+            now: { receipt }
+        )
+        let source = makeSource("com.example.provider", generation: "g1", order: 0)
+        let key = ExtensionFactKey(id: "gitlab.mr.state")
+        let subject = ExtensionFactSubject.repository(
+            .init(host: "gitlab.com", path: "group/repo")
+        )
+        let definition = makeDefinition(
+            key: key,
+            subjectKinds: [.repository]
+        )
+        let providerFuture = Date(timeIntervalSinceReferenceDate: 1_000)
+        let fact = makeFact(
+            key: key,
+            subject: subject,
+            value: "opened",
+            observedAt: providerFuture
+        )
+        try registry.replaceDefinitions([definition], from: source)
+        try registry.replaceFacts([fact], replacing: [subject], from: source)
+
+        XCTAssertEqual(registry.exactFact(key, for: subject)?.receivedAt, receipt)
+        XCTAssertEqual(registry.exactFact(key, for: subject)?.freshnessDate, receipt)
+
+        var changes: [ExtensionFactChange] = []
+        let token = center.addObserver(
+            forName: ExtensionFactsDidChange.name,
+            object: nil,
+            queue: nil
+        ) { notification in
+            if let event = notification.object as? ExtensionFactsDidChange {
+                changes.append(event.change)
+            }
+        }
+        defer { center.removeObserver(token) }
+
+        receipt = Date(timeIntervalSinceReferenceDate: 20)
+        try registry.replaceFacts([fact], replacing: [subject], from: source)
+
+        XCTAssertEqual(registry.exactFact(key, for: subject)?.receivedAt, receipt)
+        XCTAssertEqual(registry.exactFact(key, for: subject)?.freshnessDate, receipt)
+        XCTAssertEqual(changes, [.exact([.init(subject: subject, key: key)])])
+    }
+
+    func testBulkReplacementUsesOneReceiptTimestamp() throws {
+        var clockReads = 0
+        let receipt = Date(timeIntervalSinceReferenceDate: 10)
+        let registry = ExtensionFactRegistry(now: {
+            clockReads += 1
+            return receipt
+        })
+        let definition = makeDefinition(key: ExtensionHostFactKey.sessionTitle)
+        try registry.replaceHostDefinitions([definition])
+        try registry.replaceHostFacts([
+            .init(
+                facts: [makeFact(key: definition.key, subject: .session("s1"), value: "One")],
+                subjects: [.session("s1")]
+            ),
+            .init(
+                facts: [makeFact(key: definition.key, subject: .session("s2"), value: "Two")],
+                subjects: [.session("s2")]
+            ),
+        ])
+
+        XCTAssertEqual(clockReads, 1)
+        XCTAssertEqual(registry.exactFact(definition.key, for: .session("s1"))?.receivedAt, receipt)
+        XCTAssertEqual(registry.exactFact(definition.key, for: .session("s2"))?.receivedAt, receipt)
     }
 
     func testTargetedChangePostsExactCell() throws {
@@ -441,7 +526,10 @@ final class ExtensionFactRegistryTests: XCTestCase {
         }
         XCTAssertEqual(registry.definition(for: standingHostDefinition.key), standingHostDefinition)
         XCTAssertEqual(
-            registry.fact(standingHostDefinition.key, for: .session("host-kept"))?.fact.value,
+            registry.exactFact(
+                standingHostDefinition.key,
+                for: .session("host-kept")
+            )?.fact.value,
             .string("Host kept")
         )
 
@@ -486,7 +574,7 @@ final class ExtensionFactRegistryTests: XCTestCase {
             )
         }
         XCTAssertEqual(
-            registry.fact(key, for: keptSubject)?.fact.value,
+            registry.exactFact(key, for: keptSubject)?.fact.value,
             .string("kept")
         )
     }
@@ -549,7 +637,7 @@ final class ExtensionFactRegistryTests: XCTestCase {
                 )
             )
         }
-        XCTAssertEqual(registry.facts(for: .session("resolved")).count, 128)
+        XCTAssertEqual(registry.exactFacts(for: .session("resolved")).count, 128)
     }
 
     func testGenerationTotalCapIsEnforcedAcrossScopedReplacements() throws {
@@ -585,7 +673,7 @@ final class ExtensionFactRegistryTests: XCTestCase {
                 )
             )
         }
-        XCTAssertTrue(registry.facts(for: .session("overflow")).isEmpty)
+        XCTAssertTrue(registry.exactFacts(for: .session("overflow")).isEmpty)
     }
 }
 
