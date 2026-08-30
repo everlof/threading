@@ -110,6 +110,13 @@ final class ExtensionFactRegistry {
     static let maximumFactsPerGeneration = ExtensionFactProviderLimits.maximumFactsPerGeneration
     static let maximumResolvedFactsPerSubject = 128
     static let maximumExactNotificationCells = 256
+    private static let snapshotStructuralKeys: Set<ExtensionFactKey> = [
+        ExtensionHostFactKey.sessionProjectID,
+        ExtensionHostFactKey.sessionBranch,
+        ExtensionHostFactKey.projectRepositoryHost,
+        ExtensionHostFactKey.projectRepositoryPath,
+        ExtensionHostFactKey.projectBranch,
+    ]
 
     private struct StoredFact: Equatable {
         let value: ExtensionFactValue
@@ -174,6 +181,7 @@ final class ExtensionFactRegistry {
     private var hostFacts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]] = [:]
     private var publications: [SourceGeneration: Publication] = [:]
     private var resolved: [ExtensionFactSubject: [ExtensionFactKey: ResolvedCell]] = [:]
+    private var revision: UInt64 = 0
     private let notificationCenter: NotificationCenter
     private let now: () -> Date
 
@@ -214,6 +222,57 @@ final class ExtensionFactRegistry {
                 receivedAt: cell.stored.receivedAt
             ))
         })
+    }
+
+    /// Captures every input needed by one navigator evaluation under this main-actor turn.
+    /// Subsequent publications mutate registry storage and advance `revision`; they cannot alter
+    /// the dictionaries retained by an existing value snapshot.
+    func snapshot(consuming consumedKeys: Set<ExtensionFactKey>) -> ExtensionFactSnapshot {
+        let includedKeys = consumedKeys.union(Self.snapshotStructuralKeys)
+        var definitions = hostDefinitions.filter { includedKeys.contains($0.key) }
+        var providers = Dictionary(uniqueKeysWithValues: definitions.keys.map {
+            ($0, Set([ExtensionFactResolutionSource.host]))
+        })
+        for publication in orderedPublications() {
+            let source = ExtensionFactResolutionSource.extension(
+                identifier: publication.source.extensionIdentifier,
+                processGeneration: publication.source.processGeneration
+            )
+            for (key, definition) in publication.definitions where includedKeys.contains(key) {
+                if definitions[key] == nil { definitions[key] = definition }
+                providers[key, default: []].insert(source)
+            }
+        }
+        let hostSessions = Set(hostFacts.keys.compactMap { subject -> ExtensionFactSubject? in
+            guard case .session = subject else { return nil }
+            return subject
+        })
+        let sessions = hostSessions.sorted { lhs, rhs in
+            guard case let .session(left) = lhs,
+                  case let .session(right) = rhs else { return false }
+            return left < right
+        }
+        var facts: ExtensionFactSnapshot.FactTable = [:]
+        for (subject, values) in resolved {
+            if case .session = subject, !hostSessions.contains(subject) { continue }
+            let selected = values.filter { includedKeys.contains($0.key) }
+            guard !selected.isEmpty else { continue }
+            facts[subject] = Dictionary(uniqueKeysWithValues: selected.map { key, cell in
+                (key, ExtensionResolvedFact(
+                    fact: cell.stored.fact(key: key, subject: subject),
+                    definition: cell.definition,
+                    source: cell.source,
+                    receivedAt: cell.stored.receivedAt
+                ))
+            })
+        }
+        return ExtensionFactSnapshot(
+            revision: revision,
+            sessionSubjects: sessions,
+            definitionsByKey: definitions,
+            providersByKey: providers,
+            factsBySubject: facts
+        )
     }
 
     func replaceHostDefinitions(_ definitions: [ExtensionFactDefinition]) throws {
@@ -597,6 +656,7 @@ final class ExtensionFactRegistry {
     }
 
     private func post(_ change: ExtensionFactChange) {
+        revision &+= 1
         notificationCenter.post(ExtensionFactsDidChange(change: change))
     }
 }
