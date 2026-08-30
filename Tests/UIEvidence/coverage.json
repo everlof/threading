@@ -785,12 +785,12 @@
       "status": "implemented",
       "priority": "important",
       "title": "Attachment video playback",
-      "description": "The real attachment pane with a native movie selected, covering its centred playback action, timeline below the picture, hover-only Pause posture, the fold's compact limit, and collapsible turn groups.",
-      "states": ["Paused play overlay", "Playing hover pause overlay", "Timeline below video", "Compressed fold", "Turn groups expanded", "Previous turn collapsed"],
+      "description": "The real attachment pane with a native movie selected, covering its centred playback action, timeline below the picture, hover-only Pause posture, the fold's compact limit, and the complete turn-group chronology including empty and boundary states.",
+      "states": ["Paused play overlay", "Playing hover pause overlay", "Timeline below video", "Compressed fold", "Turn groups expanded", "Previous turn collapsed", "Empty pane", "Latest turn empty", "All turns collapsed", "Upcoming and between turns", "Narrow long-label chronology"],
       "matrix": {
         "themes": ["System", "Neo Brutalism", "Cyberpunk"],
         "appearances": ["Light", "Dark", "Theme-authored"],
-        "sizes": ["420×560-point attachment pane", "Compact fold"]
+        "sizes": ["420×560-point attachment pane", "420×360-point short pane", "200×420-point narrow pane", "Compact fold"]
       },
       "source": {
         "path": "Tests/ThreadingTests/SessionAttachmentVideoTests.swift",

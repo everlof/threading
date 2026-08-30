@@ -73,6 +73,7 @@ final class ThemedDisclosureRow: ThemedControl {
     var onToggle: ((Bool) -> Void)?
 
     private let density: Density
+    private let isCollapsible: Bool
     private let chevron = GlyphView()
     private var isPressed = false {
         didSet { needsDisplay = true }
@@ -83,9 +84,11 @@ final class ThemedDisclosureRow: ThemedControl {
     init(
         content: NSView,
         isExpanded: Bool = false,
+        isCollapsible: Bool = true,
         density: Density = .standard
     ) {
         self.isExpanded = isExpanded
+        self.isCollapsible = isCollapsible
         self.density = density
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -115,6 +118,7 @@ final class ThemedDisclosureRow: ThemedControl {
         ])
 
         updateChevron()
+        chevron.isHidden = !isCollapsible
     }
 
     @available(*, unavailable)
@@ -126,33 +130,37 @@ final class ThemedDisclosureRow: ThemedControl {
 
     /// The one semantic operation, shared by pointer, keyboard and accessibility.
     override func performPrimaryAction() -> Bool {
-        guard isEnabled else { return false }
+        guard isEnabled, isCollapsible else { return false }
         isExpanded.toggle()
         onToggle?(isExpanded)
         return true
     }
 
     override func mouseDown(with event: NSEvent) {
-        guard isEnabled else { return }
+        guard isEnabled, isCollapsible else { return }
         isPressed = true
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard isEnabled else { return }
+        guard isEnabled, isCollapsible else { return }
         isPressed = bounds.contains(convert(event.locationInWindow, from: nil))
     }
 
     override func mouseUp(with event: NSEvent) {
         let inside = bounds.contains(convert(event.locationInWindow, from: nil))
         isPressed = false
-        if inside, isEnabled {
+        if inside, isEnabled, isCollapsible {
             _ = performPrimaryAction()
         }
     }
 
     /// A pointing hand, so the row reads as clickable before it is clicked.
     /// The whole row is the press, and it is set in text — so the hand. See `PointerClaiming`.
-    override var restingPointer: NSCursor? { .pointingHand }
+    override var restingPointer: NSCursor? { isCollapsible ? .pointingHand : .arrow }
+
+    override var acceptsFirstResponder: Bool {
+        isCollapsible && super.acceptsFirstResponder
+    }
 
     // MARK: - Drawing
 
@@ -161,9 +169,9 @@ final class ThemedDisclosureRow: ThemedControl {
         // theme switch reaches the chevron without anything being recorded on it.
         chevron.tint = Design.Text.tertiary
 
-        if isPressed {
+        if isCollapsible, isPressed {
             ThemedSurface.draw(bounds, fill: Design.Surface.controlHover, radius: 0)
-        } else if isHovered {
+        } else if isCollapsible, isHovered {
             ThemedSurface.draw(bounds, fill: density.hoverFill, radius: 0)
         }
 
@@ -183,11 +191,15 @@ final class ThemedDisclosureRow: ThemedControl {
 
     // MARK: - Accessibility
 
-    override func accessibilityRole() -> NSAccessibility.Role? { .disclosureTriangle }
+    override func accessibilityRole() -> NSAccessibility.Role? {
+        isCollapsible ? .disclosureTriangle : .group
+    }
 
-    override func accessibilityValue() -> Any? { isExpanded }
+    override func accessibilityValue() -> Any? { isCollapsible ? isExpanded : nil }
 
-    override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
+    override func accessibilityPerformPress() -> Bool {
+        isCollapsible && performPrimaryAction()
+    }
 
     // MARK: - Layout Constants
 

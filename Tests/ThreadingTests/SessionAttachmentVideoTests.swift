@@ -440,21 +440,10 @@ final class SessionAttachmentVideoTests: XCTestCase {
         )
         pane.showAttachment(at: movie)
 
-        let host = ThemedSurfaceView()
-        // This is the render root, not an arranged child. Keep its explicit product-shell size
-        // out of the descendant Auto Layout system's fitting-size calculation.
-        host.translatesAutoresizingMaskIntoConstraints = true
-        host.frame = NSRect(x: 0, y: 0, width: 420, height: 560)
-        host.applySurface(fill: Design.Surface.panel, radius: .fixed(0))
-        pane.view.translatesAutoresizingMaskIntoConstraints = false
-        host.addSubview(pane.view)
-        NSLayoutConstraint.activate([
-            pane.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
-            pane.view.topAnchor.constraint(equalTo: host.topAnchor),
-            pane.view.widthAnchor.constraint(equalToConstant: 420),
-            pane.view.heightAnchor.constraint(equalToConstant: 560)
-        ])
-        host.layoutSubtreeIfNeeded()
+        let host = renderHost(
+            holding: pane,
+            size: NSSize(width: 420, height: 560)
+        )
 
         let player = try XCTUnwrap(
             descendants(of: pane.view).compactMap { $0 as? MediaDocumentPlayerView }.first
@@ -578,7 +567,172 @@ final class SessionAttachmentVideoTests: XCTestCase {
         )
         written += 2
 
-        XCTAssertEqual(written, themes.count * appearances.count * 3 + 2)
+        // No file at all is a different silence from an empty latest turn: the first owns the
+        // pane's ordinary explanatory state, while the second must retain the turn chronology.
+        AppThemePalette.set(.system)
+        let emptyPane = SessionAttachmentsViewController(sessionID: SessionID())
+        let emptyHost = renderHost(
+            holding: emptyPane,
+            size: NSSize(width: 420, height: 560),
+            appearance: .aqua
+        )
+        layout(emptyHost, appearance: .aqua)
+        try writeRender(
+            emptyHost,
+            to: directory,
+            named: "attachment-video-turn-empty-pane-system-light"
+        )
+
+        let foldedSessionID = SessionID()
+        let foldedPreviousID = "evidence-folded-previous"
+        let foldedLatestID = "evidence-folded-latest"
+        let foldedFile = try writePNG(named: "evidence-folded-previous.png")
+        _ = try XCTUnwrap(SessionAttachmentStore.shared.record(
+            declared: foldedFile,
+            sessionID: foldedSessionID,
+            projectRoot: root,
+            origin: .user,
+            turnID: foldedPreviousID,
+            turnPlacement: .next
+        ))
+        let foldedPrevious = SessionAttachmentTurnBoundary(
+            id: GitTurnCheckpointID(),
+            ordinal: 1,
+            userTurnID: foldedPreviousID,
+            requestedAt: Date(timeIntervalSince1970: 10)
+        )
+        let foldedLatest = SessionAttachmentTurnBoundary(
+            id: GitTurnCheckpointID(),
+            ordinal: 2,
+            userTurnID: foldedLatestID,
+            requestedAt: Date(timeIntervalSince1970: 20)
+        )
+        AppThemePalette.set(AppThemeStyles.neoBrutalism)
+        let foldedPane = SessionAttachmentsViewController(sessionID: foldedSessionID)
+        foldedPane.turnBoundariesProvider = { [foldedPrevious, foldedLatest] in
+            [foldedPrevious, foldedLatest]
+        }
+        let foldedHost = renderHost(
+            holding: foldedPane,
+            size: NSSize(width: 420, height: 560),
+            appearance: .aqua
+        )
+        foldedPane.setTurnSection(.checkpoint(foldedLatest.id), expanded: false)
+        foldedPane.setTurnSection(.checkpoint(foldedPrevious.id), expanded: false)
+        foldedPane.tableViewForTesting.scrollRowToVisible(0)
+        layout(foldedHost, appearance: .aqua)
+        realizeVisibleRows(in: foldedPane)
+        try writeRender(
+            foldedHost,
+            to: directory,
+            named: "attachment-video-turn-latest-empty-all-collapsed-neo-brutalism-light"
+        )
+
+        // One short, dark pane carries the two boundary states exact turn ids cannot name:
+        // a prompt waiting for admission and pane-local comparison input between turns.
+        let boundarySessionID = SessionID()
+        let boundaryLatestID = "evidence-boundary-latest"
+        let boundaryLatestFile = try writePNG(named: "evidence-boundary-latest.png")
+        let upcomingFile = try writePNG(named: "evidence-boundary-upcoming.png")
+        let betweenFile = try writePNG(named: "evidence-boundary-between.png")
+        _ = try XCTUnwrap(SessionAttachmentStore.shared.record(
+            declared: boundaryLatestFile,
+            sessionID: boundarySessionID,
+            projectRoot: root,
+            origin: .user,
+            turnID: boundaryLatestID,
+            turnPlacement: .next
+        ))
+        _ = try XCTUnwrap(SessionAttachmentStore.shared.record(
+            declared: upcomingFile,
+            sessionID: boundarySessionID,
+            projectRoot: root,
+            origin: .user,
+            turnPlacement: .next
+        ))
+        _ = try XCTUnwrap(SessionAttachmentStore.shared.record(
+            declared: betweenFile,
+            sessionID: boundarySessionID,
+            projectRoot: root,
+            origin: .user,
+            turnPlacement: .none
+        ))
+        let boundaryLatest = SessionAttachmentTurnBoundary(
+            id: GitTurnCheckpointID(),
+            ordinal: 1,
+            userTurnID: boundaryLatestID,
+            requestedAt: Date(timeIntervalSince1970: 1)
+        )
+        AppThemePalette.set(.system)
+        let boundaryPane = SessionAttachmentsViewController(sessionID: boundarySessionID)
+        boundaryPane.turnBoundariesProvider = { [boundaryLatest] in [boundaryLatest] }
+        let boundaryHost = renderHost(
+            holding: boundaryPane,
+            size: NSSize(width: 420, height: 360),
+            appearance: .darkAqua
+        )
+        boundaryPane.showAttachment(at: boundaryLatestFile)
+        boundaryPane.tableViewForTesting.scrollRowToVisible(0)
+        layout(boundaryHost, appearance: .darkAqua)
+        realizeVisibleRows(in: boundaryPane)
+        try writeRender(
+            boundaryHost,
+            to: directory,
+            named: "attachment-video-turn-upcoming-between-short-system-dark"
+        )
+
+        // Fifty is the durable ledger's real per-session ceiling. Putting one file at each end
+        // yields the longest title the shipping chronology can generate ("49 turns ago") and a
+        // long filename at the pane's ordinary 200-point opening floor.
+        let narrowSessionID = SessionID()
+        let narrowBoundaries = (1...GitTurnCheckpointDefaults.maximumPerSession).map { ordinal in
+            SessionAttachmentTurnBoundary(
+                id: GitTurnCheckpointID(),
+                ordinal: ordinal,
+                userTurnID: "evidence-narrow-turn-\(ordinal)",
+                requestedAt: Date(timeIntervalSince1970: TimeInterval(ordinal))
+            )
+        }
+        let narrowLatestFile = try writePNG(named: "evidence-narrow-latest.png")
+        let narrowOldFile = try writePNG(
+            named: "this-is-a-deliberately-long-attachment-name-for-the-narrow-pane.png"
+        )
+        _ = try XCTUnwrap(SessionAttachmentStore.shared.record(
+            declared: narrowLatestFile,
+            sessionID: narrowSessionID,
+            projectRoot: root,
+            origin: .user,
+            turnID: try XCTUnwrap(narrowBoundaries.last).userTurnID,
+            turnPlacement: .next
+        ))
+        _ = try XCTUnwrap(SessionAttachmentStore.shared.record(
+            declared: narrowOldFile,
+            sessionID: narrowSessionID,
+            projectRoot: root,
+            origin: .user,
+            turnID: try XCTUnwrap(narrowBoundaries.first).userTurnID,
+            turnPlacement: .next
+        ))
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+        let narrowPane = SessionAttachmentsViewController(sessionID: narrowSessionID)
+        narrowPane.turnBoundariesProvider = { narrowBoundaries }
+        let narrowHost = renderHost(
+            holding: narrowPane,
+            size: NSSize(width: DisplayPaneDefaults.minWidth, height: 420),
+            appearance: .darkAqua
+        )
+        narrowPane.showAttachment(at: narrowLatestFile)
+        narrowPane.tableViewForTesting.scrollRowToVisible(0)
+        layout(narrowHost, appearance: .darkAqua)
+        realizeVisibleRows(in: narrowPane)
+        try writeRender(
+            narrowHost,
+            to: directory,
+            named: "attachment-video-turn-narrow-long-cyberpunk-dark"
+        )
+        written += 4
+
+        XCTAssertEqual(written, themes.count * appearances.count * 3 + 6)
         print("Rendered attachment video playback to \(directory.path)")
     }
 
@@ -764,6 +918,52 @@ final class SessionAttachmentVideoTests: XCTestCase {
             resolved.performAsCurrentDrawingAppearance {
                 MainActor.assumeIsolated(render)
             }
+        }
+    }
+
+    private func renderHost(
+        holding pane: SessionAttachmentsViewController,
+        size: NSSize,
+        appearance: NSAppearance.Name? = nil
+    ) -> ThemedSurfaceView {
+        let host = ThemedSurfaceView()
+        // This is the render root, not an arranged child. Keep its explicit product-shell size
+        // out of the descendant Auto Layout system's fitting-size calculation.
+        host.translatesAutoresizingMaskIntoConstraints = true
+        host.frame = NSRect(origin: .zero, size: size)
+        if let appearance {
+            host.appearance = NSAppearance(named: appearance)
+        }
+        host.applySurface(fill: Design.Surface.panel, radius: .fixed(0))
+        // Load and settle the production controller at its real shell size before the host owns
+        // it. Loading an AppKit table at a zero-size root can leave its document view with a
+        // zero visible rect even after the outer constraints settle; the ordinary pane fixture
+        // above follows this same two-pass sizing path for that reason.
+        pane.view.frame = NSRect(origin: .zero, size: size)
+        pane.view.autoresizingMask = []
+        pane.view.layoutSubtreeIfNeeded()
+        pane.view.layoutSubtreeIfNeeded()
+        pane.view.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(pane.view)
+        NSLayoutConstraint.activate([
+            pane.view.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            pane.view.topAnchor.constraint(equalTo: host.topAnchor),
+            pane.view.widthAnchor.constraint(equalToConstant: size.width),
+            pane.view.heightAnchor.constraint(equalToConstant: size.height)
+        ])
+        host.layoutSubtreeIfNeeded()
+        return host
+    }
+
+    /// An on-screen `NSTableView` asks its delegate for visible rows during display. Evidence
+    /// roots are intentionally off-window, so make that same bounded request before caching the
+    /// bitmap; otherwise the clip view is truthful but visually empty in the artifact.
+    private func realizeVisibleRows(in pane: SessionAttachmentsViewController) {
+        let table = pane.tableViewForTesting
+        let visible = table.rows(in: table.visibleRect)
+        guard visible.location != NSNotFound, visible.length > 0 else { return }
+        for row in visible.location..<(visible.location + visible.length) {
+            _ = table.view(atColumn: 0, row: row, makeIfNecessary: true)
         }
     }
 

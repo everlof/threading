@@ -625,12 +625,16 @@ final class SessionAttachmentsViewController: NSViewController {
 
             previewMessage.centerXAnchor.constraint(equalTo: previewHost.centerXAnchor),
             previewMessage.centerYAnchor.constraint(equalTo: previewHost.centerYAnchor),
+            // The label starts empty and receives every fallback sentence later. Giving it the
+            // preview's readable width here avoids AppKit preserving the empty label's four-point
+            // intrinsic width after the first message arrives; centred alignment keeps short
+            // sentences visually centred while long ones wrap inside the pane.
             previewMessage.leadingAnchor.constraint(
-                greaterThanOrEqualTo: previewHost.leadingAnchor,
+                equalTo: previewHost.leadingAnchor,
                 constant: inset
             ),
             previewMessage.trailingAnchor.constraint(
-                lessThanOrEqualTo: previewHost.trailingAnchor,
+                equalTo: previewHost.trailingAnchor,
                 constant: -inset
             ),
 
@@ -2533,11 +2537,12 @@ final class SessionAttachmentTurnHeaderView: NSTableCellView {
         disclosure = ThemedDisclosureRow(
             content: content,
             isExpanded: isExpanded,
+            isCollapsible: !section.attachments.isEmpty,
             density: .compact
         )
         super.init(frame: .zero)
 
-        disclosure.onToggle = onToggle
+        disclosure.onToggle = section.attachments.isEmpty ? nil : onToggle
         disclosure.setAccessibilityLabel("\(title), \(count)")
         disclosure.setAccessibilityIdentifier(Self.accessibilityIdentifier(for: section.id))
 
