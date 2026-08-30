@@ -332,6 +332,11 @@ predating `usageWindows` sends only the binding fraction, and the phone rings th
 order and the reset-expiry rule live in `MobileAccountUsageReading.resolve`; the draft's disc
 follows the model the draft will start.
 
+The session menu writes the disc's exact percentages beside it and follows them with the next
+reset from that same resolved window set. The reading owns the reset timestamp rather than letting
+the menu rescan the account's complete wire list: a Codex Spark reset therefore appears only for a
+chat that actually runs Spark, never because it happens earlier than the selected model's limits.
+
 ### One name per window
 
 A window is named by its **length**, and a scoped one adds the **model** it meters: compact

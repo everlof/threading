@@ -158,36 +158,30 @@ enum MobileSessionChrome {
 
     /// What that row says under the login's name.
     ///
-    /// The gauge beside it carries the percentages, so the words are spent on the one thing a
-    /// ring cannot show: when the nearest window still ahead comes back. Two cases keep the
-    /// reading in words instead — a host that sends no reset time, and one that sends no window
-    /// to ring — because a row reduced to a name and an undrawable gauge has lost the reason it
-    /// is in the menu.
+    /// The row keeps the exact percentages beside its glanceable gauge, then names when the
+    /// first model-relevant window comes back. The reset was once selected independently from
+    /// every account window, which let an unrelated Spark limit replace the reset for the model
+    /// this chat actually runs; `MobileAccountUsageReading` now owns both facts.
     static func usageMenuDetail(
         reading: MobileAccountUsageReading,
-        windows: [RemoteAccountUsageWindowDTO]?,
         now: Date = Date()
     ) -> String {
-        let nextReset = (windows ?? [])
-            .compactMap(\.resetsAt)
-            .map { Date(timeIntervalSince1970: $0) }
-            .filter { $0 > now }
-            .min()
-        guard let nextReset, !reading.rings.isEmpty else {
-            // A gauge with no words at all is a host that sent a fraction and no reading; the
-            // row keeps the dash the rest of the app uses for a value it does not know rather
-            // than an empty second line.
-            return reading.summary ?? MobileUsageDefaults.unknownValue
+        var parts = reading.summary.map { [$0] } ?? []
+        if let nextReset = reading.nextReset {
+            // Relative to the same instant the window ahead was chosen against, and in the
+            // usage dashboard's own words for the same fact. `Date.formatted(.relative:)` is
+            // always relative to the real clock instead, which is a second reading of "now" in
+            // one line.
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            parts.append(MobileL10n.string(
+                "Next reset %@",
+                formatter.localizedString(for: nextReset, relativeTo: now)
+            ))
         }
-        // Relative to the same instant the window ahead was chosen against, and in the usage
-        // dashboard's own words for the same fact. `Date.formatted(.relative:)` is always
-        // relative to the real clock instead, which is a second reading of "now" in one line.
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        return MobileL10n.string(
-            "Next reset %@",
-            formatter.localizedString(for: nextReset, relativeTo: now)
-        )
+        return parts.isEmpty
+            ? MobileUsageDefaults.unknownValue
+            : parts.joined(separator: MobileUsageDefaults.segmentSeparator)
     }
 }
 
@@ -195,7 +189,7 @@ enum MobileSessionChrome {
 /// be photographed from one build. Ships as `.reset`; a DEBUG run names another through
 /// `THREADING_MOBILE_USAGE_MENU`. Delete with the three shapes that are not chosen.
 enum MobileUsageMenuShape: String {
-    /// What ships today: the login, and when its nearest window comes back.
+    /// What ships today: the login, its exact usage, and the next relevant reset.
     case reset
     /// The address joined onto the same line.
     case address
@@ -452,7 +446,7 @@ struct SessionDetailView: View {
     @ViewBuilder
     private var sessionMenuContent: some View {
         // The disc that opens this menu is ringed by the account's usage; the row leads with
-        // that same drawing at glyph size, says when the nearest window comes back, and takes
+        // that same drawing at glyph size, states its exact values and relevant reset, and takes
         // the reader to the dashboard for the rest.
         if let account = sessionAccount,
            let reading = sessionUsageReading,
@@ -621,10 +615,7 @@ struct SessionDetailView: View {
         account: RemoteAccountChoiceDTO,
         reading: MobileAccountUsageReading
     ) -> some View {
-        let detail = MobileSessionChrome.usageMenuDetail(
-            reading: reading,
-            windows: account.usageWindows
-        )
+        let detail = MobileSessionChrome.usageMenuDetail(reading: reading)
         let address = MobileSessionChrome.usageMenuAddress(for: account)
         switch MobileUsageMenuShape.current {
         case .reset:
@@ -654,7 +645,7 @@ struct SessionDetailView: View {
         }
     }
 
-    /// One row: the login, what is left to say in words, and the reading drawn beside them.
+    /// One row: the login, its exact reading and relevant reset, and the glanceable gauge.
     private func usageRow(
         title: String,
         detail: String,
@@ -669,10 +660,10 @@ struct SessionDetailView: View {
             Text(detail)
             usageMenuGlyph(for: reading)
         }
-        // The rings carry the percentages now. VoiceOver still hears them, here and on the
-        // disc that opens this menu, because a gauge read aloud is not a reading.
+        // The visible detail and VoiceOver value stay identical: both include the exact
+        // percentages and the relevant reset, while the rings remain the glanceable path.
         .accessibilityLabel(title)
-        .accessibilityValue(reading.summary ?? "")
+        .accessibilityValue(detail)
     }
 
     /// The reading as the menu row's glyph: its rings, or the gauge symbol when a host reports

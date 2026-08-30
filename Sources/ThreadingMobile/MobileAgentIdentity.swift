@@ -255,6 +255,18 @@ struct MobileAccountUsageReading: Equatable {
     /// names every window the chat is metered by, including one the disc had no room to ring.
     let summary: String?
 
+    /// The first future reset among the same windows `rings` and `summary` describe.
+    ///
+    /// Kept on the resolved reading so a presentation cannot accidentally choose from the
+    /// account's unfiltered wire list and promote a scoped limit for another model.
+    let nextReset: Date?
+
+    init(rings: [Ring], summary: String?, nextReset: Date? = nil) {
+        self.rings = rings
+        self.summary = summary
+        self.nextReset = nextReset
+    }
+
     /// The rings for `account` as a chat on `model` is metered. A nil model means the account's
     /// default, the fallback the Mac's own pill makes, because that is what the next turn spends.
     static func resolve(
@@ -268,7 +280,8 @@ struct MobileAccountUsageReading: Equatable {
                 rings: account.usageFraction.map {
                     [Ring(id: MobileUsageDefaults.bindingRingID, fraction: $0)]
                 } ?? [],
-                summary: account.usageSummary
+                summary: account.usageSummary,
+                nextReset: nil
             )
         }
 
@@ -288,7 +301,16 @@ struct MobileAccountUsageReading: Equatable {
         let summary = chosen
             .map { "\($0.name) \(value($0, now: now))" }
             .joined(separator: MobileUsageDefaults.segmentSeparator)
-        return MobileAccountUsageReading(rings: Array(rings), summary: summary.isEmpty ? nil : summary)
+        let nextReset = chosen
+            .compactMap(\.resetsAt)
+            .map(Date.init(timeIntervalSince1970:))
+            .filter { $0 > now }
+            .min()
+        return MobileAccountUsageReading(
+            rings: Array(rings),
+            summary: summary.isEmpty ? nil : summary,
+            nextReset: nextReset
+        )
     }
 
     /// The Mac's own rule, `AccountUsage.Window.isExpired`: past the reset, the fraction is a
@@ -467,11 +489,9 @@ struct MobileAccountUsageRings: View {
 /// The rings as a picture, for the one place that cannot hold a view: a menu row.
 ///
 /// `UIMenu` builds its own rows out of a title, a subtitle and an image, so a chat menu's usage
-/// row could only ever spell its reading out — "7d 34% · Next reset in 5 hours" — and a person
-/// reading that asked for the percentage as a graphic instead. The image, though, may be any
-/// picture at all. This renders the reading the disc that opened the menu is already ringed by,
-/// so the row is labelled by the same drawing at glyph size and its words are freed for what a
-/// ring cannot say.
+/// row spells its exact reading and reset out while the gauge makes the same percentages
+/// glanceable. The image may be any picture at all, so this renders the reading the disc that
+/// opened the menu is already ringed by and hands that same drawing over at glyph size.
 ///
 /// Rendered rather than drawn again in Core Graphics: `MobileAccountUsageRings` is the one
 /// definition of what a reading looks like, and a second one would drift from it.

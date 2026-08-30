@@ -159,6 +159,80 @@ final class MobileAccountUsageReadingTests: XCTestCase {
         XCTAssertEqual(onOpus?.summary, "5h 43% · 7d 73%")
     }
 
+    /// A reset is part of the resolved reading, not a second scan of the account's complete
+    /// wire list. An earlier Spark reset therefore belongs only to a Spark chat.
+    func testNextResetUsesTheSameModelScopeAsTheRingsAndSummary() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let fiveHour = RemoteAccountUsageWindowDTO(
+            id: "5h",
+            name: "5h",
+            fraction: 0.43,
+            resetsAt: now.addingTimeInterval(3_600).timeIntervalSince1970,
+            windowDuration: fiveHourSeconds
+        )
+        let weekly = RemoteAccountUsageWindowDTO(
+            id: "7d",
+            name: "7d",
+            fraction: 0.73,
+            resetsAt: now.addingTimeInterval(3 * 24 * 60 * 60).timeIntervalSince1970,
+            windowDuration: weekSeconds
+        )
+        let spark = RemoteAccountUsageWindowDTO(
+            id: "GPT-5.3-Codex-Spark",
+            name: "7d GPT-5.3-Codex-Spark",
+            fraction: 0.12,
+            resetsAt: now.addingTimeInterval(5 * 60).timeIntervalSince1970,
+            windowDuration: weekSeconds,
+            metersModelIDs: ["gpt-5.3-codex-spark"]
+        )
+        let login = account(windows: [fiveHour, weekly, spark])
+
+        let onSol = MobileAccountUsageReading.resolve(
+            account: login,
+            model: "gpt-5.3-codex",
+            now: now
+        )
+        XCTAssertEqual(onSol?.summary, "5h 43% · 7d 73%")
+        XCTAssertEqual(onSol?.nextReset, now.addingTimeInterval(3_600))
+
+        let onSpark = MobileAccountUsageReading.resolve(
+            account: login,
+            model: "gpt-5.3-codex-spark",
+            now: now
+        )
+        XCTAssertEqual(
+            onSpark?.summary,
+            "5h 43% · 7d 73% · 7d GPT-5.3-Codex-Spark 12%"
+        )
+        XCTAssertEqual(onSpark?.nextReset, now.addingTimeInterval(5 * 60))
+    }
+
+    func testNextResetIgnoresARelevantWindowThatAlreadyExpired() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let expired = RemoteAccountUsageWindowDTO(
+            id: "5h",
+            name: "5h",
+            fraction: 0.91,
+            resetsAt: now.addingTimeInterval(-60).timeIntervalSince1970,
+            windowDuration: fiveHourSeconds
+        )
+        let future = RemoteAccountUsageWindowDTO(
+            id: "7d",
+            name: "7d",
+            fraction: 0.20,
+            resetsAt: now.addingTimeInterval(7_200).timeIntervalSince1970,
+            windowDuration: weekSeconds
+        )
+
+        let reading = MobileAccountUsageReading.resolve(
+            account: account(windows: [expired, future]),
+            model: nil,
+            now: now
+        )
+
+        XCTAssertEqual(reading?.nextReset, now.addingTimeInterval(7_200))
+    }
+
     /// A chat that chose no model runs the account's default, which is what the Mac's pill meters
     /// too. With no default known nothing scoped applies, the conservative answer.
     func testAChatWithoutAModelIsMeteredByTheAccountsDefault() {
