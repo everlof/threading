@@ -74,6 +74,11 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
         window?.firstResponder === self
     }
 
+    /// Reports focus without asking a feature to subclass or observe AppKit responders. A host
+    /// uses this when a control's surrounding presentation must stay visible while the keyboard
+    /// is on it, just as `onHoverChange` exposes the shared pointer state below.
+    var onKeyboardFocusChange: ((Bool) -> Void)?
+
     override var isEnabled: Bool {
         didSet {
             if !isEnabled, hasKeyboardFocus {
@@ -85,13 +90,19 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
-        if accepted { needsDisplay = true }
+        if accepted {
+            needsDisplay = true
+            onKeyboardFocusChange?(true)
+        }
         return accepted
     }
 
     override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
-        if resigned { needsDisplay = true }
+        if resigned {
+            needsDisplay = true
+            onKeyboardFocusChange?(false)
+        }
         return resigned
     }
 

@@ -239,16 +239,28 @@ final class WorkspaceNavigatorPipelinePlaceholderView: NSView, ThemedComponent {
 @MainActor
 final class WorkspaceNavigatorPipelineTemplateView: NSView, ThemedComponent {
     typealias ImageResolver = (WorkspaceNavigatorRealizedImage) -> NSImage?
+    typealias IntentHandler = (ExtensionWorkspaceNavigatorIntent) -> Void
+
+    private var intentButtons: [ThemedIconButton] = []
+    private var keyboardFocusedIntentButtons = Set<ObjectIdentifier>()
+    private var intentControlsHovered = false
+    private var intentControlsPresented = false
 
     init(
         node: WorkspaceNavigatorRealizedTemplateNode,
-        imageResolver: @escaping ImageResolver
+        imageResolver: @escaping ImageResolver,
+        onIntent: @escaping IntentHandler = { _ in }
     ) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityIdentifier("workspace.navigator.pipeline-template")
 
-        let content = makeView(for: node, parentAxis: nil, imageResolver: imageResolver)
+        let content = makeView(
+            for: node,
+            parentAxis: nil,
+            imageResolver: imageResolver,
+            onIntent: onIntent
+        )
         content.translatesAutoresizingMaskIntoConstraints = false
         addSubview(content)
         var constraints = [
@@ -267,11 +279,49 @@ final class WorkspaceNavigatorPipelineTemplateView: NSView, ThemedComponent {
             constraints.append(content.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor))
         }
         NSLayoutConstraint.activate(constraints)
+        setIntentControlsPresented(false)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window == nil else { return }
+        keyboardFocusedIntentButtons.removeAll()
+        intentControlsHovered = false
+        updateIntentControlsPresentation()
+    }
+
+    /// Resting rows reserve their action geometry and keep the controls in keyboard and
+    /// accessibility traversal. `hitTest(_:)` alone refuses pointer presses until the row host
+    /// reveals them, so an invisible target cannot steal the row's ordinary click.
+    func setIntentControlsPresented(_ presented: Bool) {
+        intentControlsHovered = presented
+        updateIntentControlsPresentation()
+    }
+
+    private func updateIntentControlsPresentation() {
+        let presented = intentControlsHovered || !keyboardFocusedIntentButtons.isEmpty
+        intentControlsPresented = presented
+        for button in intentButtons {
+            if presented { button.materializeGlyphIfNeeded() }
+            button.alphaValue = presented ? 1 : 0
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let target = super.hitTest(point)
+        guard !intentControlsPresented,
+              let target,
+              intentButtons.contains(where: { target === $0 || target.isDescendant(of: $0) })
+        else { return target }
+
+        // Returning nil lets the owning collection row receive the ordinary activation gesture.
+        // The button remains enabled, focusable and exposed to accessibility without a pointer.
+        return nil
     }
 
     /// One stable list-row height derived from the declaration, not from realized subject data.
@@ -288,7 +338,8 @@ final class WorkspaceNavigatorPipelineTemplateView: NSView, ThemedComponent {
     private func makeView(
         for node: WorkspaceNavigatorRealizedTemplateNode,
         parentAxis: ExtensionAxis?,
-        imageResolver: ImageResolver
+        imageResolver: ImageResolver,
+        onIntent: @escaping IntentHandler
     ) -> NSView {
         switch node {
         case let .text(text, role):
@@ -313,6 +364,30 @@ final class WorkspaceNavigatorPipelineTemplateView: NSView, ThemedComponent {
             spinner.setAccessibilityLabel(accessibilityLabel)
             spinner.setAccessibilityIdentifier("workspace.navigator.pipeline-activity")
             return spinner
+        case let .intent(intent):
+            let button = ThemedIconButton(
+                symbolName: intent.symbolName,
+                accessibility: intent.accessibilityLabel,
+                target: .inline,
+                glyphMaterialization: .deferred
+            )
+            button.toolTip = intent.accessibilityLabel
+            button.setAccessibilityIdentifier(
+                "workspace.navigator.intent.\(intent.rawValue)"
+            )
+            button.onPress = { onIntent(intent) }
+            let buttonIdentifier = ObjectIdentifier(button)
+            button.onKeyboardFocusChange = { [weak self] hasFocus in
+                guard let self else { return }
+                if hasFocus {
+                    self.keyboardFocusedIntentButtons.insert(buttonIdentifier)
+                } else {
+                    self.keyboardFocusedIntentButtons.remove(buttonIdentifier)
+                }
+                self.updateIntentControlsPresentation()
+            }
+            intentButtons.append(button)
+            return button
         case .divider:
             return SeparatorView(parentAxis == .horizontal ? .vertical : .horizontal)
         case let .spacer(spacing):
@@ -343,7 +418,12 @@ final class WorkspaceNavigatorPipelineTemplateView: NSView, ThemedComponent {
             return spacer
         case let .stack(axis, spacing, children):
             let views = children.map {
-                makeView(for: $0, parentAxis: axis, imageResolver: imageResolver)
+                makeView(
+                    for: $0,
+                    parentAxis: axis,
+                    imageResolver: imageResolver,
+                    onIntent: onIntent
+                )
             }
             let stack = NSStackView(views: views)
             stack.orientation = axis == .horizontal ? .horizontal : .vertical
@@ -416,6 +496,8 @@ final class WorkspaceNavigatorPipelineTemplateView: NSView, ThemedComponent {
             return ceil(Design.Typography.control().boundingRectForFont.height)
         case .activityIndicator:
             return Design.Size.extensionIconImage
+        case .intent:
+            return Design.Size.inlineButtonTarget
         case let .conditional(_, content):
             return contentHeight(for: content)
         case .divider:
@@ -486,6 +568,24 @@ final class WorkspaceNavigatorPipelineTemplateView: NSView, ThemedComponent {
 
     private func spacingValue(_ spacing: ExtensionSpacing) -> CGFloat {
         Self.spacingValue(spacing)
+    }
+}
+
+private extension ExtensionWorkspaceNavigatorIntent {
+    var symbolName: String {
+        switch self {
+        case .pin: "pin"
+        case .unpin: "pin.slash"
+        case .archive: "archivebox"
+        }
+    }
+
+    var accessibilityLabel: String {
+        switch self {
+        case .pin: L10n.string("Pin")
+        case .unpin: L10n.string("Unpin")
+        case .archive: L10n.string("Archive")
+        }
     }
 }
 

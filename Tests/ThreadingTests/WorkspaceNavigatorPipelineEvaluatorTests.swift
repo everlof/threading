@@ -54,7 +54,8 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
                 .text(.fact(.init(titleKey), facet: .value, fallback: nil), role: .body),
                 .text(.fact(.init(missing), facet: .value, fallback: "Fallback"), role: .detail),
                 .text(.fact(.init(missing), facet: .value, fallback: nil), role: .detail),
-                .conditional(.isPresent(.init(missing)), content: .divider),
+                .intent(.pin),
+                .conditional(.isPresent(.init(missing)), content: .intent(.archive)),
                 .status(
                     .fact(.init(titleKey), facet: .value, fallback: nil),
                     role: .factStatus(.init(missing), fallback: .warning)
@@ -76,6 +77,7 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             children: [
                 .text(.fact(.init(titleKey), facet: .value, fallback: nil), role: .body),
                 .text(.literal("Fallback"), role: .detail),
+                .intent(.pin),
                 .status(
                     .fact(.init(titleKey), facet: .value, fallback: nil),
                     role: .literal(.warning)
@@ -83,6 +85,19 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             ]
         )
         XCTAssertEqual(compiled.rowTemplate, expectedTemplate)
+
+        let evaluator = WorkspaceNavigatorPipelineEvaluator()
+        let item = try XCTUnwrap(evaluator.evaluate(compiled).sections.first?.items.first)
+        XCTAssertEqual(evaluator.realizeVisibleRow(item, in: compiled), .stack(
+            axis: .horizontal,
+            spacing: .small,
+            children: [
+                .text("One", role: .body),
+                .text("Fallback", role: .detail),
+                .intent(.pin),
+                .status("One", role: .warning),
+            ]
+        ))
     }
 
     func testCompilationRejectsIncompatibleRuntimeDefinitions() {

@@ -3,7 +3,8 @@
 > Status: active feature draft — the product goal is that a user who wants a different sidebar
 > can have one, built by an extension, without Threading having anticipated the shape they wanted. The
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
-> plus a host-executed intent vocabulary. Rollout steps 1–5 were implemented by 2026-08-30.
+> plus a host-executed intent vocabulary. Rollout steps 1–5 and the initial intent contract were
+> implemented by 2026-08-30; the T3 reference extension and later rollout steps remain open.
 > No part of
 > `ui.workspace-navigation` v1 is withdrawn.
 
@@ -19,8 +20,8 @@ Model a navigator as a **transform over facts**, not as a document an extension 
   option values. **Threading evaluates it**, natively, over its own model.
 - It declares the **output shape** (list, outline, grid, sections) and one **item template** with
   bindings to facts. Threading realizes the template per visible row.
-- Row actions bind to a host-owned **intent** vocabulary — pin, archive, snooze, rename — which
-  Threading executes, refuses, confirms and undoes.
+- Row actions bind to a host-owned **intent** vocabulary. The first shipped slice is pin, unpin,
+  and archive, which Threading executes, refuses, persists and undoes.
 
 What crosses the process boundary is the *rule*, never the *result*. That is the whole design.
 It is what lets a navigator sort five thousand sessions at native speed, repaint one row on an
@@ -439,8 +440,9 @@ a changed fact repaints the rows bound to it instead of replacing a document.
 Reading and arranging is the pipeline; changing things is not, and should not be smuggled in as a
 sixth stage. Row actions bind to a **named intent** the host executes:
 
-`pin` · `unpin` · `archive` · `snooze(until:)` · `rename` · `new-session(project:)` ·
-`move-to-project` · `open-in(app:)`
+The implemented initial vocabulary is `pin` · `unpin` · `archive`. Possible later additions are
+`snooze(until:)` · `rename` · `new-session(project:)` · `move-to-project` · `open-in(app:)`; none
+of those later verbs is part of the public contract yet.
 
 The host owns validation, the confirmation where one is due, persistence failure, the undo, and the
 toast. It may refuse. This is the same shape as v1's `.destination`, which is already an intent the
@@ -603,7 +605,11 @@ does. An install must never reorder somebody's sidebar on its own.
    materialized item list is a degenerate template. `ActivityInboxExtension` is the buildable
    public test: it requests only `ui.workspace-navigation`, while the host produces Priority and
    relative-date sections, persists its sort option and repaints working state from facts.
-6. **Intents**, declared per navigator in the manifest. `T3SidebarExtension` becomes buildable.
+6. **Intents — contract implemented 2026-08-30; T3 example in progress.** `pin`, `unpin`, and
+   `archive` are declared per navigator in the manifest, disclosed before enable/update, rendered
+   inside the host's virtual row, and executed through native persistence/lifecycle paths without
+   revealing the gesture, source session, or result to the extension. `T3SidebarExtension` is the
+   remaining public example for this step.
 7. **Windowed collections**, retiring the aggregate item cap.
 8. **Native on the pipeline**, as far as it honestly goes. Full parity includes drag reorder,
    inline rename, LabelMorph titles and hover cards; the realistic target is that native's *facts*

@@ -116,6 +116,7 @@ struct InstalledExtensionSnapshot {
     let profile: ExtensionProfile
     let contributionKinds: [ExtensionContributionKind]
     let capabilities: [String]
+    let navigatorIntents: [ExtensionNavigatorIntentDisclosure]
     let companions: [ExtensionCompanion]
     let companionStatuses: [String: InstalledCompanionStatus]
     let services: [ExtensionServiceDefinition]
@@ -529,6 +530,9 @@ final class ExtensionManager:
                     $0.rawValue < $1.rawValue
                 } ?? [],
                 capabilities: manifest?.capabilities.map(\.rawValue).sorted() ?? [],
+                navigatorIntents: ExtensionNavigatorIntentDisclosure.disclosures(
+                    in: manifest?.workspaceNavigators.map(localization.workspaceNavigator) ?? []
+                ),
                 companions: manifest?.companions
                     .map(localization.companion)
                     .sorted { $0.id < $1.id } ?? [],

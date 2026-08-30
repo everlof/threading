@@ -24146,6 +24146,28 @@
         }
       }
     },
+    "Navigator actions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Navigatoråtgärder"
+          }
+        }
+      }
+    },
+    "Navigator actions: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Navigatoråtgärder: %@"
+          }
+        }
+      }
+    },
     "Navigator cell" : {
       "extractionState" : "manual",
       "localizations" : {

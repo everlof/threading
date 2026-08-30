@@ -20,6 +20,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     private let factSnapshotProvider: WorkspaceNavigatorHostViewController.FactSnapshotProvider
     private let factSnapshotPatchProvider:
         WorkspaceNavigatorHostViewController.FactSnapshotPatchProvider
+    private let intentHandler: WorkspaceNavigatorHostViewController.IntentHandler
     private let onSelectNative: () -> Void
     private var visibleController: NSViewController?
     private var extensionController: WorkspaceNavigatorHostViewController?
@@ -43,6 +44,9 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
             @escaping WorkspaceNavigatorHostViewController.FactSnapshotPatchProvider = {
                 _, _, _ in nil
             },
+        intentHandler: @escaping WorkspaceNavigatorHostViewController.IntentHandler = {
+            _, _ in .targetUnavailable
+        },
         onSelectNative: @escaping () -> Void = {}
     ) {
         self.nativeController = nativeController
@@ -51,6 +55,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         self.destinationHandler = destinationHandler
         self.factSnapshotProvider = factSnapshotProvider
         self.factSnapshotPatchProvider = factSnapshotPatchProvider
+        self.intentHandler = intentHandler
         self.onSelectNative = onSelectNative
         super.init(nibName: nil, bundle: nil)
     }
@@ -123,6 +128,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
                 destinationHandler: destinationHandler,
                 factSnapshotProvider: factSnapshotProvider,
                 factSnapshotPatchProvider: factSnapshotPatchProvider,
+                intentHandler: intentHandler,
                 onSelectNative: onSelectNative,
                 onUnavailable: { [weak self] in
                     self?.failBack(
@@ -178,6 +184,17 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         extensionController?.synchronizeSelection(with: destination)
     }
 
+    /// Routes a lifecycle receipt to whichever navigator shell is actually visible when the
+    /// asynchronous result arrives. `show(_:)` also transfers requests which were already live
+    /// before a shell swap, so neither completion ordering can strand Archive's Undo.
+    func presentToast(_ toast: ToastRequest) {
+        if let extensionHost = visibleController as? WorkspaceNavigatorHostViewController {
+            extensionHost.presentToast(toast)
+        } else {
+            nativeController.presentToast(toast)
+        }
+    }
+
     private func failBack(
         extensionIdentifier: String,
         navigatorID: String,
@@ -231,6 +248,14 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
 
         let previous = visibleController
         (previous as? WorkspaceNavigatorHostViewController)?.dismissPresentedMenu()
+        let transferredToasts: [ToastRequest]
+        if let extensionHost = previous as? WorkspaceNavigatorHostViewController {
+            transferredToasts = extensionHost.takePresentedToastsForTransfer()
+        } else if previous === nativeController {
+            transferredToasts = nativeController.takePresentedToastsForTransfer()
+        } else {
+            transferredToasts = []
+        }
         addChild(controller)
         let presented = controller.view
         presented.translatesAutoresizingMaskIntoConstraints = false
@@ -245,5 +270,6 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
 
         previous?.view.removeFromSuperview()
         previous?.removeFromParent()
+        transferredToasts.forEach(presentToast)
     }
 }

@@ -386,7 +386,8 @@ items.
   grants no project or session data by itself; request the applicable host-read capabilities
   separately. Put every navigator with a host-evaluated `pipeline` in the manifest's static
   `workspaceNavigators` list and repeat the exact raw base-language list during registration.
-  Keep materialized v1 navigators runtime-only.
+  Keep materialized v1 navigators runtime-only. A pipeline navigator's static `intents` list is
+  inspection metadata within that same declaration, not a session-write capability.
 - Declare `host.events` when a workspace navigator sets `eventActionID`. The selected navigator
   then receives bounded host-observed session IDs even if it never pages the general event journal.
 - Declare `host.projects.read` before calling `projects()` or `project(id:)`.
@@ -481,6 +482,17 @@ generation. A mismatch or process termination exposes no navigator from that gen
 `session.activity.detailed@1` currently publishes the public
 `ExtensionSessionDetailedActivity` raw values `dormant`, `idle`, `working`, `awaiting-user`,
 `needs-attention`, and `limit-reached`; unknown future raw values remain decodable.
+
+A pipeline row may use `.intent(.pin)`, `.intent(.unpin)`, or `.intent(.archive)` after listing the
+same value in its navigator's `intents` array. Declare at most eight unique values, bind every one
+you declare, and do not bind an undeclared value. Threading discloses these verbs during install,
+update, and in the installed extension's Settings detail. The control is rendered and executed by
+the host against the source session after current-generation and current-entity revalidation. The
+extension receives no gesture, session identity, mutation result, or Undo callback. Scheduled,
+missing, and already archived sessions are refused; pin persistence and archive receipts use the
+same native product paths as Threading's own sidebar. See
+[`WORKSPACE_NAVIGATORS.md`](WORKSPACE_NAVIGATORS.md#host-owned-row-intents) for the full ownership
+and staleness contract.
 
 For a context-dependent panel, set `loadActionID`. Treat `root` as the immediate loading and
 fallback state. Threading sends that action once when the tab connects to each extension process

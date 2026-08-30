@@ -787,6 +787,11 @@ extension ProjectSidebarViewController {
         toasts.present(toast)
     }
 
+    /// Hands live receipts to a replacement navigator shell without firing or dropping Undo.
+    func takePresentedToastsForTransfer() -> [ToastRequest] {
+        toasts.takeRequestsForTransfer()
+    }
+
     /// Brings the outline up to date with the store, preserving expansion and selection.
     ///
     /// A change that leaves the tree's *shape* alone refreshes the rows in place instead.

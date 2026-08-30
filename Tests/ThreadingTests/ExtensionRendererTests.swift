@@ -2322,6 +2322,531 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         XCTAssertTrue(router.invocations.isEmpty)
     }
 
+    func testPipelineIntentControlsRevealAndDispatchEntirelyInsideTheHost() throws {
+        let sessionID = SessionID()
+        let sourceID = sessionID.uuidString.lowercased()
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(titleKey, usages: [.presentable])
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: [sourceID],
+            definitions: [definition],
+            facts: [navigatorFact(
+                titleKey,
+                sessionID: sourceID,
+                value: .string("Host action")
+            )]
+        )
+        let navigator = pipelineNavigator(
+            intents: [.pin, .archive],
+            consumes: [.init(key: titleKey, requirement: .required)],
+            template: .stack(axis: .horizontal, spacing: .small, children: [
+                .text(
+                    .fact(.init(titleKey), facet: .value, fallback: nil),
+                    role: .compactBody
+                ),
+                .flexibleSpacer,
+                .intent(.pin),
+                .intent(.archive),
+            ])
+        )
+        XCTAssertEqual(navigator.validationIssues(path: "navigator"), [])
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        var dispatched: [(ExtensionWorkspaceNavigatorIntent, SessionID)] = []
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            intentHandler: { intent, sessionID in
+                dispatched.append((intent, sessionID))
+                return .accepted
+            },
+            onUnavailable: { XCTFail("valid intent pipeline became unavailable") }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 300, height: 240),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = host
+        window.setContentSize(NSSize(width: 300, height: 240))
+        host.view.frame = try XCTUnwrap(window.contentView).bounds
+        host.view.layoutSubtreeIfNeeded()
+        defer { window.contentViewController = nil }
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        let row = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        let template = try XCTUnwrap(
+            descendants(in: host.view).compactMap {
+                $0 as? WorkspaceNavigatorPipelineTemplateView
+            }.first
+        )
+        let buttons = descendants(in: template).compactMap { $0 as? ThemedIconButton }
+        let pin = try XCTUnwrap(buttons.first {
+            $0.accessibilityIdentifier() == "workspace.navigator.intent.pin"
+        })
+        let archive = try XCTUnwrap(buttons.first {
+            $0.accessibilityIdentifier() == "workspace.navigator.intent.archive"
+        })
+
+        XCTAssertEqual([pin.alphaValue, archive.alphaValue], [0, 0])
+        XCTAssertTrue(pin.isEnabled)
+        XCTAssertTrue(archive.isEnabled)
+        XCTAssertEqual(pin.accessibilityRole(), .button)
+        XCTAssertEqual(pin.accessibilityTitle(), "Pin")
+        template.layoutSubtreeIfNeeded()
+        let hiddenPinPoint = template.convert(
+            NSPoint(x: pin.bounds.midX, y: pin.bounds.midY),
+            from: pin
+        )
+        XCTAssertNil(template.hitTest(hiddenPinPoint))
+        XCTAssertTrue(pin.accessibilityPerformPress())
+
+        XCTAssertTrue(window.makeFirstResponder(pin))
+        XCTAssertEqual([pin.alphaValue, archive.alphaValue], [1, 1])
+        XCTAssertTrue(window.makeFirstResponder(nil))
+        XCTAssertEqual([pin.alphaValue, archive.alphaValue], [0, 0])
+        template.setIntentControlsPresented(true)
+        XCTAssertEqual([pin.alphaValue, archive.alphaValue], [1, 1])
+        XCTAssertTrue(pin.isEnabled)
+        XCTAssertTrue(archive.isEnabled)
+        template.layoutSubtreeIfNeeded()
+        let revealedPinPoint = template.convert(
+            NSPoint(x: pin.bounds.midX, y: pin.bounds.midY),
+            from: pin
+        )
+        let revealedTarget = template.hitTest(revealedPinPoint)
+        XCTAssertTrue(revealedTarget === pin || revealedTarget?.isDescendant(of: pin) == true)
+
+        archive.onPress?()
+
+        XCTAssertEqual(dispatched.map(\.0), [.pin, .archive])
+        XCTAssertEqual(dispatched.map(\.1), [sessionID, sessionID])
+        XCTAssertTrue(router.invocations.isEmpty)
+
+        row.removeFromSuperview()
+        XCTAssertEqual([pin.alphaValue, archive.alphaValue], [0, 0])
+    }
+
+    func testPipelineIntentFromRetiredProcessGenerationCannotReachMutationBridge() throws {
+        let sessionID = SessionID()
+        let sourceID = sessionID.uuidString.lowercased()
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(titleKey, usages: [.presentable])
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: [sourceID],
+            definitions: [definition],
+            facts: [navigatorFact(
+                titleKey,
+                sessionID: sourceID,
+                value: .string("Retired generation")
+            )]
+        )
+        let navigator = pipelineNavigator(
+            intents: [.archive],
+            consumes: [.init(key: titleKey, requirement: .required)],
+            template: .stack(axis: .horizontal, spacing: .small, children: [
+                .text(
+                    .fact(.init(titleKey), facet: .value, fallback: nil),
+                    role: .compactBody
+                ),
+                .intent(.archive),
+            ])
+        )
+        let router = TestWorkspaceNavigatorRouter(
+            navigator: navigator,
+            processGeneration: "generation-1"
+        )
+        var mutationBridgeCalls = 0
+        var unavailableCalls = 0
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            intentHandler: { _, _ in
+                mutationBridgeCalls += 1
+                return .accepted
+            },
+            onUnavailable: { unavailableCalls += 1 }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        let row = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        let retainedArchiveButton = try XCTUnwrap(descendants(in: row).compactMap {
+            $0 as? ThemedIconButton
+        }.first { $0.accessibilityIdentifier() == "workspace.navigator.intent.archive" })
+
+        router.inventory = .init(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            extensionName: router.inventory.extensionName,
+            processGeneration: "generation-2",
+            navigator: navigator
+        )
+        row.removeFromSuperview()
+        retainedArchiveButton.onPress?()
+
+        XCTAssertEqual(mutationBridgeCalls, 0)
+        XCTAssertEqual(unavailableCalls, 1)
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineIntentFromReplacedSameSnapshotPresentationCannotReachMutationBridge()
+        throws
+    {
+        let sessionID = SessionID()
+        let sourceID = sessionID.uuidString.lowercased()
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(
+            titleKey,
+            usages: [.searchable, .presentable]
+        )
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: [sourceID],
+            definitions: [definition],
+            facts: [navigatorFact(
+                titleKey,
+                sessionID: sourceID,
+                value: .string("Original row")
+            )]
+        )
+        let navigator = pipelineNavigator(
+            intents: [.archive],
+            consumes: [.init(key: titleKey, requirement: .required)],
+            search: .init(
+                placeholder: "Find work",
+                accessibilityLabel: "Find navigator sessions",
+                fields: [.init(titleKey)]
+            ),
+            template: .stack(axis: .horizontal, spacing: .small, children: [
+                .text(
+                    .fact(.init(titleKey), facet: .value, fallback: nil),
+                    role: .compactBody
+                ),
+                .intent(.archive),
+            ])
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        var mutationBridgeCalls = 0
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            intentHandler: { _, _ in
+                mutationBridgeCalls += 1
+                return .accepted
+            },
+            onUnavailable: { XCTFail("same-generation structural replacement failed closed") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        let row = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        let retainedArchiveButton = try XCTUnwrap(descendants(in: row).compactMap {
+            $0 as? ThemedIconButton
+        }.first { $0.accessibilityIdentifier() == "workspace.navigator.intent.archive" })
+        let search = try XCTUnwrap(descendants(in: host.view).compactMap {
+            $0 as? ThemedSearchField
+        }.first)
+
+        search.stringValue = "no matching row"
+        search.delegate?.controlTextDidChange?(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: search
+        ))
+        _ = try waitForPipelineTable(in: host, rowCount: 0)
+        row.removeFromSuperview()
+        retainedArchiveButton.onPress?()
+
+        XCTAssertEqual(mutationBridgeCalls, 0)
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineIntentRefusesMalformedSourceIdentityBeforeTheMutationBridge() throws {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(titleKey, usages: [.presentable])
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["not-a-session-uuid"],
+            definitions: [definition],
+            facts: [navigatorFact(
+                titleKey,
+                sessionID: "not-a-session-uuid",
+                value: .string("Malformed")
+            )]
+        )
+        let navigator = pipelineNavigator(
+            intents: [.archive],
+            consumes: [.init(key: titleKey, requirement: .required)],
+            template: .stack(axis: .horizontal, spacing: .small, children: [
+                .text(
+                    .fact(.init(titleKey), facet: .value, fallback: nil),
+                    role: .compactBody
+                ),
+                .intent(.archive),
+            ])
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        var mutationBridgeCalls = 0
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            intentHandler: { _, _ in
+                mutationBridgeCalls += 1
+                return .accepted
+            },
+            onUnavailable: { XCTFail("valid intent pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        let row = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        let archive = try XCTUnwrap(descendants(in: row).compactMap {
+            $0 as? ThemedIconButton
+        }.first)
+
+        archive.onPress?()
+
+        XCTAssertEqual(mutationBridgeCalls, 0)
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineIntentSurvivesAnExactPresentationOnlyFactPatch() throws {
+        let sessionID = SessionID()
+        let sourceID = sessionID.uuidString.lowercased()
+        let activityKey = ExtensionHostFactKey.sessionActivity
+        let registry = ExtensionFactRegistry(
+            now: { Date(timeIntervalSinceReferenceDate: 200) }
+        )
+        try registry.replaceHostDefinitions(
+            HostFactCatalog.definitions.filter { $0.key == activityKey }
+        )
+        let observedAt = Date(timeIntervalSinceReferenceDate: 100)
+        try registry.replaceHostFacts(
+            [ExtensionFact(
+                key: activityKey,
+                subject: .session(sourceID),
+                value: .string("idle"),
+                label: "Before",
+                status: .neutral,
+                observedAt: observedAt
+            )],
+            replacing: [.session(sourceID)]
+        )
+        let navigator = pipelineNavigator(
+            intents: [.archive],
+            consumes: [.init(key: activityKey, requirement: .required)],
+            template: .stack(axis: .horizontal, spacing: .small, children: [
+                .status(
+                    .fact(.init(activityKey), facet: .label, fallback: "Unknown"),
+                    role: .factStatus(.init(activityKey), fallback: .neutral)
+                ),
+                .intent(.archive),
+            ])
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        var dispatched: [(ExtensionWorkspaceNavigatorIntent, SessionID)] = []
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { registry.snapshot(consuming: $0) },
+            factSnapshotPatchProvider: { snapshot, cells, keys in
+                registry.patch(snapshot, exactCells: cells, consuming: keys)
+            },
+            intentHandler: { intent, target in
+                dispatched.append((intent, target))
+                return .accepted
+            },
+            onUnavailable: { XCTFail("presentation patch invalidated its row intent") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        try waitForPipelineText("Before", in: host, table: table, row: 0, timeout: 2)
+
+        try registry.replaceHostFacts(
+            [ExtensionFact(
+                key: activityKey,
+                subject: .session(sourceID),
+                value: .string("working"),
+                label: "After",
+                status: .positive,
+                observedAt: observedAt.addingTimeInterval(1)
+            )],
+            replacing: [.session(sourceID)]
+        )
+        try waitForPipelineText("After", in: host, table: table, row: 0, timeout: 2)
+        let row = try XCTUnwrap(table.view(atColumn: 0, row: 0, makeIfNecessary: true))
+        let archive = try XCTUnwrap(descendants(in: row).compactMap {
+            $0 as? ThemedIconButton
+        }.first { $0.accessibilityIdentifier() == "workspace.navigator.intent.archive" })
+
+        archive.onPress?()
+
+        XCTAssertEqual(dispatched.map(\.0), [.archive])
+        XCTAssertEqual(dispatched.map(\.1), [sessionID])
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testWorkspaceNavigatorIntentDispatcherEnforcesTheShippingMutationPolicy() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "workspace-navigator-intent-dispatch-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        let store = ProjectStore(stateManager: manager)
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let active = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let scheduled = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let archived = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let refused = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        XCTAssertEqual(store.setArchived(true, for: archived.id), .applied)
+        var archivedByCoordinator: [SessionID] = []
+        let dispatcher = WorkspaceNavigatorIntentDispatcher(
+            projectStore: store,
+            hasScheduledStart: { $0 == scheduled.id },
+            archive: {
+                archivedByCoordinator.append($0)
+                return true
+            }
+        )
+
+        XCTAssertEqual(dispatcher.perform(.pin, sessionID: active.id), .accepted)
+        XCTAssertTrue(try XCTUnwrap(store.session(withID: active.id)).isPinned)
+        XCTAssertEqual(dispatcher.perform(.unpin, sessionID: active.id), .accepted)
+        XCTAssertFalse(try XCTUnwrap(store.session(withID: active.id)).isPinned)
+        XCTAssertEqual(dispatcher.perform(.archive, sessionID: active.id), .accepted)
+        XCTAssertEqual(archivedByCoordinator, [active.id])
+
+        XCTAssertEqual(
+            dispatcher.perform(.pin, sessionID: SessionID()),
+            .targetUnavailable
+        )
+        XCTAssertEqual(
+            dispatcher.perform(.pin, sessionID: archived.id),
+            .targetUnavailable
+        )
+        XCTAssertEqual(
+            dispatcher.perform(.pin, sessionID: scheduled.id),
+            .targetUnavailable
+        )
+        XCTAssertFalse(try XCTUnwrap(store.session(withID: archived.id)).isPinned)
+        XCTAssertFalse(try XCTUnwrap(store.session(withID: scheduled.id)).isPinned)
+        XCTAssertEqual(archivedByCoordinator, [active.id])
+
+        let recovery = ProjectStore(stateManager: manager, refusesWrites: true)
+        let refusingDispatcher = WorkspaceNavigatorIntentDispatcher(
+            projectStore: recovery,
+            hasScheduledStart: { _ in false },
+            archive: { _ in XCTFail("pin refusal reached archive"); return false }
+        )
+        XCTAssertEqual(
+            refusingDispatcher.perform(.pin, sessionID: refused.id),
+            .persistenceRefused
+        )
+        XCTAssertFalse(try XCTUnwrap(recovery.session(withID: refused.id)).isPinned)
+    }
+
+    func testWorkspaceSidebarRoutesAReceiptWhichCompletesAfterFailbackToNative() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "receipt-before",
+            title: "Receipt",
+            root: .content(.text("Receipt", role: .body))
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let native = ProjectSidebarViewController()
+        let container = WorkspaceSidebarContainerViewController(
+            nativeController: native,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil }
+        )
+        _ = container.view
+        container.activate(.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: navigator.id
+        ))
+        router.isRegistered = false
+        container.refreshAvailability()
+        XCTAssertEqual(container.effectiveSelection, .native)
+
+        var undone = false
+        container.presentToast(ToastRequest(
+            message: "Archived after failback",
+            detail: nil,
+            actionTitle: "Undo",
+            action: { undone = true },
+            identifier: "sidebar.toast.navigator.before-failback"
+        ))
+        let toast = try XCTUnwrap(descendants(in: native.view).compactMap {
+            $0 as? ToastView
+        }.first)
+        XCTAssertEqual(toast.request.identifier, "sidebar.toast.navigator.before-failback")
+        toast.request.action?()
+        XCTAssertTrue(undone)
+    }
+
+    func testWorkspaceSidebarTransfersALiveUndoWhenTheExtensionFailsBack() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "receipt-after",
+            title: "Receipt",
+            root: .content(.text("Receipt", role: .body))
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let native = ProjectSidebarViewController()
+        let container = WorkspaceSidebarContainerViewController(
+            nativeController: native,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil }
+        )
+        _ = container.view
+        container.activate(.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: navigator.id
+        ))
+        let extensionHost = try XCTUnwrap(container.children.compactMap {
+            $0 as? WorkspaceNavigatorHostViewController
+        }.first)
+        var undone = false
+        container.presentToast(ToastRequest(
+            message: "Archived before failback",
+            detail: nil,
+            actionTitle: "Undo",
+            action: { undone = true },
+            identifier: "sidebar.toast.navigator.after-failback"
+        ))
+        XCTAssertEqual(descendants(in: extensionHost.view).compactMap {
+            $0 as? ToastView
+        }.first?.request.identifier, "sidebar.toast.navigator.after-failback")
+
+        router.isRegistered = false
+        container.refreshAvailability()
+
+        XCTAssertEqual(container.effectiveSelection, .native)
+        XCTAssertNil(extensionHost.parent)
+        let transferred = try XCTUnwrap(descendants(in: native.view).compactMap {
+            $0 as? ToastView
+        }.first)
+        XCTAssertEqual(
+            transferred.request.identifier,
+            "sidebar.toast.navigator.after-failback"
+        )
+        transferred.request.action?()
+        XCTAssertTrue(undone)
+    }
+
     func testPipelineNavigatorWaitsForARequiredProviderThenRecoversFromFacts() throws {
         let stateKey = ExtensionFactKey(id: "example.required-state")
         let definition = navigatorFactDefinition(stateKey, usages: [.presentable])
@@ -8582,6 +9107,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
 
   private func pipelineNavigator(
     options: [ExtensionWorkspaceNavigatorOption] = [],
+    intents: [ExtensionWorkspaceNavigatorIntent] = [],
     consumes: [ExtensionWorkspaceNavigatorFactConsumption],
     search: ExtensionWorkspaceNavigatorSearch? = nil,
     filters: [ExtensionWorkspaceNavigatorFilterClause] = [],
@@ -8594,6 +9120,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
       title: "Pipeline",
       root: .content(.text("Legacy fallback", role: .body)),
       options: options,
+      intents: intents,
       pipeline: .init(
         consumes: consumes,
         search: search,
@@ -9175,6 +9702,7 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
     }
 
     var inventory: ExtensionWorkspaceNavigatorInventoryItem
+    var isRegistered = true
     var invocations: [Invocation] = []
     var optionWrites: [OptionWrite] = []
     var exactImageRequests: [ExactImageRequest] = []
@@ -9221,7 +9749,8 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
         extensionIdentifier: String,
         navigatorID: String
     ) -> ExtensionWorkspaceNavigatorInventoryItem? {
-        guard extensionIdentifier == inventory.extensionIdentifier,
+        guard isRegistered,
+              extensionIdentifier == inventory.extensionIdentifier,
               navigatorID == inventory.navigator.id else {
             return nil
         }

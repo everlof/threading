@@ -185,6 +185,7 @@ indirect enum WorkspaceNavigatorRealizedTemplateNode: Equatable, Sendable {
     )
     case status(String, role: ExtensionStatusRole)
     case activityIndicator(accessibilityLabel: String)
+    case intent(ExtensionWorkspaceNavigatorIntent)
     case divider
     case spacer(ExtensionSpacing)
     case flexibleSpacer
@@ -395,7 +396,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             imageBindings(in: content)
         case let .stack(_, _, children):
             children.flatMap(imageBindings)
-        case .text, .status, .activityIndicator, .divider, .spacer, .flexibleSpacer:
+        case .text, .status, .activityIndicator, .intent, .divider, .spacer, .flexibleSpacer:
             []
         }
     }
@@ -711,6 +712,8 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             )
         case let .activityIndicator(accessibilityLabel):
             return .activityIndicator(accessibilityLabel: accessibilityLabel)
+        case let .intent(intent):
+            return .intent(intent)
         case let .conditional(predicate, content):
             guard truth(
                 of: predicate,
@@ -758,7 +761,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             resolveText(binding, candidate: candidate, snapshot: snapshot) != nil
         case let .image(binding, _, _):
             resolveImage(binding, candidate: candidate, snapshot: snapshot) != nil
-        case .activityIndicator, .divider, .spacer, .flexibleSpacer:
+        case .activityIndicator, .intent, .divider, .spacer, .flexibleSpacer:
             true
         case let .conditional(predicate, content):
             truth(

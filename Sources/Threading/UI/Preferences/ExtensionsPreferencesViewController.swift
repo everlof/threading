@@ -39,6 +39,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         case services
         case serviceDependencies
         case capabilities
+        case navigatorIntents
         case companions
         case actions
     }
@@ -438,12 +439,22 @@ final class ExtensionsPreferencesViewController: NSViewController {
             L10n.format("Version %@ · %@", $0, item.identifier)
         }
             ?? item.identifier
+        let subtitle: String
+        if item.navigatorIntents.isEmpty {
+            subtitle = version
+        } else {
+            let verbs = Set(item.navigatorIntents.flatMap(\.intents))
+                .sorted { $0.rawValue < $1.rawValue }
+                .map(\.presentationName)
+                .joined(separator: ", ")
+            subtitle = version + "\n" + L10n.format("Navigator actions: %@", verbs)
+        }
 
         let identifier = item.identifier
         let status = shortStatus(item.status)
         return SettingsUI.disclosureHeader(
             title: item.name,
-            subtitle: version,
+            subtitle: subtitle,
             summary: status.label,
             summaryColor: status.color,
             control: toggle,
@@ -549,6 +560,7 @@ final class ExtensionsPreferencesViewController: NSViewController {
         if !item.services.isEmpty { rows.append(.services) }
         if !item.serviceDependencies.isEmpty { rows.append(.serviceDependencies) }
         if !item.capabilities.isEmpty { rows.append(.capabilities) }
+        if !item.navigatorIntents.isEmpty { rows.append(.navigatorIntents) }
         if !item.companions.isEmpty { rows.append(.companions) }
         rows.append(.actions)
         return rows
@@ -1175,6 +1187,12 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
             return SettingsUI.row(
                 title: "Declared capabilities",
                 subtitle: item.capabilities.joined(separator: ", ")
+            )
+        case .navigatorIntents:
+            return SettingsUI.row(
+                title: L10n.string("Navigator actions"),
+                subtitle: item.navigatorIntents.map(\.presentation).joined(separator: "\n"),
+                localizes: false
             )
         case .companions:
             return SettingsUI.row(

@@ -684,6 +684,50 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
     }
 
+    func testExtensionsSettingsShowsNavigatorActionsBesideEnableAndInPackageDetail() throws {
+        let title = ExtensionWorkspaceNavigatorFactReference(ExtensionHostFactKey.sessionTitle)
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "focused",
+            title: "Focused sessions",
+            root: .content(.text("Fallback", role: .body)),
+            intents: [.pin, .archive],
+            pipeline: .init(consumes: [
+                .init(key: title.key, requirement: .required),
+            ], output: .init(
+                collectionID: "sessions",
+                rowTemplate: .stack(axis: .horizontal, spacing: .small, children: [
+                    .text(.fact(title, facet: .value, fallback: "Untitled"), role: .compactBody),
+                    .flexibleSpacer,
+                    .intent(.pin), .intent(.archive),
+                ])
+            ))
+        )
+        let source = try makePackage(navigator: navigator)
+        let store = ExtensionPackageStore(rootURL: temporaryDirectory("settings-intents"))
+        _ = try store.install(from: source)
+        let manager = ExtensionManager(store: store)
+        let item = try XCTUnwrap(manager.installedExtensions.first)
+        XCTAssertEqual(item.navigatorIntents.map(\.navigatorID), ["focused"])
+        let controller = ExtensionsPreferencesViewController(manager: manager)
+        _ = controller.view
+        let window = settingsWindow(controller.view)
+        window.contentView?.layoutSubtreeIfNeeded()
+
+        var labels = descendants(in: controller.view)
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertTrue(labels.contains { $0.contains("Navigator actions: Archive, Pin") })
+        let card = try XCTUnwrap(descendants(in: controller.view).first {
+            $0.accessibilityIdentifier() == "settings.extensions.card.com.example.installed-test"
+        })
+        XCTAssertTrue(card.accessibilityPerformPress())
+        window.contentView?.layoutSubtreeIfNeeded()
+        labels = descendants(in: controller.view)
+            .compactMap { ($0 as? NSTextField)?.stringValue }
+        XCTAssertTrue(labels.contains("Navigator actions"))
+        XCTAssertTrue(labels.contains("Focused sessions [focused]: Archive, Pin"))
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: controller.view), [])
+    }
+
     func testExtensionsSettingsListsAnAppOwnedExtensionWithSourceAndInstallControls() throws {
         let source = try makePackage()
         let container = temporaryDirectory("first-party-settings")
@@ -2391,6 +2435,42 @@ final class ExtensionPackageStoreTests: XCTestCase {
         XCTAssertTrue(proposal.message.contains("tool-permission policy"))
     }
 
+    func testInstallProposalDisclosesEveryHostOwnedNavigatorIntentInStableOrder() throws {
+        let root = temporaryDirectory("navigator-intent-install-proposal")
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "work",
+            title: "Focused work",
+            root: .content(.text("Fallback", role: .body)),
+            intents: [.unpin, .archive, .pin],
+            pipeline: .init(consumes: [], output: .init(
+                collectionID: "sessions",
+                rowTemplate: .stack(axis: .horizontal, spacing: .small, children: [
+                    .intent(.pin), .intent(.unpin), .intent(.archive),
+                ])
+            ))
+        )
+        let proposal = ExtensionInstallProposal(bundle: ThreadingExtensionBundle(
+            rootURL: root,
+            executableURL: root.appendingPathComponent("bin/navigator.wasm"),
+            sourceURL: nil,
+            manifest: ExtensionManifest(
+                identifier: "com.example.navigator-intents",
+                name: "Navigator Intents",
+                version: "1.0.0",
+                runtime: .webAssembly,
+                executable: "bin/navigator.wasm",
+                capabilities: [.workspaceNavigation],
+                workspaceNavigators: [navigator]
+            )
+        ))
+
+        XCTAssertEqual(proposal.navigatorIntents.map(\.navigatorID), ["work"])
+        XCTAssertEqual(proposal.navigatorIntents.first?.intents, [.archive, .pin, .unpin])
+        XCTAssertTrue(proposal.message.contains("Focused work [work]: Archive, Pin, Unpin"))
+        XCTAssertTrue(proposal.message.contains("never receives the press"))
+        XCTAssertTrue(proposal.message.contains("session identity"))
+    }
+
     func testFirstPartyInstallProposalExplainsTheAppCopyAndNeverPromisesGitExecution() throws {
         let root = temporaryDirectory("first-party-install-proposal")
         let manifest = ExtensionManifest(
@@ -2878,6 +2958,49 @@ final class ExtensionPackageStoreTests: XCTestCase {
             ["proxy: run while enabled"]
         )
         XCTAssertTrue(backgrounding.requiresApproval)
+    }
+
+    func testAddingANavigatorIntentRequiresUpdateApprovalAndNamesTheFinalVerbs() {
+        func manifest(
+            version: String,
+            intents: [ExtensionWorkspaceNavigatorIntent]
+        ) -> ExtensionManifest {
+            let navigator = ExtensionWorkspaceNavigator(
+                id: "focused",
+                title: "Focused sessions",
+                root: .content(.text("Fallback", role: .body)),
+                intents: intents,
+                pipeline: .init(consumes: [], output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .stack(
+                        axis: .horizontal,
+                        spacing: .small,
+                        children: intents.map(ExtensionWorkspaceNavigatorTemplateNode.intent)
+                    )
+                ))
+            )
+            return ExtensionManifest(
+                identifier: "com.example.navigator-update",
+                name: "Navigator Update",
+                version: version,
+                runtime: .webAssembly,
+                executable: "bin/navigator.wasm",
+                capabilities: [.workspaceNavigation],
+                workspaceNavigators: [navigator]
+            )
+        }
+
+        let plan = ExtensionUpdatePlan(
+            installed: manifest(version: "1.0.0", intents: [.pin]),
+            candidate: manifest(version: "1.1.0", intents: [.pin, .archive])
+        )
+        XCTAssertTrue(plan.requiresApproval)
+        XCTAssertEqual(plan.addedNavigatorIntents, ["Focused sessions [focused]: Archive"])
+        let confirmation = plan.confirmation(name: "Navigator Update")
+        XCTAssertEqual(confirmation.acceptTitle, "Grant and Update")
+        XCTAssertTrue(confirmation.message.contains("adds host-owned navigator actions"))
+        XCTAssertTrue(confirmation.message.contains("Focused sessions [focused]: Archive, Pin"))
+        XCTAssertTrue(confirmation.message.contains("never receives the press"))
     }
 
     func testUpdatingARunningExtensionStopsItFirstAndPutsItBack() async throws {

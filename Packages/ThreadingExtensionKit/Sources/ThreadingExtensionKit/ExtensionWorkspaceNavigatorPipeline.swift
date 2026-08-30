@@ -619,6 +619,9 @@ public indirect enum ExtensionWorkspaceNavigatorTemplateNode: Codable, Equatable
         role: ExtensionWorkspaceNavigatorStatusBinding
     )
     case activityIndicator(accessibilityLabel: String)
+    /// A host-rendered control which asks Threading to perform one declared source-session
+    /// intent. No gesture or source identity crosses into the extension process.
+    case intent(ExtensionWorkspaceNavigatorIntent)
     case conditional(
         ExtensionWorkspaceNavigatorPredicate,
         content: Self
@@ -633,6 +636,7 @@ public indirect enum ExtensionWorkspaceNavigatorTemplateNode: Codable, Equatable
         case binding
         case role
         case accessibilityLabel
+        case intent
         case predicate
         case content
         case spacing
@@ -645,6 +649,7 @@ public indirect enum ExtensionWorkspaceNavigatorTemplateNode: Codable, Equatable
         case image
         case status
         case activityIndicator
+        case intent
         case conditional
         case divider
         case spacer
@@ -691,6 +696,11 @@ public indirect enum ExtensionWorkspaceNavigatorTemplateNode: Codable, Equatable
                 String.self,
                 forKey: .accessibilityLabel
             ))
+        case .intent:
+            self = try .intent(container.decode(
+                ExtensionWorkspaceNavigatorIntent.self,
+                forKey: .intent
+            ))
         case .conditional:
             self = try .conditional(
                 container.decode(
@@ -733,6 +743,9 @@ public indirect enum ExtensionWorkspaceNavigatorTemplateNode: Codable, Equatable
         case let .activityIndicator(accessibilityLabel):
             try container.encode(Kind.activityIndicator, forKey: .type)
             try container.encode(accessibilityLabel, forKey: .accessibilityLabel)
+        case let .intent(intent):
+            try container.encode(Kind.intent, forKey: .type)
+            try container.encode(intent, forKey: .intent)
         case let .conditional(predicate, content):
             try container.encode(Kind.conditional, forKey: .type)
             try container.encode(predicate, forKey: .predicate)
@@ -876,11 +889,13 @@ public struct ExtensionWorkspaceNavigatorPipeline: Codable, Equatable, Sendable 
 
     public func validationIssues(
         path: String = "pipeline",
-        options: [ExtensionWorkspaceNavigatorOption] = []
+        options: [ExtensionWorkspaceNavigatorOption] = [],
+        intents: [ExtensionWorkspaceNavigatorIntent] = []
     ) -> [ExtensionValidationIssue] {
         var validator = WorkspaceNavigatorPipelineValidator(
             pipeline: self,
             options: options,
+            intents: intents,
             path: path
         )
         return validator.validate()
@@ -890,20 +905,24 @@ public struct ExtensionWorkspaceNavigatorPipeline: Codable, Equatable, Sendable 
 private struct WorkspaceNavigatorPipelineValidator {
     let pipeline: ExtensionWorkspaceNavigatorPipeline
     let options: [ExtensionWorkspaceNavigatorOption]
+    let intents: [ExtensionWorkspaceNavigatorIntent]
     let path: String
 
     private var issues: [ExtensionValidationIssue] = []
     private var referencedFacts = Set<ExtensionFactKey>()
     private var referencedOptions = Set<String>()
+    private var referencedIntents = Set<ExtensionWorkspaceNavigatorIntent>()
     private var predicateNodeCount = 0
 
     init(
         pipeline: ExtensionWorkspaceNavigatorPipeline,
         options: [ExtensionWorkspaceNavigatorOption],
+        intents: [ExtensionWorkspaceNavigatorIntent],
         path: String
     ) {
         self.pipeline = pipeline
         self.options = options
+        self.intents = intents
         self.path = path
     }
 
@@ -1174,6 +1193,14 @@ private struct WorkspaceNavigatorPipelineValidator {
                 path: "\(nodePath).accessibilityLabel",
                 maximum: 256
             )
+        case let .intent(intent):
+            referencedIntents.insert(intent)
+            if !intents.contains(intent) {
+                append(
+                    "\(nodePath).intent",
+                    "must name an intent declared by the navigator"
+                )
+            }
         case let .conditional(predicate, content):
             validatePredicate(predicate, path: "\(nodePath).predicate", depth: 0)
             validateTemplate(
@@ -1391,6 +1418,16 @@ private struct WorkspaceNavigatorPipelineValidator {
             append(
                 "\(path).options",
                 "declared navigator option '\(optionID)' is not consumed by the pipeline"
+            )
+        }
+
+        let declaredIntents = Set(intents)
+        for intent in declaredIntents.subtracting(referencedIntents).sorted(by: {
+            $0.rawValue < $1.rawValue
+        }) {
+            append(
+                "\(path).output.rowTemplate",
+                "declared navigator intent '\(intent.rawValue)' is not bound by the pipeline"
             )
         }
     }

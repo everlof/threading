@@ -180,8 +180,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Extension workspace navigator shell",
-      "description": "Focused materialized and fact-pipeline extension navigators in the real main-window split shell, including the public Activity Inbox example with host-calendar sections and working state, plus host-owned title/search bands, virtualized collections, declared options and the permanent route back to Native.",
-      "states": ["Focused materialized navigator", "Fact-pipeline navigator", "Activity Inbox date sections", "Working session indicator", "Zero-result pipeline search", "Declared pipeline options", "Activity sort menu", "Return-to-Native menu"],
+      "description": "Focused materialized and fact-pipeline extension navigators in the real main-window split shell, including the public Activity Inbox example with host-calendar sections and working state, plus host-owned title/search bands, virtualized collections, declared options and intents, and the permanent route back to Native.",
+      "states": ["Focused materialized navigator", "Fact-pipeline navigator", "Activity Inbox date sections", "Working session indicator", "Zero-result pipeline search", "Declared pipeline options", "Hover-revealed row intents", "Keyboard-focused row intent", "Activity sort menu", "Return-to-Native menu"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],

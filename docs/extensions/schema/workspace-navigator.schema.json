@@ -191,6 +191,10 @@
               ]
             }
           }
+        },
+        {
+          "if": { "required": ["intents"] },
+          "then": { "required": ["pipeline"] }
         }
       ],
       "properties": {
@@ -207,6 +211,12 @@
           "type": "array",
           "maxItems": 16,
           "items": { "$ref": "#/$defs/navigatorOption" }
+        },
+        "intents": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": { "enum": ["pin", "unpin", "archive"] }
         },
         "loadActionID": { "$ref": "#/$defs/contributionID" },
         "eventActionID": { "$ref": "#/$defs/contributionID" },

@@ -143,6 +143,67 @@ final class SessionLifecycleConfirmationTests: XCTestCase {
         XCTAssertEqual(undone, 1)
     }
 
+    func testArchiveFencesADoublePressAndRoutesItsReceiptAndUndoFailureThroughTheOwner()
+        throws
+    {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "threading-archive-intent-fence-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let manager = StateManager(appSupportDirectory: directory)
+        defer { manager.closeDatabase() }
+        let store = ProjectStore(stateManager: manager)
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let session = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .claude,
+            title: "One archive"
+        ))
+        let sidebar = ProjectSidebarViewController(projectStore: store)
+        let terminal = TerminalContainerViewController(recovery: true)
+        var archiveCalls = 0
+        var archiveCompletion: ProviderArchiveSync.Completion?
+        var receipts: [ToastRequest] = []
+        let coordinator = SessionCoordinator(
+            sidebar: sidebar,
+            container: terminal,
+            environment: AppEnvironment(
+                projectStore: store,
+                agentRuntime: AgentRuntime(
+                    currentSessionProjection: CurrentSessionProjection { _ in nil }
+                ),
+                settings: AppSettings(defaults: UserDefaults.standard),
+                eventLog: EventLog(directory: directory.appendingPathComponent("Logs"))
+            ),
+            onPresentationChanged: {},
+            archiveStateSetter: { archived, sessionID, completion in
+                XCTAssertEqual(sessionID, session.id)
+                if archived {
+                    archiveCalls += 1
+                    archiveCompletion = completion
+                } else {
+                    completion(.failure(.persistenceUnavailable(processStopped: false)))
+                }
+            },
+            toastPresenter: { receipts.append($0) }
+        )
+
+        XCTAssertTrue(coordinator.setArchived(true, for: session.id))
+        XCTAssertTrue(coordinator.setArchived(true, for: session.id))
+        XCTAssertEqual(archiveCalls, 1)
+        XCTAssertTrue(receipts.isEmpty)
+
+        try XCTUnwrap(archiveCompletion)(.success(()))
+        let archiveReceipt = try XCTUnwrap(receipts.first)
+        XCTAssertEqual(archiveReceipt.actionTitle, "Undo")
+        archiveReceipt.action?()
+
+        XCTAssertEqual(receipts.count, 2)
+        XCTAssertTrue(receipts[1].message.contains("restore"))
+    }
+
     /// Provider-backed archive finishes asynchronously. A chat selected during that wait owns
     /// the pane; the completion for the older chat must not replace it with the empty state.
     func testDelayedArchiveCompletionDoesNotClearANewerSessionSelection() throws {

@@ -126,6 +126,7 @@ struct ExtensionLocalizationResolver: Sendable {
                     control: settingControl(option.control)
                 )
             },
+            intents: navigator.intents,
             pipeline: navigator.pipeline.map(workspaceNavigatorPipeline),
             loadActionID: navigator.loadActionID,
             eventActionID: navigator.eventActionID,
@@ -216,6 +217,8 @@ struct ExtensionLocalizationResolver: Sendable {
             return .status(workspaceNavigatorTextBinding(binding), role: role)
         case .activityIndicator(let accessibilityLabel):
             return .activityIndicator(accessibilityLabel: string(accessibilityLabel))
+        case .intent(let intent):
+            return .intent(intent)
         case .conditional(let predicate, let content):
             return .conditional(
                 predicate,

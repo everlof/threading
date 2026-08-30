@@ -1,6 +1,12 @@
 import AppKit
 import ThreadingExtensionKit
 
+enum WorkspaceNavigatorIntentDispatchResult: Equatable {
+    case accepted
+    case targetUnavailable
+    case persistenceRefused
+}
+
 /// Presents one live extension navigator inside Threading's host-owned sidebar shell.
 ///
 /// Full documents are rebuilt atomically. Live item content patches keep the existing collection
@@ -14,6 +20,10 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         Set<ExtensionFactCell>,
         Set<ExtensionFactKey>
     ) -> ExtensionFactSnapshotPatch?
+    typealias IntentHandler = (
+        ExtensionWorkspaceNavigatorIntent,
+        SessionID
+    ) -> WorkspaceNavigatorIntentDispatchResult
 
     static let maximumPendingSessionIDs =
         ExtensionWorkspaceNavigatorHostEvent.maximumSessionIDs * 4
@@ -35,10 +45,12 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     /// Localized once from the validated registration. Runtime documents may replace content,
     /// never the host-owned option contract which scopes durable user choices.
     private let declaredOptions: [ExtensionWorkspaceNavigatorOption]
+    private let declaredIntents: Set<ExtensionWorkspaceNavigatorIntent>
     /// Pipeline declarations are compiled from the registration snapshot. A process response may
     /// replace fallback content, but cannot add, remove or mutate that static host program.
     private let declaredPipeline: ExtensionWorkspaceNavigatorPipeline?
     private let consumedFactKeys: Set<ExtensionFactKey>
+    private let intentHandler: IntentHandler
     private var navigator: ExtensionWorkspaceNavigator
     private var optionValues: [String: ExtensionJSONValue]
     private lazy var titleLabel: NSTextField = {
@@ -99,6 +111,12 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     /// The pipeline paired with the presentation currently owned by the table. Compilation may
     /// race ahead on the main actor; visible rows must stay fenced to their accepted snapshot.
     private var presentedPipeline: CompiledWorkspaceNavigatorPipeline?
+    /// A host-owned epoch for the accepted table membership, order, routes and source identities.
+    /// Fact revisions cannot fence this by themselves: search, options and relative-time
+    /// evaluation can replace the structure while retaining the same frozen fact snapshot.
+    /// Presentation-only fact patches deliberately do not advance this epoch.
+    private var pipelinePresentationEpoch: UInt64 = 0
+    private var presentedPipelineEpoch: UInt64?
     private var pipelineQuery = ""
     private var pendingPipelineFactChange: ExtensionFactChange?
     private var isPipelineRefreshScheduled = false
@@ -179,6 +197,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                 maximumPixelDimension: 64
             )
         },
+        intentHandler: @escaping IntentHandler = { _, _ in .targetUnavailable },
         onSelectNative: @escaping () -> Void = {},
         onUnavailable: @escaping () -> Void
     ) {
@@ -187,6 +206,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         processGeneration = inventory.processGeneration
         navigator = inventory.navigator
         declaredOptions = inventory.navigator.options
+        declaredIntents = Set(inventory.navigator.intents)
         declaredPipeline = inventory.navigator.pipeline
         consumedFactKeys = Set(inventory.navigator.pipeline?.consumes.map(\.key) ?? [])
         optionValues = inventory.optionValues
@@ -199,6 +219,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         self.pipelineCalendarProvider = pipelineCalendarProvider
         self.pipelineNowProvider = pipelineNowProvider
         self.pipelineImageDecoder = pipelineImageDecoder
+        self.intentHandler = intentHandler
         self.onSelectNative = onSelectNative
         self.onUnavailable = onUnavailable
         super.init(nibName: nil, bundle: nil)
@@ -611,6 +632,10 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         _ presentation: WorkspaceNavigatorPipelinePresentation,
         pipeline compiled: CompiledWorkspaceNavigatorPipeline
     ) {
+        pipelinePresentationEpoch += 1
+        let acceptedEpoch = pipelinePresentationEpoch
+        presentedPipeline = compiled
+        presentedPipelineEpoch = acceptedEpoch
         let evaluation = presentation.evaluation
         let rowHeight = compiled.rowTemplate.map {
             WorkspaceNavigatorPipelineTemplateView.rowHeight(for: $0)
@@ -625,7 +650,6 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         if let controller = pipelineCollectionController,
            controller.collectionID == compiled.output.collectionID,
            let results = pipelineResultsView {
-            presentedPipeline = compiled
             resetPipelineImages()
             controller.update(
                 presentation,
@@ -648,7 +672,9 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             presentation: presentation,
             itemRowHeight: rowHeight,
             renderItem: { [weak self] item in
-                guard let self, let current = self.presentedPipeline else {
+                guard let self,
+                      let current = self.presentedPipeline,
+                      let presentationEpoch = self.presentedPipelineEpoch else {
                     throw ExtensionProcessError.notRunning
                 }
                 let currentItem = WorkspaceNavigatorPipelineItem(
@@ -672,6 +698,13 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                     node: realized,
                     imageResolver: { [weak self] image in
                         self?.resolvedPipelineImage(image)
+                    },
+                    onIntent: { [weak self] intent in
+                        self?.performPipelineIntent(
+                            intent,
+                            for: item,
+                            presentationEpoch: presentationEpoch
+                        )
                     }
                 )
             },
@@ -696,7 +729,6 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                 : nil,
             detail: presentation.rows.isEmpty ? evaluation.emptyState?.detail : nil
         )
-        presentedPipeline = compiled
         resetPipelineImages()
         addChild(controller)
         replaceRoot(
@@ -711,7 +743,9 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
 
     private func renderPipelinePlaceholder(title: String, detail: String?) {
         let previousController = pipelineCollectionController
+        pipelinePresentationEpoch += 1
         presentedPipeline = nil
+        presentedPipelineEpoch = nil
         resetPipelineImages()
         pipelineCollectionController = nil
         pipelineResultsView = nil
@@ -721,6 +755,37 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         if let previousController {
             previousController.view.removeFromSuperview()
             previousController.removeFromParent()
+        }
+    }
+
+    /// Executes only a statically declared host verb against the exact source row which received
+    /// the gesture. A stale snapshot, malformed opaque ID, removed session, or refused durable
+    /// write ends here with host-owned presentation; no action request reaches the extension.
+    private func performPipelineIntent(
+        _ intent: ExtensionWorkspaceNavigatorIntent,
+        for item: WorkspaceNavigatorPipelineItem,
+        presentationEpoch: UInt64
+    ) {
+        guard routing.registeredWorkspaceNavigator(
+            extensionIdentifier: extensionIdentifier,
+            navigatorID: navigatorID
+        )?.processGeneration == processGeneration else {
+            onUnavailable()
+            return
+        }
+        guard declaredIntents.contains(intent),
+              presentationEpoch == presentedPipelineEpoch,
+              let sessionID = SessionID(uuidString: item.sourceSessionID) else {
+            presentError(L10n.string("That session is no longer available."))
+            return
+        }
+        switch intentHandler(intent, sessionID) {
+        case .accepted:
+            break
+        case .targetUnavailable:
+            presentError(L10n.string("That session is no longer available."))
+        case .persistenceRefused:
+            presentError(L10n.string("The project data could not be saved."))
         }
     }
 
@@ -1542,13 +1607,21 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     }
 
     private func presentError(_ message: String) {
-        toasts.present(ToastRequest(
+        presentToast(ToastRequest(
             message: L10n.string("Navigator extension"),
             detail: message,
             actionTitle: nil,
             action: nil,
             identifier: "workspace.navigator.error"
         ))
+    }
+
+    func presentToast(_ toast: ToastRequest) {
+        toasts.present(toast)
+    }
+
+    func takePresentedToastsForTransfer() -> [ToastRequest] {
+        toasts.takeRequestsForTransfer()
     }
 
     private func spacingValue(_ spacing: ExtensionSpacing) -> CGFloat {
@@ -2552,6 +2625,8 @@ private enum WorkspaceNavigatorGridRow {
 
 private final class WorkspaceNavigatorRowHostView: NSView {
     private var installed: NSView?
+    private var trackingArea: NSTrackingArea?
+    private var presentsIntentControls = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -2561,6 +2636,42 @@ private final class WorkspaceNavigatorRowHostView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea { removeTrackingArea(trackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(area)
+        trackingArea = area
+        if hoverIsStale(presentsIntentControls) {
+            setIntentControlsPresented(false)
+        }
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        setIntentControlsPresented(!isPointerCovered(at: event.locationInWindow))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        setIntentControlsPresented(false)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Detachment and reuse do not promise a pointer exit. Never hand the next mounted row
+        // the previous row's revealed controls; the pointer will reveal it again if still valid.
+        if window == nil { setIntentControlsPresented(false) }
+    }
+
+    private func setIntentControlsPresented(_ presented: Bool) {
+        presentsIntentControls = presented
+        (installed as? WorkspaceNavigatorPipelineTemplateView)?
+            .setIntentControlsPresented(presented)
     }
 
     func install(_ content: NSView) throws {
@@ -2575,6 +2686,8 @@ private final class WorkspaceNavigatorRowHostView: NSView {
             content.topAnchor.constraint(greaterThanOrEqualTo: topAnchor),
             content.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor)
         ])
+        (content as? WorkspaceNavigatorPipelineTemplateView)?
+            .setIntentControlsPresented(presentsIntentControls)
     }
 }
 

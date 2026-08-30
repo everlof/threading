@@ -228,6 +228,55 @@ read and no extension callback on a fact or calendar edge.
 `needs-attention`, and `limit-reached`. Use those constants instead of reproducing private host
 model strings. The raw-value type deliberately keeps unknown future values decodable.
 
+## Host-owned row intents
+
+A pipeline navigator may place a bounded product action directly in its visible-row template.
+The initial vocabulary is deliberately small:
+
+```swift
+ExtensionWorkspaceNavigator(
+    id: "focused-work",
+    title: "Focused work",
+    root: .content(.text("Requires a pipeline-capable host", role: .body)),
+    intents: [.pin, .unpin, .archive],
+    pipeline: .init(
+        // ...
+        output: .init(
+            collectionID: "sessions",
+            rowTemplate: .stack(
+                axis: .horizontal,
+                spacing: .small,
+                children: [
+                    .text(.fact(title), role: .compactBody),
+                    .flexibleSpacer,
+                    .intent(.pin),
+                    .intent(.archive),
+                ]
+            )
+        )
+    )
+)
+```
+
+`pin`, `unpin`, and `archive` are the only supported values. A navigator may declare at most eight
+unique intents. Its manifest and startup registration must repeat the exact raw navigator
+declaration, including `intents`. Every declared intent must occur in its template and every
+`.intent` leaf must be declared; explicit `null` is not a legacy spelling for an absent list.
+
+These are host product intents, not extension callbacks or a session-write permission. Threading
+renders the buttons, keeps them keyboard- and accessibility-reachable while revealing their
+chrome on row hover or keyboard focus, and dispatches the gesture without sending the extension a
+session ID, press event, or result. The host revalidates the selected process generation, the
+structural pipeline revision, and the current source session at the press edge. A missing,
+archived, or scheduled session is refused without mutation. Pin and unpin use the native project
+store persistence path. Archive uses the native lifecycle coordinator, including duplicate-press
+fencing, provider coordination, a receipt, and Undo.
+
+Presentation-only fact patches do not invalidate a still-visible row action; a structural
+evaluation does. A stale action can therefore never be retargeted to a reused row or a replacement
+process generation. Install and update confirmation copy and the installed extension's Settings
+summary list the declared verbs before the navigator can be enabled or updated.
+
 ## Runtime snapshots and actions
 
 Set `loadActionID` when the static registration is only a useful initial or loading document.
