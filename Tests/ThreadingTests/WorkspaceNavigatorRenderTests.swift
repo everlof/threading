@@ -4,6 +4,11 @@ import XCTest
 
 @testable import Threading
 
+private enum WorkspaceNavigatorEvidenceFact {
+    static let attentionLane = ExtensionFactKey(id: "example.attention-lane", version: 1)
+    static let removedLane = ExtensionFactKey(id: "example.removed-lane", version: 2)
+}
+
 /// Captures an extension navigator in the shipping main-window split shell. The header cannot be
 /// reviewed honestly as an isolated band: its title truncation, sidebar width, separator, themed
 /// ground, collection viewport and menu overlay are relationships owned by the real window.
@@ -130,6 +135,82 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         content.layoutSubtreeIfNeeded()
         content.displayIfNeeded()
         try write(content, named: "workspace-navigator-pipeline-system-light-menu.png")
+        controller.selectWorkspaceNavigator(.native)
+        XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+
+        let dynamicSelection = WorkspaceNavigatorSelection.extensionNavigator(
+            extensionIdentifier: router.dynamicPipelineInventory.extensionIdentifier,
+            navigatorID: router.dynamicPipelineInventory.navigator.id
+        )
+        for fixture in fixtures {
+            AppThemePalette.set(fixture.theme)
+            content.appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+            controller.selectWorkspaceNavigator(dynamicSelection)
+            _ = try waitForPipelineTable(in: content, rowCount: 11)
+            AppThemeRefresh.repaint(content)
+            try suppressComposerUsage(in: content)
+            content.layoutSubtreeIfNeeded()
+            content.displayIfNeeded()
+
+            let menuButton = try XCTUnwrap(
+                descendants(of: content).compactMap { $0 as? ThemedIconButton }.first {
+                    $0.accessibilityIdentifier() == "workspace.navigator.menu"
+                }
+            )
+            XCTAssertTrue(menuButton.accessibilityPerformPress())
+            XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: window))
+            content.layoutSubtreeIfNeeded()
+            content.displayIfNeeded()
+            try write(
+                content,
+                named: "workspace-navigator-dynamic-\(fixture.name)-menu.png"
+            )
+
+            if fixture.name == "system-light" {
+                let groupBy = try XCTUnwrap(descendants(of: content).first {
+                    $0.accessibilityRole() == .menuItem
+                        && $0.accessibilityTitle()?.hasPrefix("Group by, ") == true
+                })
+                XCTAssertTrue(groupBy.accessibilityPerformPress())
+                XCTAssertEqual(
+                    descendants(of: content).filter { $0.accessibilityRole() == .menu }.count,
+                    2
+                )
+                content.layoutSubtreeIfNeeded()
+                content.displayIfNeeded()
+                try write(
+                    content,
+                    named: "workspace-navigator-dynamic-system-light-group-menu.png"
+                )
+            }
+            controller.selectWorkspaceNavigator(.native)
+            XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+        }
+
+        AppThemePalette.set(.system)
+        content.appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        controller.selectWorkspaceNavigator(.extensionNavigator(
+            extensionIdentifier: router.unavailableDynamicPipelineInventory.extensionIdentifier,
+            navigatorID: router.unavailableDynamicPipelineInventory.navigator.id
+        ))
+        _ = try waitForPipelineTable(in: content, rowCount: 9)
+        AppThemeRefresh.repaint(content)
+        try suppressComposerUsage(in: content)
+        content.layoutSubtreeIfNeeded()
+        content.displayIfNeeded()
+        let unavailableMenuButton = try XCTUnwrap(
+            descendants(of: content).compactMap { $0 as? ThemedIconButton }.first {
+                $0.accessibilityIdentifier() == "workspace.navigator.menu"
+            }
+        )
+        XCTAssertTrue(unavailableMenuButton.accessibilityPerformPress())
+        XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: window))
+        content.layoutSubtreeIfNeeded()
+        content.displayIfNeeded()
+        try write(
+            content,
+            named: "workspace-navigator-dynamic-system-light-unavailable-menu.png"
+        )
         controller.selectWorkspaceNavigator(.native)
         XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
 
@@ -423,6 +504,41 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             ],
             replacing: Set(rows.map { .session($0.0) }).union(projectSubjects)
         )
+        let attentionDefinition = ExtensionFactDefinition(
+            key: WorkspaceNavigatorEvidenceFact.attentionLane,
+            displayName: "Attention lane",
+            valueType: .string,
+            subjectKinds: [.session],
+            usages: [.groupable, .sortable, .presentable]
+        )
+        let source = ComponentCustomizationSource(
+            extensionIdentifier: "com.example.attention-facts",
+            processGeneration: "attention-facts-evidence-generation",
+            order: 0
+        )
+        try registry.replaceDefinitions([attentionDefinition], from: source)
+        let attentionByID = [
+            "pipeline-1": "Needs review",
+            "pipeline-2": "In progress",
+            "pipeline-3": "Planned",
+            "pipeline-4": "In progress",
+            "pipeline-5": "Planned",
+            "pipeline-6": "Needs review",
+            "pipeline-7": "In progress",
+            "pipeline-8": "Planned",
+        ]
+        try registry.replaceFacts(
+            rows.map { id, _, _, _, _ in
+                ExtensionFact(
+                    key: WorkspaceNavigatorEvidenceFact.attentionLane,
+                    subject: .session(id),
+                    value: .string(attentionByID[id]!),
+                    observedAt: observedAt
+                )
+            },
+            replacing: Set(rows.map { .session($0.0) }),
+            from: source
+        )
         return registry
     }
 
@@ -494,6 +610,8 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
 private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigatorRouting {
     let inventory: ExtensionWorkspaceNavigatorInventoryItem
     let pipelineInventory: ExtensionWorkspaceNavigatorInventoryItem
+    let dynamicPipelineInventory: ExtensionWorkspaceNavigatorInventoryItem
+    let unavailableDynamicPipelineInventory: ExtensionWorkspaceNavigatorInventoryItem
     let activityInboxInventory: ExtensionWorkspaceNavigatorInventoryItem
     let t3SidebarInventory: ExtensionWorkspaceNavigatorInventoryItem
 
@@ -573,6 +691,16 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
             title: "Working only",
             control: .toggle(defaultValue: false)
         )
+        let groupBy = ExtensionWorkspaceNavigatorRegisteredFactOption(
+            id: "group-by",
+            title: "Group by",
+            application: .bucket(direction: .ascending, unknownTitle: "Other")
+        )
+        let sortBy = ExtensionWorkspaceNavigatorRegisteredFactOption(
+            id: "sort-by",
+            title: "Sort by",
+            application: .sort(direction: .ascending)
+        )
         let pipelineNavigator = ExtensionWorkspaceNavigator(
             id: "pipeline-workspace",
             title: "Focused work from shared session facts",
@@ -643,6 +771,91 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
             optionValues: [workingOnly.id: .bool(false)],
             optionPersistenceOutcome: .loaded
         )
+        let dynamicPipelineNavigator = ExtensionWorkspaceNavigator(
+            id: "dynamic-pipeline-workspace",
+            title: "Arrange work with any registered fact",
+            root: .content(.text("Pipeline unavailable", role: .body)),
+            options: [workingOnly],
+            intents: [.pin, .archive],
+            pipeline: .init(
+                consumes: [
+                    .init(key: title.key, requirement: .required),
+                    .init(key: activity.key, requirement: .enhances),
+                    .init(key: branch.key, requirement: .enhances),
+                ],
+                registeredFactOptions: [groupBy, sortBy],
+                search: .init(
+                    placeholder: "Find focused work",
+                    accessibilityLabel: "Search focused navigator sessions",
+                    fields: [title, branch]
+                ),
+                filters: [.init(
+                    when: [.init(optionID: workingOnly.id, equals: .bool(true))],
+                    predicate: .comparison(
+                        .init(activity),
+                        .equal,
+                        .string(ExtensionSessionDetailedActivity.working.rawValue)
+                    )
+                )],
+                sort: [.init(
+                    operand: .init(title),
+                    direction: .ascending
+                )],
+                output: .init(
+                    collectionID: "dynamic-pipeline-sessions",
+                    rowTemplate: .stack(
+                        axis: .vertical,
+                        spacing: .tight,
+                        children: [
+                            .text(
+                                .fact(title, facet: .value, fallback: "Untitled session"),
+                                role: .compactBody
+                            ),
+                            .stack(
+                                axis: .horizontal,
+                                spacing: .small,
+                                children: [
+                                    .status(
+                                        .fact(activity, facet: .label, fallback: "Idle"),
+                                        role: .factStatus(activity, fallback: .neutral)
+                                    ),
+                                    .flexibleSpacer,
+                                    .text(
+                                        .fact(branch, facet: .value, fallback: "No branch"),
+                                        role: .compactDetail
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                    emptyState: .init(title: "No focused work")
+                )
+            )
+        )
+        dynamicPipelineInventory = .init(
+            extensionIdentifier: "com.example.dynamic-pipeline-navigator",
+            extensionName: "Dynamic Pipeline Navigator",
+            processGeneration: "dynamic-pipeline-evidence-generation",
+            navigator: dynamicPipelineNavigator,
+            optionValues: [workingOnly.id: .bool(false)],
+            registeredFactSelections: [
+                groupBy.id: WorkspaceNavigatorEvidenceFact.attentionLane,
+                sortBy.id: ExtensionHostFactKey.sessionTitle,
+            ],
+            optionPersistenceOutcome: .loaded
+        )
+        unavailableDynamicPipelineInventory = .init(
+            extensionIdentifier: "com.example.unavailable-dynamic-pipeline-navigator",
+            extensionName: "Unavailable Dynamic Pipeline Navigator",
+            processGeneration: "unavailable-dynamic-pipeline-evidence-generation",
+            navigator: dynamicPipelineNavigator,
+            optionValues: [workingOnly.id: .bool(false)],
+            registeredFactSelections: [
+                groupBy.id: WorkspaceNavigatorEvidenceFact.removedLane,
+                sortBy.id: ExtensionHostFactKey.sessionTitle,
+            ],
+            optionPersistenceOutcome: .loaded
+        )
 
         let manifestURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -704,7 +917,14 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
     }
 
     var extensionWorkspaceNavigatorInventory: [ExtensionWorkspaceNavigatorInventoryItem] {
-        [inventory, pipelineInventory, activityInboxInventory, t3SidebarInventory]
+        [
+            inventory,
+            pipelineInventory,
+            dynamicPipelineInventory,
+            unavailableDynamicPipelineInventory,
+            activityInboxInventory,
+            t3SidebarInventory,
+        ]
     }
 
     func registeredWorkspaceNavigator(
