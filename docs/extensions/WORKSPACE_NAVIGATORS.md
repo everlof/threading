@@ -198,6 +198,13 @@ Provider absence and subject absence are different:
   fact bucket uses its unknown path. `isPresent` remains false because it has no operand. Text,
   image, and status bindings independently use their presentation fallback.
 
+Extension-provided values have a host-owned 15-minute freshness ceiling. Threading uses the
+earlier of the provider's `observedAt` and the host receipt time, so a future-dated observation
+cannot extend that window. At expiry the value follows the same subject-level missing/unknown
+rules above; the live definition still counts as a provider, and resolution falls through to the
+next fresh provider for the same key when one exists. A provider cannot declare a longer TTL, and
+a fresh publication restores the value without restarting either extension.
+
 Nested `all`, `any`, and `not` expressions do not partially simplify when a provider is absent;
 the enclosing filter clause, bucket rule, or conditional template node is the degradation unit.
 Search stays visible while at least one declared field remains and disappears when none do.

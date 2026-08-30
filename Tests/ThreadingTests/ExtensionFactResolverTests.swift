@@ -311,7 +311,7 @@ final class ExtensionFactResolverTests: XCTestCase {
             key: key,
             subject: subject,
             value: .string(value),
-            observedAt: Date(timeIntervalSinceReferenceDate: 1)
+            observedAt: .distantFuture
         )
     }
 

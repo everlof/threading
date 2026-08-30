@@ -297,7 +297,10 @@ waiting for the old process.
 
 `observedAt` is mandatory because a dead provider's merge-request state must stop reading as
 current truth. The host decides when a fact is stale and how a stale fact presents; the provider
-does not get to assert freshness it cannot back up.
+does not get to assert freshness it cannot back up. The current host policy caps every extension
+observation at 15 minutes from the earlier of `observedAt` and host receipt. Expiry makes that
+subject value unknown while leaving the provider definition live, falls through to the next fresh
+provider in deterministic order, and is reversed by a fresh publication.
 
 Providers are never called during render. They publish on host events, on their own schedule, or
 on an explicit refresh, and reach the network through `network.brokered` under the grant rules
@@ -490,6 +493,9 @@ Per the [Scaling Gate](../../CLAUDE.md#scaling-gate), stated before implementati
   No IPC, no filesystem, no process work.
 - Fact publication is coalesced and bounded; a provider in a loop costs its own budget, not a
   frame.
+- Freshness uses one lazy-invalidated deadline heap and one process timer. Provider publication
+  updates only changed winning cells; refreshing a non-earliest cell does not reset the timer,
+  and deadline debris is compacted at twice the retained-cell count.
 - Option changes re-evaluate one navigator, not the window.
 - An opt-in deterministic stress fixture drives 5,000 sessions with a synthetic provider at the
   stress publication rate, measuring background evaluation, main-thread mount, scroll tail, live

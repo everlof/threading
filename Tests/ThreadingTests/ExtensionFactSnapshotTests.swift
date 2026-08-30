@@ -440,7 +440,7 @@ final class ExtensionFactSnapshotTests: XCTestCase {
             key: extensionKey,
             subject: subject,
             value: .string(value),
-            observedAt: Date(timeIntervalSinceReferenceDate: 1)
+            observedAt: .distantFuture
         )
     }
 }
