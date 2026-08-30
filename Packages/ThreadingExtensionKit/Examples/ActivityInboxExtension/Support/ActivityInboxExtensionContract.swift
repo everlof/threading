@@ -122,6 +122,7 @@ public enum ActivityInboxExtensionContract {
                 ],
                 output: .init(
                     collectionID: "activity-sessions",
+                    windowing: .hostVirtualized,
                     rowTemplate: .stack(
                         axis: .horizontal,
                         spacing: .small,

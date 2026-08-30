@@ -231,6 +231,7 @@ final class ExtensionBundleLoaderTests: XCTestCase {
                 ],
                 output: .init(
                     collectionID: "sessions",
+                    windowing: .hostVirtualized,
                     rowTemplate: .stack(
                         axis: .horizontal,
                         spacing: .small,
@@ -293,6 +294,7 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             ExtensionWorkspaceNavigatorPipeline.maximumOutputItems
         )
         XCTAssertEqual(localizedNavigator.pipeline?.output.overflow, .truncateWithNotice)
+        XCTAssertEqual(localizedNavigator.pipeline?.output.windowing, .hostVirtualized)
         guard case .stack(_, _, let localizedTemplateChildren) =
             localizedNavigator.pipeline?.output.rowTemplate,
               case .text(.fact(_, _, let fallback), _) = localizedTemplateChildren.first,

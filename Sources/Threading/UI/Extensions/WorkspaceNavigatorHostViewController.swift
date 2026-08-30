@@ -2030,23 +2030,20 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
     }
 
     private func restoreSelection(preferredItemID: String?) {
-        let matchingID: String?
+        let matchingRow: Int?
         if let synchronizedDestination {
-            matchingID = presentation.rows.lazy.compactMap {
-                row -> WorkspaceNavigatorPipelineItem? in
-                guard case .item(let item) = row else { return nil }
-                return item
-            }.first {
-                destinationsMatch($0.destination, synchronizedDestination)
-            }?.sourceSessionID
+            matchingRow = presentation.row(matching: synchronizedDestination)
         } else {
-            matchingID = preferredItemID
+            matchingRow = preferredItemID.flatMap { presentation.rowBySourceSessionID[$0] }
         }
         // Host navigation is authoritative, including when its destination has no row in the
         // current presentation. Retained table state applies only before the host synchronizes.
         suppressSelectionCallback = true
-        if let matchingID, let row = presentation.rowBySourceSessionID[matchingID] {
-            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        if let matchingRow {
+            tableView.selectRowIndexes(
+                IndexSet(integer: matchingRow),
+                byExtendingSelection: false
+            )
         } else {
             tableView.deselectAll(nil)
         }
@@ -2076,35 +2073,6 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
             y: min(maximumY, max(0, tableView.rect(ofRow: row).minY + offset))
         ))
         scrollView.reflectScrolledClipView(scrollView.contentView)
-    }
-
-    private func destinationsMatch(
-        _ lhs: ExtensionWorkspaceNavigatorDestination,
-        _ rhs: ExtensionWorkspaceNavigatorDestination
-    ) -> Bool {
-        switch (lhs, rhs) {
-        case (.project(let lhsID), .project(let rhsID)):
-            return identifiersMatch(lhsID, rhsID)
-        case (
-            .session(let lhsID, let lhsProjectID),
-            .session(let rhsID, let rhsProjectID)
-        ):
-            guard identifiersMatch(lhsID, rhsID) else { return false }
-            switch (lhsProjectID, rhsProjectID) {
-            case (nil, _), (_, nil): return true
-            case (.some(let lhsProjectID), .some(let rhsProjectID)):
-                return identifiersMatch(lhsProjectID, rhsProjectID)
-            }
-        default:
-            return false
-        }
-    }
-
-    private func identifiersMatch(_ lhs: String, _ rhs: String) -> Bool {
-        if let lhsUUID = UUID(uuidString: lhs), let rhsUUID = UUID(uuidString: rhs) {
-            return lhsUUID == rhsUUID
-        }
-        return lhs == rhs
     }
 }
 

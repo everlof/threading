@@ -70,6 +70,24 @@ class WorkspaceNavigatorSchemaTests(unittest.TestCase):
     def test_shipped_t3_manifest_resolves_and_validates(self) -> None:
         self.assert_valid(self.manifest_validator, self.t3_manifest)
 
+    def test_windowing_is_optional_but_never_null_or_unknown(self) -> None:
+        legacy = copy.deepcopy(self.activity_manifest)
+        output = legacy["workspaceNavigators"][0]["pipeline"]["output"]
+        output.pop("windowing")
+        self.assert_valid(self.manifest_validator, legacy)
+
+        explicit_null = copy.deepcopy(self.activity_manifest)
+        explicit_null["workspaceNavigators"][0]["pipeline"]["output"][
+            "windowing"
+        ] = None
+        self.assert_invalid(self.manifest_validator, explicit_null)
+
+        unknown = copy.deepcopy(self.activity_manifest)
+        unknown["workspaceNavigators"][0]["pipeline"]["output"][
+            "windowing"
+        ] = "extensionPaged"
+        self.assert_invalid(self.manifest_validator, unknown)
+
     def test_pipeline_intent_vocabulary_is_bounded_and_requires_a_pipeline(self) -> None:
         manifest = copy.deepcopy(self.activity_manifest)
         navigator = manifest["workspaceNavigators"][0]

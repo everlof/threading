@@ -476,6 +476,9 @@ least one transform clause. Read
 [`WORKSPACE_NAVIGATORS.md`](WORKSPACE_NAVIGATORS.md#host-evaluated-pipeline-declarations) for the
 exact required/enhancing degradation boundaries, explicit project join, source-session activation,
 static-generation rule, and the format-1 1,000-item overflow notice before authoring one.
+For a complete host-windowed result, set `output.windowing` to `.hostVirtualized`; keep the
+required `itemLimit` and `.truncateWithNotice` compatibility fields valid. A host which predates
+the additive windowing hint ignores it and presents the bounded prefix with its omission notice.
 The static manifest list is inspection metadata, not a render source. Threading validates the
 complete raw registration against it before localization and inventories only the matched live
 generation. A mismatch or process termination exposes no navigator from that generation.

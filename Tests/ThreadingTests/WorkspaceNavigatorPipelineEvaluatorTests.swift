@@ -1335,6 +1335,32 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             try evaluator.realizeVisibleRow(XCTUnwrap(result.sections.first?.items.first), in: compiled),
             .text("session-4999", role: .body)
         )
+
+        let windowedValue = pipeline(
+            consumes: [.init(key: titleKey), .init(key: dateKey)],
+            sort: [.init(operand: .init(.init(dateKey)), direction: .descending)],
+            itemLimit: 1,
+            windowing: .hostVirtualized,
+            template: titleTemplate
+        )
+        let windowedCompiled = try ready(windowedValue, snapshot: snapshot)
+        let windowedResult = evaluator.evaluate(windowedCompiled)
+        let presentation = WorkspaceNavigatorPipelinePresentation(evaluation: windowedResult)
+
+        XCTAssertEqual(windowedResult.itemCount, 5000)
+        XCTAssertEqual(windowedResult.omittedItemCount, 0)
+        XCTAssertEqual(
+            windowedResult.sections.first?.items.first?.sourceSessionID,
+            "session-4999"
+        )
+        XCTAssertEqual(
+            windowedResult.sections.first?.items.last?.sourceSessionID,
+            "session-0000"
+        )
+        XCTAssertEqual(
+            presentation.row(matching: .session(id: "session-4999", projectID: nil)),
+            0
+        )
     }
 
     func testEvaluationSchedulerCollapsesATypeaheadBurstToTheNewestPendingRequest() throws {
@@ -1495,6 +1521,7 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         buckets: [ExtensionWorkspaceNavigatorBucketClause] = [],
         sort: [ExtensionWorkspaceNavigatorSortClause] = [],
         itemLimit: Int = 1000,
+        windowing: ExtensionWorkspaceNavigatorPipelineWindowing? = nil,
         template: ExtensionWorkspaceNavigatorTemplateNode
     ) -> ExtensionWorkspaceNavigatorPipeline {
         .init(
@@ -1507,6 +1534,7 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             output: .init(
                 collectionID: "sessions",
                 itemLimit: itemLimit,
+                windowing: windowing,
                 rowTemplate: template,
                 emptyState: .init(title: "Nothing here")
             )

@@ -41625,6 +41625,17 @@
         }
       }
     },
+    "The host-owned search band, virtualized results frame, realized semantic rows, row intents, overflow notice, and zero-result answer used by focused extension sidebars." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det värdägda sökfältet, den virtualiserade resultatramen, realiserade semantiska rader, radåtgärder, överskottsmeddelandet och svaret utan träffar som används av fokuserade tilläggssidofält."
+          }
+        }
+      }
+    },
     "The iPhone controls the terminal size while its remote view is open." : {
       "extractionState" : "manual",
       "localizations" : {

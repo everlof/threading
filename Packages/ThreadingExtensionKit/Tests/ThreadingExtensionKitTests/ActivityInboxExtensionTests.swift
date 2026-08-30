@@ -45,6 +45,7 @@ final class ActivityInboxExtensionTests: XCTestCase {
         ])
         XCTAssertEqual(pipeline.output.activation, .sourceSession)
         XCTAssertEqual(pipeline.output.collectionID, "activity-sessions")
+        XCTAssertEqual(pipeline.output.windowing, .hostVirtualized)
         XCTAssertEqual(navigator.options.map(\.id), ["sort-order"])
 
         guard case let .rules(rules, unmatched) = pipeline.buckets.first?.strategy else {

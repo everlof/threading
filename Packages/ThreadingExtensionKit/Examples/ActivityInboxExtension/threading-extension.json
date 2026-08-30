@@ -266,7 +266,8 @@
             "spacing": "small",
             "type": "stack"
           },
-          "selectionMode": "single"
+          "selectionMode": "single",
+          "windowing": "hostVirtualized"
         },
         "search": {
           "accessibilityLabel": "Search Activity Inbox sessions",

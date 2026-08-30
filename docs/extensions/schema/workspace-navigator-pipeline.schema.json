@@ -463,6 +463,7 @@
         "activation": { "const": "sourceSession" },
         "itemLimit": { "type": "integer", "minimum": 1, "maximum": 1000 },
         "overflow": { "const": "truncateWithNotice" },
+        "windowing": { "const": "hostVirtualized" },
         "rowTemplate": { "$ref": "#/$defs/templateNode" },
         "emptyState": {
           "type": "object",

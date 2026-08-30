@@ -222,6 +222,8 @@ impossible.
 
 Format 1 evaluates the host's session catalogue, realizes a single-select list from one bounded
 row template, and routes every generated row to its source session without calling the extension.
+An output may add `windowing: .hostVirtualized` to expose the complete evaluated ordering while
+still realizing semantic templates only for the collection viewport.
 The declaration names every fact it consumes as `required` or `enhances`, and every declared
 option must participate in a filter, bucket, or sort condition. `loadActionID` and
 `eventActionID` are unavailable on a pipeline navigator: facts and option values invalidate it
@@ -272,11 +274,14 @@ Project-scoped lookup is explicit, never implicit inheritance. It follows the cu
 a project ID simply has no project-scoped value and follows the per-subject unknown/fallback rules
 above; provider availability is not inferred from whether any particular session joins.
 
-Until windowed collections ship, format 1 requires `itemLimit` in `1...1000` and
-`overflow: .truncateWithNotice`. After filtering, bucketing, and sorting, the host emits the first
-`itemLimit` source sessions in that final order and appends a localized, nonselectable notice with
-the omitted count. This is an explicit finite bridge, not silent truncation or a claim that format
-1 has already implemented windowing. The complete machine-readable contract is
+The compatibility fields remain required: `itemLimit` is in `1...1000` and `overflow` is
+`.truncateWithNotice`. Without `windowing`, the host emits that prefix after filtering,
+bucketing, and sorting and appends a localized, nonselectable notice with the omitted count. With
+`windowing: .hostVirtualized`, a capable host keeps every lightweight row identity in the final
+ordering, reports no omitted rows, and asks the template renderer only for the visible range.
+Older format-1 hosts ignore the additive field and safely retain the bounded notice behavior, so
+the compatibility fields remain valid even though a windowing-aware host does not apply their
+truncation. The complete machine-readable contract is
 [`schema/workspace-navigator-pipeline.schema.json`](schema/workspace-navigator-pipeline.schema.json).
 
 [`ActivityInboxExtension`](../../Packages/ThreadingExtensionKit/Examples/ActivityInboxExtension)

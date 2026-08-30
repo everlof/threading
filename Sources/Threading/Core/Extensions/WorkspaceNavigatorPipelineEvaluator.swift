@@ -49,6 +49,7 @@ struct WorkspaceNavigatorPipelinePresentation: Equatable, Sendable {
     let evaluation: WorkspaceNavigatorPipelineEvaluation
     let rows: [Row]
     let rowBySourceSessionID: [String: Int]
+    let rowBySourceSessionUUID: [UUID: Int]
 
     init(evaluation: WorkspaceNavigatorPipelineEvaluation) {
         self.evaluation = evaluation
@@ -56,15 +57,39 @@ struct WorkspaceNavigatorPipelinePresentation: Equatable, Sendable {
         rows.reserveCapacity(evaluation.itemCount + evaluation.sections.count)
         var rowBySourceSessionID: [String: Int] = [:]
         rowBySourceSessionID.reserveCapacity(evaluation.itemCount)
+        var rowBySourceSessionUUID: [UUID: Int] = [:]
+        rowBySourceSessionUUID.reserveCapacity(evaluation.itemCount)
         for section in evaluation.sections {
             if let title = section.title { rows.append(.section(title: title)) }
             for item in section.items {
                 rowBySourceSessionID[item.sourceSessionID] = rows.count
+                if let uuid = UUID(uuidString: item.sourceSessionID) {
+                    rowBySourceSessionUUID[uuid] = rows.count
+                }
                 rows.append(.item(item))
             }
         }
         self.rows = rows
         self.rowBySourceSessionID = rowBySourceSessionID
+        self.rowBySourceSessionUUID = rowBySourceSessionUUID
+    }
+
+    /// Resolves a host-synchronized source-session route without scanning the full presentation
+    /// on the main actor. Project identity is checked when both routes carry one, matching the
+    /// navigator's existing destination semantics.
+    func row(matching destination: ExtensionWorkspaceNavigatorDestination) -> Int? {
+        guard case let .session(sessionID, projectID) = destination else { return nil }
+        let row = rowBySourceSessionID[sessionID]
+            ?? UUID(uuidString: sessionID).flatMap { rowBySourceSessionUUID[$0] }
+        guard let row,
+              rows.indices.contains(row),
+              case let .item(item) = rows[row] else { return nil }
+        guard let projectID, let itemProjectID = item.projectID else { return row }
+        if projectID == itemProjectID { return row }
+        guard let projectUUID = UUID(uuidString: projectID),
+              let itemProjectUUID = UUID(uuidString: itemProjectID),
+              projectUUID == itemProjectUUID else { return nil }
+        return row
     }
 }
 
@@ -288,7 +313,10 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             referenceDate: referenceDate
         )
         let eligibleCount = unboundedSections.reduce(0) { $0 + $1.candidates.count }
-        var remaining = pipeline.output.itemLimit
+        let emittedItemLimit = pipeline.output.windowing == .hostVirtualized
+            ? eligibleCount
+            : pipeline.output.itemLimit
+        var remaining = emittedItemLimit
         var sections: [WorkspaceNavigatorPipelineSection] = []
         for section in unboundedSections where remaining > 0 {
             let candidates = Array(section.candidates.prefix(remaining))
@@ -316,7 +344,7 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             snapshotRevision: pipeline.snapshot.revision,
             referenceDate: referenceDate,
             sections: sections,
-            omittedItemCount: max(0, eligibleCount - pipeline.output.itemLimit),
+            omittedItemCount: max(0, eligibleCount - emittedItemLimit),
             emptyState: sections.isEmpty ? pipeline.output.emptyState : nil
         )
     }
