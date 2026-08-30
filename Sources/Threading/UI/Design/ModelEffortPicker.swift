@@ -179,6 +179,7 @@ final class ModelEffortMatrixControl: ThemedControl {
         static var verticalCellInset: CGFloat { 6 }
         static var beacon: CGFloat { 7 }
         static var selectedBeacon: CGFloat { 11 }
+        static var axisHoverProgress: CGFloat { 0.46 }
     }
 
     #if DEBUG
@@ -441,13 +442,13 @@ final class ModelEffortMatrixControl: ThemedControl {
             ThemedSurface.draw(
                 rect,
                 fill: Design.Surface.controlHover,
-                border: focused ? Design.Surface.accent : Design.Surface.border,
+                border: Design.Surface.accent,
                 radius: Design.Radius.control
             )
         } else if onHoveredAxis && available {
             ThemedSurface.draw(
                 rect,
-                fill: Design.Surface.controlHover.withAlphaComponent(0.46),
+                fill: axisHoverFill,
                 border: effort.isUltra ? Design.Surface.accentMuted : nil,
                 radius: Design.Radius.control
             )
@@ -604,6 +605,17 @@ final class ModelEffortMatrixControl: ThemedControl {
         if let hoveredCell { return hoveredCell }
         guard window?.firstResponder === self else { return nil }
         return focusedCell
+    }
+
+    /// A crosshair is partway from rest to hover, whichever colours and alpha the theme
+    /// authored for those two states. Replacing the hover role's alpha with a fixed value made
+    /// Pure Black's axes nearly half-white while their intersection stayed at its 10% hover,
+    /// visually demoting the cell the pointer was actually considering.
+    private var axisHoverFill: NSColor {
+        Design.Surface.controlResting.blended(
+            withFraction: Layout.axisHoverProgress,
+            of: Design.Surface.controlHover
+        ) ?? Design.Surface.controlHover
     }
 
     private func cellRect(row: Int, column: Int) -> NSRect {
@@ -786,5 +798,16 @@ final class ModelEffortMatrixControl: ThemedControl {
     func hoverModelForTesting(at row: Int?) {
         hoveredModelRow = row.flatMap { presentation.models.indices.contains($0) ? $0 : nil }
     }
+
+    func hoverCellForTesting(row: Int?, column: Int?) {
+        guard let row, let column else {
+            hoveredCell = nil
+            return
+        }
+        let cell = Cell(row: row, column: column)
+        hoveredCell = isAvailable(cell) ? cell : nil
+    }
+
+    var axisHoverFillForTesting: NSColor { axisHoverFill }
     #endif
 }

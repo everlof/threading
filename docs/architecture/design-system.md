@@ -3405,3 +3405,22 @@ and theme/appearance refresh re-derives the fill, isolation ink, edge, radius an
 on a contrasting terminal backdrop: changing the live content behind the control may not change
 interior pixels, and a visible band crossing its midpoint must be separated from both outer edges
 by pixels matching the live backdrop rather than the theme's ground.
+
+## 2026-08-29 — A matrix crosshair cannot be louder than its intersection
+
+Pure Black exposed the model-by-effort picker's state hierarchy backwards. The cell under the
+pointer wore the theme's authored `controlHover` — white at 10% — while every available cell on
+its row and column replaced that authored alpha with a fixed 46%. The axes became light grey and
+their intersection stayed nearly black, so Fable / Max was the least visible cell in the trace
+that was meant to identify it. The committed selection remained a white whole-cell fill, but the
+candidate combination read like a hole in its own highlight.
+
+An intermediate state is now an interpolation between the theme's `controlResting` and
+`controlHover`, including their authored alpha, rather than a new opacity applied to one role.
+The hovered or keyboard-focused intersection keeps the full hover fill and an accent edge; the
+committed choice remains the only accent-filled cell. This preserves the hierarchy under both
+translucent palette themes and opaque period materials without adding a Pure Black exception.
+`ModelEffortPickerRenderTests` carries the exact Pure crosshair, under both of that theme's
+appearances since it became adaptive, alongside the existing System, Cyberpunk and Windows 98
+evidence, and a focused assertion holds the intermediate fill
+strictly between that theme's resting and hover states.
