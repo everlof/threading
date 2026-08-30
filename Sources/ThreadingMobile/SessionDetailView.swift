@@ -2232,7 +2232,7 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> IntrinsicTextView {
-        let view = IntrinsicTextView()
+        let view = TerminalLineTextView()
         view.delegate = context.coordinator
         view.backgroundColor = .clear
         view.isOpaque = false
