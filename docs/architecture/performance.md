@@ -396,7 +396,11 @@ pinch stays live), but navigation motion is not a sequence of terminal widths.
 destination for both push and interactive Back; its update is O(1), retains one terminal view,
 and commits only the final width after the coordinator completes with that terminal still on
 screen (or after the same quiet period when UIKit exposes no coordinator). A completed Back
-discards the outgoing width before teardown. Height stays live for the keyboard and safe area. The wire
+discards the outgoing width before teardown. Keyboard presentation height is clipped live by the
+structural host, but SwiftTerm keeps its last committed row grid through the animation and
+receives the final height once at `keyboardDidShow` or `keyboardDidHide`. A cancelled transition
+that returns to the committed height produces no resize, and teardown discards pending height.
+The wire
 sees only the first grid of a lease — entering still sizes the agent at once — and after that the
 grid that has held still for
 `RemoteMobileConnectionDefaults.viewportSettleDelay` (150 ms; crossings inside a moving gesture
@@ -406,8 +410,8 @@ dismissed chat never resizes the Mac afterwards. The browser client has debounce
 `RemoteTerminalViewportLeaseTests` holds the boundary: a storm leases once, with the settled
 grid; the first grid is immediate; release cancels. `RemoteTerminalLayoutViewTests` holds the
 local half: a navigation-width storm leaves SwiftTerm on one grid, a coordinator-less storm
-commits only its last width, and keyboard height still follows its container without changing
-columns.
+commits only its last width, and 10,000 keyboard presentation frames retain one terminal, report
+no intermediate grid, and report exactly one final grid at the stable keyboard state.
 
 The return-to-live-end control shares that frequency boundary. Every accepted UIKit offset can
 re-evaluate it, so the check reads only `contentOffset`, the cached cell size/reachable maximum,
