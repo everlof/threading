@@ -25,19 +25,51 @@ enum NativeSidebarFactDependency: String, CaseIterable, Sendable {
     case sessionManualOrder
     case sessionModel
     case sessionManagerRelationship
+    case sessionManagerRole
     case sessionConduct
     case sessionScheduledStart
     case projectName
     case projectManualOrder
     case projectScratchpad
     case projectCreated
-    case projectRepository
     case projectBranch
     case terminalProjectMembership
     case terminalTitle
     case terminalBranch
     case terminalManualOrder
     case terminalCreated
+}
+
+/// A source-model spelling that deliberately differs from its public fact projection.
+///
+/// The parity checker validates each raw value against the named Swift model member, then uses
+/// the typed case from the descriptor inventory. This keeps derivations such as
+/// `displayTitle -> session.title` explicit without making the fact catalog main-actor isolated.
+enum NativeSidebarMemberAlias: String, CaseIterable, Sendable {
+    case sessionDisplayTitle = "AgentSession.displayTitle"
+    case sessionProvider = "AgentSession.kind"
+    case sessionAccount = "AgentSession.accountHandle"
+    case sessionParentFork = "AgentSession.forkedFrom"
+    case sessionParentSideChat = "AgentSession.isSideChat"
+    case projectScratchpad = "Project.isTheScratchpad"
+    case projectSessions = "Project.sessions"
+    case projectTerminals = "Project.terminals"
+}
+
+/// A provider method whose result supplies a catalog-owned fact to the native sidebar.
+enum NativeSidebarProviderAlias: String, CaseIterable, Sendable {
+    case managerOverview = "ControlGrantStore.overview"
+    case managerRole = "ControlGrantStore.isManager"
+    case managerSessionTitle = "ProjectStore.session"
+}
+
+/// A non-model input whose value is projected as a published fact by the native navigator.
+enum NativeSidebarFactInputAlias: String, CaseIterable, Sendable {
+    case rowActivity = "SessionRowView.configure.activity"
+    case rowConduct = "SessionRowView.configure.conduct"
+    case rowScheduledStart = "SessionRowView.configure.isScheduledStart"
+    case rootProjects = "SidebarTreeBuilder.rootNodes.projects"
+    case projectNodeProjects = "SidebarTreeBuilder.projectNode.projects"
 }
 
 /// The session values shared by the host fact publisher and, later, the native navigator.
@@ -125,15 +157,21 @@ enum HostFactProjection: Equatable, Sendable {
 struct HostFactDescriptor: Sendable {
     let definition: ExtensionFactDefinition
     let nativeDependencies: Set<NativeSidebarFactDependency>
+    let nativeAliases: Set<NativeSidebarMemberAlias>
+    let providerAliases: Set<NativeSidebarProviderAlias>
     private let extractValue: @Sendable (HostFactProjection) -> ExtensionFactValue?
 
     init(
         definition: ExtensionFactDefinition,
         nativeDependencies: Set<NativeSidebarFactDependency>,
+        nativeAliases: Set<NativeSidebarMemberAlias> = [],
+        providerAliases: Set<NativeSidebarProviderAlias> = [],
         extractValue: @escaping @Sendable (HostFactProjection) -> ExtensionFactValue?
     ) {
         self.definition = definition
         self.nativeDependencies = nativeDependencies
+        self.nativeAliases = nativeAliases
+        self.providerAliases = providerAliases
         self.extractValue = extractValue
     }
 
@@ -154,6 +192,16 @@ struct HostFactDescriptor: Sendable {
 
 /// Sole authority for Threading's navigator fact definitions and extraction semantics.
 enum HostFactCatalog {
+    static let nativeInputOwnership: [
+        NativeSidebarFactInputAlias: NativeSidebarFactDependency
+    ] = [
+        .rowActivity: .sessionActivity,
+        .rowConduct: .sessionConduct,
+        .rowScheduledStart: .sessionScheduledStart,
+        .rootProjects: .projectManualOrder,
+        .projectNodeProjects: .projectManualOrder,
+    ]
+
     private static let identityUsages: Set<ExtensionFactUsage> = [
         .filterable, .sortable, .groupable, .presentable,
     ]
@@ -170,22 +218,27 @@ enum HostFactCatalog {
     static let all: [HostFactDescriptor] = [
         session(
             ExtensionHostFactKey.sessionProjectID, "Project", .string, identityUsages,
-            parity: [.sessionProjectMembership]
+            parity: [.sessionProjectMembership],
+            nativeAliases: [.projectSessions]
         ) { .string($0.projectID) },
         session(
             ExtensionHostFactKey.sessionCheckoutID, "Checkout", .string, identityUsages
         ) { .string($0.projectID) },
         session(
             ExtensionHostFactKey.sessionTitle, "Title", .string, textUsages,
-            parity: [.sessionTitle]
+            parity: [.sessionTitle],
+            nativeAliases: [.sessionDisplayTitle],
+            providerAliases: [.managerSessionTitle]
         ) { .string($0.title) },
         session(
             ExtensionHostFactKey.sessionProviderID, "Provider", .string, identityUsages,
-            parity: [.sessionProvider]
+            parity: [.sessionProvider],
+            nativeAliases: [.sessionProvider]
         ) { .string($0.providerID) },
         session(
             ExtensionHostFactKey.sessionAccountID, "Account", .string, identityUsages,
-            parity: [.sessionAccount]
+            parity: [.sessionAccount],
+            nativeAliases: [.sessionAccount]
         ) { .string($0.accountID) },
         session(
             ExtensionHostFactKey.sessionActivity, "Activity", .string, stateUsages
@@ -203,7 +256,8 @@ enum HostFactCatalog {
         ) { $0.branch.map(ExtensionFactValue.string) },
         session(
             ExtensionHostFactKey.sessionParentID, "Parent Session", .string, identityUsages,
-            parity: [.sessionParent]
+            parity: [.sessionParent],
+            nativeAliases: [.sessionParentFork, .sessionParentSideChat]
         ) { $0.parentID.map(ExtensionFactValue.string) },
         session(
             ExtensionHostFactKey.sessionIsSideChat, "Side Chat", .boolean, stateUsages
@@ -254,7 +308,8 @@ enum HostFactCatalog {
         ) { .date($0.lastTurnAt ?? $0.lastActiveAt) },
         session(
             ExtensionHostFactKey.sessionManualOrder, "Manual Order", .integer, [.sortable],
-            parity: [.sessionManualOrder]
+            parity: [.sessionManualOrder],
+            nativeAliases: [.projectSessions]
         ) { .integer(Int64($0.manualOrder)) },
         session(
             ExtensionHostFactKey.sessionModel, "Model", .string, textUsages,
@@ -262,10 +317,13 @@ enum HostFactCatalog {
         ) { $0.model.map(ExtensionFactValue.string) },
         session(
             ExtensionHostFactKey.sessionManagerID, "Manager", .string, identityUsages,
-            parity: [.sessionManagerRelationship]
+            parity: [.sessionManagerRelationship],
+            providerAliases: [.managerOverview]
         ) { $0.managerID.map(ExtensionFactValue.string) },
         session(
-            ExtensionHostFactKey.sessionIsManager, "Manager Role", .boolean, stateUsages
+            ExtensionHostFactKey.sessionIsManager, "Manager Role", .boolean, stateUsages,
+            parity: [.sessionManagerRole],
+            providerAliases: [.managerRole]
         ) { .boolean($0.isManager) },
         session(
             ExtensionHostFactKey.sessionHasCustomConduct,
@@ -298,7 +356,8 @@ enum HostFactCatalog {
         ) { .integer(Int64($0.manualOrder)) },
         project(
             ExtensionHostFactKey.projectIsScratchpad, "Scratchpad", .boolean, stateUsages,
-            parity: [.projectScratchpad]
+            parity: [.projectScratchpad],
+            nativeAliases: [.projectScratchpad]
         ) { .boolean($0.isScratchpad) },
         project(
             ExtensionHostFactKey.projectCreatedAt, "Project Created At", .date, dateUsages,
@@ -308,8 +367,7 @@ enum HostFactCatalog {
             ExtensionHostFactKey.projectRepositoryHost,
             "Repository Host",
             .string,
-            textUsages,
-            parity: [.projectRepository]
+            textUsages
         ) { $0.repository.map { .string($0.host) } },
         project(
             ExtensionHostFactKey.projectRepositoryPath,
@@ -324,7 +382,8 @@ enum HostFactCatalog {
 
         terminal(
             ExtensionHostFactKey.terminalProjectID, "Terminal Project", .string, identityUsages,
-            parity: [.terminalProjectMembership]
+            parity: [.terminalProjectMembership],
+            nativeAliases: [.projectTerminals]
         ) { .string($0.projectID) },
         terminal(
             ExtensionHostFactKey.terminalTitle, "Terminal Title", .string, textUsages,
@@ -336,7 +395,8 @@ enum HostFactCatalog {
         ) { $0.branch.map(ExtensionFactValue.string) },
         terminal(
             ExtensionHostFactKey.terminalManualOrder, "Terminal Order", .integer, [.sortable],
-            parity: [.terminalManualOrder]
+            parity: [.terminalManualOrder],
+            nativeAliases: [.projectTerminals]
         ) { .integer(Int64($0.manualOrder)) },
         terminal(
             ExtensionHostFactKey.terminalCreatedAt, "Terminal Created At", .date, dateUsages,
@@ -359,15 +419,19 @@ enum HostFactCatalog {
         _ valueType: ExtensionFactValueType,
         _ usages: Set<ExtensionFactUsage>,
         parity: Set<NativeSidebarFactDependency> = [],
+        nativeAliases: Set<NativeSidebarMemberAlias> = [],
+        providerAliases: Set<NativeSidebarProviderAlias> = [],
         extract: @escaping @Sendable (NativeSidebarSessionFacts) -> ExtensionFactValue?
     ) -> HostFactDescriptor {
-        descriptor(
+        return descriptor(
             key,
             displayName,
             valueType,
             subjectKind: .session,
             usages: usages,
-            parity: parity
+            parity: parity,
+            nativeAliases: nativeAliases,
+            providerAliases: providerAliases
         ) { projection in
             guard case .session(let facts) = projection else { return nil }
             return extract(facts)
@@ -380,15 +444,19 @@ enum HostFactCatalog {
         _ valueType: ExtensionFactValueType,
         _ usages: Set<ExtensionFactUsage>,
         parity: Set<NativeSidebarFactDependency> = [],
+        nativeAliases: Set<NativeSidebarMemberAlias> = [],
+        providerAliases: Set<NativeSidebarProviderAlias> = [],
         extract: @escaping @Sendable (NativeSidebarProjectFacts) -> ExtensionFactValue?
     ) -> HostFactDescriptor {
-        descriptor(
+        return descriptor(
             key,
             displayName,
             valueType,
             subjectKind: .project,
             usages: usages,
-            parity: parity
+            parity: parity,
+            nativeAliases: nativeAliases,
+            providerAliases: providerAliases
         ) { projection in
             guard case .project(let facts) = projection else { return nil }
             return extract(facts)
@@ -401,15 +469,19 @@ enum HostFactCatalog {
         _ valueType: ExtensionFactValueType,
         _ usages: Set<ExtensionFactUsage>,
         parity: Set<NativeSidebarFactDependency> = [],
+        nativeAliases: Set<NativeSidebarMemberAlias> = [],
+        providerAliases: Set<NativeSidebarProviderAlias> = [],
         extract: @escaping @Sendable (NativeSidebarTerminalFacts) -> ExtensionFactValue?
     ) -> HostFactDescriptor {
-        descriptor(
+        return descriptor(
             key,
             displayName,
             valueType,
             subjectKind: .terminal,
             usages: usages,
-            parity: parity
+            parity: parity,
+            nativeAliases: nativeAliases,
+            providerAliases: providerAliases
         ) { projection in
             guard case .terminal(let facts) = projection else { return nil }
             return extract(facts)
@@ -423,6 +495,8 @@ enum HostFactCatalog {
         subjectKind: ExtensionFactSubjectKind,
         usages: Set<ExtensionFactUsage>,
         parity: Set<NativeSidebarFactDependency>,
+        nativeAliases: Set<NativeSidebarMemberAlias>,
+        providerAliases: Set<NativeSidebarProviderAlias>,
         extract: @escaping @Sendable (HostFactProjection) -> ExtensionFactValue?
     ) -> HostFactDescriptor {
         HostFactDescriptor(
@@ -434,6 +508,8 @@ enum HostFactCatalog {
                 usages: usages
             ),
             nativeDependencies: parity,
+            nativeAliases: nativeAliases,
+            providerAliases: providerAliases,
             extractValue: extract
         )
     }

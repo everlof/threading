@@ -328,16 +328,42 @@ enum SidebarTreeBuilder {
         excludingSessionIDs: Set<SessionID> = [],
         at date: Date = Date()
     ) -> [NSObject] {
-        let arranged = pinningScratchpad(projects)
+        let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
+        let visibilityScope = NativeSidebarParity.host(.visibilityScope, visibility)
+        let transientExclusions = NativeSidebarParity.host(
+            .transientExclusion,
+            excludingSessionIDs
+        )
+        let evaluationDate = NativeSidebarParity.host(.clock, date)
+        let arranged = pinningScratchpad(classifiedProjects)
         // The scratchpad answers "no repository" for grouping even though it is one, which is
         // what keeps it out of a repository heading — and, just as importantly, keeps it from
         // *causing* one: counted as a checkout, it would drag a project the user added inside it
         // under a heading that exists only because the scratchpad is there.
         let identities = arranged.map { project in
-            project.isTheScratchpad ? nil : GitInfo.repositoryIdentity(for: project.folderPath)
+            let isScratchpad = NativeSidebarParity.fact(
+                .projectScratchpad,
+                project.isTheScratchpad
+            )
+            let localRepositoryPath = NativeSidebarParity.host(
+                .localRepositoryContext,
+                project.folderPath
+            )
+            return isScratchpad
+                ? nil
+                : NativeSidebarParity.host(
+                    .localRepositoryContext,
+                    GitInfo.repositoryIdentity(for: localRepositoryPath)
+                )
         }
-        let order = AppSettings.sidebarSessionOrder
-        let isReversed = AppSettings.sidebarSessionOrderIsReversed
+        let order = NativeSidebarParity.option(
+            .sessionOrder,
+            AppSettings.sidebarSessionOrder
+        )
+        let isReversed = NativeSidebarParity.option(
+            .sessionOrderDirection,
+            AppSettings.sidebarSessionOrderIsReversed
+        )
 
         var checkoutCounts: [String: Int] = [:]
         for identity in identities.compactMap({ $0 }) {
@@ -350,16 +376,20 @@ enum SidebarTreeBuilder {
         for (project, identity) in zip(arranged, identities) {
             // Standalone terminals are not sessions and cannot be snoozed, so they stay in the
             // ordinary attention view and never leak into the dedicated Snoozed scope.
+            let terminals = NativeSidebarParity.facts(
+                [.terminalProjectMembership, .terminalManualOrder],
+                project.terminals
+            )
             let node = makeProjectNode(
                 from: project,
-                terminals: visibility == .attention
-                    ? project.terminals
+                terminals: visibilityScope == .attention
+                    ? terminals
                     : [],
                 order: order,
                 isReversed: isReversed,
-                visibility: visibility,
-                excludingSessionIDs: excludingSessionIDs,
-                date: date
+                visibility: visibilityScope,
+                excludingSessionIDs: transientExclusions,
+                date: evaluationDate
             )
 
             guard let identity, checkoutCounts[identity, default: 0] > 1 else {
@@ -374,7 +404,10 @@ enum SidebarTreeBuilder {
 
             let group = RepoGroupNode(
                 identity: identity,
-                name: GitInfo.repositoryName(forIdentity: identity)
+                name: NativeSidebarParity.host(
+                    .localRepositoryContext,
+                    GitInfo.repositoryName(forIdentity: identity)
+                )
             )
             group.projectNodes.append(node)
             groupsByIdentity[identity] = group
@@ -392,8 +425,14 @@ enum SidebarTreeBuilder {
     /// that only knows "scratchpad before anything else" is free to reshuffle the checkouts
     /// underneath it — and the order of those rows is the user's own arrangement.
     static func pinningScratchpad(_ projects: [Project]) -> [Project] {
-        guard projects.contains(where: \.isTheScratchpad) else { return projects }
-        return projects.filter(\.isTheScratchpad) + projects.filter { !$0.isTheScratchpad }
+        guard projects.contains(where: {
+            NativeSidebarParity.fact(.projectScratchpad, $0.isTheScratchpad)
+        }) else { return projects }
+        return projects.filter {
+            NativeSidebarParity.fact(.projectScratchpad, $0.isTheScratchpad)
+        } + projects.filter {
+            !NativeSidebarParity.fact(.projectScratchpad, $0.isTheScratchpad)
+        }
     }
 
     /// Rebuilds only one project's descendants for a content change that can alter their
@@ -405,14 +444,33 @@ enum SidebarTreeBuilder {
         visibility: SidebarSessionVisibility = .attention,
         excludingSessionIDs: Set<SessionID> = []
     ) -> ProjectNode? {
-        guard let project = projects.first(where: { $0.id == projectID }) else { return nil }
+        let classifiedProjectID = NativeSidebarParity.host(.entityIdentity, projectID)
+        let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
+        let visibilityScope = NativeSidebarParity.host(.visibilityScope, visibility)
+        let transientExclusions = NativeSidebarParity.host(
+            .transientExclusion,
+            excludingSessionIDs
+        )
+        guard let project = classifiedProjects.first(where: {
+            NativeSidebarParity.host(.entityIdentity, $0.id) == classifiedProjectID
+        }) else { return nil }
+        let terminals = NativeSidebarParity.facts(
+            [.terminalProjectMembership, .terminalManualOrder],
+            project.terminals
+        )
         return makeProjectNode(
             from: project,
-            terminals: visibility == .attention ? project.terminals : [],
-            order: AppSettings.sidebarSessionOrder,
-            isReversed: AppSettings.sidebarSessionOrderIsReversed,
-            visibility: visibility,
-            excludingSessionIDs: excludingSessionIDs
+            terminals: visibilityScope == .attention ? terminals : [],
+            order: NativeSidebarParity.option(
+                .sessionOrder,
+                AppSettings.sidebarSessionOrder
+            ),
+            isReversed: NativeSidebarParity.option(
+                .sessionOrderDirection,
+                AppSettings.sidebarSessionOrderIsReversed
+            ),
+            visibility: visibilityScope,
+            excludingSessionIDs: transientExclusions
         )
     }
 
@@ -425,26 +483,39 @@ enum SidebarTreeBuilder {
         excludingSessionIDs: Set<SessionID> = [],
         date: Date = Date()
     ) -> ProjectNode {
-        let node = ProjectNode(projectID: project.id)
+        let projectID = NativeSidebarParity.host(.entityIdentity, project.id)
+        let projectSessions = NativeSidebarParity.facts(
+            [.sessionProjectMembership, .sessionManualOrder],
+            project.sessions
+        )
+        let node = ProjectNode(projectID: projectID)
         // Archived sessions are gathered separately, below the projects.
         let activeSessions = orderedActiveSessions(
-            project.sessions,
+            projectSessions,
             order: order,
             isReversed: isReversed,
             visibility: visibility,
             excludingSessionIDs: excludingSessionIDs,
             date: date
         )
-        node.sessionNodes = activeSessions.map { SessionNode(sessionID: $0.id) }
+        node.sessionNodes = activeSessions.map {
+            SessionNode(sessionID: NativeSidebarParity.host(.entityIdentity, $0.id))
+        }
         node.terminalNodes = terminals.map {
-            TerminalNode(terminalID: $0.id, projectFolderPath: project.folderPath)
+            TerminalNode(
+                terminalID: NativeSidebarParity.host(.entityIdentity, $0.id),
+                projectFolderPath: NativeSidebarParity.host(
+                    .localRepositoryContext,
+                    project.folderPath
+                )
+            )
         }
 
         // Side chats hang off the session they were forked from, so only what remains
         // at the project's own level is grouped by branch below.
         let top = attachSideChats(sessions: activeSessions, nodes: node.sessionNodes)
         node.childNodes = childNodes(
-            projectID: project.id,
+            projectID: projectID,
             sessions: top.sessions,
             sessionNodes: top.nodes,
             terminals: terminals,
@@ -471,15 +542,21 @@ enum SidebarTreeBuilder {
         date: Date = Date()
     ) -> [AgentSession] {
         let active = sessions.filter {
-            guard !$0.isArchived, !excludingSessionIDs.contains($0.id) else { return false }
-            let isSnoozed = $0.isSnoozed(at: date)
+            let isArchived = NativeSidebarParity.fact(.sessionArchived, $0.isArchived)
+            let sessionID = NativeSidebarParity.host(.entityIdentity, $0.id)
+            guard !isArchived, !excludingSessionIDs.contains(sessionID) else { return false }
+            let evaluationDate = NativeSidebarParity.host(.clock, date)
+            let isSnoozed = NativeSidebarParity.fact(
+                .sessionSnoozed,
+                $0.isSnoozed(at: evaluationDate)
+            )
             return visibility == .snoozed ? isSnoozed : !isSnoozed
         }
 
         if order == .manual || order == .type {
             let reversesSessions = order == .manual && isReversed
             let pinnedCount = active.reduce(into: 0) { count, session in
-                if session.isPinned { count += 1 }
+                if NativeSidebarParity.fact(.sessionPinned, session.isPinned) { count += 1 }
             }
             guard pinnedCount > 0 else {
                 return reversesSessions ? Array(active.reversed()) : active
@@ -490,7 +567,7 @@ enum SidebarTreeBuilder {
             pinned.reserveCapacity(pinnedCount)
             unpinned.reserveCapacity(active.count - pinnedCount)
             for session in active {
-                if session.isPinned {
+                if NativeSidebarParity.fact(.sessionPinned, session.isPinned) {
                     pinned.append(session)
                 } else {
                     unpinned.append(session)
@@ -508,12 +585,16 @@ enum SidebarTreeBuilder {
         // session value. Name order also derives each display title once: that property reads
         // the agent-title preference, and doing so from every comparison turned one 5,000-row
         // rebuild into tens of thousands of defaults reads.
-        let displayTitles = order == .name ? active.map(\.displayTitle) : []
+        let displayTitles = order == .name
+            ? active.map { NativeSidebarParity.fact(.sessionTitle, $0.displayTitle) }
+            : []
         let orderedOffsets = active.indices.sorted { lhsOffset, rhsOffset in
             let lhs = active[lhsOffset]
             let rhs = active[rhsOffset]
-            if lhs.isPinned != rhs.isPinned {
-                return lhs.isPinned
+            let lhsIsPinned = NativeSidebarParity.fact(.sessionPinned, lhs.isPinned)
+            let rhsIsPinned = NativeSidebarParity.fact(.sessionPinned, rhs.isPinned)
+            if lhsIsPinned != rhsIsPinned {
+                return lhsIsPinned
             }
 
             switch order {
@@ -521,8 +602,16 @@ enum SidebarTreeBuilder {
                 // Handled by the linear path above.
                 break
             case .recentActivity:
-                if lhs.lastActiveAt != rhs.lastActiveAt {
-                    let isNewer = lhs.lastActiveAt > rhs.lastActiveAt
+                let lhsLastActive = NativeSidebarParity.fact(
+                    .sessionLastActive,
+                    lhs.lastActiveAt
+                )
+                let rhsLastActive = NativeSidebarParity.fact(
+                    .sessionLastActive,
+                    rhs.lastActiveAt
+                )
+                if lhsLastActive != rhsLastActive {
+                    let isNewer = lhsLastActive > rhsLastActive
                     return isReversed ? !isNewer : isNewer
                 }
             case .name:
@@ -611,7 +700,9 @@ enum SidebarTreeBuilder {
     ) -> (sessions: [AgentSession], nodes: [SessionNode]) {
         var parentIDs: [SessionID: SessionID?] = [:]
         for session in sessions {
-            parentIDs[session.id] = session.forkedFrom
+            let sessionID = NativeSidebarParity.host(.entityIdentity, session.id)
+            let parentID = NativeSidebarParity.fact(.sessionParent, session.forkedFrom)
+            parentIDs[sessionID] = parentID
         }
 
         var nodesByID: [SessionID: SessionNode] = [:]
@@ -623,9 +714,10 @@ enum SidebarTreeBuilder {
         var topNodes: [SessionNode] = []
 
         for (session, node) in zip(sessions, nodes) {
-            guard let parentID = session.forkedFrom,
+            let parentSessionID = NativeSidebarParity.host(.entityIdentity, session.id)
+            guard let parentID = NativeSidebarParity.fact(.sessionParent, session.forkedFrom),
                   let parent = nodesByID[parentID],
-                  !formsCycle(from: parentID, back: session.id, parentIDs: parentIDs) else {
+                  !formsCycle(from: parentID, back: parentSessionID, parentIDs: parentIDs) else {
                 topSessions.append(session)
                 topNodes.append(node)
                 continue
@@ -677,7 +769,11 @@ enum SidebarTreeBuilder {
         isReversed: Bool
     ) -> [NSObject] {
         let terminalsFirst = order == .type && isReversed
-        guard AppSettings.groupsSessionsByBranch else {
+        let usesBranchGrouping = NativeSidebarParity.option(
+            .branchGrouping,
+            AppSettings.groupsSessionsByBranch
+        )
+        guard usesBranchGrouping else {
             if terminalsFirst {
                 return terminalNodes.map { $0 as NSObject } + sessionNodes.map { $0 as NSObject }
             }
@@ -686,24 +782,27 @@ enum SidebarTreeBuilder {
 
         var itemCounts: [String: Int] = [:]
         for session in sessions {
-            if let branch = session.branch {
+            if let branch = NativeSidebarParity.fact(.sessionBranch, session.branch) {
                 itemCounts[branch, default: 0] += 1
             }
         }
         for terminal in terminals {
-            if let branch = terminal.branch {
+            if let branch = NativeSidebarParity.fact(.terminalBranch, terminal.branch) {
                 itemCounts[branch, default: 0] += 1
             }
         }
 
         let hasSharedBranch = itemCounts.values.contains { $0 > 1 }
-        let groupsLoneBranches = AppSettings.groupsLoneBranches && hasSharedBranch
+        let groupsLoneBranches = NativeSidebarParity.option(
+            .loneBranchHeadings,
+            AppSettings.groupsLoneBranches
+        ) && hasSharedBranch
 
         var children: [NSObject] = []
         var groupsByBranch: [String: BranchGroupNode] = [:]
 
         func append(_ session: AgentSession, node: SessionNode) {
-            guard let branch = session.branch,
+            guard let branch = NativeSidebarParity.fact(.sessionBranch, session.branch),
                   groupsLoneBranches || itemCounts[branch, default: 0] > 1 else {
                 children.append(node)
                 return
@@ -722,7 +821,7 @@ enum SidebarTreeBuilder {
         }
 
         func append(_ terminal: ProjectTerminal, node: TerminalNode) {
-            guard let branch = terminal.branch,
+            guard let branch = NativeSidebarParity.fact(.terminalBranch, terminal.branch),
                   groupsLoneBranches || itemCounts[branch, default: 0] > 1 else {
                 children.append(node)
                 return

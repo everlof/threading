@@ -1124,6 +1124,8 @@
 				"$(SRCROOT)/scripts/check_theme_boundaries.sh",
 				"$(SRCROOT)/scripts/check_architecture_boundaries.sh",
 				"$(SRCROOT)/scripts/check_logging_boundaries.py",
+				"$(SRCROOT)/scripts/check_navigator_fact_parity.py",
+				"$(SRCROOT)/scripts/tests/test_navigator_fact_parity.py",
 				"$(SRCROOT)/scripts/theme_boundary_lint.swift",
 				"$(SRCROOT)/docs/THEME_BOUNDARY.md",
 				"$(SRCROOT)/AGENTS.md",
