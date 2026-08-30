@@ -201,6 +201,68 @@ final class SimulatorPaneTests: XCTestCase {
         )
     }
 
+    func testRecoverableSimulatorScreenRoutesARealPointerTap() throws {
+        let size = NSSize(width: 200, height: 400)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
+
+        let screen = SimulatorScreenView(frame: NSRect(origin: .zero, size: size))
+        screen.translatesAutoresizingMaskIntoConstraints = true
+        screen.frame = NSRect(origin: .zero, size: size)
+        screen.image = NSImage(size: NSSize(width: 100, height: 200))
+        screen.interactionState = .recoverable
+        window.contentView = screen
+        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.orderFront(nil)
+
+        var taps: [CGPoint] = []
+        screen.onTap = { taps.append($0) }
+        let location = NSPoint(x: 50, y: 300)
+        let down = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: location,
+            modifierFlags: [],
+            timestamp: 1,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        ))
+        let up = try XCTUnwrap(NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: location,
+            modifierFlags: [],
+            timestamp: 1.05,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 2,
+            clickCount: 1,
+            pressure: 0
+        ))
+
+        screen.mouseDown(with: down)
+        screen.mouseUp(with: up)
+
+        let tap = try XCTUnwrap(taps.first)
+        XCTAssertEqual(tap.x, 0.25, accuracy: 0.001)
+        XCTAssertEqual(tap.y, 0.25, accuracy: 0.001)
+        XCTAssertEqual(taps.count, 1)
+
+        screen.interactionState = .ready(touch: false, keyboard: true)
+        XCTAssertFalse(screen.performPrimaryAction())
+        XCTAssertTrue(screen.acceptsFirstResponder)
+        screen.interactionState = .unavailable
+        XCTAssertFalse(screen.performPrimaryAction())
+        XCTAssertFalse(screen.acceptsFirstResponder)
+    }
+
     private func eventually(
         timeout: TimeInterval = 3,
         _ condition: @MainActor () -> Bool

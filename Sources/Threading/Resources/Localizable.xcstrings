@@ -10605,6 +10605,28 @@
         }
       }
     },
+    "Click to enable control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klicka för att aktivera styrning"
+          }
+        }
+      }
+    },
+    "Click to reconnect control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klicka för att återansluta styrning"
+          }
+        }
+      }
+    },
     "Client ID" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11936,6 +11958,17 @@
         }
       }
     },
+    "Connecting Simulator control…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ansluter simulatorstyrning…"
+          }
+        }
+      }
+    },
     "Connecting live preview…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12240,6 +12273,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Styra %@?"
+          }
+        }
+      }
+    },
+    "Control denied" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Styrning nekad"
+          }
+        }
+      }
+    },
+    "Control ready" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Styrning klar"
           }
         }
       }
@@ -15606,6 +15661,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktivera HTTPS…"
+          }
+        }
+      }
+    },
+    "Enable Simulator Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivera simulatorstyrning"
           }
         }
       }
@@ -28733,6 +28799,17 @@
         }
       }
     },
+    "Press to reconnect and control the Simulator." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryck för att återansluta och styra simulatorn."
+          }
+        }
+      }
+    },
     "Pressed %@." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30735,6 +30812,17 @@
         }
       }
     },
+    "Reconnect Simulator Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återanslut simulatorstyrning"
+          }
+        }
+      }
+    },
     "Record browser trace" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32590,6 +32678,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Försök igen med säker relä"
+          }
+        }
+      }
+    },
+    "Retry Simulator Control" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök med simulatorstyrning igen"
           }
         }
       }
@@ -36686,6 +36785,39 @@
         }
       }
     },
+    "Simulator control is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorstyrning är inte tillgänglig."
+          }
+        }
+      }
+    },
+    "Simulator control ready" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorstyrning klar"
+          }
+        }
+      }
+    },
+    "Simulator control was not allowed for %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorstyrning tilläts inte för %@."
+          }
+        }
+      }
+    },
     "Simulator screen" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38721,6 +38853,17 @@
         }
       }
     },
+    "Tap, drag, or type to control the Simulator." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryck, dra eller skriv för att styra simulatorn."
+          }
+        }
+      }
+    },
     "Tell me when I reach my own limits" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39179,6 +39322,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "QR-koden ger ägaråtkomst."
+          }
+        }
+      }
+    },
+    "The Simulator input was cancelled." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simulatorinmatningen avbröts."
           }
         }
       }

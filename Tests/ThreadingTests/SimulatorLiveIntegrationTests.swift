@@ -29,7 +29,7 @@ final class SimulatorLiveIntegrationTests: XCTestCase {
         }
     }
 
-    func testDirectFramebufferDecodeAndHomeButton() async throws {
+    func testDirectFramebufferDecodeAndHumanInputEnvelope() async throws {
         guard let rawDeviceID = ProcessInfo.processInfo.environment[
             "THREADING_SIMULATOR_INTEGRATION_UDID"
         ], !rawDeviceID.isEmpty else {
@@ -86,6 +86,8 @@ final class SimulatorLiveIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(evidence.width, 0)
         XCTAssertGreaterThan(evidence.height, 0)
         XCTAssertTrue(evidence.capabilities.supportsButtons)
+        XCTAssertTrue(evidence.capabilities.supportsTouch)
         try await session.sendInput(.button(.home))
+        try await session.sendInput(.tap(x: 0.5, y: 0.5))
     }
 }

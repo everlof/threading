@@ -126,6 +126,69 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
         XCTAssertEqual(openCount, 2)
     }
 
+    func testVisibleFallbackScreenClickReconnectsAndSendsTheIntendedTap() async throws {
+        let failedSession = SimulatorRecoveryStreamSessionFake()
+        let recoveredSession = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([
+            .success(failedSession),
+            .success(recoveredSession),
+        ])
+        let control = SimulatorRecoveryControlFake()
+        let controller = makeController(control: control, coordinator: coordinator)
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        failedSession.emit(.failed("The framebuffer connection was replaced."))
+        try await eventually {
+            controller.frameImageForTesting != nil
+                && controller.screenInteractionStateForTesting == .recoverable
+        }
+
+        XCTAssertTrue(
+            controller.performScreenPrimaryActionForTesting(),
+            "the visible fallback frame rejected the human interaction request"
+        )
+
+        try await eventually {
+            recoveredSession.inputs == [.tap(x: 0.5, y: 0.5)]
+        }
+        XCTAssertEqual(controller.liveBackendForTesting, .direct(codec: .h264))
+        XCTAssertEqual(
+            controller.screenInteractionStateForTesting,
+            .ready(touch: true, keyboard: true)
+        )
+        let openCount = await coordinator.openCount
+        XCTAssertEqual(openCount, 2)
+    }
+
+    func testExplicitControlButtonRetriesADeniedDecisionWithoutSpendingATap() async throws {
+        let session = SimulatorRecoveryStreamSessionFake()
+        let coordinator = SimulatorRecoveryStreamCoordinatorFake([.success(session)])
+        let control = SimulatorRecoveryControlFake()
+        let authorizer = SimulatorRecoveryInputAuthorizerFake(initialDecision: false)
+        let controller = makeController(
+            control: control,
+            coordinator: coordinator,
+            inputAuthorizer: authorizer
+        )
+        _ = controller.view
+        defer { controller.terminate() }
+
+        controller.setPresented(true)
+        try await eventually { controller.liveBackendForTesting == .direct(codec: .h264) }
+        XCTAssertTrue(controller.statusForTesting.contains("Control denied"))
+
+        XCTAssertTrue(controller.controlButtonForTesting.performPrimaryAction())
+
+        try await eventually { controller.statusForTesting.contains("Control ready") }
+        XCTAssertEqual(authorizer.resetCount, 1)
+        XCTAssertEqual(authorizer.authorizationCount, 1)
+        XCTAssertEqual(session.inputs, [], "enabling control must not invent a device tap")
+        XCTAssertTrue(controller.controlButtonForTesting.isSelected)
+    }
+
     func testAgentInstallQuiescesDirectTransportAndReconnectsAfterMutation() async throws {
         let firstSession = SimulatorRecoveryStreamSessionFake()
         let recoveredSession = SimulatorRecoveryStreamSessionFake()
@@ -232,7 +295,8 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
 
     private func makeController(
         control: SimulatorRecoveryControlFake,
-        coordinator: SimulatorRecoveryStreamCoordinatorFake
+        coordinator: SimulatorRecoveryStreamCoordinatorFake,
+        inputAuthorizer: any SimulatorInputAuthorizing = SimulatorRecoveryInputAuthorizerFake()
     ) -> SimulatorPaneViewController {
         SimulatorPaneViewController(
             preferredDeviceID: simulatorRecoveryFirstDevice.id,
@@ -242,7 +306,7 @@ final class SimulatorPaneRecoveryTests: XCTestCase {
                 releaseGraceNanoseconds: 1_000_000
             ),
             streamCoordinator: coordinator,
-            inputAuthorizer: SimulatorRecoveryInputAuthorizerFake()
+            inputAuthorizer: inputAuthorizer
         )
     }
 
@@ -346,11 +410,30 @@ private final class SimulatorRecoveryStreamSessionFake: SimulatorLiveStreamSessi
 
 @MainActor
 private final class SimulatorRecoveryInputAuthorizerFake: SimulatorInputAuthorizing {
+    private(set) var resetCount = 0
+    private(set) var authorizationCount = 0
+    private var storedDecision: Bool?
+
+    init(initialDecision: Bool? = nil) {
+        storedDecision = initialDecision
+    }
+
+    func decision(for deviceID: SimulatorDeviceID) -> Bool? {
+        storedDecision
+    }
+
+    func resetDecision(for deviceID: SimulatorDeviceID) {
+        resetCount += 1
+        storedDecision = nil
+    }
+
     func authorize(
         device: SimulatorDevice,
         in window: NSWindow?,
         completion: @escaping @MainActor (Bool) -> Void
     ) {
+        authorizationCount += 1
+        storedDecision = true
         completion(true)
     }
 }

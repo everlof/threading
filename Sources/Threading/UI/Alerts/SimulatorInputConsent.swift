@@ -2,11 +2,23 @@ import AppKit
 
 @MainActor
 protocol SimulatorInputAuthorizing: AnyObject {
+    /// The remembered decision for this exact device, or nil when the next request must ask.
+    func decision(for deviceID: SimulatorDeviceID) -> Bool?
+
+    /// Clears a previous decision only after an explicit, ordinary Control-button press.
+    /// Repeated gestures never call this, so a denial cannot turn into repeated prompting.
+    func resetDecision(for deviceID: SimulatorDeviceID)
+
     func authorize(
         device: SimulatorDevice,
         in window: NSWindow?,
         completion: @escaping @MainActor (Bool) -> Void
     )
+}
+
+extension SimulatorInputAuthorizing {
+    func decision(for deviceID: SimulatorDeviceID) -> Bool? { nil }
+    func resetDecision(for deviceID: SimulatorDeviceID) {}
 }
 
 /// One explicit decision for one exact adopted device during this app launch.
@@ -19,6 +31,17 @@ final class SimulatorInputConsentController: SimulatorInputAuthorizing {
 
     private var decisions: [SimulatorDeviceID: Bool] = [:]
     private var pending: [SimulatorDeviceID: [@MainActor (Bool) -> Void]] = [:]
+
+    func decision(for deviceID: SimulatorDeviceID) -> Bool? {
+        decisions[deviceID]
+    }
+
+    func resetDecision(for deviceID: SimulatorDeviceID) {
+        // An explicit retry cannot replace a sheet that is already being answered. This is also
+        // what keeps every pending input request converged on one decision.
+        guard pending[deviceID] == nil else { return }
+        decisions.removeValue(forKey: deviceID)
+    }
 
     func authorize(
         device: SimulatorDevice,
