@@ -293,7 +293,7 @@
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
-        "sizes": ["420×820 points", "312×760-point narrow sentinel"]
+        "sizes": ["420×820 points", "312×760-point narrow sentinel", "477×559-point multiline-command regression"]
       },
       "source": {
         "path": "Tests/ThreadingTests/SessionInfoRenderTests.swift",
@@ -653,8 +653,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Issue reporting",
-      "description": "Both app-owned reporting sheets: the inspected-element report with evidence and the general problem form, under adaptive and authored themes.",
-      "states": ["Inspector report", "Report a problem", "Evidence preview", "Submission fields"],
+      "description": "Both app-owned reporting sheets: the inspected-element report with evidence and the general problem form before and after a reviewed image is attached, under adaptive and authored themes.",
+      "states": ["Inspector report", "Report a problem", "Attached image", "Evidence preview", "Submission fields"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark"],
