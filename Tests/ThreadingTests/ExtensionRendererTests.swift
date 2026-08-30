@@ -3066,7 +3066,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
             factSnapshotPatchProvider: { _, _, _ in
                 .init(snapshot: current, affectedSourceSessionIDs: Set(sessionIDs))
             },
-            pipelineImageDecoder: decodeProbe.decode,
+            pipelineImageDecoder: { [decodeProbe] data in decodeProbe.decode(data) },
             onUnavailable: { XCTFail("rapid revision pipeline became unavailable") }
         )
         _ = host.view
