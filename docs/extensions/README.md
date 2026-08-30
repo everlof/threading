@@ -23,6 +23,9 @@ The first vertical slice exists:
 - [`HelloStatusExtension`](../../Packages/ThreadingExtensionKit/Examples/HelloStatusExtension) is the
   compiling provider reference; [`HelloStatusConsumerExtension`](../../Packages/ThreadingExtensionKit/Examples/HelloStatusConsumerExtension)
   is the matching service consumer.
+- [`GitLabStateExtension`](../../Packages/ThreadingExtensionKit/Examples/GitLabStateExtension) is
+  the compiling data-only fact-provider reference. It publishes merge-request state on canonical
+  repository-branch subjects without declaring UI or session access.
 - [`extension-manifest.schema.json`](schema/extension-manifest.schema.json) is the
   machine-readable manifest schema.
 - [`extension-settings.schema.json`](schema/extension-settings.schema.json) defines the
@@ -93,6 +96,14 @@ The first vertical slice exists:
   service, and version dependencies. Threading's generation-bound host token authenticates the
   caller, the broker routes only declared dependencies to a matching running registration, and
   Extensions settings reports provided services plus required/optional availability.
+- Fact providers declare the same bounded definitions in their manifest and registration, then
+  atomically replace complete repository-domain scopes. Threading joins those facts onto matching
+  projects and sessions from its own in-memory host facts; the provider never receives opaque
+  entity IDs. `GitLabStateExtension` demonstrates this with a stable maximum of 32 repositories,
+  128 branch facts per repository, four concurrent brokered requests, two API pages per refresh,
+  and five-minute polling. A complete response clears facts that disappeared, while transport,
+  authorization, rate-limit, malformed, unknown-state, and truncated answers preserve the prior
+  observation for host-owned staleness presentation.
 - Extensions declaring `storage.secrets` can store bounded opaque values through the
   generation-bound host broker. Threading scopes them by authenticated extension identity and
   stores them in Keychain; values never enter package files, KV JSON, settings, cache directories,
@@ -692,6 +703,7 @@ Packages/ThreadingExtensionKit/
 ├── Plugins/ThreadingExtensionPolicyPlugin/
 ├── Examples/HelloStatusExtension/
 ├── Examples/HelloStatusConsumerExtension/
+├── Examples/GitLabStateExtension/
 ├── Examples/SimulatorRelayExtension/
 └── Tests/ThreadingExtensionKitTests/
 
@@ -731,6 +743,7 @@ swift build --package-path Packages/ThreadingExtensionKit
 swift test --package-path Packages/ThreadingExtensionKit
 swift run --package-path Packages/ThreadingExtensionKit HelloStatusExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit HelloStatusConsumerExtensionExample --threading-register
+swift run --package-path Packages/ThreadingExtensionKit GitLabStateExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit SessionInfoExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit ThreadingComponentCatalogGenerator \
   docs/extensions/generated
@@ -740,6 +753,11 @@ The example target uses the same policy plugin generated extensions must use.
 Run the catalogue generator with `--check` in verification to detect stale committed docs.
 `--threading-register` is a finite diagnostic handshake. Threading uses `--threading-serve` to keep
 the process alive and exchange action messages.
+
+The GitLab example has no visible contribution. Its shipping evidence is the finite registration,
+safe-extension policy check, deterministic provider tests, and the host integration that resolves
+one published repository-branch fact onto matching project and session subjects; there is no
+appearance or layout to approve in this rollout.
 
 ## Try the real host path
 

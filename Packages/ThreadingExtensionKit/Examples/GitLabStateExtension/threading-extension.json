@@ -1,0 +1,42 @@
+{
+  "formatVersion": 1,
+  "identifier": "codes.threading.gitlab-state",
+  "name": "GitLab Merge Request State",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/gitlab-state.wasm",
+  "capabilities": [
+    "facts.provide",
+    "host.projects.read",
+    "host.repositories.read",
+    "host.events",
+    "network.brokered"
+  ],
+  "factDefinitions": [
+    {
+      "key": {
+        "id": "gitlab.mr.state",
+        "version": 1
+      },
+      "displayName": "GitLab merge request state",
+      "valueType": "string",
+      "subjectKinds": [
+        "repositoryBranch"
+      ],
+      "usages": [
+        "filterable",
+        "sortable",
+        "groupable",
+        "presentable"
+      ]
+    }
+  ],
+  "networkGrants": [
+    {
+      "host": "gitlab.com",
+      "methods": [
+        "GET"
+      ]
+    }
+  ]
+}

@@ -49,6 +49,7 @@ swift build
 swift test
 swift run HelloStatusExtensionExample --threading-register
 swift run HelloStatusConsumerExtensionExample --threading-register
+swift run GitLabStateExtensionExample --threading-register
 ```
 
 Threading links this package, renders `ExtensionNode` through its own AppKit design system, and
@@ -101,6 +102,14 @@ Fact providers use `facts.provide` and repeat their manifest's `factDefinitions`
 registration. `ExtensionHostClient.publishFacts(_:replacing:)` atomically replaces values for
 explicit repository or repository-branch subjects. The bearer supplies provider identity and
 process generation; no opaque project or session identifier is accepted by this capability.
+`Examples/GitLabStateExtension` is the data-only reference: it discovers public GitLab merge
+request state through an exact `gitlab.com` brokered-network grant and publishes
+`gitlab.mr.state@1` on canonical repository-branch subjects. It declares no navigator, component,
+session, settings, or storage capability. Its stable 32-repository admission set, four-request
+concurrency ceiling, two-page repository limit, and 128-fact repository limit bound both remote
+work and retained generation state. Authoritative refreshes replace complete repository scopes;
+transient or truncated refreshes preserve the last observation so the host, not the provider,
+decides when it is stale.
 
 Component customization is connected end to end. A process declaring `ui.components` receives a
 short-lived host URL and bearer token, then uses `ExtensionHostClient` to atomically replace its

@@ -42,6 +42,10 @@ let package = Package(
             targets: ["LottieViewerExtensionExample"]
         ),
         .executable(
+            name: "GitLabStateExtensionExample",
+            targets: ["GitLabStateExtensionExample"]
+        ),
+        .executable(
             name: "SimulatorRelayExtensionExample",
             targets: ["SimulatorRelayExtensionExample"]
         ),
@@ -129,6 +133,22 @@ let package = Package(
             exclude: ["threading-extension.json"],
             plugins: ["ThreadingExtensionPolicyPlugin"]
         ),
+        .target(
+            name: "GitLabStateExtensionSupport",
+            dependencies: ["ThreadingExtensionKit"],
+            path: "Examples/GitLabStateExtension/Support",
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
+        .executableTarget(
+            name: "GitLabStateExtensionExample",
+            dependencies: [
+                "ThreadingExtensionKit",
+                "GitLabStateExtensionSupport"
+            ],
+            path: "Examples/GitLabStateExtension",
+            exclude: ["Support", "threading-extension.json"],
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
         .executableTarget(
             name: "SimulatorRelayExtensionExample",
             dependencies: ["ThreadingExtensionKit"],
@@ -155,7 +175,8 @@ let package = Package(
             name: "ThreadingExtensionKitTests",
             dependencies: [
                 "ThreadingExtensionKit",
-                "ThreadingExtensionPolicy"
+                "ThreadingExtensionPolicy",
+                "GitLabStateExtensionSupport"
             ]
         )
     ]

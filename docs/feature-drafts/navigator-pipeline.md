@@ -216,7 +216,7 @@ So facts are keyed by **domain key**, and the host performs the join:
 | Subject | Inherited by |
 |---|---|
 | `.session(id)` | that session |
-| `.project(id)` | that project and, by default, its sessions |
+| `.project(id)` | that project only; a later transform may opt into project-to-session inheritance |
 | `.repositoryBranch(repository:branch:)` | every session, checkout and project on that branch |
 | `.repository(identity)` | everything in that repository |
 
@@ -573,8 +573,13 @@ does. An install must never reorder somebody's sidebar on its own.
    structural or interaction authority.
 2. **The fact registry — implemented 2026-08-30.** Host facts only, plus the fail-closed parity
    lint. Nothing outside the host consumes it yet.
-3. **Extension fact providers** and the domain-key join. `GitLabStateExtension` becomes buildable
-   and is the test.
+3. **Extension fact providers and the domain-key join — implemented 2026-08-30.** Providers
+   publish generation-bound facts only on canonical repository subjects. The host synchronously
+   resolves exact, repository-branch, then repository facts from its in-memory catalogue without
+   exposing project or session identifiers. `GitLabStateExtension` is the buildable public test:
+   no UI, no session authority, exact anonymous `gitlab.com` network access, a stable maximum of
+   32 repositories and 4,096 retained facts, bounded paging/concurrency/retry, atomic removal, and
+   preservation of the last observation across non-authoritative refresh failures.
 4. **Options**, rendered in the navigator menu and persisted.
 5. **Transform and templates** — `ui.workspace-navigation@2`, with the `consumes` declarations,
    the degradation tiers and the host-owned search control. v1 documents keep working; a
