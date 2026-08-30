@@ -2926,10 +2926,18 @@ tab pauses live capture; closing it releases Threading's lease. A device that wa
 is left running. If Threading itself started the device, it may stop it when the final lease is
 deliberately released.
 
+You can use the screen directly too: click for a tap, drag for a swipe, then type while the screen
+has keyboard focus. The status line says whether control is ready, needs permission, or needs to
+reconnect. A click on a visible fallback frame requests that reconnection and preserves the
+intended tap, but Threading does not send it until the direct device connection and permission are
+both in place. The hand control beside Refresh enables control without spending a tap. If you
+previously chose not to allow control, press that hand explicitly to ask again; repeated screen
+clicks do not keep presenting the permission sheet.
+
 The device chip switches between available iPhones without creating another kind of window. A
 helper or Xcode compatibility failure stays in the tab, with a reason and retry; Threading never
 silently responds by launching Apple Simulator. The public screenshot fallback is view-only, so
-control waits until the direct connection has recovered.
+actual device input waits until the direct connection has recovered.
 
 **More tabs than fit scroll rather than shrink**, and the strip only answers what is meant for
 it. Swipe sideways over the tabs to move along them; a mouse wheel does the same, since sideways

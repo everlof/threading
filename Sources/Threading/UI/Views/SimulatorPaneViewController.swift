@@ -33,6 +33,23 @@ final class SimulatorPaneViewController: NSViewController {
         static let fallbackFrameInterval: UInt64 = 1_000_000_000
     }
 
+    private enum ControlActivity: Equatable {
+        case idle
+        case connecting
+        case failed(String)
+    }
+
+    private enum ControlAuthorizationError: LocalizedError {
+        case denied(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .denied(let deviceName):
+                L10n.format("Simulator control was not allowed for %@.", deviceName)
+            }
+        }
+    }
+
     private let control: any SimulatorControlling
     private let leaseManager: any SimulatorLeaseManaging
     private let streamCoordinator: any SimulatorLiveStreamCoordinating
@@ -54,6 +71,8 @@ final class SimulatorPaneViewController: NSViewController {
     private var liveCapabilities: SimulatorBridgeCapabilities?
     private var lastStreamFailure: String?
     private var requiresLeaseRefresh = false
+    private var controlActivity: ControlActivity = .idle
+    private var controlAuthorizationDecisions: [SimulatorDeviceID: Bool] = [:]
     private var agentCommandTasks: [UUID: Task<Void, Never>] = [:]
     private var isPresented = false
 
@@ -95,9 +114,22 @@ final class SimulatorPaneViewController: NSViewController {
         return button
     }()
 
+    private lazy var controlButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "hand.tap",
+            accessibility: L10n.string("Enable Simulator Control"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Enable Simulator Control")
+        button.onPress = { [weak self] in self?.requestControl() }
+        button.setAccessibilityIdentifier("simulator.control")
+        return button
+    }()
+
     private lazy var controlRow = ControlRowView(
         leading: [deviceChip],
-        trailing: [retryButton]
+        trailing: [controlButton, retryButton]
     )
 
     private lazy var screenView: SimulatorScreenView = {
@@ -251,6 +283,7 @@ final class SimulatorPaneViewController: NSViewController {
 
     func selectDevice(_ id: SimulatorDeviceID) {
         guard id != selectedDeviceID else { return }
+        controlActivity = .idle
         preferredDeviceID = id
         prepare(id, releasingCurrentLease: true)
     }
@@ -368,6 +401,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func retry() {
+        controlActivity = .idle
         if let lease {
             if requiresLeaseRefresh {
                 prepare(
@@ -477,6 +511,12 @@ final class SimulatorPaneViewController: NSViewController {
         guard isPresented, let deviceID = lease?.device.id else { return }
         if let streamSession {
             streamSession.setVisible(true)
+            if let capabilities = liveCapabilities {
+                screenView.interactionState = .ready(
+                    touch: capabilities.supportsTouch,
+                    keyboard: capabilities.supportsKeyboard
+                )
+            }
             return
         }
         guard streamTask == nil, fallbackTask == nil else { return }
@@ -513,8 +553,10 @@ final class SimulatorPaneViewController: NSViewController {
                     case .ready(let backend, let capabilities, _, _):
                         self.liveBackend = backend
                         self.liveCapabilities = capabilities
-                        self.screenView.allowsInteraction = capabilities.supportsTouch
-                            || capabilities.supportsKeyboard
+                        self.screenView.interactionState = .ready(
+                            touch: capabilities.supportsTouch,
+                            keyboard: capabilities.supportsKeyboard
+                        )
                         if let device = self.lease?.device {
                             self.presentationState = .ready(device)
                         }
@@ -559,7 +601,7 @@ final class SimulatorPaneViewController: NSViewController {
         SimulatorStreamDiagnostics.shared.recordedFallback()
         liveCapabilities = nil
         lastStreamFailure = reason
-        screenView.allowsInteraction = false
+        screenView.interactionState = .recoverable
         if let device = lease?.device { presentationState = .ready(device) }
 
         let control = control
@@ -589,6 +631,7 @@ final class SimulatorPaneViewController: NSViewController {
                 } catch {
                     guard let self, !Task.isCancelled else { return }
                     self.requiresLeaseRefresh = true
+                    self.screenView.interactionState = .unavailable
                     self.presentationState = .failed(error.localizedDescription)
                     return
                 }
@@ -597,6 +640,7 @@ final class SimulatorPaneViewController: NSViewController {
     }
 
     private func stopFrameLoop() {
+        screenView.interactionState = .unavailable
         streamSession?.setVisible(false)
         fallbackTask?.cancel()
         fallbackTask = nil
@@ -620,16 +664,56 @@ final class SimulatorPaneViewController: NSViewController {
         liveBackend = nil
         liveCapabilities = nil
         lastStreamFailure = nil
-        screenView.allowsInteraction = false
+        screenView.interactionState = .unavailable
     }
 
     private func submitInput(_ input: SimulatorBridgeInput) {
+        if liveCapabilities == nil || effectiveControlDecision != true {
+            controlActivity = .connecting
+            renderState()
+        }
         sendInput(input) { [weak self] result in
-            if case .failure(let message) = result {
-                self?.statusLabel.stringValue = message
-                self?.statusLabel.textColor = Design.Status.negative
-                self?.statusLabel.toolTip = message
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.controlActivity = .idle
+            case .failure(let message):
+                if self.effectiveControlDecision == false {
+                    self.controlActivity = .idle
+                } else {
+                    self.controlActivity = .failed(message)
+                }
             }
+            self.renderState()
+        }
+    }
+
+    /// The ordinary, retryable route for a person who wants control without spending a tap.
+    /// A prior denial is cleared only here; tapping the screen after denial remains fail-closed
+    /// and does not ask again.
+    private func requestControl() {
+        guard let device = lease?.device else { return }
+        let retriesDeniedDecision = effectiveControlDecision == false
+        controlActivity = .connecting
+        renderState()
+        runAgentCommand { [weak self] in
+            guard let self else { return }
+            do {
+                _ = try await self.authorizedInputSession(
+                    for: device,
+                    resettingDeniedDecision: retriesDeniedDecision
+                )
+                self.controlActivity = .idle
+            } catch is ControlAuthorizationError {
+                self.controlActivity = .idle
+            } catch is CancellationError {
+                self.controlActivity = .failed(L10n.string(
+                    "The Simulator input was cancelled."
+                ))
+            } catch {
+                self.controlActivity = .failed(error.localizedDescription)
+            }
+            self.renderState()
         }
     }
 
@@ -651,18 +735,7 @@ final class SimulatorPaneViewController: NSViewController {
         runAgentCommand { [weak self] in
             guard let self else { return }
             do {
-                self.reconnectTransportForInputIfNeeded(on: device.id)
-                let session = try await self.awaitInputSession(for: device.id)
-                let approved = await self.inputAuthorization(for: device)
-                guard approved else {
-                    completion(.failure("Simulator control was not allowed for \(device.name)."))
-                    return
-                }
-                guard self.lease?.device.id == device.id,
-                      self.streamSession === session else {
-                    completion(.failure("The selected Simulator changed before input was sent."))
-                    return
-                }
+                let session = try await self.authorizedInputSession(for: device)
                 try await session.sendInput(input)
                 try Task.checkCancellation()
                 guard self.lease?.device.id == device.id,
@@ -677,6 +750,31 @@ final class SimulatorPaneViewController: NSViewController {
                 completion(.failure(error.localizedDescription))
             }
         }
+    }
+
+    private func authorizedInputSession(
+        for device: SimulatorDevice,
+        resettingDeniedDecision: Bool = false
+    ) async throws -> any SimulatorLiveStreamSession {
+        if resettingDeniedDecision {
+            inputAuthorizer.resetDecision(for: device.id)
+            controlAuthorizationDecisions.removeValue(forKey: device.id)
+        }
+        reconnectTransportForInputIfNeeded(on: device.id)
+        let session = try await awaitInputSession(for: device.id)
+        let approved = await inputAuthorization(for: device)
+        controlAuthorizationDecisions[device.id] = approved
+        renderState()
+        guard approved else {
+            throw ControlAuthorizationError.denied(device.name)
+        }
+        guard lease?.device.id == device.id,
+              streamSession === session else {
+            throw SimulatorLiveStreamError.helperUnavailable(
+                "The selected Simulator changed before input was sent."
+            )
+        }
+        return session
     }
 
     /// A device install or launch can invalidate an otherwise healthy private framebuffer
@@ -721,6 +819,72 @@ final class SimulatorPaneViewController: NSViewController {
         }
     }
 
+    private var effectiveControlDecision: Bool? {
+        guard let deviceID = lease?.device.id else { return nil }
+        return controlAuthorizationDecisions[deviceID]
+            ?? inputAuthorizer.decision(for: deviceID)
+    }
+
+    private func controlStatus() -> String? {
+        if effectiveControlDecision == false {
+            return L10n.string("Control denied")
+        }
+        switch controlActivity {
+        case .connecting:
+            return L10n.string("Connecting Simulator control…")
+        case .failed(let message):
+            return message
+        case .idle:
+            break
+        }
+        switch liveBackend {
+        case .direct:
+            guard let capabilities = liveCapabilities,
+                  capabilities.supportsTouch || capabilities.supportsKeyboard else {
+                return L10n.string("View only")
+            }
+            return effectiveControlDecision == true
+                ? L10n.string("Control ready")
+                : L10n.string("Click to enable control")
+        case .screenshotFallback:
+            return L10n.string("Click to reconnect control")
+        case nil:
+            return nil
+        }
+    }
+
+    private func configureControlButton(for device: SimulatorDevice?) {
+        let decision = effectiveControlDecision
+        let hasDirectHumanControl = liveCapabilities.map {
+            $0.supportsTouch || $0.supportsKeyboard
+        } ?? false
+        let title: String
+        switch controlActivity {
+        case .connecting:
+            title = L10n.string("Connecting Simulator control…")
+        case .failed:
+            title = L10n.string("Enable Simulator Control")
+        case .idle:
+            if decision == false {
+                title = L10n.string("Retry Simulator Control")
+            } else if decision == true, hasDirectHumanControl {
+                title = L10n.string("Simulator control ready")
+            } else if case .screenshotFallback = liveBackend {
+                title = L10n.string("Reconnect Simulator Control")
+            } else {
+                title = L10n.string("Enable Simulator Control")
+            }
+        }
+        controlButton.setSymbol("hand.tap", accessibility: title)
+        controlButton.toolTip = title
+        controlButton.isSelected = decision == true && hasDirectHumanControl
+        controlButton.isEnabled = device != nil
+            && isPresented
+            && !requiresLeaseRefresh
+            && controlActivity != .connecting
+            && (liveCapabilities == nil || hasDirectHumanControl)
+    }
+
     private func renderState() {
         guard isViewLoaded else { return }
         switch presentationState {
@@ -748,12 +912,9 @@ final class SimulatorPaneViewController: NSViewController {
             case .screenshotFallback: backend = L10n.string("Preview fallback")
             case nil: backend = L10n.string("Connecting live preview…")
             }
-            statusLabel.stringValue = L10n.format(
-                "%@ · %@ · %@",
-                device.name,
-                device.runtimeName,
-                backend
-            )
+            var status = [device.name, device.runtimeName, backend]
+            if let control = controlStatus() { status.append(control) }
+            statusLabel.stringValue = status.joined(separator: " · ")
             if case .screenshotFallback = liveBackend {
                 statusLabel.textColor = Design.Status.warning
             } else {
@@ -769,7 +930,14 @@ final class SimulatorPaneViewController: NSViewController {
         // Keeping the chip enabled also lets the user inspect that one-item choice instead of
         // washing the device name out as though Simulator itself were unavailable.
         deviceChip.isEnabled = !devices.isEmpty
-        statusLabel.toolTip = lastStreamFailure ?? statusLabel.stringValue
+        configureControlButton(for: lease?.device)
+        if let lastStreamFailure,
+           !lastStreamFailure.isEmpty,
+           lastStreamFailure != statusLabel.stringValue {
+            statusLabel.toolTip = statusLabel.stringValue + "\n" + lastStreamFailure
+        } else {
+            statusLabel.toolTip = statusLabel.stringValue
+        }
     }
 
     private func deviceEntries() -> [ThemedMenuEntry] {
@@ -786,5 +954,11 @@ final class SimulatorPaneViewController: NSViewController {
     var frameImageForTesting: NSImage? { screenView.image }
     var liveBackendForTesting: SimulatorLiveBackend? { liveBackend }
     var isPresentedForTesting: Bool { isPresented }
+    var screenInteractionStateForTesting: SimulatorScreenView.InteractionState {
+        screenView.interactionState
+    }
+    var statusForTesting: String { statusLabel.stringValue }
+    var controlButtonForTesting: ThemedIconButton { controlButton }
+    func performScreenPrimaryActionForTesting() -> Bool { screenView.performPrimaryAction() }
     func retryForTesting() { retry() }
 }
