@@ -1842,7 +1842,8 @@ private struct TerminalLineComposer: View {
     /// whenever the pasteboard could have changed — rather than on every body evaluation, which
     /// a live terminal performs constantly.
     @State private var clipboardOffersFiles = false
-    @FocusState private var draftIsFocused: Bool
+    /// The editor is UIKit-owned, so first-responder truth comes back through a plain binding.
+    @State private var draftIsFocused = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1868,71 +1869,29 @@ private struct TerminalLineComposer: View {
                 )
             }
 
-            HStack(alignment: .center, spacing: MobileDesign.Spacing.small) {
-                Menu {
-                    // Text pastes into the draft itself, at the insertion point, the way the
-                    // system has always done it. This entry is for what that cannot carry: a
-                    // picture has no text to insert, and a copied one is in neither picker.
-                    if clipboardOffersFiles {
-                        Button(action: stageClipboardFiles) {
-                            Label(
-                                MobileL10n.string("From Clipboard"),
-                                systemImage: "doc.on.clipboard"
-                            )
-                        }
-                    }
-                    // A PhotosPicker inside a Menu is torn down with the menu before its sheet
-                    // can present; the item requests presentation and .photosPicker below shows it.
-                    Button {
-                        isPickingPhotos = true
-                    } label: {
-                        Label(MobileL10n.string("Photo Library"), systemImage: "photo.on.rectangle")
-                    }
-                    Button {
-                        isImportingFiles = true
-                    } label: {
-                        Label("Files", systemImage: "folder")
-                    }
-                } label: {
-                    Image(systemName: "paperclip")
-                        .font(.headline)
-                        .frame(
-                            width: MobileDesign.Size.minimumTapTarget,
-                            height: MobileDesign.Size.minimumTapTarget
-                        )
-                }
-                .disabled(
-                    connection.isPromptSubmissionPending
-                        || attachmentPicksInFlight > 0
-                        || attachmentTray?.canAcceptMore != true
+            ZStack(alignment: .topLeading) {
+                TerminalLinePromptEditor(
+                    text: $draft,
+                    isFocused: $draftIsFocused,
+                    theme: theme,
+                    onSubmit: submit
                 )
-                .accessibilityLabel(MobileL10n.string("Attachments"))
+                .mobileUIEvidenceKeyboardFocus($draftIsFocused)
 
-                TextField("Compose on this device…", text: $draft, axis: .vertical)
-                    .focused($draftIsFocused)
-                    .mobileUIEvidenceKeyboardFocus($draftIsFocused)
-                    .lineLimit(1...5)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.send)
-                    .onSubmit(submit)
-
-                Button(action: submit) {
-                    Image(systemName: "arrow.up")
-                        .font(.headline)
-                        .frame(
-                            width: MobileDesign.Size.minimumTapTarget,
-                            height: MobileDesign.Size.minimumTapTarget
-                        )
-                        .background(
-                            canSubmit ? theme.accent : theme.controlResting,
-                            in: RoundedRectangle(cornerRadius: theme.controlRadius)
-                        )
-                        .foregroundStyle(canSubmit ? theme.ground : theme.secondaryLabel)
+                if draft.isEmpty {
+                    Text("Compose on this device…")
+                        .font(.body)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .padding(.top, TerminalLinePromptMetrics.textInsets.top)
+                        .padding(.leading, MobileDesign.Size.minimumTapTarget)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-                .disabled(!canSubmit)
-                .accessibilityLabel(MobileL10n.string("Send terminal line"))
             }
+            // Both controls retain their full 44-point targets. They occupy only the first line,
+            // while the editor's text-container exclusions let every later line run beneath.
+            .overlay(alignment: .topLeading) { attachmentMenu }
+            .overlay(alignment: .topTrailing) { sendButton }
             .padding(.horizontal, MobileDesign.Spacing.inset)
             .padding(.vertical, MobileDesign.Spacing.small)
         }
@@ -1994,6 +1953,65 @@ private struct TerminalLineComposer: View {
             && (!draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || !quotes.isEmpty
                 || attachmentTray?.readyUploadIDs.isEmpty == false)
+    }
+
+    private var attachmentMenu: some View {
+        Menu {
+            // Text pastes into the draft itself, at the insertion point, the way the system has
+            // always done it. This entry is for what that cannot carry: a picture has no text to
+            // insert, and a copied one is in neither picker.
+            if clipboardOffersFiles {
+                Button(action: stageClipboardFiles) {
+                    Label(
+                        MobileL10n.string("From Clipboard"),
+                        systemImage: "doc.on.clipboard"
+                    )
+                }
+            }
+            // A PhotosPicker inside a Menu is torn down with the menu before its sheet can
+            // present; the item requests presentation and .photosPicker below shows it.
+            Button {
+                isPickingPhotos = true
+            } label: {
+                Label(MobileL10n.string("Photo Library"), systemImage: "photo.on.rectangle")
+            }
+            Button {
+                isImportingFiles = true
+            } label: {
+                Label("Files", systemImage: "folder")
+            }
+        } label: {
+            Image(systemName: "paperclip")
+                .font(.headline)
+                .frame(
+                    width: MobileDesign.Size.minimumTapTarget,
+                    height: MobileDesign.Size.minimumTapTarget
+                )
+        }
+        .disabled(
+            connection.isPromptSubmissionPending
+                || attachmentPicksInFlight > 0
+                || attachmentTray?.canAcceptMore != true
+        )
+        .accessibilityLabel(MobileL10n.string("Attachments"))
+    }
+
+    private var sendButton: some View {
+        Button(action: submit) {
+            Image(systemName: "arrow.up")
+                .font(.headline)
+                .frame(
+                    width: MobileDesign.Size.minimumTapTarget,
+                    height: MobileDesign.Size.minimumTapTarget
+                )
+                .background(
+                    canSubmit ? theme.accent : theme.controlResting,
+                    in: RoundedRectangle(cornerRadius: theme.controlRadius)
+                )
+                .foregroundStyle(canSubmit ? theme.ground : theme.secondaryLabel)
+        }
+        .disabled(!canSubmit)
+        .accessibilityLabel(MobileL10n.string("Send terminal line"))
     }
 
     private func statusLabel(
@@ -2116,6 +2134,13 @@ private struct TerminalLineComposer: View {
     }
 
     private func restoreDraft() {
+#if DEBUG
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+            == "terminal-compose" {
+            draft = "Review the attachment spacing, then let every wrapped line use the full composer width."
+            return
+        }
+#endif
         guard draft.isEmpty, let hostID = model.activeHostID else { return }
         draft = continuity.draft(
             surface: .terminal,
@@ -2168,6 +2193,144 @@ private struct TerminalLineComposer: View {
         case .accepted:
             break
         }
+    }
+}
+
+/// The atomic terminal composer uses one native text container so its first line can flow around
+/// overlaid actions and its later lines can reclaim their width. A SwiftUI multiline `TextField`
+/// is a single rectangular layout item and therefore cannot express this first-line-only shape.
+struct TerminalLinePromptEditor: UIViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    let theme: RemoteThemePalette
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, isFocused: $isFocused, onSubmit: onSubmit)
+    }
+
+    func makeUIView(context: Context) -> IntrinsicTextView {
+        let view = IntrinsicTextView()
+        view.delegate = context.coordinator
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        view.font = TerminalLinePromptMetrics.font
+        view.textContainerInset = TerminalLinePromptMetrics.textInsets
+        view.textContainer.lineFragmentPadding = 0
+        view.isScrollEnabled = false
+        view.adjustsFontForContentSizeCategory = true
+        view.autocapitalizationType = .none
+        view.autocorrectionType = .no
+        view.returnKeyType = .send
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.accessibilityLabel = MobileL10n.string("Compose on this device…")
+        view.minimumIntrinsicHeight = MobileDesign.Size.minimumTapTarget
+        view.maximumIntrinsicHeight = TerminalLinePromptMetrics.maximumHeight
+        view.firstLineLeadingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineTrailingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineAccessoryHeight = MobileDesign.Size.minimumTapTarget
+        return view
+    }
+
+    func updateUIView(_ view: IntrinsicTextView, context: Context) {
+        context.coordinator.onSubmit = onSubmit
+        if view.text != text {
+            view.text = text
+            view.invalidateIntrinsicContentSize()
+        }
+        view.font = TerminalLinePromptMetrics.font
+        view.textContainerInset = TerminalLinePromptMetrics.textInsets
+        view.textColor = theme.uiLabel
+        view.tintColor = theme.uiAccent
+        view.minimumIntrinsicHeight = MobileDesign.Size.minimumTapTarget
+        view.maximumIntrinsicHeight = TerminalLinePromptMetrics.maximumHeight
+        view.firstLineLeadingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineTrailingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineAccessoryHeight = MobileDesign.Size.minimumTapTarget
+
+        if isFocused, !view.isFirstResponder {
+            Task { @MainActor [weak view] in
+                guard let view, isFocused, view.window != nil else { return }
+                view.becomeFirstResponder()
+            }
+        } else if !isFocused, view.isFirstResponder {
+            view.resignFirstResponder()
+        }
+    }
+
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        uiView: IntrinsicTextView,
+        context: Context
+    ) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        uiView.updateFirstLineAccessoryExclusions(for: width)
+        let measured = uiView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        )
+        return CGSize(
+            width: width,
+            height: min(
+                max(measured.height, MobileDesign.Size.minimumTapTarget),
+                uiView.maximumIntrinsicHeight
+            )
+        )
+    }
+
+    @MainActor
+    final class Coordinator: NSObject, UITextViewDelegate {
+        private var text: Binding<String>
+        private var isFocused: Binding<Bool>
+        var onSubmit: () -> Void
+
+        init(
+            text: Binding<String>,
+            isFocused: Binding<Bool>,
+            onSubmit: @escaping () -> Void
+        ) {
+            self.text = text
+            self.isFocused = isFocused
+            self.onSubmit = onSubmit
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            text.wrappedValue = textView.text
+            textView.invalidateIntrinsicContentSize()
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            isFocused.wrappedValue = true
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            isFocused.wrappedValue = false
+        }
+
+        func textView(
+            _ textView: UITextView,
+            shouldChangeTextIn range: NSRange,
+            replacementText replacement: String
+        ) -> Bool {
+            guard replacement == "\n", textView.markedTextRange == nil else { return true }
+            onSubmit()
+            return false
+        }
+    }
+}
+
+private enum TerminalLinePromptMetrics {
+    static let maximumLines: CGFloat = 5
+    static var font: UIFont { .preferredFont(forTextStyle: .body) }
+    static var textInsets: UIEdgeInsets {
+        let vertical = max(
+            0,
+            (MobileDesign.Size.minimumTapTarget - font.lineHeight) / 2
+        )
+        return UIEdgeInsets(top: vertical, left: 0, bottom: vertical, right: 0)
+    }
+    static var maximumHeight: CGFloat {
+        let insets = textInsets
+        return ceil(font.lineHeight * maximumLines + insets.top + insets.bottom)
     }
 }
 

@@ -956,6 +956,26 @@ extension View {
         self
 #endif
     }
+
+    /// A UIKit editor hosted by SwiftUI owns first responder directly, so its evidence seam is a
+    /// plain binding rather than a `FocusState` with no SwiftUI focus target to register against.
+    @ViewBuilder
+    func mobileUIEvidenceKeyboardFocus(_ focus: Binding<Bool>) -> some View {
+#if DEBUG
+        onReceive(NotificationCenter.default.publisher(
+            for: .mobileUIEvidenceFocusRequested
+        )) { _ in
+            focus.wrappedValue = true
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: .mobileUIEvidenceDismissRequested
+        )) { _ in
+            focus.wrappedValue = false
+        }
+#else
+        self
+#endif
+    }
 }
 
 @MainActor
