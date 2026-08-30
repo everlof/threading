@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
+import ImageIO
 import ThreadingRemoteKit
+import UniformTypeIdentifiers
 
 enum DeveloperIssueReportKind: String, Sendable {
     case problem
@@ -25,17 +27,22 @@ struct DeveloperIssueReportDraft: Equatable, Sendable {
     let title: String
     let details: String
     let local: Local?
+    let attachmentURLs: [URL]
 
     init(
         kind: DeveloperIssueReportKind,
         title: String,
         details: String,
-        local: Local? = nil
+        local: Local? = nil,
+        attachmentURLs: [URL] = []
     ) {
         self.kind = kind
         self.title = title
         self.details = details
         self.local = local
+        self.attachmentURLs = Array(attachmentURLs.prefix(
+            PublicIssueReportPolicy.maximumImagePreviewCount
+        ))
     }
 
     /// The record as a reader opens it: a heading, what kind of report it is and when, then the
@@ -49,6 +56,11 @@ struct DeveloperIssueReportDraft: Equatable, Sendable {
         if !heading.isEmpty { parts.append("# \(heading)") }
         parts.append("\(kind.rawValue) · \(createdAt)")
         if !body.isEmpty { parts.append(body) }
+        if !attachmentURLs.isEmpty {
+            parts.append(
+                "Attachments:\n" + attachmentURLs.map { "- \($0.path)" }.joined(separator: "\n")
+            )
+        }
         return parts.joined(separator: "\n\n") + "\n"
     }
 
@@ -60,10 +72,19 @@ struct DeveloperIssueReportDraft: Equatable, Sendable {
         if !body.isEmpty { parts.append(body) }
         return parts.joined(separator: "\n\n")
     }
+
+    /// The reviewed report plus machine-local paths an agent on this Mac can open.
+    /// The public `description` above deliberately never contains these paths.
+    var localDescription: String {
+        guard !attachmentURLs.isEmpty else { return description }
+        return description + "\n\nAttachments:\n"
+            + attachmentURLs.map { "- \($0.path)" }.joined(separator: "\n")
+    }
 }
 
 enum DeveloperIssueReportComposer {
     static let maximumTitleCharacters = 80
+    static let maximumImageAttachments = PublicIssueReportPolicy.maximumImagePreviewCount
 
     static func title(fromNote note: String, fallback: String) -> String {
         let firstLine = note
@@ -103,8 +124,9 @@ enum DeveloperIssueReportSubmission: Equatable, Sendable {
 
 /// The Mac's single route into the private support inbox.
 ///
-/// UI contributes reviewed prose and, for an inspector report, one small screenshot preview.
-/// Diagnostics come from the content-free journal and are built at the moment of submission.
+/// UI contributes reviewed prose and bounded image evidence: an inspector screenshot or images
+/// explicitly selected on the manual form. Diagnostics come from the content-free journal and
+/// are built at the moment of submission.
 @MainActor
 struct MacIssueReportSubmitter {
     typealias DiagnosticsProvider = @MainActor () async throws -> PublicIssueReportDiagnosticsDTO
@@ -146,7 +168,8 @@ struct MacIssueReportSubmitter {
         let record = MacIssueReportRecord(
             id: id,
             markdown: draft.recordMarkdown(createdAt: createdAt),
-            screenshotURL: draft.local?.screenshotURL
+            screenshotURL: draft.local?.screenshotURL,
+            attachmentURLs: draft.attachmentURLs
         )
 
         do {
@@ -166,6 +189,13 @@ struct MacIssueReportSubmitter {
             }
 
             let preview = try screenshot.map { try Self.previewJPEG(from: $0) }
+            let availableAttachmentCount = max(
+                0,
+                PublicIssueReportPolicy.maximumImagePreviewCount - (preview == nil ? 0 : 1)
+            )
+            let attachmentPreviews = try await IssueReportImagePreviewEncoder.previews(
+                from: Array(draft.attachmentURLs.prefix(availableAttachmentCount))
+            )
             let submission = PublicIssueReportSubmissionDTO(
                 id: id,
                 createdAt: createdAt,
@@ -173,7 +203,8 @@ struct MacIssueReportSubmitter {
                 description: description,
                 diagnostics: try await diagnosticsProvider(),
                 screenshotPreviewBase64: preview?.base64EncodedString(),
-                screenshotMediaType: preview == nil ? nil : "image/jpeg"
+                screenshotMediaType: preview == nil ? nil : "image/jpeg",
+                imagePreviews: attachmentPreviews.isEmpty ? nil : attachmentPreviews
             )
             guard PublicIssueReportPolicy.accepts(submission) else {
                 throw MacIssueReportError.invalidPackage
@@ -260,6 +291,76 @@ struct MacIssueReportSubmitter {
     }
 }
 
+/// Builds only the backend projection of explicitly reviewed image files.
+///
+/// Source inspection, bounded rasterization, resizing, and JPEG compression all stay off the
+/// main actor. The outbox has already retained the original file, so failure here refuses the
+/// upload projection without losing the report itself.
+private enum IssueReportImagePreviewEncoder {
+    static func previews(from urls: [URL]) async throws -> [PublicIssueReportImagePreviewDTO] {
+        guard !urls.isEmpty else { return [] }
+        return try await Task.detached(priority: .utility) {
+            try urls.map { url in
+                guard let frame = BoundedImageDecoder.thumbnailFrame(
+                    at: url,
+                    policy: .issueReportPreview
+                ), let data = jpeg(from: frame) else {
+                    throw MacIssueReportError.attachmentEncoding
+                }
+                return PublicIssueReportImagePreviewDTO(
+                    jpegBase64: data.base64EncodedString()
+                )
+            }
+        }.value
+    }
+
+    private static func jpeg(from source: CGImage) -> Data? {
+        for dimension in [480, 400, 320, 260, 220] {
+            guard let image = resized(source, maximumDimension: dimension) else { continue }
+            for quality in [0.55, 0.42, 0.32, 0.24, 0.18] {
+                let data = NSMutableData()
+                guard let destination = CGImageDestinationCreateWithData(
+                    data,
+                    UTType.jpeg.identifier as CFString,
+                    1,
+                    nil
+                ) else { continue }
+                CGImageDestinationAddImage(
+                    destination,
+                    image,
+                    [kCGImageDestinationLossyCompressionQuality: quality] as CFDictionary
+                )
+                guard CGImageDestinationFinalize(destination) else { continue }
+                let encoded = data as Data
+                if encoded.count <= PublicIssueReportPolicy.maximumScreenshotPreviewBytes {
+                    return encoded
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func resized(_ source: CGImage, maximumDimension: Int) -> CGImage? {
+        let longestSide = max(source.width, source.height)
+        guard longestSide > 0 else { return nil }
+        let scale = min(1, CGFloat(maximumDimension) / CGFloat(longestSide))
+        let width = max(1, Int(floor(CGFloat(source.width) * scale)))
+        let height = max(1, Int(floor(CGFloat(source.height) * scale)))
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+        ) else { return nil }
+        context.interpolationQuality = .high
+        context.draw(source, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
+    }
+}
+
 enum MacIssueReportDeliveryResult: Sendable {
     case delivered(PublicIssueReportReceiptDTO)
     case queued
@@ -278,12 +379,26 @@ struct MacIssueReportRecord: Sendable {
     let id: String
     let markdown: String
     let screenshotURL: URL?
+    let attachmentURLs: [URL]
+
+    init(
+        id: String,
+        markdown: String,
+        screenshotURL: URL?,
+        attachmentURLs: [URL] = []
+    ) {
+        self.id = id
+        self.markdown = markdown
+        self.screenshotURL = screenshotURL
+        self.attachmentURLs = attachmentURLs
+    }
 }
 
 enum MacIssueReportError: LocalizedError {
     case invalidPackage
     case outboxFull
     case screenshotEncoding
+    case attachmentEncoding
     case unreadableResponse
     case serviceRejected(Int)
 
@@ -295,6 +410,8 @@ enum MacIssueReportError: LocalizedError {
             return L10n.string("The private report outbox is full.")
         case .screenshotEncoding:
             return L10n.string("The screenshot could not be made safe for upload.")
+        case .attachmentEncoding:
+            return L10n.string("The image could not be decoded.")
         case .unreadableResponse:
             return L10n.string("The report service returned an unreadable response.")
         case .serviceRejected(let status):
@@ -351,6 +468,7 @@ actor MacIssueReportOutbox {
     private static let recordSubmissionName = "submission.json"
     private static let recordReceiptName = "receipt.json"
     private static let recordScreenshotName = "screenshot"
+    private static let recordAttachmentName = "attachment"
     private static let defaultScreenshotExtension = "png"
 
     private let directory: URL
@@ -444,6 +562,21 @@ actor MacIssueReportOutbox {
                 : source.pathExtension
             let destination = folder
                 .appendingPathComponent(Self.recordScreenshotName)
+                .appendingPathExtension(name)
+            try? FileManager.default.removeItem(at: destination)
+            try? FileManager.default.copyItem(at: source, to: destination)
+        }
+
+        for (index, source) in record.attachmentURLs.prefix(
+            PublicIssueReportPolicy.maximumImagePreviewCount
+        ).enumerated() {
+            let name = source.pathExtension.isEmpty
+                ? Self.defaultScreenshotExtension
+                : source.pathExtension
+            let destination = folder
+                .appendingPathComponent(
+                    "\(Self.recordAttachmentName)-\(String(format: "%02d", index + 1))"
+                )
                 .appendingPathExtension(name)
             try? FileManager.default.removeItem(at: destination)
             try? FileManager.default.copyItem(at: source, to: destination)

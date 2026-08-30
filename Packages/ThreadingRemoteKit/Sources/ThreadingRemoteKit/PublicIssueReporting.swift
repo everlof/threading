@@ -25,6 +25,11 @@ public struct PublicIssueReportSubmissionDTO: Codable, Equatable, Sendable {
     public let diagnostics: PublicIssueReportDiagnosticsDTO
     public let screenshotPreviewBase64: String?
     public let screenshotMediaType: String?
+    /// Additional images the reporter explicitly attached to the reviewed form.
+    ///
+    /// The legacy screenshot pair remains for existing iOS and inspector clients. New manual
+    /// attachments use a bounded array so adding a second image does not invent numbered fields.
+    public let imagePreviews: [PublicIssueReportImagePreviewDTO]?
 
     public init(
         schemaVersion: Int = Self.currentSchemaVersion,
@@ -34,7 +39,8 @@ public struct PublicIssueReportSubmissionDTO: Codable, Equatable, Sendable {
         description: String,
         diagnostics: PublicIssueReportDiagnosticsDTO,
         screenshotPreviewBase64: String? = nil,
-        screenshotMediaType: String? = nil
+        screenshotMediaType: String? = nil,
+        imagePreviews: [PublicIssueReportImagePreviewDTO]? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.id = id
@@ -44,6 +50,18 @@ public struct PublicIssueReportSubmissionDTO: Codable, Equatable, Sendable {
         self.diagnostics = diagnostics
         self.screenshotPreviewBase64 = screenshotPreviewBase64
         self.screenshotMediaType = screenshotMediaType
+        self.imagePreviews = imagePreviews
+    }
+}
+
+/// One explicitly selected image in the private report package.
+///
+/// JPEG is fixed by the contract rather than repeated as user-controlled metadata per item.
+public struct PublicIssueReportImagePreviewDTO: Codable, Equatable, Sendable {
+    public let jpegBase64: String
+
+    public init(jpegBase64: String) {
+        self.jpegBase64 = jpegBase64
     }
 }
 
@@ -112,11 +130,12 @@ public struct PublicIssueReportReceiptDTO: Codable, Equatable, Sendable {
 /// Shared request budgets. The hosted endpoint independently enforces the same values because its
 /// input is untrusted; these client-side checks exist for deterministic UI and local-agent prompts.
 public enum PublicIssueReportPolicy {
-    public static let maximumRequestBytes = 64 * 1_024
+    public static let maximumRequestBytes = 128 * 1_024
     public static let maximumDescriptionBytes = 10 * 1_024
     public static let maximumDiagnosticsBytes = 24 * 1_024
     public static let maximumDiagnosticRecords = 250
     public static let maximumScreenshotPreviewBytes = 12 * 1_024
+    public static let maximumImagePreviewCount = 4
 
     public static func accepts(_ submission: PublicIssueReportSubmissionDTO) -> Bool {
         guard submission.schemaVersion == PublicIssueReportSubmissionDTO.currentSchemaVersion,
@@ -130,7 +149,7 @@ public enum PublicIssueReportPolicy {
                 || submission.diagnostics.source == .macOSHost),
               submission.diagnostics.records.count <= maximumDiagnosticRecords,
               diagnosticsAreBounded(submission.diagnostics),
-              screenshotIsBounded(submission) else {
+              imagePreviewsAreBounded(submission) else {
             return false
         }
         return ((try? JSONEncoder().encode(submission).count) ?? .max) <= maximumRequestBytes
@@ -208,19 +227,35 @@ public enum PublicIssueReportPolicy {
             }
     }
 
-    private static func screenshotIsBounded(
+    private static func imagePreviewsAreBounded(
         _ submission: PublicIssueReportSubmissionDTO
     ) -> Bool {
+        var imageCount = 0
         switch (submission.screenshotPreviewBase64, submission.screenshotMediaType) {
         case (nil, nil):
-            return true
+            break
         case (.some(let encoded), .some("image/jpeg")):
-            guard let data = Data(base64Encoded: encoded) else { return false }
-            return data.count >= 3
-                && data.count <= maximumScreenshotPreviewBytes
-                && data.starts(with: [0xff, 0xd8, 0xff])
+            guard jpegData(encoded) != nil else { return false }
+            imageCount += 1
         default:
             return false
         }
+
+        if let previews = submission.imagePreviews {
+            guard !previews.isEmpty else { return false }
+            imageCount += previews.count
+            guard previews.allSatisfy({ jpegData($0.jpegBase64) != nil }) else { return false }
+        }
+        return imageCount <= maximumImagePreviewCount
+    }
+
+    private static func jpegData(_ encoded: String) -> Data? {
+        guard let data = Data(base64Encoded: encoded),
+              data.count >= 3,
+              data.count <= maximumScreenshotPreviewBytes,
+              data.starts(with: [0xff, 0xd8, 0xff]) else {
+            return nil
+        }
+        return data
     }
 }

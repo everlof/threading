@@ -12,6 +12,34 @@ final class PublicIssueReportingTests: XCTestCase {
         )
     }
 
+    func testSubmissionAcceptsFourReviewedImagesAndRejectsInvalidCollections() {
+        let jpeg = Data([0xff, 0xd8, 0xff]).base64EncodedString()
+        let four = Array(
+            repeating: PublicIssueReportImagePreviewDTO(jpegBase64: jpeg),
+            count: PublicIssueReportPolicy.maximumImagePreviewCount
+        )
+
+        XCTAssertTrue(PublicIssueReportPolicy.accepts(makeSubmission(
+            includesScreenshot: false,
+            imagePreviews: four
+        )))
+        XCTAssertFalse(PublicIssueReportPolicy.accepts(makeSubmission(
+            includesScreenshot: false,
+            imagePreviews: []
+        )))
+        XCTAssertFalse(PublicIssueReportPolicy.accepts(makeSubmission(
+            includesScreenshot: false,
+            imagePreviews: four + [four[0]]
+        )))
+        XCTAssertFalse(PublicIssueReportPolicy.accepts(makeSubmission(
+            includesScreenshot: false,
+            imagePreviews: [PublicIssueReportImagePreviewDTO(
+                jpegBase64: Data("not a jpeg".utf8).base64EncodedString()
+            )]
+        )))
+        XCTAssertFalse(PublicIssueReportPolicy.accepts(makeSubmission(imagePreviews: four)))
+    }
+
     func testSubmissionRejectsEmptyDescriptionAndUnpairedScreenshotFields() {
         XCTAssertFalse(PublicIssueReportPolicy.accepts(makeSubmission(description: "  \n")))
 
@@ -253,7 +281,9 @@ final class PublicIssueReportingTests: XCTestCase {
         description: String = "The composer stopped responding.",
         trigger: PublicIssueReportTrigger = .diagnostics,
         source: RemoteDiagnosticSource = .iOSClient,
-        additionalDetails: [RemoteDiagnosticExtraField: String] = [:]
+        additionalDetails: [RemoteDiagnosticExtraField: String] = [:],
+        includesScreenshot: Bool = true,
+        imagePreviews: [PublicIssueReportImagePreviewDTO]? = nil
     ) -> PublicIssueReportSubmissionDTO {
         PublicIssueReportSubmissionDTO(
             id: UUID().uuidString.lowercased(),
@@ -265,8 +295,11 @@ final class PublicIssueReportingTests: XCTestCase {
                 source: source,
                 additionalDetails: additionalDetails
             )),
-            screenshotPreviewBase64: Data([0xff, 0xd8, 0xff]).base64EncodedString(),
-            screenshotMediaType: "image/jpeg"
+            screenshotPreviewBase64: includesScreenshot
+                ? Data([0xff, 0xd8, 0xff]).base64EncodedString()
+                : nil,
+            screenshotMediaType: includesScreenshot ? "image/jpeg" : nil,
+            imagePreviews: imagePreviews
         )
     }
 

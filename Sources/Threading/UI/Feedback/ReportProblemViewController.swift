@@ -1,6 +1,8 @@
 import AppKit
+import UniformTypeIdentifiers
 
-/// Help ▸ Report a Problem: a private report raised from anywhere in the app, without a capture.
+/// Help ▸ Report a Problem: a private report raised from anywhere in the app, with optional
+/// images the reporter selects or pastes and reviews before sending.
 ///
 /// The inspector's sheet files what the app *measured*; this one files what the user *noticed* —
 /// including the half of reports that are not defects at all, which is why the first control is
@@ -17,9 +19,24 @@ final class ReportProblemViewController: NSViewController {
     private let titleField = ThemedTextField()
     private let detailField = PromptView()
     private let statusView = SubmissionStatusView()
+    private lazy var attachmentButton: ThemedButton = {
+        let button = ThemedButton(
+            title: ReportProblemStrings.chooseImages,
+            target: self,
+            action: #selector(chooseImages)
+        )
+        button.image = NSImage(
+            systemSymbolName: DesignSymbols.attachment,
+            accessibilityDescription: ReportProblemStrings.chooseImages
+        )?.withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control))
+        button.emphasis = .tertiary
+        button.toolTip = ReportProblemStrings.chooseImages
+        button.setAccessibilityIdentifier(ReportProblemIdentifiers.attach)
+        return button
+    }()
     /// The same control the inspector's sheet uses. This sheet has no Copy Report — it is a form
-    /// rather than a capture, so there is nothing collected to carry anywhere — which means a
-    /// Release build has exactly one action and the control draws no chevron for it.
+    /// rather than an app-authored capture — which means a Release build has exactly one action
+    /// and the control draws no chevron for it.
     private lazy var actionsControl: DeveloperReportSubmitControl = {
         var available: [DeveloperReportAction] = [.send]
 #if DEBUG
@@ -40,9 +57,12 @@ final class ReportProblemViewController: NSViewController {
     /// composition root.
     var onSubmitReport: ((DeveloperIssueReportDraft) async -> DeveloperIssueReportSubmission)?
 
+    /// The system image picker boundary. Tests replace it with a deterministic URL list.
+    var imagePicker: (@escaping ([URL]) -> Void) -> Void = ReportProblemImagePicker.choose
+
 #if DEBUG
-    /// Opens a chat on the same reviewed report. There is no capture here, so what a chat gets
-    /// is exactly what the inbox would have got — which is the whole of what this sheet knows.
+    /// Opens a chat on the same reviewed report. The local route also names selected image paths
+    /// so the agent can inspect them; the backend description deliberately never contains them.
     /// See `DeveloperReportChat`.
     var onSendToChat: ((DeveloperReportChatRequest) -> DeveloperReportChatOutcome)?
 
@@ -154,6 +174,10 @@ final class ReportProblemViewController: NSViewController {
         for child in stack.arrangedSubviews {
             child.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
+
+        detailField.onContentHeightChange = { [weak self] _ in
+            self?.resizeSheetToFit()
+        }
     }
 
     private func makeKindControl() -> NSView {
@@ -179,6 +203,21 @@ final class ReportProblemViewController: NSViewController {
         detailField.placeholder = ReportProblemStrings.detailPlaceholder
         detailField.submitPlacement = .outside
         detailField.minimumHeight = ReportProblemLayout.detailHeight
+        detailField.showsImageAttachments = true
+        detailField.maximumImageAttachmentCount = DeveloperIssueReportComposer.maximumImageAttachments
+        detailField.unpreviewableImageBehavior = .reject
+        detailField.onImageAttachmentRejection = { [weak self] rejection in
+            switch rejection {
+            case .overLimit(let maximum, _):
+                self?.statusView.show(
+                    ReportProblemStrings.attachmentLimit(maximum: maximum),
+                    tone: .failed
+                )
+            case .unreadable:
+                self?.statusView.show(ReportProblemStrings.unreadableImage, tone: .failed)
+            }
+        }
+        detailField.setFooterControls(leading: [attachmentButton], trailing: [])
         detailField.onSubmit = { [weak self] _ in self?.submitIssue() }
         detailField.translatesAutoresizingMaskIntoConstraints = false
         detailField.setAccessibilityIdentifier(ReportProblemIdentifiers.detail)
@@ -270,6 +309,11 @@ final class ReportProblemViewController: NSViewController {
     @objc func submitIssue() {
         guard !isSubmitting, let onSubmitReport else { return }
 
+        guard !detailField.isPreparingAttachments else {
+            statusView.show(ReportProblemStrings.preparingAttachments, tone: .working)
+            return
+        }
+
         // A report with no words in it wastes the reader's time, and the reader is a person.
         guard !draftIsEmpty else {
             statusView.show(ReportProblemStrings.emptyWarning, tone: .failed)
@@ -293,6 +337,10 @@ final class ReportProblemViewController: NSViewController {
     /// is a person either way, and an agent handed a blank report answers by asking what it is.
     @objc func sendToChat() {
         guard !isSubmitting, let onSendToChat else { return }
+        guard !detailField.isPreparingAttachments else {
+            statusView.show(ReportProblemStrings.preparingAttachments, tone: .working)
+            return
+        }
         guard !draftIsEmpty else {
             statusView.show(ReportProblemStrings.emptyWarning, tone: .failed)
             view.window?.makeFirstResponder(titleField)
@@ -302,7 +350,7 @@ final class ReportProblemViewController: NSViewController {
         let draft = reportDraft()
         statusView.show(DeveloperReportChatStrings.startingStatus, tone: .working)
         switch onSendToChat(
-            DeveloperReportChatRequest(title: draft.title, report: draft.description)
+            DeveloperReportChatRequest(title: draft.title, report: draft.localDescription)
         ) {
         case .started(let projectName):
             statusView.show(DeveloperReportChatStrings.started(projectName: projectName), tone: .done)
@@ -317,11 +365,23 @@ final class ReportProblemViewController: NSViewController {
         onDone?()
     }
 
+    @objc func chooseImages() {
+        imagePicker { [weak self] urls in
+            self?.attachImages(at: urls)
+        }
+    }
+
+    /// Feeds picker results into the same bounded path used by paste and drag-and-drop.
+    func attachImages(at urls: [URL]) {
+        detailField.attachFiles(at: urls.map(\.path))
+    }
+
     // MARK: - Public Methods
 
     var draftIsEmpty: Bool {
         titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && detailField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && detailField.attachmentPaths.isEmpty
     }
 
     /// What gets filed. The typed title wins when there is one; otherwise the first line of the
@@ -340,7 +400,8 @@ final class ReportProblemViewController: NSViewController {
                     fallback: fallback
                 )
                 : String(typed.prefix(DeveloperIssueReportComposer.maximumTitleCharacters)),
-            details: detailField.stringValue
+            details: detailField.stringValue,
+            attachmentURLs: detailField.attachmentPaths.map { URL(fileURLWithPath: $0) }
         )
     }
 
@@ -364,6 +425,17 @@ final class ReportProblemViewController: NSViewController {
             statusView.show(message, tone: .failed)
         }
     }
+
+    private func resizeSheetToFit() {
+        view.layoutSubtreeIfNeeded()
+        let size = NSSize(
+            width: ReportProblemLayout.sheetWidth,
+            height: ceil(view.fittingSize.height)
+        )
+        guard size.height > 0, view.frame.size != size else { return }
+        preferredContentSize = size
+        view.setFrameSize(size)
+    }
 }
 
 // MARK: - Layout
@@ -378,6 +450,7 @@ enum ReportProblemIdentifiers {
     static let kind = "report.problem.kind"
     static let title = "report.problem.title"
     static let detail = "report.problem.detail"
+    static let attach = "report.problem.attach"
     static let environment = "report.problem.environment"
     static let status = "report.problem.status"
     static let submit = "report.problem.submit"
@@ -403,7 +476,13 @@ enum ReportProblemStrings {
         L10n.string("What happened, what you expected, and how to see it again")
     }
     static var detailHint: String {
-        L10n.string("⌘Return sends the report · Return adds a line")
+        L10n.string("Paste images here · ⌘Return sends · Return adds a line")
+    }
+    static var chooseImages: String { L10n.string("Choose files") }
+    static var preparingAttachments: String { L10n.string("Preparing attachments…") }
+    static var unreadableImage: String { L10n.string("The image could not be decoded.") }
+    static func attachmentLimit(maximum: Int) -> String {
+        L10n.format("You can attach up to %lld images.", maximum)
     }
     static var submittingTitle: String { L10n.string("Sending…") }
     static var submittingStatus: String { L10n.string("Sending to Threading’s private inbox…") }
@@ -421,5 +500,22 @@ enum ReportProblemStrings {
 
     static var queued: String {
         L10n.string("Report saved securely and queued for retry when Threading is active.")
+    }
+}
+
+/// Named boundary for the one system-chrome surface this host-only form needs.
+private enum ReportProblemImagePicker {
+    static func choose(completion: @escaping ([URL]) -> Void) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image]
+        panel.prompt = L10n.string("Add")
+        panel.message = ReportProblemStrings.chooseImages
+        panel.begin { response in
+            guard response == .OK else { return }
+            completion(panel.urls)
+        }
     }
 }

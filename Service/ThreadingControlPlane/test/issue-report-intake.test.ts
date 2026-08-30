@@ -325,6 +325,35 @@ describe("private issue-report intake", () => {
     expect(rejectedImage.status).toBe(400);
   });
 
+  it("stores up to four reviewed image previews and rejects malformed collections", async () => {
+    const jpegBase64 = bytesToBase64([0xff, 0xd8, 0xff, 0xd9]);
+    const report = makeReport();
+    report.imagePreviews = Array.from({ length: 4 }, () => ({ jpegBase64 }));
+
+    expect((await submit(report)).status).toBe(201);
+    const stored = await testEnv.ISSUE_REPORTS.get(`reports/v1/${report.id}.json`);
+    const envelope = await stored?.json<{ report: TestReport }>();
+    expect(envelope?.report.imagePreviews).toEqual(report.imagePreviews);
+
+    const empty = makeReport();
+    empty.imagePreviews = [];
+    expect((await submit(empty)).status).toBe(400);
+
+    const tooMany = makeReport();
+    tooMany.imagePreviews = Array.from({ length: 5 }, () => ({ jpegBase64 }));
+    expect((await submit(tooMany)).status).toBe(400);
+
+    const malformed = makeReport();
+    malformed.imagePreviews = [{ jpegBase64: btoa("not a jpeg") }];
+    expect((await submit(malformed)).status).toBe(400);
+
+    const combined = makeReport();
+    combined.screenshotPreviewBase64 = jpegBase64;
+    combined.screenshotMediaType = "image/jpeg";
+    combined.imagePreviews = Array.from({ length: 4 }, () => ({ jpegBase64 }));
+    expect((await submit(combined)).status).toBe(400);
+  });
+
   it("requires the developer secret to list or retrieve private reports", async () => {
     const report = makeReport();
     expect((await submit(report)).status).toBe(201);
@@ -397,7 +426,12 @@ interface TestReport {
   };
   screenshotPreviewBase64?: string;
   screenshotMediaType?: string;
+  imagePreviews?: Array<{ jpegBase64: string }>;
   accidentalSecret?: string;
+}
+
+function bytesToBase64(bytes: number[]): string {
+  return btoa(String.fromCharCode(...bytes));
 }
 
 function makeReport(): TestReport {

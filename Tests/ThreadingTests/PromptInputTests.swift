@@ -404,6 +404,29 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(prompt.submissionValue, "Compare this layout")
     }
 
+    func testAHostCanRejectImageOverflowWithoutTurningPathsIntoProse() throws {
+        let first = try makeImageFile(named: "first report image.png")
+        let second = try makeImageFile(named: "second report image.png")
+        defer {
+            try? FileManager.default.removeItem(at: first)
+            try? FileManager.default.removeItem(at: second)
+        }
+
+        let prompt = PromptView()
+        prompt.showsImageAttachments = true
+        prompt.maximumImageAttachmentCount = 1
+        prompt.unpreviewableImageBehavior = .reject
+        var rejection: PromptView.ImageAttachmentRejection?
+        prompt.onImageAttachmentRejection = { rejection = $0 }
+
+        prompt.attachFiles(at: [first.path, second.path])
+        waitForAttachmentPreparation(prompt)
+
+        XCTAssertEqual(prompt.attachmentPaths, [first.path])
+        XCTAssertEqual(prompt.stringValue, "", "a rejected local path leaked into report prose")
+        XCTAssertEqual(rejection, .overLimit(maximum: 1, rejected: 1))
+    }
+
     func testImagePreviewRefusesAFileThatGrowsPastItsDecodePolicy() throws {
         let imageURL = try makeImageFile(named: "oversized-preview.png")
         defer { try? FileManager.default.removeItem(at: imageURL) }
