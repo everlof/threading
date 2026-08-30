@@ -7920,7 +7920,11 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "WindowChromeButton",
                 "WindowChromeFrameView",
                 "WindowCommandBandView",
-                "WindowTitleBandView"
+                "WindowTitleBandView",
+                "WorkspaceNavigatorPipelinePlaceholderView",
+                "WorkspaceNavigatorPipelineResultsView",
+                "WorkspaceNavigatorPipelineSearchBandView",
+                "WorkspaceNavigatorPipelineTemplateView"
             ]
         )
 

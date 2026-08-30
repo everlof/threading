@@ -3235,6 +3235,17 @@
         }
       }
     },
+    "2 more sessions are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2 fler sessioner visas inte"
+          }
+        }
+      }
+    },
     "2 skipped" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8357,6 +8368,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Webbinloggning"
+          }
+        }
+      }
+    },
+    "Browser checks" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webbläsarkontroller"
           }
         }
       }
@@ -17513,6 +17535,28 @@
         }
       }
     },
+    "Filter sessions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtrera sessioner"
+          }
+        }
+      }
+    },
+    "Filter workspace sessions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtrera arbetsytans sessioner"
+          }
+        }
+      }
+    },
     "Filter: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25202,6 +25246,17 @@
         }
       }
     },
+    "No matching sessions" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga matchande sessioner"
+          }
+        }
+      }
+    },
     "No more than %1$@ in any %2$@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -31314,6 +31369,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Version"
+          }
+        }
+      }
+    },
+    "Release build" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Releasebygge"
           }
         }
       }
@@ -41680,6 +41746,17 @@
         }
       }
     },
+    "The persistent search band, bounded realized rows, overflow copy, and empty state. Type a query that misses to transition the populated result in place." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det permanenta sökbandet, avgränsade realiserade rader, överflödestext och tomtillstånd. Skriv en sökning utan träff för att växla det fyllda resultatet på plats."
+          }
+        }
+      }
+    },
     "The picture is stored with this project, under the name you give it. The agent can compare the page against it later." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42996,6 +43073,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tema"
+          }
+        }
+      }
+    },
+    "Theme audit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Temagranskning"
           }
         }
       }
@@ -46146,6 +46234,17 @@
         }
       }
     },
+    "Try a broader workspace filter." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prova ett bredare arbetsytefilter."
+          }
+        }
+      }
+    },
     "Try: “Use Threading’s app-theme MCP tools to make my current theme warmer and soften the sidebar.” The agent can inspect it with get_app_theme, duplicate a locked theme with duplicate_app_theme (apply: true), and make live changes with update_app_theme." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49134,6 +49233,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetar…"
+          }
+        }
+      }
+    },
+    "Workspace Navigator Pipeline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pipeline för arbetsytenavigatorn"
           }
         }
       }

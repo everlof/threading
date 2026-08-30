@@ -223,7 +223,11 @@ final class ComponentGalleryViewController: NSViewController {
         "WindowChromeButton",
         "WindowCommandBandView",
         "WindowChromeFrameView",
-        "WindowTitleBandView"
+        "WindowTitleBandView",
+        "WorkspaceNavigatorPipelinePlaceholderView",
+        "WorkspaceNavigatorPipelineResultsView",
+        "WorkspaceNavigatorPipelineSearchBandView",
+        "WorkspaceNavigatorPipelineTemplateView"
     ]
 
     /// The toast story's presenter, retained so the button beside the pane can send a band into
@@ -4990,6 +4994,12 @@ final class ComponentGalleryViewController: NSViewController {
         let semanticScene = makeSemanticSceneStory()
         let semanticHierarchy = makeSemanticHierarchySceneStory()
         var rows = [
+            story(
+                "Workspace Navigator Pipeline",
+                "The persistent search band, bounded realized rows, overflow copy, and empty "
+                    + "state. Type a query that misses to transition the populated result in place.",
+                WorkspaceNavigatorPipelineGalleryStory.makeView()
+            ),
             story(
                 "SemanticSceneView",
                 "Normalized, interactive marks for treemaps, heatmaps, timelines, scatter plots, and bubbles.",
