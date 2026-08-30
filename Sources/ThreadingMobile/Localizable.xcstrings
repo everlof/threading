@@ -11387,6 +11387,17 @@
         }
       }
     },
+    "Workspace · New browser activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetsyta · Ny webbläsaraktivitet"
+          }
+        }
+      }
+    },
     "Write the test I should have written…" : {
       "extractionState" : "manual",
       "localizations" : {

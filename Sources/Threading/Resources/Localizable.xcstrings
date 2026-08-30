@@ -1046,6 +1046,17 @@
         }
       }
     },
+    "%@ sign-in: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@-inloggning: %@"
+          }
+        }
+      }
+    },
     "%@ stopped right after starting." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2619,6 +2630,17 @@
         }
       }
     },
+    "%lld turns ago" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "För %lld turer sedan"
+          }
+        }
+      }
+    },
     "%lld turns in flight are lost." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3752,13 +3774,13 @@
         }
       }
     },
-    "A login named %@ already exists. Reconnect it from Settings ▸ Accounts, or choose another name." : {
+    "A login named %@ already exists. Reconnect it from Settings ▸ Agents & Accounts, or choose another name." : {
       "extractionState" : "manual",
       "localizations" : {
         "sv" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "En inloggning med namnet %@ finns redan. Återanslut den i Inställningar ▸ Konton eller välj ett annat namn."
+            "value" : "En inloggning med namnet %@ finns redan. Återanslut den i Inställningar ▸ Agenter och konton eller välj ett annat namn."
           }
         }
       }
@@ -5028,6 +5050,17 @@
         }
       }
     },
+    "Add Login" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till inloggning"
+          }
+        }
+      }
+    },
     "Add Project" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5684,6 +5717,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenter"
+          }
+        }
+      }
+    },
+    "Agents & Accounts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenter och konton"
           }
         }
       }
@@ -7862,6 +7906,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Betaversioner och stabila utgåvor"
+          }
+        }
+      }
+    },
+    "Between turns" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mellan turer"
           }
         }
       }
@@ -11903,6 +11958,17 @@
         }
       }
     },
+    "Connect model providers inside OpenCode with /connect." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut modellleverantörer i OpenCode med /connect."
+          }
+        }
+      }
+    },
     "Connect this Mac to Wi-Fi or Ethernet. The door comes back on its own." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11921,6 +11987,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anslut för att läsa privata kodförråd med behörigheter du valde på GitHub."
+          }
+        }
+      }
+    },
+    "Connect your coding agents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut dina kodningsagenter"
           }
         }
       }
@@ -16380,6 +16457,17 @@
         }
       }
     },
+    "Expand a turn to preview its attachments." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Expandera en tur för att förhandsvisa dess bilagor."
+          }
+        }
+      }
+    },
     "Expand all diffs" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -19944,6 +20032,28 @@
         }
       }
     },
+    "In Grok" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I Grok"
+          }
+        }
+      }
+    },
+    "In OpenCode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I OpenCode"
+          }
+        }
+      }
+    },
     "In an hour" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21352,6 +21462,17 @@
         }
       }
     },
+    "Latest turn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senaste turen"
+          }
+        }
+      }
+    },
     "Launch and drive this project's app to see a change working" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22540,6 +22661,17 @@
         }
       }
     },
+    "Mac login" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mac-inloggning"
+          }
+        }
+      }
+    },
     "Mac size returns shortly after the remote view closes" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22712,6 +22844,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hantera visuella baslinjer"
+          }
+        }
+      }
+    },
+    "Managed accounts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hanterade konton"
           }
         }
       }
@@ -25015,6 +25158,17 @@
         }
       }
     },
+    "No managed accounts yet. Add a Claude Code or Codex login above." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga hanterade konton än. Lägg till en Claude Code- eller Codex-inloggning ovan."
+          }
+        }
+      }
+    },
     "No managed chats yet. Spawn or adopt a chat to keep its brief and events here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25022,6 +25176,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inga hanterade chattar ännu. Starta eller adoptera en chatt för att samla dess brief och händelser här."
+          }
+        }
+      }
+    },
+    "No managed logins yet. Add Claude Code or Codex here, or continue and sign in with another supported agent when you launch it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga hanterade inloggningar än. Lägg till Claude Code eller Codex här, eller fortsätt och logga in med en annan agent som stöds när du startar den."
           }
         }
       }
@@ -27479,6 +27644,17 @@
         }
       }
     },
+    "OpenCode" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "OpenCode"
+          }
+        }
+      }
+    },
     "Opened a queued message for editing." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28146,6 +28322,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Klistra in"
+          }
+        }
+      }
+    },
+    "Paste images here · ⌘Return sends · Return adds a line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klistra in bilder här · ⌘Retur skickar · Retur lägger till en rad"
           }
         }
       }
@@ -29037,6 +29224,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Föregående start avslutades oväntat"
+          }
+        }
+      }
+    },
+    "Previous turn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Föregående tur"
           }
         }
       }
@@ -33265,6 +33463,17 @@
         }
       }
     },
+    "Run agent login once on this Mac. Threading uses that Cursor login." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör agent login en gång på denna Mac. Threading använder den Cursor-inloggningen."
+          }
+        }
+      }
+    },
     "Run at next launch" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36587,6 +36796,17 @@
         }
       }
     },
+    "Sign in inside Grok's terminal UI. Threading uses one Grok login." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logga in i Groks terminalgränssnitt. Threading använder en Grok-inloggning."
+          }
+        }
+      }
+    },
     "Sign in to Tailscale on this Mac, then retry." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -38486,6 +38706,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Supportrapporter skickar du själv"
+          }
+        }
+      }
+    },
+    "Supported agents" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenter som stöds"
           }
         }
       }
@@ -44584,6 +44815,17 @@
         }
       }
     },
+    "Threading can add, reconnect, and switch between Claude Code and Codex logins. The provider owns the secure browser flow and credential; Threading stores only the isolated config location. Grok, Cursor, and OpenCode keep sign-in in their own tools, as shown above. Rename a managed login or choose an icon to tell it apart, or switch it off without deleting it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading kan lägga till, återansluta och växla mellan Claude Code- och Codex-inloggningar. Leverantören äger det säkra webbläsarflödet och inloggningsuppgiften; Threading lagrar bara den isolerade konfigurationsplatsen. Grok, Cursor och OpenCode behåller inloggningen i sina egna verktyg, som visas ovan. Byt namn på en hanterad inloggning eller välj en ikon för att skilja den åt, eller stäng av den utan att radera den."
+          }
+        }
+      }
+    },
     "Threading cannot read %@ right now, so it is not spending this account on its own." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45218,6 +45460,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading sparar bara referensen. 1Password har värdet."
+          }
+        }
+      }
+    },
+    "Threading supports Claude Code, Codex, Grok, Cursor, and OpenCode. Add and switch Claude Code or Codex logins here; the others keep sign-in in their own tools." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading stöder Claude Code, Codex, Grok, Cursor och OpenCode. Lägg till och växla Claude Code- eller Codex-inloggningar här; de andra behåller inloggningen i sina egna verktyg."
           }
         }
       }
@@ -46593,6 +46846,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tills %@-fönstret återställs"
+          }
+        }
+      }
+    },
+    "Upcoming turn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kommande tur"
           }
         }
       }
@@ -49123,6 +49387,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Du tillåter Threading i Systeminställningar och läser sedan om tillägget."
+          }
+        }
+      }
+    },
+    "You can attach up to %lld images." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du kan bifoga upp till %lld bilder."
           }
         }
       }
