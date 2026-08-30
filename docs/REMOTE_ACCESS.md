@@ -1769,6 +1769,11 @@ feature lock.
   A frame and a complete reassembled message are each capped at 1 MiB. Every continuation is
   compared with the buffer's remaining capacity before `Data.append`, so the transient retained
   message never exceeds the stated cap; the server admits at most 32 connections.
+  An HTTP connection is bounded by silence rather than by age: a socket that opens and says
+  nothing, a request nobody answers, and a keep-alive connection nobody uses again are each
+  closed after 60 seconds, while one that keeps serving requests lives as long as it is used.
+  Measured from accept, that bound was a lifetime: a phone's pooled connection was cut off in
+  the middle of a browser preview capture, and the phone reported its network connection lost.
 - Native REST mutations carry a request id. The Mac coalesces concurrent duplicates and keeps the
   bounded result for five minutes, while rejecting the same id with a different path or semantic
   JSON body. JSON key order and whitespace are normalized before fingerprinting, and iOS emits

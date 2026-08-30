@@ -115,8 +115,10 @@ enum RemoteAccessDefaults {
     /// A request that never completes must not grow a connection's buffer forever.
     static let maximumRequestBytes = 1 * 1024 * 1024
 
-    /// How long a connection may sit in the HTTP phase (no upgrade, no complete request) before
-    /// it is closed. An open port attracts probes that open a socket and say nothing.
+    /// How long one silent stretch of the HTTP phase may last before the connection is closed:
+    /// from accept to a complete request, from a request to its response leaving, and from a
+    /// keep-alive response to the next request. An open port attracts probes that open a socket
+    /// and say nothing; a connection that keeps being used is never closed for its age.
     static let httpIdleSeconds: TimeInterval = 60
 
     // MARK: - WebSocket
