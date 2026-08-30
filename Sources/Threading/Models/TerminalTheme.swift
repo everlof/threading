@@ -414,7 +414,7 @@ extension TerminalTheme {
         id: .roseMoon,
         name: "Rosé Moon",
         foreground: NSColor(hex: "#E0DEF4")!,
-        boldForeground: NSColor(hex: "#F4F2FF")!,
+        boldForeground: NSColor(hex: "#FFD4C4")!,
         background: NSColor(hex: "#1B1D2A")!,
         cursor: NSColor(hex: "#EA9A97")!,
         selection: NSColor(hex: "#3B3854")!,
