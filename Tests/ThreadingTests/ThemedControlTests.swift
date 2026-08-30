@@ -1004,6 +1004,7 @@ final class ThemedControlTests: HostedStoreTestCase {
         defer { window.close() }
 
         var dismissals = 0
+        let restingSubviewCount = root.subviews.count
         // Deliberately unretained: the defect being pinned is a call site ignoring the token.
         // The single disabled row is the clock's own refusal menu, where this was found.
         ThemedMenuPresenter.present(
@@ -1031,6 +1032,11 @@ final class ThemedControlTests: HostedStoreTestCase {
 
         XCTAssertEqual(dismissals, 1, "Escape never reached a live session")
         XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+        XCTAssertEqual(
+            root.subviews.count,
+            restingSubviewCount,
+            "an offscreen menu waited for an animation completion the hidden window cannot run"
+        )
     }
 
     /// Two *adjacent* filled rows keep a hairline of panel between them.

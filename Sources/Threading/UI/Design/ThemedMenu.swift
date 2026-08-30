@@ -1481,7 +1481,10 @@ private final class ThemedMenuOverlayView: ThemedControl {
     /// One arrival for every panel, so a submenu materialises exactly as its root did.
     private static func animateAppear(_ host: NSView) {
         let duration = Design.Motion.appear
-        guard duration > 0, let layer = host.layer else { return }
+        // AppKit does not advance offscreen window animations. Apart from doing work nobody can
+        // see, attaching one here leaves test and preview windows holding animation machinery
+        // whose completion can never be delivered.
+        guard duration > 0, host.window?.isVisible == true, let layer = host.layer else { return }
 
         // Composed about the layer's visual centre whatever its anchor point, so the maths
         // holds under AppKit's own layer geometry rather than assuming it.
@@ -1519,6 +1522,11 @@ private final class ThemedMenuOverlayView: ThemedControl {
         }
 
         let duration = Design.Motion.vanish
+        // An invisible window has no display cycle to advance an AppKit animation. Waiting for
+        // that completion retains a blocking animation worker indefinitely; a gallery that opens
+        // many hidden menus can exhaust the process's dispatch-thread allowance and starve
+        // unrelated asynchronous work. There are no pixels to preserve offscreen, so finish now.
+        let canAnimate = duration > 0 && window?.isVisible == true
         let fadeOut: @MainActor @Sendable () -> Void = {
             NSAnimationContext.runAnimationGroup({ context in
                 context.duration = Design.Motion.vanish
@@ -1533,7 +1541,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
         switch exit {
         case .instant:
             removeFromSuperview()
-        case .fade where duration <= 0, .confirm where duration <= 0:
+        case .fade where !canAnimate, .confirm where !canAnimate:
             removeFromSuperview()
         case .fade:
             fadeOut()
@@ -1798,7 +1806,7 @@ private final class ThemedMenuOverlayView: ThemedControl {
             let duration = Design.Motion.vanish
             if case .instant = exit {
                 host.removeFromSuperview()
-            } else if duration <= 0 {
+            } else if duration <= 0 || window?.isVisible != true {
                 host.removeFromSuperview()
             } else {
                 NSAnimationContext.runAnimationGroup({ context in
