@@ -1004,6 +1004,7 @@ enum DesignSymbols {
     /// Adding to the turn already running, as opposed to starting another one.
     static let steer = "arrow.turn.down.right"
     static let search = "magnifyingglass"
+    static let attachment = "paperclip"
     static let removeAttachment = "xmark"
     /// Entering annotation mode on a browser page, and being in it.
     static let annotate = "plus.bubble"

@@ -217,9 +217,11 @@ extension ConversationViewController {
             guard let self, let message = ScheduledMessageStore.shared[id] else { return }
             let images = ScheduledMessageStore.shared.attachments.detach(message)
             ScheduledMessageStore.shared.remove(id)
+            let handover = self.handingOver(images, appendedTo: message.text)
             _ = self.sendAppPrompt(
-                self.handingOver(images, appendedTo: message.text),
-                context: message.context
+                handover.text,
+                context: message.context,
+                attachmentIDs: handover.attachmentIDs
             )
             self.refreshScheduledStrip()
         }
@@ -227,21 +229,25 @@ extension ConversationViewController {
 
     /// Files a waiting send's pictures with this conversation and puts their paths on the end of
     /// its words, which is the only form of an image either CLI reads.
-    private func handingOver(_ paths: [String], appendedTo text: String) -> String {
+    private func handingOver(
+        _ paths: [String],
+        appendedTo text: String
+    ) -> (text: String, attachmentIDs: [String]) {
         // The folder comes from the store rather than from the controller's own `project`, which
         // is private to its file — and the store is the same answer the unattended delivery uses,
         // so a picture lands in the same place whichever route sent it.
         guard !paths.isEmpty,
               let folder = projectedWorkingDirectory(for: sessionID)
-        else { return text }
+        else { return (text, []) }
 
-        return PromptAttachment.appending(
-            paths: PromptAttachment.handOver(
-                paths: paths,
-                sessionID: sessionID,
-                projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
-            ),
-            to: text
+        let handover = PromptAttachment.handOverRecording(
+            paths: paths,
+            sessionID: sessionID,
+            projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
+        )
+        return (
+            PromptAttachment.appending(paths: handover.paths, to: text),
+            handover.attachments.map(\.id)
         )
     }
 

@@ -112,6 +112,7 @@ final class SessionMessageDeliveryTests: XCTestCase {
         var steerAnswer: AppMessageSteerResult
         var accepted: [ConversationPrompt] = []
         var acceptedOrigins: [ConversationOutbox.Item.Origin] = []
+        var acceptedAttachmentIDs: [[String]] = []
         var steered: [ConversationPrompt] = []
 
         init(
@@ -126,10 +127,12 @@ final class SessionMessageDeliveryTests: XCTestCase {
 
         func acceptAppMessage(
             _ prompt: ConversationPrompt,
-            origin: ConversationOutbox.Item.Origin
+            origin: ConversationOutbox.Item.Origin,
+            attachmentIDs: [String]
         ) -> AppMessageAcceptance {
             accepted.append(prompt)
             acceptedOrigins.append(origin)
+            acceptedAttachmentIDs.append(attachmentIDs)
             return acceptance
         }
 
@@ -241,6 +244,20 @@ final class SessionMessageDeliveryTests: XCTestCase {
             XCTAssertEqual(outcome, expected, "\(acceptance) must surface as \(expected)")
             XCTAssertEqual(chat.accepted.count, 1)
         }
+    }
+
+    func testAChatDeliveryCarriesAttachmentIdentityToItsQueueOwner() {
+        let chat = FakeChat(acceptance: .queuedBehindTurn)
+
+        let outcome = SessionMessageDelivery.deliver(
+            ConversationPrompt(text: "Review the screenshots"),
+            chat: chat,
+            terminal: nil,
+            attachmentIDs: ["shot-one", "shot-two"]
+        )
+
+        XCTAssertEqual(outcome, .queuedBehindTurn)
+        XCTAssertEqual(chat.acceptedAttachmentIDs, [["shot-one", "shot-two"]])
     }
 
     func testADeadChatIsNeverHandedTheMessage() {

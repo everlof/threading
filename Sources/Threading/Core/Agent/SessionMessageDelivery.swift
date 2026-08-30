@@ -40,12 +40,15 @@ protocol AppMessageReceiving: AnyObject {
     var isRunning: Bool { get }
 
     /// `origin` is what a held outbox reads back off the row it is about to hand over: a curfew's
-    /// wrap-up drains while the session is held and nothing else does. It is a requirement rather
-    /// than a defaulted parameter because Swift does not allow default arguments on protocol
-    /// requirements; the convenience below is what keeps every ordinary caller unchanged.
+    /// wrap-up drains while the session is held and nothing else does. `attachmentIDs` preserve
+    /// the exact attachment-to-queue-item relationship even when several turns are waiting.
+    /// They are requirements rather than defaulted parameters because Swift does not allow
+    /// default arguments on protocol requirements; the conveniences below keep ordinary callers
+    /// unchanged.
     func acceptAppMessage(
         _ prompt: ConversationPrompt,
-        origin: ConversationOutbox.Item.Origin
+        origin: ConversationOutbox.Item.Origin,
+        attachmentIDs: [String]
     ) -> AppMessageAcceptance
 
     func steerAppMessage(_ prompt: ConversationPrompt) -> AppMessageSteerResult
@@ -54,7 +57,14 @@ protocol AppMessageReceiving: AnyObject {
 extension AppMessageReceiving {
     /// Almost every app-composed message is an ordinary one, delivered on the user's behalf.
     func acceptAppMessage(_ prompt: ConversationPrompt) -> AppMessageAcceptance {
-        acceptAppMessage(prompt, origin: .user)
+        acceptAppMessage(prompt, origin: .user, attachmentIDs: [])
+    }
+
+    func acceptAppMessage(
+        _ prompt: ConversationPrompt,
+        origin: ConversationOutbox.Item.Origin
+    ) -> AppMessageAcceptance {
+        acceptAppMessage(prompt, origin: origin, attachmentIDs: [])
     }
 }
 
@@ -210,6 +220,7 @@ enum SessionMessageDelivery {
         _ prompt: ConversationPrompt,
         to sessionID: SessionID,
         origin: ConversationOutbox.Item.Origin = .user,
+        attachmentIDs: [String] = [],
         completion: @escaping @MainActor (Outcome) -> Void
     ) {
         guard ProjectStore.shared.session(withID: sessionID)?.pendingCheckoutMove == nil,
@@ -222,6 +233,7 @@ enum SessionMessageDelivery {
             chat: AgentRuntime.shared.conversationRuntimeSurface(for: sessionID),
             terminal: liveTerminalTarget(for: sessionID),
             origin: origin,
+            attachmentIDs: attachmentIDs,
             completion: completion
         )
     }
@@ -232,9 +244,16 @@ enum SessionMessageDelivery {
         chat: AppMessageReceiving?,
         terminal: TerminalTarget?,
         origin: ConversationOutbox.Item.Origin = .user,
+        attachmentIDs: [String] = [],
         completion: @escaping @MainActor (Outcome) -> Void
     ) {
-        let outcome = deliver(prompt, chat: chat, terminal: terminal, origin: origin)
+        let outcome = deliver(
+            prompt,
+            chat: chat,
+            terminal: terminal,
+            origin: origin,
+            attachmentIDs: attachmentIDs
+        )
         let viaTerminal = !(chat?.isRunning ?? false)
         guard outcome == .sentNow, viaTerminal, let terminal else {
             completion(outcome)
@@ -253,7 +272,8 @@ enum SessionMessageDelivery {
     static func deliver(
         _ prompt: ConversationPrompt,
         to sessionID: SessionID,
-        origin: ConversationOutbox.Item.Origin = .user
+        origin: ConversationOutbox.Item.Origin = .user,
+        attachmentIDs: [String] = []
     ) -> Outcome {
         guard ProjectStore.shared.session(withID: sessionID)?.pendingCheckoutMove == nil,
               !SessionCheckoutCoordinator.shared.isHoldingInput(sessionID: sessionID) else {
@@ -263,7 +283,8 @@ enum SessionMessageDelivery {
             prompt,
             chat: AgentRuntime.shared.conversationRuntimeSurface(for: sessionID),
             terminal: liveTerminalTarget(for: sessionID),
-            origin: origin
+            origin: origin,
+            attachmentIDs: attachmentIDs
         )
     }
 
@@ -276,10 +297,15 @@ enum SessionMessageDelivery {
         _ prompt: ConversationPrompt,
         chat: AppMessageReceiving?,
         terminal: TerminalTarget?,
-        origin: ConversationOutbox.Item.Origin = .user
+        origin: ConversationOutbox.Item.Origin = .user,
+        attachmentIDs: [String] = []
     ) -> Outcome {
         if let chat, chat.isRunning {
-            switch chat.acceptAppMessage(prompt, origin: origin) {
+            switch chat.acceptAppMessage(
+                prompt,
+                origin: origin,
+                attachmentIDs: attachmentIDs
+            ) {
             case .handedToTurn: return .sentNow
             case .queuedBehindTurn: return .queuedBehindTurn
             case .refused: return .notTaken
