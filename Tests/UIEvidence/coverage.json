@@ -180,8 +180,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Extension workspace navigator shell",
-      "description": "Focused materialized and fact-pipeline extension navigators in the real main-window split shell, including the public Activity Inbox and T3 Sidebar examples with host-calendar sections, project subtitles, pinned sections, working state, and conditional host-owned row intents, plus the permanent route back to Native.",
-      "states": ["Focused materialized navigator", "Fact-pipeline navigator", "Activity Inbox date sections", "T3 pinned and session sections", "T3 project subtitles", "Working session indicator", "Zero-result pipeline search", "Declared pipeline options", "Hover-revealed row intents", "Conditional Pin and Unpin", "Keyboard-focused row intent", "Activity sort menu", "Return-to-Native menu"],
+      "description": "Focused materialized and fact-pipeline extension navigators in the real main-window split shell, including live registered-fact Group by and Sort by controls, a retained unavailable provider choice, the public Activity Inbox and T3 Sidebar examples with host-calendar sections, project subtitles, pinned sections, working state, and conditional host-owned row intents, plus the permanent route back to Native.",
+      "states": ["Focused materialized navigator", "Fact-pipeline navigator", "Registered-fact Group by and Sort by", "Registered-fact submenu selection", "Unavailable retained fact selection", "Activity Inbox date sections", "T3 pinned and session sections", "T3 project subtitles", "Working session indicator", "Zero-result pipeline search", "Declared pipeline options", "Hover-revealed row intents", "Conditional Pin and Unpin", "Keyboard-focused row intent", "Activity sort menu", "Return-to-Native menu"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
