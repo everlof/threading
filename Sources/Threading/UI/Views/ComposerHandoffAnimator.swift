@@ -54,13 +54,24 @@ final class ComposerHandoffAnimator {
 
     // MARK: - Public Methods
 
-    /// Captures the composer and the box inside it, in the host's coordinates.
+    /// Captures the composer around the box, and the box itself, in the host's coordinates.
     ///
     /// Called while the composer is still the visible surface: both the frame and the picture
     /// are gone the moment the conversation takes the pane.
     static func snapshot(composer: NSView, box: NSView, in host: NSView) -> Snapshot? {
-        guard let composerImage = image(of: composer),
+        guard box !== composer,
+              box.isDescendant(of: composer),
               let boxImage = image(of: box) else { return nil }
+
+        // The box travels as its own ghost. Remove it only from the parent picture so the
+        // stationary ghost cannot leave a second copy (including its usage/footer row) behind.
+        // Alpha does not participate in layout, unlike hiding a view in a stack, and restoring
+        // the exact value keeps this capture boundary observationally invisible to its caller.
+        let boxAlpha = box.alphaValue
+        box.alphaValue = 0
+        defer { box.alphaValue = boxAlpha }
+
+        guard let composerImage = image(of: composer) else { return nil }
 
         return Snapshot(
             composerImage: composerImage,

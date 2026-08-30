@@ -181,6 +181,45 @@ final class ComposerHandoffTests: XCTestCase {
         )
     }
 
+    /// The box is the object the handoff carries, so the fading picture behind it must contain
+    /// the composer *around* the box rather than a second baked-in copy of the box itself. The
+    /// old snapshot captured the whole hierarchy and then captured the box again; as the second
+    /// image travelled, the first stayed behind with its usage/footer row visible.
+    func testSnapshotCarriesExactlyOneCopyOfThePromptBox() throws {
+        let stage = makeStage()
+        let composerColor = NSColor(srgbRed: 0.08, green: 0.18, blue: 0.82, alpha: 1)
+        let boxColor = NSColor(srgbRed: 0.86, green: 0.12, blue: 0.08, alpha: 1)
+        stage.composer.wantsLayer = true
+        stage.composer.layer?.backgroundColor = composerColor.cgColor
+        stage.sourceBox.wantsLayer = true
+        stage.sourceBox.layer?.backgroundColor = boxColor.cgColor
+        stage.sourceBox.alphaValue = 0.73
+
+        let snapshot = try handoffSnapshot(stage)
+        let composerPixel = try pixel(
+            in: snapshot.composerImage,
+            at: NSPoint(x: stage.sourceBox.frame.midX, y: stage.sourceBox.frame.midY),
+            pointSize: snapshot.composerFrame.size
+        )
+        let boxPixel = try pixel(
+            in: snapshot.boxImage,
+            at: NSPoint(x: stage.sourceBox.bounds.midX, y: stage.sourceBox.bounds.midY),
+            pointSize: snapshot.boxFrame.size
+        )
+
+        XCTAssertGreaterThan(
+            composerPixel.blueComponent,
+            composerPixel.redComponent,
+            "the fading composer picture still contains the prompt box"
+        )
+        XCTAssertGreaterThan(
+            boxPixel.redComponent,
+            boxPixel.blueComponent,
+            "the travelling picture lost the prompt box"
+        )
+        XCTAssertEqual(stage.sourceBox.alphaValue, 0.73, accuracy: 0.001)
+    }
+
     /// Something else taking the pane cancels the move. It lands on the same end state the
     /// completion would have reached, and reports it exactly once however late the animation's
     /// own completion arrives.
@@ -391,5 +430,16 @@ final class ComposerHandoffTests: XCTestCase {
 
     private func ghosts(in host: NSView) -> [NSImageView] {
         host.subviews.compactMap { $0 as? NSImageView }
+    }
+
+    private func pixel(
+        in image: NSImage,
+        at point: NSPoint,
+        pointSize: NSSize
+    ) throws -> NSColor {
+        let bitmap = try XCTUnwrap(image.representations.first as? NSBitmapImageRep)
+        let x = Int(point.x * CGFloat(bitmap.pixelsWide) / pointSize.width)
+        let y = Int(point.y * CGFloat(bitmap.pixelsHigh) / pointSize.height)
+        return try XCTUnwrap(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB))
     }
 }
