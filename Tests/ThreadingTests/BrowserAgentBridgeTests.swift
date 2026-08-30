@@ -601,9 +601,33 @@ final class BrowserAgentBridgeTests: XCTestCase {
         XCTAssertNil(screenshot.fullPage)
         XCTAssertEqual(screenshot.show, false)
         XCTAssertEqual(screenshot.includeImage, true)
+        XCTAssertFalse(screenshot.shouldPresentToUser)
+        XCTAssertFalse(
+            BrowserScreenshotArguments(
+                fullPage: nil,
+                ref: nil,
+                selector: nil,
+                show: nil,
+                includeImage: nil
+            ).shouldPresentToUser,
+            "an omitted show flag must leave the user's live browser selected"
+        )
+        XCTAssertTrue(
+            BrowserScreenshotArguments(
+                fullPage: nil,
+                ref: nil,
+                selector: nil,
+                show: true,
+                includeImage: nil
+            ).shouldPresentToUser
+        )
 
         let screenshotDefinition = try XCTUnwrap(
             MCPTools.definitions.first { $0.name == MCPTools.browserScreenshot }
+        )
+        XCTAssertTrue(
+            screenshotDefinition.description.contains("without changing the panel tab"),
+            screenshotDefinition.description
         )
         let screenshotSchemaData = try JSONEncoder().encode(screenshotDefinition)
         let screenshotSchema = try XCTUnwrap(
@@ -1377,6 +1401,31 @@ final class BrowserAgentBridgeTests: XCTestCase {
                 _ = pane.closeTab(id: tab.id, for: sessionID)
             }
         }
+
+        browser.recordAgentBridgePhase(
+            "javascript.dispatch",
+            startedAt: Date(),
+            outcome: "timeout",
+            detail: "limit 15s"
+        )
+        browser.recordAgentNetworkTrace(BrowserNetworkEntry(
+            method: "GET",
+            url: "https://example.test/not-recorded",
+            kind: "fetch",
+            status: 200,
+            duration: 4,
+            error: nil,
+            timestamp: Date()
+        ))
+        let prearmedDecoder = JSONDecoder()
+        prearmedDecoder.dateDecodingStrategy = .iso8601
+        let prearmedArtifact = try prearmedDecoder.decode(
+            BrowserTraceArtifact.self,
+            from: browser.agentTraceArtifactData()
+        )
+        XCTAssertFalse(prearmedArtifact.recording)
+        XCTAssertEqual(prearmedArtifact.events.map(\.category), ["bridge"])
+        XCTAssertEqual(prearmedArtifact.events.first?.outcome, "timeout")
 
         let started = call(
             coordinator,
@@ -2678,8 +2727,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         let resized = await browser.agentSetResponsiveViewport(width: 320, height: 240)
         XCTAssertTrue(resized.ok, resized.message)
         try await Task.sleep(nanoseconds: 50_000_000)
-        let capturedBaseline = await browser.screenshot(fullPage: false)
-        let baselineCapture = try XCTUnwrap(capturedBaseline)
+        let baselineCapture = try await browser.screenshot(fullPage: false)
         let baselineURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-visual-\(UUID().uuidString).png")
         try baselineCapture.data.write(to: baselineURL, options: .atomic)
@@ -2733,6 +2781,91 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: actualPath))
         XCTAssertTrue(FileManager.default.fileExists(atPath: diffPath))
+    }
+
+    func testScreenshotReturnsPixelsQuietlyUnlessPresentationIsExplicit() async throws {
+        let server = try BrowserLoopbackHTTPServer(pages: [
+            "/capture": """
+                <!doctype html><title>Capture fixture</title>
+                <main style="width:320px;height:240px;background:#369">Capture me</main>
+                """
+        ])
+        defer { server.stop() }
+
+        let sessionID = SessionID()
+        let pane = DisplayPaneController()
+        pane.showSession(sessionID)
+        let coordinator = AgentToolCoordinator(
+            displayPaneController: pane,
+            visibleSessionID: { sessionID },
+            setPaneVisible: { _ in },
+            windowProvider: { nil },
+            browserAccessDecisionProvider: { _, _, decide in decide(.allowOnce) }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 700, height: 520),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = pane
+        window.orderFront(nil)
+        defer {
+            window.close()
+            for tab in pane.tabs(for: sessionID) {
+                _ = pane.closeTab(id: tab.id, for: sessionID)
+            }
+        }
+
+        let browser = pane.activateBrowser(for: sessionID)
+        let loaded = await performNavigation(
+            browser,
+            to: server.url(host: "localhost", path: "/capture").absoluteString
+        )
+        XCTAssertTrue(loaded.0, loaded.1)
+        let browserTabID = try XCTUnwrap(pane.activeTabID(for: sessionID))
+        let originalTabCount = pane.tabs(for: sessionID).count
+
+        let quiet = await call(
+            coordinator,
+            .browserScreenshot(.init(
+                fullPage: nil,
+                ref: nil,
+                selector: nil,
+                show: nil,
+                includeImage: nil
+            )),
+            sessionID: sessionID
+        )
+        XCTAssertFalse(quiet.isError, quiet.text)
+        XCTAssertEqual(pane.tabs(for: sessionID).count, originalTabCount)
+        XCTAssertEqual(pane.activeTabID(for: sessionID), browserTabID)
+        XCTAssertTrue(pane.currentBrowser === browser)
+        XCTAssertFalse(quiet.text.contains("user can also see"), quiet.text)
+        let quietWire = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(quiet))
+                as? [String: Any]
+        )
+        let quietContent = try XCTUnwrap(quietWire["content"] as? [[String: Any]])
+        XCTAssertEqual(quietContent.compactMap { $0["type"] as? String }, ["text", "image"])
+
+        let shown = await call(
+            coordinator,
+            .browserScreenshot(.init(
+                fullPage: nil,
+                ref: nil,
+                selector: nil,
+                show: true,
+                includeImage: false
+            )),
+            sessionID: sessionID
+        )
+        XCTAssertFalse(shown.isError, shown.text)
+        XCTAssertEqual(pane.tabs(for: sessionID).count, originalTabCount + 1)
+        XCTAssertNotEqual(pane.activeTabID(for: sessionID), browserTabID)
+        XCTAssertNil(pane.currentBrowser)
+        XCTAssertTrue(shown.text.contains("user can also see"), shown.text)
     }
 
     func testControlledUploadAndDownloadUseNativeDecisionSeams() async throws {
@@ -3257,6 +3390,226 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             snapshotAfter.nodes.compactMap(\.ref),
             "Hovering must not renumber the refs the agent is working against"
         )
+    }
+
+    func testSnapshotPrioritizesModalAndActionViewportWithinBoundedWork() async throws {
+        let schemeHandler = BrowserFixtureSchemeHandler(pages: [
+            "/snapshot-priority": #"""
+                <!doctype html>
+                <html>
+                  <head>
+                    <title>Snapshot priority</title>
+                    <style>
+                      body { font: 16px sans-serif; margin: 0; }
+                      button { display: block; height: 32px; margin: 4px; }
+                      #modal {
+                        background: white; inset: 80px; padding: 20px; position: fixed;
+                        z-index: 10;
+                      }
+                      #spacer { height: 1800px; }
+                    </style>
+                  </head>
+                  <body>
+                    <main id="background">
+                      <button>Background one</button><button>Background two</button>
+                      <button>Background three</button><button>Background four</button>
+                    </main>
+                    <div id="spacer"></div>
+                    <button id="bottom-action">Bottom action</button>
+                    <div id="portal" style="height:0; position:relative">
+                      <div id="modal" role="dialog" aria-modal="true" aria-label="New app">
+                        <h2>Create app</h2>
+                        <button id="modal-create">Create</button>
+                      </div>
+                    </div>
+                  </body>
+                </html>
+                """#
+        ])
+        let browser = BrowserViewController(
+            urlSchemeHandlers: ["threading-test": schemeHandler]
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = browser
+        window.setContentSize(NSSize(width: 640, height: 480))
+        browser.view.frame = window.contentView?.bounds
+            ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.orderFront(nil)
+        defer { window.close() }
+        browser.view.layoutSubtreeIfNeeded()
+
+        let navigation = await performNavigation(
+            browser,
+            to: "threading-test://fixture/snapshot-priority"
+        )
+        XCTAssertTrue(navigation.0, navigation.1)
+
+        let modal = try await browser.agentSnapshot(maximumNodes: 3)
+        XCTAssertEqual(modal.nodes.first?.role, "dialog", modal.agentText)
+        XCTAssertEqual(modal.nodes.first?.name, "New app", modal.agentText)
+        XCTAssertTrue(modal.nodes.contains { $0.name == "Create app" }, modal.agentText)
+        XCTAssertTrue(modal.nodes.contains { $0.name == "Create" }, modal.agentText)
+        XCTAssertFalse(modal.nodes.contains { $0.name == "Background one" }, modal.agentText)
+
+        _ = try await browser.evaluate(
+            "document.querySelector('#modal').remove(); window.scrollTo(0, document.body.scrollHeight); true"
+        )
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        let documentOrder = try await browser.agentSnapshot(maximumNodes: 2)
+        XCTAssertTrue(
+            documentOrder.nodes.contains { $0.name == "Background one" },
+            documentOrder.agentText
+        )
+        XCTAssertFalse(
+            documentOrder.nodes.contains { $0.name == "Bottom action" },
+            documentOrder.agentText
+        )
+
+        let viewport = try await browser.agentSnapshot(
+            maximumNodes: 8,
+            viewportOnly: true
+        )
+        XCTAssertTrue(viewport.nodes.contains { $0.name == "Bottom action" }, viewport.agentText)
+        XCTAssertFalse(
+            viewport.nodes.contains { $0.name == "Background one" },
+            viewport.agentText
+        )
+
+        _ = try await browser.evaluate(
+            """
+            document.body.replaceChildren();
+            const fragment = document.createDocumentFragment();
+            for (let index = 0; index < 4000; index += 1) {
+              const wrapper = document.createElement('div');
+              wrapper.style.height = '1px';
+              const empty = document.createElement('span');
+              wrapper.appendChild(empty);
+              fragment.appendChild(wrapper);
+            }
+            const late = document.createElement('button');
+            late.textContent = 'Unbounded late action';
+            fragment.appendChild(late);
+            document.body.appendChild(fragment);
+            true
+            """
+        )
+        let bounded = try await browser.agentSnapshot(maximumNodes: 30)
+        XCTAssertTrue(bounded.truncated, bounded.agentText)
+        XCTAssertLessThanOrEqual(bounded.visitedElements ?? .max, 600)
+        XCTAssertNotNil(bounded.truncationReason)
+        XCTAssertFalse(
+            bounded.nodes.contains { $0.name == "Unbounded late action" },
+            bounded.agentText
+        )
+    }
+
+    func testAgentSelectHandlesARIAComboboxAndNativeClickRoutesToSelect() async throws {
+        let schemeHandler = BrowserFixtureSchemeHandler(pages: [
+            "/aria-select": #"""
+                <!doctype html>
+                <html><head><title>ARIA select</title>
+                  <style>
+                    body { font: 16px sans-serif; padding: 20px; }
+                    input, select, [role=option] { display:block; margin:8px; padding:8px; }
+                    [role=option] { border:1px solid; width:180px; }
+                  </style>
+                </head><body>
+                  <label for="native-country">Native country</label>
+                  <select id="native-country"><option>Sweden</option></select>
+                  <label id="team-label" for="team-input">Team</label>
+                  <input id="team-input" role="combobox" aria-labelledby="team-label"
+                    aria-controls="team-options" aria-expanded="false">
+                  <div id="team-options" role="listbox" hidden>
+                    <div id="team-input-option-0" role="option" data-value="se">Sweden</div>
+                    <div id="team-input-option-1" role="option" data-value="us">United States</div>
+                  </div>
+                  <script>
+                    const input = document.querySelector('#team-input');
+                    const list = document.querySelector('#team-options');
+                    function open() { list.hidden = false; input.setAttribute('aria-expanded', 'true'); }
+                    input.addEventListener('click', open);
+                    input.addEventListener('input', open);
+                    for (const option of list.children) {
+                      option.addEventListener('click', () => {
+                        input.value = option.textContent;
+                        input.dataset.selected = option.dataset.value;
+                        input.setAttribute('aria-expanded', 'false');
+                        list.hidden = true;
+                      });
+                    }
+                  </script>
+                </body></html>
+                """#
+        ])
+        let browser = BrowserViewController(
+            urlSchemeHandlers: ["threading-test": schemeHandler]
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentViewController = browser
+        window.setContentSize(NSSize(width: 640, height: 480))
+        browser.view.frame = window.contentView?.bounds
+            ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.orderFront(nil)
+        defer { window.close() }
+        browser.view.layoutSubtreeIfNeeded()
+
+        let navigation = await performNavigation(
+            browser,
+            to: "threading-test://fixture/aria-select"
+        )
+        XCTAssertTrue(navigation.0, navigation.1)
+        let snapshot = try await browser.agentSnapshot()
+        let native = try XCTUnwrap(
+            snapshot.nodes.first {
+                $0.role == "combobox" && $0.name == "Native country" && $0.ref != nil
+            },
+            snapshot.agentText
+        )
+        let nativeClick = try await browser.agentClick(
+            ref: try XCTUnwrap(native.ref),
+            selector: nil
+        )
+        XCTAssertFalse(nativeClick.ok)
+        XCTAssertTrue(nativeClick.message.contains("browser_select"), nativeClick.message)
+
+        let combo = try XCTUnwrap(
+            snapshot.nodes.first { $0.role == "combobox" && $0.name == "Team" },
+            snapshot.agentText
+        )
+        let comboRef = try XCTUnwrap(combo.ref)
+        let selected = try await browser.agentSelect(
+            ref: comboRef,
+            selector: nil,
+            value: nil,
+            label: "Sweden"
+        )
+        XCTAssertTrue(selected.ok, selected.message)
+        let selectedValue = try await browser.evaluate(
+            "document.querySelector('#team-input').dataset.selected"
+        ) as? String
+        XCTAssertEqual(selectedValue, "se")
+
+        let missing = try await browser.agentSelect(
+            ref: comboRef,
+            selector: nil,
+            value: nil,
+            label: "Norway"
+        )
+        XCTAssertFalse(missing.ok)
+        XCTAssertTrue(missing.message.contains("Available options"), missing.message)
+        XCTAssertTrue(missing.message.contains("Sweden"), missing.message)
     }
 
     func testSelectorsAreStrictAcrossDocumentShadowRootAndFrames() async throws {
@@ -4188,8 +4541,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
             responsiveMarker,
             "\"narrow\""
         )
-        let responsiveScreenshot = await browser.screenshot()
-        let responsiveCapture = try XCTUnwrap(responsiveScreenshot)
+        let responsiveCapture = try await browser.screenshot()
         XCTAssertEqual(
             responsiveCapture.width,
             responsive.viewport.width,
@@ -5197,8 +5549,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(frameColor.greenComponent, swatchColor.greenComponent)
         XCTAssertGreaterThan(frameColor.blueComponent, swatchColor.blueComponent)
 
-        let optionalCapture = await browser.screenshot(fullPage: true)
-        let capture = try XCTUnwrap(optionalCapture)
+        let capture = try await browser.screenshot(fullPage: true)
         XCTAssertGreaterThan(capture.data.count, 100)
         XCTAssertGreaterThan(capture.height, Int(browser.webView.bounds.height))
 

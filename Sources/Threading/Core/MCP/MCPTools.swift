@@ -618,6 +618,10 @@ struct BrowserScreenshotArguments: Codable, Sendable {
   let includeImage: Bool?
   var locator: BrowserSemanticLocator? = nil
 
+  /// Capturing pixels and presenting a persistent panel tab are separate actions. An omitted
+  /// value is deliberately quiet so ordinary browser inspection does not interrupt the user.
+  var shouldPresentToUser: Bool { show == true }
+
   private enum CodingKeys: String, CodingKey {
     case fullPage = "full_page"
     case ref, selector, locator, show
@@ -3568,7 +3572,10 @@ enum MCPTools {
       description: """
         Record and export a bounded, metadata-only trace for the active browser tab. The \
         trace contains agent tool names, success/error outcomes, durations, navigation \
-        phases, and method/status/kind request metadata. It never records URLs, selectors, \
+        phases, and method/status/kind request metadata. JavaScript-bridge and screenshot \
+        phase timings are retained in the bounded ring even when recording was not started, \
+        so export can diagnose the call that just stalled; start enables the broader network \
+        and navigation trace. It never records URLs, selectors, \
         locator names, request or response bodies, headers, cookies, credentials, typed \
         values, page text, console text, or screenshots. \
         Traces are runtime-only until explicitly exported to a rolling JSON artifact.
@@ -4564,7 +4571,7 @@ enum MCPTools {
         openWorldHint: true
       ),
       title: "Select an option",
-      detail: "Choose an exact visible label or submitted value from a select control.",
+      detail: "Choose an exact option from a native select or ARIA combobox/listbox.",
       symbol: "chevron.up.chevron.down",
       decodeArguments: { container in
         try container.decodeIfPresent(BrowserSelectArguments.self, forKey: .arguments)
@@ -4582,17 +4589,18 @@ enum MCPTools {
         handler.browserSelect(arguments, for: sessionID, completion: completion)
       },
       description: """
-        Select one option in a native select control, preferably by a browser_snapshot \
-        ref. Match exactly one option by its submitted value or visible label; available \
-        options are shown in the control's snapshot states. This dispatches input and \
-        change events without explicitly submitting a surrounding form, then returns a \
-        fresh page snapshot.
+        Select one option in a native select, ARIA combobox, or ARIA listbox, preferably \
+        by a browser_snapshot ref. Match exactly one option by its submitted value or \
+        visible label. Native options are shown in the control's snapshot states; an ARIA \
+        control is opened and searched within its bounded current option popup, whose \
+        labels are returned when no exact match exists. This does not explicitly submit a \
+        surrounding form, then returns a fresh page snapshot.
         """,
       inputSchema: MCPInputSchema(
         properties: [
           "ref": MCPPropertySchema(
             type: .string,
-            description: "A select-control ref from browser_snapshot."
+            description: "A select, combobox, or listbox ref from browser_snapshot."
           ),
           "selector": MCPPropertySchema(
             type: .string,
@@ -4603,12 +4611,15 @@ enum MCPTools {
             type: .string,
             description: """
               Exact option value to select. Provide value or label, not both. An \
-              empty value is valid.
+              empty value is valid. ARIA options support value where they expose one.
               """
           ),
           "label": MCPPropertySchema(
             type: .string,
-            description: "Exact visible option label. Provide label or value, not both."
+            description: """
+              Exact visible option label. Provide label or value, not both. On an ARIA \
+              control, a failed exact match returns the bounded visible option labels.
+              """
           ),
         ],
         required: []
@@ -5008,11 +5019,12 @@ enum MCPTools {
       },
       description: """
         Capture the current browser page as PNG. By default the image is returned to you \
-        for visual inspection and shown to the user as a persistent image tab. It can \
+        for visual inspection without changing the panel tab the user is watching. It can \
         capture the viewport, the full document, or one current snapshot element. Prefer \
         a stable ref when isolating an element; the target is scrolled into view and the \
         PNG stays in the same CSS-pixel coordinate scale as browser_click. Page content \
-        outside the target is omitted.
+        outside the target is omitted. Set show=true only when the user asked to preserve \
+        or inspect the screenshot itself.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -5041,8 +5053,9 @@ enum MCPTools {
           "show": MCPPropertySchema(
             type: .boolean,
             description: """
-              Preserve the capture as a user-visible image tab. Defaults to true for \
-              backward compatibility.
+              Preserve the capture as a user-visible image tab. Defaults to false so \
+              internal visual inspection does not replace the live browser the user is \
+              watching.
               """
           ),
           "include_image": MCPPropertySchema(

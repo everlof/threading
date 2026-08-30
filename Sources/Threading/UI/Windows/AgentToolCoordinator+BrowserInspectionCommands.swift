@@ -262,18 +262,14 @@ extension AgentToolCoordinator {
                         capture = elementCapture
                         clippedTarget = result.target.clipped
                     } else {
-                        guard let pageCapture = await browser.screenshot(
+                        capture = try await browser.screenshot(
                             fullPage: arguments.fullPage ?? false
-                        ) else {
-                            completion(.failure("Could not capture the page."))
-                            return
-                        }
-                        capture = pageCapture
+                        )
                         clippedTarget = false
                     }
                 } catch {
                     completion(.failure(
-                        "Could not resolve the screenshot target: \(error.localizedDescription)"
+                        "Screenshot failed: \(error.localizedDescription)"
                     ))
                     return
                 }
@@ -316,8 +312,7 @@ extension AgentToolCoordinator {
                     capture.data,
                     for: sessionID
                 )
-                let show = arguments.show ?? true
-                if show {
+                if arguments.shouldPresentToUser {
                     _ = self.present(
                         DisplayContent(
                             body: .image(image, url: cachedURL ?? url),
@@ -339,7 +334,7 @@ extension AgentToolCoordinator {
                 if let cachedURL {
                     text += "\nSaved at: \(cachedURL.path)"
                 }
-                if show {
+                if arguments.shouldPresentToUser {
                     text += "\nThe user can also see it in the display panel."
                 }
                 completion(.screenshot(
@@ -564,12 +559,7 @@ extension AgentToolCoordinator {
     ) async -> MCPToolResult {
         guard outcome.ok else { return .failure(outcome.message) }
 
-        // Let synchronous application handlers and a resulting top-level navigation settle. A
-        // streaming page may never report idle, so this wait is deliberately bounded.
-        let deadline = Date().addingTimeInterval(5)
-        repeat {
-            try? await Task.sleep(nanoseconds: 120_000_000)
-        } while browser.webView.isLoading && Date() < deadline
+        await browser.settleAfterAgentAction()
 
         guard browserResolver.browser(for: sessionID) === browser else {
             return .failure(
@@ -583,11 +573,13 @@ extension AgentToolCoordinator {
                 "\(outcome.message), but the browser page closed before its result was read."
             )
         }
+        let authorizationStartedAt = Date()
         let allowed = await authorizeBrowserAccess(
             to: url,
             for: sessionID,
             purpose: "read after navigating to"
         )
+        browser.recordAgentAuthorizationPhase(startedAt: authorizationStartedAt, allowed: allowed)
         guard allowed else {
             return .failure(
                 "\(outcome.message), but the page moved to \(url.host ?? url.absoluteString) "
@@ -607,8 +599,13 @@ extension AgentToolCoordinator {
             )
         }
 
+        let snapshotStartedAt = Date()
         do {
-            let snapshot = try await browser.agentSnapshot()
+            // An action result answers "what changed where I am now", not "what appears first
+            // in document order". The explicit browser_snapshot tool remains the full semantic
+            // document view and can be scoped when the caller wants another region.
+            let snapshot = try await browser.agentSnapshot(viewportOnly: true)
+            browser.recordAgentActionSnapshotPhase(startedAt: snapshotStartedAt, snapshot: snapshot)
             guard browser.agentPageIdentity == authorizedPage,
                   browserResolver.browser(for: sessionID) === browser else {
                 return .failure(
@@ -624,6 +621,7 @@ extension AgentToolCoordinator {
                 outcome.message + "\n\n" + snapshot.agentText
             ))
         } catch {
+            browser.recordAgentActionSnapshotPhase(startedAt: snapshotStartedAt, snapshot: nil)
             guard browser.agentPageIdentity == authorizedPage,
                   browserResolver.browser(for: sessionID) === browser else {
                 return .failure(
@@ -635,6 +633,8 @@ extension AgentToolCoordinator {
                 outcome.message
                     + "\nNow at: "
                     + BrowserURLRedactor.redact(authorizedPage.url)
+                    + "\nThe action completed, but its semantic update failed: "
+                    + error.localizedDescription
             )
         }
     }
