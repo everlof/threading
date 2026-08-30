@@ -58,6 +58,31 @@ class WorkspaceNavigatorSchemaTests(unittest.TestCase):
     def test_shipped_activity_manifest_resolves_and_validates(self) -> None:
         self.assert_valid(self.manifest_validator, self.activity_manifest)
 
+    def test_pipeline_intent_vocabulary_is_bounded_and_requires_a_pipeline(self) -> None:
+        manifest = copy.deepcopy(self.activity_manifest)
+        navigator = manifest["workspaceNavigators"][0]
+        navigator["intents"] = ["pin", "archive"]
+        navigator["pipeline"]["output"]["rowTemplate"]["children"].extend(
+            [
+                {"type": "intent", "intent": "pin"},
+                {"type": "intent", "intent": "archive"},
+            ]
+        )
+        self.assert_valid(self.manifest_validator, manifest)
+
+        unknown = copy.deepcopy(manifest)
+        unknown["workspaceNavigators"][0]["intents"] = ["delete"]
+        self.assert_invalid(self.manifest_validator, unknown)
+
+        duplicate = copy.deepcopy(manifest)
+        duplicate["workspaceNavigators"][0]["intents"] = ["pin", "pin"]
+        self.assert_invalid(self.manifest_validator, duplicate)
+
+        legacy = copy.deepcopy(manifest)
+        legacy_navigator = legacy["workspaceNavigators"][0]
+        legacy_navigator.pop("pipeline")
+        self.assert_invalid(self.manifest_validator, legacy)
+
     def test_manifest_rejects_whitespace_navigator_title_and_v1_status(self) -> None:
         title = copy.deepcopy(self.activity_manifest)
         title["workspaceNavigators"][0]["title"] = " \n\t"

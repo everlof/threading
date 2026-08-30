@@ -1,6 +1,47 @@
 import Foundation
 import ThreadingExtensionKit
 
+/// The static host mutations one named navigator may place in its rows.
+///
+/// This is disclosure data, not runtime authority: manifests remain the enforced source of
+/// truth. Keeping one shared projection makes install, update and installed Settings describe
+/// the same bounded verbs in the same order.
+struct ExtensionNavigatorIntentDisclosure: Equatable, Sendable {
+    let navigatorID: String
+    let navigatorTitle: String
+    let intents: [ExtensionWorkspaceNavigatorIntent]
+
+    init(navigator: ExtensionWorkspaceNavigator) {
+        navigatorID = navigator.id
+        navigatorTitle = navigator.title
+        intents = navigator.intents.sorted { $0.rawValue < $1.rawValue }
+    }
+
+    static func disclosures(
+        in navigators: [ExtensionWorkspaceNavigator]
+    ) -> [ExtensionNavigatorIntentDisclosure] {
+        navigators
+            .filter { !$0.intents.isEmpty }
+            .map(Self.init)
+            .sorted { $0.navigatorID < $1.navigatorID }
+    }
+
+    var presentation: String {
+        "\(navigatorTitle) [\(navigatorID)]: "
+            + intents.map(\.presentationName).joined(separator: ", ")
+    }
+}
+
+extension ExtensionWorkspaceNavigatorIntent {
+    var presentationName: String {
+        switch self {
+        case .pin: L10n.string("Pin")
+        case .unpin: L10n.string("Unpin")
+        case .archive: L10n.string("Archive")
+        }
+    }
+}
+
 /// The complete, user-facing decision made before a local package is copied into Threading.
 ///
 /// Keeping this apart from `NSAlert` makes the security boundary reviewable in tests and keeps
@@ -14,6 +55,7 @@ struct ExtensionInstallProposal: Equatable {
     let runtime: ExtensionRuntime
     let dataVersion: Int
     let capabilities: [String]
+    let navigatorIntents: [ExtensionNavigatorIntentDisclosure]
     let mcpTools: [ExtensionMCPTool]
     let networkGrants: [ExtensionNetworkGrant]
     let companions: [ExtensionCompanion]
@@ -35,6 +77,9 @@ struct ExtensionInstallProposal: Equatable {
         runtime = manifest.runtime
         dataVersion = manifest.dataVersion
         capabilities = manifest.capabilities.map(\.rawValue).sorted()
+        navigatorIntents = ExtensionNavigatorIntentDisclosure.disclosures(
+            in: manifest.workspaceNavigators
+        )
         mcpTools = manifest.mcpTools.sorted { $0.id < $1.id }
         networkGrants = manifest.networkGrants.sorted { $0.host < $1.host }
         companions = manifest.companions.sorted { $0.id < $1.id }
@@ -85,6 +130,15 @@ struct ExtensionInstallProposal: Equatable {
                     + "ids, and descriptions are shown below and are shared with Claude and "
                     + "Codex while the extension is enabled. Extension tools are not "
                     + "pre-approved; each call is subject to Threading's tool-permission policy."
+            )
+        }
+        if !navigatorIntents.isEmpty {
+            paragraphs.append(
+                "Its workspace navigators can ask Threading to perform these host-owned "
+                    + "actions on a session row:\n"
+                    + navigatorIntents.map { "  • \($0.presentation)" }.joined(separator: "\n")
+                    + "\nThe extension never receives the press, session identity, mutation "
+                    + "result, receipt or Undo."
             )
         }
         if !networkGrants.isEmpty {

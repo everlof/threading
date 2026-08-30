@@ -355,6 +355,15 @@
         {
           "type": "object",
           "additionalProperties": false,
+          "required": ["type", "intent"],
+          "properties": {
+            "type": { "const": "intent" },
+            "intent": { "enum": ["pin", "unpin", "archive"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
           "required": ["type", "predicate", "content"],
           "properties": {
             "type": { "const": "conditional" },

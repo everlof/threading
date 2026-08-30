@@ -133,11 +133,70 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         controller.selectWorkspaceNavigator(.native)
         XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
 
+        for fixture in [
+            AppearanceFixture(name: "system-light", theme: .system, appearance: .aqua),
+            AppearanceFixture(
+                name: "cyberpunk",
+                theme: AppThemeStyles.cyberpunk,
+                appearance: .darkAqua
+            ),
+            AppearanceFixture(
+                name: "swiss",
+                theme: AppThemeStyles.swissMinimalist,
+                appearance: .aqua
+            ),
+        ] {
+            AppThemePalette.set(fixture.theme)
+            content.appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+            controller.selectWorkspaceNavigator(.extensionNavigator(
+                extensionIdentifier: router.pipelineInventory.extensionIdentifier,
+                navigatorID: router.pipelineInventory.navigator.id
+            ))
+            let table = try waitForPipelineTable(in: content, rowCount: 8)
+            _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+            let template = try XCTUnwrap(
+                descendants(of: table).compactMap {
+                    $0 as? WorkspaceNavigatorPipelineTemplateView
+                }.first
+            )
+            template.setIntentControlsPresented(true)
+            AppThemeRefresh.repaint(content)
+            try suppressComposerUsage(in: content)
+            content.layoutSubtreeIfNeeded()
+            content.displayIfNeeded()
+            try write(
+                content,
+                named: "workspace-navigator-pipeline-\(fixture.name)-intents.png"
+            )
+
+            if fixture.name == "system-light" {
+                template.setIntentControlsPresented(false)
+                let pin = try XCTUnwrap(
+                    descendants(of: template).compactMap { $0 as? ThemedIconButton }.first {
+                        $0.accessibilityIdentifier() == "workspace.navigator.intent.pin"
+                    }
+                )
+                XCTAssertTrue(window.makeFirstResponder(pin))
+                content.displayIfNeeded()
+                try write(
+                    content,
+                    named: "workspace-navigator-pipeline-system-light-intent-focus.png"
+                )
+                XCTAssertTrue(window.makeFirstResponder(nil))
+            }
+            controller.selectWorkspaceNavigator(.native)
+        }
+
+        AppThemePalette.set(.system)
+        content.appearance = try XCTUnwrap(NSAppearance(named: .aqua))
         controller.selectWorkspaceNavigator(.extensionNavigator(
             extensionIdentifier: router.pipelineInventory.extensionIdentifier,
             navigatorID: router.pipelineInventory.navigator.id
         ))
         _ = try waitForPipelineTable(in: content, rowCount: 8)
+        // The preceding intent matrix ends in Swiss. Setting the palette changes the model;
+        // repainting is what returns every already-mounted composer control to System chrome.
+        AppThemeRefresh.repaint(content)
         let pipelineSearch = try XCTUnwrap(
             descendants(of: content).compactMap { $0 as? ThemedSearchField }.first
         )
@@ -437,6 +496,7 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
             title: "Focused work from shared session facts",
             root: .content(.text("Pipeline unavailable", role: .body)),
             options: [workingOnly],
+            intents: [.pin, .archive],
             pipeline: .init(
                 consumes: [
                     .init(key: title.key, requirement: .required),
@@ -483,6 +543,8 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
                                         .fact(branch, facet: .value, fallback: "No branch"),
                                         role: .compactDetail
                                     ),
+                                    .intent(.pin),
+                                    .intent(.archive),
                                 ]
                             ),
                         ]

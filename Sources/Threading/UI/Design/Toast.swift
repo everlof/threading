@@ -2130,6 +2130,17 @@ final class ToastPresenter {
         lane = nil
     }
 
+    /// Relinquishes every live request without spending its action. A swappable shell uses this
+    /// before detaching its pane so a receipt and its queued ways back can be dealt by the shell
+    /// taking over. The request order is the same one the current presenter would have shown.
+    func takeRequestsForTransfer() -> [ToastRequest] {
+        var requests: [ToastRequest] = []
+        if let current { requests.append(current.request) }
+        requests.append(contentsOf: pending)
+        invalidate()
+        return requests
+    }
+
     // MARK: - Private Methods
 
     private func show(_ request: ToastRequest) {

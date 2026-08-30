@@ -200,7 +200,7 @@ struct WorkspaceNavigatorPipelineCompiler {
                 binding,
                 role: degradeStatusBinding(role, missingEnhancements: missingEnhancements)
             )
-        case .activityIndicator, .divider, .spacer, .flexibleSpacer:
+        case .activityIndicator, .intent, .divider, .spacer, .flexibleSpacer:
             return node
         case let .conditional(predicate, content):
             guard predicate.referencedFactKeys.isDisjoint(with: missingEnhancements),
@@ -470,7 +470,7 @@ private struct RuntimePipelineValidator {
             for (index, child) in children.enumerated() {
                 validate(child, path: "\(path).children[\(index)]")
             }
-        case .activityIndicator, .divider, .spacer, .flexibleSpacer:
+        case .activityIndicator, .intent, .divider, .spacer, .flexibleSpacer:
             break
         }
     }
@@ -533,7 +533,7 @@ private extension ExtensionWorkspaceNavigatorTemplateNode {
             children.reduce(into: Set<ExtensionFactKey>()) {
                 $0.formUnion($1.referencedFactKeys)
             }
-        case .activityIndicator, .divider, .spacer, .flexibleSpacer:
+        case .activityIndicator, .intent, .divider, .spacer, .flexibleSpacer:
             []
         }
     }
@@ -558,7 +558,7 @@ private extension ExtensionWorkspaceNavigatorTemplateNode {
             case .literal: true
             case .fact(_, _, let fallback): fallback != nil
             }
-        case .activityIndicator, .divider, .spacer, .flexibleSpacer:
+        case .activityIndicator, .intent, .divider, .spacer, .flexibleSpacer:
             true
         case .conditional:
             false

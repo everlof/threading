@@ -28,6 +28,41 @@ struct MainWindowStartupPerformance: Sendable {
     var initialTitleNanoseconds: UInt64 = 0
 }
 
+/// Revalidates one semantic navigator press against live host state and maps it onto the same
+/// durable operations Native uses. Kept as a value seam so every refusal can be exercised
+/// without constructing the application's full window graph.
+@MainActor
+struct WorkspaceNavigatorIntentDispatcher {
+    let projectStore: ProjectStore
+    let hasScheduledStart: (SessionID) -> Bool
+    let archive: (SessionID) -> Bool
+
+    func perform(
+        _ intent: ExtensionWorkspaceNavigatorIntent,
+        sessionID: SessionID
+    ) -> WorkspaceNavigatorIntentDispatchResult {
+        guard let session = projectStore.session(withID: sessionID),
+              !session.isArchived,
+              !hasScheduledStart(sessionID) else {
+            return .targetUnavailable
+        }
+
+        switch intent {
+        case .pin, .unpin:
+            switch projectStore.setPinned(intent == .pin, for: sessionID) {
+            case .applied, .unchanged:
+                return .accepted
+            case .targetNotFound:
+                return .targetUnavailable
+            case .persistenceRefused, .unsupportedValue:
+                return .persistenceRefused
+            }
+        case .archive:
+            return archive(sessionID) ? .accepted : .targetUnavailable
+        }
+    }
+}
+
 /// The application's single window: a project sidebar beside the active session's terminal.
 final class MainWindowController: ThemedWindowController, RemoteWorkspaceProviding {
 
@@ -97,6 +132,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 consuming: consumedKeys
             )
         },
+        intentHandler: { [weak self] intent, sessionID in
+            self?.performWorkspaceNavigatorIntent(intent, sessionID: sessionID)
+                ?? .targetUnavailable
+        },
         onSelectNative: { [weak self] in
             self?.selectWorkspaceNavigator(.native)
         }
@@ -125,7 +164,19 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         sidebar: sidebarViewController,
         container: containerViewController,
         environment: environment,
-        onPresentationChanged: { [weak self] in self?.updateSessionTitleItem() }
+        onPresentationChanged: { [weak self] in self?.updateSessionTitleItem() },
+        toastPresenter: { [weak self] toast in
+            self?.workspaceSidebarViewController.presentToast(toast)
+        }
+    )
+    private lazy var workspaceNavigatorIntentDispatcher = WorkspaceNavigatorIntentDispatcher(
+        projectStore: environment.projectStore,
+        hasScheduledStart: { sessionID in
+            ScheduledMessageStore.shared.scheduledStart(for: sessionID) != nil
+        },
+        archive: { [weak self] sessionID in
+            self?.sessionCoordinator.setArchived(true, for: sessionID) ?? false
+        }
     )
 
     /// Selection history, replay identity, and the page hidden behind Settings.
@@ -2216,6 +2267,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             sidebarViewController.select(sessionID: sessionID)
             return nil
         }
+    }
+
+    /// The only mutation bridge exposed to navigator templates. The owning extension never runs
+    /// here: this re-reads the current host entity, refuses scheduled/archived rows, uses the
+    /// ordinary durable pin setter, and sends Archive through the same coordinator as Native.
+    private func performWorkspaceNavigatorIntent(
+        _ intent: ExtensionWorkspaceNavigatorIntent,
+        sessionID: SessionID
+    ) -> WorkspaceNavigatorIntentDispatchResult {
+        workspaceNavigatorIntentDispatcher.perform(intent, sessionID: sessionID)
     }
 
     /// Keeps the header naming whatever is on screen.

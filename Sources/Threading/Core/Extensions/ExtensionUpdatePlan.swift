@@ -69,6 +69,11 @@ struct ExtensionUpdatePlan: Equatable {
     /// independently from the WebAssembly core's host authority.
     let addedCompanionAuthorities: [String]
     let removedCompanionAuthorities: [String]
+    /// Host-owned row mutations are authority even though no callback enters the extension.
+    /// Adding one therefore requires the same explicit update approval as a new capability.
+    let addedNavigatorIntents: [String]
+    let removedNavigatorIntents: [String]
+    let candidateNavigatorIntents: [ExtensionNavigatorIntentDisclosure]
     /// A hash of the source package's contents when the plan was made.
     ///
     /// Part of the plan's identity, so `update(from:approving:)` refuses a source whose *code*
@@ -82,7 +87,9 @@ struct ExtensionUpdatePlan: Equatable {
     /// consent to an extension asking for less — and a version alone changes nothing the user
     /// agreed to.
     var requiresApproval: Bool {
-        !addedCapabilities.isEmpty || !addedCompanionAuthorities.isEmpty
+        !addedCapabilities.isEmpty
+            || !addedCompanionAuthorities.isEmpty
+            || !addedNavigatorIntents.isEmpty
     }
 
     /// True when the candidate is not newer, which is worth showing rather than refusing: a
@@ -148,6 +155,26 @@ struct ExtensionUpdatePlan: Equatable {
                     + removedCompanionAuthorities.map { "  • \($0)" }.joined(separator: "\n")
             )
         }
+        if !addedNavigatorIntents.isEmpty {
+            lines.append(
+                "It adds host-owned navigator actions:\n"
+                    + addedNavigatorIntents.map { "  • \($0)" }.joined(separator: "\n")
+            )
+        }
+        if !removedNavigatorIntents.isEmpty {
+            lines.append(
+                "It gives up navigator actions:\n"
+                    + removedNavigatorIntents.map { "  • \($0)" }.joined(separator: "\n")
+            )
+        }
+        if !candidateNavigatorIntents.isEmpty {
+            lines.append(
+                "After the update, its workspace navigators can ask Threading for:\n"
+                    + candidateNavigatorIntents.map { "  • \($0.presentation)" }
+                        .joined(separator: "\n")
+                    + "\nThe extension never receives the press or session identity."
+            )
+        }
         if candidateDataVersion > installedDataVersion {
             lines.append(
                 "Stored data schema \(installedDataVersion) → \(candidateDataVersion). "
@@ -198,6 +225,23 @@ struct ExtensionUpdatePlan: Equatable {
         removedCompanionAuthorities = installedCompanionAuthorities
             .subtracting(candidateCompanionAuthorities)
             .sorted()
+        let installedNavigatorIntents = Self.navigatorIntentAuthorities(
+            installed.workspaceNavigators
+        )
+        let candidateNavigatorIntentAuthorities = Self.navigatorIntentAuthorities(
+            candidate.workspaceNavigators
+        )
+        addedNavigatorIntents = candidateNavigatorIntentAuthorities.keys
+            .filter { installedNavigatorIntents[$0] == nil }
+            .compactMap { candidateNavigatorIntentAuthorities[$0] }
+            .sorted()
+        removedNavigatorIntents = installedNavigatorIntents.keys
+            .filter { candidateNavigatorIntentAuthorities[$0] == nil }
+            .compactMap { installedNavigatorIntents[$0] }
+            .sorted()
+        candidateNavigatorIntents = ExtensionNavigatorIntentDisclosure.disclosures(
+            in: candidate.workspaceNavigators
+        )
     }
 
     private static func companionAuthorities(
@@ -212,6 +256,19 @@ struct ExtensionUpdatePlan: Equatable {
                 "\(companion.id): \($0.rawValue)"
             })
             return values
+        })
+    }
+
+    private static func navigatorIntentAuthorities(
+        _ navigators: [ExtensionWorkspaceNavigator]
+    ) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: navigators.flatMap { navigator in
+            navigator.intents.map { intent in
+                (
+                    "\(navigator.id):\(intent.rawValue)",
+                    "\(navigator.title) [\(navigator.id)]: \(intent.presentationName)"
+                )
+            }
         })
     }
 }

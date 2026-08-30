@@ -22,6 +22,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     let environment: AppEnvironment
     let onPresentationChanged: () -> Void
     private let archiveStateSetter: ArchiveStateSetter
+    /// Window composition routes sidebar receipts through the swappable navigator shell. Tests
+    /// and standalone hosts default to the native sidebar presenter.
+    private let toastPresenter: (ToastRequest) -> Void
 
     /// Consumed by the next selected session exactly once.
     private var pendingPrompt: String?
@@ -30,6 +33,11 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// launches; this gate also prevents two finish notifications in the same launch from
     /// racing through discovery and both attempting review creation.
     private var managedWorkspacePublications: Set<SessionID> = []
+
+    /// Native rows leave optimistically, but a customizable row may remain visible until its
+    /// facts update. This is therefore the mutation fence, not the presentation: one provider
+    /// archive may be in flight for a session, and only its completion clears the pending row.
+    private var archiveSessionIDsInFlight: Set<SessionID> = []
 
     /// Released with this coordinator, which the window owns for its own lifetime.
     private let appEvents = AppEventObservations()
@@ -45,13 +53,15 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 for: sessionID,
                 completion: completion
             )
-        }
+        },
+        toastPresenter: ((ToastRequest) -> Void)? = nil
     ) {
         self.sidebar = sidebar
         self.container = container
         self.environment = environment
         self.onPresentationChanged = onPresentationChanged
         self.archiveStateSetter = archiveStateSetter
+        self.toastPresenter = toastPresenter ?? { sidebar.presentToast($0) }
 
         // An agent asked to be done with its session, and its turn has now ended. It arrives as
         // an announcement rather than a call because `SessionArchiveScheduler` is in Core and
@@ -186,10 +196,14 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// resumes by the same id — so the honest shape is to do it, say so, and leave the way back
     /// on screen; only the turn in flight is lost, which is what the toast's detail line says.
     /// See `archiveToast(for:wasRunning:undo:)`.
-    func setArchived(_ archived: Bool, for sessionID: SessionID) {
+    @discardableResult
+    func setArchived(
+        _ archived: Bool,
+        for sessionID: SessionID
+    ) -> Bool {
         guard archived else {
             restore(sessionID, reselecting: false)
-            return
+            return true
         }
 
         // A person filing an unfinished managed session is not the finish handshake. Preserve
@@ -202,9 +216,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             }
         }
 
-        archive(sessionID) { session, wasRunning, undo in
-            Self.archiveToast(for: session, wasRunning: wasRunning, undo: undo)
-        }
+        return archive(
+            sessionID,
+            receipt: { session, wasRunning, undo in
+                Self.archiveToast(for: session, wasRunning: wasRunning, undo: undo)
+            }
+        )
     }
 
     /// Files a session away because its own agent asked to be done with it.
@@ -244,7 +261,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 environment.projectStore.update(sessionID: sessionID) {
                     $0.managedWorkspace = failed
                 }
-                sidebar.presentToast(ToastRequest(
+                toastPresenter(ToastRequest(
                     message: L10n.string("Managed workspace needs attention"),
                     detail: message,
                     identifier: "sidebar.toast.managed-workspace.failed"
@@ -377,7 +394,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             shouldPresent = true
         }
         guard shouldPresent else { return }
-        sidebar.presentToast(ToastRequest(
+        toastPresenter(ToastRequest(
             message: L10n.string("Managed workspace needs attention"),
             detail: message,
             identifier: "sidebar.toast.managed-workspace.failed"
@@ -424,6 +441,9 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     ) -> Bool {
         guard let session = environment.projectStore.session(withID: sessionID),
               !session.isArchived else { return false }
+        // Repeated presses while the same durable transaction is pending are an accepted no-op,
+        // not a missing target. The caller must not turn that benign race into an error toast.
+        guard archiveSessionIDsInFlight.insert(sessionID).inserted else { return true }
 
         let wasRunning = environment.agentRuntime.isRunning(sessionID: sessionID)
         let presentation = Self.archivePresentationResolution(
@@ -437,15 +457,17 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
         archiveStateSetter(true, sessionID) { [weak self] result in
             guard let self else { return }
+            archiveSessionIDsInFlight.remove(sessionID)
             sidebar.setArchivePresentationPending(false, for: sessionID)
             switch result {
             case .success:
-                sidebar.presentToast(receipt(session, wasRunning) { [weak self] in
+                let toast = receipt(session, wasRunning) { [weak self] in
                     self?.restore(
                         sessionID,
                         reselecting: presentation.reselectsOnUndo
                     )
-                })
+                }
+                toastPresenter(toast)
                 onArchived()
             case .failure(let failure):
                 // A failure may arrive after another row was selected. Only rebuild the pane
@@ -457,11 +479,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                     sidebar.select(sessionID: sessionID)
                 }
                 onArchiveFailed()
-                sidebar.presentToast(Self.archiveFailureToast(
+                let toast = Self.archiveFailureToast(
                     for: session,
                     failure: failure,
                     wasRunning: wasRunning
-                ))
+                )
+                toastPresenter(toast)
             }
         }
         return true
@@ -509,7 +532,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 failed.lastError = message
                 $0.managedWorkspace = failed
             }
-            sidebar.presentToast(ToastRequest(
+            toastPresenter(ToastRequest(
                 message: L10n.string("Couldn’t restore the managed workspace"),
                 detail: message,
                 identifier: "sidebar.toast.managed-workspace.archive-recovery.failed"
@@ -541,7 +564,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                     $0.managedWorkspace = restored
                 }
             } catch {
-                sidebar.presentToast(ToastRequest(
+                toastPresenter(ToastRequest(
                     message: L10n.string("Couldn’t restore the managed workspace"),
                     detail: error.localizedDescription,
                     identifier: "sidebar.toast.managed-workspace.restore.failed"
@@ -557,7 +580,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 guard reselecting else { return }
                 sidebar.select(sessionID: sessionID)
             case .failure(let failure):
-                sidebar.presentToast(Self.restoreFailureToast(
+                toastPresenter(Self.restoreFailureToast(
                     for: session,
                     failure: failure
                 ))
@@ -679,7 +702,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             to: sessionID
         ) { [weak self] outcome in
             guard let self, let detail = Self.reportBackFailure(outcome) else { return }
-            self.sidebar.presentToast(ToastRequest(
+            self.toastPresenter(ToastRequest(
                 message: L10n.format("Couldn’t ask “%@” to report back", session.displayTitle),
                 detail: detail,
                 identifier: "sidebar.toast.reportBack.failed"
@@ -897,7 +920,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 "project": targetProjectID.uuidString,
                 "cause": folderFailure.knownCause
             ])
-            sidebar.presentToast(Self.sessionStartFolderFailureToast(folderFailure))
+            toastPresenter(Self.sessionStartFolderFailureToast(folderFailure))
             return false
         }
 
@@ -1056,7 +1079,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             }
         } : nil
 
-        sidebar.presentToast(Self.sessionStartFailureToast(reason: reason, retry: retry))
+        toastPresenter(Self.sessionStartFailureToast(reason: reason, retry: retry))
     }
 
     /// Turns the end a draft chose into the rule a live session runs under.

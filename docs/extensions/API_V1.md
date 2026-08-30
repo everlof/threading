@@ -34,8 +34,11 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   set of toggle and choice options plus a host-evaluated pipeline. Pipeline navigators are pinned
   as raw base-language values in the manifest and exact startup registration before localization;
   the host owns fact snapshots, search, filtering, bucketing, sorting, relative-date invalidation,
-  virtualized visible-row realization, and source-session activation without invoking the
-  extension. Materialized v1 navigators remain runtime-only and compatible.
+  virtualized visible-row realization, source-session activation, and the declared `pin`, `unpin`,
+  and `archive` row intents without invoking the extension. Intent buttons are disclosed before
+  enable/update, target only the current source session after host revalidation, and never expose
+  the gesture, session identity, or mutation result to the extension. Materialized v1 navigators
+  remain runtime-only and compatible.
 - Package-owned localization catalogues with host language negotiation. The selected catalogue
   localizes static Settings and runtime semantic contributions, and is also exposed through
   `ExtensionLocalizer` for dynamic messages and formatted copy.

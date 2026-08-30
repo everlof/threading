@@ -450,6 +450,19 @@ public struct ExtensionWorkspaceNavigatorOption: Codable, Equatable, Sendable {
     }
 }
 
+/// A bounded host-owned mutation which a pipeline row may ask Threading to perform.
+///
+/// The extension declares and places this semantic intent but never receives the gesture, a
+/// session identifier, or a mutation result. Threading revalidates the source session at the
+/// press edge and owns persistence, provider coordination, receipts, failure presentation, and
+/// Undo. Keeping the initial vocabulary deliberately narrow avoids turning navigator layout into
+/// a general session-write capability.
+public enum ExtensionWorkspaceNavigatorIntent: String, Codable, Equatable, Hashable, Sendable {
+    case pin
+    case unpin
+    case archive
+}
+
 /// One user-selectable replacement for the interior of the leading workspace navigator.
 ///
 /// Threading still owns resizing, collapse, focus routing, entity validation, and the always
@@ -461,6 +474,7 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
     public static let maximumItems = 1_000
     public static let maximumItemPatches = 64
     public static let maximumOptions = 16
+    public static let maximumIntents = 8
     /// Includes the host-owned separator and permanent route back to the Native navigator.
     public static let maximumOptionMenuEntries = 32
     public static let reservedHostOptionMenuEntries = 2
@@ -508,6 +522,11 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
     /// A runtime navigator replacement must repeat this declaration exactly. Only a new process
     /// generation may change the option contract.
     public let options: [ExtensionWorkspaceNavigatorOption]
+    /// Host-owned row intents which this navigator's static pipeline is allowed to place.
+    ///
+    /// The list is part of manifest/runtime parity. A template binding which is not named here,
+    /// or a declaration which is not actually placed, is rejected before the navigator appears.
+    public let intents: [ExtensionWorkspaceNavigatorIntent]
     /// Optional host-evaluated transform and visible-row template.
     ///
     /// `root` remains the complete v1 document and static fallback. Older hosts ignore this
@@ -529,6 +548,7 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         title: String,
         root: ExtensionWorkspaceNavigatorNode,
         options: [ExtensionWorkspaceNavigatorOption] = [],
+        intents: [ExtensionWorkspaceNavigatorIntent] = [],
         pipeline: ExtensionWorkspaceNavigatorPipeline? = nil,
         loadActionID: String? = nil,
         eventActionID: String? = nil,
@@ -538,6 +558,7 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         self.title = title
         self.root = root
         self.options = options
+        self.intents = intents
         self.pipeline = pipeline
         self.loadActionID = loadActionID
         self.eventActionID = eventActionID
@@ -545,7 +566,7 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, root, options, pipeline, loadActionID, eventActionID, preferredWidth
+        case id, title, root, options, intents, pipeline, loadActionID, eventActionID, preferredWidth
     }
 
     public init(from decoder: Decoder) throws {
@@ -555,6 +576,11 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         root = try container.decode(ExtensionWorkspaceNavigatorNode.self, forKey: .root)
         options = if container.contains(.options) {
             try container.decode([ExtensionWorkspaceNavigatorOption].self, forKey: .options)
+        } else {
+            []
+        }
+        intents = if container.contains(.intents) {
+            try container.decode([ExtensionWorkspaceNavigatorIntent].self, forKey: .intents)
         } else {
             []
         }
@@ -577,6 +603,9 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         try container.encode(title, forKey: .title)
         try container.encode(root, forKey: .root)
         try container.encode(options, forKey: .options)
+        if !intents.isEmpty {
+            try container.encode(intents, forKey: .intents)
+        }
         try container.encodeIfPresent(pipeline, forKey: .pipeline)
         try container.encodeIfPresent(loadActionID, forKey: .loadActionID)
         try container.encodeIfPresent(eventActionID, forKey: .eventActionID)
@@ -615,6 +644,19 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
                 path: "\(path).options[\(index)]"
             ))
         }
+        if intents.count > Self.maximumIntents {
+            issues.append(.init(
+                path: "\(path).intents",
+                message: "must contain at most \(Self.maximumIntents) intents"
+            ))
+        }
+        var seenIntents = Set<ExtensionWorkspaceNavigatorIntent>()
+        for (index, intent) in intents.enumerated() where !seenIntents.insert(intent).inserted {
+            issues.append(.init(
+                path: "\(path).intents[\(index)]",
+                message: "duplicates a declared navigator intent"
+            ))
+        }
         let optionEntryCost = options.reduce(0) { $0 + $1.menuEntryCost }
         if optionEntryCost > Self.maximumDeclaredOptionMenuEntries {
             issues.append(.init(
@@ -642,7 +684,8 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         if let pipeline {
             issues.append(contentsOf: pipeline.validationIssues(
                 path: "\(path).pipeline",
-                options: options
+                options: options,
+                intents: intents
             ))
             if loadActionID != nil {
                 issues.append(.init(
@@ -656,6 +699,11 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
                     message: "is not available with a host-evaluated pipeline"
                 ))
             }
+        } else if !intents.isEmpty {
+            issues.append(.init(
+                path: "\(path).intents",
+                message: "are available only with a host-evaluated pipeline"
+            ))
         }
         if let preferredWidth,
            !preferredWidth.isFinite || preferredWidth < 180 || preferredWidth > 640 {

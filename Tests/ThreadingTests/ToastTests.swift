@@ -476,6 +476,24 @@ final class ToastTests: XCTestCase {
         presenter = nil
     }
 
+    func testPresenterTransferRelinquishesTheCurrentReceiptAndItsQueueInOrder() throws {
+        let (host, bottom, _) = pane()
+        let presenter = ToastPresenter(host: host, above: bottom)
+        presenter.dwell = 30
+        let first = archiveRequest(message: "First archive")
+        let second = archiveRequest(message: "Second archive")
+
+        presenter.present(first)
+        presenter.present(second)
+
+        let transferred = presenter.takeRequestsForTransfer()
+        XCTAssertEqual(transferred.map(\.message), ["First archive", "Second archive"])
+        XCTAssertTrue(transferred.allSatisfy(\.hasAction))
+        XCTAssertNil(presenter.current)
+        XCTAssertTrue(presenter.queued.isEmpty)
+        XCTAssertFalse(host.subviews.contains { $0 is ToastView })
+    }
+
     /// A way back that expires while it is being reached for is worse than no way back, because
     /// the reach is the moment the decision was already made.
     ///

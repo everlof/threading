@@ -268,10 +268,19 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
             JSONSerialization.jsonObject(with: data) as? [String: Any]
         )
         XCTAssertNil(object["pipeline"])
-        XCTAssertNil(try JSONDecoder().decode(
+        let decoded = try JSONDecoder().decode(
             ExtensionWorkspaceNavigator.self,
             from: data
-        ).pipeline)
+        )
+        XCTAssertNil(decoded.pipeline)
+        XCTAssertEqual(decoded.intents, [])
+
+        var explicitNullIntents = object
+        explicitNullIntents["intents"] = NSNull()
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ExtensionWorkspaceNavigator.self,
+            from: JSONSerialization.data(withJSONObject: explicitNullIntents)
+        ))
     }
 
     func testExplicitNullPipelineIsRejectedRatherThanTreatedAsLegacyAbsence() {
@@ -419,6 +428,8 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
              "{\"type\":\"status\",\"binding\":{\"type\":\"literal\",\"text\":\"Ready\"},\"role\":{\"type\":\"literal\",\"role\":\"positive\"}}"),
             (.activityIndicator(accessibilityLabel: "Working"),
              "{\"type\":\"activityIndicator\",\"accessibilityLabel\":\"Working\"}"),
+            (.intent(.pin),
+             "{\"type\":\"intent\",\"intent\":\"pin\"}"),
             (.conditional(present, content: .divider),
              "{\"type\":\"conditional\",\"predicate\":{\"type\":\"isPresent\",\"fact\":{\"key\":{\"id\":\"session.title\",\"version\":1},\"scope\":\"item\"}},\"content\":{\"type\":\"divider\"}}"),
             (.divider, "{\"type\":\"divider\"}"),
@@ -545,6 +556,110 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
             $0.path == "navigator.eventActionID"
                 && $0.message.contains("not available")
         })
+    }
+
+    func testNavigatorIntentsAreManifestPinnedAndTemplateBound() throws {
+        let title = ExtensionWorkspaceNavigatorFactReference(
+            ExtensionHostFactKey.sessionTitle
+        )
+        let pipeline = ExtensionWorkspaceNavigatorPipeline(
+            consumes: [.init(key: title.key, requirement: .required)],
+            output: .init(
+                collectionID: "sessions",
+                rowTemplate: .stack(
+                    axis: .horizontal,
+                    spacing: .small,
+                    children: [
+                        .text(.fact(title, facet: .value, fallback: "Untitled"), role: .body),
+                        .flexibleSpacer,
+                        .intent(.pin),
+                        .intent(.archive),
+                    ]
+                )
+            )
+        )
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "actions",
+            title: "Actions",
+            root: .content(.status("Requires a newer host", role: .neutral)),
+            intents: [.pin, .archive],
+            pipeline: pipeline
+        )
+
+        XCTAssertEqual(navigator.validationIssues(path: "navigator"), [])
+        let data = try JSONEncoder().encode(navigator)
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        XCTAssertEqual(object["intents"] as? [String], ["pin", "archive"])
+        XCTAssertEqual(
+            try JSONDecoder().decode(ExtensionWorkspaceNavigator.self, from: data),
+            navigator
+        )
+    }
+
+    func testNavigatorRejectsUndeclaredUnusedDuplicateAndLegacyIntents() {
+        let title = ExtensionWorkspaceNavigatorFactReference(
+            ExtensionHostFactKey.sessionTitle
+        )
+        func pipeline(_ intent: ExtensionWorkspaceNavigatorIntent) ->
+            ExtensionWorkspaceNavigatorPipeline
+        {
+            .init(
+                consumes: [.init(key: title.key)],
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .stack(
+                        axis: .horizontal,
+                        spacing: .small,
+                        children: [
+                            .text(.fact(title, facet: .value, fallback: "Untitled"), role: .body),
+                            .intent(intent),
+                        ]
+                    )
+                )
+            )
+        }
+
+        let undeclared = ExtensionWorkspaceNavigator(
+            id: "undeclared",
+            title: "Undeclared",
+            root: .content(.status("Fallback", role: .neutral)),
+            pipeline: pipeline(.archive)
+        ).validationIssues(path: "navigator")
+        XCTAssertTrue(undeclared.contains {
+            $0.path.hasSuffix("rowTemplate.children[1].intent")
+                && $0.message.contains("declared by the navigator")
+        })
+
+        let unused = ExtensionWorkspaceNavigator(
+            id: "unused",
+            title: "Unused",
+            root: .content(.status("Fallback", role: .neutral)),
+            intents: [.pin, .archive],
+            pipeline: pipeline(.pin)
+        ).validationIssues(path: "navigator")
+        XCTAssertTrue(unused.contains {
+            $0.path.hasSuffix("pipeline.output.rowTemplate")
+                && $0.message.contains("'archive'")
+        })
+
+        let duplicate = ExtensionWorkspaceNavigator(
+            id: "duplicate",
+            title: "Duplicate",
+            root: .content(.status("Fallback", role: .neutral)),
+            intents: [.pin, .pin],
+            pipeline: pipeline(.pin)
+        ).validationIssues(path: "navigator")
+        XCTAssertTrue(duplicate.contains { $0.path == "navigator.intents[1]" })
+
+        let legacy = ExtensionWorkspaceNavigator(
+            id: "legacy-intent",
+            title: "Legacy intent",
+            root: .content(.status("Fallback", role: .neutral)),
+            intents: [.archive]
+        ).validationIssues(path: "navigator")
+        XCTAssertTrue(legacy.contains { $0.path == "navigator.intents" })
     }
 
     func testPipelineBoundsRejectLimitPlusOne() {
