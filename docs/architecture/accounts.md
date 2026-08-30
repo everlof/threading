@@ -108,12 +108,21 @@ session account: using a bare `codex archive` would file a matching id under whi
 `CODEX_HOME` happened to leak from the login shell, while Threading changed a different account's
 record. See [the provider archive boundary](sessions.md#the-provider-archive-boundary).
 
-These are Claude/Codex capabilities, not assumptions about every runtime. Grok supports a
-redirectable `GROK_HOME`, but multiple-login discovery and session movement have not been
-measured, so its login remains inside the TUI. OpenCode provider
-credentials and session data are shared while `OPENCODE_CONFIG_DIR` redirects configuration
-only, so it is not presented as a Threading multi-account agent. OpenRouter authentication and
-provider selection stay inside OpenCode (`/connect` and `/models`).
+These are Claude/Codex capabilities, not assumptions about every runtime. The fixed roster in
+onboarding and Settings names every supported agent while keeping each sign-in boundary explicit:
+
+- Grok supports a redirectable `GROK_HOME`, but multiple-login discovery and session movement
+  have not been measured, so its single login remains inside the terminal UI.
+- Cursor's `agent login` writes its token to the system Keychain. Measured `CURSOR_DATA_DIR` and
+  `XDG_CONFIG_HOME` overrides do not move it, so Threading has no alternate home to route and uses
+  that one Mac login.
+- OpenCode provider credentials and session data are shared while `OPENCODE_CONFIG_DIR` redirects
+  configuration only, so it is not presented as a Threading multi-account agent. OpenRouter
+  authentication and provider selection stay inside OpenCode (`/connect` and `/models`).
+
+Only Claude Code and Codex rows receive **Add Login**. The other three use ordinary explanatory
+status text rather than disabled controls, which would falsely present missing behavior as a
+temporary state.
 
 In the sidebar an alternate account is identified entirely by the session's icon slot — its
 chosen emoji, else a letter badge (`c.circle.fill`) from its name — with the full name in the

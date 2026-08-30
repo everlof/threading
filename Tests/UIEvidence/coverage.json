@@ -1082,8 +1082,9 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Account setup and reconnection",
-      "description": "The host-owned setup surface in the real onboarding flow and production Accounts Settings page, using deterministic account fixtures and every meaningful setup state without launching provider authentication.",
+      "description": "The host-owned setup surface in the real onboarding flow and production Agents & Accounts Settings page: every supported runtime, truthful sign-in ownership, deterministic managed-account fixtures and every meaningful setup state without launching provider authentication.",
       "states": [
+        "Five supported agents and sign-in owners",
         "No accounts",
         "One account",
         "Multiple accounts",

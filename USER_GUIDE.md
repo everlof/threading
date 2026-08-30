@@ -11,10 +11,12 @@ optional beyond the first click:
 1. **Appearance** — pick the app's look from every built-in theme. The walkthrough itself
    restyles the moment you click a tile, and everything is changeable later under
    **Settings ▸ Themes**.
-2. **Accounts** — the Claude Code and Codex logins found on this Mac, each with a switch that
-   takes it out of use on the spot (the same switch as **Settings ▸ Accounts**), and whether
-   the `claude`/`codex`/`grok`/`opencode` commands are actually reachable from your shell; a missing one shows
-   the install command instead of failing later inside a terminal.
+2. **Agents & Accounts** — the complete supported roster: Claude Code, Codex, Grok, Cursor,
+   and OpenCode. Claude Code and Codex can add and switch isolated logins here. Grok uses its
+   terminal login, Cursor uses the Mac login created by `agent login`, and OpenCode owns provider
+   sign-in through `/connect`. Existing managed logins each have the same enable switch as
+   **Settings ▸ Agents & Accounts**. The page also checks whether all five agent commands are
+   reachable from your shell; a missing one shows the install command instead of failing later.
 3. **Conversations** — chats you already have on disk, one list newest first, with the last
    two days pre-checked. Importing creates a project for each checked conversation's folder
    implicitly and adopts the conversations so they resume in place; **Skip for now** leaves
@@ -1735,7 +1737,22 @@ Both surfaces offer it: a session running in Threading's own chat view shows the
 composer, and one running in the agent's terminal shows it under the terminal, where you would
 have typed the answer yourself. Sessions whose agent has only one login never see it.
 
-## Accounts
+## Agents & Accounts
+
+Threading supports five coding-agent runtimes, but each runtime does not expose the same account
+model:
+
+| Agent | Threading-managed logins | Sign-in ownership |
+|-------|---------------------------|-------------------|
+| Claude Code | Multiple | **Add Login** in Threading; Claude owns the browser flow and credential |
+| Codex | Multiple | **Add Login** in Threading; Codex owns the browser flow and credential |
+| Grok | One | Sign in inside Grok's terminal UI |
+| Cursor | One | Run `agent login`; Threading uses that Mac login |
+| OpenCode | Provider accounts stay inside OpenCode | Use `/connect` in OpenCode |
+
+The complete roster appears in onboarding and **Settings ▸ Agents & Accounts**, so a missing
+**Add Login** button means that runtime does not expose a routed multi-account home—it does not
+mean Threading lacks support for the agent.
 
 Both CLIs support multiple logins by pointing an environment variable at an alternate config
 directory. Threading finds these automatically and offers each one when you create a session.
@@ -1759,7 +1776,7 @@ same person fall back to showing the addresses, since that is the one thing guar
 differ.
 
 Your alias still names sessions started on that account, and is still what you edit in
-**Settings ▸ Accounts**.
+**Settings ▸ Agents & Accounts**.
 
 Each account in that menu also carries a **ring** showing how much of its most-pressed window
 is spent — grey while there is room, orange past three quarters, red when it is nearly gone.
@@ -1782,7 +1799,7 @@ emoji if you have chosen one, otherwise a lettered badge from the account's name
 the row shows the full account name.
 
 ### Icons and names
-**Settings > Accounts** lists every account that was found. Click an account's icon to open
+**Settings > Agents & Accounts** lists every account that was found. Click an account's icon to open
 the emoji picker — choose from the grid, type any other emoji into its field, or **Remove**
 the current one. The icon tells accounts apart at a glance in the sidebar.
 
@@ -1808,8 +1825,11 @@ turns the whole thing off. Rename an account
 if the discovered name is not what you call it; clearing a name restores the one from your
 shell alias, and **Restore Name & Icon** clears both custom choices.
 
-Accounts cannot be added or removed here — they come from your config directories. Log in to a
-new one from the terminal, e.g. `CLAUDE_CONFIG_DIR="$HOME/.claude-work" claude`.
+**Add Login** creates a bounded isolated home for Claude Code or Codex, launches that provider's
+official browser sign-in, and registers the location only after the provider verifies it. Threading
+never receives or stores the credential. Existing `~/.claude-*` and `~/.codex-*` homes are still
+found automatically. Threading does not delete provider homes; switch a login off when you no
+longer want it offered.
 
 ### Switching an account off
 Each row carries a **switch**. Turning it off withdraws that login from everywhere an account
@@ -1922,7 +1942,7 @@ if a token has expired the tooltip says so and the CLI is the place to sign in a
 
 ### Your own limits
 
-**Settings ▸ Accounts ▸ Your Own Limits.** No limits until you draw one.
+**Settings ▸ Agents & Accounts ▸ Your Own Limits.** No limits until you draw one.
 
 The provider's limit is the only line the readings carry, and it only speaks at the end. A limit
 you draw here is your own, ahead of it: pick a window on one account, pick a percentage, and
