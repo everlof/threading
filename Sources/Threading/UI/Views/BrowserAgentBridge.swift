@@ -2704,19 +2704,44 @@ enum BrowserAgentScripts {
         const matchesRequested = option => mode === 'value'
           ? optionValue(option) === requested
           : optionLabel(option) === clean(requested, 240);
+        function resolveCurrentOptions() {
+          const candidates = currentOptionCandidates();
+          return { match: candidates.find(matchesRequested) || null, candidates };
+        }
         async function waitForOptions() {
-          let candidates = [];
-          for (let attempt = 0; attempt < 20; attempt += 1) {
-            candidates = currentOptionCandidates();
-            const match = candidates.find(matchesRequested);
-            if (match) return { match, candidates };
-            if (optionElementsVisited >= maximumOptionElements) break;
-            await new Promise(resolve => setTimeout(resolve, 50));
-          }
-          return { match: null, candidates };
+          const initial = resolveCurrentOptions();
+          if (initial.match || optionElementsVisited >= maximumOptionElements) return initial;
+
+          // A chain of short timers is not a clock in WebKit: once an agent-driven tab is
+          // occluded, each nominal 50 ms step may be throttled to seconds and can outlive the
+          // native bridge's complete 15-second budget. Page changes are the event being waited
+          // for, so observe them directly and keep one deadline only for the no-change case.
+          return await new Promise(resolve => {
+            let timer;
+            let finished = false;
+            const observer = new view.MutationObserver(() => {
+              const resolution = resolveCurrentOptions();
+              if (resolution.match || optionElementsVisited >= maximumOptionElements) {
+                finish(resolution);
+              }
+            });
+            const finish = resolution => {
+              if (finished) return;
+              finished = true;
+              observer.disconnect();
+              if (timer !== undefined) clearTimeout(timer);
+              resolve(resolution);
+            };
+            try {
+              observer.observe(element.ownerDocument.documentElement, {
+                childList: true, subtree: true, attributes: true
+              });
+            } catch (_) {}
+            timer = setTimeout(() => finish(resolveCurrentOptions()), 1000);
+          });
         }
 
-        let resolution = await waitForOptions();
+        let resolution = resolveCurrentOptions();
         if (!resolution.match && mode === 'label'
             && element instanceof view.HTMLInputElement) {
           const setter = Object.getOwnPropertyDescriptor(
@@ -2726,8 +2751,8 @@ enum BrowserAgentScripts {
           element.dispatchEvent(new view.InputEvent('input', {
             bubbles: true, composed: true, inputType: 'insertText', data: requested
           }));
-          resolution = await waitForOptions();
         }
+        if (!resolution.match) resolution = await waitForOptions();
         const option = resolution.match;
         if (!option) {
           const available = resolution.candidates.slice(0, 12)
