@@ -1346,6 +1346,14 @@ event sockets use separate traces across hello, failure/end and the scheduled ex
 reconnect delay; both own an explicit hello deadline rather than relying on URLSession to end a
 silent peer. Public report delivery records each 30-second HTTPS attempt and whether it was
 delivered, left idempotently queued, or terminally refused.
+
+Warm session reattachment has its own start/end trace and duration; it is not reported as the age
+of the parked WebSocket. Prompt and atomic-terminal submissions likewise pair start with the
+host's acknowledgement. A host advertising `terminalInputLatencyProbe` also acknowledges one
+sampled direct-terminal input at most every five seconds. The phone records its round trip and the
+Mac records time from frame handling through main-queue/PTY admission under the same pseudonymous
+trace. Ordinary input remains fire-and-forget, older hosts receive no probes, and neither event
+contains the input bytes or prompt text.
 They do not send it to the Mac by default. A paired interactive owner can open **Diagnostics** on
 iPhone, or use the control beside the Mac in the browser session list, and choose **Share
 diagnostics for 30 minutes**. The existing bounded history is sent first and new events follow
