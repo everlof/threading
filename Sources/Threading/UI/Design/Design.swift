@@ -237,6 +237,13 @@ enum Design {
         static let sidebarTabHeight: CGFloat = 30
         static let tabIconSlot: CGFloat = 16
 
+        /// Semantic image slots shared by ordinary extension nodes and navigator templates.
+        /// Keeping the pair on one scale prevents a fact-bound icon from changing size when a
+        /// materialized navigator migrates to the host-evaluated pipeline.
+        static let extensionIdentityImage: CGFloat = 18
+        static let extensionIconImage: CGFloat = 14
+        static let extensionDecorationImage: CGFloat = 12
+
         /// The × on a tab, and anything else that raises a surface around a small mark.
         ///
         /// Sized so the hover surface has room *around* the glyph: at 16 the drawn mark filled

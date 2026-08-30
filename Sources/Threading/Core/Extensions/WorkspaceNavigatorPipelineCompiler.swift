@@ -24,6 +24,47 @@ struct CompiledWorkspaceNavigatorPipeline: Sendable {
     let sort: [ExtensionWorkspaceNavigatorSortClause]
     let output: ExtensionWorkspaceNavigatorPipelineOutput
     let rowTemplate: ExtensionWorkspaceNavigatorTemplateNode?
+
+    func replacing(snapshot: ExtensionFactSnapshot) -> Self {
+        .init(
+            snapshot: snapshot,
+            search: search,
+            filters: filters,
+            bucket: bucket,
+            sort: sort,
+            output: output,
+            rowTemplate: rowTemplate
+        )
+    }
+
+    /// Facts which can change source inclusion, section, order, route, or whether a row has any
+    /// semantic content. Other consumed fact edges are presentation-only and can repaint their
+    /// affected virtual rows without reevaluating the session catalogue.
+    var structuralEvaluationFactKeys: Set<ExtensionFactKey> {
+        var keys = filters.reduce(into: Set<ExtensionFactKey>()) {
+            $0.formUnion($1.predicate.referencedFactKeys)
+        }
+        for clause in sort {
+            keys.formUnion(clause.operand.fact.degradationDependencyKeys)
+        }
+        if let bucket {
+            switch bucket {
+            case let .fact(operand, _, _):
+                keys.formUnion(operand.fact.degradationDependencyKeys)
+            case let .rules(rules, _):
+                for rule in rules { keys.formUnion(rule.predicate.referencedFactKeys) }
+            }
+        }
+        if let rowTemplate {
+            keys.formUnion(rowTemplate.eligibilityDependencyKeys)
+        }
+        keys.formUnion(ExtensionFactRegistry.snapshotStructuralKeys)
+        return keys
+    }
+
+    var searchFactKeys: Set<ExtensionFactKey> {
+        Set(search?.fields.flatMap { $0.degradationDependencyKeys } ?? [])
+    }
 }
 
 struct WorkspaceNavigatorPipelineCompiler {
@@ -473,6 +514,83 @@ private extension ExtensionWorkspaceNavigatorFactReference {
             [key]
         case .project:
             [key, ExtensionHostFactKey.sessionProjectID]
+        }
+    }
+}
+
+private extension ExtensionWorkspaceNavigatorTemplateNode {
+    var referencedFactKeys: Set<ExtensionFactKey> {
+        switch self {
+        case let .text(binding, _):
+            binding.referencedFactKeys
+        case let .image(binding, _, _):
+            binding.referencedFactKeys
+        case let .status(binding, role):
+            binding.referencedFactKeys.union(role.referencedFactKeys)
+        case let .conditional(predicate, content):
+            predicate.referencedFactKeys.union(content.referencedFactKeys)
+        case let .stack(_, _, children):
+            children.reduce(into: Set<ExtensionFactKey>()) {
+                $0.formUnion($1.referencedFactKeys)
+            }
+        case .activityIndicator, .divider, .spacer, .flexibleSpacer:
+            []
+        }
+    }
+
+    /// `hasContent` can only change with facts when no unconditional leaf guarantees content.
+    /// Keeping the conservative dependency set for that case lets ordinary status/icon/label
+    /// changes repaint O(changed) rows while a truly optional row still reevaluates membership.
+    var eligibilityDependencyKeys: Set<ExtensionFactKey> {
+        guaranteesContentWithoutFacts ? [] : referencedFactKeys
+    }
+
+    var guaranteesContentWithoutFacts: Bool {
+        switch self {
+        case .text(.literal, _), .image(.literal, _, _):
+            true
+        case let .text(.fact(_, _, fallback), _):
+            fallback != nil
+        case let .image(.factIcon(_, fallback), _, _):
+            fallback != nil
+        case let .status(binding, _):
+            switch binding {
+            case .literal: true
+            case .fact(_, _, let fallback): fallback != nil
+            }
+        case .activityIndicator, .divider, .spacer, .flexibleSpacer:
+            true
+        case .conditional:
+            false
+        case let .stack(_, _, children):
+            children.contains(where: \.guaranteesContentWithoutFacts)
+        }
+    }
+}
+
+private extension ExtensionWorkspaceNavigatorTextBinding {
+    var referencedFactKeys: Set<ExtensionFactKey> {
+        switch self {
+        case .literal: []
+        case let .fact(reference, _, _): reference.degradationDependencyKeys
+        }
+    }
+}
+
+private extension ExtensionWorkspaceNavigatorImageBinding {
+    var referencedFactKeys: Set<ExtensionFactKey> {
+        switch self {
+        case .literal: []
+        case let .factIcon(reference, _): reference.degradationDependencyKeys
+        }
+    }
+}
+
+private extension ExtensionWorkspaceNavigatorStatusBinding {
+    var referencedFactKeys: Set<ExtensionFactKey> {
+        switch self {
+        case .literal: []
+        case let .factStatus(reference, _): reference.degradationDependencyKeys
         }
     }
 }

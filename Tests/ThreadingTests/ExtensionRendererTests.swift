@@ -1396,7 +1396,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         )
     }
 
-    func testWorkspaceNavigatorRuntimeReplacementCannotMutateOrOmitRegisteredPipeline() throws {
+    func testWorkspaceNavigatorPipelineRefreshNeverInvokesARuntimeReplacement() throws {
         func pipeline(fallback: String) -> ExtensionWorkspaceNavigatorPipeline {
             .init(
                 consumes: [
@@ -1421,6 +1421,17 @@ final class ExtensionRendererTests: HostedStoreTestCase {
             ("mutation", Optional(pipeline(fallback: "Changed"))),
         ] {
             let declared = pipeline(fallback: "Untitled")
+            let titleKey = ExtensionHostFactKey.sessionTitle
+            let definition = navigatorFactDefinition(titleKey, usages: [.presentable])
+            let snapshot = makeWorkspaceNavigatorSnapshot(
+                sessionIDs: ["session"],
+                definitions: [definition],
+                facts: [navigatorFact(
+                    titleKey,
+                    sessionID: "session",
+                    value: .string("Host evaluated")
+                )]
+            )
             let navigator = ExtensionWorkspaceNavigator(
                 id: "activity",
                 title: "Activity",
@@ -1444,24 +1455,22 @@ final class ExtensionRendererTests: HostedStoreTestCase {
                 navigatorID: navigator.id,
                 navigator: replacement
             ))
-            let failedClosed = expectation(
-                description: "pipeline \(name) fails the generation closed"
-            )
             let host = WorkspaceNavigatorHostViewController(
                 inventory: router.inventory,
                 routing: router,
                 contextProvider: { .init() },
                 destinationHandler: { _ in nil },
-                onUnavailable: { failedClosed.fulfill() }
+                factSnapshotProvider: { _ in snapshot },
+                onUnavailable: { XCTFail("pipeline \(name) became unavailable") }
             )
             _ = host.view
+            host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+            _ = try waitForPipelineTable(in: host, rowCount: 1)
 
-            let refresh = try XCTUnwrap(
-                descendants(in: host.view).compactMap { $0 as? ThemedButton }.first
-            )
-            refresh.performClick()
+            host.refresh()
+            _ = try waitForPipelineTable(in: host, rowCount: 1)
 
-            wait(for: [failedClosed], timeout: 1)
+            XCTAssertTrue(router.invocations.isEmpty)
             XCTAssertFalse(
                 descendants(in: host.view)
                     .compactMap { ($0 as? NSTextField)?.stringValue }
@@ -1476,10 +1485,23 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         }
     }
 
-    func testWorkspaceNavigatorRuntimeReplacementMayRepeatRegisteredPipelineExactly() throws {
+    func testWorkspaceNavigatorPipelineRefreshResnapshotsWithoutCallingItsLegacyLoadAction()
+        throws
+    {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(titleKey, usages: [.presentable])
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(
+                titleKey,
+                sessionID: "session",
+                value: .string("Host evaluated")
+            )]
+        )
         let pipeline = ExtensionWorkspaceNavigatorPipeline(
             consumes: [
-                .init(key: ExtensionHostFactKey.sessionTitle, requirement: .required)
+                .init(key: titleKey, requirement: .required)
             ],
             output: .init(
                 collectionID: "sessions",
@@ -1502,39 +1524,32 @@ final class ExtensionRendererTests: HostedStoreTestCase {
                 role: .standard,
                 isEnabled: true
             )),
-            pipeline: pipeline
-        )
-        let replacement = ExtensionWorkspaceNavigator(
-            id: navigator.id,
-            title: "Updated activity",
-            root: .content(.status("Updated", role: .positive)),
-            pipeline: pipeline
+            pipeline: pipeline,
+            loadActionID: "legacy-load"
         )
         let router = TestWorkspaceNavigatorRouter(navigator: navigator)
-        router.result = .success(.init(
-            requestID: "replacement",
-            navigatorID: navigator.id,
-            navigator: replacement
-        ))
+        var completeSnapshots = 0
         let host = WorkspaceNavigatorHostViewController(
             inventory: router.inventory,
             routing: router,
             contextProvider: { .init() },
             destinationHandler: { _ in nil },
-            onUnavailable: { XCTFail("exact static pipeline replacement became unavailable") }
+            factSnapshotProvider: { _ in
+                completeSnapshots += 1
+                return snapshot
+            },
+            onUnavailable: { XCTFail("host-evaluated pipeline became unavailable") }
         )
         _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        _ = try waitForPipelineTable(in: host, rowCount: 1)
+        XCTAssertEqual(completeSnapshots, 1)
 
-        let refresh = try XCTUnwrap(
-            descendants(in: host.view).compactMap { $0 as? ThemedButton }.first
-        )
-        refresh.performClick()
+        host.refresh()
+        _ = try waitForPipelineTable(in: host, rowCount: 1)
 
-        XCTAssertTrue(
-            descendants(in: host.view)
-                .compactMap { ($0 as? NSTextField)?.stringValue }
-                .contains("Updated")
-        )
+        XCTAssertEqual(completeSnapshots, 2)
+        XCTAssertTrue(router.invocations.isEmpty)
     }
 
     func testWorkspaceNavigatorSuccessfulReplacementAtomicallyUpdatesHostTitle() throws {
@@ -1623,6 +1638,1138 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         XCTAssertEqual(title.stringValue, navigator.title)
         XCTAssertEqual(scroll.frame.maxY, header.frame.minY, accuracy: 0.5)
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: host.view), [])
+    }
+
+    func testPipelineNavigatorSearchesInMemoryAndKeepsItsHostField() throws {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(
+            titleKey,
+            usages: [.filterable, .searchable, .presentable]
+        )
+        let sessionIDs = [
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000002",
+        ]
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: sessionIDs,
+            definitions: [definition],
+            facts: [
+                navigatorFact(titleKey, sessionID: sessionIDs[0], value: .string("Alpha")),
+                navigatorFact(titleKey, sessionID: sessionIDs[1], value: .string("Beta")),
+            ]
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: titleKey, requirement: .required)],
+            search: .init(
+                placeholder: "Find work",
+                accessibilityLabel: "Find navigator sessions",
+                fields: [.init(titleKey)]
+            ),
+            template: .text(
+                .fact(.init(titleKey), facet: .value, fallback: nil),
+                role: .compactBody
+            ),
+            loadActionID: "legacy-load"
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("valid pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 360)
+        host.view.layoutSubtreeIfNeeded()
+
+        let search = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedSearchField }.first
+        )
+        let initialTable = try waitForPipelineTable(in: host, rowCount: 2)
+        XCTAssertEqual(search.placeholderAttributedString?.string, "Find work")
+        XCTAssertEqual(search.accessibilityLabel(), "Find navigator sessions")
+        _ = initialTable.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        XCTAssertFalse(router.invocations.contains { $0.actionID == "legacy-load" })
+
+        search.stringValue = "Beta"
+        search.delegate?.controlTextDidChange?(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: search
+        ))
+        let filteredTable = try waitForPipelineTable(in: host, rowCount: 1)
+        XCTAssertTrue(
+            descendants(in: host.view).compactMap { $0 as? ThemedSearchField }.first === search,
+            "per-keystroke evaluation must retain the field editor's owning control"
+        )
+        _ = filteredTable.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        XCTAssertTrue(descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }.contains("Beta"))
+        XCTAssertTrue(router.invocations.isEmpty)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: host.view), [])
+    }
+
+    func testPipelineNavigatorKeepsSelectionAndScrollThroughAnEmptySearch() throws {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(
+            titleKey,
+            usages: [.searchable, .presentable]
+        )
+        let sessionIDs = (0 ..< 30).map { String(format: "session-%02d", $0) }
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: sessionIDs,
+            definitions: [definition],
+            facts: sessionIDs.map {
+                navigatorFact(titleKey, sessionID: $0, value: .string($0))
+            }
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: titleKey, requirement: .required)],
+            search: .init(
+                placeholder: "Find work",
+                accessibilityLabel: "Find navigator sessions",
+                fields: [.init(titleKey)]
+            ),
+            template: .text(
+                .fact(.init(titleKey), facet: .value, fallback: nil),
+                role: .compactBody
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("valid pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 150)
+        host.view.layoutSubtreeIfNeeded()
+        let search = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedSearchField }.first
+        )
+        let table = try waitForPipelineTable(in: host, rowCount: sessionIDs.count)
+        let controller = try XCTUnwrap(
+            table.delegate as? WorkspaceNavigatorPipelineCollectionViewController
+        )
+        table.selectRowIndexes(IndexSet(integer: 20), byExtendingSelection: false)
+        table.scrollRowToVisible(20)
+        host.view.layoutSubtreeIfNeeded()
+        let before = controller.captureState()
+        XCTAssertEqual(before.selectedItemID, sessionIDs[20])
+        XCTAssertNotNil(before.topVisibleItemID)
+
+        search.stringValue = "no such session"
+        search.delegate?.controlTextDidChange?(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: search
+        ))
+        let emptyTable = try waitForPipelineTable(in: host, rowCount: 0)
+        XCTAssertTrue(emptyTable === table, "an empty query must retain the virtual table")
+        XCTAssertTrue(descendants(in: host.view).contains {
+            $0.accessibilityIdentifier() == "workspace.navigator.pipeline-placeholder"
+        })
+
+        search.stringValue = ""
+        search.delegate?.controlTextDidChange?(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: search
+        ))
+        let restoredTable = try waitForPipelineTable(
+            in: host,
+            rowCount: sessionIDs.count
+        )
+        host.view.layoutSubtreeIfNeeded()
+        let after = controller.captureState()
+
+        XCTAssertTrue(restoredTable === table)
+        XCTAssertEqual(after.selectedItemID, before.selectedItemID)
+        XCTAssertEqual(after.topVisibleItemID, before.topVisibleItemID)
+        XCTAssertEqual(after.topVisibleOffset, before.topVisibleOffset, accuracy: 1)
+    }
+
+    func testPipelineNavigatorHostSelectionSupersedesRetainedSelectionAfterEmptySearch()
+        throws
+    {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(
+            titleKey,
+            usages: [.searchable, .presentable]
+        )
+        let sessionIDs = ["alpha", "beta", "gamma"]
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: sessionIDs,
+            definitions: [definition],
+            facts: sessionIDs.map {
+                navigatorFact(titleKey, sessionID: $0, value: .string($0))
+            }
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: titleKey, requirement: .required)],
+            search: .init(
+                placeholder: "Find work",
+                accessibilityLabel: "Find navigator sessions",
+                fields: [.init(titleKey)]
+            ),
+            template: .text(
+                .fact(.init(titleKey), facet: .value, fallback: nil),
+                role: .compactBody
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("selection pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 160)
+        let search = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedSearchField }.first
+        )
+        let table = try waitForPipelineTable(in: host, rowCount: sessionIDs.count)
+        let controller = try XCTUnwrap(
+            table.delegate as? WorkspaceNavigatorPipelineCollectionViewController
+        )
+        table.selectRowIndexes(IndexSet(integer: 1), byExtendingSelection: false)
+        XCTAssertEqual(controller.captureState().selectedItemID, "beta")
+
+        search.stringValue = "no such session"
+        search.delegate?.controlTextDidChange?(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: search
+        ))
+        _ = try waitForPipelineTable(in: host, rowCount: 0)
+        host.synchronizeSelection(with: .session(id: "gamma", projectID: nil))
+
+        search.stringValue = ""
+        search.delegate?.controlTextDidChange?(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: search
+        ))
+        _ = try waitForPipelineTable(in: host, rowCount: sessionIDs.count)
+
+        XCTAssertEqual(controller.captureState().selectedItemID, "gamma")
+    }
+
+    func testPipelineNavigatorRejectsAWorkerResultAcrossSuspensionAndCatchesUp() throws {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(titleKey, usages: [.presentable])
+        var snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(
+                titleKey,
+                sessionID: "session",
+                value: .string("Before")
+            )]
+        )
+        let firstEvaluationEntered = DispatchSemaphore(value: 0)
+        let releaseFirstEvaluation = DispatchSemaphore(value: 0)
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: titleKey, requirement: .required)],
+            template: .text(
+                .fact(.init(titleKey), facet: .value, fallback: nil),
+                role: .compactBody
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            pipelineEvaluate: { request in
+                if request.pipeline.snapshot.revision == 1 {
+                    firstEvaluationEntered.signal()
+                    releaseFirstEvaluation.wait()
+                }
+                let evaluation = WorkspaceNavigatorPipelineEvaluator(
+                    calendar: request.calendar
+                ).evaluate(request.pipeline, query: request.query)
+                return WorkspaceNavigatorPipelinePresentation(evaluation: evaluation)
+            },
+            onUnavailable: { XCTFail("suspended pipeline became unavailable") }
+        )
+        _ = host.view
+        XCTAssertEqual(firstEvaluationEntered.wait(timeout: .now() + 1), .success)
+
+        host.setLiveEventDeliveryEnabled(false)
+        snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(
+                titleKey,
+                sessionID: "session",
+                value: .string("After")
+            )],
+            revision: 2
+        )
+        host.setLiveEventDeliveryEnabled(true)
+        releaseFirstEvaluation.signal()
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        try waitForPipelineText("After", in: host, table: table, row: 0, timeout: 2)
+
+        XCTAssertFalse(descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }.contains("Before"))
+    }
+
+    func testPipelineNavigatorKeepsPresentedSnapshotWhileANewerStructuralWorkerIsBlocked()
+        throws
+    {
+        let activityKey = ExtensionHostFactKey.sessionActivity
+        let definition = navigatorFactDefinition(activityKey, usages: [.presentable])
+        let initialSnapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(
+                activityKey,
+                sessionID: "session",
+                value: .string("Before")
+            )]
+        )
+        let structuralSnapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(
+                activityKey,
+                sessionID: "session",
+                value: .string("Middle")
+            )],
+            revision: 2
+        )
+        let patchedSnapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(
+                activityKey,
+                sessionID: "session",
+                value: .string("After")
+            )],
+            revision: 3
+        )
+        var currentSnapshot = initialSnapshot
+        let structuralEvaluationEntered = DispatchSemaphore(value: 0)
+        let releaseStructuralEvaluation = DispatchSemaphore(value: 0)
+        defer { releaseStructuralEvaluation.signal() }
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: activityKey, requirement: .enhances)],
+            template: .text(
+                .fact(.init(activityKey), facet: .value, fallback: "Unknown"),
+                role: .compactBody
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        var exactPatches = 0
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in currentSnapshot },
+            factSnapshotPatchProvider: { snapshot, _, _ in
+                exactPatches += 1
+                XCTAssertEqual(snapshot.revision, structuralSnapshot.revision)
+                return .init(
+                    snapshot: patchedSnapshot,
+                    affectedSourceSessionIDs: ["session"]
+                )
+            },
+            pipelineEvaluate: { request in
+                if request.pipeline.snapshot.revision == structuralSnapshot.revision {
+                    structuralEvaluationEntered.signal()
+                    releaseStructuralEvaluation.wait()
+                }
+                let evaluation = WorkspaceNavigatorPipelineEvaluator(
+                    calendar: request.calendar
+                ).evaluate(request.pipeline, query: request.query)
+                return WorkspaceNavigatorPipelinePresentation(evaluation: evaluation)
+            },
+            onUnavailable: { XCTFail("revision-fenced pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        try waitForPipelineText("Before", in: host, table: table, row: 0, timeout: 2)
+
+        currentSnapshot = structuralSnapshot
+        NotificationCenter.default.post(ExtensionFactsDidChange(change: .all))
+        let structuralDeadline = Date().addingTimeInterval(2)
+        var structuralWorkerIsBlocked = false
+        while !structuralWorkerIsBlocked, Date() < structuralDeadline {
+            structuralWorkerIsBlocked = structuralEvaluationEntered.wait(timeout: .now())
+                == .success
+            if !structuralWorkerIsBlocked {
+                RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            }
+        }
+        XCTAssertTrue(structuralWorkerIsBlocked)
+
+        NotificationCenter.default.post(ExtensionFactsDidChange(change: .exact([.init(
+            subject: .session("session"),
+            key: activityKey
+        )])))
+        let patchDeadline = Date().addingTimeInterval(2)
+        while exactPatches == 0, Date() < patchDeadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        let visibleText = descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }
+        XCTAssertEqual(exactPatches, 1)
+        XCTAssertTrue(visibleText.contains("Before"))
+        XCTAssertFalse(visibleText.contains("After"))
+
+        releaseStructuralEvaluation.signal()
+        try waitForPipelineText("After", in: host, table: table, row: 0, timeout: 2)
+    }
+
+    func testPipelineNavigatorUpdatesStableTableHeightAsEnhancementProvidersChange()
+        throws
+    {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let detailKey = ExtensionFactKey(id: "example.navigator-detail")
+        let titleDefinition = navigatorFactDefinition(titleKey, usages: [.presentable])
+        let detailDefinition = navigatorFactDefinition(detailKey, usages: [.presentable])
+        var snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [titleDefinition],
+            facts: [navigatorFact(
+                titleKey,
+                sessionID: "session",
+                value: .string("Title")
+            )]
+        )
+        let navigator = pipelineNavigator(
+            consumes: [
+                .init(key: titleKey, requirement: .required),
+                .init(key: detailKey, requirement: .enhances),
+            ],
+            template: .stack(axis: .vertical, spacing: .small, children: [
+                .text(
+                    .fact(.init(titleKey), facet: .value, fallback: nil),
+                    role: .compactBody
+                ),
+                .text(
+                    .fact(.init(detailKey), facet: .value, fallback: nil),
+                    role: .compactDetail
+                ),
+            ])
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("enhancement pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        let controller = try XCTUnwrap(
+            table.delegate as? WorkspaceNavigatorPipelineCollectionViewController
+        )
+        let compactHeight = controller.itemRowHeightForTesting
+
+        snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [titleDefinition, detailDefinition],
+            facts: [
+                navigatorFact(titleKey, sessionID: "session", value: .string("Title")),
+                navigatorFact(detailKey, sessionID: "session", value: .string("Detail")),
+            ],
+            revision: 2
+        )
+        NotificationCenter.default.post(ExtensionFactsDidChange(change: .all))
+        let expandedDeadline = Date().addingTimeInterval(2)
+        while controller.itemRowHeightForTesting == compactHeight,
+              Date() < expandedDeadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+        let expandedHeight = controller.itemRowHeightForTesting
+        XCTAssertTrue(
+            descendants(in: host.view).compactMap { $0 as? ThemedTableView }.contains {
+                $0 === table
+            }
+        )
+        XCTAssertGreaterThan(expandedHeight, compactHeight)
+
+        snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [titleDefinition],
+            facts: [navigatorFact(
+                titleKey,
+                sessionID: "session",
+                value: .string("Title")
+            )],
+            revision: 3
+        )
+        NotificationCenter.default.post(ExtensionFactsDidChange(change: .all))
+        let compactDeadline = Date().addingTimeInterval(2)
+        while controller.itemRowHeightForTesting != compactHeight,
+              Date() < compactDeadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertEqual(controller.itemRowHeightForTesting, compactHeight)
+    }
+
+    func testPipelineNavigatorOptionsPersistThenRecompileTheSnapshot() throws {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(
+            titleKey,
+            usages: [.filterable, .presentable]
+        )
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["alpha", "beta"],
+            definitions: [definition],
+            facts: [
+                navigatorFact(titleKey, sessionID: "alpha", value: .string("Alpha")),
+                navigatorFact(titleKey, sessionID: "beta", value: .string("Beta")),
+            ]
+        )
+        let option = ExtensionWorkspaceNavigatorOption(
+            id: "only-alpha",
+            title: "Only Alpha",
+            control: .toggle(defaultValue: false)
+        )
+        let navigator = pipelineNavigator(
+            options: [option],
+            consumes: [.init(key: titleKey, requirement: .required)],
+            filters: [.init(
+                when: [.init(optionID: option.id, equals: .bool(true))],
+                predicate: .comparison(
+                    .init(.init(titleKey)),
+                    .equal,
+                    .string("Alpha")
+                )
+            )],
+            template: .text(
+                .fact(.init(titleKey), facet: .value, fallback: nil),
+                role: .compactBody
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(
+            navigator: navigator,
+            optionValues: [option.id: .bool(false)]
+        )
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("valid option pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 320)
+        host.view.layoutSubtreeIfNeeded()
+        _ = try waitForPipelineTable(in: host, rowCount: 2)
+
+        let items = host.navigatorMenuEntries().compactMap(\.item)
+        XCTAssertEqual(items.map(\.title), ["Only Alpha", L10n.string("Native")])
+        XCTAssertFalse(items[0].isSelected)
+        items[0].onChoose?()
+        _ = try waitForPipelineTable(in: host, rowCount: 1)
+
+        XCTAssertEqual(router.optionWrites, [.init(
+            optionID: option.id,
+            value: .bool(true),
+            processGeneration: router.inventory.processGeneration
+        )])
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineNavigatorWaitsForARequiredProviderThenRecoversFromFacts() throws {
+        let stateKey = ExtensionFactKey(id: "example.required-state")
+        let definition = navigatorFactDefinition(stateKey, usages: [.presentable])
+        var snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [],
+            facts: []
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: stateKey, requirement: .required)],
+            template: .text(
+                .fact(.init(stateKey), facet: .value, fallback: nil),
+                role: .compactBody
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("provider absence should wait, not fail back") }
+        )
+        _ = host.view
+        XCTAssertTrue(descendants(in: host.view).contains {
+            $0.accessibilityIdentifier() == "workspace.navigator.pipeline-placeholder"
+        })
+
+        snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(stateKey, sessionID: "session", value: .string("Ready"))],
+            revision: 2
+        )
+        NotificationCenter.default.post(ExtensionFactsDidChange(change: .all))
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        XCTAssertTrue(descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }.contains("Ready"))
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineNavigatorDefersFactRefreshWhileItsLiveDeliveryIsSuspended() throws {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(titleKey, usages: [.presentable])
+        var snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(titleKey, sessionID: "session", value: .string("Before"))]
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: titleKey, requirement: .required)],
+            template: .text(
+                .fact(.init(titleKey), facet: .value, fallback: nil),
+                role: .compactBody
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("suspended pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        var table = try waitForPipelineTable(in: host, rowCount: 1)
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        XCTAssertTrue(descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }.contains("Before"))
+
+        host.setLiveEventDeliveryEnabled(false)
+        snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(titleKey, sessionID: "session", value: .string("After"))],
+            revision: 2
+        )
+        NotificationCenter.default.post(ExtensionFactsDidChange(change: .exact([.init(
+            subject: .session("session"),
+            key: titleKey
+        )])))
+        XCTAssertFalse(descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }.contains("After"))
+
+        host.setLiveEventDeliveryEnabled(true)
+        table = try waitForPipelineTable(in: host, rowCount: 1)
+        let deadline = Date().addingTimeInterval(2)
+        repeat {
+            _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+            if descendants(in: host.view).compactMap({ ($0 as? NSTextField)?.stringValue })
+                .contains("After") {
+                break
+            }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        } while Date() < deadline
+        XCTAssertTrue(descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }.contains("After"))
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineNavigatorPatchesOnePresentationFactWithoutResnapshottingTheCatalogue()
+        throws
+    {
+        let activityKey = ExtensionHostFactKey.sessionActivity
+        let registry = ExtensionFactRegistry(
+            now: { Date(timeIntervalSinceReferenceDate: 200) }
+        )
+        try registry.replaceHostDefinitions(
+            HostFactCatalog.definitions.filter { $0.key == activityKey }
+        )
+        let subjects: Set<ExtensionFactSubject> = [.session("alpha"), .session("beta")]
+        let observedAt = Date(timeIntervalSinceReferenceDate: 100)
+        try registry.replaceHostFacts(
+            [
+                ExtensionFact(
+                    key: activityKey,
+                    subject: .session("alpha"),
+                    value: .string("idle"),
+                    label: "Before",
+                    status: .neutral,
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: activityKey,
+                    subject: .session("beta"),
+                    value: .string("working"),
+                    label: "Working",
+                    status: .positive,
+                    observedAt: observedAt
+                ),
+            ],
+            replacing: subjects
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: activityKey, requirement: .required)],
+            template: .stack(axis: .horizontal, spacing: .small, children: [
+                .text(.literal("Session"), role: .compactBody),
+                .status(
+                    .fact(.init(activityKey), facet: .label, fallback: "Unknown"),
+                    role: .factStatus(.init(activityKey), fallback: .neutral)
+                ),
+            ])
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        var completeSnapshots = 0
+        var exactPatches = 0
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { keys in
+                completeSnapshots += 1
+                return registry.snapshot(consuming: keys)
+            },
+            factSnapshotPatchProvider: { snapshot, cells, keys in
+                exactPatches += 1
+                return registry.patch(snapshot, exactCells: cells, consuming: keys)
+            },
+            onUnavailable: { XCTFail("presentation fact patch became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 2)
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        XCTAssertEqual(completeSnapshots, 1)
+
+        try registry.replaceHostFacts(
+            [ExtensionFact(
+                key: activityKey,
+                subject: .session("alpha"),
+                value: .string("waiting"),
+                label: "After",
+                status: .warning,
+                observedAt: observedAt.addingTimeInterval(1)
+            )],
+            replacing: [.session("alpha")]
+        )
+        let deadline = Date().addingTimeInterval(2)
+        repeat {
+            _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+            if descendants(in: host.view).compactMap({ ($0 as? NSTextField)?.stringValue })
+                .contains("After") {
+                break
+            }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        } while Date() < deadline
+
+        XCTAssertTrue(descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }.contains("After"))
+        XCTAssertTrue(
+            descendants(in: host.view).compactMap { $0 as? ThemedTableView }.contains { $0 === table },
+            "an exact presentation edge must retain the virtual table"
+        )
+        XCTAssertEqual(completeSnapshots, 1)
+        XCTAssertEqual(exactPatches, 1)
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineNavigatorPromotesACumulativeExactBurstToAFullRefresh() throws {
+        let activityKey = ExtensionHostFactKey.sessionActivity
+        let definition = navigatorFactDefinition(activityKey, usages: [.presentable])
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [navigatorFact(
+                activityKey,
+                sessionID: "session",
+                value: .string("idle")
+            )]
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: activityKey, requirement: .required)],
+            template: .status(
+                .fact(.init(activityKey), facet: .value, fallback: "Unknown"),
+                role: .literal(.neutral)
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        var completeSnapshots = 0
+        var exactPatches = 0
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in
+                completeSnapshots += 1
+                return snapshot
+            },
+            factSnapshotPatchProvider: { _, _, _ in
+                exactPatches += 1
+                return nil
+            },
+            onUnavailable: { XCTFail("bounded fact burst became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        _ = try waitForPipelineTable(in: host, rowCount: 1)
+        XCTAssertEqual(completeSnapshots, 1)
+
+        for index in 0 ... ExtensionFactRegistry.maximumExactNotificationCells {
+            NotificationCenter.default.post(ExtensionFactsDidChange(change: .exact([.init(
+                subject: .session("burst-\(index)"),
+                key: activityKey
+            )])))
+        }
+        let deadline = Date().addingTimeInterval(2)
+        while completeSnapshots < 2, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+
+        XCTAssertEqual(completeSnapshots, 2)
+        XCTAssertEqual(exactPatches, 0)
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    /// Scaling gate: ordinary work is tens to hundreds of sessions with occasional fact edges;
+    /// this fixture holds 5,000 sessions, the 1,000-row output cap, a 100-keystroke burst, and an
+    /// exact fact edge. Preparation may scale on the worker, while enqueue is O(1), row creation
+    /// is O(visible), and the exact presentation mutation is O(changed).
+    func testStressPipelineNavigatorWhenEnabled() throws {
+        guard ProcessInfo.processInfo.environment["THREADING_NAVIGATOR_PIPELINE_STRESS"] == "1"
+        else {
+            throw XCTSkip("Set THREADING_NAVIGATOR_PIPELINE_STRESS=1 for the 5,000-session fixture")
+        }
+
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let activityKey = ExtensionHostFactKey.sessionActivity
+        let registry = ExtensionFactRegistry(
+            now: { Date(timeIntervalSinceReferenceDate: 300) }
+        )
+        let consumedKeys = Set([titleKey, activityKey])
+        try registry.replaceHostDefinitions(
+            HostFactCatalog.definitions.filter { consumedKeys.contains($0.key) }
+        )
+        let sessionIDs = (0 ..< 5_000).map { String(format: "session-%04d", $0) }
+        let observedAt = Date(timeIntervalSinceReferenceDate: 100)
+        let sessionsPerReplacement = min(
+            ExtensionFactRegistry.maximumSubjectsPerReplacement,
+            ExtensionFactRegistry.maximumFactsPerReplacement / 2
+        )
+        let replacements = stride(
+            from: 0,
+            to: sessionIDs.count,
+            by: sessionsPerReplacement
+        ).map { start in
+            let end = min(
+                start + sessionsPerReplacement,
+                sessionIDs.count
+            )
+            let chunk = sessionIDs[start ..< end]
+            return ExtensionHostFactReplacement(
+                facts: chunk.flatMap { sessionID in
+                    let subject = ExtensionFactSubject.session(sessionID)
+                    return [
+                        ExtensionFact(
+                            key: titleKey,
+                            subject: subject,
+                            value: .string(sessionID),
+                            observedAt: observedAt
+                        ),
+                        ExtensionFact(
+                            key: activityKey,
+                            subject: subject,
+                            value: .string("idle"),
+                            label: "Idle",
+                            status: .neutral,
+                            observedAt: observedAt
+                        ),
+                    ]
+                },
+                subjects: Set(chunk.map(ExtensionFactSubject.session))
+            )
+        }
+        try registry.replaceHostFacts(replacements)
+        let navigator = pipelineNavigator(
+            consumes: [
+                .init(key: titleKey, requirement: .required),
+                .init(key: activityKey, requirement: .required),
+            ],
+            search: .init(
+                placeholder: "Find work",
+                accessibilityLabel: "Find navigator sessions",
+                fields: [.init(titleKey)]
+            ),
+            template: .stack(axis: .vertical, spacing: .tight, children: [
+                .text(.fact(.init(titleKey), facet: .value, fallback: nil), role: .compactBody),
+                .status(
+                    .fact(.init(activityKey), facet: .label, fallback: "Unknown"),
+                    role: .factStatus(.init(activityKey), fallback: .neutral)
+                ),
+            ])
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        var completeSnapshots = 0
+        var exactPatches = 0
+        let mountStart = CFAbsoluteTimeGetCurrent()
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { keys in
+                completeSnapshots += 1
+                return registry.snapshot(consuming: keys)
+            },
+            factSnapshotPatchProvider: { snapshot, cells, keys in
+                exactPatches += 1
+                return registry.patch(snapshot, exactCells: cells, consuming: keys)
+            },
+            onUnavailable: { XCTFail("5,000-session pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 720)
+        let table = try waitForPipelineTable(
+            in: host,
+            rowCount: ExtensionWorkspaceNavigatorPipeline.maximumOutputItems,
+            timeout: 5
+        )
+        let initialLogicalRows = table.numberOfRows
+        let mountMilliseconds = (CFAbsoluteTimeGetCurrent() - mountStart) * 1_000
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        let liveTemplates = descendants(in: host.view).compactMap {
+            $0 as? WorkspaceNavigatorPipelineTemplateView
+        }.count
+        XCTAssertLessThan(liveTemplates, 50)
+
+        let patchStart = CFAbsoluteTimeGetCurrent()
+        try registry.replaceHostFacts(
+            [
+                ExtensionFact(
+                    key: titleKey,
+                    subject: .session("session-0000"),
+                    value: .string("session-0000"),
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: activityKey,
+                    subject: .session("session-0000"),
+                    value: .string("waiting"),
+                    label: "After",
+                    status: .warning,
+                    observedAt: observedAt.addingTimeInterval(1)
+                ),
+            ],
+            replacing: [.session("session-0000")]
+        )
+        try waitForPipelineText("After", in: host, table: table, row: 0, timeout: 2)
+        let patchMilliseconds = (CFAbsoluteTimeGetCurrent() - patchStart) * 1_000
+        XCTAssertEqual(completeSnapshots, 1)
+        XCTAssertEqual(exactPatches, 1)
+
+        let search = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedSearchField }.first
+        )
+        let enqueueStart = CFAbsoluteTimeGetCurrent()
+        for index in 1 ... 100 {
+            search.stringValue = index == 100 ? "session-4999" : "absent-\(index)"
+            search.delegate?.controlTextDidChange?(Notification(
+                name: NSControl.textDidChangeNotification,
+                object: search
+            ))
+        }
+        let enqueueMilliseconds = (CFAbsoluteTimeGetCurrent() - enqueueStart) * 1_000
+        let settleStart = CFAbsoluteTimeGetCurrent()
+        let filteredTable = try waitForPipelineTable(in: host, rowCount: 1, timeout: 5)
+        let settleMilliseconds = (CFAbsoluteTimeGetCurrent() - settleStart) * 1_000
+        _ = filteredTable.view(atColumn: 0, row: 0, makeIfNecessary: true)
+
+        XCTAssertTrue(filteredTable === table)
+        XCTAssertTrue(descendants(in: host.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }.contains("session-4999"))
+        XCTAssertEqual(completeSnapshots, 1)
+        XCTAssertTrue(router.invocations.isEmpty)
+        print(String(format:
+            "THREADING_PERF workspace-navigator-pipeline sessions=5000 logical_rows=%d "
+                + "live_templates=%d mount_ms=%.2f exact_patch_ms=%.2f "
+                + "query_enqueue_ms=%.2f query_settle_ms=%.2f",
+            initialLogicalRows, liveTemplates, mountMilliseconds, patchMilliseconds,
+            enqueueMilliseconds, settleMilliseconds))
+    }
+
+    func testPipelineNavigatorBoundsOutputAndKeepsOverflowOutsideSelection() throws {
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(titleKey, usages: [.presentable])
+        let sessionIDs = (0...ExtensionWorkspaceNavigatorPipeline.maximumOutputItems).map {
+            "session-\($0)"
+        }
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: sessionIDs,
+            definitions: [definition],
+            facts: sessionIDs.map {
+                navigatorFact(titleKey, sessionID: $0, value: .string($0))
+            }
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: titleKey, requirement: .required)],
+            template: .text(
+                .fact(.init(titleKey), facet: .value, fallback: nil),
+                role: .compactBody
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("bounded pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 320)
+        let table = try waitForPipelineTable(
+            in: host,
+            rowCount: ExtensionWorkspaceNavigatorPipeline.maximumOutputItems
+        )
+        let overflow = try XCTUnwrap(descendants(in: host.view).first {
+            $0.accessibilityIdentifier() == "workspace.navigator.pipeline-overflow"
+        })
+
+        XCTAssertEqual(
+            table.numberOfRows,
+            ExtensionWorkspaceNavigatorPipeline.maximumOutputItems
+        )
+        XCTAssertFalse(overflow.isDescendant(of: table))
+        XCTAssertLessThan(
+            descendants(in: host.view).compactMap {
+                $0 as? WorkspaceNavigatorPipelineTemplateView
+            }.count,
+            ExtensionWorkspaceNavigatorPipeline.maximumOutputItems,
+            "the bounded bridge must still realize templates only for visible rows"
+        )
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineFactImageUsesTheExactProviderGeneration() throws {
+        let iconKey = ExtensionFactKey(id: "example.provider-icon")
+        let provider = ExtensionFactResolutionSource.extension(
+            identifier: "com.example.provider",
+            processGeneration: "provider-generation-7"
+        )
+        let definition = navigatorFactDefinition(iconKey, usages: [.presentable])
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [ExtensionFact(
+                key: iconKey,
+                subject: .session("session"),
+                value: .string("provider"),
+                icon: .extensionResource("icon.png"),
+                observedAt: Date(timeIntervalSince1970: 1)
+            )],
+            sourcesByKey: [iconKey: provider]
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: iconKey, requirement: .required)],
+            template: .image(
+                .factIcon(.init(iconKey), fallback: nil),
+                role: .icon,
+                accessibilityLabel: "Provider"
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("provider image pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+
+        XCTAssertEqual(router.exactImageRequests, [.init(
+            extensionIdentifier: "com.example.provider",
+            relativePath: "icon.png",
+            processGeneration: "provider-generation-7"
+        )])
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineFactImageResolvesAKnownHostProviderIdentityAsset() throws {
+        let iconKey = ExtensionFactKey(id: "example.host-provider-icon")
+        let definition = navigatorFactDefinition(iconKey, usages: [.presentable])
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [ExtensionFact(
+                key: iconKey,
+                subject: .session("session"),
+                value: .string("grok"),
+                icon: .hostAsset(ExtensionIdentityAssetID.provider(AgentKind.grok.rawValue)),
+                observedAt: Date(timeIntervalSince1970: 1)
+            )]
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: iconKey, requirement: .required)],
+            template: .image(
+                .factIcon(.init(iconKey), fallback: nil),
+                role: .identity,
+                accessibilityLabel: "Grok"
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("host identity image pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+
+        let image = try XCTUnwrap(descendants(in: host.view).first {
+            $0.accessibilityIdentifier() == "workspace.navigator.pipeline-image.identity"
+        } as? NSImageView)
+        XCTAssertNotNil(image.image)
+        XCTAssertTrue(router.invocations.isEmpty)
     }
 
     func testV1NavigatorMenuKeepsDeclaredOptionsHiddenUntilAHostTransformConsumesThem()
@@ -6778,6 +7925,140 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     )
   }
 
+  private func waitForPipelineTable(
+    in host: WorkspaceNavigatorHostViewController,
+    rowCount: Int,
+    timeout: TimeInterval = 2
+  ) throws -> ThemedTableView {
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+      host.view.layoutSubtreeIfNeeded()
+      if let table = descendants(in: host.view).compactMap({ $0 as? ThemedTableView }).first(
+        where: {
+          $0.accessibilityIdentifier().hasPrefix("workspace.navigator.collection.")
+            && $0.numberOfRows == rowCount
+        }
+      ) {
+        return table
+      }
+      RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    } while Date() < deadline
+    return try XCTUnwrap(
+      nil as ThemedTableView?,
+      "pipeline table did not reach \(rowCount) rows before timeout"
+    )
+  }
+
+  private func waitForPipelineText(
+    _ text: String,
+    in host: WorkspaceNavigatorHostViewController,
+    table: ThemedTableView,
+    row: Int,
+    timeout: TimeInterval
+  ) throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+      _ = table.view(atColumn: 0, row: row, makeIfNecessary: true)
+      if descendants(in: host.view).compactMap({ ($0 as? NSTextField)?.stringValue })
+        .contains(text) {
+        return
+      }
+      RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    } while Date() < deadline
+    XCTFail("pipeline row did not render '\(text)' before timeout")
+  }
+
+  private func pipelineNavigator(
+    options: [ExtensionWorkspaceNavigatorOption] = [],
+    consumes: [ExtensionWorkspaceNavigatorFactConsumption],
+    search: ExtensionWorkspaceNavigatorSearch? = nil,
+    filters: [ExtensionWorkspaceNavigatorFilterClause] = [],
+    itemLimit: Int = ExtensionWorkspaceNavigatorPipeline.maximumOutputItems,
+    template: ExtensionWorkspaceNavigatorTemplateNode,
+    loadActionID: String? = nil
+  ) -> ExtensionWorkspaceNavigator {
+    ExtensionWorkspaceNavigator(
+      id: "pipeline",
+      title: "Pipeline",
+      root: .content(.text("Legacy fallback", role: .body)),
+      options: options,
+      pipeline: .init(
+        consumes: consumes,
+        search: search,
+        filters: filters,
+        output: .init(
+          collectionID: "pipeline-sessions",
+          itemLimit: itemLimit,
+          rowTemplate: template,
+          emptyState: .init(title: "Nothing matches")
+        )
+      ),
+      loadActionID: loadActionID
+    )
+  }
+
+  private func navigatorFactDefinition(
+    _ key: ExtensionFactKey,
+    usages: Set<ExtensionFactUsage>
+  ) -> ExtensionFactDefinition {
+    .init(
+      key: key,
+      displayName: key.id,
+      valueType: .string,
+      subjectKinds: [.session],
+      usages: usages
+    )
+  }
+
+  private func navigatorFact(
+    _ key: ExtensionFactKey,
+    sessionID: String,
+    value: ExtensionFactValue
+  ) -> ExtensionFact {
+    .init(
+      key: key,
+      subject: .session(sessionID),
+      value: value,
+      observedAt: Date(timeIntervalSince1970: 1)
+    )
+  }
+
+  private func makeWorkspaceNavigatorSnapshot(
+    sessionIDs: [String],
+    definitions: [ExtensionFactDefinition],
+    facts: [ExtensionFact],
+    revision: UInt64 = 1,
+    sourcesByKey: [ExtensionFactKey: ExtensionFactResolutionSource] = [:]
+  ) -> ExtensionFactSnapshot {
+    let definitionsByKey = Dictionary(
+      uniqueKeysWithValues: definitions.map { ($0.key, $0) }
+    )
+    let providersByKey = Dictionary(
+      uniqueKeysWithValues: definitions.map {
+        ($0.key, Set([sourcesByKey[$0.key] ?? ExtensionFactResolutionSource.host]))
+      }
+    )
+    var table: ExtensionFactSnapshot.FactTable = [:]
+    for fact in facts {
+      guard let definition = definitionsByKey[fact.key] else {
+        preconditionFailure("Missing test definition for \(fact.key.id)")
+      }
+      table[fact.subject, default: [:]][fact.key] = .init(
+        fact: fact,
+        definition: definition,
+        source: sourcesByKey[fact.key] ?? .host,
+        receivedAt: fact.observedAt
+      )
+    }
+    return .init(
+      revision: revision,
+      sessionSubjects: sessionIDs.map(ExtensionFactSubject.session),
+      definitionsByKey: definitionsByKey,
+      providersByKey: providersByKey,
+      factsBySubject: table
+    )
+  }
+
   private func descendants(in root: NSView) -> [NSView] {
     root.subviews.flatMap { [$0] + descendants(in: $0) }
   }
@@ -7210,8 +8491,23 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
         let context: ExtensionCommandContext
     }
 
+    struct OptionWrite: Equatable {
+        let optionID: String
+        let value: ExtensionJSONValue
+        let processGeneration: String
+    }
+
+    struct ExactImageRequest: Equatable {
+        let extensionIdentifier: String
+        let relativePath: String
+        let processGeneration: String
+    }
+
     var inventory: ExtensionWorkspaceNavigatorInventoryItem
     var invocations: [Invocation] = []
+    var optionWrites: [OptionWrite] = []
+    var exactImageRequests: [ExactImageRequest] = []
+    var exactImageURL: URL?
     var result: Result<ExtensionWorkspaceNavigatorActionResponse, Error>
     var acceptsActions = true
     var completesRejectedActions = false
@@ -7220,12 +8516,17 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
         Result<ExtensionWorkspaceNavigatorActionResponse, Error>
     ) -> Void] = []
 
-    init(navigator: ExtensionWorkspaceNavigator, processGeneration: String = "generation-1") {
+    init(
+        navigator: ExtensionWorkspaceNavigator,
+        processGeneration: String = "generation-1",
+        optionValues: [String: ExtensionJSONValue] = [:]
+    ) {
         inventory = .init(
             extensionIdentifier: "com.example.navigator",
             extensionName: "Example Navigator",
             processGeneration: processGeneration,
-            navigator: navigator
+            navigator: navigator,
+            optionValues: optionValues
         )
         result = .success(.init(
             requestID: "test-response",
@@ -7253,6 +8554,43 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
         relativePath: String
     ) -> URL? {
         nil
+    }
+
+    func extensionImageResourceURL(
+        extensionIdentifier: String,
+        relativePath: String,
+        processGeneration: String
+    ) -> URL? {
+        exactImageRequests.append(.init(
+            extensionIdentifier: extensionIdentifier,
+            relativePath: relativePath,
+            processGeneration: processGeneration
+        ))
+        return exactImageURL
+    }
+
+    func setWorkspaceNavigatorOption(
+        extensionIdentifier: String,
+        navigatorID: String,
+        optionID: String,
+        value: ExtensionJSONValue,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (
+            Result<[String: ExtensionJSONValue], Error>
+        ) -> Void
+    ) -> Bool {
+        guard extensionIdentifier == inventory.extensionIdentifier,
+              navigatorID == inventory.navigator.id,
+              processGeneration == inventory.processGeneration else { return false }
+        optionWrites.append(.init(
+            optionID: optionID,
+            value: value,
+            processGeneration: processGeneration
+        ))
+        var values = inventory.optionValues
+        values[optionID] = value
+        completion(.success(values))
+        return true
     }
 
     func invokeWorkspaceNavigatorAction(

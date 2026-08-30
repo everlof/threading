@@ -663,6 +663,24 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         XCTAssertEqual(clock.callCount, 1, "Visible rows must not sample a newer host day")
     }
 
+    func testACompletelyAbsentRealizedTemplateDoesNotEmitASelectableRow() throws {
+        let snapshot = makeSnapshot(
+            sessionIDs: ["full", "missing"],
+            definitions: [titleDefinition],
+            facts: [fact(titleKey, .session("full"), .string("Full"))]
+        )
+        let value = pipeline(
+            consumes: [.init(key: titleKey, requirement: .required)],
+            template: titleTemplate
+        )
+
+        let result = try WorkspaceNavigatorPipelineEvaluator().evaluate(
+            ready(value, snapshot: snapshot)
+        )
+
+        XCTAssertEqual(result.sections.flatMap(\.items).map(\.sourceSessionID), ["full"])
+    }
+
     func testFiveThousandSessionsAreBoundedBeforeVisibleRowRealization() throws {
         let dateKey = ExtensionFactKey(id: "example.date")
         let dateDefinition = definition(
@@ -712,6 +730,67 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             try evaluator.realizeVisibleRow(XCTUnwrap(result.sections.first?.items.first), in: compiled),
             .text("session-4999", role: .body)
         )
+    }
+
+    func testEvaluationSchedulerCollapsesATypeaheadBurstToTheNewestPendingRequest() throws {
+        let snapshot = makeSnapshot(
+            sessionIDs: ["session"],
+            definitions: [titleDefinition],
+            facts: [fact(titleKey, .session("session"), .string("Latest query"))]
+        )
+        let value = pipeline(
+            consumes: [.init(key: titleKey)],
+            search: .init(
+                placeholder: "Search",
+                accessibilityLabel: "Search sessions",
+                fields: [.init(titleKey)]
+            ),
+            template: titleTemplate
+        )
+        let compiled = try ready(value, snapshot: snapshot)
+        let firstEvaluationEntered = DispatchSemaphore(value: 0)
+        let releaseFirstEvaluation = DispatchSemaphore(value: 0)
+        let recorder = QueryRecorder()
+        let deliveredLatest = expectation(description: "latest evaluation delivered")
+        let scheduler = WorkspaceNavigatorPipelineEvaluationScheduler(
+            evaluate: { request in
+                recorder.recordEvaluation(request.query)
+                if request.query == "first" {
+                    firstEvaluationEntered.signal()
+                    releaseFirstEvaluation.wait()
+                }
+                let evaluation = WorkspaceNavigatorPipelineEvaluator().evaluate(
+                    request.pipeline,
+                    query: request.query
+                )
+                return WorkspaceNavigatorPipelinePresentation(evaluation: evaluation)
+            },
+            deliver: { output in
+                recorder.recordDelivery(output.query)
+                if output.query == "Latest query" { deliveredLatest.fulfill() }
+            }
+        )
+
+        scheduler.submit(.init(
+            sequence: 1,
+            pipeline: compiled,
+            query: "first",
+            calendar: .current
+        ))
+        XCTAssertEqual(firstEvaluationEntered.wait(timeout: .now() + 1), .success)
+        for index in 2 ... 100 {
+            scheduler.submit(.init(
+                sequence: index,
+                pipeline: compiled,
+                query: index == 100 ? "Latest query" : "query-\(index)",
+                calendar: .current
+            ))
+        }
+        releaseFirstEvaluation.signal()
+        wait(for: [deliveredLatest], timeout: 2)
+
+        XCTAssertEqual(recorder.evaluations, ["first", "Latest query"])
+        XCTAssertEqual(recorder.deliveries.last, "Latest query")
     }
 
     private var titleDefinition: ExtensionFactDefinition {
@@ -894,5 +973,22 @@ private final class DateSequenceClock: @unchecked Sendable {
             index += 1
             return date
         }
+    }
+}
+
+private final class QueryRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvaluations: [String] = []
+    private var recordedDeliveries: [String] = []
+
+    var evaluations: [String] { lock.withLock { recordedEvaluations } }
+    var deliveries: [String] { lock.withLock { recordedDeliveries } }
+
+    func recordEvaluation(_ query: String) {
+        lock.withLock { recordedEvaluations.append(query) }
+    }
+
+    func recordDelivery(_ query: String) {
+        lock.withLock { recordedDeliveries.append(query) }
     }
 }

@@ -9,6 +9,9 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     private let routing: ExtensionWorkspaceNavigatorRouting
     private let contextProvider: WorkspaceNavigatorHostViewController.ContextProvider
     private let destinationHandler: WorkspaceNavigatorHostViewController.DestinationHandler
+    private let factSnapshotProvider: WorkspaceNavigatorHostViewController.FactSnapshotProvider
+    private let factSnapshotPatchProvider:
+        WorkspaceNavigatorHostViewController.FactSnapshotPatchProvider
     private let onSelectNative: () -> Void
     private var visibleController: NSViewController?
     private var extensionController: WorkspaceNavigatorHostViewController?
@@ -25,12 +28,21 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         routing: ExtensionWorkspaceNavigatorRouting,
         contextProvider: @escaping WorkspaceNavigatorHostViewController.ContextProvider,
         destinationHandler: @escaping WorkspaceNavigatorHostViewController.DestinationHandler,
+        factSnapshotProvider: @escaping WorkspaceNavigatorHostViewController.FactSnapshotProvider = {
+            _ in nil
+        },
+        factSnapshotPatchProvider:
+            @escaping WorkspaceNavigatorHostViewController.FactSnapshotPatchProvider = {
+                _, _, _ in nil
+            },
         onSelectNative: @escaping () -> Void = {}
     ) {
         self.nativeController = nativeController
         self.routing = routing
         self.contextProvider = contextProvider
         self.destinationHandler = destinationHandler
+        self.factSnapshotProvider = factSnapshotProvider
+        self.factSnapshotPatchProvider = factSnapshotPatchProvider
         self.onSelectNative = onSelectNative
         super.init(nibName: nil, bundle: nil)
     }
@@ -99,6 +111,8 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
                 routing: routing,
                 contextProvider: contextProvider,
                 destinationHandler: destinationHandler,
+                factSnapshotProvider: factSnapshotProvider,
+                factSnapshotPatchProvider: factSnapshotPatchProvider,
                 onSelectNative: onSelectNative,
                 onUnavailable: { [weak self] in
                     self?.failBack(

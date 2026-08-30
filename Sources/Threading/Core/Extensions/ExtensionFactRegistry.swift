@@ -110,7 +110,10 @@ final class ExtensionFactRegistry {
     static let maximumFactsPerGeneration = ExtensionFactProviderLimits.maximumFactsPerGeneration
     static let maximumResolvedFactsPerSubject = 128
     static let maximumExactNotificationCells = 256
-    private static let snapshotStructuralKeys: Set<ExtensionFactKey> = [
+    /// Facts which can change the subject joins used by any pipeline even when the extension did
+    /// not reference the key as a presentation value. Exposed within the host so notification
+    /// filtering follows the exact same inclusion boundary as snapshot construction.
+    nonisolated static let snapshotStructuralKeys: Set<ExtensionFactKey> = [
         ExtensionHostFactKey.sessionProjectID,
         ExtensionHostFactKey.sessionBranch,
         ExtensionHostFactKey.projectRepositoryHost,
@@ -272,6 +275,44 @@ final class ExtensionFactRegistry {
             definitionsByKey: definitions,
             providersByKey: providers,
             factsBySubject: facts
+        )
+    }
+
+    /// Advances an existing snapshot through exact, provider-stable, nonstructural cells.
+    /// Structural membership and join changes deliberately return `nil` so their caller takes a
+    /// fresh atomic snapshot and reevaluates the transform.
+    func patch(
+        _ snapshot: ExtensionFactSnapshot,
+        exactCells: Set<ExtensionFactCell>,
+        consuming consumedKeys: Set<ExtensionFactKey>
+    ) -> ExtensionFactSnapshotPatch? {
+        guard exactCells.allSatisfy({ !Self.snapshotStructuralKeys.contains($0.key) }) else {
+            return nil
+        }
+        for cell in exactCells {
+            guard case .session = cell.subject else { continue }
+            let isCurrentlyASourceSession = hostFacts[cell.subject] != nil
+            guard snapshot.containsSessionSubject(cell.subject) == isCurrentlyASourceSession else {
+                return nil
+            }
+        }
+
+        let includedKeys = consumedKeys.union(Self.snapshotStructuralKeys)
+        let relevantCells = exactCells.filter { includedKeys.contains($0.key) }
+        let updates = relevantCells.map { cell in
+            let fact = resolved[cell.subject]?[cell.key].map { value in
+                ExtensionResolvedFact(
+                    fact: value.stored.fact(key: cell.key, subject: cell.subject),
+                    definition: value.definition,
+                    source: value.source,
+                    receivedAt: value.stored.receivedAt
+                )
+            }
+            return ExtensionFactSnapshotCellUpdate(cell: cell, resolvedFact: fact)
+        }
+        return ExtensionFactSnapshotPatch(
+            snapshot: snapshot.applyingExactUpdates(updates, revision: revision),
+            affectedSourceSessionIDs: snapshot.affectedSourceSessionIDs(by: relevantCells)
         )
     }
 

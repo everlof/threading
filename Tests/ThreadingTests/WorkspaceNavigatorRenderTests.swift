@@ -41,10 +41,12 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         }
 
         let router = WorkspaceNavigatorEvidenceRouter()
+        let factRegistry = try makePipelineFactRegistry()
         let controller = makeMainWindowController(
             initialFramePlan: .useDefaultFrame,
             workspaceNavigatorRouting: router
         )
+        controller.installWorkspaceNavigatorFactRegistry(factRegistry)
         let window = try XCTUnwrap(controller.window)
         window.setContentSize(Render.windowSize)
         let content = try XCTUnwrap(window.contentView)
@@ -80,6 +82,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             content.appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
             controller.selectWorkspaceNavigator(selection)
             AppThemeRefresh.repaint(content)
+            try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
 
@@ -92,6 +95,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             )
             XCTAssertTrue(menuButton.accessibilityPerformPress())
             XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: window))
+            try suppressComposerUsage(in: content)
             content.layoutSubtreeIfNeeded()
             content.displayIfNeeded()
             try write(content, named: "workspace-navigator-\(fixture.name)-menu.png")
@@ -102,7 +106,150 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
         }
 
+        AppThemePalette.set(.system)
+        content.appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        controller.selectWorkspaceNavigator(.extensionNavigator(
+            extensionIdentifier: router.pipelineInventory.extensionIdentifier,
+            navigatorID: router.pipelineInventory.navigator.id
+        ))
+        _ = try waitForPipelineTable(in: content, rowCount: 8)
+        AppThemeRefresh.repaint(content)
+        try suppressComposerUsage(in: content)
+        content.layoutSubtreeIfNeeded()
+        content.displayIfNeeded()
+        try write(content, named: "workspace-navigator-pipeline-system-light-focused.png")
+
+        let pipelineMenuButton = try XCTUnwrap(
+            descendants(of: content).compactMap { $0 as? ThemedIconButton }.first {
+                $0.accessibilityIdentifier() == "workspace.navigator.menu"
+            }
+        )
+        XCTAssertTrue(pipelineMenuButton.accessibilityPerformPress())
+        XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: window))
+        try suppressComposerUsage(in: content)
+        content.layoutSubtreeIfNeeded()
+        content.displayIfNeeded()
+        try write(content, named: "workspace-navigator-pipeline-system-light-menu.png")
+        controller.selectWorkspaceNavigator(.native)
+        XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+
+        controller.selectWorkspaceNavigator(.extensionNavigator(
+            extensionIdentifier: router.pipelineInventory.extensionIdentifier,
+            navigatorID: router.pipelineInventory.navigator.id
+        ))
+        _ = try waitForPipelineTable(in: content, rowCount: 8)
+        let pipelineSearch = try XCTUnwrap(
+            descendants(of: content).compactMap { $0 as? ThemedSearchField }.first
+        )
+        pipelineSearch.stringValue = "No matching focused work"
+        pipelineSearch.delegate?.controlTextDidChange?(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: pipelineSearch
+        ))
+        _ = try waitForPipelineTable(in: content, rowCount: 0)
+        try suppressComposerUsage(in: content)
+        content.layoutSubtreeIfNeeded()
+        content.displayIfNeeded()
+        try write(content, named: "workspace-navigator-pipeline-system-light-empty.png")
+        controller.selectWorkspaceNavigator(.native)
+
         print("Rendered the focused workspace navigator to \(Render.directory.path)")
+    }
+
+    private func makePipelineFactRegistry() throws -> ExtensionFactRegistry {
+        let registry = ExtensionFactRegistry(now: { Date(timeIntervalSinceReferenceDate: 100) })
+        let keys: Set<ExtensionFactKey> = [
+            ExtensionHostFactKey.sessionTitle,
+            ExtensionHostFactKey.sessionDetailedActivity,
+            ExtensionHostFactKey.sessionBranch,
+        ]
+        try registry.replaceHostDefinitions(
+            HostFactCatalog.definitions.filter { keys.contains($0.key) }
+        )
+        let rows: [(String, String, String, String, ExtensionStatusRole)] = [
+            ("pipeline-1", "Review navigator permissions", "awaiting-user", "Waiting for you", .warning),
+            ("pipeline-2", "Prepare the 1.4 release", "working", "Working", .positive),
+            ("pipeline-3", "Design a focused project sidebar", "idle", "Idle", .neutral),
+            ("pipeline-4", "Keep lifecycle tests deterministic", "working", "Working", .positive),
+            ("pipeline-5", "Document host-owned recovery", "idle", "Idle", .neutral),
+            ("pipeline-6", "Join GitLab merge-request state", "awaiting-user", "Waiting", .warning),
+            ("pipeline-7", "Move search into the host transform", "working", "Working", .positive),
+            ("pipeline-8", "Define safe row intents", "idle", "Planned", .neutral),
+        ]
+        let observedAt = Date(timeIntervalSinceReferenceDate: 50)
+        let facts = rows.flatMap { id, title, activity, activityLabel, status in
+            let subject = ExtensionFactSubject.session(id)
+            return [
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionTitle,
+                    subject: subject,
+                    value: .string(title),
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionDetailedActivity,
+                    subject: subject,
+                    value: .string(activity),
+                    label: activityLabel,
+                    status: status,
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionBranch,
+                    subject: subject,
+                    value: .string("navigator-pipeline"),
+                    observedAt: observedAt
+                ),
+            ]
+        }
+        try registry.replaceHostFacts(
+            facts,
+            replacing: Set(rows.map { .session($0.0) })
+        )
+        return registry
+    }
+
+    private func waitForPipelineTable(
+        in root: NSView,
+        rowCount: Int,
+        timeout: TimeInterval = 2
+    ) throws -> ThemedTableView {
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            root.layoutSubtreeIfNeeded()
+            if let table = descendants(of: root).compactMap({ $0 as? ThemedTableView }).first(
+                where: {
+                    $0.accessibilityIdentifier().hasPrefix("workspace.navigator.collection.")
+                        && $0.numberOfRows == rowCount
+                }
+            ) {
+                return table
+            }
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        } while Date() < deadline
+        return try XCTUnwrap(
+            nil as ThemedTableView?,
+            "pipeline evidence table did not reach \(rowCount) rows before timeout"
+        )
+    }
+
+    /// The surrounding shipping composer may receive a live account-usage edge while this
+    /// navigator evidence is being captured. Keep that unrelated reading deterministic so a
+    /// later pipeline image cannot differ from an earlier shell image merely because the
+    /// provider refreshed between them.
+    private func suppressComposerUsage(in root: NSView) throws {
+        let subtree = [root] + descendants(of: root)
+        let controls = subtree + subtree
+            .compactMap { $0 as? NSStackView }
+            .flatMap(\.arrangedSubviews)
+        let usage = try XCTUnwrap(
+            controls.compactMap { $0 as? UsageReadingLabel }.first {
+                $0.accessibilityIdentifier() == "composer.session-start.usage"
+            }
+        )
+        usage.readings = []
+        usage.toolTip = nil
+        usage.isHidden = true
     }
 
     private func write(_ view: NSView, named filename: String) throws {
@@ -120,6 +267,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
 @MainActor
 private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigatorRouting {
     let inventory: ExtensionWorkspaceNavigatorInventoryItem
+    let pipelineInventory: ExtensionWorkspaceNavigatorInventoryItem
 
     init() {
         let sections = [
@@ -186,21 +334,97 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
             optionValues: ["group": .bool(true)],
             optionPersistenceOutcome: .loaded
         )
+
+        let title = ExtensionWorkspaceNavigatorFactReference(ExtensionHostFactKey.sessionTitle)
+        let activity = ExtensionWorkspaceNavigatorFactReference(
+            ExtensionHostFactKey.sessionDetailedActivity
+        )
+        let branch = ExtensionWorkspaceNavigatorFactReference(ExtensionHostFactKey.sessionBranch)
+        let workingOnly = ExtensionWorkspaceNavigatorOption(
+            id: "working-only",
+            title: "Working only",
+            control: .toggle(defaultValue: false)
+        )
+        let pipelineNavigator = ExtensionWorkspaceNavigator(
+            id: "pipeline-workspace",
+            title: "Focused work from shared session facts",
+            root: .content(.text("Pipeline unavailable", role: .body)),
+            options: [workingOnly],
+            pipeline: .init(
+                consumes: [
+                    .init(key: title.key, requirement: .required),
+                    .init(key: activity.key, requirement: .enhances),
+                    .init(key: branch.key, requirement: .enhances),
+                ],
+                search: .init(
+                    placeholder: "Find focused work",
+                    accessibilityLabel: "Search focused navigator sessions",
+                    fields: [title, branch]
+                ),
+                filters: [.init(
+                    when: [.init(optionID: workingOnly.id, equals: .bool(true))],
+                    predicate: .comparison(
+                        .init(activity),
+                        .equal,
+                        .string("working")
+                    )
+                )],
+                sort: [.init(
+                    operand: .init(title),
+                    direction: .ascending
+                )],
+                output: .init(
+                    collectionID: "pipeline-sessions",
+                    rowTemplate: .stack(
+                        axis: .vertical,
+                        spacing: .tight,
+                        children: [
+                            .text(
+                                .fact(title, facet: .value, fallback: "Untitled session"),
+                                role: .compactBody
+                            ),
+                            .stack(
+                                axis: .horizontal,
+                                spacing: .small,
+                                children: [
+                                    .status(
+                                        .fact(activity, facet: .label, fallback: "Idle"),
+                                        role: .factStatus(activity, fallback: .neutral)
+                                    ),
+                                    .flexibleSpacer,
+                                    .text(
+                                        .fact(branch, facet: .value, fallback: "No branch"),
+                                        role: .compactDetail
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                    emptyState: .init(title: "No focused work")
+                )
+            )
+        )
+        pipelineInventory = .init(
+            extensionIdentifier: "com.example.pipeline-navigator",
+            extensionName: "Pipeline Navigator",
+            processGeneration: "pipeline-evidence-generation",
+            navigator: pipelineNavigator,
+            optionValues: [workingOnly.id: .bool(false)],
+            optionPersistenceOutcome: .loaded
+        )
     }
 
     var extensionWorkspaceNavigatorInventory: [ExtensionWorkspaceNavigatorInventoryItem] {
-        [inventory]
+        [inventory, pipelineInventory]
     }
 
     func registeredWorkspaceNavigator(
         extensionIdentifier: String,
         navigatorID: String
     ) -> ExtensionWorkspaceNavigatorInventoryItem? {
-        guard extensionIdentifier == inventory.extensionIdentifier,
-              navigatorID == inventory.navigator.id else {
-            return nil
+        extensionWorkspaceNavigatorInventory.first {
+            $0.extensionIdentifier == extensionIdentifier && $0.navigator.id == navigatorID
         }
-        return inventory
     }
 
     func extensionImageResourceURL(

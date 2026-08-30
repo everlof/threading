@@ -205,6 +205,15 @@ protocol ExtensionWorkspaceNavigatorRouting: AnyObject {
         relativePath: String
     ) -> URL?
 
+    /// Resolves a package-relative image only while the exact provider generation is current.
+    /// Pipeline fact images retain this provenance across snapshot evaluation, so a replacement
+    /// process can never make an old visible row read from its new package generation.
+    func extensionImageResourceURL(
+        extensionIdentifier: String,
+        relativePath: String,
+        processGeneration: String
+    ) -> URL?
+
     @discardableResult
     func invokeWorkspaceNavigatorAction(
         extensionIdentifier: String,
@@ -231,6 +240,14 @@ extension ExtensionWorkspaceNavigatorRouting {
         ) -> Void
     ) -> Bool {
         false
+    }
+
+    func extensionImageResourceURL(
+        extensionIdentifier: String,
+        relativePath: String,
+        processGeneration: String
+    ) -> URL? {
+        nil
     }
 }
 
@@ -1025,6 +1042,18 @@ final class ExtensionManager:
         relativePath: String
     ) -> URL? {
         imageResourceURL(
+            relativePath: relativePath,
+            extensionIdentifier: extensionIdentifier
+        )
+    }
+
+    func extensionImageResourceURL(
+        extensionIdentifier: String,
+        relativePath: String,
+        processGeneration: String
+    ) -> URL? {
+        guard sessionGenerations[extensionIdentifier] == processGeneration else { return nil }
+        return imageResourceURL(
             relativePath: relativePath,
             extensionIdentifier: extensionIdentifier
         )

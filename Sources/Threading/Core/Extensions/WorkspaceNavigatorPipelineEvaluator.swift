@@ -31,6 +31,126 @@ struct WorkspaceNavigatorPipelineEvaluation: Equatable, Sendable {
     var itemCount: Int { sections.reduce(0) { $0 + $1.items.count } }
 }
 
+/// Flat, immutable table input prepared beside evaluation on the worker queue. AppKit receives
+/// one array swap and asks for semantic rows only inside its viewport; it never materializes an
+/// NSObject tree proportional to the evaluator's output on the main actor.
+struct WorkspaceNavigatorPipelinePresentation: Equatable, Sendable {
+    enum Row: Equatable, Sendable {
+        case section(title: String)
+        case item(WorkspaceNavigatorPipelineItem)
+    }
+
+    let evaluation: WorkspaceNavigatorPipelineEvaluation
+    let rows: [Row]
+    let rowBySourceSessionID: [String: Int]
+
+    init(evaluation: WorkspaceNavigatorPipelineEvaluation) {
+        self.evaluation = evaluation
+        var rows: [Row] = []
+        rows.reserveCapacity(evaluation.itemCount + evaluation.sections.count)
+        var rowBySourceSessionID: [String: Int] = [:]
+        rowBySourceSessionID.reserveCapacity(evaluation.itemCount)
+        for section in evaluation.sections {
+            if let title = section.title { rows.append(.section(title: title)) }
+            for item in section.items {
+                rowBySourceSessionID[item.sourceSessionID] = rows.count
+                rows.append(.item(item))
+            }
+        }
+        self.rows = rows
+        self.rowBySourceSessionID = rowBySourceSessionID
+    }
+}
+
+/// Keeps navigator work bounded under rapid search input or provider updates. One evaluation may
+/// be running while every later submission collapses into a single newest pending request.
+final class WorkspaceNavigatorPipelineEvaluationScheduler: @unchecked Sendable {
+    struct Request: Sendable {
+        let sequence: Int
+        let pipeline: CompiledWorkspaceNavigatorPipeline
+        let query: String
+        let calendar: Calendar
+    }
+
+    struct Output: Sendable {
+        let sequence: Int
+        let query: String
+        /// The exact immutable program evaluated for this presentation. The main actor accepts
+        /// the pair atomically; it never renders rows against whichever revision compiled later.
+        let pipeline: CompiledWorkspaceNavigatorPipeline
+        let presentation: WorkspaceNavigatorPipelinePresentation
+    }
+
+    typealias Evaluate = @Sendable (Request) -> WorkspaceNavigatorPipelinePresentation
+    typealias Deliver = @MainActor @Sendable (Output) -> Void
+
+    private let queue: DispatchQueue
+    private let evaluate: Evaluate
+    private let deliver: Deliver
+    private let lock = NSLock()
+    private var pending: Request?
+    private var isDraining = false
+
+    init(
+        queue: DispatchQueue = DispatchQueue(
+            label: "codes.threading.workspace-navigator-evaluation",
+            qos: .userInitiated
+        ),
+        evaluate: @escaping Evaluate = { request in
+            let evaluation = WorkspaceNavigatorPipelineEvaluator(
+                calendar: request.calendar
+            ).evaluate(request.pipeline, query: request.query)
+            return WorkspaceNavigatorPipelinePresentation(evaluation: evaluation)
+        },
+        deliver: @escaping Deliver
+    ) {
+        self.queue = queue
+        self.evaluate = evaluate
+        self.deliver = deliver
+    }
+
+    func submit(_ request: Request) {
+        lock.lock()
+        pending = request
+        let shouldStart = !isDraining
+        if shouldStart { isDraining = true }
+        lock.unlock()
+
+        guard shouldStart else { return }
+        queue.async { [weak self] in self?.drain() }
+    }
+
+    func invalidate() {
+        lock.lock()
+        pending = nil
+        lock.unlock()
+    }
+
+    private func drain() {
+        while let request = takePendingRequest() {
+            let presentation = evaluate(request)
+            let output = Output(
+                sequence: request.sequence,
+                query: request.query,
+                pipeline: request.pipeline,
+                presentation: presentation
+            )
+            DispatchQueue.main.async { [deliver] in deliver(output) }
+        }
+    }
+
+    private func takePendingRequest() -> Request? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let request = pending else {
+            isDraining = false
+            return nil
+        }
+        pending = nil
+        return request
+    }
+}
+
 /// Literal semantic content for one visible row. The renderer remains responsible for controls,
 /// theme, accessibility mechanics, layout, and collection reuse.
 indirect enum WorkspaceNavigatorRealizedTemplateNode: Equatable, Sendable {
@@ -116,6 +236,16 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
                     snapshot: pipeline.snapshot,
                     referenceDate: referenceDate
                 ) != .true
+            }
+        }
+        if let template = pipeline.rowTemplate {
+            candidates.removeAll {
+                !hasContent(
+                    template,
+                    candidate: $0,
+                    snapshot: pipeline.snapshot,
+                    referenceDate: referenceDate
+                )
             }
         }
         candidates.sort {
@@ -527,6 +657,46 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             }
             guard !children.isEmpty else { return nil }
             return .stack(axis: axis, spacing: spacing, children: children)
+        }
+    }
+
+    /// Tests semantic presence without allocating a realized tree for every source subject.
+    /// Structure evaluation must remove an empty row before it becomes selectable, while actual
+    /// strings, image values, and view trees remain visible-row work.
+    private func hasContent(
+        _ node: ExtensionWorkspaceNavigatorTemplateNode,
+        candidate: Candidate,
+        snapshot: ExtensionFactSnapshot,
+        referenceDate: Date
+    ) -> Bool {
+        switch node {
+        case let .text(binding, _), let .status(binding, _):
+            resolveText(binding, candidate: candidate, snapshot: snapshot) != nil
+        case let .image(binding, _, _):
+            resolveImage(binding, candidate: candidate, snapshot: snapshot) != nil
+        case .activityIndicator, .divider, .spacer, .flexibleSpacer:
+            true
+        case let .conditional(predicate, content):
+            truth(
+                of: predicate,
+                candidate: candidate,
+                snapshot: snapshot,
+                referenceDate: referenceDate
+            ) == .true && hasContent(
+                content,
+                candidate: candidate,
+                snapshot: snapshot,
+                referenceDate: referenceDate
+            )
+        case let .stack(_, _, children):
+            children.contains {
+                hasContent(
+                    $0,
+                    candidate: candidate,
+                    snapshot: snapshot,
+                    referenceDate: referenceDate
+                )
+            }
         }
     }
 

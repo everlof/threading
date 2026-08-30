@@ -641,6 +641,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
         if plan.startsExtensions {
             let factPipeline = installHostFactPipeline()
+            mainWindowController.installWorkspaceNavigatorFactRegistry(factPipeline.registry)
             ExtensionHostService.shared.installSessionRuntimeShellRootProvider {
                 [weak mainWindowController] sessionID in
                 mainWindowController?.extensionShellRootPid(for: sessionID)

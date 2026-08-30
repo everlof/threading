@@ -73,6 +73,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         },
         defersInitialTreeMount: true
     )
+    private weak var workspaceNavigatorFactRegistry: ExtensionFactRegistry?
     private lazy var workspaceSidebarViewController = WorkspaceSidebarContainerViewController(
         nativeController: sidebarViewController,
         routing: workspaceNavigatorRouting,
@@ -85,6 +86,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         destinationHandler: { [weak self] destination in
             self?.openWorkspaceNavigatorDestination(destination)
                 ?? L10n.string("The workspace window is no longer available.")
+        },
+        factSnapshotProvider: { [weak self] consumedKeys in
+            self?.workspaceNavigatorFactRegistry?.snapshot(consuming: consumedKeys)
+        },
+        factSnapshotPatchProvider: { [weak self] snapshot, cells, consumedKeys in
+            self?.workspaceNavigatorFactRegistry?.patch(
+                snapshot,
+                exactCells: cells,
+                consuming: consumedKeys
+            )
         },
         onSelectNative: { [weak self] in
             self?.selectWorkspaceNavigator(.native)
@@ -446,6 +457,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func installWorkspaceNavigatorFactRegistry(_ registry: ExtensionFactRegistry) {
+        workspaceNavigatorFactRegistry = registry
     }
 
     convenience init(
@@ -3444,7 +3459,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             .browser,
               browser.contextKind == .shared,
               browser.currentURL != nil,
-              let capture = await browser.screenshot(),
+              let capture = try? await browser.screenshot(),
               capture.data.count <= RemoteWorkspaceDefaults.maximumPreviewBytes else {
             return nil
         }

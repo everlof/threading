@@ -2223,6 +2223,17 @@
         }
       }
     },
+    "%lld more sessions are not shown." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld fler sessioner visas inte."
+          }
+        }
+      }
+    },
     "%lld more unreadable folders were omitted." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -25169,6 +25180,17 @@
         }
       }
     },
+    "No sessions match this navigator." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga sessioner matchar den här navigatorn."
+          }
+        }
+      }
+    },
     "No settings found." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47781,6 +47803,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på ett svar"
+          }
+        }
+      }
+    },
+    "Waiting for navigator data." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på navigatordata."
           }
         }
       }

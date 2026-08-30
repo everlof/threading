@@ -294,6 +294,104 @@ final class ExtensionFactSnapshotTests: XCTestCase {
         XCTAssertNil(snapshot.fact(extensionKey, for: .terminal("terminal-2")))
     }
 
+    func testProjectBranchReverseJoinReachesSessionsWhenSessionBranchDiffers() throws {
+        let registry = ExtensionFactRegistry()
+        let repository = ExtensionRepositoryKey(host: "gitlab.com", path: "group/repo")
+        try registry.replaceHostDefinitions(HostFactCatalog.definitions)
+        try registry.replaceDefinitions([extensionDefinition(
+            subjectKinds: [.repositoryBranch]
+        )], from: source)
+        try registry.replaceHostFacts([
+            hostFact(
+                ExtensionHostFactKey.sessionProjectID,
+                subject: .session("session-1"),
+                value: .string("project-1")
+            ),
+            hostFact(
+                ExtensionHostFactKey.sessionBranch,
+                subject: .session("session-1"),
+                value: .string("worktree-branch")
+            ),
+            hostFact(
+                ExtensionHostFactKey.projectRepositoryHost,
+                subject: .project("project-1"),
+                value: .string(repository.host)
+            ),
+            hostFact(
+                ExtensionHostFactKey.projectRepositoryPath,
+                subject: .project("project-1"),
+                value: .string(repository.path)
+            ),
+            hostFact(
+                ExtensionHostFactKey.projectBranch,
+                subject: .project("project-1"),
+                value: .string("project-default")
+            ),
+        ], replacing: [.session("session-1"), .project("project-1")])
+        let snapshot = registry.snapshot(consuming: [extensionKey])
+
+        XCTAssertEqual(
+            snapshot.affectedSourceSessionIDs(by: [.init(
+                subject: .repositoryBranch(
+                    repository: repository,
+                    branch: "project-default"
+                ),
+                key: extensionKey
+            )]),
+            ["session-1"]
+        )
+        XCTAssertEqual(
+            snapshot.affectedSourceSessionIDs(by: [.init(
+                subject: .repositoryBranch(
+                    repository: repository,
+                    branch: "worktree-branch"
+                ),
+                key: extensionKey
+            )]),
+            ["session-1"]
+        )
+    }
+
+    func testExactPatchSharesItsImmutableBaseTable() throws {
+        let registry = ExtensionFactRegistry()
+        try registry.replaceHostDefinitions(HostFactCatalog.definitions)
+        try registry.replaceDefinitions([extensionDefinition()], from: source)
+        try registry.replaceHostFacts([
+            hostFact(
+                ExtensionHostFactKey.sessionTitle,
+                subject: .session("session-1"),
+                value: .string("Session")
+            ),
+        ], replacing: [.session("session-1")])
+        try registry.replaceFacts([
+            extensionFact(subject: .session("session-1"), value: "before"),
+        ], replacing: [.session("session-1")], from: source)
+        let snapshot = registry.snapshot(consuming: [extensionKey])
+
+        try registry.replaceFacts([
+            extensionFact(subject: .session("session-1"), value: "after"),
+        ], replacing: [.session("session-1")], from: source)
+        let patch = try XCTUnwrap(registry.patch(
+            snapshot,
+            exactCells: [.init(subject: .session("session-1"), key: extensionKey)],
+            consuming: [extensionKey]
+        ))
+
+        XCTAssertEqual(
+            patch.snapshot.baseStorageIdentityForTesting,
+            snapshot.baseStorageIdentityForTesting,
+            "an exact patch must path-copy its overlay, not the catalogue fact table"
+        )
+        XCTAssertEqual(
+            snapshot.exactFact(extensionKey, for: .session("session-1"))?.fact.value,
+            .string("before")
+        )
+        XCTAssertEqual(
+            patch.snapshot.exactFact(extensionKey, for: .session("session-1"))?.fact.value,
+            .string("after")
+        )
+    }
+
     private func extensionDefinition(
         subjectKinds: Set<ExtensionFactSubjectKind> = [.session]
     ) -> ExtensionFactDefinition {

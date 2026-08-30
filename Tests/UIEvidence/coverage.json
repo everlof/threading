@@ -159,8 +159,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Extension workspace navigator shell",
-      "description": "A focused extension navigator in the real main-window split shell, with its host-owned localized title band, virtualized collection and permanent menu route back to Native.",
-      "states": ["Focused extension navigator", "Return-to-Native menu"],
+      "description": "Focused materialized and fact-pipeline extension navigators in the real main-window split shell, with the host-owned title/search bands, virtualized collection, declared pipeline options and permanent menu route back to Native.",
+      "states": ["Focused materialized navigator", "Fact-pipeline navigator", "Zero-result pipeline search", "Declared pipeline options", "Return-to-Native menu"],
       "matrix": {
         "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
         "appearances": ["Light", "Dark", "Theme-authored"],
