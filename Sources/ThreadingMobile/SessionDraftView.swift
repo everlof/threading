@@ -60,7 +60,10 @@ struct SessionDraftView: View {
                 )
             }
             if draftIsMounted {
-                SessionDraftComposerScreen(draft: draft)
+                SessionDraftComposerScreen(
+                    draft: draft,
+                    showsNavigationChrome: isDrafting
+                )
                     .opacity(isDrafting ? 1 : 0)
                     .scaleEffect(
                         isDrafting || reduceMotion ? 1 : SessionDraftMotion.recedeScale
@@ -134,6 +137,10 @@ private struct SessionDraftComposerScreen: View {
     @Environment(\.remoteTheme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let draft: MobileSessionDraft
+    /// The draft content remains mounted while it fades over the session it became, but its
+    /// toolbar cannot: SwiftUI merges toolbar items from both children in that overlap and drew
+    /// two account/usage discs until the fade completed.
+    let showsNavigationChrome: Bool
 
     @State private var projectID = ""
     @State private var agentID = ""
@@ -215,8 +222,9 @@ private struct SessionDraftComposerScreen: View {
         MobileL10n.string("Make the error message useful…"),
     ]
 
-    init(draft: MobileSessionDraft) {
+    init(draft: MobileSessionDraft, showsNavigationChrome: Bool) {
         self.draft = draft
+        self.showsNavigationChrome = showsNavigationChrome
         let evidenceID = ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]
         let suggestion: String
         if evidenceID?.contains("new-session-draft-matrix-") == true {
@@ -358,7 +366,7 @@ private struct SessionDraftComposerScreen: View {
     // MARK: - Body
 
     var body: some View {
-        GeometryReader { proxy in
+        navigationChrome(around: GeometryReader { proxy in
             // The ground fills what the composer and the keyboard leave, so the hint centres in
             // the space that is actually empty and a drag anywhere on it reaches the keyboard.
             ScrollView {
@@ -374,18 +382,7 @@ private struct SessionDraftComposerScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                MobileConnectionStatusButton(
-                    title: MobileL10n.string("New session"),
-                    status: appModel.activeHost?.name ?? MobileL10n.string("Connected"),
-                    statusColor: hostStatusColor
-                )
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                identityMenu
-            }
-        }
+        )
         .onAppear {
             applyCatalogDefaults()
             configureAttachments()
@@ -500,6 +497,28 @@ private struct SessionDraftComposerScreen: View {
             allowsMultipleSelection: true
         ) { result in
             beginImportingFiles(result)
+        }
+    }
+
+    /// Removing the modifier itself matters here. Leaving an empty `.toolbar` attached while the
+    /// draft fades lets SwiftUI retain its previous items and merge them with the session's bar.
+    @ViewBuilder
+    private func navigationChrome<Content: View>(around content: Content) -> some View {
+        if showsNavigationChrome {
+            content.toolbar {
+                ToolbarItem(placement: .principal) {
+                    MobileConnectionStatusButton(
+                        title: MobileL10n.string("New session"),
+                        status: appModel.activeHost?.name ?? MobileL10n.string("Connected"),
+                        statusColor: hostStatusColor
+                    )
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    identityMenu
+                }
+            }
+        } else {
+            content
         }
     }
 
