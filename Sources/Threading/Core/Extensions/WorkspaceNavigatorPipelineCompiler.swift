@@ -12,6 +12,16 @@ enum WorkspaceNavigatorPipelineCompilationResult: Sendable {
     case invalid([WorkspaceNavigatorPipelineCompilationIssue])
 }
 
+enum CompiledWorkspaceNavigatorBucket: Sendable {
+    case declared(ExtensionWorkspaceNavigatorBucketStrategy)
+    case registeredFact(
+        key: ExtensionFactKey,
+        direction: ExtensionWorkspaceNavigatorSortDirection,
+        unknownTitle: String,
+        isAvailable: Bool
+    )
+}
+
 /// A provider-checked, option-specialized pipeline which is safe to evaluate without IPC.
 ///
 /// Compilation removes provider-level `enhances` gaps. Per-subject gaps deliberately remain for
@@ -20,7 +30,7 @@ struct CompiledWorkspaceNavigatorPipeline: Sendable {
     let snapshot: ExtensionFactSnapshot
     let search: ExtensionWorkspaceNavigatorSearch?
     let filters: [ExtensionWorkspaceNavigatorFilterClause]
-    let bucket: ExtensionWorkspaceNavigatorBucketStrategy?
+    let bucket: CompiledWorkspaceNavigatorBucket?
     let sort: [ExtensionWorkspaceNavigatorSortClause]
     let output: ExtensionWorkspaceNavigatorPipelineOutput
     let rowTemplate: ExtensionWorkspaceNavigatorTemplateNode?
@@ -49,10 +59,12 @@ struct CompiledWorkspaceNavigatorPipeline: Sendable {
         }
         if let bucket {
             switch bucket {
-            case let .fact(operand, _, _):
+            case let .declared(.fact(operand, _, _)):
                 keys.formUnion(operand.fact.degradationDependencyKeys)
-            case let .rules(rules, _):
+            case let .declared(.rules(rules, _)):
                 for rule in rules { keys.formUnion(rule.predicate.referencedFactKeys) }
+            case let .registeredFact(key, _, _, isAvailable):
+                if isAvailable { keys.insert(key) }
             }
         }
         if let rowTemplate {
@@ -71,7 +83,8 @@ struct WorkspaceNavigatorPipelineCompiler {
     func compile(
         _ pipeline: ExtensionWorkspaceNavigatorPipeline,
         snapshot: ExtensionFactSnapshot,
-        optionValues: [String: ExtensionJSONValue]
+        optionValues: [String: ExtensionJSONValue],
+        registeredFactSelections: [String: ExtensionFactKey] = [:]
     ) -> WorkspaceNavigatorPipelineCompilationResult {
         let requirements = Dictionary(
             pipeline.consumes.map { ($0.key, $0.requirement) },
@@ -120,17 +133,46 @@ struct WorkspaceNavigatorPipelineCompiler {
             isActive($0.when)
                 && $0.predicate.referencedFactKeys.isDisjoint(with: missingEnhancements)
         }
-        let sort = pipeline.sort.filter {
+        var sort = pipeline.sort.filter {
             isActive($0.when)
                 && $0.operand.fact.degradationDependencyKeys.isDisjoint(
                     with: missingEnhancements
                 )
         }
-        let bucket = firstSurvivingBucket(
+        var bucket = firstSurvivingBucket(
             pipeline.buckets,
             missingEnhancements: missingEnhancements,
             isActive: isActive
-        )
+        ).map(CompiledWorkspaceNavigatorBucket.declared)
+        for option in pipeline.registeredFactOptions {
+            guard let key = registeredFactSelections[option.id] else { continue }
+            switch option.application {
+            case let .bucket(direction, unknownTitle):
+                let isAvailable = snapshot.definition(for: key).map {
+                    ExtensionFactRegistry.isRegisteredFactDefinitionEligible(
+                        $0,
+                        for: .groupable
+                    )
+                } ?? false
+                bucket = .registeredFact(
+                    key: key,
+                    direction: direction,
+                    unknownTitle: unknownTitle,
+                    isAvailable: isAvailable
+                )
+            case let .sort(direction):
+                guard snapshot.definition(for: key).map({
+                    ExtensionFactRegistry.isRegisteredFactDefinitionEligible(
+                        $0,
+                        for: .sortable
+                    )
+                }) == true else { continue }
+                sort.insert(.init(
+                    operand: .init(.init(key)),
+                    direction: direction
+                ), at: 0)
+            }
+        }
         let rowTemplate = degradeTemplate(
             pipeline.output.rowTemplate,
             missingEnhancements: missingEnhancements

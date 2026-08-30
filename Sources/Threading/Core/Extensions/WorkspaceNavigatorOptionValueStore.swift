@@ -18,6 +18,9 @@ struct WorkspaceNavigatorOptionSnapshot: Equatable, Sendable {
     let processGeneration: String
     let revision: UInt64
     let valuesByNavigatorID: [String: [String: ExtensionJSONValue]]
+    /// Dynamic fact selections stay on the host side of the inventory boundary. They never join
+    /// the static option-value map which can participate in declaration conditions.
+    let registeredFactSelectionsByNavigatorID: [String: [String: ExtensionFactKey]]
     let persistenceOutcome: WorkspaceNavigatorOptionPersistenceOutcome
 }
 
@@ -66,6 +69,17 @@ protocol WorkspaceNavigatorOptionValueStoring: Sendable {
 
     func set(
         _ value: ExtensionJSONValue,
+        extensionIdentifier: String,
+        processGeneration: String,
+        navigatorID: String,
+        optionID: String,
+        completion: @escaping @Sendable (
+            Result<WorkspaceNavigatorOptionSnapshot, Error>
+        ) -> Void
+    )
+
+    func setRegisteredFactSelection(
+        _ key: ExtensionFactKey?,
         extensionIdentifier: String,
         processGeneration: String,
         navigatorID: String,
@@ -135,9 +149,42 @@ final class WorkspaceNavigatorOptionValueStore:
         let processGeneration: String
         var revision: UInt64
         var rawState: State
-        let declarations: [String: [String: ExtensionWorkspaceNavigatorOption]]
+        let declarations: [String: [String: Declaration]]
         let persistenceOutcome: WorkspaceNavigatorOptionPersistenceOutcome
         let writesAllowed: Bool
+    }
+
+    private enum Declaration {
+        case staticOption(ExtensionWorkspaceNavigatorOption)
+        case registeredFact
+
+        func accepts(_ value: ExtensionJSONValue) -> Bool {
+            switch self {
+            case .staticOption(let option):
+                option.control.accepts(value)
+            case .registeredFact:
+                value == .null || WorkspaceNavigatorRegisteredFactSelectionCodec.decode(value) != nil
+            }
+        }
+
+        var defaultValue: ExtensionJSONValue {
+            switch self {
+            case .staticOption(let option): option.control.defaultValue
+            case .registeredFact: .null
+            }
+        }
+    }
+
+    private enum WriteKind {
+        case staticOption
+        case registeredFact
+
+        func matches(_ declaration: Declaration) -> Bool {
+            switch (self, declaration) {
+            case (.staticOption, .staticOption), (.registeredFact, .registeredFact): true
+            default: false
+            }
+        }
     }
 
     private final class Lane: @unchecked Sendable {
@@ -232,6 +279,49 @@ final class WorkspaceNavigatorOptionValueStore:
             Result<WorkspaceNavigatorOptionSnapshot, Error>
         ) -> Void
     ) {
+        setValue(
+            value,
+            kind: .staticOption,
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: processGeneration,
+            navigatorID: navigatorID,
+            optionID: optionID,
+            completion: completion
+        )
+    }
+
+    func setRegisteredFactSelection(
+        _ key: ExtensionFactKey?,
+        extensionIdentifier: String,
+        processGeneration: String,
+        navigatorID: String,
+        optionID: String,
+        completion: @escaping @Sendable (
+            Result<WorkspaceNavigatorOptionSnapshot, Error>
+        ) -> Void
+    ) {
+        setValue(
+            key.map(WorkspaceNavigatorRegisteredFactSelectionCodec.encode) ?? .null,
+            kind: .registeredFact,
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: processGeneration,
+            navigatorID: navigatorID,
+            optionID: optionID,
+            completion: completion
+        )
+    }
+
+    private func setValue(
+        _ value: ExtensionJSONValue,
+        kind: WriteKind,
+        extensionIdentifier: String,
+        processGeneration: String,
+        navigatorID: String,
+        optionID: String,
+        completion: @escaping @Sendable (
+            Result<WorkspaceNavigatorOptionSnapshot, Error>
+        ) -> Void
+    ) {
         guard ExtensionIdentifierRules.isReverseDNSIdentifier(extensionIdentifier) else {
             completion(.failure(
                 WorkspaceNavigatorOptionValueStoreError.invalidExtensionIdentifier(
@@ -254,13 +344,13 @@ final class WorkspaceNavigatorOptionValueStore:
                 ))
                 return
             }
-            guard let option = navigator[optionID] else {
+            guard let declaration = navigator[optionID] else {
                 completion(.failure(
                     WorkspaceNavigatorOptionValueStoreError.unknownOption(optionID)
                 ))
                 return
             }
-            guard option.control.accepts(value) else {
+            guard kind.matches(declaration), declaration.accepts(value) else {
                 completion(.failure(
                     WorkspaceNavigatorOptionValueStoreError.invalidValue(optionID)
                 ))
@@ -281,7 +371,7 @@ final class WorkspaceNavigatorOptionValueStore:
 
             var candidate = active.rawState
             var navigatorValues = candidate.values[navigatorID] ?? [:]
-            if value == option.control.defaultValue {
+            if value == declaration.defaultValue {
                 navigatorValues.removeValue(forKey: optionID)
             } else {
                 navigatorValues[optionID] = value
@@ -425,13 +515,17 @@ final class WorkspaceNavigatorOptionValueStore:
 
     private static func declarations(
         from navigators: [ExtensionWorkspaceNavigator]
-    ) -> [String: [String: ExtensionWorkspaceNavigatorOption]] {
-        var result: [String: [String: ExtensionWorkspaceNavigatorOption]] = [:]
+    ) -> [String: [String: Declaration]] {
+        var result: [String: [String: Declaration]] = [:]
         for navigator in navigators {
-            result[navigator.id] = Dictionary(
-                navigator.options.map { ($0.id, $0) },
+            var declarations = Dictionary(
+                navigator.options.map { ($0.id, Declaration.staticOption($0)) },
                 uniquingKeysWith: { first, _ in first }
             )
+            for option in navigator.pipeline?.registeredFactOptions ?? [] {
+                declarations[option.id] = .registeredFact
+            }
+            result[navigator.id] = declarations
         }
         return result
     }
@@ -440,20 +534,33 @@ final class WorkspaceNavigatorOptionValueStore:
         from active: ActiveGeneration
     ) -> WorkspaceNavigatorOptionSnapshot {
         var effective: [String: [String: ExtensionJSONValue]] = [:]
-        for (navigatorID, options) in active.declarations {
+        var registeredFactSelections: [String: [String: ExtensionFactKey]] = [:]
+        for (navigatorID, declarations) in active.declarations {
             var values: [String: ExtensionJSONValue] = [:]
-            for (optionID, option) in options {
+            var selections: [String: ExtensionFactKey] = [:]
+            for (optionID, declaration) in declarations {
                 let persisted = active.rawState.values[navigatorID]?[optionID]
-                values[optionID] = persisted.flatMap { value in
-                    option.control.accepts(value) ? value : nil
-                } ?? option.control.defaultValue
+                switch declaration {
+                case .staticOption(let option):
+                    values[optionID] = persisted.flatMap { value in
+                        option.control.accepts(value) ? value : nil
+                    } ?? option.control.defaultValue
+                case .registeredFact:
+                    if let key = persisted.flatMap(
+                        WorkspaceNavigatorRegisteredFactSelectionCodec.decode
+                    ) {
+                        selections[optionID] = key
+                    }
+                }
             }
             effective[navigatorID] = values
+            registeredFactSelections[navigatorID] = selections
         }
         return WorkspaceNavigatorOptionSnapshot(
             processGeneration: active.processGeneration,
             revision: active.revision,
             valuesByNavigatorID: effective,
+            registeredFactSelectionsByNavigatorID: registeredFactSelections,
             persistenceOutcome: active.persistenceOutcome
         )
     }
@@ -492,5 +599,26 @@ final class WorkspaceNavigatorOptionValueStore:
             )
             return false
         }
+    }
+}
+
+/// Stable host-only wire stored inside the existing navigator preference document. Keeping the
+/// codec out of the public SDK prevents a persisted selection from becoming extension input.
+private enum WorkspaceNavigatorRegisteredFactSelectionCodec {
+    static func encode(_ key: ExtensionFactKey) -> ExtensionJSONValue {
+        .object([
+            "id": .string(key.id),
+            "version": .integer(Int64(key.version)),
+        ])
+    }
+
+    static func decode(_ value: ExtensionJSONValue) -> ExtensionFactKey? {
+        guard case let .object(object) = value,
+              Set(object.keys) == ["id", "version"],
+              case let .string(id)? = object["id"],
+              case let .integer(rawVersion)? = object["version"],
+              let version = Int(exactly: rawVersion) else { return nil }
+        let key = ExtensionFactKey(id: id, version: version)
+        return key.validationIssues().isEmpty ? key : nil
     }
 }

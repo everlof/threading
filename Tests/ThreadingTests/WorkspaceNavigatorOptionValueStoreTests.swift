@@ -392,6 +392,112 @@ final class WorkspaceNavigatorOptionValueStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.path))
     }
 
+    func testRegisteredFactSelectionRoundTripsAndNoneElidesItsStoredValue() throws {
+        let root = temporaryDirectory("registered-fact")
+        let store = WorkspaceNavigatorOptionValueStore(rootURL: root)
+        let declaration = registeredFactNavigator
+        let initial = try store.activate(
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: "generation-1",
+            navigators: [declaration]
+        )
+        XCTAssertEqual(initial.persistenceOutcome, .missing)
+        XCTAssertEqual(initial.valuesByNavigatorID[declaration.id], [:])
+        XCTAssertEqual(initial.registeredFactSelectionsByNavigatorID[declaration.id], [:])
+
+        let key = ExtensionFactKey(id: "gitlab.merge-request.state", version: 1)
+        let selected = try setRegisteredFact(
+            key,
+            store: store,
+            generation: "generation-1",
+            navigator: declaration
+        ).get()
+        XCTAssertEqual(selected.revision, 1)
+        XCTAssertEqual(
+            selected.registeredFactSelectionsByNavigatorID[declaration.id]?["group-by"],
+            key
+        )
+        XCTAssertEqual(selected.valuesByNavigatorID[declaration.id], [:])
+
+        let document = try XCTUnwrap(
+            try JSONSerialization.jsonObject(
+                with: Data(contentsOf: optionFile(in: root))
+            ) as? [String: Any]
+        )
+        let value = try XCTUnwrap(document["value"] as? [String: Any])
+        let values = try XCTUnwrap(value["values"] as? [String: Any])
+        let navigatorValues = try XCTUnwrap(values[declaration.id] as? [String: Any])
+        let encodedKey = try XCTUnwrap(navigatorValues["group-by"] as? [String: Any])
+        XCTAssertEqual(encodedKey["id"] as? String, key.id)
+        XCTAssertEqual(encodedKey["version"] as? Int, key.version)
+
+        XCTAssertThrowsError(try set(
+            .string("not-a-static-option"),
+            store: store,
+            generation: "generation-1",
+            optionID: "group-by"
+        ).get()) { error in
+            XCTAssertEqual(
+                error as? WorkspaceNavigatorOptionValueStoreError,
+                .invalidValue("group-by")
+            )
+        }
+
+        let cleared = try setRegisteredFact(
+            nil,
+            store: store,
+            generation: "generation-1",
+            navigator: declaration
+        ).get()
+        XCTAssertEqual(cleared.revision, 2)
+        XCTAssertEqual(cleared.registeredFactSelectionsByNavigatorID[declaration.id], [:])
+
+        let reopened = WorkspaceNavigatorOptionValueStore(rootURL: root)
+        let durable = try reopened.activate(
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: "generation-2",
+            navigators: [declaration]
+        )
+        XCTAssertEqual(durable.registeredFactSelectionsByNavigatorID[declaration.id], [:])
+    }
+
+    func testTemporarilyRemovedRegisteredFactDeclarationRetainsItsSelection() throws {
+        let root = temporaryDirectory("registered-fact-retention")
+        let declaration = registeredFactNavigator
+        let key = ExtensionFactKey(id: "gitlab.merge-request.author", version: 1)
+        let store = WorkspaceNavigatorOptionValueStore(rootURL: root)
+        _ = try store.activate(
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: "generation-1",
+            navigators: [declaration]
+        )
+        _ = try setRegisteredFact(
+            key,
+            store: store,
+            generation: "generation-1",
+            navigator: declaration
+        ).get()
+
+        _ = try store.activate(
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: "generation-2",
+            navigators: [ExtensionWorkspaceNavigator(
+                id: declaration.id,
+                title: "Activity",
+                root: .content(.status("Ready", role: .neutral))
+            )]
+        )
+        let restored = try store.activate(
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: "generation-3",
+            navigators: [declaration]
+        )
+        XCTAssertEqual(
+            restored.registeredFactSelectionsByNavigatorID[declaration.id]?["group-by"],
+            key
+        )
+    }
+
     private var extensionIdentifier: String { "com.example.navigator" }
 
     private var navigator: ExtensionWorkspaceNavigator {
@@ -420,6 +526,31 @@ final class WorkspaceNavigatorOptionValueStoreTests: XCTestCase {
         )
     }
 
+    private var registeredFactNavigator: ExtensionWorkspaceNavigator {
+        ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Ready", role: .neutral)),
+            pipeline: .init(
+                consumes: [],
+                registeredFactOptions: [
+                    .init(
+                        id: "group-by",
+                        title: "Group by",
+                        application: .bucket(
+                            direction: .ascending,
+                            unknownTitle: "Unknown"
+                        )
+                    ),
+                ],
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .text(.literal("Session"), role: .body)
+                )
+            )
+        )
+    }
+
     private func set(
         _ value: ExtensionJSONValue,
         store: WorkspaceNavigatorOptionValueStore,
@@ -434,6 +565,30 @@ final class WorkspaceNavigatorOptionValueStoreTests: XCTestCase {
             processGeneration: generation,
             navigatorID: navigator.id,
             optionID: optionID
+        ) {
+            result.set($0)
+            finished.signal()
+        }
+        XCTAssertEqual(finished.wait(timeout: .now() + 2), .success)
+        return result.value() ?? .failure(
+            WorkspaceNavigatorOptionValueStoreError.couldNotBeSaved
+        )
+    }
+
+    private func setRegisteredFact(
+        _ key: ExtensionFactKey?,
+        store: WorkspaceNavigatorOptionValueStore,
+        generation: String,
+        navigator: ExtensionWorkspaceNavigator
+    ) -> Result<WorkspaceNavigatorOptionSnapshot, Error> {
+        let result = ResultBox<Result<WorkspaceNavigatorOptionSnapshot, Error>>()
+        let finished = DispatchSemaphore(value: 0)
+        store.setRegisteredFactSelection(
+            key,
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: generation,
+            navigatorID: navigator.id,
+            optionID: "group-by"
         ) {
             result.set($0)
             finished.signal()

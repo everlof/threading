@@ -397,6 +397,17 @@
         }
       }
     },
+    "%@ (Unavailable)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ (otillgänglig)"
+          }
+        }
+      }
+    },
     "%@ (allowed)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13773,6 +13784,17 @@
         }
       }
     },
+    "Created At" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skapad"
+          }
+        }
+      }
+    },
     "Created pull request #%lld." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13912,6 +13934,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anpassat"
+          }
+        }
+      }
+    },
+    "Custom Conduct" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anpassade instruktioner"
           }
         }
       }
@@ -14726,6 +14759,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Övergripande åtgärd"
+          }
+        }
+      }
+    },
+    "Detailed Activity" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detaljerad aktivitet"
           }
         }
       }
@@ -21418,6 +21462,17 @@
         }
       }
     },
+    "Last Active At" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senast aktiv"
+          }
+        }
+      }
+    },
     "Last Turn" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21429,6 +21484,17 @@
         }
       }
     },
+    "Last Turn At" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senaste tur"
+          }
+        }
+      }
+    },
     "Last Turn is unavailable because this chat moved to another checkout." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21436,6 +21502,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Senaste svaret är inte tillgängligt eftersom chatten flyttades till en annan checkout."
+          }
+        }
+      }
+    },
+    "Last Used At" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senast använd"
           }
         }
       }
@@ -22991,6 +23068,17 @@
         }
       }
     },
+    "Manager Role" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ansvarigroll"
+          }
+        }
+      }
+    },
     "Manager roles" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23031,6 +23119,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Manuell"
+          }
+        }
+      }
+    },
+    "Manual Order" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Manuell ordning"
           }
         }
       }
@@ -25752,6 +25851,17 @@
         }
       }
     },
+    "None" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ingen"
+          }
+        }
+      }
+    },
     "None available" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -28322,6 +28432,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Paneler"
+          }
+        }
+      }
+    },
+    "Parent Session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Överordnad session"
           }
         }
       }
@@ -34167,6 +34288,28 @@
         }
       }
     },
+    "Scheduled Start" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schemalagd start"
+          }
+        }
+      }
+    },
+    "Scheduled Start At" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schemalagd starttid"
+          }
+        }
+      }
+    },
     "Scheduled messages could not be saved, so this was not taken." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36939,6 +37082,17 @@
         }
       }
     },
+    "Side Chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidokonversation"
+          }
+        }
+      }
+    },
     "Side by Side" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37500,6 +37654,17 @@
         }
       }
     },
+    "Snoozed At" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausad vid"
+          }
+        }
+      }
+    },
     "Snoozed Sessions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37507,6 +37672,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Snoozade sessioner"
+          }
+        }
+      }
+    },
+    "Snoozed Until" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pausad till"
           }
         }
       }
@@ -48445,6 +48621,17 @@
         }
       }
     },
+    "Wake Reason" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Orsak till väckning"
+          }
+        }
+      }
+    },
     "Wake for network access is off in System Settings ▸ Energy" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49266,6 +49453,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väckt"
+          }
+        }
+      }
+    },
+    "Woke At" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vaknade"
           }
         }
       }

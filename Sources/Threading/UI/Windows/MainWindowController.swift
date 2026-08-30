@@ -132,6 +132,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 consuming: consumedKeys
             )
         },
+        registeredFactChoicesProvider: { [weak self] usage, selectedKey in
+            self?.workspaceNavigatorFactRegistry?.registeredFactChoices(
+                for: usage,
+                selectedKey: selectedKey
+            ) ?? selectedKey.map { [.unavailable($0)] } ?? []
+        },
         intentHandler: { [weak self] intent, sessionID in
             self?.performWorkspaceNavigatorIntent(intent, sessionID: sessionID)
                 ?? .targetUnavailable

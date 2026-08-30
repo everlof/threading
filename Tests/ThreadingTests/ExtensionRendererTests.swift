@@ -2322,6 +2322,111 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         XCTAssertTrue(router.invocations.isEmpty)
     }
 
+    func testPipelineRegisteredFactMenuPersistsSelectionAndScopesRefreshes() throws {
+        let stateKey = ExtensionFactKey(id: "example.state", version: 1)
+        let unavailableKey = ExtensionFactKey(id: "example.removed-state", version: 2)
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        let definition = navigatorFactDefinition(stateKey, usages: [.groupable])
+        let titleDefinition = navigatorFactDefinition(titleKey, usages: [.presentable])
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["alpha", "beta"],
+            definitions: [definition, titleDefinition],
+            facts: [
+                navigatorFact(stateKey, sessionID: "alpha", value: .string("Alpha")),
+                navigatorFact(stateKey, sessionID: "beta", value: .string("Beta")),
+                navigatorFact(titleKey, sessionID: "alpha", value: .string("First")),
+                navigatorFact(titleKey, sessionID: "beta", value: .string("Second")),
+            ]
+        )
+        let registeredOption = ExtensionWorkspaceNavigatorRegisteredFactOption(
+            id: "group-by",
+            title: "Group by",
+            application: .bucket(direction: .ascending, unknownTitle: "Unknown")
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: titleKey, requirement: .required)],
+            registeredFactOptions: [registeredOption],
+            template: .text(.literal("Session"), role: .compactBody)
+        )
+        let router = TestWorkspaceNavigatorRouter(
+            navigator: navigator,
+            registeredFactSelections: [registeredOption.id: unavailableKey]
+        )
+        var completeSnapshots = 0
+        var requestedKeys: [Set<ExtensionFactKey>] = []
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { keys in
+                completeSnapshots += 1
+                requestedKeys.append(keys)
+                return snapshot
+            },
+            registeredFactChoicesProvider: { usage, selectedKey in
+                XCTAssertEqual(usage, .groupable)
+                XCTAssertEqual(selectedKey, router.inventory.registeredFactSelections["group-by"])
+                return [
+                    .available(definition),
+                    .unavailable(unavailableKey),
+                ]
+            },
+            onUnavailable: { XCTFail("registered fact pipeline became unavailable") }
+        )
+
+        let unavailableParent = try XCTUnwrap(host.navigatorMenuEntries().first?.item)
+        XCTAssertEqual(unavailableParent.title, "Group by")
+        XCTAssertEqual(
+            unavailableParent.subtitle,
+            L10n.format("%@ (Unavailable)", "\(unavailableKey.id)@\(unavailableKey.version)")
+        )
+        let unavailableSubmenu = try XCTUnwrap(unavailableParent.submenu)
+            .compactMap(\.item)
+        XCTAssertEqual(unavailableSubmenu.map(\.title), [
+            L10n.string("None"),
+            stateKey.id,
+            L10n.format("%@ (Unavailable)", "\(unavailableKey.id)@\(unavailableKey.version)"),
+        ])
+        XCTAssertTrue(unavailableSubmenu[2].isSelected)
+        XCTAssertFalse(unavailableSubmenu[2].isEnabled)
+
+        unavailableSubmenu[1].onChoose?()
+        XCTAssertEqual(router.registeredFactWrites, [.init(
+            optionID: registeredOption.id,
+            key: stateKey,
+            processGeneration: router.inventory.processGeneration
+        )])
+        let selectedParent = try XCTUnwrap(host.navigatorMenuEntries().first?.item)
+        XCTAssertEqual(selectedParent.subtitle, stateKey.id)
+        XCTAssertTrue(try XCTUnwrap(selectedParent.submenu).compactMap(\.item)[1].isSelected)
+        XCTAssertTrue(router.invocations.isEmpty)
+
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        _ = try waitForPipelineTable(in: host, rowCount: 4)
+        XCTAssertEqual(completeSnapshots, 1)
+        XCTAssertEqual(requestedKeys, [[stateKey, titleKey]])
+
+        NotificationCenter.default.post(ExtensionFactsDidChange(change: .exact([.init(
+            subject: .session("alpha"),
+            key: ExtensionFactKey(id: "example.unrelated", version: 1)
+        )])))
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(completeSnapshots, 1)
+
+        NotificationCenter.default.post(ExtensionFactsDidChange(change: .exact([.init(
+            subject: .session("alpha"),
+            key: stateKey
+        )])))
+        let refreshDeadline = Date().addingTimeInterval(2)
+        while completeSnapshots < 2, Date() < refreshDeadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertEqual(completeSnapshots, 2)
+        XCTAssertEqual(requestedKeys.last, [stateKey, titleKey])
+    }
+
     func testPipelineIntentControlsRevealAndDispatchEntirelyInsideTheHost() throws {
         let sessionID = SessionID()
         let sourceID = sessionID.uuidString.lowercased()
@@ -9109,6 +9214,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     options: [ExtensionWorkspaceNavigatorOption] = [],
     intents: [ExtensionWorkspaceNavigatorIntent] = [],
     consumes: [ExtensionWorkspaceNavigatorFactConsumption],
+    registeredFactOptions: [ExtensionWorkspaceNavigatorRegisteredFactOption] = [],
     search: ExtensionWorkspaceNavigatorSearch? = nil,
     filters: [ExtensionWorkspaceNavigatorFilterClause] = [],
     itemLimit: Int = ExtensionWorkspaceNavigatorPipeline.maximumOutputItems,
@@ -9123,6 +9229,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
       intents: intents,
       pipeline: .init(
         consumes: consumes,
+        registeredFactOptions: registeredFactOptions,
         search: search,
         filters: filters,
         output: .init(
@@ -9695,6 +9802,12 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
         let processGeneration: String
     }
 
+    struct RegisteredFactWrite: Equatable {
+        let optionID: String
+        let key: ExtensionFactKey?
+        let processGeneration: String
+    }
+
     struct ExactImageRequest: Equatable {
         let extensionIdentifier: String
         let relativePath: String
@@ -9705,6 +9818,7 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
     var isRegistered = true
     var invocations: [Invocation] = []
     var optionWrites: [OptionWrite] = []
+    var registeredFactWrites: [RegisteredFactWrite] = []
     var exactImageRequests: [ExactImageRequest] = []
     var exactImageData: Data?
     var exactImageDataByPath: [String: Data] = [:]
@@ -9726,14 +9840,16 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
     init(
         navigator: ExtensionWorkspaceNavigator,
         processGeneration: String = "generation-1",
-        optionValues: [String: ExtensionJSONValue] = [:]
+        optionValues: [String: ExtensionJSONValue] = [:],
+        registeredFactSelections: [String: ExtensionFactKey] = [:]
     ) {
         inventory = .init(
             extensionIdentifier: "com.example.navigator",
             extensionName: "Example Navigator",
             processGeneration: processGeneration,
             navigator: navigator,
-            optionValues: optionValues
+            optionValues: optionValues,
+            registeredFactSelections: registeredFactSelections
         )
         result = .success(.init(
             requestID: "test-response",
@@ -9819,7 +9935,7 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
         value: ExtensionJSONValue,
         processGeneration: String,
         completion: @escaping @MainActor @Sendable (
-            Result<[String: ExtensionJSONValue], Error>
+            Result<WorkspaceNavigatorOptionEffectiveValues, Error>
         ) -> Void
     ) -> Bool {
         guard extensionIdentifier == inventory.extensionIdentifier,
@@ -9832,7 +9948,61 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
         ))
         var values = inventory.optionValues
         values[optionID] = value
-        completion(.success(values))
+        let revision = inventory.optionRevision + 1
+        inventory = .init(
+            extensionIdentifier: inventory.extensionIdentifier,
+            extensionName: inventory.extensionName,
+            processGeneration: inventory.processGeneration,
+            navigator: inventory.navigator,
+            optionValues: values,
+            registeredFactSelections: inventory.registeredFactSelections,
+            optionRevision: revision,
+            optionPersistenceOutcome: inventory.optionPersistenceOutcome
+        )
+        completion(.success(.init(
+            revision: revision,
+            optionValues: values,
+            registeredFactSelections: inventory.registeredFactSelections
+        )))
+        return true
+    }
+
+    func setWorkspaceNavigatorRegisteredFactSelection(
+        extensionIdentifier: String,
+        navigatorID: String,
+        optionID: String,
+        key: ExtensionFactKey?,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (
+            Result<WorkspaceNavigatorOptionEffectiveValues, Error>
+        ) -> Void
+    ) -> Bool {
+        guard extensionIdentifier == inventory.extensionIdentifier,
+              navigatorID == inventory.navigator.id,
+              processGeneration == inventory.processGeneration else { return false }
+        registeredFactWrites.append(.init(
+            optionID: optionID,
+            key: key,
+            processGeneration: processGeneration
+        ))
+        var selections = inventory.registeredFactSelections
+        selections[optionID] = key
+        let revision = inventory.optionRevision + 1
+        inventory = .init(
+            extensionIdentifier: inventory.extensionIdentifier,
+            extensionName: inventory.extensionName,
+            processGeneration: inventory.processGeneration,
+            navigator: inventory.navigator,
+            optionValues: inventory.optionValues,
+            registeredFactSelections: selections,
+            optionRevision: revision,
+            optionPersistenceOutcome: inventory.optionPersistenceOutcome
+        )
+        completion(.success(.init(
+            revision: revision,
+            optionValues: inventory.optionValues,
+            registeredFactSelections: selections
+        )))
         return true
     }
 

@@ -20,6 +20,10 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         Set<ExtensionFactCell>,
         Set<ExtensionFactKey>
     ) -> ExtensionFactSnapshotPatch?
+    typealias RegisteredFactChoicesProvider = (
+        ExtensionFactUsage,
+        ExtensionFactKey?
+    ) -> [WorkspaceNavigatorRegisteredFactChoice]
     typealias IntentHandler = (
         ExtensionWorkspaceNavigatorIntent,
         SessionID
@@ -37,6 +41,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     private let destinationHandler: DestinationHandler
     private let factSnapshotProvider: FactSnapshotProvider
     private let factSnapshotPatchProvider: FactSnapshotPatchProvider
+    private let registeredFactChoicesProvider: RegisteredFactChoicesProvider
     private let pipelineEvaluate: WorkspaceNavigatorPipelineEvaluationScheduler.Evaluate
     private let pipelineCalendarProvider: () -> Calendar
     private let pipelineNowProvider: () -> Date
@@ -45,6 +50,9 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     /// Localized once from the validated registration. Runtime documents may replace content,
     /// never the host-owned option contract which scopes durable user choices.
     private let declaredOptions: [ExtensionWorkspaceNavigatorOption]
+    private let declaredRegisteredFactOptions: [
+        ExtensionWorkspaceNavigatorRegisteredFactOption
+    ]
     private let declaredIntents: Set<ExtensionWorkspaceNavigatorIntent>
     /// Pipeline declarations are compiled from the registration snapshot. A process response may
     /// replace fallback content, but cannot add, remove or mutate that static host program.
@@ -53,6 +61,11 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     private let intentHandler: IntentHandler
     private var navigator: ExtensionWorkspaceNavigator
     private var optionValues: [String: ExtensionJSONValue]
+    private var registeredFactSelections: [String: ExtensionFactKey]
+    private var optionRevision: UInt64
+    private var effectiveConsumedFactKeys: Set<ExtensionFactKey> {
+        consumedFactKeys.union(registeredFactSelections.values)
+    }
     private lazy var titleLabel: NSTextField = {
         let label = NSTextField(labelWithString: navigator.title)
         label.applyFont(.controlRegular)
@@ -181,6 +194,9 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         destinationHandler: @escaping DestinationHandler,
         factSnapshotProvider: @escaping FactSnapshotProvider = { _ in nil },
         factSnapshotPatchProvider: @escaping FactSnapshotPatchProvider = { _, _, _ in nil },
+        registeredFactChoicesProvider: @escaping RegisteredFactChoicesProvider = { _, selected in
+            selected.map { [.unavailable($0)] } ?? []
+        },
         pipelineEvaluate: @escaping WorkspaceNavigatorPipelineEvaluationScheduler.Evaluate = {
             request in
             let evaluation = WorkspaceNavigatorPipelineEvaluator(
@@ -206,15 +222,19 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         processGeneration = inventory.processGeneration
         navigator = inventory.navigator
         declaredOptions = inventory.navigator.options
+        declaredRegisteredFactOptions = inventory.navigator.pipeline?.registeredFactOptions ?? []
         declaredIntents = Set(inventory.navigator.intents)
         declaredPipeline = inventory.navigator.pipeline
         consumedFactKeys = Set(inventory.navigator.pipeline?.consumes.map(\.key) ?? [])
         optionValues = inventory.optionValues
+        registeredFactSelections = inventory.registeredFactSelections
+        optionRevision = inventory.optionRevision
         self.routing = routing
         self.contextProvider = contextProvider
         self.destinationHandler = destinationHandler
         self.factSnapshotProvider = factSnapshotProvider
         self.factSnapshotPatchProvider = factSnapshotPatchProvider
+        self.registeredFactChoicesProvider = registeredFactChoicesProvider
         self.pipelineEvaluate = pipelineEvaluate
         self.pipelineCalendarProvider = pipelineCalendarProvider
         self.pipelineNowProvider = pipelineNowProvider
@@ -319,11 +339,27 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         }
     }
 
+    func updateOptionValues(from inventory: ExtensionWorkspaceNavigatorInventoryItem) {
+        guard inventory.extensionIdentifier == extensionIdentifier,
+              inventory.navigator.id == navigatorID,
+              inventory.processGeneration == processGeneration else { return }
+        applyOptionValues(.init(
+            revision: inventory.optionRevision,
+            optionValues: inventory.optionValues,
+            registeredFactSelections: inventory.registeredFactSelections
+        ))
+    }
+
     /// The host permanently owns the route out of an extension navigator. Options appear only
     /// for a declared pipeline, where the host compiler consumes them synchronously; legacy
     /// materialized documents still omit controls whose values cannot affect their content.
     func navigatorMenuEntries() -> [ThemedMenuEntry] {
         var entries = declaredPipeline == nil ? [] : declaredOptions.map(optionMenuEntry)
+        if declaredPipeline != nil {
+            entries.append(contentsOf: declaredRegisteredFactOptions.map(
+                registeredFactOptionMenuEntry
+            ))
+        }
         if !entries.isEmpty {
             entries.append(.separator)
         }
@@ -385,6 +421,62 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         }
     }
 
+    private func registeredFactOptionMenuEntry(
+        _ option: ExtensionWorkspaceNavigatorRegisteredFactOption
+    ) -> ThemedMenuEntry {
+        let selectedKey = registeredFactSelections[option.id]
+        let usage: ExtensionFactUsage = switch option.application {
+        case .bucket: .groupable
+        case .sort: .sortable
+        }
+        let choices = registeredFactChoicesProvider(usage, selectedKey)
+        let selectedChoice = selectedKey.flatMap { key in
+            choices.first { $0.key == key }
+        }
+        let subtitle: String = switch selectedChoice {
+        case .available(let definition): definition.displayName
+        case .unavailable(let key): unavailableRegisteredFactTitle(key)
+        case nil: L10n.string("None")
+        }
+
+        var submenu: [ThemedMenuEntry] = [
+            .item(ThemedMenuItem(
+                title: L10n.string("None"),
+                isSelected: selectedKey == nil,
+                onChoose: { [weak self] in
+                    self?.setRegisteredFactSelection(option, key: nil)
+                }
+            )),
+        ]
+        submenu.append(contentsOf: choices.map { choice in
+            switch choice {
+            case .available(let definition):
+                return .item(ThemedMenuItem(
+                    title: definition.displayName,
+                    isSelected: definition.key == selectedKey,
+                    onChoose: { [weak self] in
+                        self?.setRegisteredFactSelection(option, key: definition.key)
+                    }
+                ))
+            case .unavailable(let key):
+                return .item(ThemedMenuItem(
+                    title: unavailableRegisteredFactTitle(key),
+                    isSelected: key == selectedKey,
+                    isEnabled: false
+                ))
+            }
+        })
+        return .item(ThemedMenuItem(
+            title: option.title,
+            subtitle: subtitle,
+            submenu: submenu
+        ))
+    }
+
+    private func unavailableRegisteredFactTitle(_ key: ExtensionFactKey) -> String {
+        L10n.format("%@ (Unavailable)", "\(key.id)@\(key.version)")
+    }
+
     private func setPipelineOption(
         _ option: ExtensionWorkspaceNavigatorOption,
         value: ExtensionJSONValue
@@ -399,7 +491,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             value: value,
             processGeneration: processGeneration
         ) { [weak self] result in
-            guard let self, sequence == self.optionSequence else { return }
+            guard let self else { return }
             guard self.routing.registeredWorkspaceNavigator(
                 extensionIdentifier: self.extensionIdentifier,
                 navigatorID: self.navigatorID
@@ -409,15 +501,61 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             }
             switch result {
             case .success(let values):
-                self.optionValues = values
-                self.requestPipelineRefresh()
+                self.applyOptionValues(values)
             case .failure(let error):
-                self.presentError(error.localizedDescription)
+                if sequence == self.optionSequence {
+                    self.presentError(error.localizedDescription)
+                }
             }
         }
         if !accepted {
             onUnavailable()
         }
+    }
+
+    private func setRegisteredFactSelection(
+        _ option: ExtensionWorkspaceNavigatorRegisteredFactOption,
+        key: ExtensionFactKey?
+    ) {
+        guard declaredPipeline != nil else { return }
+        optionSequence += 1
+        let sequence = optionSequence
+        let accepted = routing.setWorkspaceNavigatorRegisteredFactSelection(
+            extensionIdentifier: extensionIdentifier,
+            navigatorID: navigatorID,
+            optionID: option.id,
+            key: key,
+            processGeneration: processGeneration
+        ) { [weak self] result in
+            guard let self else { return }
+            guard self.routing.registeredWorkspaceNavigator(
+                extensionIdentifier: self.extensionIdentifier,
+                navigatorID: self.navigatorID
+            )?.processGeneration == self.processGeneration else {
+                self.onUnavailable()
+                return
+            }
+            switch result {
+            case .success(let values):
+                self.applyOptionValues(values)
+            case .failure(let error):
+                if sequence == self.optionSequence {
+                    self.presentError(error.localizedDescription)
+                }
+            }
+        }
+        if !accepted { onUnavailable() }
+    }
+
+    private func applyOptionValues(_ values: WorkspaceNavigatorOptionEffectiveValues) {
+        guard values.revision >= optionRevision else { return }
+        let changed = values.revision != optionRevision
+            || values.optionValues != optionValues
+            || values.registeredFactSelections != registeredFactSelections
+        optionRevision = values.revision
+        optionValues = values.optionValues
+        registeredFactSelections = values.registeredFactSelections
+        if changed, isViewLoaded { requestPipelineRefresh() }
     }
 
     private func installPipelineInvalidation() {
@@ -442,7 +580,9 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         case .all:
             return true
         case .exact(let cells):
-            let relevant = consumedFactKeys.union(ExtensionFactRegistry.snapshotStructuralKeys)
+            let relevant = effectiveConsumedFactKeys.union(
+                ExtensionFactRegistry.snapshotStructuralKeys
+            )
             return cells.contains { relevant.contains($0.key) }
         }
     }
@@ -477,7 +617,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         case .all:
             boundedChange = .all
         case .exact(let cells):
-            let relevantKeys = consumedFactKeys.union(
+            let relevantKeys = effectiveConsumedFactKeys.union(
                 ExtensionFactRegistry.snapshotStructuralKeys
             )
             let relevantCells = Set(cells.filter { relevantKeys.contains($0.key) })
@@ -536,7 +676,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
               let patch = factSnapshotPatchProvider(
                 compiledPipeline.snapshot,
                 cells,
-                consumedFactKeys
+                effectiveConsumedFactKeys
               ) else { return false }
         let presentationSharesBaseRevision = presentedPipeline?.snapshot.revision
             == compiledPipeline.snapshot.revision
@@ -564,7 +704,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         }
         scheduleNextDayRefresh()
 
-        guard let snapshot = factSnapshotProvider(consumedFactKeys) else {
+        guard let snapshot = factSnapshotProvider(effectiveConsumedFactKeys) else {
             pipelineEvaluationSequence += 1
             pipelineEvaluationScheduler.invalidate()
             compiledPipeline = nil
@@ -578,7 +718,8 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         switch WorkspaceNavigatorPipelineCompiler().compile(
             declaredPipeline,
             snapshot: snapshot,
-            optionValues: optionValues
+            optionValues: optionValues,
+            registeredFactSelections: registeredFactSelections
         ) {
         case .ready(let compiled):
             compiledPipeline = compiled

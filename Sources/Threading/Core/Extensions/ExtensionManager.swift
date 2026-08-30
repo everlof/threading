@@ -155,6 +155,7 @@ struct ExtensionWorkspaceNavigatorInventoryItem: Equatable {
     let processGeneration: String
     let navigator: ExtensionWorkspaceNavigator
     let optionValues: [String: ExtensionJSONValue]
+    let registeredFactSelections: [String: ExtensionFactKey]
     let optionRevision: UInt64
     let optionPersistenceOutcome: WorkspaceNavigatorOptionPersistenceOutcome
 
@@ -164,6 +165,7 @@ struct ExtensionWorkspaceNavigatorInventoryItem: Equatable {
         processGeneration: String,
         navigator: ExtensionWorkspaceNavigator,
         optionValues: [String: ExtensionJSONValue] = [:],
+        registeredFactSelections: [String: ExtensionFactKey] = [:],
         optionRevision: UInt64 = 0,
         optionPersistenceOutcome: WorkspaceNavigatorOptionPersistenceOutcome =
             .skippedNoDeclarations
@@ -173,9 +175,16 @@ struct ExtensionWorkspaceNavigatorInventoryItem: Equatable {
         self.processGeneration = processGeneration
         self.navigator = navigator
         self.optionValues = optionValues
+        self.registeredFactSelections = registeredFactSelections
         self.optionRevision = optionRevision
         self.optionPersistenceOutcome = optionPersistenceOutcome
     }
+}
+
+struct WorkspaceNavigatorOptionEffectiveValues: Equatable, Sendable {
+    let revision: UInt64
+    let optionValues: [String: ExtensionJSONValue]
+    let registeredFactSelections: [String: ExtensionFactKey]
 }
 
 /// The lifecycle-safe boundary consumed by the leading workspace navigator host.
@@ -197,7 +206,21 @@ protocol ExtensionWorkspaceNavigatorRouting: AnyObject {
         value: ExtensionJSONValue,
         processGeneration: String,
         completion: @escaping @MainActor @Sendable (
-            Result<[String: ExtensionJSONValue], Error>
+            Result<WorkspaceNavigatorOptionEffectiveValues, Error>
+        ) -> Void
+    ) -> Bool
+
+    /// Persists a host-owned dynamic fact key. This typed path is deliberately separate from
+    /// static option JSON so the selection cannot enter extension-authored conditions or IPC.
+    @discardableResult
+    func setWorkspaceNavigatorRegisteredFactSelection(
+        extensionIdentifier: String,
+        navigatorID: String,
+        optionID: String,
+        key: ExtensionFactKey?,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (
+            Result<WorkspaceNavigatorOptionEffectiveValues, Error>
         ) -> Void
     ) -> Bool
 
@@ -246,7 +269,21 @@ extension ExtensionWorkspaceNavigatorRouting {
         value: ExtensionJSONValue,
         processGeneration: String,
         completion: @escaping @MainActor @Sendable (
-            Result<[String: ExtensionJSONValue], Error>
+            Result<WorkspaceNavigatorOptionEffectiveValues, Error>
+        ) -> Void
+    ) -> Bool {
+        false
+    }
+
+    @discardableResult
+    func setWorkspaceNavigatorRegisteredFactSelection(
+        extensionIdentifier: String,
+        navigatorID: String,
+        optionID: String,
+        key: ExtensionFactKey?,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (
+            Result<WorkspaceNavigatorOptionEffectiveValues, Error>
         ) -> Void
     ) -> Bool {
         false
@@ -840,6 +877,8 @@ final class ExtensionManager:
                     processGeneration: processGeneration,
                     navigator: $0,
                     optionValues: optionSnapshot.valuesByNavigatorID[$0.id] ?? [:],
+                    registeredFactSelections: optionSnapshot
+                        .registeredFactSelectionsByNavigatorID[$0.id] ?? [:],
                     optionRevision: optionSnapshot.revision,
                     optionPersistenceOutcome: optionSnapshot.persistenceOutcome
                 )
@@ -924,6 +963,8 @@ final class ExtensionManager:
             processGeneration: processGeneration,
             navigator: navigator,
             optionValues: optionSnapshot.valuesByNavigatorID[navigator.id] ?? [:],
+            registeredFactSelections: optionSnapshot
+                .registeredFactSelectionsByNavigatorID[navigator.id] ?? [:],
             optionRevision: optionSnapshot.revision,
             optionPersistenceOutcome: optionSnapshot.persistenceOutcome
         )
@@ -937,7 +978,7 @@ final class ExtensionManager:
         value: ExtensionJSONValue,
         processGeneration: String,
         completion: @escaping @MainActor @Sendable (
-            Result<[String: ExtensionJSONValue], Error>
+            Result<WorkspaceNavigatorOptionEffectiveValues, Error>
         ) -> Void
     ) -> Bool {
         guard enabledIdentifiers.contains(extensionIdentifier),
@@ -987,13 +1028,98 @@ final class ExtensionManager:
                         return
                     }
                     guard snapshot.revision >= current.revision else {
-                        completion(.success(
-                            current.valuesByNavigatorID[navigatorID] ?? [:]
-                        ))
+                        completion(.success(.init(
+                            revision: current.revision,
+                            optionValues: current.valuesByNavigatorID[navigatorID] ?? [:],
+                            registeredFactSelections: current
+                                .registeredFactSelectionsByNavigatorID[navigatorID] ?? [:]
+                        )))
                         return
                     }
                     self.workspaceNavigatorOptionSnapshots[extensionIdentifier] = snapshot
-                    completion(.success(snapshot.valuesByNavigatorID[navigatorID] ?? [:]))
+                    completion(.success(.init(
+                        revision: snapshot.revision,
+                        optionValues: snapshot.valuesByNavigatorID[navigatorID] ?? [:],
+                        registeredFactSelections: snapshot
+                            .registeredFactSelectionsByNavigatorID[navigatorID] ?? [:]
+                    )))
+                    self.notifyChange()
+                }
+            }
+        }
+        return true
+    }
+
+    @discardableResult
+    func setWorkspaceNavigatorRegisteredFactSelection(
+        extensionIdentifier: String,
+        navigatorID: String,
+        optionID: String,
+        key: ExtensionFactKey?,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (
+            Result<WorkspaceNavigatorOptionEffectiveValues, Error>
+        ) -> Void
+    ) -> Bool {
+        guard enabledIdentifiers.contains(extensionIdentifier),
+              sessions[extensionIdentifier] != nil,
+              sessionGenerations[extensionIdentifier] == processGeneration,
+              workspaceNavigatorOptionSnapshots[extensionIdentifier]?.processGeneration
+                == processGeneration,
+              registrations[extensionIdentifier]?.workspaceNavigators.contains(where: {
+                  $0.id == navigatorID
+                      && $0.pipeline?.registeredFactOptions.contains(where: {
+                          $0.id == optionID
+                      }) == true
+              }) == true else {
+            return false
+        }
+
+        workspaceNavigatorOptionStore.setRegisteredFactSelection(
+            key,
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: processGeneration,
+            navigatorID: navigatorID,
+            optionID: optionID
+        ) { [weak self] result in
+            DispatchQueue.main.async { @MainActor [weak self] in
+                guard let self,
+                      self.enabledIdentifiers.contains(extensionIdentifier),
+                      self.sessions[extensionIdentifier] != nil,
+                      self.sessionGenerations[extensionIdentifier] == processGeneration else {
+                    completion(.failure(
+                        WorkspaceNavigatorOptionValueStoreError.inactiveGeneration
+                    ))
+                    return
+                }
+                switch result {
+                case .failure(let error):
+                    completion(.failure(error))
+                case .success(let snapshot):
+                    guard snapshot.processGeneration == processGeneration,
+                          let current = self.workspaceNavigatorOptionSnapshots[extensionIdentifier],
+                          current.processGeneration == processGeneration else {
+                        completion(.failure(
+                            WorkspaceNavigatorOptionValueStoreError.inactiveGeneration
+                        ))
+                        return
+                    }
+                    guard snapshot.revision >= current.revision else {
+                        completion(.success(.init(
+                            revision: current.revision,
+                            optionValues: current.valuesByNavigatorID[navigatorID] ?? [:],
+                            registeredFactSelections: current
+                                .registeredFactSelectionsByNavigatorID[navigatorID] ?? [:]
+                        )))
+                        return
+                    }
+                    self.workspaceNavigatorOptionSnapshots[extensionIdentifier] = snapshot
+                    completion(.success(.init(
+                        revision: snapshot.revision,
+                        optionValues: snapshot.valuesByNavigatorID[navigatorID] ?? [:],
+                        registeredFactSelections: snapshot
+                            .registeredFactSelectionsByNavigatorID[navigatorID] ?? [:]
+                    )))
                     self.notifyChange()
                 }
             }

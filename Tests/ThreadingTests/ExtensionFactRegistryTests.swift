@@ -207,6 +207,247 @@ final class ExtensionFactRegistryTests: XCTestCase {
         )
     }
 
+    func testRegisteredFactCatalogUsesOnlyWinningMetadataAndFallsBackOnRemoval() throws {
+        let registry = ExtensionFactRegistry()
+        let key = ExtensionFactKey(id: "example.shared-state")
+        let first = makeSource("com.example.first", generation: "g1", order: 0)
+        let second = makeSource("com.example.second", generation: "g1", order: 1)
+        let winner = ExtensionFactDefinition(
+            key: key,
+            displayName: "Winner Group",
+            valueType: .string,
+            subjectKinds: [.session],
+            usages: [.groupable]
+        )
+        let fallback = ExtensionFactDefinition(
+            key: key,
+            displayName: "Fallback Sort",
+            valueType: .string,
+            subjectKinds: [.session],
+            usages: [.sortable]
+        )
+        try registry.replaceDefinitions([fallback], from: second)
+        try registry.replaceDefinitions([winner], from: first)
+
+        XCTAssertEqual(registry.definition(for: key), winner)
+        XCTAssertEqual(registry.registeredFactChoices(
+            for: .groupable,
+            selectedKey: nil
+        ), [.available(winner)])
+        XCTAssertTrue(registry.registeredFactChoices(
+            for: .sortable,
+            selectedKey: nil
+        ).isEmpty, "Losing-provider usages must not be merged into the winning definition")
+
+        registry.removeGeneration(
+            extensionIdentifier: first.extensionIdentifier,
+            processGeneration: first.processGeneration
+        )
+        XCTAssertEqual(registry.definition(for: key), fallback)
+        XCTAssertEqual(registry.registeredFactChoices(
+            for: .sortable,
+            selectedKey: nil
+        ), [.available(fallback)])
+    }
+
+    func testRegisteredFactCatalogIsBoundedAndKeepsEverySelectionClearable() throws {
+        let registry = ExtensionFactRegistry()
+        let first = makeSource("com.example.catalog-a", generation: "g1", order: 0)
+        let second = makeSource("com.example.catalog-b", generation: "g1", order: 1)
+        let definitions = (0..<130).map { index in
+            ExtensionFactDefinition(
+                key: .init(id: String(format: "example.fact.%03d", index)),
+                displayName: String(format: "Fact %03d", index),
+                valueType: .string,
+                subjectKinds: [.session],
+                usages: [.groupable, .sortable]
+            )
+        }
+        try registry.replaceDefinitions(Array(definitions.prefix(128)), from: first)
+        try registry.replaceDefinitions(Array(definitions.suffix(2)), from: second)
+
+        let ordinary = registry.registeredFactChoices(for: .groupable, selectedKey: nil)
+        XCTAssertEqual(ordinary.count, 128)
+        XCTAssertEqual(ordinary.first?.key, definitions[0].key)
+        XCTAssertEqual(ordinary.last?.key, definitions[127].key)
+
+        let outside = registry.registeredFactChoices(
+            for: .groupable,
+            selectedKey: definitions[129].key
+        )
+        XCTAssertEqual(outside.count, 128)
+        XCTAssertTrue(outside.contains { $0.key == definitions[129].key })
+        XCTAssertFalse(outside.contains { $0.key == definitions[127].key })
+
+        let missing = ExtensionFactKey(id: "example.removed-selection")
+        let unavailable = registry.registeredFactChoices(
+            for: .groupable,
+            selectedKey: missing
+        )
+        XCTAssertEqual(unavailable.count, 128)
+        XCTAssertEqual(unavailable.last, .unavailable(missing))
+        XCTAssertEqual(unavailable.dropLast().count, 127)
+    }
+
+    func testRegisteredFactCatalogFiltersUnsupportedKindsAndIneligibleSelection() throws {
+        let registry = ExtensionFactRegistry()
+        let source = makeSource("com.example.eligibility", generation: "g1", order: 0)
+        let projectOnly = ExtensionFactDefinition(
+            key: .init(id: "example.project-only"),
+            displayName: "Project only",
+            valueType: .string,
+            subjectKinds: [.project],
+            usages: [.groupable]
+        )
+        let terminalOnly = ExtensionFactDefinition(
+            key: .init(id: "example.terminal-only"),
+            displayName: "Terminal only",
+            valueType: .string,
+            subjectKinds: [.terminal],
+            usages: [.groupable]
+        )
+        let repository = ExtensionFactDefinition(
+            key: .init(id: "example.repository"),
+            displayName: "Repository",
+            valueType: .string,
+            subjectKinds: [.repository],
+            usages: [.groupable]
+        )
+        try registry.replaceDefinitions([projectOnly, terminalOnly, repository], from: source)
+
+        XCTAssertEqual(
+            registry.registeredFactChoices(for: .groupable, selectedKey: nil),
+            [.available(repository)]
+        )
+        XCTAssertEqual(
+            registry.registeredFactChoices(
+                for: .groupable,
+                selectedKey: projectOnly.key
+            ),
+            [.available(repository), .unavailable(projectOnly.key)]
+        )
+    }
+
+    func testRegisteredFactSelectionSurvivesEmptyStaleRemovedAndReturningProvider() throws {
+        var referenceDate = Date(timeIntervalSinceReferenceDate: 1_000)
+        let registry = ExtensionFactRegistry(now: { referenceDate })
+        let key = ExtensionFactKey(id: "example.returning-state", version: 1)
+        let definition = ExtensionFactDefinition(
+            key: key,
+            displayName: "Returning State",
+            valueType: .string,
+            subjectKinds: [.session],
+            usages: [.groupable]
+        )
+        let first = makeSource("com.example.returning", generation: "g1", order: 0)
+        try registry.replaceDefinitions([definition], from: first)
+        XCTAssertEqual(
+            registry.registeredFactChoices(for: .groupable, selectedKey: key),
+            [.available(definition)],
+            "A live definition is selectable before it has any values"
+        )
+
+        let subject = ExtensionFactSubject.session("session")
+        try registry.replaceFacts(
+            [makeFact(key: key, subject: subject, value: "open", observedAt: referenceDate)],
+            replacing: [subject],
+            from: first
+        )
+        referenceDate = referenceDate.addingTimeInterval(
+            ExtensionFactRegistry.maximumProviderFactAge
+        )
+        registry.refreshStaleness()
+        XCTAssertNil(registry.exactFact(key, for: subject))
+        XCTAssertEqual(
+            registry.registeredFactChoices(for: .groupable, selectedKey: key),
+            [.available(definition)],
+            "Value expiry must not remove a live provider definition from the picker"
+        )
+
+        registry.removeGeneration(
+            extensionIdentifier: first.extensionIdentifier,
+            processGeneration: first.processGeneration
+        )
+        XCTAssertEqual(
+            registry.registeredFactChoices(for: .groupable, selectedKey: key),
+            [.unavailable(key)]
+        )
+
+        let returning = makeSource("com.example.returning", generation: "g2", order: 0)
+        try registry.replaceDefinitions([definition], from: returning)
+        XCTAssertEqual(
+            registry.registeredFactChoices(for: .groupable, selectedKey: key),
+            [.available(definition)]
+        )
+    }
+
+    /// Scaling gate: ordinary installs expose tens or hundreds of definitions. This fixture
+    /// registers 5,000 winning definitions across realistic bounded providers, then measures the
+    /// user-frequency paths: opening the 128-row catalog and snapshotting one selected key.
+    func testStressRegisteredFactCatalogWhenEnabled() throws {
+        guard ProcessInfo.processInfo.environment[
+            "THREADING_NAVIGATOR_FACT_CATALOG_STRESS"
+        ] == "1" else {
+            throw XCTSkip(
+                "Set THREADING_NAVIGATOR_FACT_CATALOG_STRESS=1 for the 5,000-definition fixture"
+            )
+        }
+
+        let definitionCount = ExtensionFactRegistry.registeredFactCatalogStressDefinitionCount
+        let definitionsPerProvider = 125
+        XCTAssertEqual(definitionCount % definitionsPerProvider, 0)
+        let registry = ExtensionFactRegistry()
+        var selectedDefinition: ExtensionFactDefinition?
+        let registrationStart = CFAbsoluteTimeGetCurrent()
+        for providerIndex in 0..<(definitionCount / definitionsPerProvider) {
+            let definitions = (0..<definitionsPerProvider).map { localIndex in
+                let index = providerIndex * definitionsPerProvider + localIndex
+                return ExtensionFactDefinition(
+                    key: .init(id: String(format: "example.stress.fact-%04d", index)),
+                    displayName: String(format: "Stress Fact %04d", index),
+                    valueType: .string,
+                    subjectKinds: [.session],
+                    usages: [.groupable, .sortable]
+                )
+            }
+            selectedDefinition = definitions.last
+            try registry.replaceDefinitions(
+                definitions,
+                from: makeSource(
+                    String(format: "com.example.stress.provider-%02d", providerIndex),
+                    generation: "g1",
+                    order: providerIndex
+                )
+            )
+        }
+        let registrationMilliseconds = (CFAbsoluteTimeGetCurrent() - registrationStart) * 1_000
+        let selected = try XCTUnwrap(selectedDefinition)
+
+        let catalogStart = CFAbsoluteTimeGetCurrent()
+        let choices = registry.registeredFactChoices(
+            for: .groupable,
+            selectedKey: selected.key
+        )
+        let catalogMilliseconds = (CFAbsoluteTimeGetCurrent() - catalogStart) * 1_000
+        let snapshotStart = CFAbsoluteTimeGetCurrent()
+        let snapshot = registry.snapshot(consuming: [selected.key])
+        let snapshotMilliseconds = (CFAbsoluteTimeGetCurrent() - snapshotStart) * 1_000
+
+        XCTAssertEqual(choices.count, 128)
+        XCTAssertTrue(choices.contains { $0.key == selected.key })
+        XCTAssertEqual(snapshot.definition(for: selected.key), selected)
+        XCTAssertTrue(snapshot.hasProvider(for: selected.key))
+        print(String(
+            format: "THREADING_PERF navigator-registered-facts definitions=%d choices=%d "
+                + "registration_ms=%.3f catalog_ms=%.3f snapshot_ms=%.3f",
+            definitionCount,
+            choices.count,
+            registrationMilliseconds,
+            catalogMilliseconds,
+            snapshotMilliseconds
+        ))
+    }
+
     func testEqualSourceOrdersResolveByIdentifierRegardlessOfPublicationOrder() throws {
         let registry = ExtensionFactRegistry()
         let key = ExtensionFactKey(id: "gitlab.mr.state")
