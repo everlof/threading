@@ -1562,7 +1562,10 @@ extension ProjectSidebarViewController {
     /// its new frame and height and reopens what should be open; `initial` skips it, because
     /// at setup the first `reload()` has not drawn anything to re-lay out.
     func applyTreeDensity(initial: Bool = false) {
-        let compact = AppSettings.shared.compactsSidebarTree
+        let compact = NativeSidebarParity.option(
+            .compactTree,
+            AppSettings.shared.compactsSidebarTree
+        )
         guard initial || compact != presentedTreeIsCompact else { return }
 
         presentedTreeIsCompact = compact

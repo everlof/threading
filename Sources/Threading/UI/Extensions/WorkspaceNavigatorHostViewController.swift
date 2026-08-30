@@ -19,12 +19,45 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     private let routing: ExtensionWorkspaceNavigatorRouting
     private let contextProvider: ContextProvider
     private let destinationHandler: DestinationHandler
+    private let onSelectNative: () -> Void
     private let onUnavailable: () -> Void
     /// Localized once from the validated registration. Runtime documents may replace content,
     /// never the host-owned option contract which scopes durable user choices.
     private let declaredOptions: [ExtensionWorkspaceNavigatorOption]
     private var navigator: ExtensionWorkspaceNavigator
+    private lazy var titleLabel: NSTextField = {
+        let label = NSTextField(labelWithString: navigator.title)
+        label.applyFont(.controlRegular)
+        label.textColor = Design.Text.label
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setAccessibilityIdentifier("workspace.navigator.title")
+        return label
+    }()
+    private lazy var menuButton: ThemedIconButton = {
+        let button = ThemedIconButton(
+            symbolName: "ellipsis",
+            accessibility: L10n.string("Navigator"),
+            target: .inline,
+            inkSource: .chrome
+        )
+        button.toolTip = L10n.string("Navigator")
+        button.presentsMenu = true
+        button.setAccessibilityIdentifier("workspace.navigator.menu")
+        button.onPress = { [weak self] in self?.showNavigatorMenu() }
+        return button
+    }()
+    private lazy var header: PaneHeaderView = {
+        let header = PaneHeaderView(
+            leading: [titleLabel],
+            trailing: [menuButton],
+            margin: .paneEdge
+        )
+        header.setAccessibilityIdentifier("workspace.navigator.header")
+        return header
+    }()
     private var rootHost: NSView?
+    private var activeMenuSession: AnyObject?
     private var collectionControllers: [WorkspaceNavigatorCollectionViewController] = []
     private var collectionStates: [String: WorkspaceNavigatorCollectionState] = [:]
     private var synchronizedDestination: ExtensionWorkspaceNavigatorDestination?
@@ -44,6 +77,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         routing: ExtensionWorkspaceNavigatorRouting,
         contextProvider: @escaping ContextProvider,
         destinationHandler: @escaping DestinationHandler,
+        onSelectNative: @escaping () -> Void = {},
         onUnavailable: @escaping () -> Void
     ) {
         extensionIdentifier = inventory.extensionIdentifier
@@ -54,6 +88,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         self.routing = routing
         self.contextProvider = contextProvider
         self.destinationHandler = destinationHandler
+        self.onSelectNative = onSelectNative
         self.onUnavailable = onUnavailable
         super.init(nibName: nil, bundle: nil)
     }
@@ -77,6 +112,12 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        view.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            header.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
         render(navigator)
         DispatchQueue.main.async { [weak self] in
@@ -118,6 +159,34 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         }
     }
 
+    /// The extension owns the document below this band; the host permanently owns the route
+    /// out of it. Declared options remain absent until a host transform consumes their values,
+    /// so v1 never presents a control whose result cannot change what is on screen.
+    func navigatorMenuEntries() -> [ThemedMenuEntry] {
+        [
+            .item(ThemedMenuItem(
+                title: L10n.string("Native"),
+                onChoose: { [weak self] in self?.onSelectNative() }
+            ))
+        ]
+    }
+
+    func dismissPresentedMenu() {
+        ThemedMenuPresenter.dismiss(activeMenuSession)
+        activeMenuSession = nil
+    }
+
+    private func showNavigatorMenu() {
+        let entries = navigatorMenuEntries()
+        activeMenuSession = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(entries: entries, minimumWidth: SidebarDefaults.menuWidth),
+            from: menuButton,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in item.onChoose?() },
+            onDismiss: { [weak self] in self?.activeMenuSession = nil }
+        )
+    }
+
     private func render(_ replacement: ExtensionWorkspaceNavigator) {
         guard replacement.options == declaredOptions else {
             failClosed(afterRendering: ExtensionValidationError(issues: [.init(
@@ -144,13 +213,14 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             built.translatesAutoresizingMaskIntoConstraints = false
             view.addSubview(built, positioned: .above, relativeTo: previousRoot)
             NSLayoutConstraint.activate([
-                built.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+                built.topAnchor.constraint(equalTo: header.bottomAnchor),
                 built.bottomAnchor.constraint(equalTo: view.bottomAnchor),
                 built.leadingAnchor.constraint(equalTo: view.leadingAnchor),
                 built.trailingAnchor.constraint(equalTo: view.trailingAnchor)
             ])
             rootHost = built
             navigator = replacement
+            titleLabel.stringValue = replacement.title
             contentRevision += 1
             if let synchronizedDestination {
                 collectionControllers.forEach {

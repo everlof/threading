@@ -154,6 +154,27 @@
       }
     },
     {
+      "id": "workspace-navigator-shell",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Extension workspace navigator shell",
+      "description": "A focused extension navigator in the real main-window split shell, with its host-owned localized title band, virtualized collection and permanent menu route back to Native.",
+      "states": ["Focused extension navigator", "Return-to-Native menu"],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["Narrow leading sidebar in a 1120×720-point main window"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/WorkspaceNavigatorRenderTests.swift",
+        "test": "ThreadingTests/WorkspaceNavigatorRenderTests/testRendersFocusedNavigatorAndNativeRouteInTheMainWindow"
+      },
+      "capture": {
+        "glob": "workspace-navigator-*.png"
+      }
+    },
+    {
       "id": "sidebar-toast-receipts",
       "kind": "component",
       "status": "implemented",

@@ -1358,7 +1358,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         )
         let replacement = ExtensionWorkspaceNavigator(
             id: navigator.id,
-            title: navigator.title,
+            title: "Should not replace the accepted title",
             root: .content(.status("Updated", role: .positive))
         )
         let router = TestWorkspaceNavigatorRouter(navigator: navigator)
@@ -1388,6 +1388,217 @@ final class ExtensionRendererTests: HostedStoreTestCase {
                 .compactMap { ($0 as? NSTextField)?.stringValue }
                 .contains("Updated")
         )
+        XCTAssertEqual(
+            descendants(in: host.view).compactMap { $0 as? NSTextField }.first {
+                $0.accessibilityIdentifier() == "workspace.navigator.title"
+            }?.stringValue,
+            navigator.title
+        )
+    }
+
+    func testWorkspaceNavigatorSuccessfulReplacementAtomicallyUpdatesHostTitle() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Loading",
+            root: .content(.button(
+                id: "refresh",
+                title: "Refresh",
+                role: .standard,
+                isEnabled: true
+            ))
+        )
+        let replacement = ExtensionWorkspaceNavigator(
+            id: navigator.id,
+            title: "Priority work",
+            root: .content(.status("Updated", role: .positive))
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.result = .success(.init(
+            requestID: "replacement",
+            navigatorID: navigator.id,
+            navigator: replacement
+        ))
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("valid replacement became unavailable") }
+        )
+        _ = host.view
+        let title = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? NSTextField }.first {
+                $0.accessibilityIdentifier() == "workspace.navigator.title"
+            }
+        )
+        XCTAssertEqual(title.stringValue, "Loading")
+
+        let refresh = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedButton }.first
+        )
+        refresh.performClick()
+
+        XCTAssertEqual(title.stringValue, "Priority work")
+        XCTAssertTrue(
+            descendants(in: host.view)
+                .compactMap { ($0 as? NSTextField)?.stringValue }
+                .contains("Updated")
+        )
+    }
+
+    func testWorkspaceNavigatorHostOwnsATitleBandAboveTheVirtualizedDocument() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Focused workspace",
+            root: .collection(.init(
+                id: "sessions",
+                layout: .list,
+                items: [
+                    .init(id: "known", content: .text("Known session", role: .body))
+                ]
+            ))
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("valid navigator became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 260, height: 320)
+        host.view.layoutSubtreeIfNeeded()
+
+        let views = descendants(in: host.view)
+        let header = try XCTUnwrap(views.first {
+            $0.accessibilityIdentifier() == "workspace.navigator.header"
+        })
+        let title = try XCTUnwrap(views.compactMap { $0 as? NSTextField }.first {
+            $0.accessibilityIdentifier() == "workspace.navigator.title"
+        })
+        let scroll = try XCTUnwrap(views.compactMap { $0 as? ThemedScrollView }.first)
+
+        XCTAssertEqual(title.stringValue, navigator.title)
+        XCTAssertEqual(scroll.frame.maxY, header.frame.minY, accuracy: 0.5)
+        XCTAssertEqual(ThemeBoundaryAudit.violations(in: host.view), [])
+    }
+
+    func testV1NavigatorMenuKeepsDeclaredOptionsHiddenUntilAHostTransformConsumesThem()
+        throws
+    {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.text("Activity", role: .body)),
+            options: [
+                .init(
+                    id: "group",
+                    title: "Group sessions",
+                    control: .toggle(defaultValue: true)
+                ),
+                .init(
+                    id: "sort",
+                    title: "Sort",
+                    control: .choice(
+                        defaultValue: "recent",
+                        options: [
+                            .init(id: "recent", title: "Recent"),
+                            .init(id: "name", title: "Name")
+                        ]
+                    )
+                )
+            ]
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("valid navigator became unavailable") }
+        )
+
+        XCTAssertEqual(
+            host.navigatorMenuEntries().compactMap(\.item).map(\.title),
+            [L10n.string("Native")]
+        )
+    }
+
+    func testWorkspaceNavigatorNativeMenuRouteUsesTheContainerCallback() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.text("Activity", role: .body))
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        var nativeSelections = 0
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onSelectNative: { nativeSelections += 1 },
+            onUnavailable: { XCTFail("valid navigator became unavailable") }
+        )
+
+        let native = try XCTUnwrap(host.navigatorMenuEntries().compactMap(\.item).first)
+        native.onChoose?()
+
+        XCTAssertEqual(nativeSelections, 1)
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testWorkspaceNavigatorMenuCannotOutliveItsDetachedProcessGeneration() throws {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.text("Activity", role: .body))
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let container = WorkspaceSidebarContainerViewController(
+            nativeController: ProjectSidebarViewController(),
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil }
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 280, height: 360),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = container
+        container.activate(.extensionNavigator(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            navigatorID: navigator.id
+        ))
+        container.view.layoutSubtreeIfNeeded()
+        let menuButton = try XCTUnwrap(
+            descendants(in: container.view).compactMap { $0 as? ThemedIconButton }.first {
+                $0.accessibilityIdentifier() == "workspace.navigator.menu"
+            }
+        )
+
+        XCTAssertTrue(menuButton.accessibilityPerformPress())
+        XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: window))
+
+        router.inventory = .init(
+            extensionIdentifier: router.inventory.extensionIdentifier,
+            extensionName: router.inventory.extensionName,
+            processGeneration: "generation-2",
+            navigator: navigator
+        )
+        container.refreshAvailability()
+
+        XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+        XCTAssertEqual(
+            container.children.compactMap {
+                $0 as? WorkspaceNavigatorHostViewController
+            }.first?.processGeneration,
+            "generation-2"
+        )
+        window.contentViewController = nil
     }
 
     func testWorkspaceNavigatorRenderFailureFallsBackToNativeForThatProcessGeneration() {

@@ -5,6 +5,7 @@ enum NativeSidebarOptionDependency: String, CaseIterable, Sendable {
     case sessionOrderDirection
     case branchGrouping
     case loneBranchHeadings
+    case compactTree
 }
 
 /// State Threading must keep host-owned when navigator content is customizable.
@@ -41,6 +42,7 @@ enum NativeSidebarOptionSourceAlias: String, CaseIterable, Sendable {
     case sessionOrderDirection = "AppSettings.sidebarSessionOrderIsReversed"
     case branchGrouping = "AppSettings.groupsSessionsByBranch"
     case loneBranchHeadings = "AppSettings.groupsLoneBranches"
+    case compactTree = "AppSettings.compactsSidebarTree"
 }
 
 /// A scalar entry input or static host service that must remain host-owned.
@@ -70,6 +72,7 @@ enum NativeSidebarParity {
         .sessionOrderDirection: .sessionOrderDirection,
         .branchGrouping: .branchGrouping,
         .loneBranchHeadings: .loneBranchHeadings,
+        .compactTree: .compactTree,
     ]
 
     static let hostInputOwnership: [

@@ -9,6 +9,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     private let routing: ExtensionWorkspaceNavigatorRouting
     private let contextProvider: WorkspaceNavigatorHostViewController.ContextProvider
     private let destinationHandler: WorkspaceNavigatorHostViewController.DestinationHandler
+    private let onSelectNative: () -> Void
     private var visibleController: NSViewController?
     private var extensionController: WorkspaceNavigatorHostViewController?
     private var desiredSelection: WorkspaceNavigatorSelection = .native
@@ -23,12 +24,14 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         nativeController: ProjectSidebarViewController,
         routing: ExtensionWorkspaceNavigatorRouting,
         contextProvider: @escaping WorkspaceNavigatorHostViewController.ContextProvider,
-        destinationHandler: @escaping WorkspaceNavigatorHostViewController.DestinationHandler
+        destinationHandler: @escaping WorkspaceNavigatorHostViewController.DestinationHandler,
+        onSelectNative: @escaping () -> Void = {}
     ) {
         self.nativeController = nativeController
         self.routing = routing
         self.contextProvider = contextProvider
         self.destinationHandler = destinationHandler
+        self.onSelectNative = onSelectNative
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -96,6 +99,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
                 routing: routing,
                 contextProvider: contextProvider,
                 destinationHandler: destinationHandler,
+                onSelectNative: onSelectNative,
                 onUnavailable: { [weak self] in
                     self?.failBack(
                         extensionIdentifier: extensionIdentifier,
@@ -202,6 +206,7 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
         guard visibleController !== controller else { return }
 
         let previous = visibleController
+        (previous as? WorkspaceNavigatorHostViewController)?.dismissPresentedMenu()
         addChild(controller)
         let presented = controller.view
         presented.translatesAutoresizingMaskIntoConstraints = false

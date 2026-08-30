@@ -22,6 +22,8 @@ status, scenes, and one or more collections.
 - localization of titles and embedded semantic content;
 - a persisted user choice under **View → Navigator**, with Native always outside the replaceable
   surface;
+- a host-owned localized title band over every extension navigator, with a permanent overflow
+  menu route back to Native;
 - correlated, value-bearing runtime actions and optional `loadActionID` refreshes;
 - optional `eventActionID` delivery of coalesced `session.changed` edges, with bounded
   content-only item patches in reply;
@@ -39,6 +41,10 @@ virtualization, focus, user selection, and the authority to navigate to live hos
 Those host responsibilities are deliberately split in source. `WorkspaceSidebarContainerViewController`
 owns selection persistence, process-generation replacement and atomic Native failback;
 `WorkspaceNavigatorHostViewController` owns one validated document and its virtualized renderers.
+A Native selection from the host-owned overflow menu is persisted before the sidebar swaps. The
+container dismisses any open menu before settings override, Native failback, navigator selection,
+or process-generation replacement, so the menu session cannot outlive the document which opened
+it.
 A list or grid item that throws while being realized is a document render failure, not an empty
 cell: the renderer escalates it to the container, which replaces that exact process generation
 with Native. A stale failure from an old generation cannot evict its replacement.

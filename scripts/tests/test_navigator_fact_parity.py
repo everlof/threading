@@ -82,6 +82,7 @@ MARKERS = """
 enum NativeSidebarOptionDependency: String, CaseIterable, Sendable {
     case sessionOrder
     case branchGrouping
+    case compactTree
 }
 
 enum NativeSidebarHostDependency: String, CaseIterable, Sendable {
@@ -101,6 +102,7 @@ enum NativeSidebarHostProviderAlias: String, CaseIterable, Sendable {
 enum NativeSidebarOptionSourceAlias: String, CaseIterable, Sendable {
     case sessionOrder = "AppSettings.sidebarSessionOrder"
     case branchGrouping = "AppSettings.groupsSessionsByBranch"
+    case compactTree = "AppSettings.compactsSidebarTree"
 }
 
 enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
@@ -115,6 +117,7 @@ enum NativeSidebarParity {
     ] = [
         .sessionOrder: .sessionOrder,
         .branchGrouping: .branchGrouping,
+        .compactTree: .compactTree,
     ]
 
     static let hostInputOwnership: [
@@ -251,6 +254,18 @@ enum SidebarTreeBuilder {
 }
 """
 
+PROJECT_SIDEBAR = """
+final class ProjectSidebarViewController {
+    func applyTreeDensity(initial: Bool = false) {
+        let compact = NativeSidebarParity.option(
+            .compactTree,
+            AppSettings.shared.compactsSidebarTree
+        )
+        _ = (compact, initial)
+    }
+}
+"""
+
 
 class NavigatorFactParityTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -264,6 +279,10 @@ class NavigatorFactParityTests(unittest.TestCase):
         self.write("Sources/Threading/Models/Models.swift", MODELS)
         self.write("Sources/Threading/UI/Views/SessionRowView.swift", SESSION_ROW)
         self.write("Sources/Threading/UI/Views/SidebarOutlineNodes.swift", BUILDER)
+        self.write(
+            "Sources/Threading/UI/Views/ProjectSidebarViewController.swift",
+            PROJECT_SIDEBAR,
+        )
 
     def tearDown(self) -> None:
         self.temporary.cleanup()
@@ -299,6 +318,20 @@ class NavigatorFactParityTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("navigator-fact-parity: clean", result.stdout)
+
+    def test_unwrapped_compact_tree_source_fails(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/ProjectSidebarViewController.swift",
+            "NativeSidebarParity.option(\n"
+            "            .compactTree,\n"
+            "            AppSettings.shared.compactsSidebarTree\n"
+            "        )",
+            "AppSettings.shared.compactsSidebarTree",
+        )
+
+        self.assert_fails_with(
+            "AppSettings.compactsSidebarTree outside NativeSidebarParity"
+        )
 
     def test_unknown_fact_marker_fails(self) -> None:
         self.replace(

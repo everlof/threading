@@ -18,6 +18,9 @@ CATALOG = pathlib.PurePosixPath(
 MARKERS = pathlib.PurePosixPath("Sources/Threading/UI/Views/NativeSidebarParity.swift")
 SESSION_ROW = pathlib.PurePosixPath("Sources/Threading/UI/Views/SessionRowView.swift")
 SIDEBAR_NODES = pathlib.PurePosixPath("Sources/Threading/UI/Views/SidebarOutlineNodes.swift")
+PROJECT_SIDEBAR = pathlib.PurePosixPath(
+    "Sources/Threading/UI/Views/ProjectSidebarViewController.swift"
+)
 SOURCE_ROOT = pathlib.PurePosixPath("Sources/Threading")
 
 DOMAIN_TYPES = ("AgentSession", "Project", "ProjectTerminal")
@@ -1551,9 +1554,12 @@ def provider_reads(masked: str) -> Iterable[Tuple[int, str]]:
                 seen.add(item)
                 yield item
     for root in STATIC_PROVIDER_ROOTS:
-        pattern = re.compile(rf"\b{re.escape(root)}\.[A-Za-z_][A-Za-z0-9_]*\b")
+        shared = r"(?:\s*\.\s*shared)?" if root == "AppSettings" else ""
+        pattern = re.compile(
+            rf"\b{re.escape(root)}{shared}\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\b"
+        )
         for match in pattern.finditer(masked):
-            item = (match.start(), match.group(0))
+            item = (match.start(), f"{root}.{match.group(1)}")
             if item not in seen:
                 seen.add(item)
                 yield item
@@ -1790,7 +1796,7 @@ def audit_scope(
 
 def check(repository: pathlib.Path) -> List[str]:
     failures: List[str] = []
-    for path in (CATALOG, MARKERS, SESSION_ROW, SIDEBAR_NODES):
+    for path in (CATALOG, MARKERS, SESSION_ROW, SIDEBAR_NODES, PROJECT_SIDEBAR):
         if not (repository / path).is_file():
             failures.append(f"{path}: required navigator parity source is missing")
     if failures:
@@ -1953,6 +1959,37 @@ def check(repository: pathlib.Path) -> List[str]:
                 report_marker_failures=False,
             )
             failures.extend(entry_failures)
+
+    project_sidebar_source = (repository / PROJECT_SIDEBAR).read_text(encoding="utf-8")
+    density_bounds = declaration_slice(
+        project_sidebar_source,
+        r"\bfunc\s+applyTreeDensity\s*\(",
+    )
+    if density_bounds is None:
+        failures.append(
+            f"{PROJECT_SIDEBAR}: has no ProjectSidebarViewController.applyTreeDensity"
+        )
+    else:
+        density = project_sidebar_source[density_bounds[0]:density_bounds[1]]
+        density_line_offset = line_number(project_sidebar_source, density_bounds[0]) - 1
+        density_failures, usage = audit_scope(
+            PROJECT_SIDEBAR,
+            "ProjectSidebarViewController.applyTreeDensity",
+            density,
+            {},
+            domain_targets,
+            allowed,
+            semantic_tokens,
+            host_provider_tokens,
+            fact_input_tokens,
+            option_source_tokens,
+            host_input_tokens,
+            all_source_usage,
+            line_offset=density_line_offset,
+            audit_domain=False,
+        )
+        failures.extend(density_failures)
+        all_usage.update(usage)
 
     for lane, sources in (
         ("fact", fact_input_tokens),
