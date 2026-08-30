@@ -693,8 +693,10 @@ any Threading host-data authority.
 3. Manifests and wire values remain inspectable when they contain a capability newer than the
    host.
 4. Stable extension API is smaller than Threading's internal design system.
-5. The reference example and schemas are normative. Prose explains them but does not override
-   them.
+5. The reference example and schemas are normative for wire shape and locally representable
+   constraints. SDK validation remains authoritative for aggregate and cross-field rules (for
+   example the complete navigator option-menu budget). Prose explains these contracts but does
+   not override them.
 6. New UI vocabulary is added only for a real extension that cannot express its interface with
    existing nodes.
 
