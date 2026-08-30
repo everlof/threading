@@ -51,6 +51,7 @@ while (($#)); do
   esac
 done
 
+capture() {
 for command in ffmpeg ffprobe jq python3; do
   command -v "${command}" >/dev/null || {
     printf 'error: required command is unavailable: %s\n' "${command}" >&2
@@ -103,3 +104,6 @@ python3 "${script_directory}/build_marketing_video.py" \
 printf '\nMarketing screenshots: %s\n' "${screenshots_directory}"
 printf 'Marketing video: %s\n' "${video}"
 printf 'Evidence report: %s\n' "${evidence_directory}/report/index.html"
+}
+
+capture
