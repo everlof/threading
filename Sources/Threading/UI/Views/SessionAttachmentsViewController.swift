@@ -126,11 +126,22 @@ final class SessionAttachmentsViewController: NSViewController {
         ProjectStore.shared.workingDirectory(forSessionID: sessionID).map(URL.init(fileURLWithPath:))
     }
 
+    /// The durable, provider-neutral turn ledger reduced to the fields this chronology needs.
+    /// Injectable because layout tests should not need to build git commits to exercise a row.
+    lazy var turnBoundariesProvider: () -> [SessionAttachmentTurnBoundary] = { [sessionID] in
+        GitTurnBaselineStore.shared.checkpoints(forSessionID: sessionID).map {
+            SessionAttachmentTurnBoundary($0)
+        }
+    }
+
     /// Everything recorded for the session, and the subset the filter is showing. Both are kept:
     /// the filter decides whether it belongs on screen at all by looking at the whole list, so a
     /// pane filtered down to nothing must not then read as a session with no attachments.
     private var allAttachments: [SessionAttachment] = []
     private var attachments: [SessionAttachment] = []
+    private var turnSections: [SessionAttachmentTurnSection] = []
+    private var listItems: [SessionAttachmentTurnListItem] = []
+    private var collapsedTurnSections: Set<SessionAttachmentTurnSection.ID> = []
     private var filter: AttachmentFilter = .all
     private var selectedRelativePath: String?
     /// `selectRowIndexes` invokes the delegate synchronously. A refresh owns the one presentation
@@ -235,7 +246,8 @@ final class SessionAttachmentsViewController: NSViewController {
         table.target = self
         table.doubleAction = #selector(openSelected)
         table.onQuickLook = { [weak self] row in self?.inspectAttachment(atRow: row) ?? false }
-        table.allowsEmptySelection = false
+        // A fully folded chronology has headers but no selectable files.
+        table.allowsEmptySelection = true
         // Several rows are a batch: dragging one selected row carries every selected row's
         // file — AppKit asks `pasteboardWriterForRow` per row — and the two places a batch
         // lands, a composer and a terminal, already take several files in one drop.
@@ -462,6 +474,10 @@ final class SessionAttachmentsViewController: NSViewController {
         super.init(nibName: nil, bundle: nil)
 
         appEvents.observe(SessionAttachmentsDidChange.self) { [weak self] event in
+            guard event.sessionID == self?.sessionID else { return }
+            self?.refresh()
+        }
+        appEvents.observe(GitTurnCheckpointsDidChange.self) { [weak self] event in
             guard event.sessionID == self?.sessionID else { return }
             self?.refresh()
         }
@@ -821,6 +837,9 @@ final class SessionAttachmentsViewController: NSViewController {
             filter = .all
         }
         attachments = allAttachments.filter(filter.admits)
+        updateFilterControl()
+        attachments = allAttachments.filter(filter.admits)
+        rebuildTurnRows(revealing: revealPath)
         rebuildAnnotationDocumentIndex()
         countLabel.stringValue = L10n.format(
             "ATTACHMENTS  %lld",
@@ -832,7 +851,6 @@ final class SessionAttachmentsViewController: NSViewController {
         dropTargetRow = -1
         updateListHeight()
         emptyLabel.stringValue = emptyStateMessage()
-        updateFilterControl()
         updateScopeBand(count: listSnapshot.countOfFilesOutsideProject)
 
         let hasAttachments = !attachments.isEmpty
@@ -840,7 +858,8 @@ final class SessionAttachmentsViewController: NSViewController {
         scrollView.isHidden = !hasAttachments
         listFold.isHidden = !hasAttachments
         previewHost.isHidden = !hasAttachments
-        footerBand.isHidden = !hasAttachments
+        let hasVisibleAttachments = listItems.contains { $0.attachment != nil }
+        footerBand.isHidden = !hasVisibleAttachments
         emptyLabel.isHidden = hasAttachments
 
         guard hasAttachments else {
@@ -850,15 +869,20 @@ final class SessionAttachmentsViewController: NSViewController {
             return
         }
 
-        let revealed = revealPath.flatMap { path in
-            attachments.firstIndex { matches($0, path: path) }
-        }
+        let revealed = revealPath.flatMap(tableRow(matching:))
         revealPath = nil
         let index = revealed
             ?? previous.flatMap { path in
-                attachments.firstIndex { $0.relativePath == path }
+                tableRow(relativePath: path)
             }
-            ?? 0
+            ?? listItems.firstIndex { $0.attachment != nil }
+        guard let index else {
+            tableView.deselectAll(nil)
+            selectedRelativePath = nil
+            clearPreview()
+            showPreviewMessage(L10n.string("Expand a turn to preview its attachments."))
+            return
+        }
         tableView.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
         tableView.scrollRowToVisible(index)
         showSelected()
@@ -913,7 +937,6 @@ final class SessionAttachmentsViewController: NSViewController {
         headerRow.setFilterHidden(origins.count < 2)
         if filterControl.isHidden, filter != .all {
             filter = .all
-            attachments = allAttachments
         }
         if let index = AttachmentFilter.allCases.firstIndex(of: filter) {
             filterControl.selectedIndex = index
@@ -1041,16 +1064,62 @@ final class SessionAttachmentsViewController: NSViewController {
 
     private var selectedAttachment: SessionAttachment? {
         let row = tableView.selectedRow
-        guard row >= 0, attachments.indices.contains(row) else { return nil }
-        return attachments[row]
+        return attachment(atTableRow: row)
     }
 
     /// Every selected row's file, in the list's own order.
     private var selectedAttachments: [SessionAttachment] {
         tableView.selectedRowIndexes.compactMap {
-            attachments.indices.contains($0) ? attachments[$0] : nil
+            attachment(atTableRow: $0)
         }
     }
+
+    private func rebuildTurnRows(revealing path: String?) {
+        turnSections = SessionAttachmentTurnSectioning.sections(
+            attachments: attachments,
+            boundaries: turnBoundariesProvider()
+        )
+        if let path,
+           let section = turnSections.first(where: { section in
+               section.attachments.contains { matches($0, path: path) }
+           }) {
+            collapsedTurnSections.remove(section.id)
+        }
+        listItems = turnSections.isEmpty
+            ? attachments.map(SessionAttachmentTurnListItem.attachment)
+            : SessionAttachmentTurnSectioning.items(
+                sections: turnSections,
+                collapsed: collapsedTurnSections
+            )
+    }
+
+    private func attachment(atTableRow row: Int) -> SessionAttachment? {
+        guard listItems.indices.contains(row) else { return nil }
+        return listItems[row].attachment
+    }
+
+    private func tableRow(relativePath: String) -> Int? {
+        listItems.firstIndex { $0.attachment?.relativePath == relativePath }
+    }
+
+    private func tableRow(matching path: String) -> Int? {
+        listItems.firstIndex { item in
+            item.attachment.map { matches($0, path: path) } ?? false
+        }
+    }
+
+    /// The disclosure's single state transition. Internal so hosted UI tests can exercise the
+    /// same route without synthesizing an event AppKit refuses outside its tracking loop.
+    func setTurnSection(_ id: SessionAttachmentTurnSection.ID, expanded: Bool) {
+        if expanded {
+            collapsedTurnSections.remove(id)
+        } else {
+            collapsedTurnSections.insert(id)
+        }
+        refresh()
+    }
+
+    var tableViewForTesting: NSTableView { tableView }
 
     private func showSelected() {
         let performanceSpan = PerformanceRecorder.shared.begin(
@@ -1399,8 +1468,8 @@ final class SessionAttachmentsViewController: NSViewController {
     /// with no renderer is a real row in the pane — an extension previews it — and a rail slot
     /// the lightbox would have nothing to put in.
     func mediaInspectorSelection(forRow row: Int) -> MediaInspectorSelection? {
-        guard attachments.indices.contains(row) else { return nil }
-        let selectedID = attachments[row].id
+        guard let rowAttachment = attachment(atTableRow: row) else { return nil }
+        let selectedID = rowAttachment.id
         let inspectable = attachments.filter {
             switch $0.kind {
             case .image, .pdf: true
@@ -1799,6 +1868,10 @@ final class SessionAttachmentsViewController: NSViewController {
     /// is the list's own idiom, not a choice from a menu, and Finder's memory does not move
     /// when a file is double-clicked either.
     @objc private func openSelected() {
+        // AppKit still raises the table's double action for a non-selectable disclosure row.
+        // That header is not the file which happened to remain selected below it.
+        let clickedRow = tableView.clickedRow
+        guard clickedRow < 0 || attachment(atTableRow: clickedRow) != nil else { return }
         perform(.open, on: selectedAttachments)
     }
 
@@ -1816,11 +1889,10 @@ final class SessionAttachmentsViewController: NSViewController {
     /// screen, so declining costs the user nothing.
     @discardableResult
     func inspectAttachment(atRow row: Int) -> Bool {
-        guard attachments.indices.contains(row) else { return false }
+        guard let attachment = attachment(atTableRow: row) else { return false }
         if let selection = mediaInspectorSelection(forRow: row) {
             return MediaInspectorPresenter.present(selection, from: tableView)
         }
-        let attachment = attachments[row]
         guard attachment.kind == .archive || attachment.kind == .document else { return false }
         return MediaInspectorPresenter.present(
             MediaInspectorItem(url: attachment.url, title: attachment.name, content: .document),
@@ -1999,8 +2071,8 @@ final class SessionAttachmentsViewController: NSViewController {
     /// follow.
     @discardableResult
     private func presentContextMenu(forRow row: Int, anchor: ThemedMenuAnchor) -> Bool {
-        guard contextMenuSession == nil, attachments.indices.contains(row) else { return false }
-        let attachment = attachments[row]
+        guard contextMenuSession == nil,
+              let attachment = attachment(atTableRow: row) else { return false }
 
         // The click also selects, and that is not ceremony: the preview under this list is what
         // "this file" means in this pane, so a menu acting on one row while the picture below it
@@ -2288,7 +2360,7 @@ final class SessionAttachmentsViewController: NSViewController {
 extension SessionAttachmentsViewController: NSTableViewDataSource {
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        attachments.count
+        listItems.count
     }
 
     /// A row *is* its file, so it is dragged as one: onto Finder, onto a composer, onto a message
@@ -2298,8 +2370,7 @@ extension SessionAttachmentsViewController: NSTableViewDataSource {
         _ tableView: NSTableView,
         pasteboardWriterForRow row: Int
     ) -> NSPasteboardWriting? {
-        guard attachments.indices.contains(row) else { return nil }
-        return attachments[row].url as NSURL
+        attachment(atTableRow: row)?.url as NSURL?
     }
 
     /// Every drop here lands **on** a row.
@@ -2315,8 +2386,8 @@ extension SessionAttachmentsViewController: NSTableViewDataSource {
         proposedDropOperation dropOperation: NSTableView.DropOperation
     ) -> NSDragOperation {
         let target = min(max(row, 0), tableView.numberOfRows - 1)
-        guard attachments.indices.contains(target),
-              canDrop(info.draggingPasteboard, on: attachments[target]) else {
+        guard let attachment = attachment(atTableRow: target),
+              canDrop(info.draggingPasteboard, on: attachment) else {
             markDropTarget(row: -1)
             return []
         }
@@ -2337,7 +2408,7 @@ extension SessionAttachmentsViewController: NSTableViewDataSource {
         dropOperation: NSTableView.DropOperation
     ) -> Bool {
         markDropTarget(row: -1)
-        guard attachments.indices.contains(row) else { return false }
+        guard let target = attachment(atTableRow: row) else { return false }
 
         // Asked again, not taken on trust from the validation that lit the row up. The list is
         // live: a terminal scan's debounce is a main-queue timer, and event tracking is a common
@@ -2345,7 +2416,6 @@ extension SessionAttachmentsViewController: NSTableViewDataSource {
         // release inserts at the top and slides every row down one. The drop would then land on
         // the row *above* the one that said "Drop to compare" — and if that row is a PDF, on the
         // dead-end comparison `canCompare` exists to prevent.
-        let target = attachments[row]
         let pasteboard = info.draggingPasteboard
         guard canDrop(pasteboard, on: target) else { return false }
 
@@ -2373,8 +2443,17 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
         viewFor tableColumn: NSTableColumn?,
         row: Int
     ) -> NSView? {
-        guard attachments.indices.contains(row) else { return nil }
-        let attachment = attachments[row]
+        guard listItems.indices.contains(row) else { return nil }
+        if case .header(let section) = listItems[row] {
+            return SessionAttachmentTurnHeaderView(
+                section: section,
+                isExpanded: !collapsedTurnSections.contains(section.id),
+                onToggle: { [weak self] expanded in
+                    self?.setTurnSection(section.id, expanded: expanded)
+                }
+            )
+        }
+        guard let attachment = listItems[row].attachment else { return nil }
         let count = annotationDocument(for: attachment)?.annotations.count ?? 0
         // Only for a row that exists: a movie's frame costs a decoder, and this list is the one
         // place in the app where the number of files is the session's rather than the schema's.
@@ -2385,7 +2464,15 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        SessionAttachmentsDefaults.rowHeight
+        guard listItems.indices.contains(row) else { return SessionAttachmentsDefaults.rowHeight }
+        if case .header = listItems[row] {
+            return SessionAttachmentsDefaults.turnHeaderHeight
+        }
+        return SessionAttachmentsDefaults.rowHeight
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
+        attachment(atTableRow: row) != nil
     }
 
     /// Redraws one row, found by identity rather than by the index it had when the work started.
@@ -2395,7 +2482,9 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
     /// repaint whichever file has moved into that slot.
     private func redrawRow(for attachmentID: String) {
         guard isViewLoaded,
-              let row = attachments.firstIndex(where: { $0.id == attachmentID }) else { return }
+              let row = listItems.firstIndex(where: { $0.attachment?.id == attachmentID }) else {
+            return
+        }
         tableView.reloadData(forRowIndexes: [row], columnIndexes: [0])
     }
 
@@ -2406,6 +2495,108 @@ extension SessionAttachmentsViewController: NSTableViewDelegate {
 }
 
 // MARK: - Row
+
+/// A real disclosure control hosted as one virtual table row. The section's attachment values
+/// live in the projection above; only headers and expanded files reach this view layer.
+final class SessionAttachmentTurnHeaderView: NSTableCellView {
+    let sectionID: SessionAttachmentTurnSection.ID
+    let disclosure: ThemedDisclosureRow
+
+    init(
+        section: SessionAttachmentTurnSection,
+        isExpanded: Bool,
+        onToggle: @escaping (Bool) -> Void
+    ) {
+        sectionID = section.id
+
+        let title = Self.title(for: section)
+        let count = Self.fileCount(section.attachments.count)
+
+        let titleLabel = NSTextField(labelWithString: title.uppercased())
+        titleLabel.applyFont(.detail(weight: .semibold))
+        titleLabel.textColor = section.isLatest ? Design.Text.label : Design.Text.tertiary
+        titleLabel.lineBreakMode = .byTruncatingTail
+
+        let countLabel = NSTextField(labelWithString: count.uppercased())
+        countLabel.applyFont(.numericDetail())
+        countLabel.textColor = Design.Text.quaternary
+        countLabel.setContentHuggingPriority(.required, for: .horizontal)
+
+        let divider = SeparatorView(.vertical)
+        divider.heightAnchor.constraint(equalToConstant: Design.Size.inlineButtonGlyph).isActive = true
+
+        let content = NSStackView(views: [titleLabel, divider, countLabel])
+        content.orientation = .horizontal
+        content.alignment = .centerY
+        content.spacing = Design.Spacing.small
+
+        disclosure = ThemedDisclosureRow(
+            content: content,
+            isExpanded: isExpanded,
+            density: .compact
+        )
+        super.init(frame: .zero)
+
+        disclosure.onToggle = onToggle
+        disclosure.setAccessibilityLabel("\(title), \(count)")
+        disclosure.setAccessibilityIdentifier(Self.accessibilityIdentifier(for: section.id))
+
+        let rule = SeparatorView()
+        addSubview(disclosure)
+        addSubview(rule)
+        NSLayoutConstraint.activate([
+            disclosure.topAnchor.constraint(equalTo: topAnchor),
+            disclosure.leadingAnchor.constraint(equalTo: leadingAnchor),
+            disclosure.trailingAnchor.constraint(equalTo: trailingAnchor),
+            disclosure.bottomAnchor.constraint(equalTo: rule.topAnchor),
+            rule.leadingAnchor.constraint(equalTo: leadingAnchor),
+            rule.trailingAnchor.constraint(equalTo: trailingAnchor),
+            rule.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private static func title(for section: SessionAttachmentTurnSection) -> String {
+        switch section.id {
+        case .upcoming:
+            return L10n.string("Upcoming turn")
+        case .betweenTurns:
+            return L10n.string("Between turns")
+        case .checkpoint:
+            switch section.distanceFromLatest {
+            case 0:
+                return L10n.string("Latest turn")
+            case 1:
+                return L10n.string("Previous turn")
+            case .some(let distance):
+                return L10n.format("%lld turns ago", Int64(distance))
+            case nil:
+                return L10n.string("Previous turn")
+            }
+        }
+    }
+
+    private static func fileCount(_ count: Int) -> String {
+        count == 1 ? L10n.string("1 file") : L10n.format("%lld files", Int64(count))
+    }
+
+    private static func accessibilityIdentifier(
+        for id: SessionAttachmentTurnSection.ID
+    ) -> String {
+        switch id {
+        case .upcoming:
+            return "attachments.turn.upcoming"
+        case .betweenTurns:
+            return "attachments.turn.between"
+        case .checkpoint(let checkpointID):
+            return "attachments.turn.\(checkpointID.uuidString.lowercased())"
+        }
+    }
+}
 
 /// **An `NSTableCellView` rather than a plain `NSView`, and that is a colour decision.**
 ///
@@ -2949,6 +3140,9 @@ extension SessionAttachment.Origin {
 enum SessionAttachmentsDefaults {
     static let columnIdentifier = NSUserInterfaceItemIdentifier("SessionAttachmentsColumn")
     static let rowHeight: CGFloat = 42
+    @MainActor static var turnHeaderHeight: CGFloat {
+        ThemedDisclosureRow.Density.compact.minimumHeight + Design.Radius.border
+    }
 
     /// One width for both of this pane's menus — the row's and the footer chevron's — because
     /// they carry the same items and a narrower one under the button would read as a different

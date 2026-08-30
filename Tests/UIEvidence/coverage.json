@@ -785,8 +785,8 @@
       "status": "implemented",
       "priority": "important",
       "title": "Attachment video playback",
-      "description": "The real attachment pane with a native movie selected, covering its centred playback action, timeline below the picture, hover-only Pause posture, and the fold's compact limit.",
-      "states": ["Paused play overlay", "Playing hover pause overlay", "Timeline below video", "Compressed fold"],
+      "description": "The real attachment pane with a native movie selected, covering its centred playback action, timeline below the picture, hover-only Pause posture, the fold's compact limit, and collapsible turn groups.",
+      "states": ["Paused play overlay", "Playing hover pause overlay", "Timeline below video", "Compressed fold", "Turn groups expanded", "Previous turn collapsed"],
       "matrix": {
         "themes": ["System", "Neo Brutalism", "Cyberpunk"],
         "appearances": ["Light", "Dark", "Theme-authored"],

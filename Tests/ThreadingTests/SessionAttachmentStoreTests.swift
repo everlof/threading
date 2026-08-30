@@ -799,6 +799,44 @@ final class SessionAttachmentStoreTests: XCTestCase {
         )
     }
 
+    func testTurnAssociationSurvivesARelaunch() throws {
+        let session = SessionID()
+        let shot = try write([0x89], to: elsewhere.appendingPathComponent("turn.png"))
+        let store = makeStore()
+        let attachment = try XCTUnwrap(store.record(
+            declared: shot,
+            sessionID: session,
+            projectRoot: checkout,
+            origin: .user,
+            turnPlacement: .next
+        ))
+
+        store.associate(
+            attachmentIDs: [attachment.id],
+            withTurnID: "queued-turn",
+            for: session
+        )
+
+        let relaunched = try XCTUnwrap(makeStore().attachments(for: session).first)
+        XCTAssertEqual(relaunched.turnID, "queued-turn")
+        XCTAssertEqual(relaunched.turnPlacement, .next)
+        XCTAssertTrue(payloads[session]?.contains(#""formatVersion":3"#) == true)
+    }
+
+    func testLegacyUserAttachmentPointsToTheNextTurn() throws {
+        let session = SessionID()
+        _ = try write([0x89], to: checkout.appendingPathComponent("legacy-user.png"))
+        payloads[session] = """
+        [{"projectRoot":"\(checkout.path)","relativePath":"legacy-user.png",\
+        "kind":"image","origin":"user","referencedAt":0}]
+        """
+
+        XCTAssertEqual(
+            makeStore().attachments(for: session).map(\.turnPlacement),
+            [.next]
+        )
+    }
+
     /// A payload written before provenance existed still decodes, and reads as the only kind it
     /// could have held.
     func testAPayloadWrittenBeforeProvenanceReadsAsTheAgents() throws {

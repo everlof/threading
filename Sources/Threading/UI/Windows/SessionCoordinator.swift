@@ -1016,7 +1016,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             PromptAttachment.record(
                 paths: attachmentPaths,
                 sessionID: session.id,
-                projectRoot: URL(fileURLWithPath: folder, isDirectory: true)
+                projectRoot: URL(fileURLWithPath: folder, isDirectory: true),
+                turnPlacement: .next
             )
         }
 

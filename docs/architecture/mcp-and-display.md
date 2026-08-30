@@ -1285,6 +1285,18 @@ merge and its no-project fallback. The list had to become two things it was not 
   rows carry no time is a list whose order has to be taken on trust, and the order is the whole
   reason the images stopped being tabs.
 
+**Turn disclosures make that chronology navigable without making transcript rows its authority.**
+`SessionAttachmentTurnSectioning` projects the bounded attachment values against the bounded,
+provider-neutral `GitTurnBaselineStore` checkpoint ledger. Exact native message/outbox identities
+win; agent output otherwise points back to the current checkpoint, prompt handoffs point forward
+to the next admitted checkpoint, and a comparison dropped directly on this pane remains **Between
+turns** so a later unrelated prompt cannot claim it. Headers are `ThemedDisclosureRow` controls:
+Latest turn stays explicit even when it has no files, and collapsing a turn removes its attachment
+items before `NSTableView` asks for cells. The build cost remains O(attachments log turns), with the
+store and ledger ceilings still doing the bounding. The grouping, collapse state, selection repair
+and chronology labels stay host-owned beside the list; `attachments.preview@1` still replaces only
+the selected file's preview body.
+
 **The pane is two panes, and the footer is a band.** The list is one half, its preview the
 other — a full-bleed `SeparatorView` folds them apart, and the preview is the layout's one
 flexible element, filling whatever stands between the fold and the footer. The footer is a

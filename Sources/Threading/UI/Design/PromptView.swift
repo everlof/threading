@@ -2221,9 +2221,26 @@ enum PromptAttachment {
     static func record(
         paths: [String],
         sessionID: SessionID,
-        projectRoot: URL
+        projectRoot: URL,
+        turnID: String? = nil,
+        turnPlacement: SessionAttachment.TurnPlacement = .none
     ) -> [SessionAttachment] {
         ComposerAttachmentHandover.record(
+            paths: paths,
+            sessionID: sessionID,
+            projectRoot: projectRoot,
+            turnID: turnID,
+            turnPlacement: turnPlacement
+        )
+    }
+
+    @MainActor
+    static func handOverRecording(
+        paths: [String],
+        sessionID: SessionID,
+        projectRoot: URL
+    ) -> ComposerAttachmentHandover.RecordedHandover {
+        ComposerAttachmentHandover.handOverRecording(
             paths: paths,
             sessionID: sessionID,
             projectRoot: projectRoot

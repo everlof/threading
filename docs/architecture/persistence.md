@@ -154,6 +154,13 @@ by id later, so startup records `containsUnkeyedRows` and only skipping the tabl
 it. The project and session rows stay all-or-nothing and eagerly decoded because those are the copy
 of record.
 
+**The attachment document's `formatVersion` is 3.** Version 3 adds the optional exact turn id and
+the current/next/neither placement used by the collapsible attachment chronology. The version bump
+prevents an older build from silently rewriting a row while discarding that grouping metadata.
+Within a readable version the fields remain migration-safe: an older user attachment points to the
+next turn, an older agent attachment points to the current turn, and an unknown future placement
+falls back through that same origin rule.
+
 Authoritative session rows remain eager, but their healthy decode is **bounded and batched**.
 `ProjectDatabase` joins at most 256 stored JSON objects into one temporary array and invokes the
 top-level `JSONDecoder` once for that group instead of constructing a parser for every row. Indexed
