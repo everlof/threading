@@ -255,6 +255,23 @@ final class SessionInfoRowView: NSView, PointerClaiming {
         recomposeToolTip()
     }
 
+    /// Updates a fixed-form summary row without replacing the row under the pointer or in the
+    /// scroll document. Process rows use `update(_:)`; usage rows keep their glyph and primary
+    /// identity while their secondary receipt, values and spoken sentence move together.
+    func updateSummary(
+        secondary: String,
+        valueSegments: [String],
+        accessibilityLabel: String
+    ) {
+        guard commandLine == nil else {
+            assertionFailure("A command row cannot become a fixed-form summary")
+            return
+        }
+        secondaryLabel.stringValue = secondary
+        valueLabel.segments = valueSegments
+        setAccessibilityLabel(accessibilityLabel)
+    }
+
     // MARK: - Reveal
 
     /// Whether the raw command line is on show — row-local and transient by design: a shape

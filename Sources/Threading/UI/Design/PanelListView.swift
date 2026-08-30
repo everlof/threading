@@ -91,7 +91,8 @@ final class PanelListView: NSView {
     }
 
     /// What a section says when it has no rows: wrapped, quiet, on the content ink column.
-    func addNote(_ text: String) {
+    @discardableResult
+    func addNote(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.applyFont(.subheading)
         label.textColor = Design.Text.tertiary
@@ -99,6 +100,7 @@ final class PanelListView: NSView {
         label.lineBreakMode = .byWordWrapping
         label.maximumNumberOfLines = 0
         addRow(label)
+        return label
     }
 
     /// Any full-width content: a row view, a control strip, a spacer.
