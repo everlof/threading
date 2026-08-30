@@ -650,7 +650,8 @@ struct SessionDashboard: View {
         // This evidence fixture borrows demo data plumbing, but represents a real failed owner
         // connection. Suppressing the demo disclaimer keeps the captured state truthful.
         if let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey],
-           ["sessions-offline", "sessions-connecting"].contains(demoMode) {
+           ["sessions-offline", "sessions-connecting"].contains(demoMode)
+            || MobileDemoFixture.isMarketing(demoMode) {
             return false
         }
 #endif
@@ -791,7 +792,7 @@ struct SessionDashboard: View {
                 // notifications underneath an unresolved route gives a first-run reader two
                 // unrelated setup stories at once, and notifications can be enabled just as
                 // safely after the catalogue arrives.
-                if projectName == nil, model.me != nil, notifications.shouldOfferOnboarding {
+                if projectName == nil, model.me != nil, shouldOfferNotificationOnboarding {
                     NotificationOnboardingCard()
                 }
             }
@@ -802,6 +803,17 @@ struct SessionDashboard: View {
             .padding(.horizontal, MobileDesign.Spacing.large)
             .padding(.bottom, 36)
         }
+    }
+
+    private var shouldOfferNotificationOnboarding: Bool {
+#if DEBUG
+        if MobileDemoFixture.isMarketing(
+            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+        ) {
+            return false
+        }
+#endif
+        return notifications.shouldOfferOnboarding
     }
 
     /// One kind's plate under its heading, for the by-type arrangement. Nothing is drawn for a

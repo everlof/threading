@@ -2263,19 +2263,37 @@ final class RemoteSessionConnection: ObservableObject {
 
     static func demoTerminal() -> RemoteSessionConnection {
         let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] ?? ""
+        let marketingProvider: MobileMarketingTerminalFixture.Provider? = switch demoMode {
+        case MobileDemoFixture.marketingClaudeTUI.rawValue,
+             MobileDemoFixture.marketingClaudeUsageMenu.rawValue:
+            .claude
+        case MobileDemoFixture.marketingCodexTUI.rawValue:
+            .codex
+        default:
+            nil
+        }
         let isCodexFixture = demoMode == "terminal-ansi"
             || demoMode == "terminal-attachments"
             || demoMode == "terminal-codex-tui"
             || demoMode == "terminal-scrollback"
+            || marketingProvider == .codex
         let agentName = isCodexFixture ? "Codex" : "Claude Code"
-        let session = RemoteSessionSummaryDTO(
-            id: "f50c77da-5716-470b-933c-d68310644b4f",
-            title: "\(agentName) · AnotherTerminal",
-            agentKind: isCodexFixture ? "codex" : "claude",
-            surface: .terminal,
-            state: .idle,
-            projectName: "AnotherTerminal"
-        )
+        let session: RemoteSessionSummaryDTO
+        if let marketingProvider {
+            session = RemoteAppModel.marketingTerminalSession(
+                provider: marketingProvider,
+                now: Date().timeIntervalSince1970
+            )
+        } else {
+            session = RemoteSessionSummaryDTO(
+                id: "f50c77da-5716-470b-933c-d68310644b4f",
+                title: "\(agentName) · AnotherTerminal",
+                agentKind: isCodexFixture ? "codex" : "claude",
+                surface: .terminal,
+                state: .idle,
+                projectName: "AnotherTerminal"
+            )
+        }
         let link = RemoteConnectionLink(string: "https://demo.invalid/#terminal-preview")!
         let connection = RemoteSessionConnection(
             session: session,
@@ -2284,12 +2302,24 @@ final class RemoteSessionConnection: ObservableObject {
         connection.phase = .connected
         connection.surface = .terminal
         connection.capability = .interact
-        let usesThreadingTheme = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"]
-            == "threading"
-        connection.theme = usesThreadingTheme
-            ? RemoteAppModel.demoThreadingTheme
-            : RemoteAppModel.demoTheme
-        connection.terminalTheme = usesThreadingTheme
+        let requestedTheme = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"]
+        switch requestedTheme {
+        case "fallback":
+            connection.theme = nil
+        case "light":
+            connection.theme = RemoteAppModel.demoLightTheme
+        case "threading":
+            connection.theme = RemoteAppModel.demoThreadingTheme
+        case "system-remote":
+            connection.theme = RemoteAppModel.demoSystemRemoteTheme
+        case let requested?:
+            connection.theme = RemoteAppModel.demoCatalogThemes.first(where: {
+                $0.id == requested
+            }) ?? RemoteAppModel.demoTheme
+        case nil:
+            connection.theme = RemoteAppModel.demoTheme
+        }
+        connection.terminalTheme = requestedTheme == "threading"
             ? RemoteAppModel.demoThreadingTerminalTheme
             : RemoteAppModel.demoTerminalTheme
         connection.terminalColumns = 48
@@ -2309,6 +2339,33 @@ final class RemoteSessionConnection: ObservableObject {
         connection.supportsComposerAttachmentUploads = true
         connection.supportsTerminalAttachmentInsertion = true
         connection.inputControl = ownerOnlyInputControlState()
+        if let marketingProvider {
+            let fixture: MobileMarketingTerminalFixture
+            do {
+                fixture = try MobileMarketingTerminalFixture.load(marketingProvider)
+            } catch {
+                fatalError("Invalid marketing terminal fixture: \(error)")
+            }
+            connection.terminalColumns = fixture.columns
+            connection.terminalRows = fixture.rows
+            connection.pendingTerminalOutput = fixture.payload
+            if marketingProvider == .claude {
+                connection.runPlanRevision = 1
+                connection.runPlan = RemoteRunPlanSummaryDTO(
+                    activeTitle: "Render theme variants",
+                    current: 3,
+                    completed: 2,
+                    active: 1,
+                    total: 3
+                )
+                connection.runPlanSteps = [
+                    .init(id: "0", title: "Build deterministic provider fixtures", status: .completed),
+                    .init(id: "1", title: "Capture five marketing checkpoints", status: .completed),
+                    .init(id: "2", title: "Render theme variants", status: .inProgress),
+                ]
+            }
+            return connection
+        }
         let lines: [String]
         switch demoMode {
         case "terminal-selection":

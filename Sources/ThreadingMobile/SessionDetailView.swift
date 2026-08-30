@@ -272,6 +272,19 @@ struct SessionDetailView: View {
         ))
     }
 
+#if DEBUG
+    /// Installs an already-connected, local PTY fixture behind the shipping session chrome.
+    /// Evidence can therefore exercise the real toolbar/menu without opening a socket.
+    init(evidenceConnection: RemoteSessionConnection) {
+        session = evidenceConnection.session
+        openingStrategy = .resumeIfNeeded
+        _workspaceActivity = StateObject(wrappedValue: MobileWorkspaceActivity(
+            sessionID: evidenceConnection.session.id
+        ))
+        _connection = State(initialValue: evidenceConnection)
+    }
+#endif
+
     var body: some View {
         Group {
             if let connection {
@@ -523,7 +536,7 @@ struct SessionDetailView: View {
                         Label("Chat Settings", systemImage: "gearshape")
                     }
                 }
-                Section("Interface") {
+                Menu {
                     Button {
                         confirmSurfaceSwitch(to: .conversation)
                     } label: {
@@ -545,6 +558,8 @@ struct SessionDetailView: View {
                                 : "terminal"
                         )
                     }
+                } label: {
+                    Label("Interface", systemImage: "rectangle.2.swap")
                 }
             }
             .disabled(isMutatingSession)
@@ -747,6 +762,13 @@ struct SessionDetailView: View {
 
     private func open() async {
 #if DEBUG
+        // The marketing terminal is a privacy-reviewed PTY resource already installed by the
+        // DEBUG initializer above. Treating it as a dormant row would replace it with a socket.
+        if MobileDemoFixture.isMarketing(
+            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+        ), connection != nil {
+            return
+        }
         // An evidence run asks for one opening state and stays in it; nothing connects.
         if let fixture = MobileSessionOpeningFixture.current {
             launchError = fixture.launchError

@@ -13,15 +13,20 @@ requested_simulator="booted"
 accept_new_baselines=0
 require_accepted=0
 requested_only=""
+requested_theme=""
 temporary_simulator_udid=""
 simulator_udid=""
 simulator_preferences_backup=""
 template_simulator_to_reboot=""
+idb_connected=0
 
 cleanup() {
   local exit_status=$?
   if [[ -n "${simulator_udid}" ]]; then
     xcrun simctl status_bar "${simulator_udid}" clear >/dev/null 2>&1 || true
+  fi
+  if ((idb_connected)) && [[ -n "${simulator_udid}" ]]; then
+    idb disconnect "${simulator_udid}" >/dev/null 2>&1 || true
   fi
   if [[ -n "${temporary_simulator_udid}" ]]; then
     xcrun simctl shutdown "${temporary_simulator_udid}" >/dev/null 2>&1 || true
@@ -53,6 +58,7 @@ Options:
   --output PATH                 Use a new run directory instead of .build/ui-evidence-ios-reports/…
   --simulator UDID              Reuse this booted/bootable iOS simulator instead of an isolated one
   --only ID[,ID…]               Capture these image ids or coverage entries (ios- is optional)
+  --theme ID                    Override every selected capture with one manifest theme
   --accept-new-baselines        Copy only captures that do not have an approved baseline yet
   --require-accepted            Fail unless every captured image exactly matches a baseline
   -h, --help                    Show this help
@@ -85,6 +91,14 @@ while (($#)); do
       requested_only="$2"
       shift 2
       ;;
+    --theme)
+      if (($# < 2)); then
+        printf 'error: --theme requires a manifest theme id\n' >&2
+        exit 2
+      fi
+      requested_theme="$2"
+      shift 2
+      ;;
     --accept-new-baselines)
       accept_new_baselines=1
       shift
@@ -111,6 +125,13 @@ for command in jq lockf python3 xcodebuild xcrun; do
     exit 1
   }
 done
+
+if [[ -n "${requested_theme}" ]] \
+    && ! jq -e --arg theme "${requested_theme}" '.themeIDs | index($theme) != null' \
+      "${manifest}" >/dev/null; then
+  printf 'error: unsupported iOS evidence theme override: %s\n' "${requested_theme}" >&2
+  exit 2
+fi
 
 threading_acquire_coresimulator_lane "iOS UI evidence capture" || exit $?
 
@@ -278,14 +299,25 @@ run_token="ios-$(basename "${run_directory}" | tr -cd '[:alnum:]-' | cut -c1-80)
 capture_fixture() {
   local fixture="$1"
   local identifier entry_id demo appearance theme keyboard_state capture_mode keyboard_layout
+  local content_size
+  local interaction_label interaction_wait_labels
   identifier="$(jq -r '.id' <<<"${fixture}")"
   entry_id="$(jq -r '.entryID' <<<"${fixture}")"
   demo="$(jq -r '.demo' <<<"${fixture}")"
   appearance="$(jq -r '.appearance' <<<"${fixture}")"
   theme="$(jq -r '.theme' <<<"${fixture}")"
+  if [[ -n "${requested_theme}" ]]; then
+    theme="${requested_theme}"
+    appearance="$(jq -r --arg theme "${theme}" \
+      '.themeAppearances[$theme] // "dark"' "${manifest}")"
+  fi
   keyboard_state="$(jq -r '.keyboardState // "none"' <<<"${fixture}")"
   capture_mode="$(jq -r '.captureMode // "app"' <<<"${fixture}")"
   keyboard_layout="$(jq -r '.keyboardLayout // "frame"' <<<"${fixture}")"
+  content_size="$(jq -r '.contentSize // "large"' <<<"${fixture}")"
+  interaction_label="$(jq -r '.interaction.tapAccessibilityLabel // empty' <<<"${fixture}")"
+  interaction_wait_labels="$(jq -c \
+    '.interaction.waitForAccessibilityLabels // []' <<<"${fixture}")"
 
   if [[ ! "${identifier}" =~ ^[a-z][a-z0-9-]{0,95}$ ]]; then
     printf 'error: invalid iOS evidence capture id: %s\n' "${identifier}" >&2
@@ -315,7 +347,9 @@ capture_fixture() {
       "${identifier}" "${keyboard_state}" >&2
     return 1
   fi
-  if [[ "${capture_mode}" != "app" && "${capture_mode}" != "display" ]]; then
+  if [[ "${capture_mode}" != "app" \
+      && "${capture_mode}" != "display" \
+      && "${capture_mode}" != "stable-display" ]]; then
     printf 'error: capture %s has unsupported capture mode: %s\n' \
       "${identifier}" "${capture_mode}" >&2
     return 1
@@ -325,16 +359,42 @@ capture_fixture() {
       "${identifier}" "${keyboard_layout}" >&2
     return 1
   fi
+  case "${content_size}" in
+    extra-small|small|medium|large|extra-large|extra-extra-large|extra-extra-extra-large) ;;
+    *)
+      printf 'error: capture %s has unsupported content size: %s\n' \
+        "${identifier}" "${content_size}" >&2
+      return 1
+      ;;
+  esac
+  if [[ -n "${interaction_label}" ]]; then
+    if ! command -v idb >/dev/null; then
+      printf 'error: capture %s requires idb for semantic interaction\n' "${identifier}" >&2
+      return 1
+    fi
+    if [[ "${capture_mode}" == "app" ]]; then
+      printf 'error: capture %s must use display mode for a system menu\n' "${identifier}" >&2
+      return 1
+    fi
+    if [[ "$(jq 'length' <<<"${interaction_wait_labels}")" -le 0 ]]; then
+      printf 'error: capture %s has no semantic interaction postconditions\n' \
+        "${identifier}" >&2
+      return 1
+    fi
+  fi
 
   printf 'Capturing %-42s  %s · %s · %s\n' \
     "${identifier}" "${demo}" "${appearance}" "${theme}"
   xcrun simctl ui "${simulator_udid}" appearance "${appearance}"
+  xcrun simctl ui "${simulator_udid}" content_size "${content_size}"
 
   local stdout_path="${log_directory}/${identifier}.stdout.log"
   local stderr_path="${log_directory}/${identifier}.stderr.log"
   local marker="${data_container}/tmp/threading-ui-evidence/${run_token}/${identifier}.json"
   local source_image="${data_container}/tmp/threading-ui-evidence/${run_token}/${identifier}.png"
   local failure="${data_container}/tmp/threading-ui-evidence/${run_token}/${identifier}.failure.txt"
+  local interaction_ready="${data_container}/tmp/threading-ui-evidence/${run_token}/${identifier}.interaction-ready"
+  local interaction_prepared="${data_container}/tmp/threading-ui-evidence/${run_token}/${identifier}.interaction-prepared"
   local launch_environment=(
     "SIMCTL_CHILD_THREADING_MOBILE_DEMO=${demo}"
     "SIMCTL_CHILD_THREADING_MOBILE_UI_EVIDENCE_RUN=${run_token}"
@@ -358,6 +418,11 @@ capture_fixture() {
     "SIMCTL_CHILD_THREADING_MOBILE_UI_EVIDENCE_CAPTURE_MODE=${capture_mode}"
     "SIMCTL_CHILD_THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_LAYOUT=${keyboard_layout}"
   )
+  if [[ -n "${interaction_label}" ]]; then
+    launch_environment+=(
+      "SIMCTL_CHILD_THREADING_MOBILE_UI_EVIDENCE_HOST_INTERACTION=semantic-tap"
+    )
+  fi
 
   env "${launch_environment[@]}" \
     xcrun simctl launch \
@@ -366,6 +431,64 @@ capture_fixture() {
       --stderr="${stderr_path}" \
       "${simulator_udid}" \
       "${bundle_identifier}" >/dev/null
+
+  if [[ -n "${interaction_label}" ]]; then
+    local interaction_poll accessibility_json tap_point tap_x tap_y
+    for ((interaction_poll = 0; interaction_poll < 400; interaction_poll += 1)); do
+      [[ -f "${interaction_ready}" ]] && break
+      sleep 0.05
+    done
+    if [[ ! -f "${interaction_ready}" ]]; then
+      printf 'error: fixture %s never requested its semantic interaction\n' \
+        "${identifier}" >&2
+      return 1
+    fi
+
+    if ((!idb_connected)); then
+      idb connect "${simulator_udid}" >"${log_directory}/idb-connect.log" 2>&1
+      idb_connected=1
+    fi
+    accessibility_json="${log_directory}/${identifier}.accessibility.json"
+    tap_point=""
+    for ((interaction_poll = 0; interaction_poll < 200; interaction_poll += 1)); do
+      idb ui describe-all --json --udid "${simulator_udid}" >"${accessibility_json}"
+      tap_point="$(jq -er --arg label "${interaction_label}" '
+        [.[] | select((.AXLabel // "") | startswith($label))][0].frame
+        | select(.width > 0 and .height > 0)
+        | "\(.x + (.width / 2)) \(.y + (.height / 2))"
+      ' "${accessibility_json}" 2>/dev/null || true)"
+      [[ -n "${tap_point}" ]] && break
+      sleep 0.05
+    done
+    if [[ -z "${tap_point}" ]]; then
+      printf 'error: fixture %s has no accessible control beginning with %s\n' \
+        "${identifier}" "${interaction_label}" >&2
+      return 1
+    fi
+    read -r tap_x tap_y <<<"${tap_point}"
+    idb ui tap --udid "${simulator_udid}" "${tap_x}" "${tap_y}" \
+      >"${log_directory}/${identifier}.tap.log" 2>&1
+
+    local interaction_settled=0
+    for ((interaction_poll = 0; interaction_poll < 200; interaction_poll += 1)); do
+      idb ui describe-all --json --udid "${simulator_udid}" >"${accessibility_json}"
+      if jq -e --argjson labels "${interaction_wait_labels}" '
+          [.[] | .AXLabel? // empty] as $actual
+          | all($labels[]; . as $label | any($actual[]; startswith($label)))
+        ' "${accessibility_json}" >/dev/null; then
+        interaction_settled=1
+        break
+      fi
+      sleep 0.05
+    done
+    if ((!interaction_settled)); then
+      printf 'error: fixture %s did not expose every post-interaction label\n' \
+        "${identifier}" >&2
+      printf 'expected: %s\n' "${interaction_wait_labels}" >&2
+      return 1
+    fi
+    : >"${interaction_prepared}"
+  fi
 
   local poll
   # The app publishes an explicit terminal marker after at most 75 rendered samples. A complex
@@ -411,7 +534,7 @@ capture_fixture() {
     fi
   done < <(jq -r '.assertions[]?' <<<"${fixture}")
 
-  if [[ "${capture_mode}" == "display" ]]; then
+  if [[ "${capture_mode}" != "app" ]]; then
     # The software keyboard is an OS-owned window and therefore absent from the app-owned PNG.
     # `simctl io` captures only this simulator display, needs no macOS screen-recording grant,
     # and preserves the same deterministic device pixels as the ordinary evidence images.
@@ -471,6 +594,9 @@ generator_arguments=(
   --environment "device=${device_name}"
   --environment "runner=iOS Simulator app-owned capture"
 )
+if [[ -n "${requested_theme}" ]]; then
+  generator_arguments+=(--environment "themeOverride=${requested_theme}")
+fi
 if ((accept_new_baselines)); then
   generator_arguments+=(--accept-new-baselines)
 fi

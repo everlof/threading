@@ -348,9 +348,12 @@ final class RemoteAppModel: ObservableObject {
         }
         if let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey],
            let link = RemoteConnectionLink(
-            string: "https://david-mac.tailnet-demo.ts.net:8443/#preview"
+            string: MobileDemoFixture.isMarketing(demoMode)
+                ? "https://remote.threading.invalid/#preview"
+                : "https://david-mac.tailnet-demo.ts.net:8443/#preview"
            ) {
             isDemo = true
+            let isMarketing = MobileDemoFixture.isMarketing(demoMode)
             // This scene photographs a row containing the connection time. Its clock is part of
             // the fixture, not ambient machine state: otherwise every minute creates a visual
             // regression and accepting it merely blesses the time at which the test happened.
@@ -365,20 +368,26 @@ final class RemoteAppModel: ObservableObject {
                 name: "David’s MacBook Pro",
                 link: link,
                 lastConnectedAt: demoNow,
-                endpoints: [
-                    RemoteHostEndpointDTO(
-                        kind: .tailscale,
+                endpoints: isMarketing
+                    ? [RemoteHostEndpointDTO(
+                        kind: .hosted,
                         baseURL: link.baseURL,
                         isStable: true
-                    ),
-                    RemoteHostEndpointDTO(
-                        kind: .lan,
-                        baseURL: URL(string: "https://192.168.1.42:8760/")!,
-                        isStable: true
-                    ),
-                ],
-                connectionPolicy: .privateOnly,
-                activeEndpointKind: .tailscale
+                    )]
+                    : [
+                        RemoteHostEndpointDTO(
+                            kind: .tailscale,
+                            baseURL: link.baseURL,
+                            isStable: true
+                        ),
+                        RemoteHostEndpointDTO(
+                            kind: .lan,
+                            baseURL: URL(string: "https://192.168.1.42:8760/")!,
+                            isStable: true
+                        ),
+                    ],
+                connectionPolicy: isMarketing ? nil : .privateOnly,
+                activeEndpointKind: isMarketing ? .hosted : .tailscale
             )
             if demoMode == "sessions-offline" || demoMode == "connection-status" {
                 // A public, deterministic certificate fingerprint gives the recovery fixture the
@@ -407,7 +416,7 @@ final class RemoteAppModel: ObservableObject {
                 connectionPolicy: .privateOnly,
                 activeEndpointKind: .tailscale
             )
-            hosts = [host, studio]
+            hosts = isMarketing ? [host] : [host, studio]
             activeHostID = host.id
             continuity.setActiveHostID(host.id)
             if demoMode == "sessions-offline" {
@@ -426,12 +435,12 @@ final class RemoteAppModel: ObservableObject {
                     total: 3
                 )
             } else {
-                me = Self.demoResponse
+                me = Self.demoResponse(for: demoMode)
                 phase = .online
                 lastConnection = .demo(
                     hostID: host.id,
                     baseURL: link.baseURL,
-                    kind: .tailscale,
+                    kind: isMarketing ? .hosted : .tailscale,
                     now: demoNow
                 )
             }
@@ -3345,6 +3354,24 @@ final class RemoteAppModel: ObservableObject {
         ]
     }()
 
+    /// The marketing menu keeps two exact provider windows on one line. Their reset timestamps
+    /// are deliberately absent: the screenshot must replay identically next month, and the full
+    /// usage dashboard remains the place for time-relative history.
+    private static let marketingClaudeUsageWindows: [RemoteAccountUsageWindowDTO] = [
+        RemoteAccountUsageWindowDTO(
+            id: "5h",
+            name: "5h",
+            fraction: 0.31,
+            windowDuration: 5 * 60 * 60
+        ),
+        RemoteAccountUsageWindowDTO(
+            id: "7d",
+            name: "7d",
+            fraction: 0.56,
+            windowDuration: 7 * 24 * 60 * 60
+        ),
+    ]
+
     /// The demo's terminal chat, held apart from the catalogue literal for the reason its
     /// windows are: one more argument inside that expression puts the type checker over budget.
     private static func demoTerminalSession(now: Double) -> RemoteSessionSummaryDTO {
@@ -3375,6 +3402,169 @@ final class RemoteAppModel: ObservableObject {
             // the alternate login whose chip the row above wears, so the two agree.
             accountID: "keller"
         )
+    }
+
+    static func marketingTerminalSession(
+        provider: MobileMarketingTerminalFixture.Provider,
+        now: Double
+    ) -> RemoteSessionSummaryDTO {
+        switch provider {
+        case .claude:
+            return RemoteSessionSummaryDTO(
+                id: "marketing-claude-session",
+                title: "Polish launch screenshots",
+                agentKind: "claude",
+                surface: .terminal,
+                state: .needsAttention,
+                projectName: "Threading",
+                isAvailable: true,
+                lastActiveAt: now - 90,
+                terminalTheme: demoTerminalTheme,
+                inheritedTerminalThemeName: demoTerminalTheme.name,
+                inheritedTerminalTheme: demoTerminalTheme,
+                account: .init(name: "Vera Keller", glyph: "V", isEmoji: false, hue: 0.72),
+                accountID: "keller",
+                model: "claude-fable-5"
+            )
+        case .codex:
+            return RemoteSessionSummaryDTO(
+                id: "marketing-codex-session",
+                title: "Build App Store capture flow",
+                agentKind: "codex",
+                surface: .terminal,
+                state: .working,
+                projectName: "Threading",
+                isAvailable: true,
+                lastActiveAt: now,
+                isPinned: true,
+                terminalTheme: demoTerminalTheme,
+                inheritedTerminalThemeName: demoTerminalTheme.name,
+                inheritedTerminalTheme: demoTerminalTheme,
+                account: .init(name: "David", glyph: "🧑‍💻", isEmoji: true, hue: nil),
+                accountID: "default",
+                model: "gpt-5.6-sol"
+            )
+        }
+    }
+
+    private static func demoResponse(for mode: String) -> RemoteMeDTO {
+        MobileDemoFixture.isMarketing(mode) ? marketingResponse(forMode: mode) : demoResponse
+    }
+
+    private static func marketingResponse(forMode mode: String) -> RemoteMeDTO {
+        let response = marketingResponse
+        guard mode == MobileDemoFixture.marketingClaudeUsageMenu.rawValue else {
+            return response
+        }
+        // With the software keyboard visible, one more nested menu pushes Archive below the
+        // first system-menu viewport. This host deliberately does not advertise theme management,
+        // leaving the complete capability-appropriate menu visible in one marketing frame.
+        return RemoteMeDTO(
+            serverProtocol: response.serverProtocol,
+            share: response.share,
+            sessions: response.sessions,
+            terminals: response.terminals,
+            host: response.host,
+            theme: response.theme,
+            themeCatalog: nil,
+            archivedSessions: response.archivedSessions,
+            newSessionCatalog: response.newSessionCatalog,
+            features: response.features
+        )
+    }
+
+    static var marketingResponse: RemoteMeDTO {
+        let base = demoResponse
+        let now = Date().timeIntervalSince1970
+        let sessions = [
+            marketingTerminalSession(provider: .codex, now: now),
+            marketingTerminalSession(provider: .claude, now: now),
+            RemoteSessionSummaryDTO(
+                id: "marketing-remote-access-session",
+                title: "Verify away-from-home access",
+                agentKind: "codex",
+                surface: .conversation,
+                state: .idle,
+                projectName: "Threading",
+                isAvailable: true,
+                lastActiveAt: now - 12 * 60,
+                terminalTheme: demoTerminalTheme,
+                account: .init(name: "Work", glyph: "W", isEmoji: false, hue: 0.14),
+                accountID: "codex-work",
+                model: "gpt-5.6-terra"
+            ),
+            RemoteSessionSummaryDTO(
+                id: "marketing-linux-session",
+                title: "Plan Linux account support",
+                agentKind: "claude",
+                surface: .conversation,
+                state: .dormant,
+                projectName: "Threading",
+                isAvailable: false,
+                lastActiveAt: now - 22 * 60 * 60,
+                terminalTheme: demoTerminalTheme,
+                account: .init(name: "David", glyph: "D", isEmoji: false, hue: 0.58),
+                accountID: "default"
+            ),
+        ]
+        let catalog = base.newSessionCatalog.map {
+            RemoteNewSessionCatalogDTO(
+                projects: [
+                    .init(
+                        id: "project-threading",
+                        name: "Threading",
+                        branch: "main",
+                        checkoutLabel: "Threading"
+                    ),
+                ],
+                agents: marketingAgents($0.agents),
+                supportsManagerRole: $0.supportsManagerRole
+            )
+        }
+        return RemoteMeDTO(
+            serverProtocol: base.serverProtocol,
+            share: base.share,
+            sessions: sessions,
+            terminals: [],
+            host: RemoteHostDTO(id: "demo-mac", name: "David’s MacBook Pro"),
+            theme: base.theme,
+            themeCatalog: base.themeCatalog,
+            archivedSessions: [],
+            newSessionCatalog: catalog,
+            features: base.features
+        )
+    }
+
+    private static func marketingAgents(
+        _ agents: [RemoteAgentChoiceDTO]
+    ) -> [RemoteAgentChoiceDTO] {
+        agents.map { agent in
+            guard agent.id == "claude" else { return agent }
+            let accounts = agent.accounts?.map { account in
+                guard account.id == "keller" else { return account }
+                return RemoteAccountChoiceDTO(
+                    id: account.id,
+                    name: account.name,
+                    email: account.email,
+                    emoji: account.emoji,
+                    usageSummary: "5h 31% · 7d 56%",
+                    usageFraction: 0.56,
+                    usageError: account.usageError,
+                    usageWindows: marketingClaudeUsageWindows,
+                    models: account.models,
+                    defaultModelID: account.defaultModelID
+                )
+            }
+            return RemoteAgentChoiceDTO(
+                id: agent.id,
+                name: agent.name,
+                accounts: accounts,
+                models: agent.models,
+                defaultModelID: agent.defaultModelID,
+                supportsConversation: agent.supportsConversation,
+                permissionModes: agent.permissionModes
+            )
+        }
     }
 
     private static var demoResponse: RemoteMeDTO {

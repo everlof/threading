@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import binascii
+import base64
 import hashlib
 import json
 import struct
@@ -198,6 +199,62 @@ class UIEvidenceToolsTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn("changed after review", result.stderr)
         self.assertFalse((self.baseline / "shot.png").exists())
+
+    def test_ios_marketing_flow_has_one_theme_and_exact_timeline_contract(self) -> None:
+        manifest = json.loads(
+            (REPOSITORY / "Tests/UIEvidence/ios-coverage.json").read_text()
+        )
+        self.assertEqual(set(manifest["themeIDs"]), set(manifest["themeAppearances"]))
+        flow = next(item for item in manifest["flows"] if item["id"] == "ios-marketing-flow")
+        captures = {item["id"]: item for item in manifest["captures"]}
+        self.assertEqual(len(flow["shots"]), 5)
+        self.assertEqual(
+            [shot["captureID"] for shot in flow["shots"]],
+            [
+                "marketing-sessions",
+                "marketing-claude-tui",
+                "marketing-claude-usage-menu",
+                "marketing-codex-tui",
+                "marketing-settings",
+            ],
+        )
+        for shot in flow["shots"]:
+            self.assertEqual(captures[shot["captureID"]]["entryID"], "ios-marketing-flow")
+        marketing = [captures[shot["captureID"]] for shot in flow["shots"]]
+        self.assertEqual({capture["theme"] for capture in marketing}, {"threading"})
+        self.assertEqual({capture["contentSize"] for capture in marketing}, {"large"})
+        self.assertEqual(
+            {
+                capture["captureMode"]
+                for capture in marketing
+                if capture["id"] != "marketing-claude-usage-menu"
+            },
+            {"stable-display"},
+        )
+        total_frames = sum(shot["holdFrames"] for shot in flow["shots"]) + sum(
+            shot.get("transition", {}).get("frames", 0) for shot in flow["shots"][:-1]
+        )
+        self.assertEqual((flow["fps"], total_frames), (30, 348))
+        menu = captures["marketing-claude-usage-menu"]
+        self.assertEqual(menu["captureMode"], "display")
+        self.assertEqual(menu["keyboardState"], "open")
+        self.assertEqual(
+            menu["interaction"]["waitForAccessibilityLabels"],
+            ["Vera Keller", "Workspace", "Interface", "Archive"],
+        )
+
+    def test_marketing_pty_resources_are_privacy_safe(self) -> None:
+        fixture_directory = REPOSITORY / "Sources/ThreadingMobile/TerminalFixtures"
+        for provider in ("claude", "codex"):
+            fixture = json.loads(
+                (fixture_directory / f"marketing-{provider}-tui.json").read_text()
+            )
+            payload = base64.b64decode(fixture["payloadBase64"], validate=True)
+            self.assertEqual(fixture["provider"], provider)
+            self.assertEqual(fixture["columns"], 48)
+            self.assertIn(b"\x1b", payload)
+            self.assertNotIn(b"/Users/", payload)
+            self.assertNotIn(b"/home/", payload)
 
 
 if __name__ == "__main__":

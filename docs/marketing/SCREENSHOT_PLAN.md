@@ -6,8 +6,11 @@ screenshots.
 
 ## Capture principles
 
-- Use deterministic synthetic projects, conversations, diffs, and account
-  names. Never capture a developer's real repository or provider history.
+- Use deterministic synthetic projects, diffs, and account names. A provider TUI fixture is
+  initially rendered by the installed provider from a synthetic saved session, privacy-reviewed,
+  and stored as its PTY bytes. Ordinary recaptures replay that recording through SwiftTerm; they
+  never spend a provider turn or read a developer's provider history. Hand-authored ANSI that only
+  resembles a provider is not acceptable. Never capture a developer's real repository content.
 - Capture the shipping interface from DEBUG-only fixtures. Do not maintain a
   second marketing implementation of the app.
 - Freeze time, elapsed durations, rate limits, file paths, and process state so
@@ -26,14 +29,14 @@ screenshots.
 | ID | Platform | Scene | What it proves |
 | --- | --- | --- | --- |
 | `mac-attention` | macOS | Several active sessions with working, needs-you, and review states | The app turns concurrent work into an attention model |
-| `mac-conversation` | macOS | Native conversation with tool activity and an inline permission | Decisions stay attached to their cause |
+| `mac-conversation` | macOS | Experimental native conversation with tool activity and an inline permission | The structured preview keeps decisions attached to their cause |
 | `mac-subagents` | macOS | Parent session with a visible child tree and results | Delegation does not disappear into a flat log |
 | `mac-git-review` | macOS | File list, text diff, and staging boundary | Conversation connects to reviewable changes |
-| `mac-theme-showcase` | macOS | The same populated native conversation and Git Review pane under each compared theme | Theme masks change the app dress without changing the underlying story |
+| `mac-theme-showcase` | macOS | The same full Threading workspace — project sidebar, selected session, provider TUI, display pane, and Git Review — under each compared theme | Theme masks change the app dress without changing the underlying story |
 | `ios-sessions` | iOS | Paired session list with attention states | Important work follows away from the desk |
 | `ios-permission` | iOS | Shared conversation and scoped approval | Remote decisions remain explicit |
 | `ios-review` | iOS | Compact Git review | The companion supports review without pretending to be the Mac |
-| `ios-tui` | iOS | Provider TUI with the remote composer | Native and terminal sessions can both follow you from the Mac |
+| `ios-tui` | iOS | Provider TUI with the remote composer | The established terminal session follows you from the Mac |
 
 ## Master sizes
 
@@ -59,6 +62,36 @@ not website-ready marketing selections. The review demo currently opens
 without its synthetic host data and must be fixed before `ios-review` is
 accepted.
 
+## iOS marketing flow
+
+The five current iOS checkpoints are one entry in the canonical evidence manifest:
+
+1. one connected Mac, one Threading project, and four mixed Claude/Codex chats;
+2. the installed Claude Code TUI recording with its structured task strip;
+3. the installed Codex TUI recording;
+4. Claude with the real software keyboard and complete shipping session menu open;
+5. the shipping Settings root.
+
+Run the complete story with one theme input:
+
+```bash
+scripts/capture_marketing_ios.sh --theme threading
+scripts/capture_marketing_ios.sh --theme editorial
+```
+
+The script writes five semantically named full-display PNGs, the evidence report, and an MP4. All
+five declare standard Dynamic Type and the Simulator's fixed 9:41 status treatment. Static scenes
+first prove that their app-owned pixels have stabilized, then capture the composed display. The
+menu capture uses accessibility labels to press the shipping toolbar control and to prove the
+Usage account, Workspace, Interface, and Archive rows exist before capture. It has no coordinate
+or animation delay in its contract.
+
+The MP4 is assembled after capture from the five reviewed product frames. Its manifest specifies
+30 fps, integer hold/transition frame counts, and 348 total frames, so every theme has identical
+timestamps regardless of simulator or theme rendering speed. This first video contract is a
+deterministic checkpoint story with crossfades; a future continuous gesture/navigation recording
+would need a virtual-clock frame stepper to make the same timing claim.
+
 ## Capture harness
 
 The repository already has deterministic AppKit render tests controlled by
@@ -69,13 +102,12 @@ permissions, new sessions, review, and themed dialogs.
 Build on those foundations:
 
 1. Add a DEBUG-only `THREADING_MARKETING_SCENE` router to the macOS app.
-2. Extend `THREADING_MOBILE_DEMO` with the seven named scenes above.
+2. Extend `THREADING_MOBILE_DEMO` only through the canonical evidence catalogue.
 3. Seed both platforms from one small marketing-fixture package so names,
    messages, session state, and diffs agree.
 4. Add a `ThreadingMarketingUITests` target that launches each scene at its
    canonical size and writes a named PNG.
-5. Add `scripts/capture_marketing_screenshots.sh` as the single local entry
-   point.
+5. Keep `scripts/capture_marketing_ios.sh` as the single iOS marketing entry point.
 6. Validate dimensions, expected scene count, and accidental sensitive strings
    before assets can be synced into `web/public/product/`.
 
@@ -95,10 +127,20 @@ The first version of this contract now lives in:
 - `web/public/product/manifest.json`, which records the resolved source, pixel
   size, and SHA-256 digest for each public copy.
 
-`GitReviewRenderTests.testRendersThreadingConversationWithGitReviewPane` owns the
-named macOS theme-showcase captures. It renders the shipping conversation, Git
-Review pane, split view, and Threading surfaces inside the native macOS window rather than a
-website mockup.
+`GitReviewRenderTests.testRendersFullThreadingShellWithTUIAndGitReview` owns the
+named macOS theme-showcase captures. It drives the shipping `MainWindowController`
+through its real sidebar selection, attaches the shipping provider terminal,
+opens the display pane's Git Review against a temporary Git repository, and
+renders the complete three-pane Threading workspace. The repository contents
+are deterministic fixture data. The provider transcript is produced by one
+real, read-only Codex terminal session and the same live terminal is repainted
+under every theme.
+
+Run `scripts/capture_website_tui.sh` to create those seven captures. The render
+test is skipped unless that script's explicit live-capture flag is present, so
+an ordinary test run never spends a provider turn. The disposable repository's
+trust setting is scoped to that one command; provider-owned live-session history
+keeps following the provider's normal behavior.
 
 All images under `web/public/product/` are generated copies. Do not edit them by
 hand. After capturing new macOS journey evidence, macOS surface evidence, and
