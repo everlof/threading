@@ -265,6 +265,7 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
     public let workspaceNavigators: [ExtensionWorkspaceNavigator]
     public let mcpTools: [ExtensionMCPTool]
     public let services: [ExtensionServiceDefinition]
+    public let factDefinitions: [ExtensionFactDefinition]
     /// File extensions this package asks the attachments scanner to notice.
     public let previewableFileTypes: [ExtensionPreviewableFileType]
 
@@ -274,6 +275,7 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
         workspaceNavigators: [ExtensionWorkspaceNavigator] = [],
         mcpTools: [ExtensionMCPTool] = [],
         services: [ExtensionServiceDefinition] = [],
+        factDefinitions: [ExtensionFactDefinition] = [],
         previewableFileTypes: [ExtensionPreviewableFileType] = []
     ) {
         self.commands = commands
@@ -281,11 +283,13 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
         self.workspaceNavigators = workspaceNavigators
         self.mcpTools = mcpTools
         self.services = services
+        self.factDefinitions = factDefinitions
         self.previewableFileTypes = previewableFileTypes
     }
 
     private enum CodingKeys: String, CodingKey {
-        case commands, panels, workspaceNavigators, mcpTools, services, previewableFileTypes
+        case commands, panels, workspaceNavigators, mcpTools, services, factDefinitions
+        case previewableFileTypes
     }
 
     public init(from decoder: Decoder) throws {
@@ -300,6 +304,10 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
         services = try container.decodeIfPresent(
             [ExtensionServiceDefinition].self,
             forKey: .services
+        ) ?? []
+        factDefinitions = try container.decodeIfPresent(
+            [ExtensionFactDefinition].self,
+            forKey: .factDefinitions
         ) ?? []
         previewableFileTypes = try container.decodeIfPresent(
             [ExtensionPreviewableFileType].self,
@@ -472,6 +480,27 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
                 message: "must contain 'services.provide' when services are registered"
             ))
         }
+        if !factDefinitions.isEmpty, !manifest.capabilities.contains(.factsProvide) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'facts.provide' when fact definitions are registered"
+            ))
+        }
+        if factDefinitions.count > ExtensionFactProviderLimits.maximumDefinitions {
+            issues.append(.init(
+                path: "factDefinitions",
+                message: "must contain at most "
+                    + "\(ExtensionFactProviderLimits.maximumDefinitions) definitions"
+            ))
+        }
+        var seenFactKeys: Set<ExtensionFactKey> = []
+        for (index, definition) in factDefinitions.enumerated() {
+            let path = "factDefinitions[\(index)]"
+            issues.append(contentsOf: definition.providerValidationIssues(path: path))
+            if !seenFactKeys.insert(definition.key).inserted {
+                issues.append(.init(path: "\(path).key", message: "duplicates this fact key"))
+            }
+        }
 
         let declaredTools = Dictionary(
             manifest.mcpTools.map { ($0.id, $0) },
@@ -516,6 +545,13 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
                     message: "must match the manifest declaration exactly"
                 ))
             }
+        }
+
+        if Set(factDefinitions) != Set(manifest.factDefinitions) {
+            issues.append(.init(
+                path: "factDefinitions",
+                message: "must match the manifest declarations exactly"
+            ))
         }
 
         if !issues.isEmpty {

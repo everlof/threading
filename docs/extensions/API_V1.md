@@ -95,6 +95,9 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
   only over HTTPS on the same exact host and method; any other redirect returns its 3xx for an
   independently granted re-request. The response's optional `finalURL` reports the URL that
   answered after same-host redirects without breaking decoding from an older host.
+- Domain-keyed fact publication (`facts.provide`) with static manifest and registration
+  definitions. Providers may replace bounded values only for canonical repository and
+  repository-branch subjects; this capability grants no opaque project or session identifiers.
 
 `ThreadingExtensionAPI.safeCapabilities` is the normative capability set. `network.client` is
 not a safe-v1 capability: it remains decodable for deprecated native format-1 compatibility,

@@ -10,6 +10,7 @@ The package contains:
 - statically declared and runtime-registered MCP tool contributions;
 - statically inspectable, host-rendered Settings pages and built-in-page sections;
 - versioned, manifest-declared extension services brokered without shared storage;
+- versioned, domain-keyed fact providers with bounded atomic publication;
 - host-scoped persistent key-value and disposable cache storage;
 - a tokenized host client for atomic component and primitive identity publications plus safe
   project/session/provider/account snapshots, separately gated session-runtime telemetry, and
@@ -95,6 +96,11 @@ Brokered services use `services.provide` plus runtime-registered
 JSON object through Threading's generation-bound host channel; Threading authenticates the caller
 from its token and forwards an `ExtensionServiceRequest` to the matching running provider
 process. The provider never receives the consumer token or access to its package/storage.
+
+Fact providers use `facts.provide` and repeat their manifest's `factDefinitions` in the live
+registration. `ExtensionHostClient.publishFacts(_:replacing:)` atomically replaces values for
+explicit repository or repository-branch subjects. The bearer supplies provider identity and
+process generation; no opaque project or session identifier is accepted by this capability.
 
 Component customization is connected end to end. A process declaring `ui.components` receives a
 short-lived host URL and bearer token, then uses `ExtensionHostClient` to atomically replace its

@@ -376,6 +376,10 @@ items.
 - Declare `services.provide` and static `services` metadata before registering services.
 - Declare `services.consume` and every exact `serviceDependencies` authority before calling
   another extension.
+- Declare `facts.provide` and the same static `factDefinitions` in the manifest and registration
+  before calling `publishFacts(_:replacing:)`. Provider subjects are canonical repositories or
+  repository branches, never guessed project, session, or terminal IDs. Each call is a complete
+  replacement for its named subjects; an empty fact list clears those subjects.
 - Declare `ui.components` before constructing `ExtensionHostClient` or publishing component
   patches.
 - Declare `ui.workspace-navigation` before registering workspace navigators. This capability

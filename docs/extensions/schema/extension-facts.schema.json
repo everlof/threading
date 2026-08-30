@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threading.codes/schema/extension-facts.schema.json",
+  "title": "Threading extension fact publication",
+  "$ref": "#/$defs/publication",
+  "$defs": {
+    "key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9.-]*$",
+          "not": {
+            "pattern": "^(session|project|terminal|repository|checkout)\\."
+          }
+        },
+        "version": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+      }
+    },
+    "repository": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "path"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "^(?![\\s\\S]*[\\r\\n])[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^(?![\\s\\S]*[\\r\\n])(?!\\s)(?![\\s\\S]*\\s$)(?!/)(?!\\.\\.?$)(?!\\.\\.?/)(?![\\s\\S]*\\/\\.\\.?(?:\\/|$))(?![\\s\\S]*//)(?![\\s\\S]*/$)(?![\\s\\S]*\\\\)(?![\\s\\S]*[?#])(?![\\s\\S]*\\.[gG][iI][tT]$).+$"
+        }
+      }
+    },
+    "subject": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "repository"],
+          "properties": {
+            "type": { "const": "repository" },
+            "repository": { "$ref": "#/$defs/repository" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "repository", "branch"],
+          "properties": {
+            "type": { "const": "repositoryBranch" },
+            "repository": { "$ref": "#/$defs/repository" },
+            "branch": { "type": "string", "minLength": 1, "maxLength": 512 }
+          }
+        }
+      ]
+    },
+    "value": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "value"],
+          "properties": { "type": { "const": "string" }, "value": { "type": "string", "maxLength": 1024 } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "value"],
+          "properties": { "type": { "const": "boolean" }, "value": { "type": "boolean" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "value"],
+          "properties": { "type": { "const": "integer" }, "value": { "type": "integer" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "value"],
+          "properties": { "type": { "const": "number" }, "value": { "type": "number" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "value"],
+          "properties": { "type": { "const": "date" }, "value": { "type": "number" } }
+        }
+      ]
+    },
+    "image": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "identifier"],
+          "properties": {
+            "type": { "const": "hostAsset" },
+            "identifier": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "path"],
+          "properties": {
+            "type": { "const": "extensionResource" },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^(?!/)(?!\\.\\.?$)(?!\\.\\.?/)(?![\\s\\S]*\\/\\.\\.?(?:\\/|$))\\S(?:[\\s\\S]*\\S)?$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "name"],
+          "properties": {
+            "type": { "const": "systemSymbol" },
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512,
+              "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+            }
+          }
+        }
+      ]
+    },
+    "definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "displayName", "valueType", "subjectKinds", "usages"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+        "valueType": { "enum": ["string", "boolean", "integer", "number", "date"] },
+        "subjectKinds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["repository", "repositoryBranch"] }
+        },
+        "usages": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["filterable", "sortable", "groupable", "searchable", "presentable"] }
+        }
+      }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "subject", "value", "observedAt"],
+      "properties": {
+        "key": { "$ref": "#/$defs/key" },
+        "subject": { "$ref": "#/$defs/subject" },
+        "value": { "$ref": "#/$defs/value" },
+        "label": { "type": "string", "maxLength": 256 },
+        "status": { "enum": ["neutral", "positive", "warning", "negative"] },
+        "icon": { "$ref": "#/$defs/image" },
+        "observedAt": { "type": "number" }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["protocolVersion", "replacingSubjects", "facts"],
+      "properties": {
+        "protocolVersion": { "const": 1 },
+        "replacingSubjects": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2048,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/subject" }
+        },
+        "facts": {
+          "type": "array",
+          "maxItems": 2048,
+          "items": { "$ref": "#/$defs/fact" }
+        }
+      }
+    }
+  }
+}

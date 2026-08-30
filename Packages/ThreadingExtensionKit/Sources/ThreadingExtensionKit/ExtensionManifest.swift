@@ -18,6 +18,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     public let mcpTools: [ExtensionMCPTool]
     public let settings: ExtensionSettingsContribution
     public let services: [ExtensionServiceDefinition]
+    public let factDefinitions: [ExtensionFactDefinition]
     public let serviceDependencies: [ExtensionServiceDependency]
     public let companions: [ExtensionCompanion]
     public let themes: [ExtensionThemeContribution]
@@ -37,6 +38,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         mcpTools: [ExtensionMCPTool] = [],
         settings: ExtensionSettingsContribution = .init(),
         services: [ExtensionServiceDefinition] = [],
+        factDefinitions: [ExtensionFactDefinition] = [],
         serviceDependencies: [ExtensionServiceDependency] = [],
         companions: [ExtensionCompanion] = [],
         themes: [ExtensionThemeContribution] = [],
@@ -55,6 +57,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         self.mcpTools = mcpTools
         self.settings = settings
         self.services = services
+        self.factDefinitions = factDefinitions
         self.serviceDependencies = serviceDependencies
         self.companions = companions
         self.themes = themes
@@ -65,7 +68,8 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities, mcpTools, settings
-        case services, serviceDependencies, companions, themes, fonts, localizations, networkGrants
+        case services, factDefinitions, serviceDependencies, companions, themes, fonts
+        case localizations, networkGrants
     }
 
     public init(from decoder: Decoder) throws {
@@ -86,6 +90,10 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         services = try container.decodeIfPresent(
             [ExtensionServiceDefinition].self,
             forKey: .services
+        ) ?? []
+        factDefinitions = try container.decodeIfPresent(
+            [ExtensionFactDefinition].self,
+            forKey: .factDefinitions
         ) ?? []
         serviceDependencies = try container.decodeIfPresent(
             [ExtensionServiceDependency].self,
@@ -214,6 +222,34 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
             issues.append(.init(
                 path: "capabilities",
                 message: "must contain 'services.provide' when services are declared"
+            ))
+        }
+
+        var seenFactKeys: Set<ExtensionFactKey> = []
+        for (index, definition) in factDefinitions.enumerated() {
+            let path = "factDefinitions[\(index)]"
+            issues.append(contentsOf: definition.providerValidationIssues(path: path))
+            if !seenFactKeys.insert(definition.key).inserted {
+                issues.append(.init(path: "\(path).key", message: "duplicates this fact key"))
+            }
+        }
+        if factDefinitions.count > ExtensionFactProviderLimits.maximumDefinitions {
+            issues.append(.init(
+                path: "factDefinitions",
+                message: "must contain at most "
+                    + "\(ExtensionFactProviderLimits.maximumDefinitions) definitions"
+            ))
+        }
+        if !factDefinitions.isEmpty, !capabilities.contains(.factsProvide) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'facts.provide' when fact definitions are declared"
+            ))
+        }
+        if capabilities.contains(.factsProvide), factDefinitions.isEmpty {
+            issues.append(.init(
+                path: "factDefinitions",
+                message: "must declare at least one definition for 'facts.provide'"
             ))
         }
 
@@ -521,6 +557,7 @@ public struct ExtensionCapability: RawRepresentable, Codable, Hashable, Sendable
     public static let settings = Self(rawValue: "settings")
     public static let servicesProvide = Self(rawValue: "services.provide")
     public static let servicesConsume = Self(rawValue: "services.consume")
+    public static let factsProvide = Self(rawValue: "facts.provide")
     public static let companionOperations = Self(rawValue: "companions.invoke")
     public static let componentCustomization = Self(rawValue: "ui.components")
     public static let workspaceNavigation = Self(rawValue: "ui.workspace-navigation")

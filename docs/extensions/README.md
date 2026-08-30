@@ -29,6 +29,8 @@ The first vertical slice exists:
   host-rendered settings form vocabulary.
 - [`extension-services.schema.json`](schema/extension-services.schema.json) defines versioned
   service declarations, dependencies, calls, and results.
+- [`extension-facts.schema.json`](schema/extension-facts.schema.json) defines domain-keyed fact
+  declarations and bounded atomic publications.
 - [`extension-node.schema.json`](schema/extension-node.schema.json) is the machine-readable UI
   schema.
 - [`workspace-navigator.schema.json`](schema/workspace-navigator.schema.json) defines the
@@ -147,6 +149,7 @@ capabilities, so a small extension can grow without changing package format:
 | Agent-tool extension | `mcp.tools` | Statically declared and runtime-registered MCP tools | Claude and Codex |
 | Settings extension | `settings` | Complete pages and sections appended to stable host pages | Threading Settings |
 | Service extension | `services.provide` | Versioned JSON service contracts | Other declared extensions |
+| Fact provider | `facts.provide` | Typed scalar facts on repository domain keys | Host navigator fact registry |
 | Component extension | `ui.components` | Properties, slots, and constrained content replacement | Documented host components |
 | Navigator extension | `ui.workspace-navigation` | Complete semantic navigator documents with virtualizable collections | Leading workspace navigator |
 | Metal surface extension | `ui.rendering.metal` + `ui.components` | Bounded fragment surfaces inside declared component hooks | Contracts whose hook vocabulary admits Metal |
