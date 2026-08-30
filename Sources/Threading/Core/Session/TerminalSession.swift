@@ -94,11 +94,11 @@ final class TerminalSession: NSObject {
     /// finding from the page just left must not repopulate the notice after its invalidation.
     private var profileApplicationGeneration = 0
 
-    /// A launch requested after SIGTERM but before SwiftTerm has reaped the old child.
+    /// A launch requested after SIGTERM but before SwiftTerm has finished the old lifecycle.
     ///
-    /// LocalProcess deliberately remains occupied during that interval so an exit callback can
-    /// never reap a replacement PID. Keep the user's latest launch request here and perform it
-    /// from the exact old child's termination callback.
+    /// LocalProcess deliberately remains occupied through its output drain and `windingDown`
+    /// interval so an exit callback can never reap a replacement PID. Keep the user's latest
+    /// launch request here and perform it from the exact old child's termination callback.
     private enum PendingLaunch {
         case shell(initialDirectory: URL?, initialCommand: ShellCommand?)
         case agent(AgentLaunchPlan)
@@ -474,7 +474,7 @@ final class TerminalSession: NSObject {
     private func startShell(initialDirectory: URL?, initialCommand: ShellCommand?) {
         guard !isRunning else { return }
 
-        guard !terminalView.process.running else {
+        guard !terminalView.process.running, !terminalView.process.windingDown else {
             pendingLaunch = .shell(
                 initialDirectory: initialDirectory,
                 initialCommand: initialCommand
@@ -549,7 +549,7 @@ final class TerminalSession: NSObject {
     func start(plan: AgentLaunchPlan) {
         guard !isRunning else { return }
 
-        guard !terminalView.process.running else {
+        guard !terminalView.process.running, !terminalView.process.windingDown else {
             pendingLaunch = .agent(plan)
             return
         }

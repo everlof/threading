@@ -46,8 +46,8 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 - **SwiftTerm** (local fork): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
   - Location: `./Packages/Vendor/SwiftTerm/` (vendored source in the main repository, not a git submodule)
   - Upstream: https://github.com/migueldeicaza/SwiftTerm
-  - Fork: https://github.com/everlof/SwiftTerm, reconciled at `90e3cb1` against upstream
-    `main` at `a28350f`. The vendored source tree matches that revision; Git metadata, build
+  - Fork: https://github.com/everlof/SwiftTerm, reconciled at `a912510` against upstream
+    `main` at `58224a7`. The vendored source tree matches that revision; Git metadata, build
     output and ignored generated cache artifacts are not copied into the application repository.
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
   - **Use upstream's implementation when it has one.** This reconciliation removes our former
@@ -84,9 +84,11 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - **The local-process lifecycle is upstream.** `LocalProcess` and its lifecycle tests match
     upstream byte for byte. Upstream launches through `forkpty`, publishes and reaps the exact
     child PID, drains readable output before reporting termination, and prevents an old process's
-    callbacks from leaking into its replacement. Do not restore our former lifecycle copy when
-    resyncing. Threading still owns the higher-level deferred relaunch decision, and the remote
-    window-size delivery seam below remains ours.
+    callbacks from leaking into its replacement. It also exposes `windingDown`: after `running`
+    becomes false but before the termination callback, `startProcess` still refuses a replacement.
+    Threading treats either state as occupied and performs its deferred relaunch from that callback.
+    Do not restore our former lifecycle copy when resyncing. Threading still owns that higher-level
+    deferred relaunch decision, and the remote window-size delivery seam below remains ours.
   - **The managed-grid seam is ours**, on both platforms. `TerminalView.shouldApplyFrameSizeChange`
     is consulted at the top of `processSizeChange`, *before* the emulator is touched, so a view
     whose grid does not follow its pixel size can refuse a frame-driven resize outright. The
