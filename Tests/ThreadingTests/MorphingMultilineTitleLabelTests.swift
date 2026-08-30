@@ -220,6 +220,29 @@ final class MorphingMultilineTitleLabelTests: XCTestCase {
         XCTAssertEqual(lines(of: block).map(\.stringValue), [oneLine])
     }
 
+    /// A closed fixture has no frames left to draw. Leaving its AppKit constraint animation
+    /// alive nevertheless occupies one shared animation worker forever; enough theme fixtures
+    /// used to exhaust that pool and make an unrelated browser callback time out much later.
+    func testClosingTheWindowFinishesItsHeightTravelImmediately() throws {
+        try XCTSkipIf(Design.Motion.reducesMotion, "nothing travels under Reduce Motion")
+        let (block, window) = hostedBlock()
+        block.setStringValue(oneLine, animated: false)
+        window.layoutIfNeeded()
+        block.setStringValue(threeLines, animated: true)
+        window.layoutIfNeeded()
+        XCTAssertTrue(block.isTravellingForTesting)
+
+        // Posting the lifecycle edge directly avoids asking the hosted XCTest application to
+        // terminate after its last window closes; it is the same notification AppKit emits.
+        NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: window)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
+
+        XCTAssertFalse(
+            block.isTravellingForTesting,
+            "a closed window kept its layout animation and shared AppKit worker alive"
+        )
+    }
+
     /// The block is held at the wider of the two states while the lines swap, and the hold is
     /// below `.required` so a host narrower than the widest line still wins.
     func testTheWidthHeldDuringAMorphNeverOutranksTheHost() {
