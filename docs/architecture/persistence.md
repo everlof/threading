@@ -688,6 +688,18 @@ follows the same candidate-first, bounded rule. No continuity archive is synchro
 clients, because merging partial human input, moving another person's viewport or inheriting their
 input preference would turn private continuity into collaboration state.
 
+The iPhone's last resolved Mac app theme is a separate optional cache, not another field in that
+continuity archive. `MobileThemeCacheStore` keeps at most 64 complete `RemoteThemeDTO` records,
+scoped to the paired Mac, under a 256 KiB archive ceiling. A candidate is validated, written, and
+read back before it becomes visible; corrupt bytes are quarantined, and a future version is left
+untouched with writes disabled. `RemoteAppModel` consults it only while live `/api/me` state is
+absent and records every later authoritative or local-preview theme replacement. Keeping this
+derived appearance state separate means a malformed theme can never make an unsent draft or saved
+viewport unreadable. The normal scale is 1–5 Macs: a palette read checks at most the stable and
+pairing identities against the hard 64-record ceiling, and a write occurs only when the resolved
+theme actually changes, never on a session or terminal hot callback. See
+[`themes.md`](themes.md#2026-08-30--the-iphone-keeps-the-last-resolved-mac-theme-through-reconnect).
+
 The crash itself was in the SwiftTerm fork: `LocalProcess.processTerminated()` reaps the
 child with `waitpid`, which destroys the kernel event its `DispatchSourceProcess` is
 registered for. Left active, that knote is reported `EV_VANISHED` the next time the workloop

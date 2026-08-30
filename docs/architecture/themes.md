@@ -1867,3 +1867,25 @@ The paired terminal palettes are `app-pure-terminal-light` and `app-pure-termina
 the way Cappuccino's are. The phone's alternate icon is one set, `AppIconThemePure`, carrying a
 light and a dark luminosity asset like Cappuccino's, regenerated with
 `scripts/generate_mobile_theme_icons.sh`.
+
+## 2026-08-30 — the iPhone keeps the last resolved Mac theme through reconnect
+
+The iPhone's root used to resolve app chrome from `RemoteAppModel.me?.theme` alone. That payload is
+authoritative, but it is deliberately absent between process launch and the first authenticated
+`/api/me` response, so every cold launch painted the built-in mobile fallback and then changed
+appearance when the Mac answered. A slow or unavailable route made the wrong appearance a standing
+offline state.
+
+`MobileThemeCacheStore` now keeps the last complete resolved `RemoteThemeDTO` per paired Mac. The
+paired-host record is available synchronously at launch, so `RemoteAppModel.appTheme` uses that
+cached palette until live state arrives; a live `/api/me` or `appTheme` update always wins and is
+then recorded for the next launch. The local Mac-appearance picker flows through the same `me`
+replacement path, so its preview is remembered immediately and a refused mutation restores and
+re-records the previous authoritative value.
+
+The cache is a bounded, versioned, candidate-first `UserDefaults` document, separate from session
+continuity so unreadable optional appearance data cannot endanger drafts or reading positions. It
+is scoped by both stable Mac identity and the local pairing identity: current pairings share the
+Mac answer, while an older pairing that predates stable host ids still finds its own record. Demo
+and terminal-wire fixtures never write it. Corrupt bytes are quarantined before replacement and a
+future archive remains untouched with writes disabled.

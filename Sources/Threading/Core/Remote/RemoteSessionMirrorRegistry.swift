@@ -29,6 +29,39 @@ private enum RemoteCatalogueCacheDefaults {
     static let lifetime: Duration = .seconds(1)
 }
 
+/// The account-specific model projection shared by the remote catalogue and its regression tests.
+/// `defaultReasoningID` means what this login will inherit for that model, not merely the model
+/// cache's generic fallback. Older phones already consume this field, so fixing the projection
+/// repairs their opening choice without requiring a wire-version branch.
+@MainActor
+enum RemoteNewSessionModelCatalog {
+    static func choices(
+        for kind: AgentKind,
+        account: AgentAccount?
+    ) -> [RemoteModelChoiceDTO] {
+        AgentModels.visibleOptions(for: kind, account: account).map { option in
+            RemoteModelChoiceDTO(
+                id: option.identifier,
+                name: option.displayName,
+                reasoning: option.reasoningLevels.map {
+                    RemoteReasoningChoiceDTO(id: $0.effort, name: $0.displayName)
+                },
+                defaultReasoningID: AgentModels.effectiveEffort(
+                    selected: nil,
+                    kind: kind,
+                    model: option.identifier,
+                    account: account
+                ),
+                supportsFastMode: AgentModels.supportsFastMode(
+                    kind: kind,
+                    model: option.identifier,
+                    account: account
+                )
+            )
+        }
+    }
+}
+
 /// Bridges a live session to its remote subscribers: taps the PTY byte stream, keeps a ring for
 /// late joiners, fans output out to every watcher, and routes remote input back in.
 ///
@@ -654,31 +687,13 @@ final class RemoteSessionMirrorRegistry {
             let discoveredAccounts = AgentAccountDiscovery.accounts(for: kind)
             let accountNames = AccountName.names(for: discoveredAccounts)
 
-            @MainActor func models(for account: AgentAccount?) -> [RemoteModelChoiceDTO] {
-                AgentModels.visibleOptions(for: kind, account: account).map { option in
-                    RemoteModelChoiceDTO(
-                        id: option.identifier,
-                        name: option.displayName,
-                        reasoning: option.reasoningLevels.map {
-                            RemoteReasoningChoiceDTO(id: $0.effort, name: $0.displayName)
-                        },
-                        defaultReasoningID: option.defaultReasoningLevel,
-                        supportsFastMode: AgentModels.supportsFastMode(
-                            kind: kind,
-                            model: option.identifier,
-                            account: account
-                        )
-                    )
-                }
-            }
-
             let accounts: [RemoteAccountChoiceDTO]
             if discoveredAccounts.isEmpty {
                 accounts = [
                     RemoteAccountChoiceDTO(
                         id: AccountHandle.standardName,
                         name: AgentAccountDefaults.defaultDisplayName,
-                        models: models(for: nil),
+                        models: RemoteNewSessionModelCatalog.choices(for: kind, account: nil),
                         defaultModelID: AgentModels.defaultModel(for: kind, account: nil)
                     )
                 ]
@@ -691,7 +706,10 @@ final class RemoteSessionMirrorRegistry {
                     // account menu is: a plan metering that model separately can be nearly
                     // spent while the account's weekly window still looks comfortable.
                     let model = AgentModels.defaultModel(for: kind, account: account)
-                    let modelChoices = models(for: account)
+                    let modelChoices = RemoteNewSessionModelCatalog.choices(
+                        for: kind,
+                        account: account
+                    )
                     return RemoteAccountChoiceDTO(
                         id: account.handle.name,
                         name: accountNames[account.id] ?? account.displayName,
@@ -720,7 +738,10 @@ final class RemoteSessionMirrorRegistry {
                 id: kind.rawValue,
                 name: kind.displayName,
                 accounts: accounts,
-                models: models(for: defaultAccount),
+                models: RemoteNewSessionModelCatalog.choices(
+                    for: kind,
+                    account: defaultAccount
+                ),
                 defaultModelID: AgentModels.defaultModel(for: kind, account: defaultAccount),
                 supportsConversation: kind.supportsNativeUI,
                 permissionModes: kind.supportsPermissionModes

@@ -704,6 +704,8 @@ public struct RemoteModelChoiceDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let name: String
     public let reasoning: [RemoteReasoningChoiceDTO]
+    /// The account-effective inherited effort for this model, after the host has applied the
+    /// routed login's config and validated it against the advertised reasoning levels.
     public let defaultReasoningID: String?
     /// Nil when decoded from a host predating remote speed selection.
     public let supportsFastMode: Bool?

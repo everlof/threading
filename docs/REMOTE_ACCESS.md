@@ -351,7 +351,13 @@ reasoning effort and UI surface. The stable default is the agent's own Claude Co
 Threading's Native UI remains an explicit experimental choice. Account choices include the Mac's
 latest normalized rate-limit usage, while credentials and config paths stay on the Mac. The
 session is created through the same Mac launch path as a local session and appears on both
-devices immediately. Owners can also rename, pin, archive, restore, move a running chat between
+devices immediately. The Mac publishes each model's account-effective effort rather than its
+generic cache fallback. On each phone, the last model and effort that started successfully are
+remembered per Mac, agent and account and beat later provider-default changes while still valid.
+Auto is resolved to concrete catalogue values at Start; refusal or abandonment writes nothing,
+and withdrawn remembered values repair to the live defaults. This bounded preference archive is
+separate from unsent-draft continuity and fails open to the live catalogue after quarantine.
+Owners can also rename, pin, archive, restore, move a running chat between
 accounts, set its limit recovery, and switch it between Native and its agent UI from either side.
 A UI or account switch stops the current process, then resumes
 the same provider conversation identifier on the other surface. The session row's **Interface**
@@ -1563,7 +1569,9 @@ another device. The records are versioned. If one is corrupt, the client preserv
 copy for diagnosis and fails closed instead of overwriting it with a new blank record. Continuity
 mutations build, prune and validate a bounded candidate, persist and verify it, and only then make
 it visible to the running UI; a refused oversized draft therefore cannot create state that appears
-saved until the next launch disproves it.
+saved until the next launch disproves it. The optional last-successful model/effort archive applies
+that contract separately, keyed by Mac, agent and account, so its corruption cannot block or
+overwrite an unsent draft.
 
 An open iOS app receives these events over its authenticated live socket. Background and
 lock-screen delivery uses APNs. Development/self-hosted builds can enable the Mac's provider

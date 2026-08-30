@@ -47,7 +47,7 @@ struct MobileSettingsView: View {
                             SettingsNavigationRow(
                                 symbol: "paintpalette",
                                 title: "Mac appearance",
-                                detail: model.me?.theme.map { LocalizedStringKey($0.name) }
+                                detail: model.appTheme.map { LocalizedStringKey($0.name) }
                             ) {
                                 MacAppearanceSettingsView()
                             }

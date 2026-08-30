@@ -200,7 +200,10 @@ final class RemoteAppModel: ObservableObject {
         }
     }
     @Published private(set) var me: RemoteMeDTO? {
-        didSet { catalogueRevision &+= 1 }
+        didSet {
+            catalogueRevision &+= 1
+            rememberCurrentTheme()
+        }
     }
     /// Every transition is recorded, not only the current one. A support report that says only
     /// "offline" cannot tell a phone that never reached this Mac from one that reached it and
@@ -254,6 +257,11 @@ final class RemoteAppModel: ObservableObject {
     /// the network this phone is on right now, not something to write into a Keychain record.
     private var discoveredAddresses = RemoteDiscoveredAddresses()
     private let continuity: MobileSessionContinuityStore
+    /// Optional device-local launch memory is isolated from continuity so corrupt preferences
+    /// can never endanger an unsent draft or a saved reading position.
+    private let newSessionDefaults: MobileNewSessionDefaultsStore
+    /// A bounded per-Mac launch cache. The live `/api/me` response remains authoritative.
+    private let themeCache: MobileThemeCacheStore
     /// True while the app is showing the canned Mac — entered from the welcome screen's Try
     /// the Demo, or by the DEBUG screenshot environment. Every mutation path short-circuits on
     /// it, so demo state changes locally and nothing ever reaches a network (`DemoExperience`).
@@ -308,8 +316,14 @@ final class RemoteAppModel: ObservableObject {
         themeEventsDidReceiveHello ? themeEventsTask : nil
     }
 
-    init(continuity: MobileSessionContinuityStore = MobileSessionContinuityStore()) {
+    init(
+        continuity: MobileSessionContinuityStore = MobileSessionContinuityStore(),
+        newSessionDefaults: MobileNewSessionDefaultsStore = MobileNewSessionDefaultsStore(),
+        themeCache: MobileThemeCacheStore = MobileThemeCacheStore()
+    ) {
         self.continuity = continuity
+        self.newSessionDefaults = newSessionDefaults
+        self.themeCache = themeCache
 #if DEBUG
         if let wire = MobileTerminalWireFixtureConfiguration.current {
             isEphemeralTerminalWireFixture = true
@@ -509,6 +523,33 @@ final class RemoteAppModel: ObservableObject {
     var activeHost: PairedRemoteHost? {
         guard let activeHostID else { return nil }
         return hosts.first { $0.id == activeHostID }
+    }
+
+    /// The palette to draw now. On a cold launch the paired-host record is available before the
+    /// first authenticated catalogue, so its last resolved theme bridges that bounded interval.
+    var appTheme: RemoteThemeDTO? {
+        MobileThemeResolution.current(
+            live: me?.theme,
+            cached: activeThemeCacheIdentities.lazy.compactMap {
+                self.themeCache.theme(for: $0)
+            }.first
+        )
+    }
+
+    private var activeThemeCacheIdentities: [String] {
+        guard let host = activeHost else { return [] }
+        if let hostID = host.hostID, !hostID.isEmpty {
+            if hostID == host.id { return ["host:\(hostID)"] }
+            return ["host:\(hostID)", "pairing:\(host.id)"]
+        }
+        return ["pairing:\(host.id)"]
+    }
+
+    private func rememberCurrentTheme() {
+        guard !isDemo, !isEphemeralTerminalWireFixture, let theme = me?.theme else { return }
+        for identity in activeThemeCacheIdentities {
+            themeCache.remember(theme, for: identity)
+        }
     }
 
     var client: RemoteClient? {
@@ -1365,6 +1406,40 @@ final class RemoteAppModel: ObservableObject {
         else { throw RemoteClientError.invalidResponse }
         me = responseMe
         return MobileCreatedSession(session: session, openingStrategy: .resumeIfNeeded)
+    }
+
+    func newSessionChoiceIdentity(
+        agentID: String,
+        accountID: String
+    ) -> MobileNewSessionChoiceIdentity? {
+        guard let activeHost,
+              let stableHostID = activeHost.hostID ?? activeHostID,
+              !stableHostID.isEmpty,
+              !agentID.isEmpty,
+              !accountID.isEmpty else { return nil }
+        return MobileNewSessionChoiceIdentity(
+            // Prefer the identity the Mac signs over the phone-local pairing record. A route
+            // change or re-pair must not turn the same Mac into a different defaults scope.
+            hostID: stableHostID,
+            agentID: agentID,
+            accountID: accountID
+        )
+    }
+
+    func rememberedNewSessionChoice(
+        for identity: MobileNewSessionChoiceIdentity
+    ) -> MobileNewSessionRunChoice? {
+        newSessionDefaults.choice(for: identity)
+    }
+
+    /// The caller reaches this only after `createSession` succeeds, so failed and abandoned
+    /// drafts never become the next draft's remembered answer.
+    func rememberNewSessionChoice(
+        _ choice: MobileNewSessionRunChoice,
+        for identity: MobileNewSessionChoiceIdentity
+    ) {
+        guard !isDemo else { return }
+        newSessionDefaults.remember(choice, for: identity)
     }
 
     func renameSession(_ session: RemoteSessionSummaryDTO, to title: String) async throws {

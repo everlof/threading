@@ -582,7 +582,7 @@ struct RootView: View {
             return RemoteThemePalette(demoConversation.theme ?? model.me?.theme)
         }
 #endif
-        return RemoteThemePalette(model.me?.theme)
+        return RemoteThemePalette(model.appTheme)
     }
 
     private func openShakeReport(screenshot: UIImage?) {

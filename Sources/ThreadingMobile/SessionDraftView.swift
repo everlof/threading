@@ -140,6 +140,10 @@ private struct SessionDraftComposerScreen: View {
     @State private var accountID = ""
     @State private var modelID = ""
     @State private var reasoningID = ""
+    /// Last-successful choices are scoped to this exact identity. A catalogue refresh repairs
+    /// the open draft in place; changing Mac, agent, or account loads that identity's memory.
+    @State private var runChoiceIdentity: MobileNewSessionChoiceIdentity?
+    @State private var didInitializeRunChoice = false
     @State private var speedID = ""
     @State private var permissionID = ""
     /// The agent's supported UI is the safe default; Native stays an explicit experimental opt-in.
@@ -1343,11 +1347,32 @@ private struct SessionDraftComposerScreen: View {
     }
 
     private func applyAccountDefaults() {
-        if !models.contains(where: { $0.id == modelID }) {
-            modelID = defaultModelID.flatMap { id in
-                models.contains(where: { $0.id == id }) ? id : nil
-            } ?? ""
+        let identity = appModel.newSessionChoiceIdentity(
+            agentID: agentID,
+            accountID: accountID
+        )
+        let current = MobileNewSessionRunChoice(
+            modelID: modelID,
+            reasoningID: reasoningID
+        )
+        let resolved: MobileNewSessionRunChoice
+        if !didInitializeRunChoice || identity != runChoiceIdentity {
+            resolved = SessionDraftRunChoiceResolution.initial(
+                remembered: identity.flatMap { appModel.rememberedNewSessionChoice(for: $0) },
+                defaultModelID: defaultModelID,
+                models: models
+            )
+            runChoiceIdentity = identity
+            didInitializeRunChoice = true
+        } else {
+            resolved = SessionDraftRunChoiceResolution.repair(
+                current: current,
+                defaultModelID: defaultModelID,
+                models: models
+            )
         }
+        modelID = resolved.modelID ?? ""
+        reasoningID = resolved.reasoningID ?? ""
         applyModelDefaults()
     }
 
@@ -1357,7 +1382,10 @@ private struct SessionDraftComposerScreen: View {
             speedID = ""
             return
         }
-        if !selectedModel.reasoning.contains(where: { $0.id == reasoningID }) {
+        // Empty is the deliberate Auto column. Bootstrap and withdrawal repair materialize the
+        // live effective default elsewhere; changing a model must not erase an Auto choice.
+        if !reasoningID.isEmpty,
+           !selectedModel.reasoning.contains(where: { $0.id == reasoningID }) {
             reasoningID = selectedModel.defaultReasoningID.flatMap { id in
                 selectedModel.reasoning.contains(where: { $0.id == id }) ? id : nil
             } ?? ""
@@ -1376,14 +1404,23 @@ private struct SessionDraftComposerScreen: View {
         isSubmitting = true
         promptIsFocused = false
         let openingAttachmentUploadIDs = attachmentTray?.readyUploadIDs ?? []
+        let launchChoice = SessionDraftRunChoiceResolution.launch(
+            current: MobileNewSessionRunChoice(modelID: modelID, reasoningID: reasoningID),
+            defaultModelID: defaultModelID,
+            models: models
+        )
+        let launchIdentity = appModel.newSessionChoiceIdentity(
+            agentID: agentID,
+            accountID: accountID
+        )
         Task {
             do {
                 let creation = try await appModel.createSession(
                     projectID: projectID,
                     agentKind: agentID,
                     accountHandle: accountID.isEmpty ? nil : accountID,
-                    model: modelID.isEmpty ? nil : modelID,
-                    reasoningEffort: reasoningID.isEmpty ? nil : reasoningID,
+                    model: launchChoice.modelID,
+                    reasoningEffort: launchChoice.reasoningID,
                     fastMode: speedID == "fast" ? true : (speedID == "standard" ? false : nil),
                     permissionMode: permissionID.isEmpty ? nil : permissionID,
                     surface: surface,
@@ -1394,6 +1431,9 @@ private struct SessionDraftComposerScreen: View {
                     openingAttachmentUploadIDs: openingAttachmentUploadIDs,
                     prompt: prompt
                 )
+                if let launchIdentity {
+                    appModel.rememberNewSessionChoice(launchChoice, for: launchIdentity)
+                }
                 attachmentTray?.clear()
                 // Turns this screen into the session's: `SessionDraftView` fades this one
                 // out over the chat the model now says the draft became.
