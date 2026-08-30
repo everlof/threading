@@ -81,7 +81,10 @@ carrying stable IDs and host project/session destinations. Users select a live n
 **View → Navigator**; Threading persists the identity, routes value-bearing actions through the
 owning process, atomically installs returned snapshots, preserves collection presentation state,
 and falls back to Native if that process generation disappears or cannot render. Actionable grid
-items supply an `accessibilityLabel` for the host-owned cell. See
+items supply an `accessibilityLabel` for the host-owned cell. A navigator may declare up to 16
+localized `ExtensionWorkspaceNavigatorOption` toggle or choice values. Their complete declaration
+is immutable within one process generation and fits within a 30-entry extension-owned menu budget;
+the v1 renderer keeps these controls hidden until the host-evaluated v2 transform consumes them. See
 [`docs/extensions/WORKSPACE_NAVIGATORS.md`](../docs/extensions/WORKSPACE_NAVIGATORS.md).
 
 Settings contributions are declared in the manifest under the `settings` capability. Threading

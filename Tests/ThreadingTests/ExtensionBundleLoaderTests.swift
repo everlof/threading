@@ -58,7 +58,9 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             "Status": "Status på svenska",
             "Ready": "Klar",
             "Refresh": "Uppdatera",
-            "Running": "Kör"
+            "Running": "Kör",
+            "Grouping": "Gruppering",
+            "Recent activity": "Senaste aktivitet"
         ]).write(to: localizationDirectory.appendingPathComponent("sv.json"))
 
         let manifest = ExtensionManifest(
@@ -145,6 +147,32 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             localizedPatch.itemPatches?.first?.content,
             .status("Kör", role: .positive)
         )
+
+        let localizedNavigator = resolver.workspaceNavigator(.init(
+            id: "activity",
+            title: "Status",
+            root: .content(.status("Ready", role: .positive)),
+            options: [
+                .init(
+                    id: "sort",
+                    title: "Grouping",
+                    control: .choice(
+                        defaultValue: "recent",
+                        options: [
+                            .init(id: "recent", title: "Recent activity"),
+                            .init(id: "name", title: "Name")
+                        ]
+                    )
+                )
+            ]
+        ))
+        XCTAssertEqual(localizedNavigator.title, "Status på svenska")
+        XCTAssertEqual(localizedNavigator.options.first?.title, "Gruppering")
+        guard case .choice(_, let localizedChoices) = localizedNavigator.options.first?.control
+        else {
+            return XCTFail("localized navigator lost its choice control")
+        }
+        XCTAssertEqual(localizedChoices.map(\.title), ["Senaste aktivitet", "Name"])
     }
 
     func testInspectorRejectsLocalizationFilesThatAreNotFlatStringCatalogues() throws {

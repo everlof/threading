@@ -119,6 +119,13 @@ struct ExtensionLocalizationResolver: Sendable {
             id: navigator.id,
             title: string(navigator.title),
             root: workspaceNavigatorNode(navigator.root),
+            options: navigator.options.map { option in
+                ExtensionWorkspaceNavigatorOption(
+                    id: option.id,
+                    title: string(option.title),
+                    control: settingControl(option.control)
+                )
+            },
             loadActionID: navigator.loadActionID,
             eventActionID: navigator.eventActionID,
             preferredWidth: navigator.preferredWidth

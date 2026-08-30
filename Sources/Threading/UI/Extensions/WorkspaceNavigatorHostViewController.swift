@@ -20,6 +20,9 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     private let contextProvider: ContextProvider
     private let destinationHandler: DestinationHandler
     private let onUnavailable: () -> Void
+    /// Localized once from the validated registration. Runtime documents may replace content,
+    /// never the host-owned option contract which scopes durable user choices.
+    private let declaredOptions: [ExtensionWorkspaceNavigatorOption]
     private var navigator: ExtensionWorkspaceNavigator
     private var rootHost: NSView?
     private var collectionControllers: [WorkspaceNavigatorCollectionViewController] = []
@@ -47,6 +50,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         navigatorID = inventory.navigator.id
         processGeneration = inventory.processGeneration
         navigator = inventory.navigator
+        declaredOptions = inventory.navigator.options
         self.routing = routing
         self.contextProvider = contextProvider
         self.destinationHandler = destinationHandler
@@ -115,6 +119,13 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     }
 
     private func render(_ replacement: ExtensionWorkspaceNavigator) {
+        guard replacement.options == declaredOptions else {
+            failClosed(afterRendering: ExtensionValidationError(issues: [.init(
+                path: "navigator.options",
+                message: "must match the registered navigator option declaration"
+            )]))
+            return
+        }
         let issues = replacement.validationIssues(path: "navigator")
         guard issues.isEmpty else {
             presentError(ExtensionValidationError(issues: issues).description)

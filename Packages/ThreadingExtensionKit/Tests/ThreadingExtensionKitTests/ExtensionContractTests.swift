@@ -1455,6 +1455,137 @@ final class ExtensionContractTests: XCTestCase {
         XCTAssertThrowsError(try registration.validate(for: missingCapability))
     }
 
+    func testWorkspaceNavigatorOptionsRoundTripWithTheSettingsControlVocabulary() throws {
+        let options: [ExtensionWorkspaceNavigatorOption] = [
+            .init(
+                id: "group-branches",
+                title: "Group by branch",
+                control: .toggle(defaultValue: true)
+            ),
+            .init(
+                id: "sort",
+                title: "Sort",
+                control: .choice(
+                    defaultValue: "recent",
+                    options: [
+                        .init(id: "recent", title: "Recent activity"),
+                        .init(id: "name", title: "Name")
+                    ]
+                )
+            )
+        ]
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Ready", role: .neutral)),
+            options: options
+        )
+
+        XCTAssertEqual(navigator.validationIssues(path: "navigator"), [])
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ExtensionWorkspaceNavigator.self,
+                from: JSONEncoder().encode(navigator)
+            ),
+            navigator
+        )
+    }
+
+    func testWorkspaceNavigatorOptionsRejectUnsupportedControlsDuplicatesAndMenuOverflow() {
+        let unsupported = ExtensionWorkspaceNavigator(
+            id: "unsupported",
+            title: "Unsupported",
+            root: .content(.status("Ready", role: .neutral)),
+            options: [
+                .init(
+                    id: "query",
+                    title: "Query",
+                    control: .text(defaultValue: "", placeholder: nil, maximumLength: 40)
+                )
+            ]
+        )
+        XCTAssertTrue(unsupported.validationIssues(path: "navigator").contains {
+            $0.path == "navigator.options[0].control.type"
+        })
+
+        let duplicate = ExtensionWorkspaceNavigator(
+            id: "duplicate",
+            title: "Duplicate",
+            root: .content(.status("Ready", role: .neutral)),
+            options: [
+                .init(id: "group", title: "First", control: .toggle(defaultValue: true)),
+                .init(id: "group", title: "Second", control: .toggle(defaultValue: false))
+            ]
+        )
+        XCTAssertTrue(duplicate.validationIssues(path: "navigator").contains {
+            $0.path == "navigator.options[1].id" && $0.message.contains("duplicates")
+        })
+
+        let optionBudget = (0..<ExtensionWorkspaceNavigator.maximumOptions).map {
+            ExtensionWorkspaceNavigatorOption(
+                id: "option-\($0)",
+                title: "Option \($0)",
+                control: .toggle(defaultValue: false)
+            )
+        }
+        let exactOptionBudget = ExtensionWorkspaceNavigator(
+            id: "exact-option-budget",
+            title: "Exact option budget",
+            root: .content(.status("Ready", role: .neutral)),
+            options: optionBudget
+        )
+        XCTAssertEqual(exactOptionBudget.validationIssues(path: "navigator"), [])
+
+        let tooManyOptions = ExtensionWorkspaceNavigator(
+            id: "too-many",
+            title: "Too many",
+            root: .content(.status("Ready", role: .neutral)),
+            options: optionBudget + [
+                .init(
+                    id: "one-too-many",
+                    title: "One too many",
+                    control: .toggle(defaultValue: false)
+                )
+            ]
+        )
+        XCTAssertTrue(tooManyOptions.validationIssues(path: "navigator").contains {
+            $0.path == "navigator.options" && $0.message.contains("at most 16 options")
+        })
+
+        let values = (0..<30).map {
+            ExtensionSettingOption(id: "value-\($0)", title: "Value \($0)")
+        }
+        let exactMenuBudget = ExtensionWorkspaceNavigator(
+            id: "exact-budget",
+            title: "Exact budget",
+            root: .content(.status("Ready", role: .neutral)),
+            options: [
+                .init(
+                    id: "sort",
+                    title: "Sort",
+                    control: .choice(defaultValue: values[0].id, options: Array(values.dropLast()))
+                )
+            ]
+        )
+        XCTAssertEqual(exactMenuBudget.validationIssues(path: "navigator"), [])
+
+        let overflowing = ExtensionWorkspaceNavigator(
+            id: "overflow",
+            title: "Overflow",
+            root: .content(.status("Ready", role: .neutral)),
+            options: [
+                .init(
+                    id: "sort",
+                    title: "Sort",
+                    control: .choice(defaultValue: values[0].id, options: values)
+                )
+            ]
+        )
+        XCTAssertTrue(overflowing.validationIssues(path: "navigator").contains {
+            $0.path == "navigator.options" && $0.message.contains("requires 31")
+        })
+    }
+
     func testWorkspaceNavigatorLoadActionAndWireResponsesRoundTrip() throws {
         let replacement = ExtensionWorkspaceNavigator(
             id: "activity",
@@ -1518,12 +1649,20 @@ final class ExtensionContractTests: XCTestCase {
         )
         legacyObject.removeValue(forKey: "loadActionID")
         legacyObject.removeValue(forKey: "eventActionID")
+        legacyObject.removeValue(forKey: "options")
         let legacyNavigator = try JSONDecoder().decode(
             ExtensionWorkspaceNavigator.self,
             from: JSONSerialization.data(withJSONObject: legacyObject)
         )
         XCTAssertNil(legacyNavigator.loadActionID)
         XCTAssertNil(legacyNavigator.eventActionID)
+        XCTAssertEqual(legacyNavigator.options, [])
+
+        legacyObject["options"] = NSNull()
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ExtensionWorkspaceNavigator.self,
+            from: JSONSerialization.data(withJSONObject: legacyObject)
+        ))
     }
 
     func testWorkspaceNavigatorLiveEventsRequireAuthorityAndRoundTrip() throws {

@@ -3,8 +3,8 @@
 > Status: active feature draft — the product goal is that a user who wants a different sidebar
 > can have one, built by an extension, without Threading having anticipated the shape they wanted. The
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
-> plus a host-executed intent vocabulary. Rollout step 1 was implemented on 2026-08-29 and rollout
-> step 2 was implemented on 2026-08-30; rollout step 3 is next. No part of
+> plus a host-executed intent vocabulary. Rollout steps 1–3 were implemented by 2026-08-30;
+> rollout step 4 is in progress. No part of
 > `ui.workspace-navigation` v1 is withdrawn.
 
 ## Decision

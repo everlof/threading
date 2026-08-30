@@ -455,6 +455,17 @@ user chooses a live contribution under **View → Navigator**. Threading virtual
 routes project/session destinations through the native navigation coordinator, and returns to
 Native if the owning process generation stops or its document cannot be rendered.
 
+A navigator may declare up to 16 `ExtensionWorkspaceNavigatorOption` values with a `.toggle` or
+enumerated `.choice` control. Their IDs, titles, defaults, and choice lists are one static contract
+for the process generation: every complete runtime replacement must repeat them exactly. The
+combined declaration may require at most 30 menu entries, reserving two more for Threading's
+separator and permanent Native route. Option titles and choice titles are localizable. Declaring
+an option does not give the extension preference-file access or a mutable AppKit control.
+
+The declarations are accepted ahead of the `ui.workspace-navigation@2` transform contract, but
+the v1 materialized-document renderer does not expose inert option rows. Threading will put them
+in the navigator menu only when the host-side transform that consumes their values is present.
+
 For a context-dependent panel, set `loadActionID`. Treat `root` as the immediate loading and
 fallback state. Threading sends that action once when the tab connects to each extension process
 generation, using the same opaque project/session context as a button. Return a replacement

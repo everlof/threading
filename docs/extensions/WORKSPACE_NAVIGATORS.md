@@ -100,6 +100,43 @@ button, so the label names that activation independently of whatever visual comp
 cell contains. List and outline rows can derive their semantics from their rendered content,
 though an explicit label is available there too.
 
+## Declared options
+
+`ExtensionWorkspaceNavigatorOption` declares a host-rendered toggle or enumerated choice using the
+same control vocabulary as extension Settings:
+
+```swift
+options: [
+    .init(
+        id: "group-branches",
+        title: "Group by branch",
+        control: .toggle(defaultValue: true)
+    ),
+    .init(
+        id: "sort",
+        title: "Sort",
+        control: .choice(
+            defaultValue: "recent",
+            options: [
+                .init(id: "recent", title: "Recent activity"),
+                .init(id: "name", title: "Name")
+            ]
+        )
+    )
+]
+```
+
+The contract permits at most 16 options and 30 declared menu entries after expanding choice
+submenus; Threading reserves the final two entries for the divider and Native route. IDs and
+defaults are durable values. Titles and choice titles are localized copy. A complete runtime
+navigator replacement must repeat the original localized declaration exactly, so only a new
+process generation can change the meaning of a stored value.
+
+These declarations are forward-compatible groundwork for the host-evaluated
+`ui.workspace-navigation@2` transform. The v1 materialized-document renderer does not show option
+rows which nothing in the host consumes; declaring an option today neither invokes the extension
+nor exposes a preference file.
+
 ## Runtime snapshots and actions
 
 Set `loadActionID` when the static registration is only a useful initial or loading document.

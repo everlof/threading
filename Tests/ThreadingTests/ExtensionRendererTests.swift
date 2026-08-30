@@ -1339,6 +1339,57 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         )
     }
 
+    func testWorkspaceNavigatorRuntimeReplacementCannotMutateRegisteredOptions() throws {
+        let declaredOption = ExtensionWorkspaceNavigatorOption(
+            id: "group",
+            title: "Group sessions",
+            control: .toggle(defaultValue: true)
+        )
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.button(
+                id: "refresh",
+                title: "Refresh",
+                role: .standard,
+                isEnabled: true
+            )),
+            options: [declaredOption]
+        )
+        let replacement = ExtensionWorkspaceNavigator(
+            id: navigator.id,
+            title: navigator.title,
+            root: .content(.status("Updated", role: .positive))
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.result = .success(.init(
+            requestID: "replacement",
+            navigatorID: navigator.id,
+            navigator: replacement
+        ))
+        let failedClosed = expectation(description: "option mutation fails the generation closed")
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { failedClosed.fulfill() }
+        )
+        _ = host.view
+
+        let refresh = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedButton }.first
+        )
+        refresh.performClick()
+
+        wait(for: [failedClosed], timeout: 1)
+        XCTAssertFalse(
+            descendants(in: host.view)
+                .compactMap { ($0 as? NSTextField)?.stringValue }
+                .contains("Updated")
+        )
+    }
+
     func testWorkspaceNavigatorRenderFailureFallsBackToNativeForThatProcessGeneration() {
         let invalid = ExtensionWorkspaceNavigator(
             id: "broken",
