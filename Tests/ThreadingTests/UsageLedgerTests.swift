@@ -38,6 +38,29 @@ final class UsageLedgerTests: XCTestCase {
         XCTAssertEqual(decoded.cacheWrite1h, 0)
     }
 
+    func testLegacyLedgerRecordDecodesWithoutTranscriptProvenance() throws {
+        let current = makeRecord(
+            identity: "legacy",
+            at: nil,
+            tokens: .init(output: 1)
+        )
+        let encoded = try JSONEncoder().encode(current)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+        )
+        object["sessionKind"] = nil
+        object["parentSessionID"] = nil
+
+        let decoded = try JSONDecoder().decode(
+            UsageLedgerRecord.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        XCTAssertNil(decoded.sessionKind)
+        XCTAssertNil(decoded.parentSessionID)
+        XCTAssertEqual(decoded.tokens.output, 1)
+    }
+
     func testOpenCodeRuntimeAndOpenRouterBillingStayDistinct() {
         let direct = UsageOrigin.direct(.openCode)
         let routed = UsageOrigin.openCode(providerID: "openrouter")

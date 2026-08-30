@@ -61,6 +61,31 @@ final class SessionUsageTests: XCTestCase {
         XCTAssertEqual(snapshot.indexedRange, .lifetime)
     }
 
+    func testDurableParentProvenanceIncludesUnobservedChildWithoutInventingNavigatorRow() {
+        let report = TranscriptUsageReport(sessionCells: [
+            cell(sessionID: "parent", tokens: .init(output: 20)),
+            cell(
+                sessionID: "unobserved-child",
+                tokens: .init(cachedInput: 30, output: 10),
+                sessionKind: .subagent,
+                parentSessionID: "parent"
+            )
+        ])
+        let input = SessionUsageProjector.Input(
+            sessionID: SessionID(),
+            runtimeID: AgentKind.claude.rawValue,
+            mainIdentities: ["parent"],
+            children: []
+        )
+
+        let snapshot = SessionUsageProjector.project(report: report, input: input)
+
+        XCTAssertEqual(snapshot.main.processedTokens, 20)
+        XCTAssertEqual(snapshot.subagents.processedTokens, 40)
+        XCTAssertEqual(snapshot.total.processedTokens, 60)
+        XCTAssertTrue(snapshot.children.isEmpty)
+    }
+
     func testLegacyReportStatesNinetyDayRangeInsteadOfClaimingLifetime() {
         let now = Date()
         let report = TranscriptUsageReport(cells: [
@@ -172,7 +197,9 @@ final class SessionUsageTests: XCTestCase {
         sessionID: String,
         model: String = "gpt-5.6-terra",
         tokens: UsageTokenCounts,
-        catalogCost: Double = 0
+        catalogCost: Double = 0,
+        sessionKind: UsageSessionKind? = nil,
+        parentSessionID: String? = nil
     ) -> TranscriptUsageReport.SessionCell {
         .init(
             sessionID: sessionID,
@@ -185,7 +212,9 @@ final class SessionUsageTests: XCTestCase {
             catalogCostUSD: catalogCost,
             unpricedTokens: 0,
             cacheSavingsUSD: 0,
-            records: 1
+            records: 1,
+            sessionKind: sessionKind,
+            parentSessionID: parentSessionID
         )
     }
 }

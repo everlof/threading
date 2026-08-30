@@ -82,20 +82,20 @@ final class UsageScanCache {
     func records(
         for source: URL,
         parserID: String,
-        parse: () -> [UsageLedgerRecord]
-    ) -> Result {
-        autoreleasepool {
-            resolveRecords(for: source, parserID: parserID, parse: parse)
+        parse: () throws -> [UsageLedgerRecord]
+    ) rethrows -> Result {
+        try autoreleasepool {
+            try resolveRecords(for: source, parserID: parserID, parse: parse)
         }
     }
 
     private func resolveRecords(
         for source: URL,
         parserID: String,
-        parse: () -> [UsageLedgerRecord]
-    ) -> Result {
+        parse: () throws -> [UsageLedgerRecord]
+    ) rethrows -> Result {
         guard let fingerprint = fingerprint(of: source) else {
-            return Result(records: parse(), wasCacheHit: false)
+            return Result(records: try parse(), wasCacheHit: false)
         }
 
         let cacheURL = url(forSourcePath: source.path, parserID: parserID)
@@ -109,7 +109,7 @@ final class UsageScanCache {
             return Result(records: envelope.records, wasCacheHit: true)
         }
 
-        let parsed = parse()
+        let parsed = try parse()
         let envelope = Envelope(
             schemaVersion: UsageScanCacheDefaults.schemaVersion,
             parserID: parserID,
@@ -403,7 +403,7 @@ final class UsageLedgerIndex {
     func update(
         source: URL,
         parserID: String,
-        load: () -> UsageScanCache.Result
+        load: () throws -> UsageScanCache.Result
     ) throws -> Update {
         let attributes = try fileManager.attributesOfItem(atPath: source.path)
         guard let size = attributes[.size] as? NSNumber,
@@ -652,8 +652,8 @@ enum UsageScanCacheDefaults {
     /// The cache is only a migration/fallback layer once `UsageLedgerIndex` has a source. It may
     /// use enough room to avoid reparsing a recent working set, but never several gigabytes.
     static let maximumTotalBytes: Int64 = 512 * 1024 * 1024
-    static let claudeParserID = "claude-v3"
-    static let codexParserID = "codex-v1"
+    static let claudeParserID = "claude-v4-strict-provenance"
+    static let codexParserID = "codex-v2-strict-child-boundary"
     static let openCodeParserID = "opencode-export-v1"
 }
 

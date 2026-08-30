@@ -209,8 +209,9 @@ final class WireIntegerTests: XCTestCase {
 
     // MARK: - Usage adapters
 
-    /// An oversized count no longer files a billed response as one that used no tokens.
-    func testAnOversizedClaudeCountRefusesItsLineAndKeepsTheOthers() throws {
+    /// An oversized count makes the whole source visibly incomplete instead of silently
+    /// presenting the remaining responses as its exact total.
+    func testAnOversizedClaudeCountRefusesItsSource() throws {
         let directory = try ProviderWireTextCorpus.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = try XCTUnwrap(ProviderWireTextCorpus.write(#"""
@@ -218,12 +219,14 @@ final class WireIntegerTests: XCTestCase {
         {"type":"assistant","timestamp":"2026-08-27T10:00:01Z","requestId":"r2","cwd":"/tmp","message":{"id":"m2","model":"claude-sonnet-4-5","usage":{"input_tokens":1000,"output_tokens":200}}}
         """#, to: directory, named: "claude-oversized.jsonl"))
 
-        let records = ClaudeUsageAdapter.records(
+        XCTAssertThrowsError(try ClaudeUsageAdapter.records(
             inTranscriptAt: url, accountID: "a", accountName: "A"
-        )
-        XCTAssertEqual(records.count, 1, "the unreadable line produces no record")
-        XCTAssertEqual(records.first?.identity, "claude|m2|r2", "and the readable one still does")
-        XCTAssertEqual(records.first?.tokens.uncachedInput, 1000)
+        )) { error in
+            XCTAssertEqual(
+                error as? UsageTranscriptAdapterFailure,
+                .unreadableRecord(runtimeID: AgentKind.claude.rawValue, line: 1)
+            )
+        }
     }
 
     /// A count of exactly `Int64.max` is a number this app can hold, so it is kept.
@@ -234,14 +237,14 @@ final class WireIntegerTests: XCTestCase {
         {"type":"assistant","timestamp":"2026-08-27T10:00:00Z","requestId":"r1","cwd":"/tmp","message":{"id":"m1","model":"m","usage":{"input_tokens":9223372036854775807,"output_tokens":0}}}
         """#, to: directory, named: "claude-int64-max.jsonl"))
 
-        let records = ClaudeUsageAdapter.records(
+        let records = try ClaudeUsageAdapter.records(
             inTranscriptAt: url, accountID: "a", accountName: "A"
         )
         XCTAssertEqual(records.count, 1)
         XCTAssertEqual(records.first?.tokens.uncachedInput, 9223372036854775807)
     }
 
-    func testAnOversizedCodexCountRefusesItsRecord() throws {
+    func testAnOversizedCodexCountRefusesItsSource() throws {
         let directory = try ProviderWireTextCorpus.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = try XCTUnwrap(ProviderWireTextCorpus.write(#"""
@@ -250,11 +253,14 @@ final class WireIntegerTests: XCTestCase {
         {"type":"event_msg","timestamp":"2026-08-27T10:00:02Z","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":30,"output_tokens":5}}}}
         """#, to: directory, named: "codex-oversized.jsonl"))
 
-        let records = CodexUsageAdapter.records(
+        XCTAssertThrowsError(try CodexUsageAdapter.records(
             inRolloutAt: url, accountID: "a", accountName: "A"
-        )
-        XCTAssertEqual(records.count, 1, "the unreadable record is refused, the readable one is not")
-        XCTAssertEqual(records.first?.tokens.output, 5)
+        )) { error in
+            XCTAssertEqual(
+                error as? UsageTranscriptAdapterFailure,
+                .unreadableRecord(runtimeID: AgentKind.codex.rawValue, line: 2)
+            )
+        }
     }
 
     /// OpenCode's adapter refuses the whole export for one unreadable message, and an oversized

@@ -1635,8 +1635,10 @@ final class SubagentSessionStateTests: XCTestCase {
     private func codexTokenCount(last: Int, total: Int) -> String {
         """
         {"type":"event_msg","payload":{"type":"token_count","info":{\
-        "last_token_usage":{"total_tokens":\(last)},\
-        "total_token_usage":{"total_tokens":\(total)}}}}
+        "last_token_usage":{"total_tokens":\(last),"input_tokens":\(last),\
+        "cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0},\
+        "total_token_usage":{"total_tokens":\(total),"input_tokens":\(total),\
+        "cached_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0}}}}
         """
     }
 }
@@ -1938,6 +1940,7 @@ final class ClaudeSubagentEventTests: XCTestCase {
         XCTAssertEqual(timeline.workingCount, 1)
         XCTAssertEqual(timeline.doneCount, 0)
         XCTAssertEqual(timeline.agents.first?.descriptor.model, "claude-haiku-4-5")
+        XCTAssertEqual(timeline.agents.first?.descriptor.alternateThreadIDs, ["agent-7"])
 
         let notification = try XCTUnwrap(adapter.route("""
             {"type":"user","parent_tool_use_id":null,"message":{"content":

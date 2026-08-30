@@ -77,6 +77,10 @@ struct TranscriptUsageReport: Codable, Equatable, Sendable {
         var unpricedTokens: Int64
         var cacheSavingsUSD: Double
         var records: Int
+        /// Optional for reports built before transcript role provenance was retained.
+        var sessionKind: UsageSessionKind? = nil
+        /// The durable provider parent, when the transcript names one exactly.
+        var parentSessionID: String? = nil
 
         var costUSD: Double { providerReportedCostUSD + catalogCostUSD }
     }
@@ -343,6 +347,8 @@ enum UsageLedgerBuilder {
         let origin: UsageOrigin
         let accountID: String
         let model: String
+        let sessionKind: UsageSessionKind?
+        let parentSessionID: String?
     }
 
     static func build(
@@ -416,7 +422,9 @@ enum UsageLedgerBuilder {
                 sessionID: priced.sessionID,
                 origin: priced.origin,
                 accountID: priced.accountID,
-                model: priced.model
+                model: priced.model,
+                sessionKind: priced.sessionKind,
+                parentSessionID: priced.parentSessionID
             )
             var sessionCell = bySessionCell[sessionKey] ?? .init(
                 sessionID: priced.sessionID,
@@ -429,7 +437,9 @@ enum UsageLedgerBuilder {
                 catalogCostUSD: 0,
                 unpricedTokens: 0,
                 cacheSavingsUSD: 0,
-                records: 0
+                records: 0,
+                sessionKind: priced.sessionKind,
+                parentSessionID: priced.parentSessionID
             )
             sessionCell.tokens += priced.tokens
             sessionCell.records += 1
@@ -877,19 +887,28 @@ final class TranscriptUsageService {
             let runtime = source.runtime
             let account = source.account
             let file = source.file
+            guard var item = coverage[runtime.rawValue] else {
+                ThreadingLogger.usage.fault(
+                    "Usage coverage invariant missing runtime=\(runtime.rawValue, privacy: .public)"
+                )
+                assertionFailure("Missing usage coverage for \(runtime.rawValue)")
+                continue
+            }
+            item.sourceCount += 1
+            scan.sourceFiles += 1
             let result: UsageLedgerIndex.Update
             do {
                 result = try index.update(source: file, parserID: source.parserID) {
-                    cache.records(for: file, parserID: source.parserID) {
+                    try cache.records(for: file, parserID: source.parserID) {
                         switch runtime {
                         case .claude:
-                            return ClaudeUsageAdapter.records(
+                            return try ClaudeUsageAdapter.records(
                                 inTranscriptAt: file,
                                 accountID: account.accountID,
                                 accountName: account.accountName
                             )
                         case .codex:
-                            return CodexUsageAdapter.records(
+                            return try CodexUsageAdapter.records(
                                 inRolloutAt: file,
                                 accountID: account.accountID,
                                 accountName: account.accountName
@@ -899,7 +918,7 @@ final class TranscriptUsageService {
                         }
                     }
                 }
-            } catch {
+            } catch let error as SQLiteDatabase.Failure {
                 ThreadingLogger.usage.error(
                     "Usage ledger index update failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
@@ -907,21 +926,36 @@ final class TranscriptUsageService {
                 fallback.builtAt = Date()
                 fallback.scan.duration = CFAbsoluteTimeGetCurrent() - started
                 return fallback
-            }
-            scan.sourceFiles += 1
-            if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
-            reporter.advance(sourceName: runtime.displayName)
-            guard var item = coverage[runtime.rawValue] else {
-                ThreadingLogger.usage.fault(
-                    "Usage coverage invariant missing runtime=\(runtime.rawValue, privacy: .public)"
+            } catch {
+                // The source is deliberately absent from `usedSources` after a loader failure,
+                // so `finishScan` also removes any stale complete revision from the ledger.
+                // Keeping its old rows while saying coverage is partial would still present a
+                // mixture of old and new facts as the current transcript.
+                item.state = item.recordCount > 0 || item.state == .complete
+                    ? .partial
+                    : .failed
+                item.detail = "One or more \(runtime.displayName) transcripts could not be read completely."
+                coverage[runtime.rawValue] = item
+                reporter.advance(sourceName: runtime.displayName)
+                ThreadingLogger.usage.error(
+                    "Usage transcript failed runtime=\(runtime.rawValue, privacy: .public): \(error.localizedDescription, privacy: .private(mask: .hash))"
                 )
-                assertionFailure("Missing usage coverage for \(runtime.rawValue)")
                 continue
             }
-            item.sourceCount += 1
+            if result.wasCacheHit { scan.cacheHits += 1 } else { scan.cacheMisses += 1 }
+            reporter.advance(sourceName: runtime.displayName)
             item.recordCount += result.recordCount
-            item.state = .complete
-            item.detail = nil
+            switch item.state {
+            case .unavailable:
+                item.state = .complete
+                item.detail = nil
+            case .failed:
+                // At least one earlier source failed and this one succeeded: some records are
+                // known, but the runtime total is still not complete.
+                item.state = .partial
+            case .complete, .partial:
+                break
+            }
             coverage[runtime.rawValue] = item
         }
 

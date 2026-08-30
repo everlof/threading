@@ -194,7 +194,10 @@ unavailable banked-reset inventory.
 `UsageLedgerRecord` is the response-level interchange between provider adapters and aggregation.
 Five token categories remain separate: uncached input, cached input, cache creation, output and
 reasoning. Reasoning is a subset of output and is never added a second time. The record also keeps
-session, account, model, checkout directory, runtime and billing route.
+session, account, model, checkout directory, runtime and billing route. Transcript provenance is
+retained beside those values: root or subagent, plus the provider parent session id when the
+durable source states one. Older cached rows decode with unknown provenance and are replaced by
+the next parser-version scan rather than guessed into the new relationship.
 
 Runtime and biller are different axes. An OpenCode session routed through OpenRouter is stored as
 runtime `opencode`, biller `openrouter`; that distinction survives cache, aggregation, the ranked
@@ -205,8 +208,8 @@ Adapters make provider wire differences explicit:
 
 | Source | Contract |
 |---|---|
-| Claude Code | One ledger record per assistant response in supported JSONL transcripts. Cache read and creation remain distinct. Message/request identity deduplicates resumes, compactions, forks and copied subagent responses after all files have joined. Repeated streaming partials merge the component-wise maximum of every token counter, so file order cannot retain a smaller output total. |
-| Codex | Stateful rollout parsing carries session metadata, working directory and active model into each `token_count`. Codex input includes cached input on the wire, so the adapter subtracts it once. An immediately repeated `last_token_usage` is suppressed without collapsing two later responses that happen to have equal counts. |
+| Claude Code | One ledger record per assistant response in supported JSONL transcripts. Cache read and creation remain distinct. A JSONL below `<parent>/subagents/` is durably attributed to that parent independently of whether a hook or native renderer observed it. Message/request identity deduplicates resumes, compactions, forks and copied responses after all files have joined. Repeated streaming partials merge the component-wise maximum of every token counter, so file order cannot retain a smaller output total. |
+| Codex | Stateful rollout parsing carries session metadata, working directory and active model into each `token_count`. A current child rollout retains its exact `parent_thread_id`; older child rollouts are recognised by the first `inter_agent_communication_metadata` boundary, and copied parent usage before it is excluded. Codex input includes cached input on the wire, so the adapter subtracts it once. An immediately repeated `last_token_usage` is suppressed without collapsing two later responses that happen to have equal counts. |
 | OpenCode | Supported CLI exports provide assistant token counts, model, provider route and reported cost. Export revision is the session's durable activity timestamp, so a warm scan does not launch OpenCode for a dormant session. |
 | OpenRouter | It is a billing route reported by an OpenCode export, not a fake fifth runtime. It gets its own coverage row and chart series so routed spend remains visible. |
 | Grok | The measured ACP surface exposes current context occupancy, while its supported transcript export is Markdown. That is partial coverage, not a token estimate derived from characters. An authoritative future export can land behind `GrokUsageAdapter` without changing the ledger or dashboard. |
@@ -216,19 +219,20 @@ OpenCode and OpenRouter rows with `complete`, `partial`, `unavailable` or `faile
 record counts, and a reason where useful. A plausible-looking total can therefore never imply
 whole-machine coverage when one runtime is unreadable.
 
-**A usage adapter refuses an export it cannot finish reading, and coverage is why.** Everywhere
+**A usage adapter refuses a source it cannot finish reading, and coverage is why.** Everywhere
 else that a provider array holds an element this client cannot open, the reader keeps the
 readable elements and names what it dropped — see
 [`native-conversations.md`](native-conversations.md#one-unreadable-element-does-not-cost-the-list).
 A bill is the exception. A half-read catalogue still says something true about itself; a total
 does not, because it is one number a person reads as *the* cost of that session with nowhere on
-the figure to admit a message was skipped. So `OpenCodeUsageAdapter` throws
-`Failure.unreadableMessage(index:)` for a `messages` element that is not an object, and
-`TranscriptUsageService` turns that into a `partial`/`failed` coverage row with a detail line.
-The session's spend is then visibly missing rather than invisibly short. Recovering here would
-trade a gap the dashboard states for an undercount it presents as fact — which is the one
-direction this page must never move. The refusal names the message index so a log line separates
-one bad row from an OpenCode export-format change, which `unfamiliarExport` alone could not.
+the figure to admit a response was skipped. Claude and Codex therefore use the strict streaming
+entry point in `JSONLReader`: an unreadable usage-bearing line, an out-of-range counter, or a file
+read failure refuses the whole transcript. `OpenCodeUsageAdapter` likewise throws
+`Failure.unreadableMessage(index:)` for a `messages` element that is not an object.
+`TranscriptUsageService` turns either refusal into a `partial`/`failed` coverage row with a detail
+line. The failed source is not marked used in `UsageLedgerIndex`, so end-of-scan cleanup also
+removes its prior complete revision; retaining stale rows while declaring partial coverage would
+still mix old and current facts. The spend is visibly missing rather than invisibly short.
 
 ### Session receipts
 
@@ -240,8 +244,11 @@ That is deliberately separate from the dashboard's 90-day daily cells: an old co
 means its whole lifetime, while an old cached report says **Last 90 days** until the next rebuild
 rather than silently relabelling a partial total.
 
-`SessionUsageService` indexes those lifetime cells by provider session identity once per completed
-scan on its utility queue. A selected session then folds only its parent and known child aliases.
+`SessionUsageService` indexes those lifetime cells by provider session identity and durable parent
+identity once per completed scan on its utility queue. A selected session folds its parent and
+known child aliases, then adds any transcript-proven child cells whose parent matches even when no
+live or persisted navigator row observed them. That second path changes only Main/Subagents/Total;
+it does not manufacture a child row or presentation identity.
 The immutable result reconciles Total = Main agent + Subagents and preserves token categories,
 provider-reported versus catalog-priced cost, unpriced tokens, requests, models, catalog version
 and runtime coverage. A live child counter may lead the transcript index; only that positive delta
@@ -294,8 +301,10 @@ warm and cold results have the same exact deduplication. Sources no adapter offe
 their now-unowned records are removed once at the end of the transaction.
 
 The fallback array aggregation path applies the same component-wise maximum before grouping. The
-lightweight subagent reader uses a scan-global identity map and emits only each counter's positive
-delta, keeping its line-by-line memory bound while reaching the same completed response total.
+lightweight subagent reader calls the same Claude/Codex adapters as the account index, then applies
+the same response-identity maxima before reducing to the scalar live counter. Boundary filtering,
+duplicate suppression and malformed-source refusal therefore cannot drift between the live child
+receipt and its later indexed token-category receipt.
 
 `UsageScanCache` remains the cold/migration layer for a source the index does not yet know. It
 stores one private envelope per source and feeds either the existing envelope or a fresh parse into
@@ -309,7 +318,7 @@ checkout roots once per directory and aggregates at two bounded cell grains:
 
 `day × runtime/biller × account × exact model × checkout`
 
-`session × runtime/biller × account × exact model`
+`session × root/subagent parent × runtime/biller × account × exact model`
 
 The persisted report keeps at most 90 daily cells per combination plus nine days of quarter-hour
 buckets used by the existing spend forecast. Lifetime session cells keep no response text or

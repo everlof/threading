@@ -1167,10 +1167,9 @@ struct SubagentTranscriptLoadCache {
 
 /// Reads the raw token count one completed child consumed from its own transcript.
 ///
-/// Claude's stable message usage schema is shared with the account usage index. Codex's
-/// rollout schema is explicitly isolated here: child rollouts copy parent context, so summing
-/// `total_token_usage` would attribute the parent to every child. The per-request
-/// `last_token_usage` records after the child communication boundary are the child work.
+/// Both providers go through the account ledger adapters. Keeping a second scalar parser here
+/// once let Codex's live child receipt disagree with its indexed receipt about duplicate records
+/// and the copied parent prefix before an inter-agent boundary.
 enum SubagentUsageReader {
 
     @MainActor
@@ -1188,76 +1187,50 @@ enum SubagentUsageReader {
 
     static func read(at url: URL, kind: AgentKind) -> Int? {
         guard let format = TranscriptReplayFormat(kind: kind) else { return nil }
+        let records: [UsageLedgerRecord]
         switch format {
         case .claude:
-            var deduplicator = TranscriptUsageDeduplicator()
-            let total = TranscriptUsageIndex
-                .entries(inTranscriptAt: url, deduplicator: &deduplicator)
-                .reduce(Int64(0)) {
-                    $0 + $1.usage.billedTokens + $1.usage.cachedTokens
-                }
-            return total > 0 && total <= Int64(Int.max) ? Int(total) : nil
+            guard let parsed = try? ClaudeUsageAdapter.records(
+                inTranscriptAt: url,
+                accountID: "subagent",
+                accountName: "Subagent"
+            ) else { return nil }
+            records = parsed
 
         case .codex:
-            return readCodex(at: url)
+            guard let parsed = try? CodexUsageAdapter.records(
+                inRolloutAt: url,
+                accountID: "subagent",
+                accountName: "Subagent"
+            ) else { return nil }
+            records = parsed
         }
+        return processedTotal(of: records)
     }
 
-    private static func readCodex(at url: URL) -> Int? {
-        var crossedBoundary = false
-        var sawBoundary = false
-        var allLastUsage: [Int64] = []
-        var childLastUsage: [Int64] = []
-        var totalBeforeBoundary: Int64?
-        var lastTotalAfterBoundary: Int64?
-
-        JSONLReader.forEachRecord(at: url, limit: .max) { record in
-            if record["type"] as? String == "inter_agent_communication_metadata" {
-                crossedBoundary = true
-                sawBoundary = true
-                return true
+    private static func processedTotal(of records: [UsageLedgerRecord]) -> Int? {
+        var byIdentity: [String: UsageLedgerRecord] = [:]
+        for record in records {
+            if let previous = byIdentity[record.identity] {
+                byIdentity[record.identity] = previous.mergingUsageMaximums(with: record)
+            } else {
+                byIdentity[record.identity] = record
             }
-
-            guard record["type"] as? String == "event_msg",
-                  let payload = record["payload"] as? [String: Any],
-                  payload["type"] as? String == "token_count",
-                  let info = payload["info"] as? [String: Any] else {
-                return true
-            }
-
-            if let last = info["last_token_usage"] as? [String: Any],
-               let tokens = integer(last["total_tokens"]), tokens > 0 {
-                allLastUsage.append(tokens)
-                if crossedBoundary { childLastUsage.append(tokens) }
-            }
-
-            if let total = info["total_token_usage"] as? [String: Any],
-               let tokens = integer(total["total_tokens"]) {
-                if crossedBoundary {
-                    lastTotalAfterBoundary = tokens
-                } else {
-                    totalBeforeBoundary = tokens
-                }
-            }
-            return true
         }
 
-        let requestUsage = sawBoundary ? childLastUsage : allLastUsage
-        if !requestUsage.isEmpty {
-            let total = requestUsage.reduce(Int64(0), +)
-            return total <= Int64(Int.max) ? Int(total) : nil
+        var total: Int64 = 0
+        for record in byIdentity.values {
+            for count in [
+                record.tokens.uncachedInput,
+                record.tokens.cachedInput,
+                record.tokens.cacheWrite,
+                record.tokens.output
+            ] {
+                let sum = total.addingReportingOverflow(count)
+                guard !sum.overflow else { return nil }
+                total = sum.partialValue
+            }
         }
-
-        // Version-tolerant fallback for a rollout that omits `last_token_usage`: only a delta
-        // across a witnessed child boundary is attributable without counting copied context.
-        if sawBoundary, let before = totalBeforeBoundary, let after = lastTotalAfterBoundary {
-            let delta = max(0, after - before)
-            return delta > 0 && delta <= Int64(Int.max) ? Int(delta) : nil
-        }
-        return nil
-    }
-
-    private static func integer(_ value: Any?) -> Int64? {
-        (value as? NSNumber)?.int64Value
+        return total > 0 && total <= Int64(Int.max) ? Int(total) : nil
     }
 }

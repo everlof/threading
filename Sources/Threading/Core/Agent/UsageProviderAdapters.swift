@@ -1,5 +1,16 @@
 import Foundation
 
+enum UsageTranscriptAdapterFailure: Error, Equatable, LocalizedError {
+    case unreadableRecord(runtimeID: String, line: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .unreadableRecord(let runtimeID, let line):
+            return "An unreadable \(runtimeID) usage record was found at line \(line)"
+        }
+    }
+}
+
 // MARK: - Claude
 
 /// Claude's JSONL usage adapter. It emits one record per assistant response and leaves global
@@ -9,19 +20,28 @@ enum ClaudeUsageAdapter {
         inTranscriptAt url: URL,
         accountID: String,
         accountName: String
-    ) -> [UsageLedgerRecord] {
+    ) throws -> [UsageLedgerRecord] {
         let marker = Array(UsageIndexDefaults.usageMarker.utf8)
         let sessionID = url.deletingPathExtension().lastPathComponent
+        let parentSessionID = parentSessionID(of: url)
         var lineNumber = 0
         var found: [UsageLedgerRecord] = []
 
-        JSONLReader.forEachLine(at: url, limit: .max) { line in
+        try JSONLReader.forEachLineStrict(at: url, limit: .max) { line in
             lineNumber += 1
-            guard TranscriptUsageIndex.contains(marker, in: line),
-                  let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
-                  let message = object[UsageIndexDefaults.messageKey] as? [String: Any],
-                  let usage = message[UsageIndexDefaults.usageKey] as? [String: Any]
+            guard TranscriptUsageIndex.contains(marker, in: line) else { return true }
+
+            guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any]
+            else { throw unreadable(lineNumber) }
+            // `"usage"` also appears in provider-owned metadata. It becomes a billable
+            // candidate only under a message; once present there, refusing an unreadable shape
+            // is safer than silently filing a smaller transcript total.
+            guard let message = object[UsageIndexDefaults.messageKey] as? [String: Any],
+                  let rawUsage = message[UsageIndexDefaults.usageKey]
             else { return true }
+            guard let usage = rawUsage as? [String: Any] else {
+                throw unreadable(lineNumber)
+            }
 
             let messageID = message[UsageIndexDefaults.idKey] as? String ?? ""
             let requestID = object[UsageIndexDefaults.requestKey] as? String ?? ""
@@ -39,17 +59,15 @@ enum ClaudeUsageAdapter {
             let cacheCreation = usage[UsageIndexDefaults.cacheWriteDetailKey]
                 as? [String: Any]
 
-            // A count this app cannot hold makes the line unreadable, and an unreadable line
-            // produces no record — the same answer this loop already gives one whose JSON does
-            // not parse. Writing `0` into the field instead would put a number in the bill the
-            // account was never charged, and nothing downstream could tell it from a response
-            // that genuinely used no cached input.
+            // A count this app cannot hold makes the source incomplete. Writing `0` into the
+            // field instead would put a number in the bill the account was never charged, and
+            // skipping only this response would present the smaller source total as complete.
             guard let uncachedInput = count(usage[UsageIndexDefaults.inputKey]),
                   let cachedInput = count(usage[UsageIndexDefaults.cacheReadKey]),
                   let cacheWrite = count(usage[UsageIndexDefaults.cacheWriteKey]),
                   let cacheWrite1h = count(cacheCreation?[UsageIndexDefaults.cacheWrite1hKey]),
                   let output = count(usage[UsageIndexDefaults.outputKey])
-            else { return true }
+            else { throw unreadable(lineNumber) }
 
             found.append(UsageLedgerRecord(
                 identity: identity,
@@ -68,12 +86,27 @@ enum ClaudeUsageAdapter {
                     cacheWrite1h: cacheWrite1h,
                     output: output
                 ),
-                reportedCostUSD: reported
+                reportedCostUSD: reported,
+                sessionKind: parentSessionID == nil ? .root : .subagent,
+                parentSessionID: parentSessionID
             ))
             return true
         }
 
         return found
+    }
+
+    private static func parentSessionID(of transcript: URL) -> String? {
+        let directory = transcript.deletingLastPathComponent()
+        guard directory.lastPathComponent == AgentDefaults.claudeSubagentsSubdirectory else {
+            return nil
+        }
+        let parent = directory.deletingLastPathComponent().lastPathComponent
+        return parent.isEmpty ? nil : parent
+    }
+
+    private static func unreadable(_ line: Int) -> UsageTranscriptAdapterFailure {
+        .unreadableRecord(runtimeID: AgentKind.claude.rawValue, line: line)
     }
 }
 
@@ -87,22 +120,28 @@ enum CodexUsageAdapter {
         inRolloutAt url: URL,
         accountID: String,
         accountName: String
-    ) -> [UsageLedgerRecord] {
+    ) throws -> [UsageLedgerRecord] {
         let markers = CodexMarkers.all.map { Array($0.utf8) }
         var sessionID = url.deletingPathExtension().lastPathComponent
+        var parentSessionID: String?
+        var metadataSaysSubagent = false
+        var crossedChildBoundary = false
         var workingDirectory = ""
         var model = UsageIndexDefaults.unknownModel
         var previousSignature: String?
         var lineNumber = 0
-        var found: [UsageLedgerRecord] = []
+        var beforeBoundary: [UsageLedgerRecord] = []
+        var afterBoundary: [UsageLedgerRecord] = []
 
-        JSONLReader.forEachLine(at: url, limit: .max) { line in
+        try JSONLReader.forEachLineStrict(at: url, limit: .max) { line in
             lineNumber += 1
-            guard markers.contains(where: { TranscriptUsageIndex.contains($0, in: line) }),
-                  let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+            guard markers.contains(where: { TranscriptUsageIndex.contains($0, in: line) }) else {
+                return true
+            }
+            guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
                   let type = object["type"] as? String,
                   let payload = object["payload"] as? [String: Any]
-            else { return true }
+            else { throw unreadable(lineNumber) }
 
             switch type {
             case "session_meta":
@@ -110,16 +149,52 @@ enum CodexUsageAdapter {
                     ?? payload["id"] as? String
                     ?? sessionID
                 workingDirectory = payload["cwd"] as? String ?? workingDirectory
+                if let statedParent = payload["parent_thread_id"] as? String,
+                   !statedParent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    parentSessionID = statedParent
+                }
+                if parentSessionID != nil
+                    || (payload["source"] as? [String: Any])?["subagent"] != nil {
+                    metadataSaysSubagent = true
+                }
 
             case "turn_context":
                 workingDirectory = payload["cwd"] as? String ?? workingDirectory
                 model = payload["model"] as? String ?? model
 
+            case "inter_agent_communication_metadata":
+                // Older child rollouts begin with a copied parent token record. The first
+                // communication boundary is the durable point after which per-request usage
+                // belongs to the child. Later boundaries are ordinary child traffic.
+                if !crossedChildBoundary {
+                    crossedChildBoundary = true
+                    previousSignature = nil
+                }
+
             case "event_msg":
-                guard payload["type"] as? String == "token_count",
-                      let info = payload["info"] as? [String: Any],
-                      let last = info["last_token_usage"] as? [String: Any]
-                else { return true }
+                guard payload["type"] as? String == "token_count" else { return true }
+                guard let rawInfo = payload["info"] else {
+                    throw unreadable(lineNumber)
+                }
+                if rawInfo is NSNull { return true }
+                guard let info = rawInfo as? [String: Any],
+                      let rawLast = info["last_token_usage"]
+                else { throw unreadable(lineNumber) }
+                if rawLast is NSNull { return true }
+                guard let last = rawLast as? [String: Any] else {
+                    throw unreadable(lineNumber)
+                }
+                guard [
+                    "input_tokens",
+                    "cached_input_tokens",
+                    "output_tokens",
+                    "reasoning_output_tokens"
+                ].contains(where: { last[$0] != nil }) else {
+                    // `total_tokens` alone is enough for a live scalar progress label, but it
+                    // cannot be assigned to input/cache/output or priced. The categorized ledger
+                    // refuses it instead of turning a known total into a record of zero.
+                    throw unreadable(lineNumber)
+                }
 
                 // As in the Claude adapter above: a count outside `Int64` makes this record
                 // unreadable rather than a record of zero tokens.
@@ -127,7 +202,7 @@ enum CodexUsageAdapter {
                       let cached = count(last["cached_input_tokens"]),
                       let output = count(last["output_tokens"]),
                       let reasoning = count(last["reasoning_output_tokens"])
-                else { return true }
+                else { throw unreadable(lineNumber) }
                 let stamp = object["timestamp"] as? String ?? ""
 
                 // Codex may restate an unchanged last response as surrounding events arrive.
@@ -153,7 +228,8 @@ enum CodexUsageAdapter {
                 let identity = stamp.isEmpty
                     ? "codex|\(sessionID)|line|\(lineNumber)"
                     : "codex|\(sessionID)|\(stamp)|\(signature)"
-                found.append(UsageLedgerRecord(
+                let isSubagent = crossedChildBoundary || metadataSaysSubagent
+                let record = UsageLedgerRecord(
                     identity: identity,
                     sessionID: sessionID,
                     at: UsageLedgerDate.parse(stamp),
@@ -167,8 +243,15 @@ enum CodexUsageAdapter {
                         cachedInput: cached,
                         output: output,
                         reasoning: reasoning
-                    )
-                ))
+                    ),
+                    sessionKind: isSubagent ? .subagent : .root,
+                    parentSessionID: isSubagent ? parentSessionID : nil
+                )
+                if crossedChildBoundary {
+                    afterBoundary.append(record)
+                } else {
+                    beforeBoundary.append(record)
+                }
 
             default:
                 break
@@ -176,7 +259,7 @@ enum CodexUsageAdapter {
             return true
         }
 
-        return found
+        return crossedChildBoundary ? afterBoundary : beforeBoundary
     }
 
     static func rollouts(inAccountAt configPath: String) -> [URL] {
@@ -192,7 +275,16 @@ enum CodexUsageAdapter {
     }
 
     private enum CodexMarkers {
-        static let all = ["\"session_meta\"", "\"turn_context\"", "\"token_count\""]
+        static let all = [
+            "\"session_meta\"",
+            "\"turn_context\"",
+            "\"token_count\"",
+            "\"inter_agent_communication_metadata\""
+        ]
+    }
+
+    private static func unreadable(_ line: Int) -> UsageTranscriptAdapterFailure {
+        .unreadableRecord(runtimeID: AgentKind.codex.rawValue, line: line)
     }
 }
 
@@ -331,7 +423,9 @@ enum GrokUsageAdapter {
 /// what a provider means by omitting it, and a quoted number `Int64` cannot parse still reads as
 /// none — that last one is a separate finding, pinned by `ProviderWireTextCorpusTests`, and it is
 /// deliberately neither fixed nor moved here: a string was never a JSON number, and what to do
-/// about a provider that quotes its numbers is a different decision from this one.
+/// about a provider that quotes its numbers is a different decision from this one. Claude and
+/// Codex additionally require the provider's category keys before calling this reader, so a
+/// total-only record cannot be mistaken for a categorized zero-token bill.
 ///
 /// The reading this replaced was `max(0, number.int64Value)`, which wrapped an oversized count to
 /// a negative and then clamped that to `0` — so a response the account was billed twelve
