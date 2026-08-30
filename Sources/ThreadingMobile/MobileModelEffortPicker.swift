@@ -230,13 +230,6 @@ struct MobileModelEffortPicker: View {
             matrix
         }
         .padding(MobileDesign.Spacing.inset)
-        .background(theme.floatingSurface)
-        // The popover is tone-on-tone with the composer bar it opens over; the themed dialog's
-        // border gives the edge back without a second surface colour.
-        .overlay {
-            RoundedRectangle(cornerRadius: theme.panelRadius, style: .continuous)
-                .strokeBorder(theme.border, lineWidth: max(theme.borderWidth, 1))
-        }
         .frame(minWidth: 350, idealWidth: 380, maxWidth: 420)
         .accessibilityElement(children: .contain)
         #if DEBUG

@@ -893,9 +893,9 @@ private struct SessionDraftComposerScreen: View {
         .disabled(models.isEmpty && selectedModel == nil)
         .accessibilityLabel(MobileL10n.string("Model and effort"))
         .accessibilityValue(runSummary)
-        .popover(
+        .mobileThemedPopover(
             isPresented: $runPickerIsPresented,
-            attachmentAnchor: .rect(.bounds),
+            theme: theme,
             arrowEdge: .bottom
         ) {
             MobileModelEffortPicker(
@@ -909,10 +909,6 @@ private struct SessionDraftComposerScreen: View {
                     runPickerIsPresented = false
                 }
             )
-            .mobileTheme(theme)
-            .presentationBackground(theme.floatingSurface)
-            .presentationCornerRadius(theme.panelRadius)
-            .presentationCompactAdaptation(.popover)
         }
     }
 
