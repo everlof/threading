@@ -40,7 +40,7 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             AppThemePalette.set(previousTheme)
         }
 
-        let router = WorkspaceNavigatorEvidenceRouter()
+        let router = try WorkspaceNavigatorEvidenceRouter()
         let factRegistry = try makePipelineFactRegistry()
         let controller = makeMainWindowController(
             initialFramePlan: .useDefaultFrame,
@@ -153,6 +153,49 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         try write(content, named: "workspace-navigator-pipeline-system-light-empty.png")
         controller.selectWorkspaceNavigator(.native)
 
+        let activitySelection = WorkspaceNavigatorSelection.extensionNavigator(
+            extensionIdentifier: router.activityInboxInventory.extensionIdentifier,
+            navigatorID: router.activityInboxInventory.navigator.id
+        )
+        for fixture in [
+            AppearanceFixture(name: "system-light", theme: .system, appearance: .aqua),
+            AppearanceFixture(name: "system-dark", theme: .system, appearance: .darkAqua),
+        ] {
+            AppThemePalette.set(fixture.theme)
+            content.appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
+            controller.selectWorkspaceNavigator(activitySelection)
+            _ = try waitForPipelineTable(in: content, rowCount: 9)
+            freezePipelineSpinners(in: content)
+            AppThemeRefresh.repaint(content)
+            try suppressComposerUsage(in: content)
+            content.layoutSubtreeIfNeeded()
+            content.displayIfNeeded()
+            try write(
+                content,
+                named: "workspace-navigator-activity-inbox-\(fixture.name).png"
+            )
+
+            if fixture.name == "system-light" {
+                let menuButton = try XCTUnwrap(
+                    descendants(of: content).compactMap { $0 as? ThemedIconButton }.first {
+                        $0.accessibilityIdentifier() == "workspace.navigator.menu"
+                    }
+                )
+                XCTAssertTrue(menuButton.accessibilityPerformPress())
+                XCTAssertTrue(ThemedMenuPresenter.isMenuOpen(in: window))
+                freezePipelineSpinners(in: content)
+                try suppressComposerUsage(in: content)
+                content.layoutSubtreeIfNeeded()
+                content.displayIfNeeded()
+                try write(
+                    content,
+                    named: "workspace-navigator-activity-inbox-system-light-menu.png"
+                )
+            }
+            controller.selectWorkspaceNavigator(.native)
+            XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+        }
+
         print("Rendered the focused workspace navigator to \(Render.directory.path)")
     }
 
@@ -162,19 +205,35 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
             ExtensionHostFactKey.sessionTitle,
             ExtensionHostFactKey.sessionDetailedActivity,
             ExtensionHostFactKey.sessionBranch,
+            ExtensionHostFactKey.sessionLastUsedAt,
+            ExtensionHostFactKey.sessionIsArchived,
+            ExtensionHostFactKey.sessionIsSnoozed,
         ]
         try registry.replaceHostDefinitions(
             HostFactCatalog.definitions.filter { keys.contains($0.key) }
         )
         let rows: [(String, String, String, String, ExtensionStatusRole)] = [
-            ("pipeline-1", "Review navigator permissions", "awaiting-user", "Waiting for you", .warning),
-            ("pipeline-2", "Prepare the 1.4 release", "working", "Working", .positive),
-            ("pipeline-3", "Design a focused project sidebar", "idle", "Idle", .neutral),
-            ("pipeline-4", "Keep lifecycle tests deterministic", "working", "Working", .positive),
-            ("pipeline-5", "Document host-owned recovery", "idle", "Idle", .neutral),
-            ("pipeline-6", "Join GitLab merge-request state", "awaiting-user", "Waiting", .warning),
-            ("pipeline-7", "Move search into the host transform", "working", "Working", .positive),
-            ("pipeline-8", "Define safe row intents", "idle", "Planned", .neutral),
+            ("pipeline-1", "Review navigator permissions", ExtensionSessionDetailedActivity.awaitingUser.rawValue, "Waiting for you", .warning),
+            ("pipeline-2", "Prepare the 1.4 release", ExtensionSessionDetailedActivity.working.rawValue, "Working", .positive),
+            ("pipeline-3", "Design a focused project sidebar", ExtensionSessionDetailedActivity.idle.rawValue, "Idle", .neutral),
+            ("pipeline-4", "Keep lifecycle tests deterministic", ExtensionSessionDetailedActivity.working.rawValue, "Working", .positive),
+            ("pipeline-5", "Document host-owned recovery", ExtensionSessionDetailedActivity.idle.rawValue, "Idle", .neutral),
+            ("pipeline-6", "Join GitLab merge-request state", ExtensionSessionDetailedActivity.awaitingUser.rawValue, "Waiting", .warning),
+            ("pipeline-7", "Move search into the host transform", ExtensionSessionDetailedActivity.working.rawValue, "Working", .positive),
+            ("pipeline-8", "Define safe row intents", ExtensionSessionDetailedActivity.idle.rawValue, "Planned", .neutral),
+        ]
+        let calendar = Calendar.current
+        let now = Date()
+        let today = calendar.startOfDay(for: now)
+        let lastUsedByID: [String: Date] = [
+            "pipeline-1": calendar.date(byAdding: .day, value: -10, to: today)!,
+            "pipeline-2": calendar.date(byAdding: .hour, value: -1, to: now)!,
+            "pipeline-3": calendar.date(byAdding: .hour, value: -2, to: now)!,
+            "pipeline-4": calendar.date(byAdding: .hour, value: -12, to: today)!,
+            "pipeline-5": calendar.date(byAdding: .day, value: -4, to: today)!,
+            "pipeline-6": now,
+            "pipeline-7": calendar.date(byAdding: .day, value: -10, to: today)!,
+            "pipeline-8": now,
         ]
         let observedAt = Date(timeIntervalSinceReferenceDate: 50)
         let facts = rows.flatMap { id, title, activity, activityLabel, status in
@@ -198,6 +257,24 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
                     key: ExtensionHostFactKey.sessionBranch,
                     subject: subject,
                     value: .string("navigator-pipeline"),
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionLastUsedAt,
+                    subject: subject,
+                    value: .date(lastUsedByID[id]!),
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionIsArchived,
+                    subject: subject,
+                    value: .boolean(id == "pipeline-6"),
+                    observedAt: observedAt
+                ),
+                ExtensionFact(
+                    key: ExtensionHostFactKey.sessionIsSnoozed,
+                    subject: subject,
+                    value: .boolean(id == "pipeline-8"),
                     observedAt: observedAt
                 ),
             ]
@@ -252,6 +329,15 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         usage.isHidden = true
     }
 
+    /// Evidence must show the working indicator without sampling a different animation frame on
+    /// the second strict pass. Removing only the presentation animation leaves the semantic arc
+    /// visible and keeps its accessibility identity intact.
+    private func freezePipelineSpinners(in root: NSView) {
+        for spinner in descendants(of: root).compactMap({ $0 as? ThemedSpinner }) {
+            spinner.layer?.sublayers?.forEach { $0.removeAllAnimations() }
+        }
+    }
+
     private func write(_ view: NSView, named filename: String) throws {
         let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: rep)
@@ -268,8 +354,9 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
 private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigatorRouting {
     let inventory: ExtensionWorkspaceNavigatorInventoryItem
     let pipelineInventory: ExtensionWorkspaceNavigatorInventoryItem
+    let activityInboxInventory: ExtensionWorkspaceNavigatorInventoryItem
 
-    init() {
+    init() throws {
         let sections = [
             ExtensionWorkspaceNavigatorSection(
                 id: "priority",
@@ -366,7 +453,7 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
                     predicate: .comparison(
                         .init(activity),
                         .equal,
-                        .string("working")
+                        .string(ExtensionSessionDetailedActivity.working.rawValue)
                     )
                 )],
                 sort: [.init(
@@ -412,10 +499,39 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
             optionValues: [workingOnly.id: .bool(false)],
             optionPersistenceOutcome: .loaded
         )
+
+        let manifestURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent(
+                "Packages/ThreadingExtensionKit/Examples/ActivityInboxExtension/"
+                    + "threading-extension.json"
+            )
+        let manifest = try JSONDecoder().decode(
+            ExtensionManifest.self,
+            from: Data(contentsOf: manifestURL)
+        )
+        try manifest.validate()
+        guard let activityInbox = manifest.workspaceNavigators.first(where: {
+            $0.id == "activity-inbox"
+        }), let sortOption = activityInbox.options.first(where: {
+            $0.id == "sort-order"
+        }) else {
+            throw WorkspaceNavigatorEvidenceError.missingActivityInboxDeclaration
+        }
+        activityInboxInventory = .init(
+            extensionIdentifier: manifest.identifier,
+            extensionName: manifest.name,
+            processGeneration: "activity-inbox-evidence-generation",
+            navigator: activityInbox,
+            optionValues: [sortOption.id: .string("recent")],
+            optionPersistenceOutcome: .loaded
+        )
     }
 
     var extensionWorkspaceNavigatorInventory: [ExtensionWorkspaceNavigatorInventoryItem] {
-        [inventory, pipelineInventory]
+        [inventory, pipelineInventory, activityInboxInventory]
     }
 
     func registeredWorkspaceNavigator(
@@ -446,4 +562,8 @@ private final class WorkspaceNavigatorEvidenceRouter: ExtensionWorkspaceNavigato
     ) -> Bool {
         false
     }
+}
+
+private enum WorkspaceNavigatorEvidenceError: Error {
+    case missingActivityInboxDeclaration
 }

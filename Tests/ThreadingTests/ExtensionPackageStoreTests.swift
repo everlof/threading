@@ -1351,6 +1351,59 @@ final class ExtensionPackageStoreTests: XCTestCase {
         )
     }
 
+    func testStaticPipelineMetadataIsNeverInventoriedWithoutALiveMatchedGeneration()
+        async throws
+    {
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Host evaluated", role: .neutral)),
+            pipeline: .init(
+                consumes: [.init(
+                    key: ExtensionHostFactKey.sessionTitle,
+                    requirement: .required
+                )],
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .text(
+                        .fact(
+                            .init(ExtensionHostFactKey.sessionTitle),
+                            facet: .value,
+                            fallback: nil
+                        ),
+                        role: .body
+                    )
+                )
+            )
+        )
+        let source = try makePackage(
+            navigator: navigator,
+            exitsAfterRegistration: true
+        )
+        let store = ExtensionPackageStore(
+            rootURL: temporaryDirectory("manager-static-navigator-lifecycle")
+        )
+        _ = try store.install(from: source)
+        let manager = ExtensionManager(store: store)
+        defer { manager.terminateAll() }
+
+        XCTAssertEqual(
+            manager.extensionWorkspaceNavigatorInventory,
+            [],
+            "inspected manifest metadata is not a render inventory"
+        )
+        try manager.setEnabled(true, identifier: "com.example.installed-test")
+        let terminated = await waitUntil {
+            guard let installed = manager.installedExtensions.first else { return false }
+            if case .failed = installed.status {
+                return manager.extensionWorkspaceNavigatorInventory.isEmpty
+            }
+            return false
+        }
+        XCTAssertTrue(terminated)
+        XCTAssertEqual(manager.extensionWorkspaceNavigatorInventory, [])
+    }
+
     func testManagerRejectsAnOlderNavigatorOptionCompletion() async throws {
         let navigator = ExtensionWorkspaceNavigator(
             id: "activity",
@@ -3225,7 +3278,8 @@ final class ExtensionPackageStoreTests: XCTestCase {
         requiresStorageEnvironment: Bool = false,
         settings: ExtensionSettingsContribution = .init(),
         settingsResponseIDs: [String] = [],
-        settingsResponseError: String? = nil
+        settingsResponseError: String? = nil,
+        exitsAfterRegistration: Bool = false
     ) throws -> URL {
         let root = temporaryDirectory("source")
         let bin = root.appendingPathComponent("bin", isDirectory: true)
@@ -3268,6 +3322,7 @@ final class ExtensionPackageStoreTests: XCTestCase {
             runtime: .native,
             executable: "bin/extension",
             capabilities: capabilities,
+            workspaceNavigators: navigators.filter { $0.pipeline != nil },
             mcpTools: tools,
             settings: settings,
             services: services,
@@ -3288,7 +3343,9 @@ final class ExtensionPackageStoreTests: XCTestCase {
             as: UTF8.self
         )
         let serveBody: String
-        if !settingsResponseIDs.isEmpty {
+        if exitsAfterRegistration {
+            serveBody = "exit 73"
+        } else if !settingsResponseIDs.isEmpty {
             let ids = String(
                 decoding: try JSONEncoder().encode(settingsResponseIDs),
                 as: UTF8.self

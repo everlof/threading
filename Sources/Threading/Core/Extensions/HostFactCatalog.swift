@@ -525,12 +525,12 @@ enum HostFactCatalog {
 
     private static func detailedActivity(_ activity: SessionActivity) -> String {
         switch activity {
-        case .dormant: "dormant"
-        case .idle: "idle"
-        case .working: "working"
-        case .awaitingUser: "awaiting-user"
-        case .needsAttention: "needs-attention"
-        case .limitReached: "limit-reached"
+        case .dormant: ExtensionSessionDetailedActivity.dormant.rawValue
+        case .idle: ExtensionSessionDetailedActivity.idle.rawValue
+        case .working: ExtensionSessionDetailedActivity.working.rawValue
+        case .awaitingUser: ExtensionSessionDetailedActivity.awaitingUser.rawValue
+        case .needsAttention: ExtensionSessionDetailedActivity.needsAttention.rawValue
+        case .limitReached: ExtensionSessionDetailedActivity.limitReached.rawValue
         }
     }
 

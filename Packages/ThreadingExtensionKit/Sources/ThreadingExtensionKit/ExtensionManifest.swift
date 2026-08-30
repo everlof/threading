@@ -15,6 +15,11 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     public let runtime: ExtensionRuntime
     public let executable: String
     public let capabilities: Set<ExtensionCapability>
+    /// Host-evaluated navigator declarations inspectable before the process starts.
+    ///
+    /// Materialized v1 navigators remain runtime-only for compatibility. Every pipeline
+    /// navigator must appear here and the running generation must register the exact same value.
+    public let workspaceNavigators: [ExtensionWorkspaceNavigator]
     public let mcpTools: [ExtensionMCPTool]
     public let settings: ExtensionSettingsContribution
     public let services: [ExtensionServiceDefinition]
@@ -35,6 +40,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         runtime: ExtensionRuntime,
         executable: String,
         capabilities: Set<ExtensionCapability> = [],
+        workspaceNavigators: [ExtensionWorkspaceNavigator] = [],
         mcpTools: [ExtensionMCPTool] = [],
         settings: ExtensionSettingsContribution = .init(),
         services: [ExtensionServiceDefinition] = [],
@@ -54,6 +60,7 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         self.runtime = runtime
         self.executable = executable
         self.capabilities = capabilities
+        self.workspaceNavigators = workspaceNavigators
         self.mcpTools = mcpTools
         self.settings = settings
         self.services = services
@@ -67,7 +74,8 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities, mcpTools, settings
+        case formatVersion, identifier, name, version, dataVersion, runtime, executable, capabilities
+        case workspaceNavigators, mcpTools, settings
         case services, factDefinitions, serviceDependencies, companions, themes, fonts
         case localizations, networkGrants
     }
@@ -82,6 +90,14 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
         runtime = try container.decode(ExtensionRuntime.self, forKey: .runtime)
         executable = try container.decode(String.self, forKey: .executable)
         capabilities = try container.decode(Set<ExtensionCapability>.self, forKey: .capabilities)
+        workspaceNavigators = if container.contains(.workspaceNavigators) {
+            try container.decode(
+                [ExtensionWorkspaceNavigator].self,
+                forKey: .workspaceNavigators
+            )
+        } else {
+            []
+        }
         mcpTools = try container.decodeIfPresent([ExtensionMCPTool].self, forKey: .mcpTools) ?? []
         settings = try container.decodeIfPresent(
             ExtensionSettingsContribution.self,
@@ -172,6 +188,34 @@ public struct ExtensionManifest: Codable, Equatable, Sendable {
                     message: "must end in '.wasm' for the 'webAssembly' runtime"
                 )
             )
+        }
+
+        var seenNavigatorIDs: Set<String> = []
+        for (index, navigator) in workspaceNavigators.enumerated() {
+            let path = "workspaceNavigators[\(index)]"
+            issues.append(contentsOf: navigator.validationIssues(path: path))
+            if navigator.pipeline == nil {
+                issues.append(.init(
+                    path: "\(path).pipeline",
+                    message: "must declare a host-evaluated pipeline; v1 navigators stay runtime-only"
+                ))
+            }
+            if !seenNavigatorIDs.insert(navigator.id).inserted {
+                issues.append(.init(path: "\(path).id", message: "duplicates '\(navigator.id)'"))
+            }
+        }
+        if workspaceNavigators.count > 8 {
+            issues.append(.init(
+                path: "workspaceNavigators",
+                message: "must contain at most 8 navigators"
+            ))
+        }
+        if !workspaceNavigators.isEmpty,
+           !capabilities.contains(.workspaceNavigation) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'ui.workspace-navigation' when pipeline navigators are declared"
+            ))
         }
 
         var seenToolIDs: Set<String> = []

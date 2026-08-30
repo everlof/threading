@@ -26,6 +26,10 @@ The first vertical slice exists:
 - [`GitLabStateExtension`](../../Packages/ThreadingExtensionKit/Examples/GitLabStateExtension) is
   the compiling data-only fact-provider reference. It publishes merge-request state on canonical
   repository-branch subjects without declaring UI or session access.
+- [`ActivityInboxExtension`](../../Packages/ThreadingExtensionKit/Examples/ActivityInboxExtension)
+  is the compiling host-evaluated navigator reference. It declares Priority, Today, Yesterday and
+  Last 7 days sections, a sort option, host search and a working indicator without
+  reading sessions or running extension code on a live fact edge.
 - [`extension-manifest.schema.json`](schema/extension-manifest.schema.json) is the
   machine-readable manifest schema.
 - [`extension-settings.schema.json`](schema/extension-settings.schema.json) defines the
@@ -704,6 +708,7 @@ Packages/ThreadingExtensionKit/
 ├── Examples/HelloStatusExtension/
 ├── Examples/HelloStatusConsumerExtension/
 ├── Examples/GitLabStateExtension/
+├── Examples/ActivityInboxExtension/
 ├── Examples/SimulatorRelayExtension/
 └── Tests/ThreadingExtensionKitTests/
 
@@ -744,6 +749,7 @@ swift test --package-path Packages/ThreadingExtensionKit
 swift run --package-path Packages/ThreadingExtensionKit HelloStatusExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit HelloStatusConsumerExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit GitLabStateExtensionExample --threading-register
+swift run --package-path Packages/ThreadingExtensionKit ActivityInboxExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit SessionInfoExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit ThreadingComponentCatalogGenerator \
   docs/extensions/generated

@@ -185,6 +185,27 @@ final class ExtensionFactContractTests: XCTestCase {
         XCTAssertTrue(ExtensionHostFactKey.isReserved(.init(id: "repository.host", version: 1)))
         XCTAssertFalse(ExtensionHostFactKey.isReserved(.init(id: "gitlab.mr.state", version: 1)))
     }
+
+    func testDetailedActivityVocabularyPinsAllSixHostFactValues() {
+        XCTAssertEqual([
+            ExtensionSessionDetailedActivity.dormant.rawValue,
+            ExtensionSessionDetailedActivity.idle.rawValue,
+            ExtensionSessionDetailedActivity.working.rawValue,
+            ExtensionSessionDetailedActivity.awaitingUser.rawValue,
+            ExtensionSessionDetailedActivity.needsAttention.rawValue,
+            ExtensionSessionDetailedActivity.limitReached.rawValue,
+        ], [
+            "dormant", "idle", "working", "awaiting-user", "needs-attention", "limit-reached",
+        ])
+        XCTAssertEqual(
+            try? JSONDecoder().decode(
+                ExtensionSessionDetailedActivity.self,
+                from: Data("\"future-state\"".utf8)
+            ).rawValue,
+            "future-state",
+            "Unknown future detail remains inspectable"
+        )
+    }
 }
 
 private func sortedEncoder() -> JSONEncoder {

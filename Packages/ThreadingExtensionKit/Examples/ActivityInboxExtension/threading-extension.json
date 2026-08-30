@@ -1,0 +1,335 @@
+{
+  "formatVersion": 1,
+  "identifier": "codes.threading.activity-inbox",
+  "name": "Activity Inbox",
+  "version": "0.1.0",
+  "runtime": "webAssembly",
+  "executable": "bin/activity-inbox.wasm",
+  "capabilities": [
+    "ui.workspace-navigation"
+  ],
+  "workspaceNavigators": [
+    {
+      "id": "activity-inbox",
+      "options": [
+        {
+          "control": {
+            "defaultValue": "recent",
+            "options": [
+              {
+                "id": "recent",
+                "title": "Recent activity"
+              },
+              {
+                "id": "name",
+                "title": "Name"
+              }
+            ],
+            "type": "choice"
+          },
+          "id": "sort-order",
+          "title": "Sort"
+        }
+      ],
+      "pipeline": {
+        "buckets": [
+          {
+            "strategy": {
+              "rules": [
+                {
+                  "id": "priority",
+                  "predicate": {
+                    "operand": {
+                      "fact": {
+                        "key": {
+                          "id": "session.activity.detailed",
+                          "version": 1
+                        },
+                        "scope": "item"
+                      }
+                    },
+                    "operation": "equal",
+                    "type": "comparison",
+                    "value": {
+                      "type": "string",
+                      "value": "awaiting-user"
+                    }
+                  },
+                  "title": "Priority"
+                },
+                {
+                  "id": "today",
+                  "predicate": {
+                    "operand": {
+                      "fact": {
+                        "key": {
+                          "id": "session.last-used-at",
+                          "version": 1
+                        },
+                        "scope": "item"
+                      }
+                    },
+                    "range": {
+                      "type": "today"
+                    },
+                    "type": "relativeDate"
+                  },
+                  "title": "Today"
+                },
+                {
+                  "id": "yesterday",
+                  "predicate": {
+                    "operand": {
+                      "fact": {
+                        "key": {
+                          "id": "session.last-used-at",
+                          "version": 1
+                        },
+                        "scope": "item"
+                      }
+                    },
+                    "range": {
+                      "type": "yesterday"
+                    },
+                    "type": "relativeDate"
+                  },
+                  "title": "Yesterday"
+                },
+                {
+                  "id": "last-seven-days",
+                  "predicate": {
+                    "operand": {
+                      "fact": {
+                        "key": {
+                          "id": "session.last-used-at",
+                          "version": 1
+                        },
+                        "scope": "item"
+                      }
+                    },
+                    "range": {
+                      "days": 7,
+                      "type": "lastDays"
+                    },
+                    "type": "relativeDate"
+                  },
+                  "title": "Last 7 days"
+                }
+              ],
+              "type": "rules",
+              "unmatched": {
+                "type": "omit"
+              }
+            },
+            "when": []
+          }
+        ],
+        "consumes": [
+          {
+            "key": {
+              "id": "session.title",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.activity.detailed",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.last-used-at",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.is-archived",
+              "version": 1
+            },
+            "requirement": "required"
+          },
+          {
+            "key": {
+              "id": "session.is-snoozed",
+              "version": 1
+            },
+            "requirement": "required"
+          }
+        ],
+        "filters": [
+          {
+            "predicate": {
+              "operand": {
+                "fact": {
+                  "key": {
+                    "id": "session.is-archived",
+                    "version": 1
+                  },
+                  "scope": "item"
+                }
+              },
+              "operation": "equal",
+              "type": "comparison",
+              "value": {
+                "type": "boolean",
+                "value": false
+              }
+            },
+            "when": []
+          },
+          {
+            "predicate": {
+              "operand": {
+                "fact": {
+                  "key": {
+                    "id": "session.is-snoozed",
+                    "version": 1
+                  },
+                  "scope": "item"
+                }
+              },
+              "operation": "equal",
+              "type": "comparison",
+              "value": {
+                "type": "boolean",
+                "value": false
+              }
+            },
+            "when": []
+          }
+        ],
+        "formatVersion": 1,
+        "output": {
+          "activation": "sourceSession",
+          "collectionID": "activity-sessions",
+          "emptyState": {
+            "detail": "Try changing the search or sort option.",
+            "title": "No sessions"
+          },
+          "itemLimit": 1000,
+          "layout": {
+            "type": "list"
+          },
+          "overflow": "truncateWithNotice",
+          "rowTemplate": {
+            "axis": "horizontal",
+            "children": [
+              {
+                "binding": {
+                  "facet": "value",
+                  "fact": {
+                    "key": {
+                      "id": "session.title",
+                      "version": 1
+                    },
+                    "scope": "item"
+                  },
+                  "fallback": "Untitled session",
+                  "type": "fact"
+                },
+                "role": "compactBody",
+                "type": "text"
+              },
+              {
+                "type": "flexibleSpacer"
+              },
+              {
+                "content": {
+                  "accessibilityLabel": "Working",
+                  "type": "activityIndicator"
+                },
+                "predicate": {
+                  "operand": {
+                    "fact": {
+                      "key": {
+                        "id": "session.activity.detailed",
+                        "version": 1
+                      },
+                      "scope": "item"
+                    }
+                  },
+                  "operation": "equal",
+                  "type": "comparison",
+                  "value": {
+                    "type": "string",
+                    "value": "working"
+                  }
+                },
+                "type": "conditional"
+              }
+            ],
+            "spacing": "small",
+            "type": "stack"
+          },
+          "selectionMode": "single"
+        },
+        "search": {
+          "accessibilityLabel": "Search Activity Inbox sessions",
+          "fields": [
+            {
+              "key": {
+                "id": "session.title",
+                "version": 1
+              },
+              "scope": "item"
+            }
+          ],
+          "placeholder": "Search sessions"
+        },
+        "sort": [
+          {
+            "direction": "descending",
+            "operand": {
+              "fact": {
+                "key": {
+                  "id": "session.last-used-at",
+                  "version": 1
+                },
+                "scope": "item"
+              }
+            },
+            "when": [
+              {
+                "equals": "recent",
+                "optionID": "sort-order"
+              }
+            ]
+          },
+          {
+            "direction": "ascending",
+            "operand": {
+              "fact": {
+                "key": {
+                  "id": "session.title",
+                  "version": 1
+                },
+                "scope": "item"
+              }
+            },
+            "when": [
+              {
+                "equals": "name",
+                "optionID": "sort-order"
+              }
+            ]
+          }
+        ],
+        "source": "sessions"
+      },
+      "root": {
+        "content": {
+          "role": "neutral",
+          "text": "Activity Inbox requires a newer Threading host.",
+          "type": "status"
+        },
+        "type": "content"
+      },
+      "title": "Activity Inbox"
+    }
+  ]
+}

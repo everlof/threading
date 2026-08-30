@@ -20,6 +20,184 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
         XCTAssertNotNil(object["pipeline"])
     }
 
+    func testPipelineNavigatorsArePinnedInTheManifestWhileLegacyNavigatorsStayRuntimeOnly() throws {
+        let navigator = activityInboxNavigator()
+        let manifest = ExtensionManifest(
+            identifier: "com.example.activity-inbox",
+            name: "Activity Inbox",
+            version: "1.0.0",
+            runtime: .webAssembly,
+            executable: "bin/activity-inbox.wasm",
+            capabilities: [.workspaceNavigation],
+            workspaceNavigators: [navigator]
+        )
+        let registration = ExtensionRegistration(workspaceNavigators: [navigator])
+
+        try manifest.validate()
+        try registration.validate(for: manifest)
+
+        let runtimeOnlyManifest = ExtensionManifest(
+            identifier: "com.example.activity-inbox",
+            name: "Activity Inbox",
+            version: "1.0.0",
+            runtime: .webAssembly,
+            executable: "bin/activity-inbox.wasm",
+            capabilities: [.workspaceNavigation]
+        )
+        XCTAssertThrowsError(try registration.validate(for: runtimeOnlyManifest)) { error in
+            XCTAssertTrue((error as? ExtensionValidationError)?.issues.contains {
+                $0.path == "workspaceNavigators"
+                    && $0.message.contains("manifest declarations exactly")
+            } == true)
+        }
+
+        let changed = ExtensionWorkspaceNavigator(
+            id: navigator.id,
+            title: "Changed after inspection",
+            root: navigator.root,
+            options: navigator.options,
+            pipeline: navigator.pipeline
+        )
+        XCTAssertThrowsError(try ExtensionRegistration(
+            workspaceNavigators: [changed]
+        ).validate(for: manifest))
+
+        let legacy = ExtensionWorkspaceNavigator(
+            id: "legacy",
+            title: "Legacy",
+            root: .content(.status("Ready", role: .neutral))
+        )
+        try ExtensionRegistration(workspaceNavigators: [legacy]).validate(
+            for: runtimeOnlyManifest
+        )
+
+        let invalidStatic = ExtensionManifest(
+            identifier: "com.example.legacy-static",
+            name: "Legacy Static",
+            version: "1.0.0",
+            runtime: .webAssembly,
+            executable: "bin/legacy.wasm",
+            capabilities: [.workspaceNavigation],
+            workspaceNavigators: [legacy]
+        )
+        XCTAssertThrowsError(try invalidStatic.validate()) { error in
+            XCTAssertTrue((error as? ExtensionValidationError)?.issues.contains {
+                $0.path == "workspaceNavigators[0].pipeline"
+            } == true)
+        }
+    }
+
+    func testManifestNavigatorAbsenceDefaultsToEmptyButExplicitNullIsRejected() throws {
+        let manifest = ExtensionManifest(
+            identifier: "com.example.legacy",
+            name: "Legacy",
+            version: "1.0.0",
+            runtime: .webAssembly,
+            executable: "bin/legacy.wasm",
+            capabilities: [.workspaceNavigation]
+        )
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: JSONEncoder().encode(manifest))
+                as? [String: Any]
+        )
+        object.removeValue(forKey: "workspaceNavigators")
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                ExtensionManifest.self,
+                from: JSONSerialization.data(withJSONObject: object)
+            ).workspaceNavigators,
+            []
+        )
+        object["workspaceNavigators"] = NSNull()
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ExtensionManifest.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        ))
+    }
+
+    func testStartupPipelineManifestParityRejectsRemovalReorderingAndMutation() throws {
+        let first = activityInboxNavigator()
+        let second = ExtensionWorkspaceNavigator(
+            id: "second-inbox",
+            title: "Second inbox",
+            root: first.root,
+            options: first.options,
+            pipeline: first.pipeline
+        )
+        let manifest = ExtensionManifest(
+            identifier: "com.example.two-inboxes",
+            name: "Two Inboxes",
+            version: "1.0.0",
+            runtime: .webAssembly,
+            executable: "bin/inboxes.wasm",
+            capabilities: [.workspaceNavigation],
+            workspaceNavigators: [first, second]
+        )
+        try ExtensionRegistration(
+            workspaceNavigators: [first, second]
+        ).validate(for: manifest)
+
+        let mutated = ExtensionWorkspaceNavigator(
+            id: second.id,
+            title: "Changed",
+            root: second.root,
+            options: second.options,
+            pipeline: second.pipeline
+        )
+        for runtimeNavigators in [
+            [first],
+            [second, first],
+            [first, mutated],
+        ] {
+            XCTAssertThrowsError(try ExtensionRegistration(
+                workspaceNavigators: runtimeNavigators
+            ).validate(for: manifest))
+        }
+    }
+
+    func testScopedLegacyReplacementPinsOnlyItsAcceptedImmutableContract() throws {
+        let option = ExtensionWorkspaceNavigatorOption(
+            id: "group",
+            title: "Group",
+            control: .toggle(defaultValue: false)
+        )
+        let original = ExtensionWorkspaceNavigator(
+            id: "legacy",
+            title: "Loading",
+            root: .content(.status("Loading", role: .neutral)),
+            options: [option],
+            loadActionID: "refresh"
+        )
+        let manifest = ExtensionManifest(
+            identifier: "com.example.legacy",
+            name: "Legacy",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/extension",
+            capabilities: [.workspaceNavigation]
+        )
+        let replacement = ExtensionWorkspaceNavigator(
+            id: original.id,
+            title: "Ready",
+            root: .content(.status("Refreshed", role: .positive)),
+            options: original.options,
+            loadActionID: original.loadActionID
+        )
+        try ExtensionRegistration(
+            workspaceNavigators: [replacement]
+        ).validateWorkspaceNavigatorReplacement(for: manifest, replacing: original)
+
+        let changedOptions = ExtensionWorkspaceNavigator(
+            id: original.id,
+            title: replacement.title,
+            root: replacement.root,
+            loadActionID: original.loadActionID
+        )
+        XCTAssertThrowsError(try ExtensionRegistration(
+            workspaceNavigators: [changedOptions]
+        ).validateWorkspaceNavigatorReplacement(for: manifest, replacing: original))
+    }
+
     func testLegacyNavigatorWireRemainsPipelineFree() throws {
         let legacy = ExtensionWorkspaceNavigator(
             id: "legacy",
@@ -526,8 +704,8 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
             pipeline: ExtensionWorkspaceNavigatorPipeline(
                 consumes: [
                     .init(key: title.key, requirement: .required),
-                    .init(key: activity.key, requirement: .enhances),
-                    .init(key: lastUsed.key, requirement: .enhances),
+                    .init(key: activity.key, requirement: .required),
+                    .init(key: lastUsed.key, requirement: .required),
                     .init(key: archived.key, requirement: .required),
                     .init(key: snoozed.key, requirement: .required),
                 ],
@@ -557,7 +735,7 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
                                 predicate: .comparison(
                                     .init(activity),
                                     .equal,
-                                    .string("awaiting-user")
+                                    .string(ExtensionSessionDetailedActivity.awaitingUser.rawValue)
                                 )
                             ),
                             .init(
@@ -576,7 +754,7 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
                                 predicate: .relativeDate(.init(lastUsed), .lastDays(7))
                             ),
                         ],
-                        unmatched: .bucket(id: "older", title: "Older")
+                        unmatched: .omit
                     )),
                 ],
                 sort: [
@@ -606,7 +784,7 @@ final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
                                 .comparison(
                                     .init(activity),
                                     .equal,
-                                    .string("working")
+                                    .string(ExtensionSessionDetailedActivity.working.rawValue)
                                 ),
                                 content: .activityIndicator(
                                     accessibilityLabel: "Working"

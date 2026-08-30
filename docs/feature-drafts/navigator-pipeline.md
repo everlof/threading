@@ -3,8 +3,8 @@
 > Status: active feature draft — the product goal is that a user who wants a different sidebar
 > can have one, built by an extension, without Threading having anticipated the shape they wanted. The
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
-> plus a host-executed intent vocabulary. Rollout steps 1–4 were implemented by 2026-08-30;
-> rollout step 5 is in progress. No part of
+> plus a host-executed intent vocabulary. Rollout steps 1–5 were implemented by 2026-08-30.
+> No part of
 > `ui.workspace-navigation` v1 is withdrawn.
 
 ## Decision
@@ -596,12 +596,13 @@ does. An install must never reorder somebody's sidebar on its own.
    32 repositories and 4,096 retained facts, bounded paging/concurrency/retry, atomic removal, and
    preservation of the last observation across non-authoritative refresh failures.
 4. **Options — implemented 2026-08-30**, rendered in the navigator menu and persisted.
-5. **Transform and templates — in progress**, the `ui.workspace-navigation@2` contract revision,
-   with the `consumes` declarations,
-   the degradation tiers and the host-owned search control. v1 documents keep working; a
-   materialized item list is a degenerate template. `@2` names the additive format, while the
-   permission remains `ui.workspace-navigation`: the pipeline adds no authority and older hosts
-   must be able to render the required v1 `root` fallback rather than reject an unknown capability.
+5. **Transform and templates — implemented 2026-08-30.** The
+   `ui.workspace-navigation@2` contract adds `consumes` declarations, exact degradation tiers,
+   host-owned search and calendar invalidation, background transform evaluation, virtualized
+   visible-row template realization and source-session activation. v1 documents keep working; a
+   materialized item list is a degenerate template. `ActivityInboxExtension` is the buildable
+   public test: it requests only `ui.workspace-navigation`, while the host produces Priority and
+   relative-date sections, persists its sort option and repaints working state from facts.
 6. **Intents**, declared per navigator in the manifest. `T3SidebarExtension` becomes buildable.
 7. **Windowed collections**, retiring the aggregate item cap.
 8. **Native on the pipeline**, as far as it honestly goes. Full parity includes drag reorder,

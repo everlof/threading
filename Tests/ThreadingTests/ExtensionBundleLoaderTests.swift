@@ -277,6 +277,63 @@ final class ExtensionBundleLoaderTests: XCTestCase {
         XCTAssertEqual(label, "Kör")
     }
 
+    func testPipelineManifestParityUsesRawBaseLanguageBeforeLocalization() throws {
+        let rawNavigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.status("Ready", role: .neutral)),
+            pipeline: .init(
+                consumes: [.init(
+                    key: ExtensionHostFactKey.sessionTitle,
+                    requirement: .required
+                )],
+                search: .init(
+                    placeholder: "Search sessions",
+                    accessibilityLabel: "Search sessions",
+                    fields: [.init(ExtensionHostFactKey.sessionTitle)]
+                ),
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .text(
+                        .fact(
+                            .init(ExtensionHostFactKey.sessionTitle),
+                            facet: .value,
+                            fallback: "Untitled"
+                        ),
+                        role: .body
+                    )
+                )
+            )
+        )
+        let manifest = ExtensionManifest(
+            identifier: "com.example.localized-pipeline",
+            name: "Localized Pipeline",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/extension",
+            capabilities: [.workspaceNavigation],
+            workspaceNavigators: [rawNavigator]
+        )
+        let rawRegistration = ExtensionRegistration(
+            workspaceNavigators: [rawNavigator]
+        )
+        try rawRegistration.validate(for: manifest)
+
+        let localizedRegistration = ExtensionLocalizationResolver(strings: [
+            "Activity": "Aktivitet",
+            "Ready": "Klar",
+            "Search sessions": "Sök sessioner",
+            "Untitled": "Namnlös",
+        ]).registration(rawRegistration)
+        XCTAssertEqual(localizedRegistration.workspaceNavigators.first?.title, "Aktivitet")
+        XCTAssertThrowsError(try localizedRegistration.validate(for: manifest)) { error in
+            XCTAssertTrue((error as? ExtensionValidationError)?.issues.contains {
+                $0.path == "workspaceNavigators"
+                    && $0.message.contains("manifest declarations exactly")
+            } == true)
+        }
+    }
+
     func testInspectorRejectsLocalizationFilesThatAreNotFlatStringCatalogues() throws {
         let directory = try makeBundle(
             capabilities: [],

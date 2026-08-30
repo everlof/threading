@@ -66,6 +66,19 @@
         "$ref": "#/$defs/mcpTool"
       }
     },
+    "workspaceNavigators": {
+      "type": "array",
+      "maxItems": 8,
+      "uniqueItems": true,
+      "default": [],
+      "description": "Static host-evaluated navigator declarations. Every value must contain a pipeline and the running generation must register the exact same declaration. Materialized v1 navigators remain runtime-only for compatibility. Requires ui.workspace-navigation.",
+      "items": {
+        "allOf": [
+          { "$ref": "workspace-navigator.schema.json" },
+          { "required": ["pipeline"] }
+        ]
+      }
+    },
     "settings": {
       "$ref": "extension-settings.schema.json",
       "default": {

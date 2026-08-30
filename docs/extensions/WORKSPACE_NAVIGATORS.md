@@ -135,8 +135,9 @@ options: [
 The contract permits at most 16 options and 30 declared menu entries after expanding choice
 submenus; Threading reserves the final two entries for the divider and Native route. IDs and
 defaults are durable values. Titles and choice titles are localized copy. A complete runtime
-navigator replacement must repeat the original localized declaration exactly, so only a new
-process generation can change the meaning of a stored value.
+navigator replacement must repeat the raw option declaration accepted from that process
+generation exactly, so only a new generation can change the meaning of a stored value. Threading
+localizes the accepted declaration afterward for presentation.
 
 Option values are host-owned state. Threading hydrates one recoverable file per extension on the
 background activation path, then publishes only a generation-matched in-memory snapshot to the
@@ -168,8 +169,20 @@ row template, and routes every generated row to its source session without calli
 The declaration names every fact it consumes as `required` or `enhances`, and every declared
 option must participate in a filter, bucket, or sort condition. `loadActionID` and
 `eventActionID` are unavailable on a pipeline navigator: facts and option values invalidate it
-inside the host. A runtime action replacement must repeat the initial localized pipeline exactly;
+inside the host. A runtime action replacement must repeat the raw registered pipeline exactly;
 only a new process generation may add, remove, or change it.
+
+Pipeline declarations cross two matched boundaries. Put every pipeline navigator in the
+manifest's `workspaceNavigators` array so Threading can inspect the package without launching it,
+then register the exact same raw base-language values, in the same order, during the process
+handshake. The host validates that complete list before localization. Runtime-only v1 navigators
+stay out of the manifest and may coexist in the same registration. An absent manifest member
+decodes as `[]` for old packages; explicit `null` is invalid.
+
+The manifest list is inspection metadata, never render inventory. Threading exposes only the
+localized navigator values belonging to a currently running generation whose complete raw list
+matched the manifest. A mismatch, startup failure, disable, or process termination exposes none
+of that generation's navigators and restores the host-owned Native route.
 
 Provider absence and subject absence are different:
 
@@ -202,6 +215,18 @@ Until windowed collections ship, format 1 requires `itemLimit` in `1...1000` and
 the omitted count. This is an explicit finite bridge, not silent truncation or a claim that format
 1 has already implemented windowing. The complete machine-readable contract is
 [`schema/workspace-navigator-pipeline.schema.json`](schema/workspace-navigator-pipeline.schema.json).
+
+[`ActivityInboxExtension`](../../Packages/ThreadingExtensionKit/Examples/ActivityInboxExtension)
+is the complete safe-extension example. Its manifest requests only `ui.workspace-navigation`; its
+static pipeline produces Priority, Today, Yesterday and Last 7 days sections from published
+host facts, shows working state from the detailed activity fact, and lets the host own search,
+sorting, the clock, row realization and source-session activation. There is no session snapshot
+read and no extension callback on a fact or calendar edge.
+
+`session.activity.detailed@1` currently publishes six named raw values through
+`ExtensionSessionDetailedActivity`: `dormant`, `idle`, `working`, `awaiting-user`,
+`needs-attention`, and `limit-reached`. Use those constants instead of reproducing private host
+model strings. The raw-value type deliberately keeps unknown future values decodable.
 
 ## Runtime snapshots and actions
 

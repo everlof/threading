@@ -1552,6 +1552,136 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         XCTAssertTrue(router.invocations.isEmpty)
     }
 
+    func testActivityInboxAutomaticallyRebucketsAtMidnightAndForTimeZoneChangesWithoutInvokingExtension() throws {
+        let navigator = try activityInboxNavigatorFromShippedManifest()
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        let nextDay = try XCTUnwrap(utc.date(from: .init(
+            year: 2026,
+            month: 8,
+            day: 31
+        )))
+        let initialNow = nextDay.addingTimeInterval(-0.1)
+        let lastUsed = try XCTUnwrap(utc.date(from: .init(
+            year: 2026,
+            month: 8,
+            day: 30,
+            hour: 23,
+            minute: 45
+        )))
+        let time = MutableNavigatorTimeContext(now: initialNow, calendar: utc)
+        let sessionID = "working-session"
+        let definitions: [ExtensionFactDefinition] = [
+            .init(
+                key: ExtensionHostFactKey.sessionTitle,
+                displayName: "Title",
+                valueType: .string,
+                subjectKinds: [.session],
+                usages: [.searchable, .sortable, .presentable]
+            ),
+            .init(
+                key: ExtensionHostFactKey.sessionDetailedActivity,
+                displayName: "Activity",
+                valueType: .string,
+                subjectKinds: [.session],
+                usages: [.filterable, .groupable, .presentable]
+            ),
+            .init(
+                key: ExtensionHostFactKey.sessionLastUsedAt,
+                displayName: "Last used",
+                valueType: .date,
+                subjectKinds: [.session],
+                usages: [.filterable, .sortable, .groupable]
+            ),
+            .init(
+                key: ExtensionHostFactKey.sessionIsArchived,
+                displayName: "Archived",
+                valueType: .boolean,
+                subjectKinds: [.session],
+                usages: [.filterable]
+            ),
+            .init(
+                key: ExtensionHostFactKey.sessionIsSnoozed,
+                displayName: "Snoozed",
+                valueType: .boolean,
+                subjectKinds: [.session],
+                usages: [.filterable]
+            ),
+        ]
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: [sessionID],
+            definitions: definitions,
+            facts: [
+                navigatorFact(
+                    ExtensionHostFactKey.sessionTitle,
+                    sessionID: sessionID,
+                    value: .string("Late build")
+                ),
+                navigatorFact(
+                    ExtensionHostFactKey.sessionDetailedActivity,
+                    sessionID: sessionID,
+                    value: .string(ExtensionSessionDetailedActivity.working.rawValue)
+                ),
+                navigatorFact(
+                    ExtensionHostFactKey.sessionLastUsedAt,
+                    sessionID: sessionID,
+                    value: .date(lastUsed)
+                ),
+                navigatorFact(
+                    ExtensionHostFactKey.sessionIsArchived,
+                    sessionID: sessionID,
+                    value: .boolean(false)
+                ),
+                navigatorFact(
+                    ExtensionHostFactKey.sessionIsSnoozed,
+                    sessionID: sessionID,
+                    value: .boolean(false)
+                ),
+            ]
+        )
+        let router = TestWorkspaceNavigatorRouter(
+            navigator: navigator,
+            optionValues: ["sort-order": .string("recent")]
+        )
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            pipelineEvaluate: { request in
+                let evaluation = WorkspaceNavigatorPipelineEvaluator(
+                    calendar: request.calendar,
+                    now: { request.referenceDate }
+                ).evaluate(request.pipeline, query: request.query)
+                return WorkspaceNavigatorPipelinePresentation(evaluation: evaluation)
+            },
+            pipelineCalendarProvider: { time.calendar },
+            pipelineNowProvider: { time.now },
+            onUnavailable: { XCTFail("Activity Inbox became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+
+        let table = try waitForPipelineTable(in: host, rowCount: 2)
+        try waitForPipelineText("Today", in: host, table: table, row: 0, timeout: 2)
+        _ = table.view(atColumn: 0, row: 1, makeIfNecessary: true)
+        XCTAssertTrue(descendants(in: host.view).contains {
+            $0.accessibilityIdentifier() == "workspace.navigator.pipeline-activity"
+        })
+
+        time.now = nextDay.addingTimeInterval(10 * 60)
+        try waitForPipelineText("Yesterday", in: host, table: table, row: 0, timeout: 3)
+
+        var losAngeles = utc
+        losAngeles.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        time.calendar = losAngeles
+        NotificationCenter.default.post(name: .NSSystemTimeZoneDidChange, object: nil)
+        try waitForPipelineText("Today", in: host, table: table, row: 0, timeout: 2)
+
+        XCTAssertTrue(router.invocations.isEmpty)
+    }
+
     func testWorkspaceNavigatorSuccessfulReplacementAtomicallyUpdatesHostTitle() throws {
         let navigator = ExtensionWorkspaceNavigator(
             id: "activity",
@@ -7997,6 +8127,27 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     )
   }
 
+  private func activityInboxNavigatorFromShippedManifest() throws
+    -> ExtensionWorkspaceNavigator
+  {
+    let repositoryRoot = URL(fileURLWithPath: #filePath)
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+      .deletingLastPathComponent()
+    let manifestURL = repositoryRoot.appendingPathComponent(
+      "Packages/ThreadingExtensionKit/Examples/ActivityInboxExtension/"
+        + "threading-extension.json"
+    )
+    let manifest = try JSONDecoder().decode(
+      ExtensionManifest.self,
+      from: Data(contentsOf: manifestURL)
+    )
+    try manifest.validate()
+    return try XCTUnwrap(
+      manifest.workspaceNavigators.first { $0.id == "activity-inbox" }
+    )
+  }
+
   private func navigatorFactDefinition(
     _ key: ExtensionFactKey,
     usages: Set<ExtensionFactUsage>
@@ -8480,6 +8631,27 @@ private final class TestExtensionSecretStore:
 
   func keys(extensionIdentifier: String) throws -> [String] {
     values[extensionIdentifier]?.keys.sorted() ?? []
+  }
+}
+
+private final class MutableNavigatorTimeContext: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storedNow: Date
+  private var storedCalendar: Calendar
+
+  init(now: Date, calendar: Calendar) {
+    storedNow = now
+    storedCalendar = calendar
+  }
+
+  var now: Date {
+    get { lock.withLock { storedNow } }
+    set { lock.withLock { storedNow = newValue } }
+  }
+
+  var calendar: Calendar {
+    get { lock.withLock { storedCalendar } }
+    set { lock.withLock { storedCalendar = newValue } }
   }
 }
 

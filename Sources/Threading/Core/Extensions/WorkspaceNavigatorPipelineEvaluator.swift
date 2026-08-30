@@ -70,6 +70,22 @@ final class WorkspaceNavigatorPipelineEvaluationScheduler: @unchecked Sendable {
         let pipeline: CompiledWorkspaceNavigatorPipeline
         let query: String
         let calendar: Calendar
+        /// One host-owned clock sample shared by evaluation and the midnight scheduler.
+        let referenceDate: Date
+
+        init(
+            sequence: Int,
+            pipeline: CompiledWorkspaceNavigatorPipeline,
+            query: String,
+            calendar: Calendar,
+            referenceDate: Date = Date()
+        ) {
+            self.sequence = sequence
+            self.pipeline = pipeline
+            self.query = query
+            self.calendar = calendar
+            self.referenceDate = referenceDate
+        }
     }
 
     struct Output: Sendable {
@@ -98,7 +114,8 @@ final class WorkspaceNavigatorPipelineEvaluationScheduler: @unchecked Sendable {
         ),
         evaluate: @escaping Evaluate = { request in
             let evaluation = WorkspaceNavigatorPipelineEvaluator(
-                calendar: request.calendar
+                calendar: request.calendar,
+                now: { request.referenceDate }
             ).evaluate(request.pipeline, query: request.query)
             return WorkspaceNavigatorPipelinePresentation(evaluation: evaluation)
         },

@@ -487,6 +487,231 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         XCTAssertEqual(westCoast.sections.first?.identity, .rule(id: "yesterday"))
     }
 
+    func testActivityInboxKeepsPriorityAheadOfCalendarSectionsAndRealizesWorkingState() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = date(2026, 8, 30, 15, 0, calendar: calendar)
+        let today = calendar.startOfDay(for: now)
+        let activityKey = ExtensionHostFactKey.sessionDetailedActivity
+        let lastUsedKey = ExtensionHostFactKey.sessionLastUsedAt
+        let archivedKey = ExtensionHostFactKey.sessionIsArchived
+        let snoozedKey = ExtensionHostFactKey.sessionIsSnoozed
+        let definitions = [
+            titleDefinition,
+            definition(
+                activityKey,
+                type: .string,
+                kinds: [.session],
+                usages: [.filterable, .groupable, .presentable]
+            ),
+            definition(
+                lastUsedKey,
+                type: .date,
+                kinds: [.session],
+                usages: [.filterable, .sortable, .groupable]
+            ),
+            definition(
+                archivedKey,
+                type: .boolean,
+                kinds: [.session],
+                usages: [.filterable]
+            ),
+            definition(
+                snoozedKey,
+                type: .boolean,
+                kinds: [.session],
+                usages: [.filterable]
+            ),
+        ]
+        let rows: [(
+            id: String,
+            title: String,
+            activity: String,
+            lastUsed: Date,
+            archived: Bool,
+            snoozed: Bool
+        )] = [
+            (
+                "priority-old",
+                "Waiting for approval",
+                ExtensionSessionDetailedActivity.awaitingUser.rawValue,
+                calendar.date(byAdding: .day, value: -10, to: today)!,
+                false,
+                false
+            ),
+            (
+                "today-zulu",
+                "Zulu working session",
+                ExtensionSessionDetailedActivity.working.rawValue,
+                calendar.date(byAdding: .hour, value: -1, to: now)!,
+                false,
+                false
+            ),
+            (
+                "today-alpha",
+                "Alpha idle session",
+                ExtensionSessionDetailedActivity.idle.rawValue,
+                calendar.date(byAdding: .hour, value: -2, to: now)!,
+                false,
+                false
+            ),
+            (
+                "yesterday",
+                "Yesterday session",
+                ExtensionSessionDetailedActivity.idle.rawValue,
+                calendar.date(byAdding: .hour, value: -12, to: today)!,
+                false,
+                false
+            ),
+            (
+                "week",
+                "Earlier this week",
+                ExtensionSessionDetailedActivity.idle.rawValue,
+                calendar.date(byAdding: .day, value: -4, to: today)!,
+                false,
+                false
+            ),
+            (
+                "older",
+                "Older session",
+                ExtensionSessionDetailedActivity.idle.rawValue,
+                calendar.date(byAdding: .day, value: -10, to: today)!,
+                false,
+                false
+            ),
+            (
+                "archived",
+                "Archived today",
+                ExtensionSessionDetailedActivity.working.rawValue,
+                now,
+                true,
+                false
+            ),
+            (
+                "snoozed",
+                "Snoozed today",
+                ExtensionSessionDetailedActivity.idle.rawValue,
+                now,
+                false,
+                true
+            ),
+        ]
+        let facts = rows.flatMap { row in
+            let subject = ExtensionFactSubject.session(row.id)
+            return [
+                fact(titleKey, subject, .string(row.title)),
+                fact(activityKey, subject, .string(row.activity)),
+                fact(lastUsedKey, subject, .date(row.lastUsed)),
+                fact(archivedKey, subject, .boolean(row.archived)),
+                fact(snoozedKey, subject, .boolean(row.snoozed)),
+            ]
+        }
+        let snapshot = makeSnapshot(
+            sessionIDs: rows.map(\.id),
+            definitions: definitions,
+            facts: facts
+        )
+        let declaration = try activityInboxPipelineFromShippedManifest()
+        let evaluator = WorkspaceNavigatorPipelineEvaluator(
+            calendar: calendar,
+            now: { now }
+        )
+        let recent = try evaluator.evaluate(ready(
+            declaration,
+            snapshot: snapshot,
+            optionValues: ["sort-order": .string("recent")]
+        ))
+
+        XCTAssertEqual(recent.sections.map(\.identity), [
+            .rule(id: "priority"),
+            .rule(id: "today"),
+            .rule(id: "yesterday"),
+            .rule(id: "last-seven-days"),
+        ])
+        XCTAssertEqual(recent.sections.map { $0.items.map(\.sourceSessionID) }, [
+            ["priority-old"],
+            ["today-zulu", "today-alpha"],
+            ["yesterday"],
+            ["week"],
+        ])
+        XCTAssertFalse(recent.sections.flatMap(\.items).contains {
+            ["archived", "snoozed"].contains($0.sourceSessionID)
+        })
+
+        let working = try XCTUnwrap(
+            recent.sections.flatMap(\.items).first { $0.sourceSessionID == "today-zulu" }
+        )
+        let recentProgram = try ready(
+            declaration,
+            snapshot: snapshot,
+            optionValues: ["sort-order": .string("recent")]
+        )
+        XCTAssertEqual(evaluator.realizeVisibleRow(working, in: recentProgram), .stack(
+            axis: .horizontal,
+            spacing: .small,
+            children: [
+                .text("Zulu working session", role: .compactBody),
+                .flexibleSpacer,
+                .activityIndicator(accessibilityLabel: "Working"),
+            ]
+        ))
+
+        let named = try evaluator.evaluate(ready(
+            declaration,
+            snapshot: snapshot,
+            optionValues: ["sort-order": .string("name")]
+        ))
+        XCTAssertEqual(named.sections[1].items.map(\.sourceSessionID), [
+            "today-alpha", "today-zulu",
+        ])
+
+        let activityChangedFacts = rows.flatMap { row in
+            let subject = ExtensionFactSubject.session(row.id)
+            let activity = row.id == "today-zulu"
+                ? ExtensionSessionDetailedActivity.awaitingUser.rawValue
+                : row.activity
+            return [
+                fact(titleKey, subject, .string(row.title)),
+                fact(activityKey, subject, .string(activity)),
+                fact(lastUsedKey, subject, .date(row.lastUsed)),
+                fact(archivedKey, subject, .boolean(row.archived)),
+                fact(snoozedKey, subject, .boolean(row.snoozed)),
+            ]
+        }
+        let activityChangedSnapshot = makeSnapshot(
+            sessionIDs: rows.map(\.id),
+            definitions: definitions,
+            facts: activityChangedFacts,
+            revision: 2
+        )
+        let activityChangedProgram = try ready(
+            declaration,
+            snapshot: activityChangedSnapshot,
+            optionValues: ["sort-order": .string("recent")]
+        )
+        let activityChanged = evaluator.evaluate(activityChangedProgram)
+        XCTAssertEqual(activityChanged.sections[0].items.map(\.sourceSessionID), [
+            "today-zulu", "priority-old",
+        ])
+        XCTAssertEqual(activityChanged.sections[1].items.map(\.sourceSessionID), [
+            "today-alpha",
+        ])
+        let noLongerWorking = try XCTUnwrap(
+            activityChanged.sections[0].items.first { $0.sourceSessionID == "today-zulu" }
+        )
+        XCTAssertEqual(
+            evaluator.realizeVisibleRow(noLongerWorking, in: activityChangedProgram),
+            .stack(
+                axis: .horizontal,
+                spacing: .small,
+                children: [
+                    .text("Zulu working session", role: .compactBody),
+                    .flexibleSpacer,
+                ]
+            )
+        )
+    }
+
     func testVisibleRowRealizationUsesPresentationFallbacksAndExplicitProjectJoin() throws {
         let stateDefinition = definition(
             stateKey,
@@ -813,6 +1038,28 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
 
     private var titleTemplate: ExtensionWorkspaceNavigatorTemplateNode {
         .text(.fact(.init(titleKey), facet: .value, fallback: nil), role: .body)
+    }
+
+    private func activityInboxPipelineFromShippedManifest() throws
+        -> ExtensionWorkspaceNavigatorPipeline
+    {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let manifestURL = repositoryRoot.appendingPathComponent(
+            "Packages/ThreadingExtensionKit/Examples/ActivityInboxExtension/"
+                + "threading-extension.json"
+        )
+        let manifest = try JSONDecoder().decode(
+            ExtensionManifest.self,
+            from: Data(contentsOf: manifestURL)
+        )
+        try manifest.validate()
+        let navigator = try XCTUnwrap(
+            manifest.workspaceNavigators.first { $0.id == "activity-inbox" }
+        )
+        return try XCTUnwrap(navigator.pipeline)
     }
 
     private func pipeline(

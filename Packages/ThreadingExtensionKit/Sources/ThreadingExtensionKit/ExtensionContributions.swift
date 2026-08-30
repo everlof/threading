@@ -316,6 +316,79 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
     }
 
     public func validate(for manifest: ExtensionManifest) throws {
+        let issues = validationIssues(for: manifest)
+        if !issues.isEmpty {
+            throw ExtensionValidationError(issues: issues)
+        }
+    }
+
+    /// Validates one v1 navigator document returned after the process registration handshake.
+    ///
+    /// Manifest pipeline parity belongs to the complete startup registration. A later action
+    /// response carries only one navigator, so comparing that partial response with the complete
+    /// manifest would incorrectly reject a package which also declares static pipeline
+    /// navigators. The immutable option and pipeline contracts are still pinned to the accepted
+    /// navigator from this exact process generation.
+    public func validateWorkspaceNavigatorReplacement(
+        for manifest: ExtensionManifest,
+        replacing original: ExtensionWorkspaceNavigator
+    ) throws {
+        var issues: [ExtensionValidationIssue] = []
+        guard workspaceNavigators.count == 1,
+              commands.isEmpty,
+              panels.isEmpty,
+              mcpTools.isEmpty,
+              services.isEmpty,
+              factDefinitions.isEmpty,
+              previewableFileTypes.isEmpty else {
+            throw ExtensionValidationError(issues: [.init(
+                path: "workspaceNavigators",
+                message: "a navigator replacement must contain exactly one navigator"
+            )])
+        }
+
+        let replacement = workspaceNavigators[0]
+        issues.append(contentsOf: replacement.validationIssues(path: "workspaceNavigators[0]"))
+        if !manifest.capabilities.contains(.workspaceNavigation) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'ui.workspace-navigation' for a navigator replacement"
+            ))
+        }
+        if replacement.eventActionID != nil,
+           !manifest.capabilities.contains(.hostEvents) {
+            issues.append(.init(
+                path: "capabilities",
+                message: "must contain 'host.events' when a navigator declares eventActionID"
+            ))
+        }
+        if replacement.id != original.id {
+            issues.append(.init(
+                path: "workspaceNavigators[0].id",
+                message: "must match the registered navigator ID"
+            ))
+        }
+        if replacement.options != original.options {
+            issues.append(.init(
+                path: "workspaceNavigators[0].options",
+                message: "must match the registered navigator option declaration"
+            ))
+        }
+        if replacement.pipeline != original.pipeline {
+            issues.append(.init(
+                path: "workspaceNavigators[0].pipeline",
+                message: "must match the registered navigator pipeline declaration"
+            ))
+        }
+
+        if !issues.isEmpty {
+            throw ExtensionValidationError(issues: issues)
+        }
+    }
+
+    private func validationIssues(
+        for manifest: ExtensionManifest
+    ) -> [ExtensionValidationIssue] {
         var issues: [ExtensionValidationIssue] = []
 
         for (index, command) in commands.enumerated() {
@@ -441,6 +514,13 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
                 message: "must contain at most 8 workspace navigators"
             ))
         }
+        let runtimePipelineNavigators = workspaceNavigators.filter { $0.pipeline != nil }
+        if runtimePipelineNavigators != manifest.workspaceNavigators {
+            issues.append(.init(
+                path: "workspaceNavigators",
+                message: "pipeline navigators must match the manifest declarations exactly"
+            ))
+        }
         for (index, panel) in panels.enumerated() {
             guard let reference = panel.remoteSurface else { continue }
             guard let companion = manifest.companions.first(where: {
@@ -554,9 +634,7 @@ public struct ExtensionRegistration: Codable, Equatable, Sendable {
             ))
         }
 
-        if !issues.isEmpty {
-            throw ExtensionValidationError(issues: issues)
-        }
+        return issues
     }
 
     private func identifierIssues(

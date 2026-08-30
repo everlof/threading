@@ -46,6 +46,10 @@ let package = Package(
             targets: ["GitLabStateExtensionExample"]
         ),
         .executable(
+            name: "ActivityInboxExtensionExample",
+            targets: ["ActivityInboxExtensionExample"]
+        ),
+        .executable(
             name: "SimulatorRelayExtensionExample",
             targets: ["SimulatorRelayExtensionExample"]
         ),
@@ -149,6 +153,25 @@ let package = Package(
             exclude: ["Support", "threading-extension.json"],
             plugins: ["ThreadingExtensionPolicyPlugin"]
         ),
+        // The acceptance example for host-evaluated navigator pipelines. Its process publishes
+        // one immutable declaration; filtering, calendar buckets, sorting, search, row
+        // realization and session routing all remain inside Threading.
+        .target(
+            name: "ActivityInboxExtensionSupport",
+            dependencies: ["ThreadingExtensionKit"],
+            path: "Examples/ActivityInboxExtension/Support",
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
+        .executableTarget(
+            name: "ActivityInboxExtensionExample",
+            dependencies: [
+                "ThreadingExtensionKit",
+                "ActivityInboxExtensionSupport"
+            ],
+            path: "Examples/ActivityInboxExtension",
+            exclude: ["Support", "threading-extension.json"],
+            plugins: ["ThreadingExtensionPolicyPlugin"]
+        ),
         .executableTarget(
             name: "SimulatorRelayExtensionExample",
             dependencies: ["ThreadingExtensionKit"],
@@ -176,7 +199,8 @@ let package = Package(
             dependencies: [
                 "ThreadingExtensionKit",
                 "ThreadingExtensionPolicy",
-                "GitLabStateExtensionSupport"
+                "GitLabStateExtensionSupport",
+                "ActivityInboxExtensionSupport"
             ]
         )
     ]

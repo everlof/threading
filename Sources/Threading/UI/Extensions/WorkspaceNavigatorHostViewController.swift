@@ -28,6 +28,8 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     private let factSnapshotProvider: FactSnapshotProvider
     private let factSnapshotPatchProvider: FactSnapshotPatchProvider
     private let pipelineEvaluate: WorkspaceNavigatorPipelineEvaluationScheduler.Evaluate
+    private let pipelineCalendarProvider: () -> Calendar
+    private let pipelineNowProvider: () -> Date
     private let onSelectNative: () -> Void
     private let onUnavailable: () -> Void
     /// Localized once from the validated registration. Runtime documents may replace content,
@@ -136,10 +138,13 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         pipelineEvaluate: @escaping WorkspaceNavigatorPipelineEvaluationScheduler.Evaluate = {
             request in
             let evaluation = WorkspaceNavigatorPipelineEvaluator(
-                calendar: request.calendar
+                calendar: request.calendar,
+                now: { request.referenceDate }
             ).evaluate(request.pipeline, query: request.query)
             return WorkspaceNavigatorPipelinePresentation(evaluation: evaluation)
         },
+        pipelineCalendarProvider: @escaping () -> Calendar = { .current },
+        pipelineNowProvider: @escaping () -> Date = Date.init,
         onSelectNative: @escaping () -> Void = {},
         onUnavailable: @escaping () -> Void
     ) {
@@ -157,6 +162,8 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         self.factSnapshotProvider = factSnapshotProvider
         self.factSnapshotPatchProvider = factSnapshotPatchProvider
         self.pipelineEvaluate = pipelineEvaluate
+        self.pipelineCalendarProvider = pipelineCalendarProvider
+        self.pipelineNowProvider = pipelineNowProvider
         self.onSelectNative = onSelectNative
         self.onUnavailable = onUnavailable
         super.init(nibName: nil, bundle: nil)
@@ -386,8 +393,8 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
 
     private func scheduleNextDayRefresh() {
         nextDayTimer?.invalidate()
-        let calendar = Calendar.current
-        let now = Date()
+        let calendar = pipelineCalendarProvider()
+        let now = pipelineNowProvider()
         guard let nextDay = calendar.date(
             byAdding: .day,
             value: 1,
@@ -553,12 +560,14 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         pipelineEvaluationSequence += 1
         let sequence = pipelineEvaluationSequence
         let query = pipelineQuery
-        let calendar = Calendar.current
+        let calendar = pipelineCalendarProvider()
+        let referenceDate = pipelineNowProvider()
         pipelineEvaluationScheduler.submit(.init(
             sequence: sequence,
             pipeline: compiledPipeline,
             query: query,
-            calendar: calendar
+            calendar: calendar,
+            referenceDate: referenceDate
         ))
     }
 

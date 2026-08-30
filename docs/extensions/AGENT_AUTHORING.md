@@ -384,7 +384,9 @@ items.
   patches.
 - Declare `ui.workspace-navigation` before registering workspace navigators. This capability
   grants no project or session data by itself; request the applicable host-read capabilities
-  separately.
+  separately. Put every navigator with a host-evaluated `pipeline` in the manifest's static
+  `workspaceNavigators` list and repeat the exact raw base-language list during registration.
+  Keep materialized v1 navigators runtime-only.
 - Declare `host.events` when a workspace navigator sets `eventActionID`. The selected navigator
   then receives bounded host-observed session IDs even if it never pages the general event journal.
 - Declare `host.projects.read` before calling `projects()` or `project(id:)`.
@@ -462,9 +464,8 @@ combined declaration may require at most 30 menu entries, reserving two more for
 separator and permanent Native route. Option titles and choice titles are localizable. Declaring
 an option does not give the extension preference-file access or a mutable AppKit control.
 
-The declarations are accepted ahead of the `ui.workspace-navigation@2` transform contract, but
-the v1 materialized-document renderer does not expose inert option rows. Threading will put them
-in the navigator menu only when the host-side transform that consumes their values is present.
+The v1 materialized-document renderer does not expose inert option rows. Threading puts them in
+the navigator menu only when a host-side pipeline consumes their values.
 
 For the additive host-evaluated format, set `pipeline` and keep `root` as the useful fallback for
 hosts which do not implement that format. `@2` is the contract revision, not a new capability;
@@ -474,6 +475,12 @@ least one transform clause. Read
 [`WORKSPACE_NAVIGATORS.md`](WORKSPACE_NAVIGATORS.md#host-evaluated-pipeline-declarations) for the
 exact required/enhancing degradation boundaries, explicit project join, source-session activation,
 static-generation rule, and the format-1 1,000-item overflow notice before authoring one.
+The static manifest list is inspection metadata, not a render source. Threading validates the
+complete raw registration against it before localization and inventories only the matched live
+generation. A mismatch or process termination exposes no navigator from that generation.
+`session.activity.detailed@1` currently publishes the public
+`ExtensionSessionDetailedActivity` raw values `dormant`, `idle`, `working`, `awaiting-user`,
+`needs-attention`, and `limit-reached`; unknown future raw values remain decodable.
 
 For a context-dependent panel, set `loadActionID`. Treat `root` as the immediate loading and
 fallback state. Threading sends that action once when the tab connects to each extension process

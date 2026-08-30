@@ -50,6 +50,7 @@ swift test
 swift run HelloStatusExtensionExample --threading-register
 swift run HelloStatusConsumerExtensionExample --threading-register
 swift run GitLabStateExtensionExample --threading-register
+swift run ActivityInboxExtensionExample --threading-register
 ```
 
 Threading links this package, renders `ExtensionNode` through its own AppKit design system, and
@@ -86,6 +87,14 @@ localized `ExtensionWorkspaceNavigatorOption` toggle or choice values. Their com
 is immutable within one process generation and fits within a 30-entry extension-owned menu budget;
 the v1 renderer keeps these controls hidden until the host-evaluated v2 transform consumes them. See
 [`docs/extensions/WORKSPACE_NAVIGATORS.md`](../docs/extensions/WORKSPACE_NAVIGATORS.md).
+
+For a host-evaluated navigator, set `pipeline`, put that complete navigator in the manifest's
+static `workspaceNavigators` list, and repeat the exact raw base-language declaration in the live
+registration. Threading checks parity before localizing it and exposes only the matched running
+generation; materialized v1 navigators remain runtime-only. `Examples/ActivityInboxExtension` is
+the public reference: it requests only `ui.workspace-navigation`, while Threading owns its search,
+Priority/relative-date sections, sorting, working indicator updates, row realization, and
+source-session activation.
 
 Settings contributions are declared in the manifest under the `settings` capability. Threading
 renders complete pages and sections appended to stable built-in pages using toggle, bounded text,
