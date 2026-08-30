@@ -1324,30 +1324,38 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         DispatchQueue.main.async {
-            guard let result = self.services.notifications.register(
+            let registrationResult = self.services.notifications.register(
                 registration,
                 deviceID: deviceID,
                 authorization: authorization
-            ) else {
+            )
+            switch registrationResult {
+            case .invalid:
                 respond(.respond(RemoteRouter.error(
                     422,
                     "Invalid Device Token",
                     code: .invalidDeviceToken
                 )))
-                return
+            case .persistenceUnavailable:
+                respond(.respond(RemoteRouter.error(
+                    503,
+                    "Persistence Unavailable",
+                    code: .persistenceUnavailable
+                )))
+            case .registered(let result):
+                self.services.eventLog.recordRemoteEvent("Remote notifications registered", [
+                    .share: authorization.shareID,
+                    .device: deviceID,
+                    .delivery: result.delivery.rawValue,
+                ])
+                MacRemoteDiagnostics.record(.notificationRegistrationReceived, fields: [
+                    .peer: MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
+                    .transport: result.delivery.rawValue,
+                    .capability: authorization.capability.rawValue,
+                    .enabledKindCount: String(registration.enabledKinds.count),
+                ])
+                respond(.respond(RemoteRouter.json(result)))
             }
-            self.services.eventLog.recordRemoteEvent("Remote notifications registered", [
-                .share: authorization.shareID,
-                .device: deviceID,
-                .delivery: result.delivery.rawValue,
-            ])
-            MacRemoteDiagnostics.record(.notificationRegistrationReceived, fields: [
-                .peer: MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device"),
-                .transport: result.delivery.rawValue,
-                .capability: authorization.capability.rawValue,
-                .enabledKindCount: String(registration.enabledKinds.count),
-            ])
-            respond(.respond(RemoteRouter.json(result)))
         }
     }
 

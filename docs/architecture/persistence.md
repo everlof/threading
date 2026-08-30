@@ -811,6 +811,21 @@ Keychain. Both Mac stores use the data-protection Keychain when the signed build
 under the same shared probe as the browser vault below. An ad-hoc build falls back to the login
 Keychain and Settings states that weaker boundary rather than claiming the Release guarantee.
 
+APNs registrations use a third, separate versioned Keychain item under the same storage policy.
+It contains only device-bound delivery metadata — share id, device id, APNs token, environment,
+and enabled/sounding kinds — never a bearer or authorization. On every Remote Access start the
+complete record set is rebound to the current owner-device and accepted-member stores; expired,
+revoked, and wrong-device records stay inert and are pruned. Registration persists a validated
+candidate before making it live, while revocation commits to the authority store first and then
+drops live delivery even if this secondary cleanup fails. A corrupt notification item therefore
+fails notification registration closed without disabling pairing. Reset Everything names and
+deletes it explicitly. Load, write, prune, revoke-cleanup, and reset-delete failures enter the
+share-safe remote diagnostic journal with only a fixed stage and reason. The store is bounded to
+288 records and 1 MiB: at expected cardinality it
+contains 1–5 records. Persistence scans are O(total) only at registration, revocation, or Remote
+Access startup. Notification fan-out is O(active subscriptions), bounded by the same 288-record
+ceiling, and neither path runs on a session or terminal hot callback.
+
 The move from the old login-Keychain items is validation-first. With no protected item, a valid
 legacy envelope is written to the protected Keychain before the obsolete item is removed; corrupt
 or future-version data remains untouched and fails closed. If neither item exists, an empty

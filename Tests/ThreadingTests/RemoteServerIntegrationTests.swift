@@ -2468,6 +2468,15 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
     }
 
     func testNotificationRegistrationIsAuthenticatedAndValidatesDeviceToken() throws {
+        authority.set(
+            RemoteAuthorization(
+                shareID: "notification-test",
+                capability: .interact,
+                scope: .allSessions,
+                boundDeviceID: "test-device"
+            ),
+            forToken: "notificationtoken"
+        )
         let valid = try JSONEncoder().encode(RemoteNotificationRegistrationDTO(
             deviceToken: String(repeating: "ab", count: 32),
             environment: .sandbox,
@@ -2475,7 +2484,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         ))
         let registered = try XCTUnwrap(post(
             RemoteRouter.notificationRegistrationPath,
-            bearer: "goodtoken",
+            bearer: "notificationtoken",
             body: valid
         ))
         XCTAssertEqual(registered.status, 200)
@@ -2493,7 +2502,7 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(
             try XCTUnwrap(post(
                 RemoteRouter.notificationRegistrationPath,
-                bearer: "goodtoken",
+                bearer: "notificationtoken",
                 body: invalid
             )).status,
             422

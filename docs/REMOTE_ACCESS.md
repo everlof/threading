@@ -1410,6 +1410,15 @@ permission request uses its more specific permission notification instead of als
 generic response-needed event. Notification sounds have a master switch and an independent
 switch for every category, so a useful banner does not have to imply an audible interruption.
 
+The phone owns token acquisition: after notification permission and whenever APNs rotates the
+token, iOS registers it over the authenticated paired-device route together with its sandbox or
+production environment and current preferences. Nothing is copied by hand in the product path.
+The Mac persists that device-bound routing metadata separately from credentials and re-authorizes
+it against the current pairing/share records whenever Remote Access starts. A Mac restart thus
+does not require waking or foregrounding the phone; revoking the pairing or membership still
+makes the saved routing record inert immediately. The hosted service remains stateless for this
+mapping — the Mac supplies the token and environment on each bounded `/v1/push` request.
+
 Opening a notification deep-links to the relevant chat. A requested agent update may additionally
 carry one closed, authenticated destination: an attachment id, a browser-tab id, or an extension
 and panel id. These are Threading-owned identities, not an agent-authored path, URL, or application
@@ -1572,6 +1581,13 @@ credentials the settings page says **Live only**: events still work while the au
 connection is alive, but a suspended app cannot receive a remote push. A distributed build
 should move the provider key behind a service it operates rather than ship it in either app.
 
+The current one-secret provider configuration requires a signing key valid for both endpoints.
+Existing unrestricted APNs keys can do that; Apple's newer team/topic-scoped keys may instead be
+restricted to one environment. The registration selects `api.sandbox.push.apple.com` for a
+development token and `api.push.apple.com` for a TestFlight/App Store token; device tokens
+themselves never cross between those environments. If the configured key is environment-scoped,
+the provider needs separate sandbox/production secrets before it can serve both.
+
 The environment-selected `.p8` file must be a regular UTF-8 file no larger than 64 KiB. It is
 read through the opened-file streaming limit before CryptoKit parses it; a metadata preflight is
 not trusted because the configured path can be replaced or grown between inspection and read.
@@ -1579,10 +1595,10 @@ not trusted because the configured path can be replaced or grown between inspect
 ### Hosted service
 
 The implemented Cloudflare Worker/D1/Durable Object service owns Sign in with Apple, bounded daily
-Apple grant validation, scoped host/device credentials, bounded ICE signaling and TURN
-provisioning. It never receives the remote HTTP/WebSocket payload carried inside WebRTC. A later
-push slice should keep the APNs key in the service, deduplicate/collapse bounded events, and store
-only sanitized notification or widget projections. Presence should remain connection-derived
+Apple grant validation, scoped host/device credentials, bounded ICE signaling, TURN provisioning,
+and APNs provider signing. It never receives the remote HTTP/WebSocket payload carried inside
+WebRTC and does not retain APNs device mappings: an authenticated Mac submits one bounded,
+sanitized event, token and environment for each delivery. Presence remains connection-derived
 rather than a database heartbeat.
 
 Scheduled expiry cleanup keeps each D1 delete to a 1,000-row page, then immediately repeats only
@@ -1646,6 +1662,10 @@ feature lock.
   and a protected empty sentinel prevents a login-Keychain item planted after the first upgraded
   launch from becoming authority. Once present, the protected item is the only item read for
   authorization.
+- **APNs routing metadata is a separate, authorization-free Keychain item.** It follows the same
+  protected-when-available storage and validation-first migration rules, but contains no bearer.
+  Startup joins each record to a current device-bound capability before making it active, so a
+  corrupt notification item cannot disable pairing and an orphan cannot restore revoked access.
 - The pairing code carries the fingerprint. `SHA-256` over the leaf certificate's DER, truncated
   to 128 bits and written base32 upper case, is 26 characters entirely inside QR's alphanumeric
   mode, and it rides as a second fragment component: `HTTPS://192.168.1.42:8760#<token>.<code>`.
