@@ -2838,6 +2838,7 @@ final class ExtensionRendererTests: HostedStoreTestCase {
             )
         )
         let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.exactImageData = try pngData(width: 1, height: 1, color: .systemRed)
         let host = WorkspaceNavigatorHostViewController(
             inventory: router.inventory,
             routing: router,
@@ -2850,6 +2851,10 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
         let table = try waitForPipelineTable(in: host, rowCount: 1)
         _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        let loaded = try waitForPipelineImage(
+            in: host,
+            identifier: "workspace.navigator.pipeline-image.icon"
+        )
 
         table.reloadData()
         _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
@@ -2858,8 +2863,373 @@ final class ExtensionRendererTests: HostedStoreTestCase {
             extensionIdentifier: "com.example.provider",
             relativePath: "icon.png",
             processGeneration: "provider-generation-7"
-        )], "row realization and reuse must read only the preloaded in-memory image cache")
+        )], "row realization and reuse must read only the prefetched in-memory image cache")
+        XCTAssertEqual(loaded.size, NSSize(width: 1, height: 1))
         XCTAssertTrue(router.invocations.isEmpty)
+    }
+
+    func testPipelineFactIconPatchRevisionFencesStaleDecodeAndLoadsReplacement() throws {
+        let iconKey = ExtensionFactKey(id: "example.replaced-icon")
+        let provider = ExtensionFactResolutionSource.extension(
+            identifier: "com.example.provider",
+            processGeneration: "provider-generation-7"
+        )
+        let definition = navigatorFactDefinition(iconKey, usages: [.presentable])
+        func snapshot(path: String, revision: UInt64) -> ExtensionFactSnapshot {
+            makeWorkspaceNavigatorSnapshot(
+                sessionIDs: ["session"],
+                definitions: [definition],
+                facts: [ExtensionFact(
+                    key: iconKey,
+                    subject: .session("session"),
+                    value: .string(path),
+                    icon: .extensionResource(path),
+                    observedAt: Date(timeIntervalSince1970: TimeInterval(revision))
+                )],
+                revision: revision,
+                sourcesByKey: [iconKey: provider]
+            )
+        }
+        let first = snapshot(path: "a.png", revision: 1)
+        let second = snapshot(path: "b.png", revision: 2)
+        var current = first
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: iconKey, requirement: .required)],
+            template: .image(
+                .factIcon(.init(iconKey), fallback: nil),
+                role: .icon,
+                accessibilityLabel: "Provider"
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.defersImageDataCompletion = true
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in current },
+            factSnapshotPatchProvider: { _, _, _ in
+                .init(snapshot: current, affectedSourceSessionIDs: ["session"])
+            },
+            onUnavailable: { XCTFail("replacement image pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        let table = try waitForPipelineTable(in: host, rowCount: 1)
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        try waitForPipelineImageRequest("a.png", router: router)
+
+        current = second
+        NotificationCenter.default.post(ExtensionFactsDidChange(change: .exact([.init(
+            subject: .session("session"),
+            key: iconKey
+        )])))
+        try waitForPipelineImageRequest("b.png", router: router)
+
+        router.completeImageRequest(
+            relativePath: "b.png",
+            data: try pngData(width: 2, height: 1, color: .systemBlue)
+        )
+        let replacement = try waitForPipelineImage(
+            in: host,
+            identifier: "workspace.navigator.pipeline-image.icon",
+            size: NSSize(width: 2, height: 1)
+        )
+        router.completeImageRequest(
+            relativePath: "a.png",
+            data: try pngData(width: 1, height: 1, color: .systemRed)
+        )
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+
+        XCTAssertEqual(replacement.size, NSSize(width: 2, height: 1))
+        XCTAssertEqual(
+            (descendants(in: host.view).first {
+                $0.accessibilityIdentifier() == "workspace.navigator.pipeline-image.icon"
+            } as? NSImageView)?.image?.size,
+            NSSize(width: 2, height: 1),
+            "completion from the evicted snapshot must not replace the accepted icon"
+        )
+        XCTAssertEqual(router.exactImageRequests.map(\.relativePath), ["a.png", "b.png"])
+    }
+
+    func testPipelineFactIconPrefetchStaysBoundedToVisibleRows() throws {
+        let iconKey = ExtensionFactKey(id: "example.many-icons")
+        let definition = navigatorFactDefinition(iconKey, usages: [.presentable])
+        let sessionIDs = (0..<ExtensionWorkspaceNavigatorPipeline.maximumOutputItems).map {
+            "session-\($0)"
+        }
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: sessionIDs,
+            definitions: [definition],
+            facts: sessionIDs.enumerated().map { index, sessionID in
+                ExtensionFact(
+                    key: iconKey,
+                    subject: .session(sessionID),
+                    value: .string(sessionID),
+                    icon: .extensionResource("icon-\(index).png"),
+                    observedAt: Date(timeIntervalSince1970: 1)
+                )
+            },
+            sourcesByKey: [iconKey: .extension(
+                identifier: "com.example.provider",
+                processGeneration: "provider-generation-7"
+            )]
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: iconKey, requirement: .required)],
+            template: .image(
+                .factIcon(.init(iconKey), fallback: nil),
+                role: .icon,
+                accessibilityLabel: "Provider"
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("bounded image pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 320)
+        let table = try waitForPipelineTable(
+            in: host,
+            rowCount: ExtensionWorkspaceNavigatorPipeline.maximumOutputItems
+        )
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+        try waitForPipelineImageRequest("icon-0.png", router: router)
+
+        XCTAssertLessThanOrEqual(router.exactImageRequests.count, 48)
+        XCTAssertLessThan(
+            router.exactImageRequests.count,
+            ExtensionWorkspaceNavigatorPipeline.maximumOutputItems / 10,
+            "mounting a virtual table must not enumerate or load every fact icon"
+        )
+    }
+
+    func testPipelineFactIconAdmissionStaysGlobalAcrossRapidSnapshotRevisions() throws {
+        let iconKey = ExtensionFactKey(id: "example.rapid-revision-icon")
+        let definition = navigatorFactDefinition(iconKey, usages: [.presentable])
+        let sessionIDs = (0..<60).map { "session-\($0)" }
+        func snapshot(revision: UInt64) -> ExtensionFactSnapshot {
+            makeWorkspaceNavigatorSnapshot(
+                sessionIDs: sessionIDs,
+                definitions: [definition],
+                facts: sessionIDs.enumerated().map { index, sessionID in
+                    let path = "r\(revision)-\(index).png"
+                    return ExtensionFact(
+                        key: iconKey,
+                        subject: .session(sessionID),
+                        value: .string(path),
+                        icon: .extensionResource(path),
+                        observedAt: Date(timeIntervalSince1970: TimeInterval(revision))
+                    )
+                },
+                revision: revision,
+                sourcesByKey: [iconKey: .extension(
+                    identifier: "com.example.provider",
+                    processGeneration: "provider-generation-7"
+                )]
+            )
+        }
+        var current = snapshot(revision: 1)
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: iconKey, requirement: .required)],
+            template: .stack(
+                axis: .horizontal,
+                spacing: .small,
+                children: [
+                    .image(
+                        .factIcon(.init(iconKey), fallback: nil),
+                        role: .icon,
+                        accessibilityLabel: "Provider"
+                    ),
+                    .text(
+                        .fact(.init(iconKey), facet: .value, fallback: nil),
+                        role: .compactBody
+                    )
+                ]
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.defersImageDataCompletion = true
+        let decodeProbe = PipelineImageDecodeProbe()
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in current },
+            factSnapshotPatchProvider: { _, _, _ in
+                .init(snapshot: current, affectedSourceSessionIDs: Set(sessionIDs))
+            },
+            pipelineImageDecoder: decodeProbe.decode,
+            onUnavailable: { XCTFail("rapid revision pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 4_000)
+        let table = try waitForPipelineTable(in: host, rowCount: sessionIDs.count)
+        try waitForPipelineImageRequest("r1-47.png", router: router)
+        XCTAssertEqual(router.activeImageDataRequestCount, 48)
+
+        for revision in UInt64(2)...4 {
+            current = snapshot(revision: revision)
+            NotificationCenter.default.post(ExtensionFactsDidChange(change: .exact([.init(
+                subject: .session("session-0"),
+                key: iconKey
+            )])))
+            try waitForPipelineText(
+                "r\(revision)-0.png",
+                in: host,
+                table: table,
+                row: 0,
+                timeout: 2
+            )
+        }
+
+        XCTAssertEqual(
+            router.exactImageRequests.count,
+            48,
+            "snapshot resets must not admit work past still-active reads from older revisions"
+        )
+        router.completeImageRequest(
+            relativePath: "r1-0.png",
+            data: try pngData(width: 1, height: 1, color: .systemRed)
+        )
+        try waitForPipelineImageRequest("r4-0.png", router: router)
+        XCTAssertEqual(
+            decodeProbe.decodeCount,
+            0,
+            "bytes fenced by a stale snapshot must be rejected before image decoding"
+        )
+
+        router.completeImageRequest(
+            relativePath: "r4-0.png",
+            data: try pngData(width: 1, height: 1, color: .systemBlue)
+        )
+        try waitForPipelineImageDecodeCount(1, probe: decodeProbe)
+        XCTAssertLessThanOrEqual(router.maximumActiveImageDataRequestCount, 48)
+    }
+
+    func testPipelineFactIconQueueResolvesMoreThanNinetySixVisibleReferencesAndQuiesces()
+        throws
+    {
+        let iconKey = ExtensionFactKey(id: "example.wide-visible-icon-set")
+        let definition = navigatorFactDefinition(iconKey, usages: [.presentable])
+        let sessionIDs = (0..<120).map { "session-\($0)" }
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: sessionIDs,
+            definitions: [definition],
+            facts: sessionIDs.enumerated().map { index, sessionID in
+                ExtensionFact(
+                    key: iconKey,
+                    subject: .session(sessionID),
+                    value: .string(sessionID),
+                    icon: .extensionResource("icon-\(index).png"),
+                    observedAt: Date(timeIntervalSince1970: 1)
+                )
+            },
+            sourcesByKey: [iconKey: .extension(
+                identifier: "com.example.provider",
+                processGeneration: "provider-generation-7"
+            )]
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: iconKey, requirement: .required)],
+            template: .image(
+                .factIcon(.init(iconKey), fallback: nil),
+                role: .icon,
+                accessibilityLabel: "Provider"
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.exactImageData = try pngData(width: 1, height: 1, color: .systemPurple)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("wide visible icon pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 6_000)
+        let table = try waitForPipelineTable(in: host, rowCount: sessionIDs.count)
+        try waitForPipelineImageRequest("icon-119.png", router: router, timeout: 5)
+        _ = try waitForPipelineImage(
+            in: host,
+            table: table,
+            row: 119,
+            identifier: "workspace.navigator.pipeline-image.icon",
+            size: NSSize(width: 1, height: 1),
+            timeout: 5
+        )
+        XCTAssertEqual(router.exactImageRequests.count, sessionIDs.count)
+        XCTAssertLessThanOrEqual(router.maximumActiveImageDataRequestCount, 48)
+
+        for _ in 0..<3 {
+            table.reloadData()
+            _ = table.view(atColumn: 0, row: 119, makeIfNecessary: true)
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertEqual(
+            router.exactImageRequests.count,
+            sessionIDs.count,
+            "a visible working set larger than the old cache must settle without retry churn"
+        )
+    }
+
+    func testPipelineFactImageDecodeIsDownsampledToSidebarDimensions() throws {
+        let iconKey = ExtensionFactKey(id: "example.large-provider-icon")
+        let definition = navigatorFactDefinition(iconKey, usages: [.presentable])
+        let snapshot = makeWorkspaceNavigatorSnapshot(
+            sessionIDs: ["session"],
+            definitions: [definition],
+            facts: [ExtensionFact(
+                key: iconKey,
+                subject: .session("session"),
+                value: .string("large"),
+                icon: .extensionResource("large.png"),
+                observedAt: Date(timeIntervalSince1970: 1)
+            )],
+            sourcesByKey: [iconKey: .extension(
+                identifier: "com.example.provider",
+                processGeneration: "provider-generation-7"
+            )]
+        )
+        let navigator = pipelineNavigator(
+            consumes: [.init(key: iconKey, requirement: .required)],
+            template: .image(
+                .factIcon(.init(iconKey), fallback: nil),
+                role: .icon,
+                accessibilityLabel: "Provider"
+            )
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.exactImageData = try pngData(width: 1_024, height: 1_024, color: .systemOrange)
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            factSnapshotProvider: { _ in snapshot },
+            onUnavailable: { XCTFail("large provider image pipeline became unavailable") }
+        )
+        _ = host.view
+        host.view.frame = NSRect(x: 0, y: 0, width: 300, height: 240)
+        _ = try waitForPipelineTable(in: host, rowCount: 1)
+
+        let image = try waitForPipelineImage(
+            in: host,
+            identifier: "workspace.navigator.pipeline-image.icon",
+            size: NSSize(width: 64, height: 64),
+            timeout: 5
+        )
+        XCTAssertEqual(image.size, NSSize(width: 64, height: 64))
+        XCTAssertEqual(router.exactImageRequests.count, 1)
     }
 
     func testPipelineFactImageResolvesAKnownHostProviderIdentityAsset() throws {
@@ -2898,10 +3268,10 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         let table = try waitForPipelineTable(in: host, rowCount: 1)
         _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
 
-        let image = try XCTUnwrap(descendants(in: host.view).first {
-            $0.accessibilityIdentifier() == "workspace.navigator.pipeline-image.identity"
-        } as? NSImageView)
-        XCTAssertNotNil(image.image)
+        _ = try waitForPipelineImage(
+            in: host,
+            identifier: "workspace.navigator.pipeline-image.identity"
+        )
         XCTAssertTrue(router.invocations.isEmpty)
     }
 
@@ -8101,6 +8471,115 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     XCTFail("pipeline row did not render '\(text)' before timeout")
   }
 
+  private func waitForPipelineImage(
+    in host: WorkspaceNavigatorHostViewController,
+    identifier: String,
+    size expectedSize: NSSize? = nil,
+    timeout: TimeInterval = 2
+  ) throws -> NSImage {
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+      // Hosted AppKit tests do not put the table on screen, so NSTableView is allowed to defer a
+      // targeted row reload indefinitely. Force only the already-realized first row to vend
+      // again; the production callback remains the targeted reload exercised by a real window.
+      if let table = descendants(in: host.view).compactMap({ $0 as? ThemedTableView }).first,
+        table.numberOfRows > 0,
+        table.numberOfColumns > 0 {
+        table.reloadData(
+          forRowIndexes: IndexSet(integer: 0),
+          columnIndexes: IndexSet(integer: 0)
+        )
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+      }
+      host.view.layoutSubtreeIfNeeded()
+      if let image = (descendants(in: host.view).first {
+        $0.accessibilityIdentifier() == identifier
+      } as? NSImageView)?.image,
+        expectedSize == nil || image.size == expectedSize {
+        return image
+      }
+      RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    } while Date() < deadline
+    return try XCTUnwrap(nil as NSImage?, "pipeline image '\(identifier)' did not load")
+  }
+
+  private func waitForPipelineImage(
+    in host: WorkspaceNavigatorHostViewController,
+    table: ThemedTableView,
+    row: Int,
+    identifier: String,
+    size expectedSize: NSSize? = nil,
+    timeout: TimeInterval = 2
+  ) throws -> NSImage {
+    let deadline = Date().addingTimeInterval(timeout)
+    repeat {
+      table.reloadData(
+        forRowIndexes: IndexSet(integer: row),
+        columnIndexes: IndexSet(integer: 0)
+      )
+      if let rowView = table.view(atColumn: 0, row: row, makeIfNecessary: true),
+        let image = (descendants(in: rowView).first {
+          $0.accessibilityIdentifier() == identifier
+        } as? NSImageView)?.image,
+        expectedSize == nil || image.size == expectedSize {
+        return image
+      }
+      host.view.layoutSubtreeIfNeeded()
+      RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    } while Date() < deadline
+    return try XCTUnwrap(
+      nil as NSImage?,
+      "pipeline image '\(identifier)' did not load in row \(row)"
+    )
+  }
+
+  private func waitForPipelineImageRequest(
+    _ relativePath: String,
+    router: TestWorkspaceNavigatorRouter,
+    timeout: TimeInterval = 2
+  ) throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while !router.exactImageRequests.contains(where: { $0.relativePath == relativePath }),
+      Date() < deadline {
+      RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    XCTAssertTrue(
+      router.exactImageRequests.contains { $0.relativePath == relativePath },
+      "pipeline image request '\(relativePath)' did not start"
+    )
+  }
+
+  private func waitForPipelineImageDecodeCount(
+    _ expectedCount: Int,
+    probe: PipelineImageDecodeProbe,
+    timeout: TimeInterval = 2
+  ) throws {
+    let deadline = Date().addingTimeInterval(timeout)
+    while probe.decodeCount < expectedCount, Date() < deadline {
+      RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+    }
+    XCTAssertEqual(probe.decodeCount, expectedCount)
+  }
+
+  private func pngData(width: Int, height: Int, color: NSColor) throws -> Data {
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let context = try XCTUnwrap(CGContext(
+      data: nil,
+      width: width,
+      height: height,
+      bitsPerComponent: 8,
+      bytesPerRow: 0,
+      space: colorSpace,
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ))
+    context.setFillColor(try XCTUnwrap(color.usingColorSpace(.deviceRGB)).cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    let image = try XCTUnwrap(context.makeImage())
+    return try XCTUnwrap(
+      NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    )
+  }
+
   private func pipelineNavigator(
     options: [ExtensionWorkspaceNavigatorOption] = [],
     consumes: [ExtensionWorkspaceNavigatorFactConsumption],
@@ -8658,6 +9137,23 @@ private final class MutableNavigatorTimeContext: @unchecked Sendable {
   }
 }
 
+private final class PipelineImageDecodeProbe: @unchecked Sendable {
+  private let lock = NSLock()
+  private var storedDecodeCount = 0
+
+  var decodeCount: Int {
+    lock.withLock { storedDecodeCount }
+  }
+
+  func decode(_ data: Data) -> CGImage? {
+    lock.withLock { storedDecodeCount += 1 }
+    return ExtensionImageResourceLoader.decodedImage(
+      from: data,
+      maximumPixelDimension: 64
+    )
+  }
+}
+
 @MainActor
 private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRouting {
     struct Invocation: Equatable {
@@ -8682,7 +9178,11 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
     var invocations: [Invocation] = []
     var optionWrites: [OptionWrite] = []
     var exactImageRequests: [ExactImageRequest] = []
-    var exactImageURL: URL?
+    var exactImageData: Data?
+    var exactImageDataByPath: [String: Data] = [:]
+    var defersImageDataCompletion = false
+    private(set) var activeImageDataRequestCount = 0
+    private(set) var maximumActiveImageDataRequestCount = 0
     var result: Result<ExtensionWorkspaceNavigatorActionResponse, Error>
     var acceptsActions = true
     var completesRejectedActions = false
@@ -8690,6 +9190,10 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
     private var deferredCompletions: [(
         Result<ExtensionWorkspaceNavigatorActionResponse, Error>
     ) -> Void] = []
+    private var deferredImageCompletions: [(
+        request: ExactImageRequest,
+        completion: @MainActor @Sendable (Data?) -> Void
+    )] = []
 
     init(
         navigator: ExtensionWorkspaceNavigator,
@@ -8741,7 +9245,42 @@ private final class TestWorkspaceNavigatorRouter: ExtensionWorkspaceNavigatorRou
             relativePath: relativePath,
             processGeneration: processGeneration
         ))
-        return exactImageURL
+        return nil
+    }
+
+    func loadExtensionImageResourceData(
+        extensionIdentifier: String,
+        relativePath: String,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (Data?) -> Void
+    ) {
+        let request = ExactImageRequest(
+            extensionIdentifier: extensionIdentifier,
+            relativePath: relativePath,
+            processGeneration: processGeneration
+        )
+        exactImageRequests.append(request)
+        activeImageDataRequestCount += 1
+        maximumActiveImageDataRequestCount = max(
+            maximumActiveImageDataRequestCount,
+            activeImageDataRequestCount
+        )
+        if defersImageDataCompletion {
+            deferredImageCompletions.append((request, completion))
+        } else {
+            let data = exactImageDataByPath[relativePath] ?? exactImageData
+            activeImageDataRequestCount -= 1
+            completion(data)
+        }
+    }
+
+    func completeImageRequest(relativePath: String, data: Data?) {
+        guard let index = deferredImageCompletions.firstIndex(where: {
+            $0.request.relativePath == relativePath
+        }) else { return }
+        let completion = deferredImageCompletions.remove(at: index).completion
+        activeImageDataRequestCount -= 1
+        completion(data)
     }
 
     func setWorkspaceNavigatorOption(

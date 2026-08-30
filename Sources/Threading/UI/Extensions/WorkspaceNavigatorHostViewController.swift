@@ -123,10 +123,34 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     )
     private var pipelineCollectionController: WorkspaceNavigatorPipelineCollectionViewController?
     private var pipelineResultsView: WorkspaceNavigatorPipelineResultsView?
-    /// Every value is resolved before a presentation reaches AppKit. Missing values are retained
-    /// separately so a bad resource does not turn each row reuse into another filesystem read.
-    private var pipelineImages: [WorkspaceNavigatorRealizedImage: NSImage] = [:]
-    private var attemptedPipelineImages = Set<WorkspaceNavigatorRealizedImage>()
+    private enum PipelineImageEntry {
+        case pending(revision: UInt64, itemIDs: Set<String>)
+        case loading(token: Int, revision: UInt64, itemIDs: Set<String>)
+        case resolved(image: NSImage?, cost: Int)
+    }
+
+    typealias PipelineImageDecoder = @Sendable (Data) -> CGImage?
+
+    /// A visible-window cache, including failed resolutions. Rows perform only a dictionary read.
+    /// Active work survives snapshot resets in this accounting set, so repeated exact patches
+    /// cannot escape the process-wide admission bound by merely fencing old results.
+    private var pipelineImageEntries: [WorkspaceNavigatorRealizedImage: PipelineImageEntry] = [:]
+    private var pipelineImageLRU: [WorkspaceNavigatorRealizedImage] = []
+    private var pipelineImageCacheCost = 0
+    private var visiblePipelineImageReferences = Set<WorkspaceNavigatorRealizedImage>()
+    private var pendingPipelineImageReferences: [WorkspaceNavigatorRealizedImage] = []
+    private var pendingPipelineImageCursor = 0
+    private var activePipelineImageLoadTokens = Set<Int>()
+    private var pipelineImageLoadSequence = 0
+    private let pipelineImageDecoder: PipelineImageDecoder
+    private static let pipelineImageDecodeDimension = 64
+    private static let maximumPipelineImageCostPerEntry = pipelineImageDecodeDimension
+        * pipelineImageDecodeDimension * 4
+    private static let maximumVisiblePipelineImageReferences = 512
+    private static let maximumPipelineImageEntries = maximumVisiblePipelineImageReferences
+    private static let maximumPipelineImageCacheCost = maximumVisiblePipelineImageReferences
+        * maximumPipelineImageCostPerEntry
+    private static let maximumConcurrentPipelineImageLoads = 48
     private var optionSequence = 0
     private var nextDayTimer: Timer?
     private let pipelineEvents = AppEventObservations()
@@ -149,6 +173,12 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         },
         pipelineCalendarProvider: @escaping () -> Calendar = { .current },
         pipelineNowProvider: @escaping () -> Date = Date.init,
+        pipelineImageDecoder: @escaping PipelineImageDecoder = { data in
+            ExtensionImageResourceLoader.decodedImage(
+                from: data,
+                maximumPixelDimension: 64
+            )
+        },
         onSelectNative: @escaping () -> Void = {},
         onUnavailable: @escaping () -> Void
     ) {
@@ -168,6 +198,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         self.pipelineEvaluate = pipelineEvaluate
         self.pipelineCalendarProvider = pipelineCalendarProvider
         self.pipelineNowProvider = pipelineNowProvider
+        self.pipelineImageDecoder = pipelineImageDecoder
         self.onSelectNative = onSelectNative
         self.onUnavailable = onUnavailable
         super.init(nibName: nil, bundle: nil)
@@ -496,6 +527,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             // a structural worker is already evaluating a newer base, keep the older visible
             // pair intact; its fenced result will submit this patched revision after delivery.
             self.presentedPipeline = presentedPipeline.replacing(snapshot: patch.snapshot)
+            self.resetPipelineImages()
             pipelineCollectionController?.reloadItems(
                 withSourceSessionIDs: patch.affectedSourceSessionIDs
             )
@@ -580,7 +612,6 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         pipeline compiled: CompiledWorkspaceNavigatorPipeline
     ) {
         let evaluation = presentation.evaluation
-        preparePipelineImages(for: evaluation, pipeline: compiled)
         let rowHeight = compiled.rowTemplate.map {
             WorkspaceNavigatorPipelineTemplateView.rowHeight(for: $0)
         } ?? SidebarDefaults.projectCompactRowHeight
@@ -595,6 +626,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
            controller.collectionID == compiled.output.collectionID,
            let results = pipelineResultsView {
             presentedPipeline = compiled
+            resetPipelineImages()
             controller.update(
                 presentation,
                 itemRowHeight: rowHeight,
@@ -639,9 +671,12 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                 return WorkspaceNavigatorPipelineTemplateView(
                     node: realized,
                     imageResolver: { [weak self] image in
-                        self?.pipelineImages[image]
+                        self?.resolvedPipelineImage(image)
                     }
                 )
+            },
+            onPrefetch: { [weak self] items in
+                self?.prefetchPipelineImages(for: items)
             },
             onActivation: { [weak self] destination, itemID in
                 self?.activate(.destination(destination), itemID: itemID)
@@ -661,8 +696,9 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                 : nil,
             detail: presentation.rows.isEmpty ? evaluation.emptyState?.detail : nil
         )
-        addChild(controller)
         presentedPipeline = compiled
+        resetPipelineImages()
+        addChild(controller)
         replaceRoot(
             build: { results },
             didInstall: {
@@ -676,6 +712,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     private func renderPipelinePlaceholder(title: String, detail: String?) {
         let previousController = pipelineCollectionController
         presentedPipeline = nil
+        resetPipelineImages()
         pipelineCollectionController = nil
         pipelineResultsView = nil
         replaceRoot {
@@ -687,42 +724,269 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         }
     }
 
-    private func preparePipelineImages(
-        for evaluation: WorkspaceNavigatorPipelineEvaluation,
-        pipeline: CompiledWorkspaceNavigatorPipeline
-    ) {
-        let references = WorkspaceNavigatorPipelineEvaluator().imageReferences(
-            in: evaluation,
-            pipeline: pipeline
-        )
-        for reference in references where attemptedPipelineImages.insert(reference).inserted {
-            if let image = loadPipelineImage(reference) {
-                pipelineImages[reference] = image
+    private func resetPipelineImages() {
+        pipelineImageEntries.removeAll(keepingCapacity: true)
+        pipelineImageLRU.removeAll(keepingCapacity: true)
+        pipelineImageCacheCost = 0
+        visiblePipelineImageReferences.removeAll(keepingCapacity: true)
+        pendingPipelineImageReferences.removeAll(keepingCapacity: true)
+        pendingPipelineImageCursor = 0
+    }
+
+    /// AppKit row callbacks call only this memory lookup. Missing, pending, and failed images all
+    /// answer nil without touching a package, an account directory, or ImageIO.
+    private func resolvedPipelineImage(_ image: WorkspaceNavigatorRealizedImage) -> NSImage? {
+        guard case .resolved(let resolved, _) = pipelineImageEntries[image] else { return nil }
+        return resolved
+    }
+
+    private func prefetchPipelineImages(for items: [WorkspaceNavigatorPipelineItem]) {
+        guard let pipeline = presentedPipeline else { return }
+        let revision = pipeline.snapshot.revision
+        var orderedReferences: [WorkspaceNavigatorRealizedImage] = []
+        var itemIDsByReference: [WorkspaceNavigatorRealizedImage: Set<String>] = [:]
+        for item in items where item.snapshotRevision == revision {
+            for reference in WorkspaceNavigatorPipelineEvaluator().imageReferences(
+                for: item,
+                pipeline: pipeline
+            ) {
+                if itemIDsByReference[reference] == nil {
+                    guard orderedReferences.count
+                        < Self.maximumVisiblePipelineImageReferences else { continue }
+                    orderedReferences.append(reference)
+                }
+                itemIDsByReference[reference, default: []].insert(item.sourceSessionID)
             }
+        }
+
+        let newVisibleReferences = Set(orderedReferences)
+        visiblePipelineImageReferences = newVisibleReferences
+        pendingPipelineImageReferences.removeAll(keepingCapacity: true)
+        pendingPipelineImageCursor = 0
+
+        let offscreenPending = pipelineImageEntries.compactMap { reference, entry in
+            if case .pending = entry,
+               !newVisibleReferences.contains(reference) {
+                return reference
+            }
+            return nil
+        }
+        for reference in offscreenPending {
+            pipelineImageEntries.removeValue(forKey: reference)
+        }
+
+        for reference in orderedReferences {
+            let itemIDs = itemIDsByReference[reference] ?? []
+            switch pipelineImageEntries[reference] {
+            case let .pending(pendingRevision, existingItemIDs):
+                guard pendingRevision == revision else { continue }
+                pipelineImageEntries[reference] = .pending(
+                    revision: revision,
+                    itemIDs: existingItemIDs.union(itemIDs)
+                )
+                pendingPipelineImageReferences.append(reference)
+            case let .loading(token, loadingRevision, existingItemIDs):
+                guard loadingRevision == revision else { continue }
+                pipelineImageEntries[reference] = .loading(
+                    token: token,
+                    revision: revision,
+                    itemIDs: existingItemIDs.union(itemIDs)
+                )
+            case .resolved:
+                touchPipelineImage(reference)
+            case nil:
+                pipelineImageEntries[reference] = .pending(
+                    revision: revision,
+                    itemIDs: itemIDs
+                )
+                pendingPipelineImageReferences.append(reference)
+            }
+        }
+        prunePipelineImages()
+        admitPendingPipelineImageLoads()
+    }
+
+    private func admitPendingPipelineImageLoads() {
+        guard let revision = presentedPipeline?.snapshot.revision else { return }
+        while activePipelineImageLoadTokens.count
+            < Self.maximumConcurrentPipelineImageLoads,
+            pendingPipelineImageCursor < pendingPipelineImageReferences.count {
+            let reference = pendingPipelineImageReferences[pendingPipelineImageCursor]
+            pendingPipelineImageCursor += 1
+            guard visiblePipelineImageReferences.contains(reference),
+                  case let .pending(pendingRevision, itemIDs) =
+                    pipelineImageEntries[reference],
+                  pendingRevision == revision else { continue }
+            startPipelineImageLoad(reference, itemIDs: itemIDs, revision: revision)
         }
     }
 
-    /// Cold resolution is deliberately outside every table/outline callback. This method may
-    /// validate and decode a package resource or warm account discovery; callers must preload
-    /// through `preparePipelineImages` and let rows read `pipelineImages` synchronously.
-    private func loadPipelineImage(_ image: WorkspaceNavigatorRealizedImage) -> NSImage? {
+    private func startPipelineImageLoad(
+        _ image: WorkspaceNavigatorRealizedImage,
+        itemIDs: Set<String>,
+        revision: UInt64
+    ) {
+        pipelineImageLoadSequence += 1
+        let token = pipelineImageLoadSequence
+        pipelineImageEntries[image] = .loading(
+            token: token,
+            revision: revision,
+            itemIDs: itemIDs
+        )
+
         switch image.reference {
         case .systemSymbol(let name):
-            return NSImage(systemSymbolName: name, accessibilityDescription: nil)
+            completePipelineImageLoad(
+                image,
+                token: token,
+                revision: revision,
+                image: NSImage(systemSymbolName: name, accessibilityDescription: nil),
+                cost: Self.maximumPipelineImageCostPerEntry
+            )
         case .hostAsset(let identifier):
-            return resolvePipelineHostIdentityAsset(identifier)
+            completePipelineImageLoad(
+                image,
+                token: token,
+                revision: revision,
+                image: resolvePipelineHostIdentityAsset(identifier),
+                cost: Self.maximumPipelineImageCostPerEntry
+            )
         case .extensionResource(let path):
             let source = image.factSource ?? .extension(
                 identifier: extensionIdentifier,
                 processGeneration: processGeneration
             )
-            guard case let .extension(identifier, generation) = source,
-                  let url = routing.extensionImageResourceURL(
-                      extensionIdentifier: identifier,
-                      relativePath: path,
-                      processGeneration: generation
-                  ) else { return nil }
-            return ExtensionImageResourceLoader.image(at: url)
+            guard case let .extension(identifier, generation) = source else {
+                completePipelineImageLoad(
+                    image,
+                    token: token,
+                    revision: revision,
+                    image: nil,
+                    cost: 0
+                )
+                return
+            }
+            activePipelineImageLoadTokens.insert(token)
+            routing.loadExtensionImageResourceData(
+                extensionIdentifier: identifier,
+                relativePath: path,
+                processGeneration: generation
+            ) { [weak self] data in
+                guard let self else { return }
+                guard self.isCurrentPipelineImageLoad(
+                    image,
+                    token: token,
+                    revision: revision
+                ) else {
+                    self.abandonPipelineImageLoad(image, token: token)
+                    return
+                }
+                guard let data else {
+                    self.completePipelineImageLoad(
+                        image,
+                        token: token,
+                        revision: revision,
+                        image: nil,
+                        cost: 0
+                    )
+                    return
+                }
+                let decoder = self.pipelineImageDecoder
+                Task { @MainActor [weak self] in
+                    let decoded = await Task.detached(priority: .userInitiated) {
+                        decoder(data)
+                    }.value
+                    self?.completePipelineImageLoad(
+                        image,
+                        token: token,
+                        revision: revision,
+                        image: decoded.map { ExtensionImageResourceLoader.image(from: $0) },
+                        cost: decoded.map {
+                            min(
+                                Self.maximumPipelineImageCostPerEntry,
+                                $0.bytesPerRow * $0.height
+                            )
+                        } ?? 0
+                    )
+                }
+            }
+        }
+    }
+
+    private func isCurrentPipelineImageLoad(
+        _ reference: WorkspaceNavigatorRealizedImage,
+        token: Int,
+        revision: UInt64
+    ) -> Bool {
+        guard presentedPipeline?.snapshot.revision == revision,
+              visiblePipelineImageReferences.contains(reference),
+              case let .loading(currentToken, currentRevision, _) =
+                pipelineImageEntries[reference] else { return false }
+        return currentToken == token && currentRevision == revision
+    }
+
+    private func abandonPipelineImageLoad(
+        _ reference: WorkspaceNavigatorRealizedImage,
+        token: Int
+    ) {
+        let freedSlot = activePipelineImageLoadTokens.remove(token) != nil
+        if case let .loading(currentToken, _, _) = pipelineImageEntries[reference],
+           currentToken == token {
+            pipelineImageEntries.removeValue(forKey: reference)
+        }
+        if freedSlot {
+            admitPendingPipelineImageLoads()
+        }
+    }
+
+    private func completePipelineImageLoad(
+        _ reference: WorkspaceNavigatorRealizedImage,
+        token: Int,
+        revision: UInt64,
+        image: NSImage?,
+        cost: Int
+    ) {
+        let freedSlot = activePipelineImageLoadTokens.remove(token) != nil
+        defer {
+            if freedSlot {
+                admitPendingPipelineImageLoads()
+            }
+        }
+        guard isCurrentPipelineImageLoad(reference, token: token, revision: revision),
+              case let .loading(_, _, itemIDs) = pipelineImageEntries[reference] else {
+            if case let .loading(currentToken, _, _) = pipelineImageEntries[reference],
+               currentToken == token {
+                pipelineImageEntries.removeValue(forKey: reference)
+            }
+            return
+        }
+        let boundedCost = image == nil ? 0 : min(
+            max(0, cost),
+            Self.maximumPipelineImageCostPerEntry
+        )
+        pipelineImageEntries[reference] = .resolved(image: image, cost: boundedCost)
+        pipelineImageCacheCost += boundedCost
+        touchPipelineImage(reference)
+        prunePipelineImages()
+        pipelineCollectionController?.reloadItems(withSourceSessionIDs: itemIDs)
+    }
+
+    private func touchPipelineImage(_ reference: WorkspaceNavigatorRealizedImage) {
+        pipelineImageLRU.removeAll { $0 == reference }
+        pipelineImageLRU.append(reference)
+    }
+
+    private func prunePipelineImages() {
+        while pipelineImageLRU.count > Self.maximumPipelineImageEntries
+            || pipelineImageCacheCost > Self.maximumPipelineImageCacheCost {
+            guard let index = pipelineImageLRU.firstIndex(where: {
+                !visiblePipelineImageReferences.contains($0)
+            }) else { return }
+            let removed = pipelineImageLRU.remove(at: index)
+            guard case let .resolved(_, cost) = pipelineImageEntries.removeValue(
+                forKey: removed
+            ) else { continue }
+            pipelineImageCacheCost = max(0, pipelineImageCacheCost - cost)
         }
     }
 
@@ -734,15 +998,11 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             return provider.icon
         }
         if let accountID = ExtensionIdentityAssetID.accountID(from: identifier),
-           let parsed = AccountID(rawValue: accountID),
-           let account = NativeSidebarParity.host(
+           let image = NativeSidebarParity.host(
                .identityPresentation,
-               AgentAccountDiscovery.account(
-                   for: parsed.provider,
-                   handle: parsed.handle
-               )
+               AccountBadge.publishedChip(forAccountID: accountID)
            ) {
-            return AccountBadge.chip(for: account)
+            return image
         }
         return nil
     }
@@ -1324,6 +1584,7 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
     NSTableViewDelegate
 {
     typealias ItemRenderer = (WorkspaceNavigatorPipelineItem) throws -> NSView
+    typealias PrefetchHandler = ([WorkspaceNavigatorPipelineItem]) -> Void
     typealias ActivationHandler = (ExtensionWorkspaceNavigatorDestination, String) -> Void
     typealias RenderFailureHandler = (Error) -> Void
 
@@ -1332,11 +1593,19 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
     private var presentation: WorkspaceNavigatorPipelinePresentation
     private var itemRowHeight: CGFloat
     private let renderItem: ItemRenderer
+    private let onPrefetch: PrefetchHandler
     private let onActivation: ActivationHandler
     private let onRenderFailure: RenderFailureHandler
     private var synchronizedDestination: ExtensionWorkspaceNavigatorDestination?
     private var suppressSelectionCallback = false
     private var retainedNonemptyState: WorkspaceNavigatorCollectionState?
+    private var isPrefetchScheduled = false
+    private let prefetchEvents = AppEventObservations()
+    private static let prefetchRowPadding = 8
+    /// Physical rows are still the source of this count; the ceiling prevents a malformed
+    /// geometry from turning one clip-view callback into a full-output scan without imposing the
+    /// image loader's smaller concurrency bound on otherwise visible rows.
+    private static let maximumPrefetchItems = 256
 
     private lazy var tableView: ThemedTableView = {
         let table = ThemedTableView()
@@ -1365,6 +1634,7 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
         presentation: WorkspaceNavigatorPipelinePresentation,
         itemRowHeight: CGFloat,
         renderItem: @escaping ItemRenderer,
+        onPrefetch: @escaping PrefetchHandler,
         onActivation: @escaping ActivationHandler,
         onRenderFailure: @escaping RenderFailureHandler
     ) {
@@ -1372,6 +1642,7 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
         self.presentation = presentation
         self.itemRowHeight = itemRowHeight
         self.renderItem = renderItem
+        self.onPrefetch = onPrefetch
         self.onActivation = onActivation
         self.onRenderFailure = onRenderFailure
         super.init(nibName: nil, bundle: nil)
@@ -1396,7 +1667,15 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        prefetchEvents.observe(
+            NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        ) { [weak self] in
+            self?.scheduleVisibleItemPrefetch()
+        }
         tableView.reloadData()
+        scheduleVisibleItemPrefetch()
     }
 
     func update(
@@ -1419,6 +1698,7 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
             to: restoration.topVisibleItemID,
             offset: restoration.topVisibleOffset
         )
+        scheduleVisibleItemPrefetch()
     }
 
     func reloadItems(withSourceSessionIDs sessionIDs: Set<String>) {
@@ -1428,6 +1708,7 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
             forRowIndexes: rows,
             columnIndexes: IndexSet(integer: 0)
         )
+        scheduleVisibleItemPrefetch()
     }
 
     func synchronizeSelection(with destination: ExtensionWorkspaceNavigatorDestination?) {
@@ -1458,6 +1739,7 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
         row: Int
     ) -> NSView? {
         guard presentation.rows.indices.contains(row) else { return nil }
+        scheduleVisibleItemPrefetch()
         let identifier = NSUserInterfaceItemIdentifier("WorkspaceNavigatorPipelineRow")
         let host = tableView.makeView(withIdentifier: identifier, owner: self)
             as? WorkspaceNavigatorRowHostView ?? WorkspaceNavigatorRowHostView()
@@ -1507,6 +1789,30 @@ final class WorkspaceNavigatorPipelineCollectionViewController:
         guard presentation.rows.indices.contains(row),
               case .item(let item) = presentation.rows[row] else { return nil }
         return item
+    }
+
+    /// Coalesces table, clip-view, and targeted-reload callbacks into one bounded main-turn read.
+    /// The handler may start worker I/O, so it is never invoked from AppKit's row callback itself.
+    private func scheduleVisibleItemPrefetch() {
+        guard !isPrefetchScheduled else { return }
+        isPrefetchScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isPrefetchScheduled = false
+            self.prefetchVisibleItems()
+        }
+    }
+
+    private func prefetchVisibleItems() {
+        let visible = tableView.rows(in: tableView.visibleRect)
+        guard visible.location != NSNotFound, visible.length > 0 else { return }
+        let lower = max(0, visible.location - Self.prefetchRowPadding)
+        let upper = min(
+            presentation.rows.count,
+            visible.location + visible.length + Self.prefetchRowPadding
+        )
+        let items = (lower..<upper).compactMap(item(at:))
+        onPrefetch(Array(items.prefix(Self.maximumPrefetchItems)))
     }
 
     private func restoreSelection(preferredItemID: String?) {
