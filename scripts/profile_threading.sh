@@ -37,7 +37,7 @@
 #   scripts/profile_threading.sh remote-conversation-stress [rows]
 #   scripts/profile_threading.sh ios-conversation-stress [seconds] [rows] [booted|simulator-UDID]
 #   scripts/profile_threading.sh cross-device-conversation-stress [seconds] [rows] [booted|simulator-UDID]
-#   scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [booted|simulator-UDID]
+#   scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [booted|simulator-UDID] [admission-delay-ms]
 #   scripts/profile_threading.sh ios-device-trace "Time Profiler" [seconds] <device-name-or-UDID> [process]
 #   scripts/profile_threading.sh ios-device-full [seconds] <device-name-or-UDID> [process]
 #   scripts/profile_threading.sh latest
@@ -388,9 +388,15 @@ run_ios_terminal_wire_lab() {
   local output_directory="$1"
   local history_lines="$2"
   local simulator_udid="$3"
+  local admission_delay_ms="$4"
   [[ "${history_lines}" =~ ^[0-9]+$ ]] \
       && (( 10#${history_lines} >= 1 && 10#${history_lines} <= 10000 )) || {
     echo "Terminal wire history lines must be an integer from 1 through 10000." >&2
+    return 2
+  }
+  [[ "${admission_delay_ms}" =~ ^[0-9]+$ ]] \
+      && (( 10#${admission_delay_ms} <= 5000 )) || {
+    echo "Terminal wire admission delay must be an integer from 0 through 5000 ms." >&2
     return 2
   }
   [[ -t 0 ]] || {
@@ -419,6 +425,7 @@ run_ios_terminal_wire_lab() {
   THREADING_REMOTE_TERMINAL_WIRE_LAUNCH_PATH="${launch_path}" \
   THREADING_REMOTE_TERMINAL_WIRE_STOP_PATH="${stop_path}" \
   THREADING_REMOTE_TERMINAL_WIRE_TIMEOUT=3600 \
+  THREADING_REMOTE_TERMINAL_WIRE_ADMISSION_DELAY_MS="${admission_delay_ms}" \
   DYLD_LIBRARY_PATH="${terminal_wire_mac_app}/Contents/MacOS" \
   DYLD_FRAMEWORK_PATH="${terminal_wire_mac_app}/Contents/Frameworks" \
     xcrun xctest \
@@ -481,6 +488,9 @@ run_ios_terminal_wire_lab() {
 
   echo
   echo "Terminal Wire Lab is running with ${history_lines} generated history rows."
+  if (( 10#${admission_delay_ms} > 0 )); then
+    echo "  • The Mac main-queue admission boundary is delayed ${admission_delay_ms} ms per input."
+  fi
   echo "  • Open Codex, scroll its terminal history, type 'more' or 'fill', then pop and reopen it."
   echo "  • Open Claude, scroll its application-owned transcript, type the same commands, and reopen it."
   echo "  • Each entry, typing run, submitted turn, and scroll gesture writes a THREADING_PERF line."
@@ -2480,9 +2490,10 @@ case "${command}" in
   ios-terminal-wire-lab)
     rows="${2:-2400}"
     simulator_udid="$(resolve_booted_ios_simulator "${3:-booted}")"
+    admission_delay_ms="${4:-0}"
     output_directory="$(new_run_directory ios-terminal-wire-lab)"
     run_ios_terminal_wire_lab \
-      "${output_directory}" "${rows}" "${simulator_udid}"
+      "${output_directory}" "${rows}" "${simulator_udid}" "${admission_delay_ms}"
     ;;
 
   ios-device-trace)

@@ -8,6 +8,11 @@ import ThreadingRemoteKit
 /// post-mortem and has historically recorded commands, prompts and paths. A file intended to
 /// leave the machine must be safe by construction rather than depend on a best-effort scrub.
 enum MacRemoteDiagnostics {
+    private static let nanosecondsPerMillisecond: UInt64 = 1_000_000
+    private static let interactionRecordingQueue = DispatchQueue(
+        label: "codes.threading.remote-diagnostics.interaction"
+    )
+
     static let journal = RemoteDiagnosticJournal(
         directory: FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -25,6 +30,29 @@ enum MacRemoteDiagnostics {
         fields: [RemoteDiagnosticField: String] = [:]
     ) {
         journal.record(event, level: level, fields: fields)
+    }
+
+    /// Interaction probes must not put the journal's synchronous file append onto the WebSocket
+    /// or main-queue admission path they are trying to measure. One serial front queue preserves
+    /// start/end ordering before the journal's own serialization.
+    static func recordInteraction(
+        _ event: RemoteDiagnosticEvent,
+        level: RemoteDiagnosticLevel = .info,
+        fields: [RemoteDiagnosticField: String]
+    ) {
+        interactionRecordingQueue.async {
+            journal.record(event, level: level, fields: fields)
+        }
+    }
+
+    static func monotonicNow() -> UInt64 {
+        DispatchTime.now().uptimeNanoseconds
+    }
+
+    static func elapsedMilliseconds(since startedAt: UInt64) -> String {
+        let now = monotonicNow()
+        guard now >= startedAt else { return "0" }
+        return String((now - startedAt) / nanosecondsPerMillisecond)
     }
 
     /// Stable enough to join events inside one report without exposing the underlying id.

@@ -349,6 +349,57 @@ final class RemoteConnectionFailureTests: XCTestCase {
         XCTAssertEqual(connection.phase, .connecting)
     }
 
+    func testDemoTerminalPairsContentFreeInputAndSubmissionLatencyEvents() async throws {
+        let sessionID = UUID().uuidString.lowercased()
+        let session = RemoteSessionSummaryDTO(
+            id: sessionID,
+            title: "Latency fixture",
+            agentKind: "codex",
+            surface: .terminal,
+            state: .idle,
+            projectName: "Fixture"
+        )
+        let connection = RemoteSessionConnection(
+            session: session,
+            client: RemoteClient(link: DemoExperience.link)
+        )
+        connection.connect()
+        defer { connection.disconnect(markEnded: false) }
+
+        XCTAssertEqual(connection.phase, .connected)
+        connection.sendTerminalKey("z")
+        let submissionID = try XCTUnwrap(connection.submitTerminalLine("status"))
+        await connection.waitForInteractionDiagnosticsForTesting()
+
+        let sessionPseudonym = MobileDiagnostics.pseudonym(sessionID, prefix: "session")
+        let records = MobileDiagnostics.journal.records().filter {
+            $0.fields[RemoteDiagnosticField.session.rawValue] == sessionPseudonym
+        }
+
+        try assertPairedLatencyEvents(
+            started: .terminalInputProbeStarted,
+            ended: .terminalInputProbeEnded,
+            in: records
+        )
+        let promptEnd = try assertPairedLatencyEvents(
+            started: .promptSubmissionStarted,
+            ended: .promptSubmissionEnded,
+            in: records
+        )
+        XCTAssertEqual(
+            promptEnd.fields[RemoteDiagnosticField.trace.rawValue],
+            MobileDiagnostics.pseudonym(submissionID, prefix: "trace")
+        )
+        XCTAssertEqual(
+            promptEnd.fields[RemoteDiagnosticField.result.rawValue],
+            RemotePromptSubmissionStatus.accepted.rawValue
+        )
+
+        let encoded = String(decoding: try JSONEncoder().encode(records), as: UTF8.self)
+        XCTAssertFalse(encoded.contains("status"))
+        XCTAssertFalse(encoded.contains("\"z\""))
+    }
+
     // MARK: - Helpers
 
     private func makeConnection(
@@ -371,6 +422,23 @@ final class RemoteConnectionFailureTests: XCTestCase {
             client: RemoteClient(link: link),
             helloDeadline: injectedDeadline
         )
+    }
+
+    @discardableResult
+    private func assertPairedLatencyEvents(
+        started startedEvent: RemoteDiagnosticEvent,
+        ended endedEvent: RemoteDiagnosticEvent,
+        in records: [RemoteDiagnosticRecord]
+    ) throws -> RemoteDiagnosticRecord {
+        let started = try XCTUnwrap(records.last { $0.event == startedEvent })
+        let ended = try XCTUnwrap(records.last { $0.event == endedEvent })
+        XCTAssertEqual(
+            started.fields[RemoteDiagnosticField.trace.rawValue],
+            ended.fields[RemoteDiagnosticField.trace.rawValue]
+        )
+        XCTAssertEqual(ended.fields[RemoteDiagnosticField.phase.rawValue], "clientRoundTrip")
+        XCTAssertNotNil(ended.fields[RemoteDiagnosticField.durationMS.rawValue].flatMap(Int.init))
+        return ended
     }
 
     private func terminalFailure(

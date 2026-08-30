@@ -711,6 +711,21 @@ final class RemoteProtocolTests: XCTestCase {
             result
         )
 
+        let inputProbe = RemoteTerminalInputProbeResultDTO(
+            requestID: "input-probe-1",
+            accepted: true
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteTerminalInputProbeResultDTO.self,
+                from: JSONEncoder().encode(inputProbe)
+            ),
+            inputProbe
+        )
+        XCTAssertTrue(
+            RemoteWebSocketFeature.allCases.contains(.terminalInputLatencyProbe)
+        )
+
         let hello = RemoteHelloDTO(
             surface: .conversation,
             capability: .interact,

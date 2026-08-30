@@ -497,13 +497,13 @@ lease, SIGWINCH and the TUI's resize repaint. Running a live provider for every 
 that fidelity problem by introducing account state, network variance, private transcript data
 and paid turns. Neither is an acceptable performance baseline.
 
-`scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [simulator]` now runs the
-middle path under the shipping boundaries. An isolated hosted XCTest creates two real terminal
-sessions, starts the generated Codex- and Claude-shaped helpers on real raw-mode PTYs, and serves
-them through `RemoteAccessServer` and `RemoteSessionMirrorRegistry`. A Debug `-O` iOS build gets a
-loopback-only ephemeral pairing and uses the ordinary dashboard, session navigation,
-`RemoteSessionConnection`, WebSocket and SwiftTerm surface. The pairing, continuity, discovery
-and notification state are isolated from the simulator's ordinary app data. The bearer is a
+`scripts/profile_threading.sh ios-terminal-wire-lab [history-lines] [simulator] [admission-delay-ms]`
+now runs the middle path under the shipping boundaries. An isolated hosted XCTest creates two
+real terminal sessions, starts the generated Codex- and Claude-shaped helpers on real raw-mode
+PTYs, and serves them through `RemoteAccessServer` and `RemoteSessionMirrorRegistry`. A Debug
+`-O` iOS build gets a loopback-only ephemeral pairing and uses the ordinary dashboard, session
+navigation, `RemoteSessionConnection`, WebSocket and SwiftTerm surface. The pairing, continuity,
+discovery and notification state are isolated from the simulator's ordinary app data. The bearer is a
 fixed test authority and no provider executable, credential, API or token is consulted.
 
 The two workloads deliberately disagree where provider behavior changes the cost model:
@@ -526,6 +526,15 @@ clear-history and alternate-screen sequences during entry. The driver copies the
 final real-shell screenshot into the run directory under `/tmp/threading-profiles` when Return is
 pressed in its terminal. Re-enter both chats in one run: successive `attempt` values are the
 push/pop comparison rather than separate process launches with different caches.
+
+The optional admission delay is a deterministic reproduction for remote typing that feels
+sticky while the socket itself is healthy. A value such as `750` pauses the hosted Debug Mac at
+the same main-queue boundary used by direct terminal input and atomic prompt submission. Run the
+lab once with `0` and once with `750`; the delayed run reports
+`ios-terminal-input-probe round_trip_ms`, `ios-terminal-typing first_response_ms`, and
+`ios-terminal-turn submit_to_first_bytes_ms` without consulting a provider or carrying typed
+bytes in the measurements. The fixture is accepted only by the token-free hosted test and is
+compiled out of Release builds.
 
 The first real Codex run exposed the remaining flicker as scheduling, not parser cost. Its resize
 repair arrived in 154 binary frames over 2.0 seconds; SwiftTerm spent only 61 ms feeding them, but
