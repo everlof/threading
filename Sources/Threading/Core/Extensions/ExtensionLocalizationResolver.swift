@@ -141,6 +141,23 @@ struct ExtensionLocalizationResolver: Sendable {
             formatVersion: pipeline.formatVersion,
             source: pipeline.source,
             consumes: pipeline.consumes,
+            registeredFactOptions: pipeline.registeredFactOptions.map {
+                let application: ExtensionWorkspaceNavigatorRegisteredFactApplication
+                switch $0.application {
+                case let .bucket(direction, unknownTitle):
+                    application = .bucket(
+                        direction: direction,
+                        unknownTitle: string(unknownTitle)
+                    )
+                case let .sort(direction):
+                    application = .sort(direction: direction)
+                }
+                return ExtensionWorkspaceNavigatorRegisteredFactOption(
+                    id: $0.id,
+                    title: string($0.title),
+                    application: application
+                )
+            },
             search: pipeline.search.map {
                 ExtensionWorkspaceNavigatorSearch(
                     placeholder: string($0.placeholder),

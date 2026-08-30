@@ -5,7 +5,8 @@
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
 > plus a host-executed intent vocabulary. Rollout steps 1–5 and the initial intent contract were
 > implemented by 2026-08-30; the three reference extensions now build from the public SDK, while
-> dynamic provider-fact choices, windowed collections, and native convergence remain open.
+> the dynamic provider-fact SDK contract is now pinned while its host catalogue, persistence and
+> evaluator wiring remain in progress; windowed collections and native convergence remain open.
 > No part of
 > `ui.workspace-navigation` v1 is withdrawn.
 
@@ -256,8 +257,9 @@ Data goes through facts. A transform can only sort, group or filter by things th
 Because facts are typed and self-describing, a navigator can offer *Group by…* and *Sort by…* over
 whatever facts are registered right now, including ones it has never heard of. Install GitLab and
 **MR state** appears in the group-by menu of a sidebar written before GitLab existed. Uninstall it
-and the option disappears; rows that had been grouped by it fall into an `unknown` bucket rather
-than the transform failing.
+and its key stops being offered as a live choice, while a retained selection appears as
+unavailable; rows that had been grouped by it fall into an `unknown` bucket rather than the
+transform failing. Reinstall the same key and the user's arrangement resumes.
 
 This is the payoff of the whole model, and the reason facts must be a host registry rather than a
 private channel between two extensions.
@@ -307,9 +309,9 @@ on an explicit refresh, and reach the network through `network.brokered` under t
 [`github.md`](../architecture/github.md) already documents. Bounds: a cap on facts per subject,
 a cap on total facts per extension generation, a value-size cap, and coalesced publication.
 
-Two extensions publishing the same key is resolved the way `attachments.preview@1` resolves its
-conflicts — the user's own extension ordering decides, first valid publication wins, and there is
-no invented "two extensions claim this" state for a user to resolve.
+Two extensions publishing the same compatible key resolve to one choice and one value. Persisted
+provider ordering is not shipped yet: providers currently have equal priority, so extension
+identifier and process generation provide a deterministic tie-break independent of startup order.
 
 ## Stage 2 — Options
 
@@ -619,8 +621,13 @@ does. An install must never reorder somebody's sidebar on its own.
    revealing the gesture, source session, or result to the extension. `T3SidebarExtension` proves
    the public contract with project-scoped subtitles, pinned-first sections, conditional host
    intents, a persisted sort option, and scheduled-row action omission.
-7. **Windowed collections**, retiring the aggregate item cap.
-8. **Native on the pipeline**, as far as it honestly goes. Full parity includes drag reorder,
+7. **Registered-fact choices — SDK contract implemented 2026-08-30, host wiring in progress.**
+   A pipeline may declare one dynamic bucket picker and one dynamic sort picker. The contract pins
+   host-owned None, selected-key retention, missing-last semantics, static composition, eligible
+   subject kinds, localization, deterministic catalogue order and bounds without exposing the
+   catalogue or selection to extension code.
+8. **Windowed collections**, retiring the aggregate item cap.
+9. **Native on the pipeline**, as far as it honestly goes. Full parity includes drag reorder,
    inline rename, LabelMorph titles and hover cards; the realistic target is that native's *facts*
    and *options* are the published ones, not that native is literally an extension.
 

@@ -155,6 +155,62 @@ rows which nothing in the host consumes. Declaring an option does not invoke the
 the host does not create a preference file until a user-visible control changes a non-default
 value.
 
+### Registered-fact controls
+
+> Contract status, 2026-08-30: the SDK, validation, localization and wire schema below are pinned.
+> Host catalogue, menu, persistence, invalidation and evaluator wiring are still in progress, so
+> declaring these controls does not yet make them appear in the shipping navigator.
+
+A pipeline may also declare at most one dynamic **Group by** control and one dynamic **Sort by**
+control with `registeredFactOptions`. These are host-owned pickers over the live fact registry,
+not static setting choices and not extra `consumes` entries:
+
+```swift
+registeredFactOptions: [
+    .init(
+        id: "group-by-fact",
+        title: "Group by",
+        application: .bucket(direction: .ascending, unknownTitle: "Unknown")
+    ),
+    .init(
+        id: "sort-by-fact",
+        title: "Sort by",
+        application: .sort(direction: .ascending)
+    )
+]
+```
+
+Each control has a host-localized **None** default. A selected dynamic bucket replaces the active
+static bucket clause; choosing None restores the static buckets. Present scalar values follow the
+declared direction and missing values stay in the extension-localized unknown bucket at the end.
+A selected dynamic sort is the primary sort, missing values follow present values in both
+directions, and active static sort clauses remain tie-breakers. If a selected definition is
+temporarily unavailable, grouping produces the unknown bucket and sorting becomes a no-op before
+those static tie-breakers. It does not invoke `required` / `enhances` degradation.
+
+Threading offers a host-localized None row plus at most 128 fact rows in each control after
+filtering the live host and extension registry. Grouping requires `.groupable`; sorting requires
+`.sortable`; and format 1 admits definitions applicable to `.session`, `.repositoryBranch`, or
+`.repository`. Project-only and terminal-only definitions cannot resolve from the pipeline's
+session source and are omitted. For a key with multiple compatible providers, the registry's
+winning definition — host first, then source order, extension identifier and process generation —
+alone supplies display name, usages and eligibility. Metadata from lower-precedence definitions is
+never merged. Choices sort by localized display name, then fact-key ID and version, so provider
+startup order cannot reorder the menu.
+
+A selected live eligible key always remains visible inside the 128 fact-row bound. If it moves
+outside the sorted prefix after a locale or catalogue change, it replaces the final admitted row.
+If it has no live eligible definition, one host-localized unavailable row containing that key
+reserves a fact-row slot, leaving at most 127 live rows. None therefore makes the complete submenu
+at most 129 rows and always gives the user a way to clear the retained selection.
+
+The selected value is an `ExtensionFactKey`, persisted by Threading under the navigator and option
+IDs. Those IDs share the namespace with static navigator options, but registered-fact IDs cannot
+be referenced from a static `when` condition. Threading retains a selected key across provider
+removal and resumes it when the same key returns; the provider never receives the catalogue,
+selection, source subjects, or resolved values. Each control consumes one parent row in the
+navigator's 30-entry declared-menu budget. Its bounded dynamic choices live inside that submenu.
+
 ## Host-evaluated pipeline declarations
 
 The optional `pipeline` is the additive `ui.workspace-navigation@2` contract revision. The `@2`
