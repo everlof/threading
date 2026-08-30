@@ -39,6 +39,10 @@
         "value" : "$(THREADING_RENDER_OUT)"
       },
       {
+        "key" : "THREADING_LIVE_MARKETING_CAPTURE",
+        "value" : "$(THREADING_LIVE_MARKETING_CAPTURE)"
+      },
+      {
         "key" : "THREADING_UI_EVIDENCE_OUT",
         "value" : "$(THREADING_UI_EVIDENCE_OUT)"
       }

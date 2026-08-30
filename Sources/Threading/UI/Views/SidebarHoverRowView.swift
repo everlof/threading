@@ -32,6 +32,14 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent, SidebarDensity
     /// the right answer for the lists that never fit themselves to a divider.
     private var density = SidebarDensity.relaxed
 
+    /// A rendered-evidence fixture may pin the already-resolved System selection colour.
+    /// `cacheDisplay` otherwise resolves `selectedContentBackgroundColor` through the ambient
+    /// process appearance even when the offscreen window itself is explicitly Dark Aqua.
+    /// Production leaves this nil and continues to follow the live user accent dynamically.
+    var fixtureSelectionFill: NSColor? {
+        didSet { needsDisplay = true }
+    }
+
     /// A heading keeps the class for the rule below without inheriting the wash: it only
     /// expands from its disclosure, and a highlight would promise more. Set at creation,
     /// before any tracking area exists, so there is no lit state to unwind.
@@ -212,9 +220,9 @@ final class SidebarHoverRowView: NSTableRowView, ThemedComponent, SidebarDensity
         // distinguishes, but on the question `ListSelectionStrength` re-answers for every list
         // in the app: the *window's*, not the focus inside it. So a background window does not
         // shout and the front one does not whisper at the row a click just picked.
-        let fill = isEmphasized
+        let fill = fixtureSelectionFill ?? (isEmphasized
             ? Design.Surface.selectionFill
-            : Design.Surface.selectionFillUnemphasized
+            : Design.Surface.selectionFillUnemphasized)
         fill.setFill()
         highlightPath.fill()
     }

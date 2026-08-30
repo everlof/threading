@@ -1,4 +1,6 @@
 import AppKit
+import Darwin
+@testable import SwiftTerm
 import XCTest
 @testable import Threading
 
@@ -9,7 +11,7 @@ import XCTest
 /// orange string is legible on a green added line, in both appearances. The layout assertions
 /// come along for free.
 @MainActor
-final class GitReviewRenderTests: XCTestCase {
+final class GitReviewRenderTests: HostedStoreTestCase {
 
     // MARK: - Configuration
 
@@ -62,35 +64,52 @@ final class GitReviewRenderTests: XCTestCase {
     +    return f"{version}-{channel}.2"
     """
 
-    /// The website's Threading-theme product capture. It names the same two decisions the
-    /// fixture demonstrates: the title band keeps one clean identity, and the theme page points
-    /// at a named capture rather than an unrelated audit surface.
-    private let productFixture = """
-    diff --git a/Sources/Threading/Core/Theme/AppThemeStyles.swift b/Sources/Threading/Core/Theme/AppThemeStyles.swift
-    index 1111111..2222222 100644
-    --- a/Sources/Threading/Core/Theme/AppThemeStyles.swift
-    +++ b/Sources/Threading/Core/Theme/AppThemeStyles.swift
-    @@ -170,7 +170,7 @@ enum AppThemeStyles {
-                         buttonGlyphStyle: .plain,
-                         buttonPlacement: .trailing,
-    -                    showsAppIcon: true,
-    +                    showsAppIcon: false,
-                         activeTexture: .init(kind: .rule, color: hex("#FF9A3D")),
-                         inactiveTexture: .init(kind: .rule, color: hex("#2B4B65"))
-                     ),
-    diff --git a/web/app/ThemePlayground.tsx b/web/app/ThemePlayground.tsx
-    index 3333333..4444444 100644
-    --- a/web/app/ThemePlayground.tsx
-    +++ b/web/app/ThemePlayground.tsx
-    @@ -30,7 +30,7 @@ const captures: Capture[] = [
-         slug: "threading",
-         name: "Threading",
-         detail: "A navy frame, warm text, and Threading orange.",
-    -    image: "/product/mac-browser-audit.png",
-    +    image: "/product/mac-threading-chat-review.png",
-         ground: "#040a12",
-         surface: "#0a1c2f",
-         ink: "#f7efe6",
+    /// The website capture's repository is real: Git Review reads these committed files through
+    /// its shipping git process, then the test rewrites them into the state pictured on screen.
+    private let productRenderTestBefore = """
+    import AppKit
+    import XCTest
+    @testable import Threading
+
+    @MainActor
+    final class GitReviewRenderTests: XCTestCase {
+        func productCapture() {
+            let session = AgentSession(kind: .codex, usesNativeUI: true)
+            let split = SidebarSplitViewController()
+            let conversation = ConversationViewController(agentSession: session)
+            split.addSplitViewItem(NSSplitViewItem(viewController: conversation))
+        }
+    }
+    """
+
+    private let productRenderTestAfter = """
+    import AppKit
+    import XCTest
+    @testable import Threading
+
+    @MainActor
+    final class GitReviewRenderTests: HostedStoreTestCase {
+        func productCapture() {
+            let session = AgentSession(kind: .codex, usesNativeUI: false)
+            let window = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+            let terminal = AgentSessionViewController(agentSession: session)
+            window.sidebarViewController.select(sessionID: session.id)
+        }
+    }
+    """
+
+    private let productThemeBefore = """
+    const captures = [{
+      slug: "threading",
+      image: productImage("mac-threading-chat-review.png"),
+    }];
+    """
+
+    private let productThemeAfter = """
+    const captures = [{
+      slug: "threading",
+      image: productImage("mac-threading-tui-review.png"),
+    }];
     """
 
     /// A change whose lines run far past any pane. This is the only shape that tells the two
@@ -871,30 +890,73 @@ final class GitReviewRenderTests: XCTestCase {
         }
     }
 
-    /// The product capture is the real native conversation beside the real Git Review pane.
-    /// The same fixture is rendered through every theme used by the website scroll story, so
-    /// its mask changes only the app's dress and never swaps the product story underneath it.
-    func testRendersThreadingConversationWithGitReviewPane() throws {
+    /// The product capture is the complete shipping window: project sidebar, selected session,
+    /// provider terminal, pane headers, display panel, and Git Review. The repository is a
+    /// disposable fixture, but the TUI is not: Threading launches the installed Codex provider
+    /// and the same live terminal stays attached while every website theme is captured.
+    ///
+    /// This is deliberately opt-in. A normal test run must never spend a provider turn merely
+    /// because somebody ran the suite; the website capture command states that cost explicitly.
+    func testRendersFullThreadingShellWithTUIAndGitReview() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["THREADING_LIVE_MARKETING_CAPTURE"] == "1",
+            "Run the website capture explicitly; it launches a real Codex TUI and spends one turn."
+        )
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { AppThemePalette.set(.system) }
+        let originalTheme = AppThemeLibrary.current
+        let originalBackdrop = WindowBackdrop.ground
+        let originalAppearance = NSApp.appearance
+        let product = try makeProductShellFixture()
+        XCTAssertTrue(
+            AgentRuntime.shared.installFixtureLaunchPlan(for: product.session.id) {
+                [weak self] session, project, initialPrompt in
+                guard let self else { throw LiveMarketingCaptureError.ownerReleased }
+                return self.liveCodexPlan(
+                    for: session,
+                    in: project,
+                    initialPrompt: initialPrompt
+                )
+            },
+            "the live marketing process must be installed before its terminal is materialized"
+        )
+        defer {
+            AgentRuntime.shared.discard(sessionID: product.session.id)
+            ProjectStore.shared.removeProject(id: product.project.id)
+            try? FileManager.default.removeItem(at: product.containerURL)
+            AppThemeLibrary.apply(originalTheme)
+            AppThemePalette.set(originalTheme)
+            WindowBackdrop.set(originalBackdrop)
+            NSApp.appearance = originalAppearance
+        }
 
         let fixtures: [(filename: String, theme: AppTheme, appearance: NSAppearance.Name)] = [
-            ("threading-chat-git-review.png", AppThemeStyles.threading, .darkAqua),
-            ("theme-chat-review-system-dark.png", .system, .darkAqua),
-            ("theme-chat-review-cyberpunk-dark.png", AppThemeStyles.cyberpunk, .darkAqua),
-            ("theme-chat-review-swiss-light.png", AppThemeStyles.swissMinimalist, .aqua),
-            ("theme-chat-review-neo-brutalism-light.png", AppThemeStyles.neoBrutalism, .aqua),
-            ("theme-chat-review-claymorphism-light.png", AppThemeStyles.claymorphism, .aqua),
-            ("theme-chat-review-vaporwave-dark.png", AppThemeStyles.vaporwave, .darkAqua)
+            ("threading-tui-git-review.png", AppThemeStyles.threading, .darkAqua),
+            ("theme-tui-system-dark.png", .system, .darkAqua),
+            ("theme-tui-cyberpunk-dark.png", AppThemeStyles.cyberpunk, .darkAqua),
+            ("theme-tui-swiss-light.png", AppThemeStyles.swissMinimalist, .aqua),
+            ("theme-tui-neo-brutalism-light.png", AppThemeStyles.neoBrutalism, .aqua),
+            ("theme-tui-claymorphism-light.png", AppThemeStyles.claymorphism, .aqua),
+            ("theme-tui-vaporwave-dark.png", AppThemeStyles.vaporwave, .darkAqua)
         ]
 
         for fixture in fixtures {
+            // Repaint the same live provider terminal under each selected theme. Keeping one
+            // process is what makes the comparison honest: only the app-and-terminal dress moves.
+            AppThemeLibrary.apply(fixture.theme)
             AppThemePalette.set(fixture.theme)
             let appearance = try XCTUnwrap(NSAppearance(named: fixture.appearance))
-            var result: (data: Data?, showsAppIcon: Bool)?
+            // Dynamic System colours are application-scoped when AppKit services a nested run
+            // loop. Match the product's selected appearance instead of inheriting the test
+            // process's ambient Aqua while the dark window is rendered.
+            NSApp.appearance = appearance
+            var result: ProductShellRender?
             appearance.performAsCurrentDrawingAppearance {
-                result = self.threadingConversationWithGitReview(appearance: appearance)
+                result = self.fullThreadingShellWithTUIAndGitReview(
+                    theme: fixture.theme,
+                    appearance: appearance,
+                    product: product
+                )
             }
 
             let rendered = try XCTUnwrap(result)
@@ -904,184 +966,529 @@ final class GitReviewRenderTests: XCTestCase {
                     "Threading's title band should not repeat the app mark"
                 )
             }
-            try XCTUnwrap(rendered.data, "failed to render \(fixture.filename)")
-                .write(to: directory.appendingPathComponent(fixture.filename))
+            let data = try XCTUnwrap(rendered.data, "failed to render \(fixture.filename)")
+            try assertTerminalBackground(
+                in: data,
+                at: rendered.terminalSample,
+                contentSize: rendered.contentSize,
+                equals: fixture.theme.terminalPalette(for: appearance).background,
+                filename: fixture.filename
+            )
+            try data.write(to: directory.appendingPathComponent(fixture.filename))
         }
-        print("Rendered the theme chat and review captures to \(directory.path)")
+        print("Rendered the full-window theme TUI and review captures to \(directory.path)")
     }
 
-    private func threadingConversationWithGitReview(
-        appearance: NSAppearance
-    ) -> (data: Data?, showsAppIcon: Bool) {
+    private struct ProductShellFixture {
+        let containerURL: URL
+        let project: Project
+        let session: AgentSession
+        let reviewFiles: [GitFileDiff]
+    }
+
+    private struct ProductShellRender {
+        let data: Data?
+        let showsAppIcon: Bool
+        let terminalSample: NSPoint
+        let contentSize: NSSize
+    }
+
+    private enum LiveMarketingCaptureError: Error {
+        case ownerReleased
+    }
+
+    private func fullThreadingShellWithTUIAndGitReview(
+        theme: AppTheme,
+        appearance: NSAppearance,
+        product: ProductShellFixture
+    ) -> ProductShellRender? {
         let size = NSSize(width: 1_280, height: 760)
-        let project = Project(
-            name: "Threading",
-            folderURL: URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        )
-        let session = AgentSession(
-            kind: .claude,
-            title: "Theme showcase",
-            usesNativeUI: true
-        )
-        let conversation = requireConversationViewController(
-            agentSession: session,
-            project: project,
-            customizationLookup: { _ in .empty }
-        )
-        let review = GitReviewViewController(
-            sessionID: session.id,
-            folderPath: project.folderPath,
-            mode: .uncommitted
+        let terminal = AgentRuntime.shared.makeController(for: product.session)
+        _ = terminal.view
+        var profile = TerminalProfile.default
+        profile.theme = theme.terminalPalette(for: appearance)
+        profile.cursorBlink = false
+        terminal.session.updateProfile(profile)
+        WindowBackdrop.set(.terminal(profile.theme.background))
+        XCTAssertEqual(
+            terminal.session.terminalView.terminalStateSnapshot().backgroundColor,
+            swiftTermColor(profile.theme.background),
+            "the theme capture terminal must use the selected app theme's paired palette"
         )
 
-        let split = SidebarSplitViewController()
-        let conversationItem = NSSplitViewItem(viewController: conversation)
-        conversationItem.minimumThickness = 560
-        let reviewItem = NSSplitViewItem(viewController: review)
-        reviewItem.minimumThickness = 420
-        split.addSplitViewItem(conversationItem)
-        split.addSplitViewItem(reviewItem)
-
-        let host = WindowChromeHostViewController(workspace: split)
-        let window = NSWindow(
-            contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        window.isReleasedWhenClosed = false
+        let controller = makeMainWindowController(initialFramePlan: .useDefaultFrame)
+        guard let window = controller.window else {
+            XCTFail("the shipping main window was not created")
+            return nil
+        }
         window.appearance = appearance
-        window.contentViewController = host
         window.setContentSize(size)
+        // SwiftTerm's Metal-backed renderer does not produce its first frame while its window
+        // has never been ordered. Keep the real product window far offscreen, but give AppKit
+        // the same ordered-window lifecycle it has in the running application.
         window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
-        window.orderFront(nil)
+        window.makeKeyAndOrderFront(nil)
         defer {
             window.orderOut(nil)
+            window.delegate = nil
             window.contentViewController = nil
-            window.close()
+            controller.window = nil
         }
 
-        host.setTitle("Threading")
-        host.setTakeoverActive(true)
-        host.bandView.fixtureIsKey = true
-        host.commandBandView.setLeadingControls(makeProductWindowControls())
-        host.view.frame = NSRect(origin: .zero, size: size)
-        host.view.appearance = appearance
-        host.view.layoutSubtreeIfNeeded()
-        split.splitView.setPosition(720, ofDividerAt: 0)
-        host.view.layoutSubtreeIfNeeded()
-
-        applyProductConversation(to: conversation)
-        review.show(.files(GitDiffParser.files(fromUnifiedDiff: productFixture)))
-        conversation.scrollToConversationEnd()
-        AppThemeRefresh.repaint(host.view)
-        host.view.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
-        conversation.scrollToConversationEnd()
-        host.view.layoutSubtreeIfNeeded()
-        window.displayIfNeeded()
-        window.makeFirstResponder(nil)
-
-        guard let content = window.contentView,
-              let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else {
-            return (nil, host.bandView.showsApplicationIcon)
+        guard let content = window.contentView else {
+            XCTFail("the shipping main window had no content view")
+            return nil
         }
-        content.cacheDisplay(in: content.bounds, to: rep)
-        return (
-            rep.representation(using: .png, properties: [:]),
-            host.bandView.showsApplicationIcon
-        )
-    }
+        content.appearance = appearance
+        // Sidebar rows read key-window state when they are configured. Pin the deterministic
+        // capture state before mounting the real tree so the selected System row keeps its ink.
+        applyKeyFixtureState(in: content)
+        controller.sidebarViewController.mountInitialTreeIfNeeded()
+        controller.displayPaneController.showSession(product.session.id)
+        guard let review = controller.displayPaneController.activateReview(
+            for: product.session.id
+        ) else {
+            XCTFail("the shipping display pane did not create Git Review")
+            return nil
+        }
 
-    private func applyProductConversation(to conversation: ConversationViewController) {
-        let patch = """
-        *** Begin Patch
-        *** Update File: Sources/Threading/Core/Theme/AppThemeStyles.swift
-        @@
-        -                    showsAppIcon: true,
-        +                    showsAppIcon: false,
-        *** End Patch
-        """
-        let events: [StreamEvent] = [
-            .userMessage(
-                "The theme page should show the app people actually use, not Execution Audit."
-            ),
-            .assistantMessage(blocks: [
-                .text("I will use a populated native conversation with Git Review open beside it. The website will read the image through a named screenshot reference.")
-            ]),
-            .turnFinished(
-                text: nil,
-                outcome: .completed,
-                metrics: TurnMetrics(
-                    duration: 8.7,
-                    outputTokens: 132,
-                    effort: "high",
-                    contextTokens: 37_600,
-                    contextWindow: 200_000
-                )
-            ),
-            .userMessage(
-                "Give the Threading theme a cleaner title bar, then show the real change beside this chat."
-            ),
-            .assistantMessage(blocks: [
-                .thinking("I will keep the title and window controls, remove the repeated mark, and verify the diff in the app."),
-                .toolUse(
-                    id: "edit-threading-chrome",
-                    tool: .edit,
-                    input: ["patch": .string(patch)]
-                )
-            ]),
-            .toolResults([
-                ToolResult(
-                    toolUseID: "edit-threading-chrome",
-                    text: "Applied the title-bar change.",
-                    isError: false
-                )
-            ]),
-            .assistantMessage(blocks: [
-                .text("The repeated app mark is gone. Git Review is open on the right with the exact files changed.")
-            ]),
-            .turnFinished(
-                text: nil,
-                outcome: .completed,
-                metrics: TurnMetrics(
-                    duration: 12.4,
-                    outputTokens: 214,
-                    effort: "high",
-                    contextTokens: 38_400,
-                    contextWindow: 200_000
-                )
+        // Select through the real sidebar. Its one event-loop handoff paints the selected row
+        // before attaching the already-cached terminal, exactly as a user click does.
+        controller.sidebarViewController.select(sessionID: product.session.id)
+        let selectionDeadline = Date().addingTimeInterval(2)
+        while controller.containerViewController.currentSessionID != product.session.id,
+              Date() < selectionDeadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        }
+        XCTAssertEqual(controller.sidebarViewController.selectedSessionID, product.session.id)
+        XCTAssertEqual(controller.containerViewController.currentSessionID, product.session.id)
+        XCTAssertTrue(controller.containerViewController.activeTerminalSession === terminal.session)
+
+        controller.setDisplayPaneVisible(true, animated: false)
+        let split = controller.splitViewController.splitView
+        content.layoutSubtreeIfNeeded()
+        split.setPosition(230, ofDividerAt: 0)
+        split.setPosition(825, ofDividerAt: 1)
+        content.layoutSubtreeIfNeeded()
+
+        let visiblePanes = split.arrangedSubviews.filter {
+            !$0.isHidden && $0.bounds.width > 1 && $0.bounds.height > 1
+        }
+        XCTAssertEqual(visiblePanes.count, 3, "the website capture must show the full three-pane app")
+        XCTAssertTrue(controller.displayPaneController.currentReview === review)
+
+        let terminalView = terminal.session.terminalView
+        terminalView.suspendsRenderingWhenNotVisible = false
+        if !terminal.isRunning {
+            terminal.launch(initialPrompt: liveProductPrompt)
+            let providerDeadline = Date().addingTimeInterval(180)
+            var markerCount = 0
+            var providerSettled = false
+            repeat {
+                RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+                markerCount = terminalView.recentLogicalBufferText(
+                    maximumUTF8Bytes: 256 * 1_024
+                ).text.components(separatedBy: liveProductMarker).count - 1
+                providerSettled = markerCount >= 2 && !terminal.activity.hasTurnInFlight
+            } while !providerSettled && Date() < providerDeadline
+            XCTAssertGreaterThanOrEqual(
+                markerCount,
+                2,
+                "the installed Codex TUI did not finish the disposable screenshot task"
             )
-        ]
+            XCTAssertTrue(
+                providerSettled,
+                "the installed Codex TUI response did not reach a completed turn boundary"
+            )
+            RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        }
+        let providerBuffer = terminalView.recentLogicalBufferText(
+            maximumUTF8Bytes: 256 * 1_024
+        ).text
+        XCTAssertGreaterThanOrEqual(
+            providerBuffer.components(separatedBy: liveProductMarker).count - 1,
+            2,
+            "the marketing capture must retain the real provider's completed response"
+        )
 
-        for event in events {
-            for change in conversation.timeline.apply(event) {
-                conversation.apply(change)
+        // The disposable checkout's patch was read before launching the provider. Cancel the
+        // pane's redundant background read and present those exact Git-parsed models through the
+        // shipping review controller; this keeps the capture deterministic without inventing a
+        // review or waiting behind provider-owned Git commands.
+        review.activeDiffCancellation?.cancel()
+        review.generation += 1
+        review.isLoading = false
+        review.loadedDiffRoot = review.repositoryRoot
+        review.show(.files(product.reviewFiles), forceRebuild: true)
+        review.setChangeRequestBarVisible(false)
+        XCTAssertEqual(
+            review.renderedFiles.map(\.path).sorted(),
+            [
+                "Tests/ThreadingTests/GitReviewRenderTests.swift",
+                "web/app/ThemePlayground.tsx"
+            ],
+            "the full-window capture must show the real repository fixture in Git Review"
+        )
+
+        applyKeyFixtureState(in: content)
+        AppThemeRefresh.repaint(content)
+        content.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        // The first SwiftTerm surface in a process also has to compile its Metal pipeline.
+        // Advance the real render loop long enough for that first frame instead of relying on
+        // later theme captures to warm it incidentally.
+        let terminalRenderDeadline = Date().addingTimeInterval(0.35)
+        repeat {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            terminalView.needsDisplay = true
+            terminalView.frameTick()
+            window.displayIfNeeded()
+        } while Date() < terminalRenderDeadline
+
+        // Both operations above may rebuild asynchronously-owned chrome: theme repaint can
+        // replace sidebar rows, while change-request discovery can restore its contextual bar.
+        // Pin the intended real-window state at the final pixel boundary.
+        review.setChangeRequestBarVisible(false)
+        var resolvedSystemSelectionFill: NSColor?
+        if theme.isSystem {
+            appearance.performAsCurrentDrawingAppearance {
+                resolvedSystemSelectionFill = NSColor.selectedContentBackgroundColor
+                    .usingColorSpace(.sRGB)
             }
         }
+        applyKeyFixtureState(
+            in: content,
+            systemSelectionFill: resolvedSystemSelectionFill
+        )
+        let selectedSidebarRows = descendants(in: content)
+            .compactMap { $0 as? SidebarHoverRowView }
+            .filter(\.isSelected)
+        XCTAssertEqual(selectedSidebarRows.count, 1)
+        XCTAssertTrue(selectedSidebarRows.allSatisfy(\.isEmphasized))
+        XCTAssertTrue(selectedSidebarRows.allSatisfy { row in
+            descendants(in: row).compactMap { $0 as? SessionRowView }.allSatisfy {
+                $0.backgroundStyle == .emphasized
+            }
+        })
+        content.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        _ = window.makeFirstResponder(terminalView)
+
+        guard let rep = content.bitmapImageRepForCachingDisplay(in: content.bounds) else {
+            return ProductShellRender(
+                data: nil,
+                showsAppIcon: false,
+                terminalSample: .zero,
+                contentSize: content.bounds.size
+            )
+        }
+        content.cacheDisplay(in: content.bounds, to: rep)
+        let terminalSample = terminalView.convert(
+            NSPoint(x: terminalView.bounds.width * 0.90, y: terminalView.bounds.height * 0.50),
+            to: content
+        )
+        let titleBand = descendants(in: content).compactMap { $0 as? WindowTitleBandView }.first
+        return ProductShellRender(
+            data: compositedPNG(
+                representation: rep,
+                ground: profile.theme.background
+            ),
+            showsAppIcon: titleBand?.showsApplicationIcon ?? false,
+            terminalSample: terminalSample,
+            contentSize: content.bounds.size
+        )
     }
 
-    /// Uses the same app-owned command controls the main window installs in this band.
-    private func makeProductWindowControls() -> [NSView] {
-        let sidebar = ThemedIconButton(
-            symbolName: "sidebar.leading",
-            accessibility: L10n.string("Show or hide sidebar"),
-            inkSource: .chrome
+    private func makeProductShellFixture() throws -> ProductShellFixture {
+        let container = FileManager.default.temporaryDirectory
+            .appendingPathComponent("threading-product-shell-\(UUID().uuidString)", isDirectory: true)
+        let repository = container.appendingPathComponent("AnotherTerminal", isDirectory: true)
+        let renderTest = repository.appendingPathComponent(
+            "Tests/ThreadingTests/GitReviewRenderTests.swift"
         )
-        let back = ThemedIconButton(
-            symbolName: "chevron.left",
-            accessibility: L10n.string("Go back"),
-            inkSource: .chrome
+        let themePlayground = repository.appendingPathComponent("web/app/ThemePlayground.tsx")
+        try FileManager.default.createDirectory(
+            at: renderTest.deletingLastPathComponent(),
+            withIntermediateDirectories: true
         )
-        back.isEnabled = false
-        let forward = ThemedIconButton(
-            symbolName: "chevron.right",
-            accessibility: L10n.string("Go forward"),
-            inkSource: .chrome
+        try FileManager.default.createDirectory(
+            at: themePlayground.deletingLastPathComponent(),
+            withIntermediateDirectories: true
         )
-        forward.isEnabled = false
-        return [sidebar, back, forward]
+        try productRenderTestBefore.write(to: renderTest, atomically: true, encoding: .utf8)
+        try productThemeBefore.write(to: themePlayground, atomically: true, encoding: .utf8)
+        try runGit(["init", "--quiet", "--initial-branch=main"], in: repository)
+        try runGit(["config", "user.email", "evidence@threading.local"], in: repository)
+        try runGit(["config", "user.name", "Threading Evidence"], in: repository)
+        try runGit(["add", "."], in: repository)
+        try runGit(["commit", "--quiet", "-m", "Seed full-window capture"], in: repository)
+        try productRenderTestAfter.write(to: renderTest, atomically: true, encoding: .utf8)
+        try productThemeAfter.write(to: themePlayground, atomically: true, encoding: .utf8)
+        let reviewFiles = GitDiffParser.files(fromUnifiedDiff: GitDiffParser.decode(
+            try runGitOutput(["diff", "--no-ext-diff", "--unified=3"], in: repository)
+        ))
+        XCTAssertEqual(
+            reviewFiles.map(\.path).sorted(),
+            [
+                "Tests/ThreadingTests/GitReviewRenderTests.swift",
+                "web/app/ThemePlayground.tsx"
+            ]
+        )
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: repository))
+        XCTAssertTrue(store.renameProject(id: project.id, to: "AnotherTerminal").succeeded)
+        _ = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .claude,
+            usesNativeUI: false,
+            title: "Release readiness"
+        ))
+        let session = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: false,
+            permissionMode: .plan,
+            title: "TUI theme screenshots"
+        ))
+        _ = try XCTUnwrap(store.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: false,
+            title: "Landing page"
+        ))
+
+        return ProductShellFixture(
+            containerURL: container,
+            project: try XCTUnwrap(store.project(withID: project.id)),
+            session: try XCTUnwrap(store.session(withID: session.id)),
+            reviewFiles: reviewFiles
+        )
+    }
+
+    private func runGitOutput(_ arguments: [String], in directory: URL) throws -> Data {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        environment["GIT_CONFIG_SYSTEM"] = "/dev/null"
+        process.environment = environment
+        try process.run()
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(
+                domain: "GitReviewRenderTests",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) failed"]
+            )
+        }
+        return data
+    }
+
+    private func runGit(_ arguments: [String], in directory: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = directory
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+        environment["GIT_CONFIG_SYSTEM"] = "/dev/null"
+        process.environment = environment
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            throw NSError(
+                domain: "GitReviewRenderTests",
+                code: Int(process.terminationStatus),
+                userInfo: [NSLocalizedDescriptionKey: "git \(arguments.joined(separator: " ")) failed"]
+            )
+        }
+    }
+
+    private func applyKeyFixtureState(
+        in view: NSView,
+        systemSelectionFill: NSColor? = nil
+    ) {
+        (view as? WindowTitleBandView)?.fixtureIsKey = true
+        (view as? ThemedTableView)?.fixtureIsKey = true
+        (view as? ThemedOutlineView)?.fixtureIsKey = true
+        if let row = view as? SidebarHoverRowView, row.isSelected {
+            // AppKit can rebuild a source-list cell after the list has applied its fixture key
+            // state. Pin both participants in the selection contract at the final pixel boundary:
+            // the row owns the fill, while SessionRowView owns the ink over that fill.
+            row.isEmphasized = true
+            row.fixtureSelectionFill = systemSelectionFill
+            row.needsDisplay = true
+            descendants(in: row).compactMap { $0 as? SessionRowView }.forEach {
+                $0.backgroundStyle = .emphasized
+            }
+        }
+        view.subviews.forEach {
+            applyKeyFixtureState(in: $0, systemSelectionFill: systemSelectionFill)
+        }
+    }
+
+    /// `cacheDisplay` preserves the transparent terminal backing that the real window compositor
+    /// normally places over `WindowBackdrop`. Flatten that real product render over the same
+    /// terminal ground so exported PNGs do not turn the transparent cells black in browsers.
+    private func compositedPNG(
+        representation: NSBitmapImageRep,
+        ground: NSColor
+    ) -> Data? {
+        guard let cachedImage = representation.cgImage,
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let context = CGContext(
+                  data: nil,
+                  width: representation.pixelsWide,
+                  height: representation.pixelsHigh,
+                  bitsPerComponent: 8,
+                  bytesPerRow: 0,
+                  space: colorSpace,
+                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ),
+              let resolvedGround = ground.usingColorSpace(.sRGB) else { return nil }
+        let bounds = CGRect(
+            x: 0,
+            y: 0,
+            width: representation.pixelsWide,
+            height: representation.pixelsHigh
+        )
+        context.setFillColor(resolvedGround.cgColor)
+        context.fill(bounds)
+        context.draw(cachedImage, in: bounds)
+        guard let image = context.makeImage() else { return nil }
+        return NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])
+    }
+
+    private let liveProductMarker = "LIVE PROVIDER RESULT:"
+
+    private var liveProductPrompt: String {
+        """
+        Inspect the two uncommitted files and describe how the capture flow changes. Do not modify
+        files and do not run tests. Summarize the implementation in two concise sentences. Start
+        the final response with exactly:
+        \(liveProductMarker)
+        """
+    }
+
+    /// Starts the installed provider without persisting trust for the throwaway repository.
+    /// The override belongs to this one invocation; ordinary live-session history remains owned
+    /// by the provider rather than copied into or synthesized by the capture harness.
+    private func liveCodexPlan(
+        for session: AgentSession,
+        in project: Project,
+        initialPrompt: String?
+    ) -> AgentLaunchPlan {
+        precondition(session.kind == .codex && !session.usesNativeUI)
+
+        // Codex canonicalizes its working directory before matching project trust.
+        // NSTemporaryDirectory() uses /var on macOS, whose canonical path is /private/var.
+        let trustedProjectPath = canonicalFilesystemPath(project.folderPath)
+
+        var command = ShellCommand(word: "env")
+        if let accountKey = AgentKind.codex.accountEnvironmentKey {
+            command.append(flag: "-u", value: accountKey)
+        }
+        command.append(word: AgentDefaults.codexExecutable)
+        command.append(
+            flag: AgentDefaults.codexConfigFlag,
+            value: "check_for_update_on_startup=false"
+        )
+        command.append(
+            flag: AgentDefaults.codexConfigFlag,
+            // The CLI's dotted override parser does not address quoted path keys. Replace the
+            // projects table for this invocation with a TOML inline table instead.
+            value: "projects={\"\(trustedProjectPath)\"={trust_level=\"trusted\"}}"
+        )
+        command.append(flag: AgentDefaults.codexNoAlternateScreenFlag)
+        command.append(flag: AgentDefaults.codexApprovalFlag, value: "never")
+        command.append(flag: AgentDefaults.codexSandboxFlag, value: "read-only")
+        command.append(flag: "--disable", value: "plugins")
+        command.append(flag: "--disable", value: "apps")
+        command.append(
+            flag: AgentDefaults.codexConfigFlag,
+            value: "mcp_servers.xcode.enabled=false"
+        )
+        command.append(
+            flag: AgentDefaults.codexConfigFlag,
+            value: "mcp_servers.node_repl.enabled=false"
+        )
+        command.append(
+            flag: AgentDefaults.codexConfigFlag,
+            value: "mcp_servers.openaiDeveloperDocs.enabled=false"
+        )
+        command.append(
+            flag: AgentDefaults.codexConfigFlag,
+            value: "approvals_reviewer=\"user\""
+        )
+        if let prompt = initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !prompt.isEmpty {
+            command.append(operand: prompt)
+        }
+        let source = ShellCommand.executing(command, in: project.folderPath)
+        return AgentLaunchPlan(
+            executable: AgentLauncher.loginShellPath,
+            arguments: ["-l", "-c", source.source],
+            resumeState: .awaitingIdentifier
+        )
+    }
+
+    private func canonicalFilesystemPath(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    private func swiftTermColor(_ color: NSColor) -> Color {
+        let srgb = color.usingColorSpace(.sRGB) ?? color
+        return Color(
+            red: UInt16(srgb.redComponent * 65_535),
+            green: UInt16(srgb.greenComponent * 65_535),
+            blue: UInt16(srgb.blueComponent * 65_535)
+        )
+    }
+
+    /// Pins the screenshot pixels, not only the terminal model. The marketing capture once
+    /// reported a light palette while the already-created blank cells still rendered black.
+    private func assertTerminalBackground(
+        in data: Data,
+        at point: NSPoint,
+        contentSize: NSSize,
+        equals expected: NSColor,
+        filename: String
+    ) throws {
+        let bitmap = try XCTUnwrap(NSBitmapImageRep(data: data))
+        let x = min(
+            max(Int(point.x / contentSize.width * CGFloat(bitmap.pixelsWide)), 0),
+            bitmap.pixelsWide - 1
+        )
+        let y = min(
+            max(Int(point.y / contentSize.height * CGFloat(bitmap.pixelsHigh)), 0),
+            bitmap.pixelsHigh - 1
+        )
+        let sampled = try XCTUnwrap(bitmap.colorAt(
+            x: x,
+            y: y
+        )?.usingColorSpace(.sRGB))
+        let reference = try XCTUnwrap(expected.usingColorSpace(.sRGB))
+        let distance = max(
+            abs(sampled.redComponent - reference.redComponent),
+            abs(sampled.greenComponent - reference.greenComponent),
+            abs(sampled.blueComponent - reference.blueComponent)
+        )
+        XCTAssertLessThan(
+            distance,
+            0.04,
+            "\(filename) rendered the terminal over \(sampled), expected \(reference)"
+        )
     }
 
     /// The real controller, laid out the way the app lays it out: the pane is sized and settled
