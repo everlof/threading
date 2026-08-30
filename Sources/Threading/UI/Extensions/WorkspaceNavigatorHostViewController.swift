@@ -24,6 +24,9 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     /// Localized once from the validated registration. Runtime documents may replace content,
     /// never the host-owned option contract which scopes durable user choices.
     private let declaredOptions: [ExtensionWorkspaceNavigatorOption]
+    /// Pipeline declarations are compiled from the registration snapshot. A process response may
+    /// replace fallback content, but cannot add, remove or mutate that static host program.
+    private let declaredPipeline: ExtensionWorkspaceNavigatorPipeline?
     private var navigator: ExtensionWorkspaceNavigator
     private lazy var titleLabel: NSTextField = {
         let label = NSTextField(labelWithString: navigator.title)
@@ -85,6 +88,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         processGeneration = inventory.processGeneration
         navigator = inventory.navigator
         declaredOptions = inventory.navigator.options
+        declaredPipeline = inventory.navigator.pipeline
         self.routing = routing
         self.contextProvider = contextProvider
         self.destinationHandler = destinationHandler
@@ -192,6 +196,13 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
             failClosed(afterRendering: ExtensionValidationError(issues: [.init(
                 path: "navigator.options",
                 message: "must match the registered navigator option declaration"
+            )]))
+            return
+        }
+        guard replacement.pipeline == declaredPipeline else {
+            failClosed(afterRendering: ExtensionValidationError(issues: [.init(
+                path: "navigator.pipeline",
+                message: "must match the registered navigator pipeline declaration"
             )]))
             return
         }

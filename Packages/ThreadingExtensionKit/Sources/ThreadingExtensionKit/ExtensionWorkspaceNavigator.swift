@@ -508,6 +508,11 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
     /// A runtime navigator replacement must repeat this declaration exactly. Only a new process
     /// generation may change the option contract.
     public let options: [ExtensionWorkspaceNavigatorOption]
+    /// Optional host-evaluated transform and visible-row template.
+    ///
+    /// `root` remains the complete v1 document and static fallback. Older hosts ignore this
+    /// additive key and render that fallback without executing the pipeline.
+    public let pipeline: ExtensionWorkspaceNavigatorPipeline?
     /// Optional action used when the host first presents the navigator or its project model
     /// changes. The response may carry a complete replacement snapshot with the same ID.
     public let loadActionID: String?
@@ -524,6 +529,7 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         title: String,
         root: ExtensionWorkspaceNavigatorNode,
         options: [ExtensionWorkspaceNavigatorOption] = [],
+        pipeline: ExtensionWorkspaceNavigatorPipeline? = nil,
         loadActionID: String? = nil,
         eventActionID: String? = nil,
         preferredWidth: Double? = nil
@@ -532,13 +538,14 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         self.title = title
         self.root = root
         self.options = options
+        self.pipeline = pipeline
         self.loadActionID = loadActionID
         self.eventActionID = eventActionID
         self.preferredWidth = preferredWidth
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, root, options, loadActionID, eventActionID, preferredWidth
+        case id, title, root, options, pipeline, loadActionID, eventActionID, preferredWidth
     }
 
     public init(from decoder: Decoder) throws {
@@ -551,6 +558,14 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         } else {
             []
         }
+        if container.contains(.pipeline) {
+            pipeline = try container.decode(
+                ExtensionWorkspaceNavigatorPipeline.self,
+                forKey: .pipeline
+            )
+        } else {
+            pipeline = nil
+        }
         loadActionID = try container.decodeIfPresent(String.self, forKey: .loadActionID)
         eventActionID = try container.decodeIfPresent(String.self, forKey: .eventActionID)
         preferredWidth = try container.decodeIfPresent(Double.self, forKey: .preferredWidth)
@@ -562,6 +577,7 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
         try container.encode(title, forKey: .title)
         try container.encode(root, forKey: .root)
         try container.encode(options, forKey: .options)
+        try container.encodeIfPresent(pipeline, forKey: .pipeline)
         try container.encodeIfPresent(loadActionID, forKey: .loadActionID)
         try container.encodeIfPresent(eventActionID, forKey: .eventActionID)
         try container.encodeIfPresent(preferredWidth, forKey: .preferredWidth)
@@ -622,6 +638,24 @@ public struct ExtensionWorkspaceNavigator: Codable, Equatable, Sendable {
                 path: "\(path).eventActionID",
                 message: ExtensionIdentifierRules.contributionMessage
             ))
+        }
+        if let pipeline {
+            issues.append(contentsOf: pipeline.validationIssues(
+                path: "\(path).pipeline",
+                options: options
+            ))
+            if loadActionID != nil {
+                issues.append(.init(
+                    path: "\(path).loadActionID",
+                    message: "is not available with a host-evaluated pipeline"
+                ))
+            }
+            if eventActionID != nil {
+                issues.append(.init(
+                    path: "\(path).eventActionID",
+                    message: "is not available with a host-evaluated pipeline"
+                ))
+            }
         }
         if let preferredWidth,
            !preferredWidth.isFinite || preferredWidth < 180 || preferredWidth > 640 {

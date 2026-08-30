@@ -1,0 +1,482 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://threading.codes/schema/workspace-navigator-pipeline.schema.json",
+  "title": "Threading host-evaluated workspace navigator pipeline",
+  "$ref": "#/$defs/pipeline",
+  "$defs": {
+    "factKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-z][a-z0-9.-]*$"
+        },
+        "version": { "type": "integer", "minimum": 1, "maximum": 1000000 }
+      }
+    },
+    "factReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "scope"],
+      "properties": {
+        "key": { "$ref": "#/$defs/factKey" },
+        "scope": { "enum": ["item", "project"] }
+      }
+    },
+    "factOperand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fact"],
+      "properties": {
+        "fact": { "$ref": "#/$defs/factReference" },
+        "fallback": { "$ref": "extension-facts.schema.json#/$defs/value" }
+      }
+    },
+    "optionCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["optionID", "equals"],
+      "properties": {
+        "optionID": { "$ref": "workspace-navigator.schema.json#/$defs/contributionID" },
+        "equals": { "type": ["boolean", "string"] }
+      }
+    },
+    "relativeDateRange": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "today" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "yesterday" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "days"],
+          "properties": {
+            "type": { "const": "lastDays" },
+            "days": { "type": "integer", "minimum": 2, "maximum": 365 }
+          }
+        }
+      ]
+    },
+    "predicate": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "operand", "operation", "value"],
+          "properties": {
+            "type": { "const": "comparison" },
+            "operand": { "$ref": "#/$defs/factOperand" },
+            "operation": {
+              "enum": [
+                "equal",
+                "notEqual",
+                "lessThan",
+                "lessThanOrEqual",
+                "greaterThan",
+                "greaterThanOrEqual"
+              ]
+            },
+            "value": { "$ref": "extension-facts.schema.json#/$defs/value" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "fact"],
+          "properties": {
+            "type": { "const": "isPresent" },
+            "fact": { "$ref": "#/$defs/factReference" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "operand", "range"],
+          "properties": {
+            "type": { "const": "relativeDate" },
+            "operand": { "$ref": "#/$defs/factOperand" },
+            "range": { "$ref": "#/$defs/relativeDateRange" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "predicates"],
+          "properties": {
+            "type": { "enum": ["all", "any"] },
+            "predicates": {
+              "type": "array",
+              "minItems": 1,
+              "items": { "$ref": "#/$defs/predicate" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "predicate"],
+          "properties": {
+            "type": { "const": "not" },
+            "predicate": { "$ref": "#/$defs/predicate" }
+          }
+        }
+      ]
+    },
+    "filterClause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "predicate"],
+      "properties": {
+        "when": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/optionCondition" }
+        },
+        "predicate": { "$ref": "#/$defs/predicate" }
+      }
+    },
+    "bucketRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "predicate"],
+      "properties": {
+        "id": { "$ref": "workspace-navigator.schema.json#/$defs/contributionID" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S" },
+        "predicate": { "$ref": "#/$defs/predicate" }
+      }
+    },
+    "unmatchedBucket": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "omit" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "id", "title"],
+          "properties": {
+            "type": { "const": "bucket" },
+            "id": { "$ref": "workspace-navigator.schema.json#/$defs/contributionID" },
+            "title": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S" }
+          }
+        }
+      ]
+    },
+    "bucketStrategy": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "operand", "direction"],
+          "properties": {
+            "type": { "const": "fact" },
+            "operand": { "$ref": "#/$defs/factOperand" },
+            "direction": { "enum": ["ascending", "descending"] },
+            "explicitOrder": {
+              "type": "array",
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": { "$ref": "extension-facts.schema.json#/$defs/value" }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "rules", "unmatched"],
+          "properties": {
+            "type": { "const": "rules" },
+            "rules": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": { "$ref": "#/$defs/bucketRule" }
+            },
+            "unmatched": { "$ref": "#/$defs/unmatchedBucket" }
+          }
+        }
+      ]
+    },
+    "bucketClause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "strategy"],
+      "properties": {
+        "when": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/optionCondition" }
+        },
+        "strategy": { "$ref": "#/$defs/bucketStrategy" }
+      }
+    },
+    "sortClause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["when", "operand", "direction"],
+      "properties": {
+        "when": {
+          "type": "array",
+          "maxItems": 4,
+          "items": { "$ref": "#/$defs/optionCondition" }
+        },
+        "operand": { "$ref": "#/$defs/factOperand" },
+        "direction": { "enum": ["ascending", "descending"] }
+      }
+    },
+    "textBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "text"],
+          "properties": {
+            "type": { "const": "literal" },
+            "text": { "type": "string", "minLength": 1, "maxLength": 1000, "pattern": "\\S" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "fact", "facet"],
+          "properties": {
+            "type": { "const": "fact" },
+            "fact": { "$ref": "#/$defs/factReference" },
+            "facet": { "enum": ["value", "label"] },
+            "fallback": { "type": "string", "maxLength": 1000 }
+          }
+        }
+      ]
+    },
+    "imageBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "reference"],
+          "properties": {
+            "type": { "const": "literal" },
+            "reference": { "$ref": "extension-facts.schema.json#/$defs/image" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "fact"],
+          "properties": {
+            "type": { "const": "factIcon" },
+            "fact": { "$ref": "#/$defs/factReference" },
+            "fallback": { "$ref": "extension-facts.schema.json#/$defs/image" }
+          }
+        }
+      ]
+    },
+    "statusBinding": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "role"],
+          "properties": {
+            "type": { "const": "literal" },
+            "role": { "enum": ["neutral", "positive", "warning", "negative"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "fact", "fallback"],
+          "properties": {
+            "type": { "const": "factStatus" },
+            "fact": { "$ref": "#/$defs/factReference" },
+            "fallback": { "enum": ["neutral", "positive", "warning", "negative"] }
+          }
+        }
+      ]
+    },
+    "templateNode": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "binding", "role"],
+          "properties": {
+            "type": { "const": "text" },
+            "binding": { "$ref": "#/$defs/textBinding" },
+            "role": { "enum": ["heading", "body", "detail", "code", "compactBody", "compactDetail"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "binding", "role"],
+          "properties": {
+            "type": { "const": "image" },
+            "binding": { "$ref": "#/$defs/imageBinding" },
+            "role": { "enum": ["identity", "icon", "decoration"] },
+            "accessibilityLabel": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "binding", "role"],
+          "properties": {
+            "type": { "const": "status" },
+            "binding": { "$ref": "#/$defs/textBinding" },
+            "role": { "$ref": "#/$defs/statusBinding" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "accessibilityLabel"],
+          "properties": {
+            "type": { "const": "activityIndicator" },
+            "accessibilityLabel": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "predicate", "content"],
+          "properties": {
+            "type": { "const": "conditional" },
+            "predicate": { "$ref": "#/$defs/predicate" },
+            "content": { "$ref": "#/$defs/templateNode" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "enum": ["divider", "flexibleSpacer"] } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "spacing"],
+          "properties": {
+            "type": { "const": "spacer" },
+            "spacing": { "enum": ["none", "tight", "small", "medium", "large"] }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "axis", "spacing", "children"],
+          "properties": {
+            "type": { "const": "stack" },
+            "axis": { "enum": ["horizontal", "vertical"] },
+            "spacing": { "enum": ["none", "tight", "small", "medium", "large"] },
+            "children": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": { "$ref": "#/$defs/templateNode" }
+            }
+          }
+        }
+      ]
+    },
+    "output": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["collectionID", "layout", "selectionMode", "activation", "itemLimit", "overflow", "rowTemplate"],
+      "properties": {
+        "collectionID": { "$ref": "workspace-navigator.schema.json#/$defs/contributionID" },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": { "type": { "const": "list" } }
+        },
+        "selectionMode": { "const": "single" },
+        "activation": { "const": "sourceSession" },
+        "itemLimit": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "overflow": { "const": "truncateWithNotice" },
+        "rowTemplate": { "$ref": "#/$defs/templateNode" },
+        "emptyState": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title"],
+          "properties": {
+            "title": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S" },
+            "detail": { "type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S" }
+          }
+        }
+      }
+    },
+    "pipeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formatVersion", "source", "consumes", "filters", "buckets", "sort", "output"],
+      "properties": {
+        "formatVersion": { "const": 1 },
+        "source": { "const": "sessions" },
+        "consumes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["key", "requirement"],
+            "properties": {
+              "key": { "$ref": "#/$defs/factKey" },
+              "requirement": { "enum": ["required", "enhances"] }
+            }
+          }
+        },
+        "search": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["placeholder", "accessibilityLabel", "fields"],
+          "properties": {
+            "placeholder": { "type": "string", "minLength": 1, "maxLength": 120, "pattern": "\\S" },
+            "accessibilityLabel": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "\\S" },
+            "fields": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 8,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/factReference" }
+            }
+          }
+        },
+        "filters": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/filterClause" }
+        },
+        "buckets": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/bucketClause" }
+        },
+        "sort": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "$ref": "#/$defs/sortClause" }
+        },
+        "output": { "$ref": "#/$defs/output" }
+      }
+    }
+  }
+}

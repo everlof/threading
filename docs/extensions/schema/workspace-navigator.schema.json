@@ -168,6 +168,19 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "title", "root"],
+      "allOf": [
+        {
+          "if": { "required": ["pipeline"] },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["loadActionID"] },
+                { "required": ["eventActionID"] }
+              ]
+            }
+          }
+        }
+      ],
       "properties": {
         "id": { "$ref": "#/$defs/contributionID" },
         "title": {
@@ -176,6 +189,7 @@
           "maxLength": 120
         },
         "root": { "$ref": "#/$defs/navigatorNode" },
+        "pipeline": { "$ref": "workspace-navigator-pipeline.schema.json" },
         "options": {
           "type": "array",
           "maxItems": 16,

@@ -466,6 +466,15 @@ The declarations are accepted ahead of the `ui.workspace-navigation@2` transform
 the v1 materialized-document renderer does not expose inert option rows. Threading will put them
 in the navigator menu only when the host-side transform that consumes their values is present.
 
+For the additive host-evaluated format, set `pipeline` and keep `root` as the useful fallback for
+hosts which do not implement that format. `@2` is the contract revision, not a new capability;
+continue declaring `ui.workspace-navigation`. Pipeline navigators may not set `loadActionID` or
+`eventActionID`, every fact reference must appear in `consumes`, and every option must gate at
+least one transform clause. Read
+[`WORKSPACE_NAVIGATORS.md`](WORKSPACE_NAVIGATORS.md#host-evaluated-pipeline-declarations) for the
+exact required/enhancing degradation boundaries, explicit project join, source-session activation,
+static-generation rule, and the format-1 1,000-item overflow notice before authoring one.
+
 For a context-dependent panel, set `loadActionID`. Treat `root` as the immediate loading and
 fallback state. Threading sends that action once when the tab connects to each extension process
 generation, using the same opaque project/session context as a button. Return a replacement

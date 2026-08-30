@@ -3,8 +3,8 @@
 > Status: active feature draft — the product goal is that a user who wants a different sidebar
 > can have one, built by an extension, without Threading having anticipated the shape they wanted. The
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
-> plus a host-executed intent vocabulary. Rollout steps 1–3 were implemented by 2026-08-30;
-> rollout step 4 is in progress. No part of
+> plus a host-executed intent vocabulary. Rollout steps 1–4 were implemented by 2026-08-30;
+> rollout step 5 is in progress. No part of
 > `ui.workspace-navigation` v1 is withdrawn.
 
 ## Decision
@@ -354,13 +354,26 @@ question that started this draft — *should pinned rows be sorted by activity w
 block?* — an option a user picks rather than a policy the app holds.
 
 Absence has two pinned meanings, and the distinction is what makes degradation graceful. A fact
-missing **for a subject** while its key has a live provider is unknown: the predicate does not
-match, the sort orders the row after every present value, the bucket is `unknown`. A fact key
+missing **for a subject** while its key has a live provider uses the operand's declared fallback
+before predicate, sort, or fact-bucket evaluation. Without a fallback it is unknown: the predicate
+does not match, the sort orders the row after every present value, the bucket is `unknown`. A fact key
 with **no registered provider at all** degrades at the stanza instead: the predicate is dropped
 rather than excluding everything, the sort key leaves the key list, the bucket grouping
 collapses. An uninstall must widen a navigator back toward "all sessions", never empty it.
 Nothing is left to the evaluator's judgement; a transform wanting different behaviour declares a
 default on the binding.
+
+The format-1 declaration makes “stanza” exact. An unavailable `enhances` key removes one search
+field, filter clause, sort clause, fact-bucket clause, rule-bucket rule, or conditional template
+node. Nested predicates never simplify piecemeal. Presentation leaves use their fallback and are
+omitted without one; an empty realized row is not selectable. Search disappears only when all its
+fields are gone, rule buckets collapse only when no rules survive, and a fact bucket collapses as
+one unit. A missing `required` provider disables the complete navigator. Subject-level absence
+continues to use unknown/fallback semantics even for a `required` key whose provider is live.
+
+Project facts do not inherit to sessions by default. A format-1 reference opts into `.project`
+scope and must consume `session.project-id` as the explicit join. A session without that join has
+an unknown project-scoped value; it does not make the project fact provider unavailable.
 
 The one primitive that cannot be faked is the relative-date bucket. *Today*, *Yesterday*,
 *Last 7 days* are relative to a clock, and if each navigator brought its own they would disagree
@@ -391,8 +404,10 @@ Unchanged from v1 in shape: sections, and a list, outline or grid, with stable I
 so selection, expansion, scroll position and first responder survive a re-evaluation. What changes
 is that the host produces this by evaluating the transform rather than receiving it.
 
-The aggregate item cap is replaced by a windowed collection: the host evaluates the full ordering
-and realizes a range. The bound that matters is the viewport, not the store.
+Format 1 is the finite bridge: it emits at most 1,000 items and requires a host-owned overflow
+notice rather than truncating silently. Rollout step 7 replaces that aggregate bound with a
+windowed collection: the host evaluates the full ordering and realizes a range. The bound that
+matters then is the viewport, not the store.
 
 ## Stage 5 — Representation
 
@@ -580,10 +595,13 @@ does. An install must never reorder somebody's sidebar on its own.
    no UI, no session authority, exact anonymous `gitlab.com` network access, a stable maximum of
    32 repositories and 4,096 retained facts, bounded paging/concurrency/retry, atomic removal, and
    preservation of the last observation across non-authoritative refresh failures.
-4. **Options**, rendered in the navigator menu and persisted.
-5. **Transform and templates** — `ui.workspace-navigation@2`, with the `consumes` declarations,
+4. **Options — implemented 2026-08-30**, rendered in the navigator menu and persisted.
+5. **Transform and templates — in progress**, the `ui.workspace-navigation@2` contract revision,
+   with the `consumes` declarations,
    the degradation tiers and the host-owned search control. v1 documents keep working; a
-   materialized item list is a degenerate template.
+   materialized item list is a degenerate template. `@2` names the additive format, while the
+   permission remains `ui.workspace-navigation`: the pipeline adds no authority and older hosts
+   must be able to render the required v1 `root` fallback rather than reject an unknown capability.
 6. **Intents**, declared per navigator in the manifest. `T3SidebarExtension` becomes buildable.
 7. **Windowed collections**, retiring the aggregate item cap.
 8. **Native on the pipeline**, as far as it honestly goes. Full parity includes drag reorder,
@@ -592,7 +610,6 @@ does. An install must never reorder somebody's sidebar on its own.
 
 ## Open questions
 
-- Do project-subject facts inherit to sessions by default, or only when the transform says so?
 - Is there a scope between "this user" and "this project" that navigator options need, given
   checkouts of one repository behave as separate projects here?
 

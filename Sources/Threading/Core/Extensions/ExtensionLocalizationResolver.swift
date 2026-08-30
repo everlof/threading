@@ -126,10 +126,125 @@ struct ExtensionLocalizationResolver: Sendable {
                     control: settingControl(option.control)
                 )
             },
+            pipeline: navigator.pipeline.map(workspaceNavigatorPipeline),
             loadActionID: navigator.loadActionID,
             eventActionID: navigator.eventActionID,
             preferredWidth: navigator.preferredWidth
         )
+    }
+
+    private func workspaceNavigatorPipeline(
+        _ pipeline: ExtensionWorkspaceNavigatorPipeline
+    ) -> ExtensionWorkspaceNavigatorPipeline {
+        ExtensionWorkspaceNavigatorPipeline(
+            formatVersion: pipeline.formatVersion,
+            source: pipeline.source,
+            consumes: pipeline.consumes,
+            search: pipeline.search.map {
+                ExtensionWorkspaceNavigatorSearch(
+                    placeholder: string($0.placeholder),
+                    accessibilityLabel: string($0.accessibilityLabel),
+                    fields: $0.fields
+                )
+            },
+            filters: pipeline.filters,
+            buckets: pipeline.buckets.map(workspaceNavigatorBucketClause),
+            sort: pipeline.sort,
+            output: ExtensionWorkspaceNavigatorPipelineOutput(
+                collectionID: pipeline.output.collectionID,
+                layout: pipeline.output.layout,
+                selectionMode: pipeline.output.selectionMode,
+                activation: pipeline.output.activation,
+                itemLimit: pipeline.output.itemLimit,
+                overflow: pipeline.output.overflow,
+                rowTemplate: workspaceNavigatorTemplate(pipeline.output.rowTemplate),
+                emptyState: pipeline.output.emptyState.map {
+                    ExtensionWorkspaceNavigatorEmptyState(
+                        title: string($0.title),
+                        detail: optional($0.detail)
+                    )
+                }
+            )
+        )
+    }
+
+    private func workspaceNavigatorBucketClause(
+        _ clause: ExtensionWorkspaceNavigatorBucketClause
+    ) -> ExtensionWorkspaceNavigatorBucketClause {
+        let strategy: ExtensionWorkspaceNavigatorBucketStrategy
+        switch clause.strategy {
+        case .fact:
+            strategy = clause.strategy
+        case .rules(let rules, let unmatched):
+            let localizedUnmatched: ExtensionWorkspaceNavigatorUnmatchedBucket
+            switch unmatched {
+            case .omit:
+                localizedUnmatched = .omit
+            case .bucket(let id, let title):
+                localizedUnmatched = .bucket(id: id, title: string(title))
+            }
+            strategy = .rules(
+                rules.map {
+                    ExtensionWorkspaceNavigatorBucketRule(
+                        id: $0.id,
+                        title: string($0.title),
+                        predicate: $0.predicate
+                    )
+                },
+                unmatched: localizedUnmatched
+            )
+        }
+        return ExtensionWorkspaceNavigatorBucketClause(
+            when: clause.when,
+            strategy: strategy
+        )
+    }
+
+    private func workspaceNavigatorTemplate(
+        _ node: ExtensionWorkspaceNavigatorTemplateNode
+    ) -> ExtensionWorkspaceNavigatorTemplateNode {
+        switch node {
+        case .text(let binding, let role):
+            return .text(workspaceNavigatorTextBinding(binding), role: role)
+        case .image(let binding, let role, let accessibilityLabel):
+            return .image(
+                binding,
+                role: role,
+                accessibilityLabel: optional(accessibilityLabel)
+            )
+        case .status(let binding, let role):
+            return .status(workspaceNavigatorTextBinding(binding), role: role)
+        case .activityIndicator(let accessibilityLabel):
+            return .activityIndicator(accessibilityLabel: string(accessibilityLabel))
+        case .conditional(let predicate, let content):
+            return .conditional(
+                predicate,
+                content: workspaceNavigatorTemplate(content)
+            )
+        case .divider:
+            return .divider
+        case .spacer(let spacing):
+            return .spacer(spacing)
+        case .flexibleSpacer:
+            return .flexibleSpacer
+        case .stack(let axis, let spacing, let children):
+            return .stack(
+                axis: axis,
+                spacing: spacing,
+                children: children.map(workspaceNavigatorTemplate)
+            )
+        }
+    }
+
+    private func workspaceNavigatorTextBinding(
+        _ binding: ExtensionWorkspaceNavigatorTextBinding
+    ) -> ExtensionWorkspaceNavigatorTextBinding {
+        switch binding {
+        case .literal(let text):
+            return .literal(string(text))
+        case .fact(let fact, let facet, let fallback):
+            return .fact(fact, facet: facet, fallback: optional(fallback))
+        }
     }
 
     private func workspaceNavigatorNode(

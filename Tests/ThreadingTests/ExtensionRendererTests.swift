@@ -1396,6 +1396,147 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         )
     }
 
+    func testWorkspaceNavigatorRuntimeReplacementCannotMutateOrOmitRegisteredPipeline() throws {
+        func pipeline(fallback: String) -> ExtensionWorkspaceNavigatorPipeline {
+            .init(
+                consumes: [
+                    .init(key: ExtensionHostFactKey.sessionTitle, requirement: .required)
+                ],
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .text(
+                        .fact(
+                            .init(ExtensionHostFactKey.sessionTitle),
+                            facet: .value,
+                            fallback: fallback
+                        ),
+                        role: .body
+                    )
+                )
+            )
+        }
+
+        for (name, replacementPipeline) in [
+            ("omission", Optional<ExtensionWorkspaceNavigatorPipeline>.none),
+            ("mutation", Optional(pipeline(fallback: "Changed"))),
+        ] {
+            let declared = pipeline(fallback: "Untitled")
+            let navigator = ExtensionWorkspaceNavigator(
+                id: "activity",
+                title: "Activity",
+                root: .content(.button(
+                    id: "refresh",
+                    title: "Refresh",
+                    role: .standard,
+                    isEnabled: true
+                )),
+                pipeline: declared
+            )
+            let replacement = ExtensionWorkspaceNavigator(
+                id: navigator.id,
+                title: "Should not replace the accepted title",
+                root: .content(.status("Updated", role: .positive)),
+                pipeline: replacementPipeline
+            )
+            let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+            router.result = .success(.init(
+                requestID: "replacement",
+                navigatorID: navigator.id,
+                navigator: replacement
+            ))
+            let failedClosed = expectation(
+                description: "pipeline \(name) fails the generation closed"
+            )
+            let host = WorkspaceNavigatorHostViewController(
+                inventory: router.inventory,
+                routing: router,
+                contextProvider: { .init() },
+                destinationHandler: { _ in nil },
+                onUnavailable: { failedClosed.fulfill() }
+            )
+            _ = host.view
+
+            let refresh = try XCTUnwrap(
+                descendants(in: host.view).compactMap { $0 as? ThemedButton }.first
+            )
+            refresh.performClick()
+
+            wait(for: [failedClosed], timeout: 1)
+            XCTAssertFalse(
+                descendants(in: host.view)
+                    .compactMap { ($0 as? NSTextField)?.stringValue }
+                    .contains("Updated")
+            )
+            XCTAssertEqual(
+                descendants(in: host.view).compactMap { $0 as? NSTextField }.first {
+                    $0.accessibilityIdentifier() == "workspace.navigator.title"
+                }?.stringValue,
+                navigator.title
+            )
+        }
+    }
+
+    func testWorkspaceNavigatorRuntimeReplacementMayRepeatRegisteredPipelineExactly() throws {
+        let pipeline = ExtensionWorkspaceNavigatorPipeline(
+            consumes: [
+                .init(key: ExtensionHostFactKey.sessionTitle, requirement: .required)
+            ],
+            output: .init(
+                collectionID: "sessions",
+                rowTemplate: .text(
+                    .fact(
+                        .init(ExtensionHostFactKey.sessionTitle),
+                        facet: .value,
+                        fallback: "Untitled"
+                    ),
+                    role: .body
+                )
+            )
+        )
+        let navigator = ExtensionWorkspaceNavigator(
+            id: "activity",
+            title: "Activity",
+            root: .content(.button(
+                id: "refresh",
+                title: "Refresh",
+                role: .standard,
+                isEnabled: true
+            )),
+            pipeline: pipeline
+        )
+        let replacement = ExtensionWorkspaceNavigator(
+            id: navigator.id,
+            title: "Updated activity",
+            root: .content(.status("Updated", role: .positive)),
+            pipeline: pipeline
+        )
+        let router = TestWorkspaceNavigatorRouter(navigator: navigator)
+        router.result = .success(.init(
+            requestID: "replacement",
+            navigatorID: navigator.id,
+            navigator: replacement
+        ))
+        let host = WorkspaceNavigatorHostViewController(
+            inventory: router.inventory,
+            routing: router,
+            contextProvider: { .init() },
+            destinationHandler: { _ in nil },
+            onUnavailable: { XCTFail("exact static pipeline replacement became unavailable") }
+        )
+        _ = host.view
+
+        let refresh = try XCTUnwrap(
+            descendants(in: host.view).compactMap { $0 as? ThemedButton }.first
+        )
+        refresh.performClick()
+
+        XCTAssertTrue(
+            descendants(in: host.view)
+                .compactMap { ($0 as? NSTextField)?.stringValue }
+                .contains("Updated")
+        )
+    }
+
     func testWorkspaceNavigatorSuccessfulReplacementAtomicallyUpdatesHostTitle() throws {
         let navigator = ExtensionWorkspaceNavigator(
             id: "activity",

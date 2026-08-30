@@ -60,7 +60,10 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             "Refresh": "Uppdatera",
             "Running": "Kör",
             "Grouping": "Gruppering",
-            "Recent activity": "Senaste aktivitet"
+            "Recent activity": "Senaste aktivitet",
+            "Search sessions": "Sök sessioner",
+            "Priority": "Prioritet",
+            "No sessions": "Inga sessioner"
         ]).write(to: localizationDirectory.appendingPathComponent("sv.json"))
 
         let manifest = ExtensionManifest(
@@ -164,7 +167,81 @@ final class ExtensionBundleLoaderTests: XCTestCase {
                         ]
                     )
                 )
-            ]
+            ],
+            pipeline: .init(
+                consumes: [
+                    .init(key: ExtensionHostFactKey.sessionTitle, requirement: .required),
+                    .init(
+                        key: ExtensionHostFactKey.sessionDetailedActivity,
+                        requirement: .enhances
+                    )
+                ],
+                search: .init(
+                    placeholder: "Search sessions",
+                    accessibilityLabel: "Search sessions",
+                    fields: [.init(ExtensionHostFactKey.sessionTitle)]
+                ),
+                buckets: [
+                    .init(strategy: .rules(
+                        [
+                            .init(
+                                id: "priority",
+                                title: "Priority",
+                                predicate: .comparison(
+                                    .init(.init(
+                                        ExtensionHostFactKey.sessionDetailedActivity
+                                    )),
+                                    .equal,
+                                    .string("working")
+                                )
+                            )
+                        ],
+                        unmatched: .omit
+                    ))
+                ],
+                sort: [
+                    .init(
+                        when: [.init(optionID: "sort", equals: .string("recent"))],
+                        operand: .init(.init(ExtensionHostFactKey.sessionTitle)),
+                        direction: .ascending
+                    ),
+                    .init(
+                        when: [.init(optionID: "sort", equals: .string("name"))],
+                        operand: .init(.init(ExtensionHostFactKey.sessionTitle)),
+                        direction: .descending
+                    )
+                ],
+                output: .init(
+                    collectionID: "sessions",
+                    rowTemplate: .stack(
+                        axis: .horizontal,
+                        spacing: .small,
+                        children: [
+                            .text(
+                                .fact(
+                                    .init(ExtensionHostFactKey.sessionTitle),
+                                    facet: .value,
+                                    fallback: "Ready"
+                                ),
+                                role: .body
+                            ),
+                            .conditional(
+                                .comparison(
+                                    .init(.init(
+                                        ExtensionHostFactKey.sessionDetailedActivity
+                                    )),
+                                    .equal,
+                                    .string("working")
+                                ),
+                                content: .activityIndicator(
+                                    accessibilityLabel: "Running"
+                                )
+                            )
+                        ]
+                    ),
+                    emptyState: .init(title: "No sessions")
+                )
+            )
         ))
         XCTAssertEqual(localizedNavigator.title, "Status på svenska")
         XCTAssertEqual(localizedNavigator.options.first?.title, "Gruppering")
@@ -173,6 +250,31 @@ final class ExtensionBundleLoaderTests: XCTestCase {
             return XCTFail("localized navigator lost its choice control")
         }
         XCTAssertEqual(localizedChoices.map(\.title), ["Senaste aktivitet", "Name"])
+        XCTAssertEqual(
+            localizedNavigator.pipeline?.search?.accessibilityLabel,
+            "Sök sessioner"
+        )
+        guard case .rules(let localizedRules, _) =
+            localizedNavigator.pipeline?.buckets.first?.strategy else {
+            return XCTFail("localized navigator lost its rule buckets")
+        }
+        XCTAssertEqual(localizedRules.map(\.title), ["Prioritet"])
+        XCTAssertEqual(localizedNavigator.pipeline?.output.emptyState?.title, "Inga sessioner")
+        XCTAssertEqual(localizedNavigator.pipeline?.output.activation, .sourceSession)
+        XCTAssertEqual(
+            localizedNavigator.pipeline?.output.itemLimit,
+            ExtensionWorkspaceNavigatorPipeline.maximumOutputItems
+        )
+        XCTAssertEqual(localizedNavigator.pipeline?.output.overflow, .truncateWithNotice)
+        guard case .stack(_, _, let localizedTemplateChildren) =
+            localizedNavigator.pipeline?.output.rowTemplate,
+              case .text(.fact(_, _, let fallback), _) = localizedTemplateChildren.first,
+              case .conditional(_, let indicator) = localizedTemplateChildren.last,
+              case .activityIndicator(let label) = indicator else {
+            return XCTFail("localized navigator lost its row template")
+        }
+        XCTAssertEqual(fallback, "Klar")
+        XCTAssertEqual(label, "Kör")
     }
 
     func testInspectorRejectsLocalizationFilesThatAreNotFlatStringCatalogues() throws {

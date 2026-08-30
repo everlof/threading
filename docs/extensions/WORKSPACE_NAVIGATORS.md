@@ -154,6 +154,55 @@ rows which nothing in the host consumes. Declaring an option does not invoke the
 the host does not create a preference file until a user-visible control changes a non-default
 value.
 
+## Host-evaluated pipeline declarations
+
+The optional `pipeline` is the additive `ui.workspace-navigation@2` contract revision. The `@2`
+names the navigator format, not a second permission: it remains under the existing
+`ui.workspace-navigation` capability because it adds no authority beyond occupying the same
+user-selected surface. An older host can still decode the navigator and present its required
+`root` fallback; requiring an unknown second capability would make that compatibility path
+impossible.
+
+Format 1 evaluates the host's session catalogue, realizes a single-select list from one bounded
+row template, and routes every generated row to its source session without calling the extension.
+The declaration names every fact it consumes as `required` or `enhances`, and every declared
+option must participate in a filter, bucket, or sort condition. `loadActionID` and
+`eventActionID` are unavailable on a pipeline navigator: facts and option values invalidate it
+inside the host. A runtime action replacement must repeat the initial localized pipeline exactly;
+only a new process generation may add, remove, or change it.
+
+Provider absence and subject absence are different:
+
+- no provider for a `required` key makes the complete navigator unavailable;
+- no provider for an `enhances` key removes the smallest unit which uses it: one search field,
+  filter clause, sort clause, fact-bucket clause, rule-bucket rule, or conditional template node;
+- a fact-bound text/image/status leaf uses its declared fallback when an `enhances` provider is
+  absent and omits that leaf if it has no fallback; if removing children empties the row template,
+  the host shows the navigator's empty state rather than a blank selectable row;
+- if a key has a live provider but one source session has no value, an operand fallback is
+  substituted before comparison, relative-date, sort, or fact-bucket evaluation. Without an
+  operand fallback, predicates do not match, sort places the subject after present values, and a
+  fact bucket uses its unknown path. `isPresent` remains false because it has no operand. Text,
+  image, and status bindings independently use their presentation fallback.
+
+Nested `all`, `any`, and `not` expressions do not partially simplify when a provider is absent;
+the enclosing filter clause, bucket rule, or conditional template node is the degradation unit.
+Search stays visible while at least one declared field remains and disappears when none do.
+Rule buckets keep their surviving rules and configured unmatched behavior, collapsing only when
+no rules survive. Fact buckets collapse as one unit.
+
+Project-scoped lookup is explicit, never implicit inheritance. It follows the current session's
+`session.project-id`, so a declaration using it must also consume that join key. A session without
+a project ID simply has no project-scoped value and follows the per-subject unknown/fallback rules
+above; provider availability is not inferred from whether any particular session joins.
+
+Until windowed collections ship, format 1 requires `itemLimit` in `1...1000` and
+`overflow: .truncateWithNotice`. After filtering, bucketing, and sorting, the host emits the first
+`itemLimit` source sessions in that final order and appends a localized, nonselectable notice with
+the omitted count. This is an explicit finite bridge, not silent truncation or a claim that format
+1 has already implemented windowing. The complete machine-readable contract is
+[`schema/workspace-navigator-pipeline.schema.json`](schema/workspace-navigator-pipeline.schema.json).
+
 ## Runtime snapshots and actions
 
 Set `loadActionID` when the static registration is only a useful initial or loading document.
