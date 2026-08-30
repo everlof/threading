@@ -225,8 +225,11 @@ enum MobileDemoFixture: String, CaseIterable {
 
     /// The new-session draft; the suffix chooses which state it opens in.
     case newSession = "new-session"
+    case newSessionDraftMatrix = "new-session-draft-matrix"
     case newSessionModelEffortPicker = "new-session-model-effort-picker"
     case newSessionMultiline = "new-session-multiline"
+    case newSessionSingleCharacter = "new-session-single-character"
+    case newSessionScrollOverflow = "new-session-scroll-overflow"
     case newSessionStructuredError = "new-session-structured-error"
 
     case themedDialogAlert = "themed-dialog-alert"

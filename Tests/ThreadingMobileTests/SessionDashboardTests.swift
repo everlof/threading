@@ -598,9 +598,15 @@ final class MobileDemoSceneTests: XCTestCase {
             case .permission: expected = ("permission", .permission)
             case .permissionLong: expected = ("permission-long", .permission)
             case .newSession: expected = ("new-session", .newSession)
+            case .newSessionDraftMatrix:
+                expected = ("new-session-draft-matrix", .newSession)
             case .newSessionModelEffortPicker:
                 expected = ("new-session-model-effort-picker", .newSession)
             case .newSessionMultiline: expected = ("new-session-multiline", .newSession)
+            case .newSessionSingleCharacter:
+                expected = ("new-session-single-character", .newSession)
+            case .newSessionScrollOverflow:
+                expected = ("new-session-scroll-overflow", .newSession)
             case .newSessionStructuredError:
                 expected = ("new-session-structured-error", .newSession)
             case .themedDialogAlert: expected = ("themed-dialog-alert", .themedDialogAlert)

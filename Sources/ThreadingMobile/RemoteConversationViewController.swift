@@ -1292,11 +1292,23 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
 /// text. The clipboard itself is deliberately not reachable from here — the composer that owns
 /// the attachment tray answers both questions — so this stays a view with no opinion about
 /// where a file goes.
-final class IntrinsicTextView: UITextView {
+final class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
     /// Whether the clipboard is holding something only the attachment strip could take.
     var offersFiles: () -> Bool = { false }
     /// Takes such a paste, and answers whether it did.
     var pasteFiles: () -> Bool = { false }
+    /// Reports the one transition between an intrinsic-height editor and its capped scroll
+    /// viewport. The new-session shell uses it to move fixed controls out of the viewport once
+    /// they can no longer stay attached to the document's first line.
+    var onScrollabilityChange: (Bool) -> Void = { _ in } {
+        didSet {
+            // UIKit can lay the view out while its representable is still configuring TextKit.
+            // Replay that first answer when the shell installs its observer afterward.
+            if let reportedScrollability {
+                onScrollabilityChange(reportedScrollability)
+            }
+        }
+    }
 
     /// The reply composer uses a full tap target; the compact pre-session draft shares its
     /// first line with Start. Both still use this same native editor and paste contract.
@@ -1307,7 +1319,34 @@ final class IntrinsicTextView: UITextView {
         didSet { invalidateIntrinsicContentSize() }
     }
 
+    /// Space occupied by controls floating over the first text line. Later lines deliberately
+    /// receive the whole text container: a multiline composer should wrap underneath its
+    /// paperclip and send controls instead of inheriting two empty columns for its full height.
+    var firstLineLeadingAccessoryWidth: CGFloat = 0 {
+        didSet {
+            guard firstLineLeadingAccessoryWidth != oldValue else { return }
+            firstLineAccessoryLayoutChanged()
+        }
+    }
+    var firstLineTrailingAccessoryWidth: CGFloat = 0 {
+        didSet {
+            guard firstLineTrailingAccessoryWidth != oldValue else { return }
+            firstLineAccessoryLayoutChanged()
+        }
+    }
+    var firstLineAccessoryHeight: CGFloat = 0 {
+        didSet {
+            guard firstLineAccessoryHeight != oldValue else { return }
+            firstLineAccessoryLayoutChanged()
+        }
+    }
+    /// A compact editor may opt into a shorter insertion mark than UIKit's full typographic line
+    /// box. Nil preserves the native caret everywhere else that shares this text view.
+    var preferredCaretHeight: CGFloat?
+
     private var measuredWidth: CGFloat = 0
+    private var appliedFirstLineAccessoryLayout: [CGFloat] = []
+    private var reportedScrollability: Bool?
 
     /// Offers Paste for a clipboard holding only files.
     ///
@@ -1329,6 +1368,18 @@ final class IntrinsicTextView: UITextView {
         super.paste(sender)
     }
 
+    override func caretRect(for position: UITextPosition) -> CGRect {
+        var rect = super.caretRect(for: position)
+        guard let preferredCaretHeight,
+              preferredCaretHeight > 0,
+              preferredCaretHeight < rect.height else {
+            return rect
+        }
+        rect.origin.y += (rect.height - preferredCaretHeight) / 2
+        rect.size.height = preferredCaretHeight
+        return rect
+    }
+
     override var intrinsicContentSize: CGSize {
         // Auto Layout asks for an intrinsic height once before the horizontal stack has a width.
         // Measuring against one point at that stage makes even a short prompt look like a
@@ -1348,13 +1399,128 @@ final class IntrinsicTextView: UITextView {
     }
 
     override func layoutSubviews() {
+        updateFirstLineAccessoryExclusions(for: bounds.width)
         super.layoutSubviews()
         if bounds.width > 0, abs(bounds.width - measuredWidth) > 0.5 {
             measuredWidth = bounds.width
             invalidateIntrinsicContentSize()
         }
-        let shouldScroll = contentSize.height > maximumIntrinsicHeight
-        if isScrollEnabled != shouldScroll { isScrollEnabled = shouldScroll }
+        // Each UIKit measurement is authoritative in one mode only. Before scrolling starts,
+        // `contentSize` is capped to the viewport and `sizeThatFits` exposes the full document.
+        // Afterward that reverses: `contentSize` owns the scroll range while `sizeThatFits`
+        // answers with the viewport. Switching the source with the mode prevents oscillation.
+        let uncappedHeight = isScrollEnabled
+            ? contentSize.height
+            : sizeThatFits(CGSize(
+                width: bounds.width,
+                height: .greatestFiniteMagnitude
+            )).height
+        // This view supplies its own intrinsic height up to `maximumIntrinsicHeight`. During that
+        // growth UIKit legitimately lays it out at several shorter intermediate heights. Those
+        // are not scroll viewports: comparing against one made an empty new-session draft report
+        // overflow and permanently move its actions into a separate row. Scrolling begins only
+        // when the document exceeds the same authored cap used by intrinsic sizing.
+        let shouldScroll = uncappedHeight > maximumIntrinsicHeight + 0.5
+        if isScrollEnabled != shouldScroll {
+            isScrollEnabled = shouldScroll
+            if shouldScroll {
+                layoutManager.ensureLayout(for: textContainer)
+            }
+        }
+        if reportedScrollability != shouldScroll {
+            reportedScrollability = shouldScroll
+            onScrollabilityChange(shouldScroll)
+        }
+    }
+
+    /// `UIViewRepresentable.sizeThatFits` measures before the view necessarily owns its proposed
+    /// bounds, so the bridge prepares the same exclusion geometry against that proposed width.
+    func updateFirstLineAccessoryExclusions(for viewWidth: CGFloat) {
+        let containerWidth = max(
+            0,
+            viewWidth - textContainerInset.left - textContainerInset.right
+        )
+        let leadingWidth = min(max(0, firstLineLeadingAccessoryWidth), containerWidth)
+        let trailingWidth = min(
+            max(0, firstLineTrailingAccessoryWidth),
+            max(0, containerWidth - leadingWidth)
+        )
+        let lineHeight = font?.lineHeight ?? 0
+        let isRightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+        let signature = [
+            containerWidth,
+            leadingWidth,
+            trailingWidth,
+            lineHeight,
+            isRightToLeft ? 1 : 0,
+        ]
+        guard signature != appliedFirstLineAccessoryLayout else { return }
+        appliedFirstLineAccessoryLayout = signature
+
+        guard containerWidth > 0, lineHeight > 0,
+              leadingWidth > 0 || trailingWidth > 0 else {
+            textContainer.exclusionPaths = []
+            return
+        }
+
+        let leadingX = isRightToLeft ? containerWidth - leadingWidth : 0
+        let trailingX = isRightToLeft ? 0 : containerWidth - trailingWidth
+        textContainer.exclusionPaths = [
+            leadingWidth > 0
+                ? UIBezierPath(rect: CGRect(
+                    x: leadingX,
+                    y: 0,
+                    width: leadingWidth,
+                    height: lineHeight
+                ))
+                : nil,
+            trailingWidth > 0
+                ? UIBezierPath(rect: CGRect(
+                    x: trailingX,
+                    y: 0,
+                    width: trailingWidth,
+                    height: lineHeight
+                ))
+                : nil,
+        ].compactMap { $0 }
+    }
+
+    /// The controls are taller than the body-font line they flank. Adding only the missing
+    /// first-line spacing moves line two below those hit targets without changing its full-width
+    /// fragment. A full-width exclusion below line one makes TextKit skip the inset line itself.
+    func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        lineSpacingAfterGlyphAt glyphIndex: Int,
+        withProposedLineFragmentRect rect: CGRect
+    ) -> CGFloat {
+        // This is clearance *before line two*, not padding after every first line. Applying it to
+        // a one-character document changed the editor's fitted height until that character was
+        // deleted, which made the whole composer jump on every empty/non-empty transition.
+        guard firstLineAccessoryHeight > 0,
+              rect.minY < 0.5,
+              glyphIndex != NSNotFound,
+              glyphIndex + 1 < layoutManager.numberOfGlyphs else {
+            return 0
+        }
+        return max(
+            0,
+            firstLineAccessoryHeight - textContainerInset.top - rect.height
+        )
+    }
+
+    private func firstLineAccessoryLayoutChanged() {
+        appliedFirstLineAccessoryLayout = []
+        if firstLineAccessoryHeight > 0 {
+            layoutManager.delegate = self
+        } else if layoutManager.delegate === self {
+            layoutManager.delegate = nil
+        }
+        layoutManager.invalidateLayout(
+            forCharacterRange: NSRange(location: 0, length: textStorage.length),
+            actualCharacterRange: nil
+        )
+        setNeedsLayout()
+        invalidateIntrinsicContentSize()
     }
 }
 
