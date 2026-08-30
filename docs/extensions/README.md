@@ -755,9 +755,14 @@ swift run --package-path Packages/ThreadingExtensionKit ActivityInboxExtensionEx
 swift run --package-path Packages/ThreadingExtensionKit SessionInfoExtensionExample --threading-register
 swift run --package-path Packages/ThreadingExtensionKit ThreadingComponentCatalogGenerator \
   docs/extensions/generated
+THREADING_WASM_SDK_ID=swift-6.3.3-RELEASE_wasm \
+  scripts/verify_activity_inbox_wasi.sh
 ```
 
-The example target uses the same policy plugin generated extensions must use.
+The final command builds Activity Inbox with the official Swift.org WASI SDK, sends the resulting
+module through Threading's shipping WebAssembly runner in both registration and serve modes, and
+byte-semantically compares the emitted navigator with the shipped manifest. The example target
+uses the same policy plugin generated extensions must use.
 Run the catalogue generator with `--check` in verification to detect stale committed docs.
 `--threading-register` is a finite diagnostic handshake. Threading uses `--threading-serve` to keep
 the process alive and exchange action messages.
@@ -774,11 +779,11 @@ SDK. Xcode's Apple toolchain may not contain the WebAssembly backend even when `
 the same language version. Verify that the selected Swift.org binary can see an installed SDK:
 
 ```bash
-SWIFT_ORG=/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin/swift
+SWIFT_ORG="${HOME}/.swiftly/bin/swift"
 "$SWIFT_ORG" sdk list
 "$SWIFT_ORG" build --disable-sandbox \
   --package-path Packages/ThreadingExtensionKit \
-  --swift-sdk swift-6.3.2-RELEASE_wasm \
+  --swift-sdk swift-6.3.3-RELEASE_wasm \
   --product HelloStatusExtensionExample
 ```
 

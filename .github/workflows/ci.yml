@@ -50,3 +50,42 @@ jobs:
 
       - name: Run the quality gate
         run: scripts/ci.sh
+
+  activity-inbox-wasi:
+    # Xcode Swift cannot consume Swift.org cross-compilation SDKs on macOS. This job deliberately
+    # uses the matching open-source toolchain for the guest, then Xcode Swift for the exact host
+    # runner that ships in Threading.
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Select the newest Xcode 26
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)"
+
+      - name: Install the official Swift WASI toolchain
+        run: |
+          curl --fail --location --retry 3 --show-error --silent \
+            https://download.swift.org/swiftly/darwin/swiftly.pkg \
+            --output "$RUNNER_TEMP/swiftly.pkg"
+          echo "fade009739a84f18ee30e524793f927019fc9c2e16b2ad958da50d3f9ff7a7f8  $RUNNER_TEMP/swiftly.pkg" \
+            | shasum -a 256 --check
+          pkgutil --check-signature "$RUNNER_TEMP/swiftly.pkg" \
+            | grep -F "Developer ID Installer: Swift Open Source (V9AUD2URP3)"
+          installer -pkg "$RUNNER_TEMP/swiftly.pkg" -target CurrentUserHomeDirectory
+          ~/.swiftly/bin/swiftly init \
+            --skip-install --no-modify-profile --quiet-shell-followup --assume-yes
+          ~/.swiftly/bin/swiftly install 6.3.3 --use --verify --assume-yes
+          ~/.swiftly/bin/swift sdk install \
+            https://download.swift.org/swift-6.3.3-release/wasm-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_wasm.artifactbundle.tar.gz \
+            --checksum cabfa08b73bb8ac783927ecd15fa386e99d0c139c5f232445067bcf58379cae7
+
+      - name: Verify Activity Inbox through the shipping runner
+        env:
+          THREADING_WASM_SDK_ID: swift-6.3.3-RELEASE_wasm
+        run: scripts/verify_activity_inbox_wasi.sh
