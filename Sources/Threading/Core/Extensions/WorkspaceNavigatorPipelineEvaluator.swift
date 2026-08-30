@@ -13,6 +13,12 @@ struct WorkspaceNavigatorPipelineItem: Equatable, Sendable {
     let destination: ExtensionWorkspaceNavigatorDestination
     let snapshotRevision: UInt64
     let referenceDate: Date
+    /// The exact host calendar which admitted this item during structure evaluation.
+    ///
+    /// Visible rows may be realized later, after a system time-zone edge. Carrying the value
+    /// with the item keeps relative-date conditionals on the same side of that edge as the
+    /// bucket/filter pass which emitted the row.
+    let calendar: Calendar
 }
 
 struct WorkspaceNavigatorPipelineSection: Equatable, Sendable {
@@ -190,7 +196,7 @@ indirect enum WorkspaceNavigatorRealizedTemplateNode: Equatable, Sendable {
 /// A `nil` source means the navigator declaration itself supplied the literal or fallback. A
 /// fact-bound image retains the exact provider generation so the renderer cannot accidentally
 /// resolve another extension's package, or a replacement generation of the same extension.
-struct WorkspaceNavigatorRealizedImage: Equatable, Sendable {
+struct WorkspaceNavigatorRealizedImage: Equatable, Hashable, Sendable {
     let reference: ExtensionImageReference
     let factSource: ExtensionFactResolutionSource?
 }
@@ -298,7 +304,8 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
                             projectID: $0.projectID
                         ),
                         snapshotRevision: pipeline.snapshot.revision,
-                        referenceDate: referenceDate
+                        referenceDate: referenceDate,
+                        calendar: calendar
                     )
                 }
             ))
@@ -325,12 +332,70 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
             sessionID: item.sourceSessionID,
             projectID: item.projectID
         )
-        return realize(
+        return WorkspaceNavigatorPipelineEvaluator(
+            calendar: item.calendar,
+            now: { item.referenceDate }
+        ).realize(
             template,
             candidate: candidate,
             snapshot: pipeline.snapshot,
             referenceDate: item.referenceDate
         )
+    }
+
+    /// Enumerates the bounded image values a presentation can request without realizing one
+    /// semantic tree per row. The host resolves these values before handing the presentation to
+    /// AppKit, so a cold package image or account badge can never turn row reuse into filesystem
+    /// work.
+    func imageReferences(
+        in evaluation: WorkspaceNavigatorPipelineEvaluation,
+        pipeline: CompiledWorkspaceNavigatorPipeline
+    ) -> Set<WorkspaceNavigatorRealizedImage> {
+        guard evaluation.snapshotRevision == pipeline.snapshot.revision,
+              let template = pipeline.rowTemplate else { return [] }
+        let bindings = imageBindings(in: template)
+        guard !bindings.isEmpty else { return [] }
+
+        var references = Set<WorkspaceNavigatorRealizedImage>()
+        for binding in bindings {
+            switch binding {
+            case let .literal(reference):
+                references.insert(.init(reference: reference, factSource: nil))
+            case .factIcon:
+                for section in evaluation.sections {
+                    for item in section.items {
+                        let candidate = Candidate(
+                            subject: .session(item.sourceSessionID),
+                            sessionID: item.sourceSessionID,
+                            projectID: item.projectID
+                        )
+                        if let resolved = resolveImage(
+                            binding,
+                            candidate: candidate,
+                            snapshot: pipeline.snapshot
+                        ) {
+                            references.insert(resolved)
+                        }
+                    }
+                }
+            }
+        }
+        return references
+    }
+
+    private func imageBindings(
+        in node: ExtensionWorkspaceNavigatorTemplateNode
+    ) -> [ExtensionWorkspaceNavigatorImageBinding] {
+        switch node {
+        case let .image(binding, _, _):
+            [binding]
+        case let .conditional(_, content):
+            imageBindings(in: content)
+        case let .stack(_, _, children):
+            children.flatMap(imageBindings)
+        case .text, .status, .activityIndicator, .divider, .spacer, .flexibleSpacer:
+            []
+        }
     }
 
     private func sections(

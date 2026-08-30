@@ -487,6 +487,67 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         XCTAssertEqual(westCoast.sections.first?.identity, .rule(id: "yesterday"))
     }
 
+    func testVisibleRowKeepsTheCalendarWhichAdmittedItsRelativeDateConditional() throws {
+        let dateKey = ExtensionFactKey(id: "example.visible-date")
+        let titleKey = ExtensionHostFactKey.sessionTitle
+        var losAngeles = Calendar(identifier: .gregorian)
+        losAngeles.timeZone = try XCTUnwrap(TimeZone(identifier: "America/Los_Angeles"))
+        var tokyo = Calendar(identifier: .gregorian)
+        tokyo.timeZone = try XCTUnwrap(TimeZone(identifier: "Asia/Tokyo"))
+        let referenceDate = date(2026, 8, 30, 23, 30, calendar: losAngeles)
+        let sessionDate = date(2026, 8, 30, 0, 30, calendar: losAngeles)
+        let pipeline = pipeline(
+            consumes: [
+                .init(key: dateKey, requirement: .required),
+                .init(key: titleKey, requirement: .required),
+            ],
+            template: .conditional(
+                .relativeDate(.init(.init(dateKey)), .today),
+                content: .text(
+                    .fact(.init(titleKey), facet: .value, fallback: nil),
+                    role: .body
+                )
+            )
+        )
+        let snapshot = makeSnapshot(
+            sessionIDs: ["session"],
+            definitions: [
+                definition(
+                    dateKey,
+                    type: .date,
+                    kinds: [.session],
+                    usages: [.filterable, .presentable]
+                ),
+                definition(
+                    titleKey,
+                    type: .string,
+                    kinds: [.session],
+                    usages: [.presentable]
+                ),
+            ],
+            facts: [
+                fact(dateKey, .session("session"), .date(sessionDate)),
+                fact(titleKey, .session("session"), .string("Same host day")),
+            ]
+        )
+        let compiled = try ready(pipeline, snapshot: snapshot)
+        let evaluation = WorkspaceNavigatorPipelineEvaluator(
+            calendar: losAngeles,
+            now: { referenceDate }
+        ).evaluate(compiled)
+        let item = try XCTUnwrap(evaluation.sections.first?.items.first)
+
+        XCTAssertEqual(item.calendar.timeZone.identifier, losAngeles.timeZone.identifier)
+        XCTAssertEqual(
+            WorkspaceNavigatorPipelineEvaluator(
+                calendar: tokyo,
+                now: { referenceDate }
+            ).realizeVisibleRow(item, in: compiled),
+            .text("Same host day", role: .body),
+            "lazy realization must not reclassify the row with a newer system calendar"
+        )
+    }
+
     func testActivityInboxKeepsPriorityAheadOfCalendarSectionsAndRealizesWorkingState() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!

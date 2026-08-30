@@ -193,9 +193,15 @@ one ambient Workspace badge instead of navigating. Lower-level interaction mutat
 invalidation without a new activity id, so a visible read-only follow view refreshes without
 animating the badge for every click or scroll. The follow route fetches bounded metadata and a PNG
 of only the currently visible shared tab on demand. It does not construct a second `WKWebView`,
-send input back to WebKit, or run a continuous pixel stream. Page titles are bounded, URLs use the
+send input back to WebKit, or run a continuous pixel stream. Because the pixels are the Mac's, a
+page on the Mac's own `localhost` previews like any other: the phone never resolves the tab's
+URL, and shows it as text rather than a link. Page titles are bounded, URLs use the
 same redactor as other remote diagnostics, and private tabs expose only a generic placeholder
-with no preview. Both REST reads and WebSocket activity require paired owner scope.
+with no preview. The toolbar badge stays wholly inside the account disc: `UINavigationBar` clips a
+menu label to its own bounds, so a decorative overhang is shaved rather than granted more room.
+Opening that menu carries the same state onto its Workspace action in words and with the filled
+workspace glyph, making the destination clear without depending on color. Both REST reads and
+WebSocket activity require paired owner scope.
 `browser_storage clear_site_data` removes the active site's WebKit-owned cookies, caches, storage,
 IndexedDB, and service-worker data only after a separate app-owned confirmation. An origin grant,
 including an "always allow" grant, never implies permission to delete signed-in state. The

@@ -2851,11 +2851,14 @@ final class ExtensionRendererTests: HostedStoreTestCase {
         let table = try waitForPipelineTable(in: host, rowCount: 1)
         _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
 
+        table.reloadData()
+        _ = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+
         XCTAssertEqual(router.exactImageRequests, [.init(
             extensionIdentifier: "com.example.provider",
             relativePath: "icon.png",
             processGeneration: "provider-generation-7"
-        )])
+        )], "row realization and reuse must read only the preloaded in-memory image cache")
         XCTAssertTrue(router.invocations.isEmpty)
     }
 

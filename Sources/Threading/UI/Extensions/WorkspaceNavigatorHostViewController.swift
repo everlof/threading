@@ -123,6 +123,10 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
     )
     private var pipelineCollectionController: WorkspaceNavigatorPipelineCollectionViewController?
     private var pipelineResultsView: WorkspaceNavigatorPipelineResultsView?
+    /// Every value is resolved before a presentation reaches AppKit. Missing values are retained
+    /// separately so a bad resource does not turn each row reuse into another filesystem read.
+    private var pipelineImages: [WorkspaceNavigatorRealizedImage: NSImage] = [:]
+    private var attemptedPipelineImages = Set<WorkspaceNavigatorRealizedImage>()
     private var optionSequence = 0
     private var nextDayTimer: Timer?
     private let pipelineEvents = AppEventObservations()
@@ -576,6 +580,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         pipeline compiled: CompiledWorkspaceNavigatorPipeline
     ) {
         let evaluation = presentation.evaluation
+        preparePipelineImages(for: evaluation, pipeline: compiled)
         let rowHeight = compiled.rowTemplate.map {
             WorkspaceNavigatorPipelineTemplateView.rowHeight(for: $0)
         } ?? SidebarDefaults.projectCompactRowHeight
@@ -619,10 +624,12 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                     projectID: item.projectID,
                     destination: item.destination,
                     snapshotRevision: current.snapshot.revision,
-                    referenceDate: item.referenceDate
+                    referenceDate: item.referenceDate,
+                    calendar: item.calendar
                 )
                 guard let realized = WorkspaceNavigatorPipelineEvaluator(
-                    calendar: .current
+                    calendar: currentItem.calendar,
+                    now: { currentItem.referenceDate }
                 ).realizeVisibleRow(currentItem, in: current) else {
                     throw ExtensionValidationError(issues: [.init(
                         path: "pipeline.output.rowTemplate",
@@ -632,7 +639,7 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
                 return WorkspaceNavigatorPipelineTemplateView(
                     node: realized,
                     imageResolver: { [weak self] image in
-                        self?.resolvePipelineImage(image)
+                        self?.pipelineImages[image]
                     }
                 )
             },
@@ -680,7 +687,25 @@ final class WorkspaceNavigatorHostViewController: NSViewController {
         }
     }
 
-    private func resolvePipelineImage(_ image: WorkspaceNavigatorRealizedImage) -> NSImage? {
+    private func preparePipelineImages(
+        for evaluation: WorkspaceNavigatorPipelineEvaluation,
+        pipeline: CompiledWorkspaceNavigatorPipeline
+    ) {
+        let references = WorkspaceNavigatorPipelineEvaluator().imageReferences(
+            in: evaluation,
+            pipeline: pipeline
+        )
+        for reference in references where attemptedPipelineImages.insert(reference).inserted {
+            if let image = loadPipelineImage(reference) {
+                pipelineImages[reference] = image
+            }
+        }
+    }
+
+    /// Cold resolution is deliberately outside every table/outline callback. This method may
+    /// validate and decode a package resource or warm account discovery; callers must preload
+    /// through `preparePipelineImages` and let rows read `pipelineImages` synchronously.
+    private func loadPipelineImage(_ image: WorkspaceNavigatorRealizedImage) -> NSImage? {
         switch image.reference {
         case .systemSymbol(let name):
             return NSImage(systemSymbolName: name, accessibilityDescription: nil)
