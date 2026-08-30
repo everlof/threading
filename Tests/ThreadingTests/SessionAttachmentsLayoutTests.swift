@@ -105,7 +105,8 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
 
     private func laidOutTurnPane(
         showing urls: [URL],
-        size: NSSize
+        size: NSSize,
+        latestFileCount: Int = 2
     ) throws -> (
         pane: SessionAttachmentsViewController,
         latest: SessionAttachmentTurnBoundary,
@@ -116,6 +117,10 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             urls: urls, sessionID: sessionID, projectRoot: root
         )
         XCTAssertEqual(recorded.count, urls.count, "a fixture attachment was refused")
+        XCTAssertTrue(
+            (0...recorded.count).contains(latestFileCount),
+            "the fixture asked for an impossible latest-turn file count"
+        )
 
         let now = Date()
         let previous = SessionAttachmentTurnBoundary(
@@ -131,12 +136,12 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
             requestedAt: now.addingTimeInterval(-1)
         )
         SessionAttachmentStore.shared.associate(
-            attachmentIDs: Array(recorded.prefix(2)).map(\.id),
+            attachmentIDs: Array(recorded.prefix(latestFileCount)).map(\.id),
             withTurnID: latest.userTurnID,
             for: sessionID
         )
         SessionAttachmentStore.shared.associate(
-            attachmentIDs: Array(recorded.dropFirst(2)).map(\.id),
+            attachmentIDs: Array(recorded.dropFirst(latestFileCount)).map(\.id),
             withTurnID: previous.userTurnID,
             for: sessionID
         )
@@ -1683,6 +1688,94 @@ final class SessionAttachmentsLayoutTests: XCTestCase {
                 as? SessionAttachmentTurnHeaderView)?.sectionID,
             .checkpoint(fixture.previous.id)
         )
+    }
+
+    func testEmptyLatestAndAllCollapsedStateKeepTruthfulChrome() throws {
+        let fixture = try laidOutTurnPane(
+            showing: [try writePNG(size: NSSize(width: 40, height: 40))],
+            size: NSSize(width: 353, height: 700),
+            latestFileCount: 0
+        )
+        let table = fixture.pane.tableViewForTesting
+
+        XCTAssertEqual(table.numberOfRows, 3, "the empty latest header was omitted")
+        let latest = try XCTUnwrap(
+            table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+                as? SessionAttachmentTurnHeaderView
+        )
+        XCTAssertEqual(
+            latest.disclosure.accessibilityLabel(),
+            "\(L10n.string("Latest turn")), \(L10n.format("%lld files", Int64(0)))"
+        )
+        XCTAssertEqual(latest.disclosure.accessibilityRole(), .group)
+        XCTAssertNil(latest.disclosure.accessibilityValue())
+        XCTAssertFalse(latest.disclosure.acceptsFirstResponder)
+        XCTAssertFalse(
+            latest.disclosure.performPrimaryAction(),
+            "an empty turn offered a disclosure action that cannot reveal anything"
+        )
+
+        fixture.pane.setTurnSection(.checkpoint(fixture.latest.id), expanded: false)
+        fixture.pane.setTurnSection(.checkpoint(fixture.previous.id), expanded: false)
+        fixture.pane.view.layoutSubtreeIfNeeded()
+
+        XCTAssertEqual(table.numberOfRows, 2, "a collapsed turn kept a file row alive")
+        XCTAssertEqual(table.selectedRow, -1, "a header became the selected attachment")
+        XCTAssertTrue(try footerBand(in: fixture.pane.view).isHidden)
+        let collapseMessage = try XCTUnwrap(
+            descendants(of: fixture.pane.view)
+                .compactMap { $0 as? NSTextField }
+                .first {
+                    !$0.isHidden
+                        && $0.stringValue
+                            == L10n.string("Expand a turn to preview its attachments.")
+                },
+            "the empty preview did not explain how to restore its files"
+        )
+        XCTAssertGreaterThan(
+            collapseMessage.frame.width,
+            100,
+            "the collapse explanation exists but is too narrow to be read"
+        )
+    }
+
+    func testTurnHeaderKeyboardAndAccessibilityToggleTheHostedSection() throws {
+        let fixture = try laidOutTurnPane(
+            showing: try writePNGs(count: 3, size: NSSize(width: 40, height: 40)),
+            size: NSSize(width: 353, height: 700)
+        )
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 353, height: 700),
+            styleMask: .borderless,
+            backing: .buffered,
+            defer: false
+        )
+        window.contentViewController = fixture.pane
+        defer { window.orderOut(nil) }
+
+        let table = fixture.pane.tableViewForTesting
+        let expanded = try XCTUnwrap(
+            table.view(atColumn: 0, row: 3, makeIfNecessary: true)
+                as? SessionAttachmentTurnHeaderView
+        ).disclosure
+        XCTAssertEqual(expanded.accessibilityRole(), .disclosureTriangle)
+        XCTAssertEqual(
+            expanded.accessibilityLabel(),
+            "\(L10n.string("Previous turn")), \(L10n.string("1 file"))"
+        )
+        XCTAssertEqual(expanded.accessibilityValue() as? Bool, true)
+
+        XCTAssertTrue(window.makeFirstResponder(expanded))
+        expanded.keyDown(with: try spaceKey(in: window))
+        XCTAssertEqual(table.numberOfRows, 4, "Space did not collapse the hosted section")
+
+        let collapsed = try XCTUnwrap(
+            table.view(atColumn: 0, row: 3, makeIfNecessary: true)
+                as? SessionAttachmentTurnHeaderView
+        ).disclosure
+        XCTAssertEqual(collapsed.accessibilityValue() as? Bool, false)
+        XCTAssertTrue(collapsed.accessibilityPerformPress())
+        XCTAssertEqual(table.numberOfRows, 5, "VoiceOver press did not expand the section")
     }
 
     /// A row shows the picture it is about. This list is the panel's visual history now — the

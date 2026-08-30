@@ -1,0 +1,2 @@
+# Draft 2020-12 validation for the public extension wire-contract fixtures.
+jsonschema==4.26.0

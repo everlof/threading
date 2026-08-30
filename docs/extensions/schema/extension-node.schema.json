@@ -12,7 +12,7 @@
           "required": ["type", "text", "role"],
           "properties": {
             "type": { "const": "text" },
-            "text": { "type": "string" },
+            "text": { "type": "string", "pattern": "\\S" },
             "role": {
               "enum": [
                 "heading",
@@ -91,7 +91,7 @@
               "type": "string",
               "pattern": "^[a-z][a-z0-9.-]*$"
             },
-            "title": { "type": "string" },
+            "title": { "type": "string", "pattern": "\\S" },
             "role": {
               "enum": ["standard", "primary", "destructive"]
             },
@@ -208,7 +208,7 @@
           "required": ["type", "text", "role"],
           "properties": {
             "type": { "const": "status" },
-            "text": { "type": "string" },
+            "text": { "type": "string", "pattern": "\\S" },
             "role": {
               "enum": ["neutral", "positive", "warning", "negative"]
             }

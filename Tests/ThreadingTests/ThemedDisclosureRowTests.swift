@@ -53,6 +53,25 @@ final class ThemedDisclosureRowTests: XCTestCase {
         XCTAssertEqual(toggles(), [])
     }
 
+    @MainActor
+    func testANonCollapsibleRowReadsAsStructureAndOffersNoAction() {
+        let row = ThemedDisclosureRow(
+            content: NSTextField(labelWithString: "Latest turn, 0 files"),
+            isExpanded: true,
+            isCollapsible: false
+        )
+
+        XCTAssertFalse(row.acceptsFirstResponder)
+        XCTAssertFalse(row.performPrimaryAction())
+        XCTAssertFalse(row.accessibilityPerformPress())
+        XCTAssertEqual(row.accessibilityRole(), .group)
+        XCTAssertNil(row.accessibilityValue())
+        XCTAssertTrue(
+            row.subviews.compactMap { $0 as? GlyphView }.first?.isHidden == true,
+            "a structural row kept a chevron for detail that does not exist"
+        )
+    }
+
     // MARK: - Pointer
 
     @MainActor

@@ -343,40 +343,42 @@ struct WorkspaceNavigatorPipelineEvaluator: Sendable {
         )
     }
 
-    /// Enumerates the bounded image values a presentation can request without realizing one
-    /// semantic tree per row. The host resolves these values before handing the presentation to
-    /// AppKit, so a cold package image or account badge can never turn row reuse into filesystem
-    /// work.
+    /// Enumerates image values for one lightweight item without constructing its semantic view
+    /// tree. The table calls this only for a bounded visible-row prefetch window; evaluating all
+    /// output items here would defeat row virtualization for fact-bound icons.
     func imageReferences(
-        in evaluation: WorkspaceNavigatorPipelineEvaluation,
+        for item: WorkspaceNavigatorPipelineItem,
         pipeline: CompiledWorkspaceNavigatorPipeline
-    ) -> Set<WorkspaceNavigatorRealizedImage> {
-        guard evaluation.snapshotRevision == pipeline.snapshot.revision,
+    ) -> [WorkspaceNavigatorRealizedImage] {
+        guard item.snapshotRevision == pipeline.snapshot.revision,
               let template = pipeline.rowTemplate else { return [] }
         let bindings = imageBindings(in: template)
         guard !bindings.isEmpty else { return [] }
 
-        var references = Set<WorkspaceNavigatorRealizedImage>()
+        let candidate = Candidate(
+            subject: .session(item.sourceSessionID),
+            sessionID: item.sourceSessionID,
+            projectID: item.projectID
+        )
+        var references: [WorkspaceNavigatorRealizedImage] = []
+        var seen = Set<WorkspaceNavigatorRealizedImage>()
         for binding in bindings {
             switch binding {
             case let .literal(reference):
-                references.insert(.init(reference: reference, factSource: nil))
+                let realized = WorkspaceNavigatorRealizedImage(
+                    reference: reference,
+                    factSource: nil
+                )
+                if seen.insert(realized).inserted {
+                    references.append(realized)
+                }
             case .factIcon:
-                for section in evaluation.sections {
-                    for item in section.items {
-                        let candidate = Candidate(
-                            subject: .session(item.sourceSessionID),
-                            sessionID: item.sourceSessionID,
-                            projectID: item.projectID
-                        )
-                        if let resolved = resolveImage(
-                            binding,
-                            candidate: candidate,
-                            snapshot: pipeline.snapshot
-                        ) {
-                            references.insert(resolved)
-                        }
-                    }
+                if let resolved = resolveImage(
+                    binding,
+                    candidate: candidate,
+                    snapshot: pipeline.snapshot
+                ), seen.insert(resolved).inserted {
+                    references.append(resolved)
                 }
             }
         }

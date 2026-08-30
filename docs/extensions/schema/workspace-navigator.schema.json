@@ -22,7 +22,11 @@
           "required": ["type", "text", "role"],
           "properties": {
             "type": { "const": "text" },
-            "text": { "type": "string", "maxLength": 1000 },
+            "text": {
+              "type": "string",
+              "maxLength": 1000,
+              "pattern": "\\S"
+            },
             "role": {
               "enum": [
                 "heading",
@@ -55,7 +59,11 @@
           "properties": {
             "type": { "const": "button" },
             "id": { "$ref": "#/$defs/contributionID" },
-            "title": { "type": "string", "maxLength": 1000 },
+            "title": {
+              "type": "string",
+              "maxLength": 1000,
+              "pattern": "\\S"
+            },
             "role": { "const": "standard" },
             "isEnabled": { "type": "boolean" }
           }
@@ -66,7 +74,11 @@
           "required": ["type", "text", "role"],
           "properties": {
             "type": { "const": "status" },
-            "text": { "type": "string", "maxLength": 1000 },
+            "text": {
+              "type": "string",
+              "maxLength": 1000,
+              "pattern": "\\S"
+            },
             "role": { "enum": ["neutral", "positive", "warning", "negative"] }
           }
         },
@@ -186,7 +198,8 @@
         "title": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 120
+          "maxLength": 120,
+          "pattern": "\\S"
         },
         "root": { "$ref": "#/$defs/navigatorNode" },
         "pipeline": { "$ref": "workspace-navigator-pipeline.schema.json" },

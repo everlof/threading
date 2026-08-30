@@ -9,27 +9,39 @@ import ThreadingExtensionKit
 /// closes that race, while ImageIO properties let us refuse decompression bombs before AppKit is
 /// asked to allocate their pixels. Decoding the one accepted frame here also keeps every host
 /// surface on the same policy instead of relying on `NSImage(contentsOf:)`'s lazy behaviour.
-@MainActor
 enum ExtensionImageResourceLoader {
     static let maximumBytes = ExtensionImageResourcePolicy.maximumBytes
     static let maximumPixelDimension = ExtensionImageResourcePolicy.maximumPixelDimension
 
+    @MainActor
     static func image(at url: URL) -> NSImage? {
         guard let data = ExtensionImageResourcePolicy.validatedData(at: url),
-              let source = CGImageSourceCreateWithData(data as CFData, nil),
-              let decoded = CGImageSourceCreateThumbnailAtIndex(
-                  source,
-                  0,
-                  [
-                      kCGImageSourceCreateThumbnailFromImageAlways: true,
-                      kCGImageSourceCreateThumbnailWithTransform: true,
-                      kCGImageSourceThumbnailMaxPixelSize: maximumPixelDimension
-                  ] as CFDictionary
-              ) else {
-            return nil
-        }
+              let decoded = decodedImage(from: data) else { return nil }
+        return image(from: decoded)
+    }
 
-        return NSImage(
+    /// ImageIO performs its bounded decode on a worker for virtualized navigator rows. `CGImage`
+    /// is immutable and Sendable; AppKit object construction remains on the main actor.
+    nonisolated static func decodedImage(
+        from data: Data,
+        maximumPixelDimension requestedMaximum: Int = maximumPixelDimension
+    ) -> CGImage? {
+        let decodeMaximum = max(1, min(requestedMaximum, maximumPixelDimension))
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+        return CGImageSourceCreateThumbnailAtIndex(
+            source,
+            0,
+            [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: decodeMaximum
+            ] as CFDictionary
+        )
+    }
+
+    @MainActor
+    static func image(from decoded: CGImage) -> NSImage {
+        NSImage(
             cgImage: decoded,
             size: NSSize(width: decoded.width, height: decoded.height)
         )

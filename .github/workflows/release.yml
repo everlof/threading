@@ -81,6 +81,8 @@ jobs:
           command -v swiftlint >/dev/null || brew install swiftlint
           command -v rg >/dev/null || brew install ripgrep
           command -v gitleaks >/dev/null || brew install gitleaks
+          python3 -m pip install --disable-pip-version-check \
+            -r scripts/requirements-schema.txt
           swiftlint version
           gitleaks version
 

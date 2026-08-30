@@ -3,6 +3,64 @@ import Foundation
 import XCTest
 
 final class WorkspaceNavigatorPipelineContractTests: XCTestCase {
+    func testShippedActivityManifestValidatesAsTheDeclaredNavigator() throws {
+        let packageRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let manifestURL = packageRoot
+            .appendingPathComponent("Examples")
+            .appendingPathComponent("ActivityInboxExtension")
+            .appendingPathComponent("threading-extension.json")
+        let manifest = try JSONDecoder().decode(
+            ExtensionManifest.self,
+            from: Data(contentsOf: manifestURL)
+        )
+
+        try manifest.validate()
+        XCTAssertEqual(manifest.workspaceNavigators.count, 1)
+        let navigator = try XCTUnwrap(manifest.workspaceNavigators.first)
+        XCTAssertEqual(navigator.validationIssues(path: "workspaceNavigators[0]"), [])
+    }
+
+    func testWhitespaceOnlyNavigatorAndPatchPresentationAreRejected() throws {
+        let validFallback = ExtensionWorkspaceNavigatorNode.content(
+            .status("Fallback", role: .neutral)
+        )
+        XCTAssertFalse(ExtensionWorkspaceNavigator(
+            id: "whitespace-title",
+            title: " \n\t",
+            root: validFallback
+        ).validationIssues(path: "navigator").isEmpty)
+        XCTAssertFalse(ExtensionWorkspaceNavigator(
+            id: "whitespace-status",
+            title: "Whitespace status",
+            root: .content(.status(" \n\t", role: .neutral))
+        ).validationIssues(path: "navigator").isEmpty)
+
+        let contents: [ExtensionNode] = [
+            .text(" \n\t", role: .body),
+            .button(
+                id: "refresh",
+                title: " \n\t",
+                role: .standard,
+                isEnabled: true
+            ),
+            .status(" \n\t", role: .neutral),
+        ]
+        for content in contents {
+            XCTAssertThrowsError(try ExtensionWorkspaceNavigatorActionResponse(
+                requestID: "whitespace-patch",
+                navigatorID: "activity-inbox",
+                itemPatches: [.init(
+                    collectionID: "sessions",
+                    itemID: "session",
+                    content: content
+                )]
+            ).validate())
+        }
+    }
+
     func testActivityInboxPipelineRoundTripsAndConsumesEveryDeclaration() throws {
         let navigator = activityInboxNavigator()
 

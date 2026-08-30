@@ -214,6 +214,15 @@ protocol ExtensionWorkspaceNavigatorRouting: AnyObject {
         processGeneration: String
     ) -> URL?
 
+    /// Reads one exact-generation package image without doing filesystem work on the main actor.
+    /// The returned bytes have passed the package containment, byte, frame, and pixel bounds.
+    func loadExtensionImageResourceData(
+        extensionIdentifier: String,
+        relativePath: String,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (Data?) -> Void
+    )
+
     @discardableResult
     func invokeWorkspaceNavigatorAction(
         extensionIdentifier: String,
@@ -248,6 +257,15 @@ extension ExtensionWorkspaceNavigatorRouting {
         processGeneration: String
     ) -> URL? {
         nil
+    }
+
+    func loadExtensionImageResourceData(
+        extensionIdentifier: String,
+        relativePath: String,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (Data?) -> Void
+    ) {
+        completion(nil)
     }
 }
 
@@ -1057,6 +1075,33 @@ final class ExtensionManager:
             relativePath: relativePath,
             extensionIdentifier: extensionIdentifier
         )
+    }
+
+    func loadExtensionImageResourceData(
+        extensionIdentifier: String,
+        relativePath: String,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (Data?) -> Void
+    ) {
+        guard sessionGenerations[extensionIdentifier] == processGeneration,
+              let rootURL = packages[extensionIdentifier]?.bundle?.rootURL else {
+            completion(nil)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let data = await Task.detached(priority: .userInitiated) {
+                ExtensionImageResourcePolicy.validatedData(
+                    relativePath: relativePath,
+                    packageRootURL: rootURL
+                )
+            }.value
+            guard let self,
+                  self.sessionGenerations[extensionIdentifier] == processGeneration else {
+                completion(nil)
+                return
+            }
+            completion(data)
+        }
     }
 
     /// The metadata preflight in `resourceURL` is only an early refusal — an extension can grow
@@ -2522,6 +2567,29 @@ enum ExtensionImageResourcePolicy {
             return nil
         }
         return data
+    }
+
+    /// Performs the complete package path and byte validation on a worker. The caller snapshots
+    /// only the installed package root on the main actor and rechecks process generation before
+    /// publishing the result, so neither a symlink swap nor a process replacement can retarget a
+    /// visible navigator row.
+    static func validatedData(relativePath: String, packageRootURL: URL) -> Data? {
+        guard !relativePath.isEmpty,
+              !NSString(string: relativePath).isAbsolutePath,
+              NSString(string: relativePath).pathComponents.allSatisfy({
+                  $0 != "." && $0 != ".." && $0 != "/"
+              }) else { return nil }
+
+        let root = packageRootURL.standardizedFileURL.resolvingSymlinksInPath()
+        let candidate = root.appendingPathComponent(relativePath)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        guard candidate.path.hasPrefix(root.path + "/"),
+              let values = try? candidate.resourceValues(
+                  forKeys: [.isRegularFileKey, .fileSizeKey]
+              ),
+              values.isRegularFile == true,
+              (values.fileSize ?? Int.max) <= maximumBytes else { return nil }
+        return validatedData(at: candidate)
     }
 }
 

@@ -29,6 +29,14 @@ enum AccountBadge {
     /// Drawn chips, keyed by everything that defines one. An avatar landing or an emoji
     /// being chosen changes the key rather than needing the cache flushed.
     private static let cache = NSCache<NSString, NSImage>()
+    /// The exact account images already published into a host fact snapshot. Navigator image
+    /// prefetch is allowed to read this memory-only projection, never to rediscover accounts or
+    /// probe avatar files while a table is scrolling.
+    private static let publishedCache: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 256
+        return cache
+    }()
 
     // MARK: - Public Methods
 
@@ -44,13 +52,21 @@ enum AccountBadge {
         let key = cacheKey(account: account, hasAvatar: avatar != nil, initial: initial)
 
         if let cached = cache.object(forKey: key) {
+            publishedCache.setObject(cached, forKey: account.id.rawValue as NSString)
             return cached
         }
 
         let image = draw(account: account, avatar: avatar, initial: initial)
         image.accessibilityDescription = account.displayName
         cache.setObject(image, forKey: key)
+        publishedCache.setObject(image, forKey: account.id.rawValue as NSString)
         return image
+    }
+
+    /// Returns only an image which `chip(for:)` already admitted while building host identity
+    /// facts. This method performs no account discovery, file read, avatar lookup, or drawing.
+    static func publishedChip(forAccountID accountID: String) -> NSImage? {
+        publishedCache.object(forKey: accountID as NSString)
     }
 
     /// The letter a chip falls back to: the first letter or digit of the account's login
