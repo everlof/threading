@@ -1011,7 +1011,7 @@ enum MobileWorkspaceActivityMenuGlyph {
                 .frame(width: side, height: side)
                 .overlay(alignment: .topTrailing) {
                     MobileWorkspaceActivityDot()
-                        .environment(\.remoteTheme, theme)
+                        .mobileTheme(theme)
                 }
                 .padding(MobileDesign.Size.usageMenuGaugeInset)
         )
