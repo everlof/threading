@@ -4133,10 +4133,11 @@ than a step: nothing moved into a submenu, so every theme is still one press awa
 what freed the rows to be plain names, since where a theme comes from is now said once over the
 group instead of on every line.
 
-**Some themes are a palette rather than a look.** Pure Black, Cappuccino, Solarized, Nord, and
-Dracula keep the app's modern shape and spend their identity on colour: Pure Black is a true
-`#000000` ground rather than the system's elevated grey, with colour reserved for the terminal;
-Cappuccino and Solarized adapt with macOS light and dark; Solarized, Nord, and Dracula ship the
+**Some themes are a palette rather than a look.** Pure, Cappuccino, Solarized, Nord, and
+Dracula keep the app's modern shape and spend their identity on colour: Pure is a true `#FFFFFF`
+ground by day and a true `#000000` ground by night rather than the system's greys, with colour
+reserved for the terminal; Pure, Cappuccino and Solarized adapt with macOS light and dark
+(set macOS to Dark to keep Pure black all day); Solarized, Nord, and Dracula ship the
 community schemes' exact published values, chrome and terminal palette alike, so a terminal set
 to **Follow App Theme** gets the real sixteen colours.
 
