@@ -1039,6 +1039,50 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
     }
 
+    /// A menu can begin its visible fade and lose the preview window before the first display
+    /// frame. AppKit's `animator().alphaValue` waits on a blocking worker for a window display
+    /// cycle that will never return; doing this once per gallery fixture eventually exhausts the
+    /// process's dispatch threads and starves otherwise unrelated async tests.
+    func testAVisibleMenuFadeFinishesAfterItsWindowCloses() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let source = NSView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        window.orderFront(nil)
+
+        let restingSubviewCount = root.subviews.count
+        let session = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [.item(ThemedMenuItem(title: "Close with the preview"))],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        )
+        XCTAssertNotNil(session)
+        XCTAssertGreaterThan(root.subviews.count, restingSubviewCount)
+
+        ThemedMenuPresenter.dismiss(session)
+        window.close()
+
+        let fadeFinished = expectation(description: "menu pixels finish after window close")
+        DispatchQueue.main.asyncAfter(deadline: .now() + Design.Motion.vanish + 0.1) {
+            fadeFinished.fulfill()
+        }
+        wait(for: [fadeFinished], timeout: Design.Motion.vanish + 1)
+        XCTAssertEqual(root.subviews.count, restingSubviewCount)
+    }
+
     /// Two *adjacent* filled rows keep a hairline of panel between them.
     ///
     /// A menu reaches that pair whenever the highlight and a press part company — the keyboard
