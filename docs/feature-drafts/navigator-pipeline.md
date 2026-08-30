@@ -4,7 +4,8 @@
 > can have one, built by an extension, without Threading having anticipated the shape they wanted. The
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
 > plus a host-executed intent vocabulary. Rollout step 1 was implemented on 2026-08-29 and rollout
-> step 2 is in progress; no part of `ui.workspace-navigation` v1 is withdrawn.
+> step 2 was implemented on 2026-08-30; rollout step 3 is next. No part of
+> `ui.workspace-navigation` v1 is withdrawn.
 
 ## Decision
 
@@ -179,6 +180,30 @@ default.
 Activity fidelity is versioned rather than changed: `session.activity` keeps publishing the
 existing four-value vocabulary, and `session.activity.detailed` publishes all six. An extension
 built against v1 sees exactly what it saw before.
+
+### Rollout step 2 implementation
+
+The host-only fact foundation now ships as three bounded pieces:
+
+- `HostFactCatalog` is the canonical, versioned inventory of 41 host facts and 31 exact native
+  sidebar dependencies. `HostFactPublisher` projects live session, project and terminal state into
+  the bounded, generation-aware `ExtensionFactRegistry`; application launch starts the pipeline
+  only after the stores are ready.
+- `SessionRowView` and `SidebarTreeBuilder` classify every value they draw or order through eager
+  identity markers for published facts, user options and deliberately host-owned state. Local
+  shared-git-directory paths remain host-only, and manager relationship and manager role remain
+  separate facts.
+- `check_navigator_fact_parity.py`, run by the architecture boundary build phase, derives its
+  accepted vocabulary from compiler-visible Swift inventories. Model members, provider methods,
+  entry inputs and option/host sources all have exact owners. A new native read without an owner
+  fails; typed option, host and entry-input owners without an audited occurrence also fail. Its 82
+  adversarial fixtures cover aliases, lexical shadowing, dependency injection, closures, key paths
+  and local collection projections; generated SDK references, comments and strings cannot satisfy
+  the audit.
+
+The markers add no rendering work beyond inline identity calls. The supported sidebar stress
+profile passed with 10 projects and 5,000 sessions: 5,059 ordered rows, 33 instantiated views and
+149.428 ms navigator load. This slice intentionally changes no appearance or interaction.
 
 ### Extension facts, and why the key matters
 
@@ -546,7 +571,8 @@ does. An install must never reorder somebody's sidebar on its own.
    `session.changed` actions and return bounded content-only item patches. This ships the live
    spinner path and proves targeted virtual-row replacement without giving the extension
    structural or interaction authority.
-2. **The fact registry**, host facts only, plus the parity lint. Nothing consumes it yet.
+2. **The fact registry — implemented 2026-08-30.** Host facts only, plus the fail-closed parity
+   lint. Nothing outside the host consumes it yet.
 3. **Extension fact providers** and the domain-key join. `GitLabStateExtension` becomes buildable
    and is the test.
 4. **Options**, rendered in the navigator menu and persisted.
