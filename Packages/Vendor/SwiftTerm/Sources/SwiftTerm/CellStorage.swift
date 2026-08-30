@@ -205,6 +205,25 @@ struct PackedCell: Hashable, Sendable {
     }
 
     @inline(__always)
+    func replacingWidthState(_ widthState: WidthState) -> PackedCell {
+        PackedCell(rawValue: (rawValue & ~Self.widthStateMask) |
+                   (UInt64(widthState.rawValue) << Self.widthStateShift))
+    }
+
+    /// True when the cell is neither half of a wide pair. This is a single
+    /// mask test, so it stays cheap enough for the per-write seam check.
+    @inline(__always)
+    var isNarrowWidth: Bool {
+        rawValue & Self.widthStateMask == 0
+    }
+
+    @inline(__always)
+    func demotedToNarrowBlank() -> PackedCell {
+        let clearedMask = Self.contentTagMask | Self.contentMask | Self.widthStateMask
+        return PackedCell(rawValue: rawValue & ~clearedMask)
+    }
+
+    @inline(__always)
     func replacingSemanticContentCode(_ code: UInt8) -> PackedCell {
         precondition(code < 7, "Invalid semantic-content code")
         return PackedCell(rawValue: (rawValue & ~Self.semanticContentMask) |
@@ -503,16 +522,17 @@ final class CellArena {
               payloadCode: UInt16 = 0, semanticContentCode: UInt8 = 0,
               isProtected: Bool = false) -> PackedCell?
     {
-        let scalars = character.unicodeScalars.map(\.value)
-        if scalars.count == 1, let scalar = scalars.first {
-            return pack(styleID: styleID, scalar: scalar, widthState: widthState,
+        guard semanticContentCode < 7 else {
+            return nil
+        }
+        let scalarView = character.unicodeScalars
+        if scalarView.count == 1, let scalar = scalarView.first {
+            return pack(styleID: styleID, scalar: scalar.value, widthState: widthState,
                         payloadCode: payloadCode,
                         semanticContentCode: semanticContentCode,
                         isProtected: isProtected)
         }
-        guard semanticContentCode < 7 else {
-            return nil
-        }
+        let scalars = scalarView.map(\.value)
         guard let identifier = intern(grapheme: scalars) else {
             let scalar = scalars.first(where: PackedCell.isValidUnicodeScalar) ?? 0xfffd
             return pack(styleID: styleID, scalar: scalar, widthState: widthState,

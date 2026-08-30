@@ -11,6 +11,12 @@ import Testing
 @testable import SwiftTerm
 
 #if os(macOS)
+    @MainActor private func drainMainQueue() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+
 import AppKit
 #endif
 
@@ -80,6 +86,42 @@ final class AlternateScrollModeTests: TerminalDelegate {
     }
 
 #if os(macOS)
+    @MainActor @Test func mouseReportsPreserveAppKitScrollDirection() async {
+        let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 160))
+        let window = NSWindow(contentRect: view.frame, styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.contentView = view
+        let delegate = WheelCapturingDelegate()
+        view.terminalDelegate = delegate
+        view.feed(text: "\u{1b}[?1000h\u{1b}[?1006h")
+        #expect(view.terminal.mouseMode != .off)
+
+        guard let up = Self.makeWheelEvent(lines: 1),
+              let down = Self.makeWheelEvent(lines: -1) else {
+            Issue.record("could not synthesize scroll wheel events")
+            return
+        }
+
+        view.scrollWheel(with: up)
+        await Self.waitForTerminalViewCallbacks()
+        guard delegate.sent.count == 1 else {
+            Issue.record("positive delta produced \(delegate.sent.count) mouse reports")
+            return
+        }
+        #expect(String(decoding: delegate.sent[0], as: UTF8.self).hasPrefix("\u{1b}[<64;"),
+                "positive AppKit delta must report mouse button 4")
+
+        delegate.sent = []
+        view.scrollWheel(with: down)
+        await Self.waitForTerminalViewCallbacks()
+        guard delegate.sent.count == 1 else {
+            Issue.record("negative delta produced \(delegate.sent.count) mouse reports")
+            return
+        }
+        #expect(String(decoding: delegate.sent[0], as: UTF8.self).hasPrefix("\u{1b}[<65;"),
+                "negative AppKit delta must report mouse button 5")
+    }
+
     /// The point of tracking the mode is that an application can turn the
     /// translation off: with 1007 reset, the wheel must produce nothing on the
     /// alternate screen (there is no scrollback there to move either).
@@ -133,7 +175,125 @@ final class AlternateScrollModeTests: TerminalDelegate {
         #expect(delegate.sent.isEmpty, "a single sub-line delta must not move the cursor on its own")
     }
 
-    private static func makeWheelEvent(lines: Int32) -> NSEvent? {
+    @MainActor @Test func classicMouseWheelEventSendsOneReport() async {
+        let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 160))
+        let delegate = WheelCapturingDelegate()
+        view.terminalDelegate = delegate
+        view.terminal.feed(text: "\u{1b}[?1000h")
+        guard let wheel = Self.makeWheelEvent(lines: -40) else {
+            Issue.record("could not synthesize a scroll wheel event")
+            return
+        }
+
+        view.scrollWheel(with: wheel)
+        await drainMainQueue()
+
+        #expect(delegate.sent.count == 1)
+    }
+
+    @MainActor @Test func preciseMouseWheelEventIsLimitedToTheInitialBurst() async {
+        let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 160))
+        let delegate = WheelCapturingDelegate()
+        view.terminalDelegate = delegate
+        view.terminal.feed(text: "\u{1b}[?1000h")
+        guard let cellHeight = view.cellDimension?.height,
+              let wheel = Self.makePreciseWheelEvent(
+                pixels: Int32((cellHeight * 40).rounded())) else {
+            Issue.record("could not synthesize a precise scroll wheel event")
+            return
+        }
+
+        view.scrollWheel(with: wheel)
+        await drainMainQueue()
+
+        #expect(delegate.sent.count == WheelReportBudget.burst)
+    }
+
+    /// Cursor keys are not notches: an accelerated classic event keeps its line count.
+    @MainActor @Test func classicWheelEventOnTheAlternateScreenKeepsItsLineCount() {
+        let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 160))
+        let delegate = WheelCapturingDelegate()
+        view.terminalDelegate = delegate
+        view.terminal.feed(text: "\u{1b}[?1049h")
+        guard let wheel = Self.makeWheelEvent(lines: -4) else {
+            Issue.record("could not synthesize a scroll wheel event")
+            return
+        }
+
+        view.scrollWheel(with: wheel)
+
+        #expect(delegate.sent == Array(repeating: Array(EscapeSequences.moveDownNormal), count: 4))
+    }
+
+    /// The same flick that is bounded as mouse reports is bounded as cursor keys.
+    @MainActor @Test func preciseWheelEventOnTheAlternateScreenIsLimitedToTheInitialBurst() {
+        let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 160))
+        let delegate = WheelCapturingDelegate()
+        view.terminalDelegate = delegate
+        view.terminal.feed(text: "\u{1b}[?1049h")
+        guard let cellHeight = view.cellDimension?.height,
+              let wheel = Self.makePreciseWheelEvent(
+                pixels: -Int32((cellHeight * 40).rounded())) else {
+            Issue.record("could not synthesize a precise scroll wheel event")
+            return
+        }
+
+        view.scrollWheel(with: wheel)
+
+        #expect(delegate.sent.count == WheelReportBudget.burst)
+        #expect(delegate.sent.allSatisfy { $0 == Array(EscapeSequences.moveDownNormal) })
+    }
+
+    @MainActor @Test func optionWheelUsesLocalScrollbackDuringMouseTracking() {
+        let view = TerminalView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 160),
+            font: nil,
+            options: TerminalOptions(cols: 40, rows: 5, scrollback: 100))
+        let delegate = WheelCapturingDelegate()
+        view.terminalDelegate = delegate
+        for index in 1...20 {
+            view.terminal.feed(text: "line-\(index)\r\n")
+        }
+        view.terminal.feed(text: "\u{1b}[?1000h")
+        let before = view.terminal.displayBuffer.yDisp
+        guard let wheel = Self.makeWheelEvent(lines: 1, modifiers: .maskAlternate) else {
+            Issue.record("could not synthesize an option scroll wheel event")
+            return
+        }
+
+        view.scrollWheel(with: wheel)
+
+        #expect(delegate.sent.isEmpty)
+        #expect(view.terminal.displayBuffer.yDisp < before)
+    }
+
+    @MainActor @Test func localHandlingModifiersDoNotBecomeAlternateScrollInput() {
+        let view = TerminalView(frame: CGRect(x: 0, y: 0, width: 320, height: 160))
+        let delegate = WheelCapturingDelegate()
+        view.terminalDelegate = delegate
+        view.terminal.feed(text: "\u{1b}[?1049h\u{1b}[?1000h")
+
+        for (name, modifier) in [
+            ("Option", CGEventFlags.maskAlternate),
+            ("Shift", CGEventFlags.maskShift),
+        ] {
+            delegate.sent = []
+            guard let wheel = Self.makeWheelEvent(lines: 1, modifiers: modifier) else {
+                Issue.record("could not synthesize a \(name) scroll wheel event")
+                return
+            }
+
+            view.scrollWheel(with: wheel)
+
+            #expect(delegate.sent.isEmpty,
+                    "\(name)-wheel requested local handling and must not send cursor keys")
+        }
+    }
+
+    private static func makeWheelEvent(
+        lines: Int32,
+        modifiers: CGEventFlags = []
+    ) -> NSEvent? {
         guard let cg = CGEvent(scrollWheelEvent2Source: nil,
                                units: .line,
                                wheelCount: 1,
@@ -143,6 +303,7 @@ final class AlternateScrollModeTests: TerminalDelegate {
             return nil
         }
         cg.location = CGPoint(x: 10, y: 10)
+        cg.flags = modifiers
         return NSEvent(cgEvent: cg)
     }
 
@@ -158,6 +319,12 @@ final class AlternateScrollModeTests: TerminalDelegate {
         }
         cg.location = CGPoint(x: 10, y: 10)
         return NSEvent(cgEvent: cg)
+    }
+
+    @MainActor private static func waitForTerminalViewCallbacks() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
     }
 #endif
 }

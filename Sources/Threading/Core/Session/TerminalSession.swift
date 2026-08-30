@@ -370,8 +370,12 @@ final class TerminalSession: NSObject {
         // itself — so it must be sent only after the palette above is in place, and it moves
         // nothing unless the answer to the re-ask has actually changed. Gated on the
         // background actually changing so font tweaks and re-applies stay silent.
-        if terminalView.terminalStateSnapshot().backgroundColor != previousBackground {
-            terminalView.reportColorSchemeChange(dark: profile.theme.hasDarkBackground)
+        let backgroundChanged = terminalView.terminalStateSnapshot().backgroundColor != previousBackground
+        terminalView.updateColorScheme(
+            profile.theme.hasDarkBackground ? .dark : .light,
+            notify: backgroundChanged
+        )
+        if backgroundChanged {
             promptColorRereadThroughFocus()
         }
     }
@@ -388,8 +392,9 @@ final class TerminalSession: NSObject {
 
     /// Re-sends this terminal's focus state as a second prompt to re-read the palette.
     ///
-    /// `DECSET 2031` is the mechanism designed for this and is what `reportColorSchemeChange`
-    /// above sends. Codex does not implement it (filed as openai/codex#38575) and instead
+    /// `DECSET 2031` is the mechanism designed for this and is what SwiftTerm's
+    /// `updateColorScheme(_:notify:)` above honors. Codex does not implement it (filed as
+    /// openai/codex#38575) and instead
     /// re-reads `OSC 10/11` when it is told focus was gained, so a focus report is the only
     /// prompt it can hear. Measured against a bare PTY: 0.146.0 answers a synthetic focus
     /// report with a fresh `OSC 10 ; ?` / `OSC 11 ; ?` pair and repaints its composer, while

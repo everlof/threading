@@ -260,6 +260,86 @@ public final class BufferLine: CustomDebugStringConvertible {
         bump()
     }
 
+    /// Removes the wide-cell seams that a write of `width` cells starting at
+    /// `x` is about to break before the caller writes.
+    ///
+    /// The check is keyed on the cells being overwritten rather than on their
+    /// neighbours, which is what Ghostty's `printCell` does. Under the cell
+    /// invariant a `.spacerTail` at `x` implies a `.wide` head at `x - 1`, and
+    /// a `.wide` head at the last written cell implies a `.spacerTail` just
+    /// past it, so the destination cells carry the same information the
+    /// neighbours do. The common narrow-over-narrow write therefore reads one
+    /// cell — the one it is about to store into, already in cache — instead of
+    /// the two neighbour cells `repairWideSeam` reads.
+    @inline(__always)
+    func repairSeamsForWrite(at x: Int, width: Int) {
+#if SWIFTTERM_SEAM_COUNTER
+        SeamRepairCounter.shared.recordCall()
+#endif
+        let cellCount = storage.count
+        guard x >= 0, x < cellCount else { return }
+        let first = storage.rawCell(at: x)
+        let lastIndex = min(x &+ width &- 1, cellCount &- 1)
+        let last = lastIndex == x ? first : storage.rawCell(at: lastIndex)
+        if first.isNarrowWidth && last.isNarrowWidth { return }
+        repairSeamsForWriteSlow(at: x, first: first,
+                                lastIndex: lastIndex, last: last,
+                                cellCount: cellCount)
+    }
+
+    /// The rare half of `repairSeamsForWrite`. Kept out of line so the common
+    /// path stays a load and a mask test.
+    private func repairSeamsForWriteSlow(at x: Int, first: PackedCell,
+                                         lastIndex: Int, last: PackedCell,
+                                         cellCount: Int)
+    {
+        var repaired = false
+        if first.widthState == .spacerTail, x > 0 {
+            let headIndex = x &- 1
+            let head = storage.rawCell(at: headIndex)
+            if head.widthState == .wide {
+                storage.setRawCell(head.demotedToNarrowBlank(), at: headIndex)
+                repaired = true
+            }
+        }
+        if last.widthState == .wide, lastIndex &+ 1 < cellCount {
+            let tailIndex = lastIndex &+ 1
+            let tail = storage.rawCell(at: tailIndex)
+            if tail.widthState == .spacerTail {
+                storage.setRawCell(tail.demotedToNarrowBlank(), at: tailIndex)
+                repaired = true
+            }
+        }
+        if repaired {
+#if SWIFTTERM_SEAM_COUNTER
+            SeamRepairCounter.shared.recordRepair()
+#endif
+            bump()
+        }
+    }
+
+    func repairWideSeam(at x: Int) {
+#if SWIFTTERM_SEAM_COUNTER
+        SeamRepairCounter.shared.recordCall()
+#endif
+        guard x > 0, x - 1 < storage.count else { return }
+        let headIndex = x - 1
+        let head = storage.rawCell(at: headIndex)
+        guard head.widthState == .wide else { return }
+#if SWIFTTERM_SEAM_COUNTER
+        SeamRepairCounter.shared.recordRepair()
+#endif
+
+        storage.setRawCell(head.demotedToNarrowBlank(), at: headIndex)
+        if x < storage.count {
+            let tail = storage.rawCell(at: x)
+            if tail.widthState == .spacerTail {
+                storage.setRawCell(tail.demotedToNarrowBlank(), at: x)
+            }
+        }
+        bump()
+    }
+
     func setPackedAsciiRun(_ bytes: ArraySlice<UInt8>, sourceStart: Int,
                            count: Int, at destinationStart: Int,
                            styleID: UInt16, payloadCode: UInt16 = 0,
@@ -268,6 +348,19 @@ public final class BufferLine: CustomDebugStringConvertible {
         guard count > 0 else { return }
         precondition(sourceStart >= bytes.startIndex && sourceStart <= bytes.endIndex)
         precondition(count <= bytes.endIndex - sourceStart)
+        let destinationEnd = destinationStart + count
+        if destinationStart > 0, destinationStart < storage.count,
+           storage.rawCell(at: destinationStart).widthState == .spacerTail {
+            let headIndex = destinationStart - 1
+            let head = storage.rawCell(at: headIndex)
+            storage.setRawCell(head.demotedToNarrowBlank(), at: headIndex)
+        }
+        if destinationEnd < storage.count {
+            let tail = storage.rawCell(at: destinationEnd)
+            if tail.widthState == .spacerTail {
+                storage.setRawCell(tail.demotedToNarrowBlank(), at: destinationEnd)
+            }
+        }
         let template = PackedCell.makeUnchecked(contentTag: .codepoint, content: 0,
                                                 styleID: styleID, widthState: .narrow,
                                                 isProtected: false, payloadCode: payloadCode,
@@ -281,7 +374,7 @@ public final class BufferLine: CustomDebugStringConvertible {
             storage.setRawCell(PackedCell(rawValue: rawValue),
                                at: destinationStart + offset)
         }
-        noteWritten(upTo: destinationStart + count)
+        noteWritten(upTo: destinationEnd)
         bump()
     }
 
@@ -293,6 +386,19 @@ public final class BufferLine: CustomDebugStringConvertible {
         guard count > 0 else { return }
         precondition(sourceStart >= 0 && sourceStart <= bytes.count)
         precondition(count <= bytes.count - sourceStart)
+        let destinationEnd = destinationStart + count
+        if destinationStart > 0, destinationStart < storage.count,
+           storage.rawCell(at: destinationStart).widthState == .spacerTail {
+            let headIndex = destinationStart - 1
+            let head = storage.rawCell(at: headIndex)
+            storage.setRawCell(head.demotedToNarrowBlank(), at: headIndex)
+        }
+        if destinationEnd < storage.count {
+            let tail = storage.rawCell(at: destinationEnd)
+            if tail.widthState == .spacerTail {
+                storage.setRawCell(tail.demotedToNarrowBlank(), at: destinationEnd)
+            }
+        }
         let template = PackedCell.makeUnchecked(contentTag: .codepoint, content: 0,
                                                 styleID: styleID, widthState: .narrow,
                                                 isProtected: false, payloadCode: payloadCode,
@@ -304,7 +410,63 @@ public final class BufferLine: CustomDebugStringConvertible {
             storage.setRawCell(PackedCell(rawValue: rawValue),
                                at: destinationStart + offset)
         }
-        noteWritten(upTo: destinationStart + count)
+        noteWritten(upTo: destinationEnd)
+        bump()
+    }
+
+    /// Writes validated Unicode scalars that all have the same cell width.
+    func setPackedScalarRun(_ scalars: UnsafeBufferPointer<UInt32>,
+                            sourceStart: Int, count: Int,
+                            at destinationStart: Int,
+                            widthState: PackedCell.WidthState,
+                            styleID: UInt16, payloadCode: UInt16 = 0,
+                            semanticContentCode: UInt8)
+    {
+        guard count > 0 else { return }
+        precondition(widthState == .narrow || widthState == .wide)
+        precondition(sourceStart >= 0 && sourceStart <= scalars.count)
+        precondition(count <= scalars.count - sourceStart)
+        let cellWidth = widthState == .wide ? 2 : 1
+        let destinationEnd = destinationStart + count * cellWidth
+        if destinationStart > 0, destinationStart < storage.count,
+           storage.rawCell(at: destinationStart).widthState == .spacerTail {
+            let headIndex = destinationStart - 1
+            let head = storage.rawCell(at: headIndex)
+            storage.setRawCell(head.demotedToNarrowBlank(), at: headIndex)
+        }
+        if destinationEnd < storage.count {
+            let tail = storage.rawCell(at: destinationEnd)
+            if tail.widthState == .spacerTail {
+                storage.setRawCell(tail.demotedToNarrowBlank(), at: destinationEnd)
+            }
+        }
+        let headTemplate = PackedCell.makeUnchecked(
+            contentTag: .codepoint, content: 0, styleID: styleID,
+            widthState: widthState, isProtected: false,
+            payloadCode: payloadCode,
+            semanticContentCode: semanticContentCode).rawValue
+        if widthState == .wide {
+            let tail = PackedCell.makeUnchecked(
+                contentTag: .codepoint, content: 0, styleID: styleID,
+                widthState: .spacerTail, isProtected: false,
+                payloadCode: payloadCode,
+                semanticContentCode: semanticContentCode)
+            for offset in 0..<count {
+                let destination = destinationStart + offset * 2
+                let rawValue = headTemplate |
+                    (UInt64(scalars[sourceStart + offset]) << PackedCell.contentShift)
+                storage.setRawCell(PackedCell(rawValue: rawValue), at: destination)
+                storage.setRawCell(tail, at: destination + 1)
+            }
+        } else {
+            for offset in 0..<count {
+                let rawValue = headTemplate |
+                    (UInt64(scalars[sourceStart + offset]) << PackedCell.contentShift)
+                storage.setRawCell(PackedCell(rawValue: rawValue),
+                                   at: destinationStart + offset)
+            }
+        }
+        noteWritten(upTo: destinationEnd)
         bump()
     }
 
@@ -466,7 +628,10 @@ public final class BufferLine: CustomDebugStringConvertible {
         defer { invalidateUsedLength() }
         let len = rightMargin + 1
         let pos = pos % len
+        repairWideSeam(at: pos)
+        repairWideSeam(at: rightMargin + 1)
         if n < len - pos {
+            repairWideSeam(at: len - n)
             for i in (0..<len-pos-n).reversed() {
                 storage.setRawCell(storage.rawCell(at: pos + i), at: pos + n + i)
             }
@@ -494,6 +659,9 @@ public final class BufferLine: CustomDebugStringConvertible {
         defer { invalidateUsedLength() }
         let len = rightMargin + 1
         let p = pos % len
+        repairWideSeam(at: pos)
+        repairWideSeam(at: pos + n)
+        repairWideSeam(at: rightMargin + 1)
         if n < len - p {
             for i in 0..<len-pos-n {
                 storage.setRawCell(storage.rawCell(at: pos + n + i), at: pos + i)

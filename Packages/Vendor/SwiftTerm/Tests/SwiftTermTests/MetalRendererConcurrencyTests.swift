@@ -42,7 +42,10 @@ struct MetalRendererConcurrencyTests {
         #expect(state.setCursorBlinkWanted(true))
         controller.apply(shouldBlink: true)
         #expect(controller.isRunning)
-        RunLoop.current.run(until: Date().addingTimeInterval(0.04))
+        let deadline = Date().addingTimeInterval(1)
+        while redraws.withLock({ $0 }) == 0, Date() < deadline {
+            RunLoop.current.run(until: min(deadline, Date().addingTimeInterval(0.02)))
+        }
         #expect(redraws.withLock { $0 } > 0)
 
         #expect(state.setCursorBlinkWanted(false))

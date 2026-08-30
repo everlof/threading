@@ -182,8 +182,12 @@ final class TerminalRenderOwner: Sendable {
         let terminal = session.terminal
         return terminal.terminalLock.withLock {
             session.search.invalidate()
+            let selectedContent = session.selection.captureSelectedContent()
             terminal.withManagedFeed {
                 terminal.feed(buffer: bytes)
+            }
+            if let selectedContent {
+                session.selection.clearIfSelectedContentChanged(from: selectedContent)
             }
             return terminal.synchronizedOutputActive
         }
@@ -196,8 +200,12 @@ final class TerminalRenderOwner: Sendable {
         let terminal = session.terminal
         return terminal.terminalLock.withLock {
             session.search.invalidate()
+            let selectedContent = session.selection.captureSelectedContent()
             terminal.withManagedFeed {
                 terminal.feedBorrowed(borrowedBytes)
+            }
+            if let selectedContent {
+                session.selection.clearIfSelectedContentChanged(from: selectedContent)
             }
             return terminal.synchronizedOutputActive
         }
@@ -209,8 +217,12 @@ final class TerminalRenderOwner: Sendable {
         let terminal = session.terminal
         return terminal.terminalLock.withLock {
             session.search.invalidate()
+            let selectedContent = session.selection.captureSelectedContent()
             terminal.withManagedFeed {
                 terminal.feed(text: text)
+            }
+            if let selectedContent {
+                session.selection.clearIfSelectedContentChanged(from: selectedContent)
             }
             return terminal.synchronizedOutputActive
         }
@@ -266,13 +278,6 @@ final class TerminalRenderOwner: Sendable {
         }
     }
 
-    func reportColorSchemeChange(dark: Bool) {
-        guard let terminal = currentSession()?.terminal else { return }
-        terminal.terminalLock.withLock {
-            terminal.reportColorSchemeChange(dark: dark)
-        }
-    }
-
     func setTerminalFocus(_ focused: Bool) {
         guard let terminal = currentSession()?.terminal else { return }
         terminal.terminalLock.withLock {
@@ -293,6 +298,20 @@ final class TerminalRenderOwner: Sendable {
                 modifiers: modifiers,
                 eventType: eventType,
                 backspaceSendsControlH: backspaceSendsControlH)
+        }
+    }
+
+    func updateColorScheme(_ colorScheme: TerminalColorScheme, notify: Bool) {
+        guard let terminal = currentSession()?.terminal else { return }
+        terminal.terminalLock.withLock {
+            terminal.updateColorScheme(colorScheme, notify: notify)
+        }
+    }
+
+    func notifyColorScheme() {
+        guard let terminal = currentSession()?.terminal else { return }
+        terminal.terminalLock.withLock {
+            terminal.notifyColorScheme()
         }
     }
 

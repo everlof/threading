@@ -46,10 +46,17 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 - **SwiftTerm** (local fork): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
   - Location: `./Packages/Vendor/SwiftTerm/` (vendored source in the main repository, not a git submodule)
   - Upstream: https://github.com/migueldeicaza/SwiftTerm
-  - Fork: https://github.com/everlof/SwiftTerm, reconciled at `7826d5c` against upstream
-    `v1.20.0` (`5d14406`). The vendored source tree matches that revision; Git metadata, build
+  - Fork: https://github.com/everlof/SwiftTerm, reconciled at `90e3cb1` against upstream
+    `main` at `a28350f`. The vendored source tree matches that revision; Git metadata, build
     output and ignored generated cache artifacts are not copied into the application repository.
   - **This is our fork** - feel free to modify SwiftTerm source code directly to implement features or fix bugs. The iOS folder is excluded on macOS builds.
+  - **Use upstream's implementation when it has one.** This reconciliation removes our former
+    copies of colour-scheme reporting, hidden-normal-buffer reflow, output-stable selection and
+    local-process lifecycle/draining. Those are now upstream code, not downstream seams. The
+    remaining fork delta is the embedding surface and behavior described below, plus the bounded
+    wheel-routing and recent-buffer changes still proposed upstream in
+    [#657](https://github.com/migueldeicaza/SwiftTerm/pull/657) and
+    [#654](https://github.com/migueldeicaza/SwiftTerm/pull/654).
   - **The scroller seam is ours.** `MacTerminalView.installScroller` lets the embedding app
     replace only the visible `NSScroller`; SwiftTerm immediately restates its target, action,
     geometry and current scroll position and continues updating that instance. Threading uses
@@ -74,14 +81,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     types they send the negotiated press and release rather than a hard-coded legacy press. Keep
     this narrow seam instead of exporting the encoder's event model or duplicating its function-
     key tables in app chrome.
-  - **The PTY seam is ours.** Local processes launch through `forkpty`; a `posix_spawn`-based
-    wrapper cannot establish the child as the PTY's controlling terminal. The launch publishes
-    the exact child PID synchronously, before its exit source is activated, and reaps that PID
-    with `waitpid` so `TerminalSession` never guesses from the app's process table.
-    `running` remains true after SIGTERM until that exact PID is reaped, so a rapid replacement
-    cannot overwrite the exit monitor and make the old callback wait on a new child.
-    `TerminalSession` retains a launch requested during that short interval and performs it from
-    the old child's termination callback.
+  - **The local-process lifecycle is upstream.** `LocalProcess` and its lifecycle tests match
+    upstream byte for byte. Upstream launches through `forkpty`, publishes and reaps the exact
+    child PID, drains readable output before reporting termination, and prevents an old process's
+    callbacks from leaking into its replacement. Do not restore our former lifecycle copy when
+    resyncing. Threading still owns the higher-level deferred relaunch decision, and the remote
+    window-size delivery seam below remains ours.
   - **The managed-grid seam is ours**, on both platforms. `TerminalView.shouldApplyFrameSizeChange`
     is consulted at the top of `processSizeChange`, *before* the emulator is touched, so a view
     whose grid does not follow its pixel size can refuse a frame-driven resize outright. The
@@ -95,6 +100,10 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     enlarge cells without reflowing the Mac-owned grid, while an interactive phone still updates
     its PTY lease. Keep both hooks and the `resetFont` routing when re-syncing: one gates the
     renderer, the other gates the PTY.
+  - **Hidden normal-buffer reflow is upstream.** A resize while the alternate buffer is active
+    resizes only that live buffer; SwiftTerm reconciles the normal buffer to the current grid when
+    it is restored. That preserves its scrollback and saved cursor without paying to reflow
+    content that is not being shown. The fork uses upstream's implementation and tests unchanged.
   - **The window-size delivery seam is ours.** `LocalProcessTerminalView.sendWindowSize(_:)` is
     an `open` method the resize path routes through: `sizeChanged` reads `getWindowSize()`,
     updates the adapter's cached size, and then asks this seam to deliver it, taking its answer
@@ -112,32 +121,27 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     the same thing, and an out-of-process host records the wanted grid and converges on it, so a
     write it could not make now is still a resize that happens and only a link that is gone
     answers false. See [`pty-host.md`](pty-host.md).
-  - **iOS selection survives output, and the edit menu has a host seam.** The iOS view's
-    `scrolled`/`linefeed` pair follows the Mac's: a selection is dropped only when scrollback
-    recycles its rows or the alternate buffer scrolls in place, never on a line feed that merely
-    appends. A long press selects the word under the finger directly and the menu comes up on
-    lift, through `UIEditMenuInteraction` (iOS 16+, the shared menu controller before that),
-    without taking first responder. `extraSelectionMenuActions` lets the host add actions after
-    Copy and `allowsPasteFromEditMenu` lets a view-only host drop Paste; `selectionHandleColor`
-    is set by the host from the terminal theme's cursor colour. Keep both when re-syncing — see
-    [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md).
+  - **Selection survival is upstream; the iOS edit-menu surface is ours.** Upstream captures the
+    selected content around each terminal feed and clears the range only when those cells changed,
+    so ordinary output no longer erases a stable selection on either platform. The fork keeps the
+    phone's host integration: a long press selects the word under the finger and presents the
+    menu on lift through `UIEditMenuInteraction` (iOS 16+, the shared menu controller before
+    that), without taking first responder. `extraSelectionMenuActions` lets the host add actions
+    after Copy, `allowsPasteFromEditMenu` lets a view-only host drop Paste, and
+    `selectionHandleColor` takes the terminal theme's cursor colour. Keep those downstream hooks
+    when re-syncing; see [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md).
   - **iOS terminal font sizing is bounded at the host.** `RemoteTerminalView` converts a pinch
     into whole-point steps from 9 through 24 and persists only the final value on the device.
     That bounds a continuous gesture to at most fifteen renderer/grid updates instead of one per
     touch sample. Command-key and accessibility actions share the same path. The gesture,
     limits, persistence and grid effects are deliberately host-owned because they govern the
     terminal viewport; extensions do not customize them.
-  - **Main-queue output is bounded.** PTY reads pause once pending terminal data reaches the
-    4 MiB high-water mark and resume below 1 MiB. The kernel PTY buffer then supplies
-    normal producer backpressure instead of an unbounded queue growing behind a busy AppKit
-    thread. `DispatchIO` may split one 128 KiB read into roughly one callback per KiB; adjacent
-    fragments already waiting at the main-queue drain are delivered as one bounded parser call,
-    while an isolated interactive fragment is delivered immediately. One completed read starts
-    one successor; partial callbacks do not fork additional read chains. Reads and queued chunks
-    carry a launch generation; starting the next process clears the previous generation so late
-    DispatchIO callbacks cannot leak old bytes into the replacement terminal. Deinitialization
-    closes the PTY, cancels the monitor and gives the child to an independent waiter so it cannot
-    remain a zombie.
+  - **The bounded output pipeline is upstream.** `TerminalIOPipeline` uses one gather thread, one
+    parser thread and a fixed four-slot ring on Darwin, with kernel PTY backpressure when the ring
+    is full. Short interactive reads are delivered promptly; saturated output is gathered into a
+    bounded batch before parsing. Shutdown and the termination path have an explicit bounded
+    drain. The fork uses this implementation and its tests unchanged; do not reintroduce the old
+    main-queue backlog or launch-generation implementation.
   - **Raw-output observers use stable callback references.** Direct-delivery parsing invokes the
     host's byte observer on the SwiftTerm reader thread, after parsing and before the borrowed PTY
     buffer can be reused. The observer is held by `LockedBytesCallback`, which snapshots a stable
@@ -178,13 +182,18 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     calls do not reorder — and writing a burst as one write instead of thirty made the splitting
     *worse*, so the rate is the whole fix. Against a reader on a 40 ms frame: 100 reports a
     second survived an 800 ms stall with every read still landing on a report boundary; 180 a
-    second split one at 800 ms; 300 a second needed only 400 ms. `forwardWheelEvent` spends a
-    token bucket of 100 a second with a burst of 6, and one classic notch now reports once
+    second split one at 800 ms; 300 a second needed only 400 ms. The Mac wheel route and iOS
+    `forwardWheelDrag` spend a shared token-bucket policy of 100 a second with a burst of 6, and
+    one classic notch now reports once
     instead of being multiplied by the scrollback velocity curve — which was worth up to a
     screenful of reports for a single event, and cleared 1000 a second on any momentum flick.
     A dropped report is right where a queued one is not: a scroll the client never saw is a
     scroll that did not happen, and the next gesture already says where the user wants to be.
-    `TerminalMouseReportingTests` pins the counts.
+    `WheelReportBudgetTests` pins the counts and every program-owned route. The Mac
+    `scrollWheel(with:)` override remains open so `EmojiFixedTerminalView` can enforce the host's
+    local-input lease around that routing without replacing it. `WheelReportBudget` and iOS
+    `forwardWheelDrag` remain public embedding seams so the host can exercise the exact route and
+    budget it ships rather than duplicating either policy in its integration tests.
   - **The phone scrolls by the same two rules, and neither one held.** iOS draws the whole buffer
     inside a `UIScrollView` rather than a viewport over `yDisp`, and `updateScroller` pinned
     `contentOffset` to the bottom on every emulator scroll — with no `userScrolling` guard, which
@@ -253,12 +262,9 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     the same trap as a test writing to `UserDefaults.standard`. `TerminalCopyOnSelectTests` pins
     all of it, including that a one-event drag selects nothing: the selection anchors at the
     first *drag* event, not at the press.
-    A settled macOS selection also survives ordinary PTY output and a line feed that does not
-    move its buffer rows. Codex repaints progress after the pointer is released, and clearing on
-    every feed chunk made a valid range disappear on its next frame. Coordinates are discarded
-    only when their meaning changes: a buffer switch, resize, alternate-buffer scroll, normal
-    scrollback trim, keyboard input, or a new pointer choice. Normal scrollback growth appends
-    beneath the selected rows and leaves them stable.
+    Selection survival across ordinary output is now upstream, as described above; the
+    downstream seam here is exposing the settled pointer gesture and selected text so the host
+    can implement copy-on-select without observing every drag update.
   - **The Option-word keys are ours.** `TerminalSession` sets `optionAsMetaKey = false` so
     Option still composes `~ | \ @` on non-US layouts. Upstream's meta branch is also the only
     place that turned Option-arrow into word motion, so that one switch silently dropped the
@@ -271,24 +277,14 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     to read back, since it only writes the delta otherwise). Control-arrow keeps its own branch
     in `keyDown` and its xterm `CSI 1;5D`/`CSI 1;5C` form. `TerminalOptionWordKeyTests` pins each
     sequence, the unmodified keys beside them, and the composition the switch exists to protect.
-  - **Answering "what colour are you?" is ours.** `OSC 10/11/12` take a list of colours, and
-    upstream's `oscSetColors` read its `startAt` offset as an *index into the parameters*: OSC
-    11's single parameter sits at index 0, the loop began at 1, and the whole sequence was
-    dropped — no reply to `OSC 11 ; ? ST`, and no way for a program to set the background
-    either. Only OSC 10 worked, because there the two numbers coincide. This matters because
-    **Claude Code's default `"theme": "auto"` is not "follow macOS"** — it asks the terminal
-    for its background and falls back to its *dark* palette when nothing answers. So every
-    agent in every session painted dark-theme ink: on a light terminal theme (Bauhaus is paper)
-    a diff's unchanged lines came through as near-white text on cream. The offset is now
-    applied to the colour *slot*, each further parameter names the next colour along, and a
-    query is answered with the code for the colour it asked about — 10, 11 or 12, where the
-    cursor's reply used to claim to be 11. `TerminalColorQueryTests` pins the bytes on both
-    sides. An agent asks once, at startup — so the fork also tracks `DECSET 2031`
-    (`colorSchemeReportingEnabled`, answered through DECRQM too), and
-    `reportColorSchemeChange` sends the subscribed program `CSI ? 997 ; 1|2 n` when the
-    embedder changes the palette under it. The report prompts the program to *re-ask* `OSC 11`,
-    which is how a theme switched under a running agent finally reaches it — see
-    [`themes.md`](themes.md) for the whole three-leg contract.
+  - **Colour queries and scheme reporting are upstream.** `OSC 10/11/12` apply their offset to
+    the colour slot and answer a query with the code that was requested, so Claude Code's
+    `"theme": "auto"` can discover a light terminal instead of falling back to dark-palette ink.
+    Upstream also owns `DECSET`/`DECRQM 2031`, `TerminalColorScheme`, `updateColorScheme` and
+    `notifyColorScheme`; a subscribed application receives `CSI ? 997 ; 1|2 n` and re-queries
+    the palette after a live theme change. Threading supplies the palette and timing, but the
+    terminal protocol implementation is no longer a fork delta. See [`themes.md`](themes.md) for
+    the whole three-leg contract.
   - **A separate colour for bold default-foreground text is ours.**
     `TerminalView.nativeBoldForegroundColor` is what `mapColor` returns for `.defaultColor` when
     the run is a foreground and carries SGR 1; nil, its default, keeps upstream's behaviour of
