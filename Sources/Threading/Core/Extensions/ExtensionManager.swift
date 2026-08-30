@@ -153,6 +153,28 @@ struct ExtensionWorkspaceNavigatorInventoryItem: Equatable {
     let extensionName: String
     let processGeneration: String
     let navigator: ExtensionWorkspaceNavigator
+    let optionValues: [String: ExtensionJSONValue]
+    let optionRevision: UInt64
+    let optionPersistenceOutcome: WorkspaceNavigatorOptionPersistenceOutcome
+
+    init(
+        extensionIdentifier: String,
+        extensionName: String,
+        processGeneration: String,
+        navigator: ExtensionWorkspaceNavigator,
+        optionValues: [String: ExtensionJSONValue] = [:],
+        optionRevision: UInt64 = 0,
+        optionPersistenceOutcome: WorkspaceNavigatorOptionPersistenceOutcome =
+            .skippedNoDeclarations
+    ) {
+        self.extensionIdentifier = extensionIdentifier
+        self.extensionName = extensionName
+        self.processGeneration = processGeneration
+        self.navigator = navigator
+        self.optionValues = optionValues
+        self.optionRevision = optionRevision
+        self.optionPersistenceOutcome = optionPersistenceOutcome
+    }
 }
 
 /// The lifecycle-safe boundary consumed by the leading workspace navigator host.
@@ -164,6 +186,19 @@ protocol ExtensionWorkspaceNavigatorRouting: AnyObject {
         extensionIdentifier: String,
         navigatorID: String
     ) -> ExtensionWorkspaceNavigatorInventoryItem?
+
+    /// Persists one declared option through the owning generation's serialized host lane.
+    @discardableResult
+    func setWorkspaceNavigatorOption(
+        extensionIdentifier: String,
+        navigatorID: String,
+        optionID: String,
+        value: ExtensionJSONValue,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (
+            Result<[String: ExtensionJSONValue], Error>
+        ) -> Void
+    ) -> Bool
 
     func extensionImageResourceURL(
         extensionIdentifier: String,
@@ -181,6 +216,22 @@ protocol ExtensionWorkspaceNavigatorRouting: AnyObject {
             Result<ExtensionWorkspaceNavigatorActionResponse, Error>
         ) -> Void
     ) -> Bool
+}
+
+extension ExtensionWorkspaceNavigatorRouting {
+    @discardableResult
+    func setWorkspaceNavigatorOption(
+        extensionIdentifier: String,
+        navigatorID: String,
+        optionID: String,
+        value: ExtensionJSONValue,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (
+            Result<[String: ExtensionJSONValue], Error>
+        ) -> Void
+    ) -> Bool {
+        false
+    }
 }
 
 /// The narrow panel boundary consumed by the display pane.
@@ -308,6 +359,7 @@ final class ExtensionManager:
 
     private let store: ExtensionPackageStore
     private let settingsStore: ExtensionSettingsValueStore
+    private let workspaceNavigatorOptionStore: any WorkspaceNavigatorOptionValueStoring
     private let launchPolicy: ExtensionLaunchPolicy
     private let companionLaunchPolicy: ExtensionCompanionLaunchPolicy
     private let companionPermissionAuthorizer:
@@ -318,6 +370,11 @@ final class ExtensionManager:
     private var sessions: [String: ExtensionProcessSession] = [:]
     private var sessionGenerations: [String: String] = [:]
     private var registrations: [String: ExtensionRegistration] = [:]
+    /// Hydrated on the background launch path and copied here before registration is exposed.
+    /// Navigator surfaces read only this generation-scoped memory snapshot.
+    private var workspaceNavigatorOptionSnapshots: [
+        String: WorkspaceNavigatorOptionSnapshot
+    ] = [:]
     private struct CompanionKey: Hashable {
         let extensionIdentifier: String
         let companionID: String
@@ -392,7 +449,8 @@ final class ExtensionManager:
         companionLaunchPolicy: ExtensionCompanionLaunchPolicy =
             LocalExtensionCompanionLaunchPolicy(),
         companionPermissionAuthorizer:
-            ExtensionCompanionSystemPermissionAuthorizing? = nil
+            ExtensionCompanionSystemPermissionAuthorizing? = nil,
+        workspaceNavigatorOptionStore: (any WorkspaceNavigatorOptionValueStoring)? = nil
     ) {
         self.store = store
         self.companionLaunchPolicy = companionLaunchPolicy
@@ -404,6 +462,10 @@ final class ExtensionManager:
         self.settingsStore = ExtensionSettingsValueStore(
             rootURL: store.storageStore.settingsURL
         )
+        self.workspaceNavigatorOptionStore = workspaceNavigatorOptionStore
+            ?? WorkspaceNavigatorOptionValueStore(
+                rootURL: store.storageStore.settingsURL
+            )
         refreshInventory(postChange: false)
         syncSettingsRegistry(postChange: false)
     }
@@ -726,6 +788,8 @@ final class ExtensionManager:
             guard enabledIdentifiers.contains(identifier),
                   sessions[identifier] != nil,
                   let processGeneration = sessionGenerations[identifier],
+                  let optionSnapshot = workspaceNavigatorOptionSnapshots[identifier],
+                  optionSnapshot.processGeneration == processGeneration,
                   let bundle = packages[identifier]?.bundle else {
                 return [ExtensionWorkspaceNavigatorInventoryItem]()
             }
@@ -735,7 +799,10 @@ final class ExtensionManager:
                     extensionIdentifier: identifier,
                     extensionName: localization.string(bundle.manifest.name),
                     processGeneration: processGeneration,
-                    navigator: $0
+                    navigator: $0,
+                    optionValues: optionSnapshot.valuesByNavigatorID[$0.id] ?? [:],
+                    optionRevision: optionSnapshot.revision,
+                    optionPersistenceOutcome: optionSnapshot.persistenceOutcome
                 )
             }
         }
@@ -802,6 +869,8 @@ final class ExtensionManager:
         guard enabledIdentifiers.contains(extensionIdentifier),
               sessions[extensionIdentifier] != nil,
               let processGeneration = sessionGenerations[extensionIdentifier],
+              let optionSnapshot = workspaceNavigatorOptionSnapshots[extensionIdentifier],
+              optionSnapshot.processGeneration == processGeneration,
               let bundle = packages[extensionIdentifier]?.bundle,
               let navigator = registrations[extensionIdentifier]?.workspaceNavigators.first(
                   where: { $0.id == navigatorID }
@@ -814,8 +883,83 @@ final class ExtensionManager:
                 catalogs: bundle.localizations
             ).string(bundle.manifest.name),
             processGeneration: processGeneration,
-            navigator: navigator
+            navigator: navigator,
+            optionValues: optionSnapshot.valuesByNavigatorID[navigator.id] ?? [:],
+            optionRevision: optionSnapshot.revision,
+            optionPersistenceOutcome: optionSnapshot.persistenceOutcome
         )
+    }
+
+    @discardableResult
+    func setWorkspaceNavigatorOption(
+        extensionIdentifier: String,
+        navigatorID: String,
+        optionID: String,
+        value: ExtensionJSONValue,
+        processGeneration: String,
+        completion: @escaping @MainActor @Sendable (
+            Result<[String: ExtensionJSONValue], Error>
+        ) -> Void
+    ) -> Bool {
+        guard enabledIdentifiers.contains(extensionIdentifier),
+              sessions[extensionIdentifier] != nil,
+              sessionGenerations[extensionIdentifier] == processGeneration,
+              workspaceNavigatorOptionSnapshots[extensionIdentifier]?.processGeneration
+                == processGeneration,
+              registrations[extensionIdentifier]?.workspaceNavigators.contains(where: {
+                  $0.id == navigatorID && $0.options.contains(where: { $0.id == optionID })
+              }) == true else {
+            return false
+        }
+
+        workspaceNavigatorOptionStore.set(
+            value,
+            extensionIdentifier: extensionIdentifier,
+            processGeneration: processGeneration,
+            navigatorID: navigatorID,
+            optionID: optionID
+        ) { [weak self] result in
+            DispatchQueue.main.async { @MainActor [weak self] in
+                guard let self,
+                      self.enabledIdentifiers.contains(extensionIdentifier),
+                      self.sessions[extensionIdentifier] != nil,
+                      self.sessionGenerations[extensionIdentifier] == processGeneration else {
+                    completion(.failure(
+                        WorkspaceNavigatorOptionValueStoreError.inactiveGeneration
+                    ))
+                    return
+                }
+                switch result {
+                case .failure(let error):
+                    completion(.failure(error))
+                case .success(let snapshot):
+                    guard snapshot.processGeneration == processGeneration else {
+                        completion(.failure(
+                            WorkspaceNavigatorOptionValueStoreError.inactiveGeneration
+                        ))
+                        return
+                    }
+                    guard let current =
+                            self.workspaceNavigatorOptionSnapshots[extensionIdentifier],
+                          current.processGeneration == processGeneration else {
+                        completion(.failure(
+                            WorkspaceNavigatorOptionValueStoreError.inactiveGeneration
+                        ))
+                        return
+                    }
+                    guard snapshot.revision >= current.revision else {
+                        completion(.success(
+                            current.valuesByNavigatorID[navigatorID] ?? [:]
+                        ))
+                        return
+                    }
+                    self.workspaceNavigatorOptionSnapshots[extensionIdentifier] = snapshot
+                    completion(.success(snapshot.valuesByNavigatorID[navigatorID] ?? [:]))
+                    self.notifyChange()
+                }
+            }
+        }
+        return true
     }
 
     @discardableResult
@@ -1630,6 +1774,7 @@ final class ExtensionManager:
         sessions.removeAll()
         sessionGenerations.removeAll()
         registrations.removeAll()
+        workspaceNavigatorOptionSnapshots.removeAll()
         companionSupervisors.removeAll()
         companionStatuses.removeAll()
         companionStartTokens.removeAll()
@@ -1639,6 +1784,10 @@ final class ExtensionManager:
         for identifier in Set(running.keys).union(runningGenerations.keys) {
             generations[identifier, default: 0] += 1
             if let processGeneration = runningGenerations[identifier] {
+                workspaceNavigatorOptionStore.deactivate(
+                    extensionIdentifier: identifier,
+                    processGeneration: processGeneration
+                )
                 ExtensionHostService.shared.revoke(
                     extensionIdentifier: identifier,
                     processGeneration: processGeneration
@@ -1708,9 +1857,13 @@ final class ExtensionManager:
 
         let storageStore = store.storageStore
         let settingsStore = settingsStore
+        let workspaceNavigatorOptionStore = workspaceNavigatorOptionStore
         let launchPolicy = launchPolicy
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = Result { () throws -> ExtensionProcessSession.Started in
+            let result = Result { () throws -> (
+                started: ExtensionProcessSession.Started,
+                navigatorOptions: WorkspaceNavigatorOptionSnapshot
+            ) in
                 var environment: [String: String]
                 do {
                     environment = try storageStore.environment(
@@ -1771,13 +1924,27 @@ final class ExtensionManager:
                     started.session.terminate()
                     throw error
                 }
-                return started
+                do {
+                    let navigatorOptions = try workspaceNavigatorOptionStore.activate(
+                        extensionIdentifier: identifier,
+                        processGeneration: processGeneration,
+                        navigators: started.registration.workspaceNavigators
+                    )
+                    return (started, navigatorOptions)
+                } catch {
+                    started.session.terminate()
+                    throw error
+                }
             }
             DispatchQueue.main.async { [weak self] in
                 guard let self else {
-                    if case .success(let started) = result {
-                        started.session.terminate()
+                    if case .success(let launched) = result {
+                        launched.started.session.terminate()
                     }
+                    workspaceNavigatorOptionStore.deactivate(
+                        extensionIdentifier: identifier,
+                        processGeneration: processGeneration
+                    )
                     ExtensionHostService.shared.revoke(
                         extensionIdentifier: identifier,
                         processGeneration: processGeneration
@@ -1786,9 +1953,13 @@ final class ExtensionManager:
                 }
                 guard self.generations[identifier] == generation,
                       self.enabledIdentifiers.contains(identifier) else {
-                    if case .success(let started) = result {
-                        started.session.terminate()
+                    if case .success(let launched) = result {
+                        launched.started.session.terminate()
                     }
+                    workspaceNavigatorOptionStore.deactivate(
+                        extensionIdentifier: identifier,
+                        processGeneration: processGeneration
+                    )
                     ExtensionHostService.shared.revoke(
                         extensionIdentifier: identifier,
                         processGeneration: processGeneration
@@ -1798,6 +1969,10 @@ final class ExtensionManager:
 
                 switch result {
                 case .failure(let error):
+                    workspaceNavigatorOptionStore.deactivate(
+                        extensionIdentifier: identifier,
+                        processGeneration: processGeneration
+                    )
                     ExtensionHostService.shared.revoke(
                         extensionIdentifier: identifier,
                         processGeneration: processGeneration
@@ -1817,13 +1992,16 @@ final class ExtensionManager:
                     )
                     self.notifyChange()
 
-                case .success(let started):
+                case .success(let launched):
+                    let started = launched.started
                     let localizedRegistration = localization.registration(
                         started.registration
                     )
                     self.sessions[identifier] = started.session
                     self.sessionGenerations[identifier] = processGeneration
                     self.registrations[identifier] = localizedRegistration
+                    self.workspaceNavigatorOptionSnapshots[identifier] =
+                        launched.navigatorOptions
                     AttachmentMediaTypeRegistry.shared.register(
                         bundle.manifest.capabilities.contains(.attachmentFileTypes)
                             ? localizedRegistration.previewableFileTypes
@@ -1874,6 +2052,13 @@ final class ExtensionManager:
                             self.sessionGenerations.removeValue(forKey: identifier)
                         }
                         self.registrations.removeValue(forKey: identifier)
+                        self.workspaceNavigatorOptionSnapshots.removeValue(
+                            forKey: identifier
+                        )
+                        self.workspaceNavigatorOptionStore.deactivate(
+                            extensionIdentifier: identifier,
+                            processGeneration: processGeneration
+                        )
                         CommandRegistry.shared.removeExtensionCommands(
                             extensionIdentifier: identifier
                         )
@@ -2122,9 +2307,14 @@ final class ExtensionManager:
         let session = sessions.removeValue(forKey: identifier)
         let processGeneration = sessionGenerations.removeValue(forKey: identifier)
         registrations.removeValue(forKey: identifier)
+        workspaceNavigatorOptionSnapshots.removeValue(forKey: identifier)
         CommandRegistry.shared.removeExtensionCommands(extensionIdentifier: identifier)
         statuses[identifier] = status
         if let processGeneration {
+            workspaceNavigatorOptionStore.deactivate(
+                extensionIdentifier: identifier,
+                processGeneration: processGeneration
+            )
             ExtensionHostService.shared.revoke(
                 extensionIdentifier: identifier,
                 processGeneration: processGeneration

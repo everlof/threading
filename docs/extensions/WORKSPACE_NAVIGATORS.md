@@ -132,10 +132,21 @@ defaults are durable values. Titles and choice titles are localized copy. A comp
 navigator replacement must repeat the original localized declaration exactly, so only a new
 process generation can change the meaning of a stored value.
 
+Option values are host-owned state. Threading hydrates one recoverable file per extension on the
+background activation path, then publishes only a generation-matched in-memory snapshot to the
+navigator host. The render and menu paths never read the filesystem. Writes are serialized per
+extension and revalidated against the active immutable declaration. A lifecycle fence drains user
+changes the host already accepted, then retires that process generation without blocking the main
+actor on disk; later work from the retired generation cannot write or publish. Invalid stored values
+fall back to declaration defaults, while unknown navigator and option IDs are retained so a
+temporarily removed declaration does not destroy user state. Corrupt data is quarantined before a
+new file is saved, and a newer format is kept byte-for-byte with writes disabled.
+
 These declarations are forward-compatible groundwork for the host-evaluated
 `ui.workspace-navigation@2` transform. The v1 materialized-document renderer does not show option
-rows which nothing in the host consumes; declaring an option today neither invokes the extension
-nor exposes a preference file.
+rows which nothing in the host consumes. Declaring an option does not invoke the extension, and
+the host does not create a preference file until a user-visible control changes a non-default
+value.
 
 ## Runtime snapshots and actions
 
