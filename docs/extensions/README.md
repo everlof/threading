@@ -30,6 +30,9 @@ The first vertical slice exists:
   is the compiling host-evaluated navigator reference. It declares Priority, Today, Yesterday and
   Last 7 days sections, a sort option, host search and a working indicator without
   reading sessions or running extension code on a live fact edge.
+- [`T3SidebarExtension`](../../Packages/ThreadingExtensionKit/Examples/T3SidebarExtension) is the
+  compiling host-evaluated intent reference. It presents a flat session list with project
+  subtitles and a pinned section, while Threading owns its pin, unpin, and archive controls.
 - [`extension-manifest.schema.json`](schema/extension-manifest.schema.json) is the
   machine-readable manifest schema.
 - [`extension-settings.schema.json`](schema/extension-settings.schema.json) defines the

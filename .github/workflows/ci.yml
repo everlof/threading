@@ -85,7 +85,7 @@ jobs:
             https://download.swift.org/swift-6.3.3-release/wasm-sdk/swift-6.3.3-RELEASE/swift-6.3.3-RELEASE_wasm.artifactbundle.tar.gz \
             --checksum cabfa08b73bb8ac783927ecd15fa386e99d0c139c5f232445067bcf58379cae7
 
-      - name: Verify Activity Inbox through the shipping runner
+      - name: Verify navigator examples through the shipping runner
         env:
           THREADING_WASM_SDK_ID: swift-6.3.3-RELEASE_wasm
-        run: scripts/verify_activity_inbox_wasi.sh
+        run: scripts/verify_navigator_examples_wasi.sh

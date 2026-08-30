@@ -788,6 +788,169 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
         )
     }
 
+    func testShippedT3SidebarPinsSessionsAndOmitsUnavailableScheduledActions() throws {
+        let navigator = try t3SidebarNavigatorFromShippedManifest()
+        let declaration = try XCTUnwrap(navigator.pipeline)
+        let projectID = "project-1"
+        let title = ExtensionHostFactKey.sessionTitle
+        let sessionProjectID = ExtensionHostFactKey.sessionProjectID
+        let projectName = ExtensionHostFactKey.projectName
+        let pinned = ExtensionHostFactKey.sessionIsPinned
+        let archived = ExtensionHostFactKey.sessionIsArchived
+        let lastUsed = ExtensionHostFactKey.sessionLastUsedAt
+        let scheduled = ExtensionHostFactKey.sessionHasScheduledStart
+        let definitions = [
+            titleDefinition,
+            definition(
+                sessionProjectID,
+                type: .string,
+                kinds: [.session],
+                usages: [.presentable]
+            ),
+            definition(
+                projectName,
+                type: .string,
+                kinds: [.project],
+                usages: [.searchable, .presentable]
+            ),
+            definition(
+                pinned,
+                type: .boolean,
+                kinds: [.session],
+                usages: [.filterable, .groupable]
+            ),
+            definition(
+                archived,
+                type: .boolean,
+                kinds: [.session],
+                usages: [.filterable]
+            ),
+            definition(
+                lastUsed,
+                type: .date,
+                kinds: [.session],
+                usages: [.sortable]
+            ),
+            definition(
+                scheduled,
+                type: .boolean,
+                kinds: [.session],
+                usages: [.filterable]
+            ),
+        ]
+        let rows: [(
+            id: String,
+            name: String,
+            isPinned: Bool,
+            isArchived: Bool,
+            isScheduled: Bool,
+            lastUsed: TimeInterval
+        )] = [
+            ("pinned", "Pinned session", true, false, false, 100),
+            ("ordinary", "Ordinary session", false, false, false, 300),
+            ("scheduled", "Alpha scheduled session", false, false, true, 200),
+            ("archived", "Archived session", false, true, false, 400),
+        ]
+        var facts = rows.flatMap { row in
+            let subject = ExtensionFactSubject.session(row.id)
+            return [
+                fact(title, subject, .string(row.name)),
+                fact(sessionProjectID, subject, .string(projectID)),
+                fact(pinned, subject, .boolean(row.isPinned)),
+                fact(archived, subject, .boolean(row.isArchived)),
+                fact(lastUsed, subject, .date(.init(timeIntervalSinceReferenceDate: row.lastUsed))),
+                fact(scheduled, subject, .boolean(row.isScheduled)),
+            ]
+        }
+        facts.append(fact(projectName, .project(projectID), .string("Navigator Project")))
+        let snapshot = makeSnapshot(
+            sessionIDs: rows.map(\.id),
+            definitions: definitions,
+            facts: facts
+        )
+        let evaluator = WorkspaceNavigatorPipelineEvaluator()
+        let compiled = try ready(
+            declaration,
+            snapshot: snapshot,
+            optionValues: ["sort-order": .string("recent")]
+        )
+        let evaluation = evaluator.evaluate(compiled)
+
+        XCTAssertEqual(evaluation.sections.map(\.identity), [
+            .rule(id: "pinned"), .rule(id: "sessions"),
+        ])
+        XCTAssertEqual(evaluation.sections.map { $0.items.map(\.sourceSessionID) }, [
+            ["pinned"], ["ordinary", "scheduled"],
+        ])
+        let realized = Dictionary(uniqueKeysWithValues: try evaluation.sections
+            .flatMap(\.items)
+            .map { item in
+                (item.sourceSessionID, try XCTUnwrap(
+                    evaluator.realizeVisibleRow(item, in: compiled)
+                ))
+            })
+        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["pinned"])), [
+            .unpin, .archive,
+        ])
+        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["ordinary"])), [
+            .pin, .archive,
+        ])
+        XCTAssertEqual(templateIntents(in: try XCTUnwrap(realized["scheduled"])), [])
+        XCTAssertEqual(templateText(in: try XCTUnwrap(realized["ordinary"])), [
+            "Ordinary session", "Navigator Project",
+        ])
+
+        let named = evaluator.evaluate(try ready(
+            declaration,
+            snapshot: snapshot,
+            optionValues: ["sort-order": .string("name")]
+        ))
+        XCTAssertEqual(named.sections[1].items.map(\.sourceSessionID), [
+            "scheduled", "ordinary",
+        ])
+
+        var repinnedFacts = rows.flatMap { row in
+            let subject = ExtensionFactSubject.session(row.id)
+            return [
+                fact(title, subject, .string(row.name)),
+                fact(sessionProjectID, subject, .string(projectID)),
+                fact(pinned, subject, .boolean(row.id == "ordinary" || row.isPinned)),
+                fact(archived, subject, .boolean(row.isArchived)),
+                fact(lastUsed, subject, .date(.init(timeIntervalSinceReferenceDate: row.lastUsed))),
+                fact(scheduled, subject, .boolean(row.isScheduled)),
+            ]
+        }
+        repinnedFacts.append(fact(
+            projectName,
+            .project(projectID),
+            .string("Navigator Project")
+        ))
+        let repinnedSnapshot = makeSnapshot(
+            sessionIDs: rows.map(\.id),
+            definitions: definitions,
+            facts: repinnedFacts,
+            revision: 2
+        )
+        let repinnedProgram = try ready(
+            declaration,
+            snapshot: repinnedSnapshot,
+            optionValues: ["sort-order": .string("recent")]
+        )
+        let repinned = evaluator.evaluate(repinnedProgram)
+        XCTAssertEqual(repinned.sections.map { $0.items.map(\.sourceSessionID) }, [
+            ["ordinary", "pinned"], ["scheduled"],
+        ])
+        let moved = try XCTUnwrap(
+            repinned.sections[0].items.first { $0.sourceSessionID == "ordinary" }
+        )
+        XCTAssertEqual(
+            templateIntents(in: try XCTUnwrap(
+                evaluator.realizeVisibleRow(moved, in: repinnedProgram)
+            )),
+            [.unpin, .archive]
+        )
+    }
+
     func testVisibleRowRealizationUsesPresentationFallbacksAndExplicitProjectJoin() throws {
         let stateDefinition = definition(
             stateKey,
@@ -1136,6 +1299,51 @@ final class WorkspaceNavigatorPipelineEvaluatorTests: XCTestCase {
             manifest.workspaceNavigators.first { $0.id == "activity-inbox" }
         )
         return try XCTUnwrap(navigator.pipeline)
+    }
+
+    private func t3SidebarNavigatorFromShippedManifest() throws
+        -> ExtensionWorkspaceNavigator
+    {
+        let repositoryRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let manifestURL = repositoryRoot.appendingPathComponent(
+            "Packages/ThreadingExtensionKit/Examples/T3SidebarExtension/"
+                + "threading-extension.json"
+        )
+        let manifest = try JSONDecoder().decode(
+            ExtensionManifest.self,
+            from: Data(contentsOf: manifestURL)
+        )
+        try manifest.validate()
+        return try XCTUnwrap(
+            manifest.workspaceNavigators.first { $0.id == "t3-sidebar" }
+        )
+    }
+
+    private func templateIntents(
+        in node: WorkspaceNavigatorRealizedTemplateNode
+    ) -> [ExtensionWorkspaceNavigatorIntent] {
+        switch node {
+        case let .intent(intent):
+            [intent]
+        case let .stack(_, _, children):
+            children.flatMap(templateIntents(in:))
+        default:
+            []
+        }
+    }
+
+    private func templateText(in node: WorkspaceNavigatorRealizedTemplateNode) -> [String] {
+        switch node {
+        case let .text(text, _):
+            [text]
+        case let .stack(_, _, children):
+            children.flatMap(templateText(in:))
+        default:
+            []
+        }
     }
 
     private func pipeline(

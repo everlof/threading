@@ -4,7 +4,8 @@
 > can have one, built by an extension, without Threading having anticipated the shape they wanted. The
 > durable work is a five-stage pipeline — facts, options, transform, structure, representation —
 > plus a host-executed intent vocabulary. Rollout steps 1–5 and the initial intent contract were
-> implemented by 2026-08-30; the T3 reference extension and later rollout steps remain open.
+> implemented by 2026-08-30; the three reference extensions now build from the public SDK, while
+> dynamic provider-fact choices, windowed collections, and native convergence remain open.
 > No part of
 > `ui.workspace-navigation` v1 is withdrawn.
 
@@ -501,8 +502,9 @@ Three extensions ship in `Packages/ThreadingExtensionKit/Examples/`, beside
 `HelloStatusExtension`. If one of them cannot be built from the published SDK, the SDK is not
 finished — which is a far better forcing function than a feature checklist.
 
-**1. `T3SidebarExtension`** — flat session list, project as subtitle, pinned block on top, hover
-pin and archive actions. Exercises: templates, intents, options, pinning facts.
+**1. [`T3SidebarExtension`](../../Packages/ThreadingExtensionKit/Examples/T3SidebarExtension)** —
+flat session list, project as subtitle, pinned block on top, hover pin and archive actions.
+Exercises: templates, intents, options, pinning facts.
 
 **2. `ActivityInboxExtension`** — the ChatGPT-style inbox: *Priority* section for sessions blocked
 on the user, then *Today* / *Yesterday* / *Last 7 days*, live spinner on working sessions.
@@ -605,11 +607,12 @@ does. An install must never reorder somebody's sidebar on its own.
    materialized item list is a degenerate template. `ActivityInboxExtension` is the buildable
    public test: it requests only `ui.workspace-navigation`, while the host produces Priority and
    relative-date sections, persists its sort option and repaints working state from facts.
-6. **Intents — contract implemented 2026-08-30; T3 example in progress.** `pin`, `unpin`, and
+6. **Intents — implemented 2026-08-30.** `pin`, `unpin`, and
    `archive` are declared per navigator in the manifest, disclosed before enable/update, rendered
    inside the host's virtual row, and executed through native persistence/lifecycle paths without
-   revealing the gesture, source session, or result to the extension. `T3SidebarExtension` is the
-   remaining public example for this step.
+   revealing the gesture, source session, or result to the extension. `T3SidebarExtension` proves
+   the public contract with project-scoped subtitles, pinned-first sections, conditional host
+   intents, a persisted sort option, and scheduled-row action omission.
 7. **Windowed collections**, retiring the aggregate item cap.
 8. **Native on the pipeline**, as far as it honestly goes. Full parity includes drag reorder,
    inline rename, LabelMorph titles and hover cards; the realistic target is that native's *facts*

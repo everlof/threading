@@ -22,6 +22,14 @@ ACTIVITY_MANIFEST = (
     / "ActivityInboxExtension"
     / "threading-extension.json"
 )
+T3_MANIFEST = (
+    REPOSITORY
+    / "Packages"
+    / "ThreadingExtensionKit"
+    / "Examples"
+    / "T3SidebarExtension"
+    / "threading-extension.json"
+)
 
 
 def load_json(path: Path) -> dict:
@@ -47,6 +55,7 @@ class WorkspaceNavigatorSchemaTests(unittest.TestCase):
         cls.manifest_validator = schema_validator("extension-manifest.schema.json")
         cls.process_validator = schema_validator("extension-process.schema.json")
         cls.activity_manifest = load_json(ACTIVITY_MANIFEST)
+        cls.t3_manifest = load_json(T3_MANIFEST)
 
     def assert_valid(self, validator, value: dict) -> None:
         errors = sorted(validator.iter_errors(value), key=lambda error: list(error.path))
@@ -57,6 +66,9 @@ class WorkspaceNavigatorSchemaTests(unittest.TestCase):
 
     def test_shipped_activity_manifest_resolves_and_validates(self) -> None:
         self.assert_valid(self.manifest_validator, self.activity_manifest)
+
+    def test_shipped_t3_manifest_resolves_and_validates(self) -> None:
+        self.assert_valid(self.manifest_validator, self.t3_manifest)
 
     def test_pipeline_intent_vocabulary_is_bounded_and_requires_a_pipeline(self) -> None:
         manifest = copy.deepcopy(self.activity_manifest)
