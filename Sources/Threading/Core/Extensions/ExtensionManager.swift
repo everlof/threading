@@ -1684,6 +1684,7 @@ final class ExtensionManager:
                 order: extensionOrder,
                 capabilities: bundle.manifest.capabilities,
                 serviceDependencies: bundle.manifest.serviceDependencies,
+                factDefinitions: bundle.manifest.factDefinitions,
                 networkGrants: bundle.manifest.networkGrants,
                 localization: localization,
                 transport: transport

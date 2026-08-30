@@ -255,6 +255,7 @@ enum ExtensionSandboxPolicy {
 
     private static let hostCapabilities: Set<ExtensionCapability> = [
         .componentCustomization,
+        .factsProvide,
         .hostProjectsRead,
         .hostSessionsRead,
         .hostSessionRuntimeRead,

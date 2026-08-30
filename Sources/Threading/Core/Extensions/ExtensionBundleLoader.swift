@@ -213,6 +213,7 @@ enum ExtensionBundleInspector {
         .settings,
         .servicesProvide,
         .servicesConsume,
+        .factsProvide,
         .companionOperations,
         .componentCustomization,
         .workspaceNavigation,

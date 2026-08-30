@@ -640,7 +640,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         if plan.startsExtensions {
-            installHostFactPipeline()
+            let factPipeline = installHostFactPipeline()
             ExtensionHostService.shared.installSessionRuntimeShellRootProvider {
                 [weak mainWindowController] sessionID in
                 mainWindowController?.extensionShellRootPid(for: sessionID)
@@ -649,15 +649,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             // Installed extensions get a separate, tokenized host-data/service channel. It must
             // be ready before a host-capable process starts, because that process receives the
             // short-lived endpoint and bearer token only in its launch environment.
-            if let componentCustomizationRegistry {
-                ExtensionHostService.shared.start(
-                    registry: componentCustomizationRegistry,
-                    identityRegistry: .shared
-                ) {
-                    ExtensionManager.shared.startEnabledExtensions()
-                    LaunchLedger.shared.record(.extensionsStarted)
-                }
-            } else {
+            ExtensionHostService.shared.start(
+                registry: componentCustomizationRegistry,
+                factRegistry: factPipeline.registry,
+                identityRegistry: .shared
+            ) {
                 ExtensionManager.shared.startEnabledExtensions()
                 LaunchLedger.shared.record(.extensionsStarted)
             }
@@ -1604,7 +1600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     /// caller is below the startup-profile return and after the first window has been ordered;
     /// the pipeline crosses one more main-queue turn before doing its bounded initial snapshot.
     @MainActor
-    private func installHostFactPipeline() {
+    private func installHostFactPipeline() -> HostFactPipeline {
         let source = LiveHostFactProjectionSource.live(
             projectStore: environment.projectStore,
             agentRuntime: environment.agentRuntime
@@ -1614,6 +1610,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         )
         hostFactPipeline = pipeline
         pipeline.startAfterFirstWindowVisible()
+        return pipeline
     }
 
     // MARK: - Single Instance Triage

@@ -84,7 +84,31 @@ struct ExtensionLocalizationResolver: Sendable {
             panels: registration.panels.map(panel),
             workspaceNavigators: registration.workspaceNavigators.map(workspaceNavigator),
             mcpTools: registration.mcpTools.map(mcpTool),
-            services: registration.services.map(service)
+            services: registration.services.map(service),
+            factDefinitions: registration.factDefinitions.map(factDefinition),
+            previewableFileTypes: registration.previewableFileTypes
+        )
+    }
+
+    func factDefinition(_ definition: ExtensionFactDefinition) -> ExtensionFactDefinition {
+        ExtensionFactDefinition(
+            key: definition.key,
+            displayName: string(definition.displayName),
+            valueType: definition.valueType,
+            subjectKinds: definition.subjectKinds,
+            usages: definition.usages
+        )
+    }
+
+    func fact(_ fact: ExtensionFact) -> ExtensionFact {
+        ExtensionFact(
+            key: fact.key,
+            subject: fact.subject,
+            value: fact.value,
+            label: optional(fact.label),
+            status: fact.status,
+            icon: fact.icon,
+            observedAt: fact.observedAt
         )
     }
 

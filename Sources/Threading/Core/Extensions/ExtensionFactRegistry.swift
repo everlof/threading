@@ -98,11 +98,12 @@ enum ExtensionFactRegistryError: Error, Equatable, LocalizedError {
 /// Publication is atomic. Lookups never call an extension and never touch disk or the network.
 @MainActor
 final class ExtensionFactRegistry {
-    static let maximumDefinitionsPerGeneration = 128
-    static let maximumSubjectsPerReplacement = 2_048
-    static let maximumFactsPerReplacement = 2_048
-    static let maximumFactsPerSourceSubject = 32
-    static let maximumFactsPerGeneration = 16_384
+    static let maximumDefinitionsPerGeneration = ExtensionFactProviderLimits.maximumDefinitions
+    static let maximumSubjectsPerReplacement =
+        ExtensionFactProviderLimits.maximumSubjectsPerPublication
+    static let maximumFactsPerReplacement = ExtensionFactProviderLimits.maximumFactsPerPublication
+    static let maximumFactsPerSourceSubject = ExtensionFactProviderLimits.maximumFactsPerSubject
+    static let maximumFactsPerGeneration = ExtensionFactProviderLimits.maximumFactsPerGeneration
     static let maximumResolvedFactsPerSubject = 128
     static let maximumExactNotificationCells = 256
 
@@ -153,21 +154,13 @@ final class ExtensionFactRegistry {
         let source: ComponentCustomizationSource
         var definitions: [ExtensionFactKey: ExtensionFactDefinition]
         var facts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]]
+        var factCount: Int
 
         init(source: ComponentCustomizationSource) {
             self.source = source
             definitions = [:]
             facts = [:]
-        }
-
-        init(
-            source: ComponentCustomizationSource,
-            definitions: [ExtensionFactKey: ExtensionFactDefinition],
-            facts: [ExtensionFactSubject: [ExtensionFactKey: StoredFact]]
-        ) {
-            self.source = source
-            self.definitions = definitions
-            self.facts = facts
+            factCount = 0
         }
     }
 
@@ -283,11 +276,7 @@ final class ExtensionFactRegistry {
         let key = SourceGeneration(source)
         var publication = publications[key] ?? Publication(source: source)
         let oldPublication = publication
-        publication = Publication(
-            source: source,
-            definitions: candidateDefinitions,
-            facts: publication.facts
-        )
+        publication.definitions = candidateDefinitions
         try validateFacts(publication.facts, against: candidateDefinitions)
 
         var candidatePublications = publications
@@ -317,6 +306,16 @@ final class ExtensionFactRegistry {
             definitions: publication.definitions,
             isHost: false
         )
+        let replacedCount = subjects.reduce(into: 0) { count, subject in
+            count += publication.facts[subject]?.count ?? 0
+        }
+        let replacementCount = grouped.values.reduce(into: 0) { $0 += $1.count }
+        let candidateCount = publication.factCount - replacedCount + replacementCount
+        guard candidateCount <= Self.maximumFactsPerGeneration else {
+            throw ExtensionFactRegistryError.tooManyFactsForGeneration(
+                maximum: Self.maximumFactsPerGeneration
+            )
+        }
         for subject in subjects {
             if let values = grouped[subject], !values.isEmpty {
                 publication.facts[subject] = values
@@ -324,12 +323,7 @@ final class ExtensionFactRegistry {
                 publication.facts.removeValue(forKey: subject)
             }
         }
-        let total = publication.facts.values.reduce(0) { $0 + $1.count }
-        guard total <= Self.maximumFactsPerGeneration else {
-            throw ExtensionFactRegistryError.tooManyFactsForGeneration(
-                maximum: Self.maximumFactsPerGeneration
-            )
-        }
+        publication.factCount = candidateCount
 
         var candidatePublications = publications
         candidatePublications[key] = publication
