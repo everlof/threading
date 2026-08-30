@@ -28,6 +28,7 @@ final class BrowserCaptureGeometryTests: XCTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentViewController = browser
+        window.animationBehavior = .none
         window.orderFront(nil)
         // The web view is sized by the controller's layout pass, and `innerWidth` is 0 until it has
         // run. Without this the probes answer about a zero-sized page, which makes the document

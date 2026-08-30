@@ -364,6 +364,7 @@ final class ExecutionAuditRenderTests: XCTestCase {
         window.contentViewController = controller
         window.setContentSize(Render.size)
         window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.animationBehavior = .none
         window.orderFront(nil)
         controller.view.frame = NSRect(origin: .zero, size: Render.size)
         controller.view.appearance = appearance

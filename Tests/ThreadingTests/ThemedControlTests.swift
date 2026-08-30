@@ -1056,6 +1056,7 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentView = root
+        window.animationBehavior = .none
         window.orderFront(nil)
 
         let restingSubviewCount = root.subviews.count
@@ -2157,6 +2158,9 @@ final class ThemedControlTests: HostedStoreTestCase {
 
         let (window, root, source) = try menuHarness()
         defer { window.close() }
+        window.animationBehavior = .none
+        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.orderFront(nil)
 
         let token = try XCTUnwrap(present(from: source))
         defer { ThemedMenuPresenter.dismiss(token) }
@@ -7722,6 +7726,7 @@ final class ThemedControlTests: HostedStoreTestCase {
             defer: false
         )
         window.contentView = root
+        window.animationBehavior = .none
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
 
@@ -7763,6 +7768,7 @@ final class ThemedControlTests: HostedStoreTestCase {
             defer: false
         )
         window.contentView = root
+        window.animationBehavior = .none
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(field)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))

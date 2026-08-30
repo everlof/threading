@@ -194,6 +194,7 @@ final class BrowserOffScreenCaptureTests: XCTestCase {
         window.center()
         // WebKit will not load or render a view that is in no on-screen window, so this class
         // is the exception the fast plan documents rather than an oversight.
+        window.animationBehavior = .none
         window.orderFront(nil)
         self.window = window
         browser.view.layoutSubtreeIfNeeded()

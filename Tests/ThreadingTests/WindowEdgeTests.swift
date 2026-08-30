@@ -363,6 +363,7 @@ final class WindowEdgeTests: HostedStoreTestCase {
 
         let terminal = terminalController.session.terminalView
         Self.seedClaudeScreen(terminal, historyLines: 0)
+        window.animationBehavior = .none
         window.orderFront(nil)
         window.contentView?.displayIfNeeded()
         print(

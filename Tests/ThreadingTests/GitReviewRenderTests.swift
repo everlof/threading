@@ -1027,6 +1027,7 @@ final class GitReviewRenderTests: HostedStoreTestCase {
         // has never been ordered. Keep the real product window far offscreen, but give AppKit
         // the same ordered-window lifecycle it has in the running application.
         window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.animationBehavior = .none
         window.makeKeyAndOrderFront(nil)
         defer {
             window.orderOut(nil)

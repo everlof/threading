@@ -142,6 +142,7 @@ final class SimulatorPaneRenderTests: XCTestCase {
         window.contentViewController = host
         window.setContentSize(Render.size)
         window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.animationBehavior = .none
         window.orderFront(nil)
 
         host.setTitle("Threading")

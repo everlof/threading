@@ -2712,6 +2712,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentViewController = pane
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer {
             window.close()
@@ -2810,6 +2811,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentViewController = pane
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer {
             window.close()
@@ -2958,6 +2960,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentViewController = pane
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer {
             window.close()
@@ -3344,6 +3347,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
             ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
         browser.view.layoutSubtreeIfNeeded()
@@ -3440,6 +3444,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
             ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
         browser.view.layoutSubtreeIfNeeded()
@@ -3561,6 +3566,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
             ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
         browser.view.layoutSubtreeIfNeeded()
@@ -3672,6 +3678,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
             ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
         browser.view.layoutSubtreeIfNeeded()
@@ -3823,6 +3830,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentViewController = pane
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer {
             window.close()
@@ -3915,6 +3923,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentViewController = pane
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer {
             window.close()
@@ -4007,6 +4016,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentViewController = pane
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer {
             window.close()
@@ -4403,6 +4413,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         window.setContentSize(NSSize(width: 800, height: 600))
         browser.view.frame = window.contentView?.bounds
             ?? NSRect(x: 0, y: 0, width: 800, height: 600)
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
         browser.view.layoutSubtreeIfNeeded()
@@ -5679,6 +5690,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
             ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
         browser.view.layoutSubtreeIfNeeded()
@@ -5830,6 +5842,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
             ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
         browser.view.layoutSubtreeIfNeeded()
@@ -5902,6 +5915,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         )
         window.isReleasedWhenClosed = false
         window.contentViewController = browser
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
 
@@ -6034,6 +6048,7 @@ final class BrowserAgentBridgeIntegrationTests: XCTestCase {
         window.setContentSize(NSSize(width: 640, height: 480))
         browser.view.frame = window.contentView?.bounds
             ?? NSRect(x: 0, y: 0, width: 640, height: 480)
+        window.animationBehavior = .none
         window.orderFront(nil)
         defer { window.close() }
         browser.view.layoutSubtreeIfNeeded()
