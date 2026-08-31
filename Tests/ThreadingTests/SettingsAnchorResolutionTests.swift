@@ -1,3 +1,4 @@
+import ThreadingExtensionKit
 import XCTest
 @testable import Threading
 
@@ -126,6 +127,88 @@ final class SettingsAnchorResolutionTests: XCTestCase {
         withExtendedLifetime(host) {}
     }
 
+    // MARK: - Rows a virtual list has not built
+
+    /// The half of the contract a virtualized page introduces: a field twenty rows down does
+    /// not exist yet, so `find` has to keep saying no and `locate` has to make it exist.
+    ///
+    /// Extension pages are one table over arbitrarily many fields — before this, a palette
+    /// result for an extension's own setting opened the page and stopped there.
+    func testAFieldBelowTheFoldOnAnExtensionPageIsBroughtOnScreen() throws {
+        let manifest = try settingsManifest(
+            settings: ExtensionSettingsContribution(pages: [
+                ExtensionSettingsPage(
+                    id: "panels",
+                    title: "Panels",
+                    sections: [
+                        ExtensionSettingsSection(
+                            id: "frames",
+                            title: "Frames",
+                            fields: (0..<40).map {
+                                ExtensionSettingField(
+                                    id: "field-\($0)",
+                                    title: "Field \($0)",
+                                    control: .toggle(defaultValue: false)
+                                )
+                            }
+                        )
+                    ]
+                )
+            ])
+        )
+        ExtensionSettingsRegistry.shared.replace(enabledManifests: [manifest])
+        defer { ExtensionSettingsRegistry.shared.replace(enabledManifests: []) }
+
+        let registered = try XCTUnwrap(ExtensionSettingsRegistry.shared.pages.first)
+        let controller = ExtensionSettingsViewController(page: registered)
+        let host = fixture(holding: controller.view)
+
+        XCTAssertNil(
+            SettingsRowAnchor.find(title: "Field 39", in: controller.view),
+            "a row that far down should not have been built yet"
+        )
+        XCTAssertNotNil(
+            SettingsRowAnchor.locate(title: "Field 39", in: controller.view),
+            "asking the page for the row did not bring it into the table"
+        )
+        XCTAssertNil(
+            SettingsRowAnchor.locate(title: "Field 400", in: controller.view),
+            "a title nothing owns must still resolve to nothing"
+        )
+        withExtendedLifetime(host) {}
+    }
+
+    /// The same question of the Extensions page, whose rows are packages rather than settings.
+    func testAnExtensionsOwnRowOnTheExtensionsPageIsBroughtOnScreen() throws {
+        let manifest = try settingsManifest(
+            settings: ExtensionSettingsContribution(sections: [
+                ExtensionHostSettingsSection(
+                    id: "capture",
+                    page: .extensions,
+                    title: "Capture",
+                    fields: (0..<40).map {
+                        ExtensionSettingField(
+                            id: "field-\($0)",
+                            title: "Capture field \($0)",
+                            control: .toggle(defaultValue: false)
+                        )
+                    }
+                )
+            ])
+        )
+        ExtensionSettingsRegistry.shared.replace(enabledManifests: [manifest])
+        defer { ExtensionSettingsRegistry.shared.replace(enabledManifests: []) }
+
+        let controller = ExtensionsPreferencesViewController()
+        let host = fixture(holding: controller.view)
+
+        XCTAssertNotNil(
+            SettingsRowAnchor.locate(title: "Capture field 39", in: controller.view),
+            "the Extensions page did not bring its own last row into the table"
+        )
+        withExtendedLifetime(host) {}
+    }
+
     // MARK: - The result rows in their sidebar
 
     func testASidebarShowingResultsPassesTheThemeBoundaryAudit() {
@@ -179,6 +262,22 @@ final class SettingsAnchorResolutionTests: XCTestCase {
 
     private func descendants(of view: NSView) -> [NSView] {
         view.subviews.flatMap { [$0] + descendants(of: $0) }
+    }
+
+    private func settingsManifest(
+        settings: ExtensionSettingsContribution
+    ) throws -> ExtensionManifest {
+        let manifest = ExtensionManifest(
+            identifier: "com.example.anchor-reveal",
+            name: "Anchor Reveal",
+            version: "1.0.0",
+            runtime: .native,
+            executable: "bin/settings",
+            capabilities: [.settings],
+            settings: settings
+        )
+        try manifest.validate()
+        return manifest
     }
 
     private func enclosingScrollView(of view: NSView) -> NSScrollView? {

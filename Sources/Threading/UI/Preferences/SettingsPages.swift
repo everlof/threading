@@ -28,16 +28,6 @@ struct SettingsEntry: Equatable {
     }
 }
 
-/// The one spelling of a settings destination's full path — "General › Notifications › Alert
-/// sound" — shared by the AI suggestions and anywhere else a result stands far from its page.
-enum SettingsPath {
-    static let separator = " › "
-
-    static func display(pageTitle: String, section: String?, title: String?) -> String {
-        [pageTitle, section, title].compactMap { $0 }.joined(separator: separator)
-    }
-}
-
 /// How a settings query is read. One implementation, because the sidebar's page rows and its
 /// row-level results have to agree about what matched — two spellings of "contains" is how a
 /// destination appears in one and not the other.
@@ -111,12 +101,24 @@ enum SettingsPages {
             self.make = make
         }
 
+        /// The page's rows as they stand right now: its own catalogue plus whatever an enabled
+        /// extension is currently contributing to it.
+        ///
+        /// `entries` stays the static half on purpose. That half is what
+        /// `SettingsAnchorResolutionTests` can build a page and check against, and it is decided
+        /// once when `builtIn` is constructed — an extension enabled afterwards would never
+        /// appear in it. Everything that *presents* the catalogue reads this instead.
+        @MainActor
+        var liveEntries: [SettingsEntry] {
+            entries + (hostPage.map { SettingsPages.extensionEntries(on: $0) } ?? [])
+        }
+
         @MainActor
         var searchableText: String {
             let extensionTerms = hostPage.map {
                 ExtensionSettingsRegistry.shared.searchTerms(for: $0)
             } ?? []
-            let entryText = entries.map { $0.searchableText(pageTitle: title) }
+            let entryText = liveEntries.map { $0.searchableText(pageTitle: title) }
             return ([title] + searchTerms + extensionTerms + entryText).joined(separator: " ")
         }
 
@@ -419,7 +421,12 @@ enum SettingsPages {
                 title: "\(registered.extensionName) — \(registered.page.title)",
                 symbol: registered.page.symbol,
                 group: extensionsGroup,
-                searchTerms: ExtensionSettingsRegistry.searchTerms(for: registered)
+                searchTerms: ExtensionSettingsRegistry.searchTerms(for: registered),
+                // Stated rather than looked up: a page an extension contributes is built here,
+                // from this registration, so its rows come from the same value. The built-in
+                // path cannot answer for it — `entries(for:)` reads the app's own definitions,
+                // which know nothing about an extension's fields.
+                entries: entries(for: registered)
             ) {
                 ExtensionSettingsViewController(page: registered)
             }
@@ -442,6 +449,55 @@ enum SettingsPages {
         all.first { $0.title == title }?.id
     }
 
+    /// Every place in Settings the command palette can take you: each page, then every row on
+    /// it, then each installed extension.
+    ///
+    /// Built from `all` and `liveEntries`, so what the palette offers and what the Settings
+    /// sidebar's own search offers are the same list read twice — a row that can be found in one
+    /// and not the other is the drift this projection exists to prevent.
+    ///
+    /// Installed extensions are here because they are what somebody types. An extension is not a
+    /// settings row and has no `SettingsEntry`; it is a disclosure on the Extensions page,
+    /// anchored by its name like every other row, and "marketeer" is a far more likely query
+    /// than "extensions".
+    static var destinations: [SettingsDestination] {
+        let pages = all
+        var destinations: [SettingsDestination] = []
+        for page in pages {
+            destinations.append(
+                SettingsDestination(
+                    pageID: page.id,
+                    pageTitle: page.title,
+                    group: page.group,
+                    keywords: page.displayTerms
+                )
+            )
+            destinations += page.liveEntries.map { entry in
+                SettingsDestination(
+                    pageID: page.id,
+                    pageTitle: page.title,
+                    group: page.group,
+                    section: entry.section,
+                    rowTitle: entry.title,
+                    keywords: entry.terms
+                )
+            }
+        }
+        if let extensionsPage = pages.first(where: { $0.id == extensionsID }) {
+            destinations += ExtensionManager.shared.installedExtensions.map { installed in
+                SettingsDestination(
+                    pageID: extensionsPage.id,
+                    pageTitle: extensionsPage.title,
+                    group: extensionsPage.group,
+                    section: L10n.string("Installed"),
+                    rowTitle: installed.name,
+                    keywords: [installed.identifier]
+                )
+            }
+        }
+        return SettingsDestinationCatalog.catalog(destinations)
+    }
+
     static var sidebarItems: [SettingsSidebar.Item] {
         all.map { page in
             SettingsSidebar.Item(
@@ -450,7 +506,7 @@ enum SettingsPages {
                 symbol: page.symbol,
                 searchText: page.searchableText,
                 group: page.group,
-                entries: page.entries.map {
+                entries: page.liveEntries.map {
                     SettingsSidebar.Item.Entry(
                         title: $0.title,
                         section: $0.section,
@@ -474,6 +530,50 @@ enum SettingsPages {
                 section: presentation.section.map { L10n.string($0) },
                 terms: presentation.searchTerms.flatMap(expanded(_:))
             )
+        }
+    }
+
+    /// The rows one extension's own settings page draws.
+    ///
+    /// An extension's strings arrive already localized by its own resolver, so none of them go
+    /// through `L10n` — see the localization-domain split in `design-system.md`. The section
+    /// caption is the section's own title, matching what `ExtensionSettingsViewController`
+    /// renders for a page it owns outright.
+    private static func entries(
+        for page: RegisteredExtensionSettingsPage
+    ) -> [SettingsEntry] {
+        page.page.sections.flatMap { section in
+            section.fields.map { field in
+                SettingsEntry(
+                    title: field.title,
+                    section: section.title,
+                    terms: ExtensionSettingsRegistry.searchTerms(for: field)
+                )
+            }
+        }
+    }
+
+    /// The rows extensions contribute to one of *Threading's* pages.
+    ///
+    /// Computed on every read because enabling or disabling an extension has to add and remove
+    /// these without the page list being rebuilt. The caption repeats the owner's name the way
+    /// `ExtensionSettingsRenderer` prefixes a host section's title, so a destination's path
+    /// names the extension the row belongs to rather than a bare section nobody can place.
+    @MainActor
+    fileprivate static func extensionEntries(
+        on hostPage: ExtensionHostSettingsPage
+    ) -> [SettingsEntry] {
+        ExtensionSettingsRegistry.shared.sections(for: hostPage).flatMap { registered in
+            let caption = registered.section.title
+                .map { "\(registered.extensionName) — \($0)" }
+                ?? registered.extensionName
+            return registered.section.fields.map { field in
+                SettingsEntry(
+                    title: field.title,
+                    section: caption,
+                    terms: ExtensionSettingsRegistry.searchTerms(for: field)
+                )
+            }
         }
     }
 

@@ -871,6 +871,24 @@ struct RemoteClient {
         )
     }
 
+    func search(
+        _ query: RemoteSearchRequestDTO,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteSearchResponseDTO {
+        try await postResponse(query, to: link.searchURL, requestID: requestID)
+    }
+
+    func resolveSearchResult(
+        token: String,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteSearchResolutionDTO {
+        try await postResponse(
+            RemoteSearchResolveRequestDTO(token: token),
+            to: link.searchResolveURL,
+            requestID: requestID
+        )
+    }
+
     func acceptInvitation(
         displayName: String,
         requestID: String = UUID().uuidString.lowercased()

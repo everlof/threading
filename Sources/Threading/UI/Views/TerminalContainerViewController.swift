@@ -68,6 +68,9 @@ final class TerminalContainerViewController: NSViewController {
 
     private var currentChild: AgentSessionViewController?
     private var currentConversation: ConversationViewController?
+    private var currentSearchConversationWindow: ConversationSearchWindowViewController?
+    private var currentProjectTextSearchPreview: ProjectTextSearchPreviewViewController?
+    private(set) var currentSearchFileRelativePath: String?
     private var currentProjectTerminal: ProjectTerminalViewController?
     private(set) var currentTerminalID: TerminalID? {
         didSet {
@@ -84,7 +87,11 @@ final class TerminalContainerViewController: NSViewController {
 
     /// Whether a natively rendered conversation is on screen, which is what the turn and step
     /// commands need in order to validate themselves on or off.
-    var isShowingConversation: Bool { currentConversation != nil }
+    var isShowingConversation: Bool {
+        currentConversation != nil || currentSearchConversationWindow != nil
+    }
+
+    var isShowingProjectTextSearchPreview: Bool { currentProjectTextSearchPreview != nil }
 
     /// Moves the showing conversation by one exchange, or by one tool call inside one.
     ///
@@ -1039,6 +1046,7 @@ final class TerminalContainerViewController: NSViewController {
         let handsOverTheBox = consumeComposerHandoff(for: sessionID)
 
         guard sessionID != currentSessionID || settingsPage != nil || currentTerminalID != nil
+            || currentSearchConversationWindow != nil
         else { return }
 
         // Read while the composer is still the visible surface: its frame and its picture are
@@ -1494,6 +1502,134 @@ final class TerminalContainerViewController: NSViewController {
         conversation.focusPrompt()
     }
 
+    /// Mounts the bounded, source-validated reader used by a historical Search hit. It is a
+    /// session surface for navigation and scope, but deliberately not a live conversation: no
+    /// provider is launched and no composer or terminal input is admitted merely by searching.
+    func showSearchConversationWindow(
+        _ window: ConversationWindow,
+        projectName: String,
+        sessionTitle: String,
+        providerName: String,
+        onClose: @escaping @MainActor () -> Void
+    ) {
+        consumeComposerHandoff(for: nil)
+        detachCurrentChild()
+        currentComposerProjectID = nil
+        currentSettingsPageID = nil
+        currentTerminalID = nil
+        currentSessionID = window.sessionID
+        applyDrawer(for: nil)
+
+        let controller = ConversationSearchWindowViewController()
+        controller.onClose = onClose
+        addChild(controller)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(controller.view, positioned: .below, relativeTo: drawerDivider)
+        NSLayoutConstraint.activate([
+            controller.view.topAnchor.constraint(equalTo: contentTopAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+
+        controller.apply(ConversationSearchWindowPresentation(
+            title: sessionTitle,
+            subtitle: [
+                projectName,
+                providerName,
+                window.isArchived ? L10n.string("Archived") : L10n.string("Search match"),
+            ].joined(separator: " · "),
+            rows: window.rows.map { row in
+                ConversationSearchWindowRowPresentation(
+                    id: row.id,
+                    eyebrow: Self.searchHistoryEyebrow(for: row),
+                    title: row.title.isEmpty ? nil : row.title,
+                    body: row.body,
+                    match: row.id == window.anchorRowID ? window.anchorMatch : nil,
+                    isAnchor: row.id == window.anchorRowID
+                )
+            },
+            anchorRowID: window.anchorRowID,
+            hasEarlier: window.hasEarlier,
+            hasLater: window.hasLater
+        ))
+        currentSearchConversationWindow = controller
+        placeholderView.isHidden = true
+        hideLaunchFailureIfNeeded()
+        hideComposerIfLoaded()
+        applyPaneBackground(.chrome)
+        refreshGitStatusOverlayRunState()
+        refreshGitStatusOverlaySubagents()
+    }
+
+    private static func searchHistoryEyebrow(for row: ConversationWindowRow) -> String {
+        let owner: String
+        if row.hasError {
+            owner = L10n.string("Error")
+        } else if row.kind == .toolSummary {
+            owner = L10n.string("Tool")
+        } else {
+            switch row.author {
+            case .you: owner = L10n.string("You")
+            case .agent: owner = L10n.string("Agent")
+            case .system, .none: owner = L10n.string("System")
+            }
+        }
+        guard let timestamp = row.timestamp else { return owner }
+        return owner + " · " + DateFormatter.localizedString(
+            from: timestamp,
+            dateStyle: .medium,
+            timeStyle: .short
+        )
+    }
+
+    func showProjectTextSearchWindow(
+        _ window: ProjectTextWindow,
+        projectName: String,
+        onClose: @escaping @MainActor () -> Void
+    ) {
+        consumeComposerHandoff(for: nil)
+        detachCurrentChild()
+        currentComposerProjectID = window.projectID
+        currentSettingsPageID = nil
+        currentTerminalID = nil
+        currentSessionID = nil
+        currentSearchFileRelativePath = window.relativePath
+        applyDrawer(for: nil)
+
+        let controller = ProjectTextSearchPreviewViewController()
+        controller.onClose = onClose
+        addChild(controller)
+        controller.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(controller.view, positioned: .below, relativeTo: drawerDivider)
+        NSLayoutConstraint.activate([
+            controller.view.topAnchor.constraint(equalTo: contentTopAnchor),
+            controller.view.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
+            controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+        ])
+        controller.apply(ProjectTextSearchPreviewPresentation(
+            path: window.relativePath,
+            project: projectName,
+            lines: window.lines.map { line in
+                ProjectTextSearchPreviewLinePresentation(
+                    number: line.number,
+                    text: line.text,
+                    match: line.number == window.anchorLine ? window.anchorMatch : nil,
+                    isAnchor: line.number == window.anchorLine
+                )
+            },
+            anchorLine: window.anchorLine,
+            hasEarlier: window.hasEarlier,
+            hasLater: window.hasLater
+        ))
+        currentProjectTextSearchPreview = controller
+        placeholderView.isHidden = true
+        hideLaunchFailureIfNeeded()
+        hideComposerIfLoaded()
+        applyPaneBackground(.chrome)
+    }
+
     /// The one way a view is placed over the pane's backdrop.
     ///
     /// Typed to `BackdropOverlay` for the same reason the toolbar's factory is: this pane is
@@ -1551,6 +1687,19 @@ final class TerminalContainerViewController: NSViewController {
             conversation.view.removeFromSuperview()
             conversation.removeFromParent()
             currentConversation = nil
+        }
+
+        if let searchWindow = currentSearchConversationWindow {
+            searchWindow.view.removeFromSuperview()
+            searchWindow.removeFromParent()
+            currentSearchConversationWindow = nil
+        }
+
+        if let preview = currentProjectTextSearchPreview {
+            preview.view.removeFromSuperview()
+            preview.removeFromParent()
+            currentProjectTextSearchPreview = nil
+            currentSearchFileRelativePath = nil
         }
 
         if let terminal = currentProjectTerminal {

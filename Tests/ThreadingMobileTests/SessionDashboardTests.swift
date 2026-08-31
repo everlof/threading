@@ -746,6 +746,7 @@ final class MobileDemoSceneTests: XCTestCase {
     /// The variable is spelled once, and every reader in the app goes through it.
     func testTheEnvironmentVariableIsSpelledOnce() {
         XCTAssertEqual(MobileDemoScene.environmentKey, "THREADING_MOBILE_DEMO")
+            case .universalSearch: expected = ("universal-search", .universalSearch)
     }
 }
 #endif

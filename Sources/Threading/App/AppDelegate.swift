@@ -152,6 +152,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var hostFactPipeline: HostFactPipeline?
     private var workspaceNavigatorMenu: NSMenu?
     private var commandPaletteController: CommandPaletteViewController?
+    private var navigationSearchIndexStore: NavigationSearchIndexStore?
+    private var transcriptSearchIndexStore: TranscriptSearchIndexStore?
+    private var remoteUniversalSearchService: RemoteUniversalSearchService?
+    private var universalSearchController: UniversalSearchSessionController?
     private var agentCLIUpdateCoordinator: AgentCLIUpdateCoordinator?
 
     /// The same semantic catalog and invocation route feeds menus, shortcuts and the palette.
@@ -520,6 +524,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
         )
         self.mainWindowController = mainWindowController
+        let navigationSearchIndexStore = NavigationSearchIndexStore(
+            projectStore: environment.projectStore
+        )
+        self.navigationSearchIndexStore = navigationSearchIndexStore
+        let transcriptSearchIndexStore = TranscriptSearchIndexStore(
+            projectStore: environment.projectStore
+        )
+        self.transcriptSearchIndexStore = transcriptSearchIndexStore
+        let remoteUniversalSearchService = RemoteUniversalSearchService(
+            navigationIndex: navigationSearchIndexStore,
+            transcriptIndex: transcriptSearchIndexStore,
+            projectStore: environment.projectStore,
+            workspaceMetadata: { [weak mainWindowController] in
+                mainWindowController?.workspaceMetadataSearchRecords() ?? []
+            }
+        )
+        self.remoteUniversalSearchService = remoteUniversalSearchService
+        RemoteAccessCoordinator.shared.installUniversalSearch(remoteUniversalSearchService)
+        universalSearchController = UniversalSearchSessionController(
+            navigationIndex: navigationSearchIndexStore,
+            transcriptIndex: transcriptSearchIndexStore,
+            catalog: { [weak self] in self?.hostCommandPlane.commands() ?? [] },
+            projects: { [weak self] in self?.environment.projectStore.projects ?? [] },
+            projectContext: { [weak mainWindowController] in
+                mainWindowController?.currentProjectID
+            },
+            viewContext: { [weak mainWindowController] in
+                mainWindowController?.currentSearchViewContext
+            },
+            workspaceMetadata: { [weak mainWindowController] in
+                mainWindowController?.workspaceMetadataSearchRecords() ?? []
+            },
+            activate: { [weak self] locator in
+                await self?.activateSearchLocator(locator) == true
+            }
+        )
         // A checkout move requested by the turn that preceded a crash is a durable input fence.
         // Settle it only after the window has installed its relaunch observer, but before session
         // restoration is allowed to start the provider in the old checkout.
@@ -2307,6 +2347,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         menu.addItem(commandItem("system.selectAll", action: #selector(performHostMenuCommand(_:))))
         menu.addItem(.separator())
         menu.addItem(commandItem(AppCommands.ID.find, action: #selector(showFind)))
+        menu.addItem(commandItem(
+            AppCommands.ID.searchEverywhere,
+            action: #selector(showSearchEverywhere)
+        ))
 
         let item = NSMenuItem()
         item.submenu = menu
@@ -2729,7 +2773,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 availability: state.availability,
                 nextInput: state.nextInput
             )
-        }
+        } + settingsDestinations().map { $0.hostDescriptor() }
+    }
+
+    /// Every page and row in Settings, offered beside the commands.
+    ///
+    /// Appended rather than registered: these navigate rather than run, so they belong in the
+    /// palette and nowhere else — see `SettingsDestination`. Enumerated on each catalog read for
+    /// the same reason commands are: an extension can be enabled or removed between one palette
+    /// and the next, taking its pages and rows with it.
+    private func settingsDestinations() -> [SettingsDestination] {
+        guard mainWindowController != nil else { return [] }
+        return SettingsPages.destinations
     }
 
     private func hostCommandInputOptions(
@@ -2883,6 +2938,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         _ request: HostCommandInvocationRequest
     ) -> HostCommandInvocationOutcome {
         let id = request.commandID
+        if SettingsDestinationCatalog.isDestinationID(id) {
+            return showSettingsDestination(id: id)
+        }
         guard let command = CommandRegistry.shared.command(id: id) else {
             return .refused(commandID: id, reason: L10n.string("This command is no longer available."))
         }
@@ -2985,16 +3043,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         case AppCommands.ID.renameSession: mainWindowController?.renameCurrentSession()
         case AppCommands.ID.closeSession: mainWindowController?.closeCurrentSession()
         case AppCommands.ID.closeTab: mainWindowController?.closeActiveTab()
-        case AppCommands.ID.find: mainWindowController?.showFind()
+        case AppCommands.ID.find:
+            if mainWindowController?.showFind() != true { showUniversalSearch(everywhere: false) }
+        case AppCommands.ID.findNext:
+            if universalSearchController?.repeatSelection(backwards: false) != true {
+                _ = mainWindowController?.repeatFind(backwards: false)
+            }
+        case AppCommands.ID.findPrevious:
+            if universalSearchController?.repeatSelection(backwards: true) != true {
+                _ = mainWindowController?.repeatFind(backwards: true)
+            }
+        case AppCommands.ID.searchEverywhere: showUniversalSearch(everywhere: true)
         case AppCommands.ID.openIn: mainWindowController?.openInPreferredApp()
         case AppCommands.ID.toggleSidebar: mainWindowController?.toggleSidebar()
         case AppCommands.ID.groupByBranch:
-            AppSettings.shared.groupsSessionsByBranch.toggle()
+            NativeSidebarPipelineOptions.toggleBranchGrouping()
             NotificationCenter.default.post(ProjectsDidChange())
         case AppCommands.ID.loneBranchHeadings:
-            AppSettings.shared.groupsLoneBranches.toggle()
+            NativeSidebarPipelineOptions.toggleLoneBranchHeadings()
             NotificationCenter.default.post(ProjectsDidChange())
-        case AppCommands.ID.compactTree: AppSettings.shared.compactsSidebarTree.toggle()
+        case AppCommands.ID.compactTree: NativeSidebarPipelineOptions.toggleCompactTree()
         // No extra post: the setter's own settings event is what the sidebar's footer control
         // and the Settings row both follow, which is what keeps the three surfaces one state.
         case AppCommands.ID.silenceSounds: AppSettings.shared.silencesAllSounds.toggle()
@@ -3042,6 +3110,102 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
         }
         return .invoked(commandID: id)
+    }
+
+    /// Opens Settings on a destination's page and reveals its row.
+    ///
+    /// Resolved against the catalogue as it stands rather than by taking the id apart: a page an
+    /// extension contributed can be gone by the time its palette row is confirmed, and a
+    /// navigation to a page that no longer exists should refuse rather than open Settings on
+    /// whatever is first.
+    private func showSettingsDestination(id: String) -> HostCommandInvocationOutcome {
+        guard let controller = mainWindowController,
+              let destination = SettingsDestinationCatalog.destination(
+                  id: id,
+                  in: SettingsPages.destinations
+              ) else {
+            return .refused(
+                commandID: id,
+                reason: L10n.string("That settings page is no longer available.")
+            )
+        }
+        controller.showSettingsPage(id: destination.pageID, revealing: destination.rowTitle)
+        return .invoked(commandID: id)
+    }
+
+    private func showUniversalSearch(everywhere: Bool) {
+        guard let window = mainWindowController?.window else { return }
+        let preferredScope: SearchScope
+        if !everywhere, let view = mainWindowController?.currentSearchViewContext {
+            preferredScope = .view(view)
+        } else {
+            // Command-F reaches this branch only when the active surface has no honest provider.
+            preferredScope = .everywhere
+        }
+        universalSearchController?.present(in: window, preferredScope: preferredScope)
+    }
+
+    private func activateSearchLocator(_ locator: SearchLocator) async -> Bool {
+        guard let controller = mainWindowController else { return false }
+        switch locator {
+        case .project(let projectID):
+            return controller.openSearchProject(projectID)
+        case .session(let projectID, let sessionID):
+            return controller.openSearchSession(sessionID, projectID: projectID)
+        case .projectTerminal(let projectID, let terminalID):
+            return controller.openSearchTerminal(terminalID, projectID: projectID)
+        case .archivedSession(let projectID, let sessionID):
+            return controller.openArchivedSearchSession(sessionID, projectID: projectID)
+        case .command(let commandID):
+            if case .invoked = hostCommandPlane.invoke(commandID: commandID) { return true }
+            return false
+        case .setting(let destinationID):
+            if case .invoked = hostCommandPlane.invoke(commandID: destinationID) { return true }
+            return false
+        case .workspaceFile(let projectID, _, let location):
+            if location.line != nil {
+                guard let project = environment.projectStore.project(withID: projectID) else {
+                    return false
+                }
+                do {
+                    let textWindow = try await ProjectTextWindowLoader.load(
+                        projectID: projectID,
+                        root: project.folderURL,
+                        location: location
+                    )
+                    guard !Task.isCancelled else { return false }
+                    return controller.openSearchProjectTextWindow(textWindow)
+                } catch {
+                    return false
+                }
+            }
+            return controller.openSearchWorkspaceFile(projectID: projectID, location: location)
+        case .attachment(let projectID, let sessionID, let attachmentID):
+            return controller.openSearchAttachment(
+                projectID: projectID,
+                sessionID: sessionID,
+                attachmentID: attachmentID
+            )
+        case .browserTab(let projectID, let sessionID, let tabID):
+            return controller.openSearchBrowserTab(
+                projectID: projectID,
+                sessionID: sessionID,
+                tabID: tabID
+            )
+        case .conversation(let conversation):
+            guard let loader = transcriptSearchIndexStore?.conversationWindowLoader() else {
+                return false
+            }
+            do {
+                let window = try await loader.load(centeredOn: conversation)
+                guard !Task.isCancelled else { return false }
+                return controller.openSearchConversationWindow(window)
+            } catch {
+                return false
+            }
+        case .gitReview:
+            return false
+        }
     }
 
     @objc private func showCommandPalette() {
@@ -3377,6 +3541,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
 
     @objc private func showFind() {
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.find)
+    }
+
+    @objc private func showSearchEverywhere() {
+        _ = hostCommandPlane.invoke(commandID: AppCommands.ID.searchEverywhere)
     }
 
     @objc private func jumpToReviewFile() {
