@@ -535,6 +535,13 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             resolveTurnStartWaiters(for: report.sessionID)
         }
 
+        // Also before it, and for the same reason the prompt title is: where the agent is
+        // working is a fact about the *conversation*, not about the terminal showing it, and a
+        // natively rendered chat has no controller to fall through to. Every event carries the
+        // directory, so this runs on all of them; the tracker's own comparison is what makes
+        // that cheap.
+        SessionExecutionLocusTracker.shared.observe(report)
+
         guard let controller = controllers[report.sessionID] else {
             // Ordinary for a rendered conversation, which learns its boundaries from the stream
             // and has no terminal controller. Recorded at debug because it is also what a

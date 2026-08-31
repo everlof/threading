@@ -760,6 +760,17 @@
         }
       }
     },
+    "%@ is not a valid value for %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ är inte ett giltigt värde för %@."
+          }
+        }
+      }
+    },
     "%@ is not available on your login shell's PATH. Install it, then try again." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -844,6 +855,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ blandat"
+          }
+        }
+      }
+    },
+    "%@ needs a value." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ behöver ett värde."
           }
         }
       }
@@ -5149,6 +5171,17 @@
         }
       }
     },
+    "Add a project first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till ett projekt först."
+          }
+        }
+      }
+    },
     "Add a throwaway account and agents can sign in to that exact origin without you typing it. Never store a real account here." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7360,6 +7393,17 @@
         }
       }
     },
+    "Attachment search covers sessions opened during this launch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bilagesökningen omfattar sessioner som öppnats under den här körningen."
+          }
+        }
+      }
+    },
     "Attachments" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -8390,6 +8434,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Endast webbläsare"
+          }
+        }
+      }
+    },
+    "Browser search covers tabs opened during this launch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Webbläsarsökningen omfattar flikar som öppnats under den här körningen."
           }
         }
       }
@@ -10770,6 +10825,17 @@
         }
       }
     },
+    "Close History" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng historik"
+          }
+        }
+      }
+    },
     "Close Other Tabs" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10788,6 +10854,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stäng uppblåsning"
+          }
+        }
+      }
+    },
+    "Close Search" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng sökning"
           }
         }
       }
@@ -10876,6 +10953,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stäng uppblåsning och återgå till dess öppnare"
+          }
+        }
+      }
+    },
+    "Close the quoted phrase to search." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avsluta den citerade frasen för att söka."
           }
         }
       }
@@ -12508,6 +12596,17 @@
         }
       }
     },
+    "Conversation history search is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökning i konversationshistoriken är inte tillgänglig."
+          }
+        }
+      }
+    },
     "Conversation repair: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13065,6 +13164,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte koda kontrollbegäran."
+          }
+        }
+      }
+    },
+    "Could not move to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte flytta till %@"
           }
         }
       }
@@ -13846,6 +13956,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Aktuellt tema"
+          }
+        }
+      }
+    },
+    "Current View" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuell vy"
           }
         }
       }
@@ -14715,6 +14836,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Designstilar"
+          }
+        }
+      }
+    },
+    "Destinations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mål"
           }
         }
       }
@@ -16105,6 +16237,17 @@
         }
       }
     },
+    "Error" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fel"
+          }
+        }
+      }
+    },
     "Escape suggestion dismissed." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -16310,6 +16453,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Allt ovanför"
+          }
+        }
+      }
+    },
+    "Everywhere" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Överallt"
           }
         }
       }
@@ -17271,6 +17425,17 @@
         }
       }
     },
+    "File paths searched in the %lld most recent projects — choose Project or refine the query." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filsökvägar söktes i de %lld senast använda projekten — välj Projekt eller förfina sökningen."
+          }
+        }
+      }
+    },
     "File the session away when the turn ends, with an undo on the receipt." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17575,6 +17740,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hitta ikon automatiskt"
+          }
+        }
+      }
+    },
+    "Find Next" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hitta nästa"
+          }
+        }
+      }
+    },
+    "Find Previous" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hitta föregående"
           }
         }
       }
@@ -20219,6 +20406,28 @@
         }
       }
     },
+    "Indexing %lld destinations…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indexerar %lld mål…"
+          }
+        }
+      }
+    },
+    "Indexing %lld of %lld destinations…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indexerar %lld av %lld mål…"
+          }
+        }
+      }
+    },
     "Info" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20985,6 +21194,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dess checkout eller arbetskatalog ändrades innan en terminal kunde ta emot kommandot."
+          }
+        }
+      }
+    },
+    "Its conversation had already moved there, so resuming it here would have started an empty one. Threading followed it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dess konversation hade redan flyttat dit, så att återuppta den här hade startat en tom. Threading följde efter."
           }
         }
       }
@@ -23629,6 +23849,17 @@
         }
       }
     },
+    "More matches are available — refine the query." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fler träffar finns — förfina sökningen."
+          }
+        }
+      }
+    },
     "More observations needed" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23801,6 +24032,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Flytta chatten till en annan checkout?"
+          }
+        }
+      }
+    },
+    "Move this chat to the new worktree?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flytta chatten till den nya arbetskopian?"
           }
         }
       }
@@ -24230,6 +24472,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "NavigatorGridItemView"
+          }
+        }
+      }
+    },
+    "Nearby conversation history" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Närliggande konversationshistorik"
           }
         }
       }
@@ -25418,6 +25671,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ingen avläsning för din gräns"
+          }
+        }
+      }
+    },
+    "No recent destinations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga senaste mål"
           }
         }
       }
@@ -27838,6 +28102,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Öppningsmeddelande"
+          }
+        }
+      }
+    },
+    "Opening result…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppnar resultat…"
           }
         }
       }
@@ -33111,6 +33386,17 @@
         }
       }
     },
+    "Return to open · Escape to close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retur öppnar · Escape stänger"
+          }
+        }
+      }
+    },
     "Revalidate cached content with the server when possible" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -33195,6 +33481,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visade den aktiva sidan i sidofältet."
+          }
+        }
+      }
+    },
+    "Reverse Session Order" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Omvänd konversationsordning"
           }
         }
       }
@@ -34574,6 +34871,17 @@
         }
       }
     },
+    "Search Everywhere…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök överallt…"
+          }
+        }
+      }
+    },
     "Search Settings" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34581,6 +34889,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sök i inställningar"
+          }
+        }
+      }
+    },
+    "Search Threading" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök i Threading"
           }
         }
       }
@@ -34651,6 +34970,28 @@
         }
       }
     },
+    "Search is limited to %lld bytes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökningen är begränsad till %lld byte."
+          }
+        }
+      }
+    },
+    "Search match" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökresultat"
+          }
+        }
+      }
+    },
     "Search or enter address" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -34658,6 +34999,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sök eller ange adress"
+          }
+        }
+      }
+    },
+    "Search results" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökresultat"
+          }
+        }
+      }
+    },
+    "Search scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökområde"
+          }
+        }
+      }
+    },
+    "Search supports up to %lld filters." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökningen stöder upp till %lld filter."
           }
         }
       }
@@ -34713,6 +35087,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Söker bland alla app- och tilläggskommandon som är tillgängliga just nu."
+          }
+        }
+      }
+    },
+    "Searches projects, sessions, terminals, commands, settings and indexed history." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Söker i projekt, sessioner, terminaler, kommandon, inställningar och indexerad historik."
           }
         }
       }
@@ -35461,6 +35846,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Konversationsalternativ"
+          }
+        }
+      }
+    },
+    "Session Order" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konversationsordning"
           }
         }
       }
@@ -36818,6 +37214,50 @@
         }
       }
     },
+    "Showing complete indexed history" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar hela den indexerade historiken"
+          }
+        }
+      }
+    },
+    "Showing nearby history · Earlier and later messages are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar närliggande historik · Tidigare och senare meddelanden visas inte"
+          }
+        }
+      }
+    },
+    "Showing nearby history · Earlier messages are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar närliggande historik · Tidigare meddelanden visas inte"
+          }
+        }
+      }
+    },
+    "Showing nearby history · Later messages are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar närliggande historik · Senare meddelanden visas inte"
+          }
+        }
+      }
+    },
     "Showing recovery mode" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37511,6 +37951,28 @@
         }
       }
     },
+    "Some conversation history is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Viss konversationshistorik är inte tillgänglig."
+          }
+        }
+      }
+    },
+    "Some long conversation entries were shortened for search." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vissa långa konversationsposter förkortades för sökning."
+          }
+        }
+      }
+    },
     "Some of these" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37518,6 +37980,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Några av dessa"
+          }
+        }
+      }
+    },
+    "Some project file catalogues are unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vissa projekts filkataloger är inte tillgängliga."
           }
         }
       }
@@ -39623,6 +40096,17 @@
         }
       }
     },
+    "That result is no longer available." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Resultatet är inte längre tillgängligt."
+          }
+        }
+      }
+    },
     "That session does not belong to the requested project." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39674,6 +40158,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den sessionen arkiverades innan det här skulle skickas."
+          }
+        }
+      }
+    },
+    "That settings page is no longer available." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den inställningssidan är inte längre tillgänglig."
           }
         }
       }
@@ -39942,6 +40437,17 @@
         }
       }
     },
+    "The agent created %@ and wants to continue this conversation there. Reason: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten skapade %@ och vill fortsätta konversationen där. Orsak: %@"
+          }
+        }
+      }
+    },
     "The agent did not answer the control request." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39971,6 +40477,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten lämnade ingen redogörelse för vad den hittade."
+          }
+        }
+      }
+    },
+    "The agent has been working there." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten har arbetat där."
           }
         }
       }
@@ -41203,6 +41720,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Filerna är identiska."
+          }
+        }
+      }
+    },
+    "The final backslash must escape a character." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det sista omvända snedstrecket måste undanta ett tecken."
           }
         }
       }
@@ -45651,6 +46179,17 @@
         }
       }
     },
+    "Threading still resumes it in the checkout it started from. Move it to keep the two together." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading återupptar den fortfarande i utcheckningen den startade i. Flytta den för att hålla ihop de två."
+          }
+        }
+      }
+    },
     "Threading stops the agent, moves the conversation to a login with room, and queues “continue” there. A login whose fresh reading has no room is refused rather than used." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -46912,6 +47451,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Okänt fält i projektkonfigurationen: %@."
+          }
+        }
+      }
+    },
+    "Unknown search filter: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Okänt sökfilter: %@"
           }
         }
       }
@@ -49321,6 +49871,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetskatalog: %@"
+          }
+        }
+      }
+    },
+    "Working in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetar i %@"
           }
         }
       }
@@ -54275,6 +54836,28 @@
         }
       }
     },
+    "“%@” is working in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” arbetar i %@"
+          }
+        }
+      }
+    },
+    "“%@” now runs in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” körs nu i %@"
+          }
+        }
+      }
+    },
     "“%@” requests %@, but neither it nor its fallback fonts are installed. Using the system font." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54341,6 +54924,17 @@
         }
       }
     },
+    "↑↓ Move   Return Open   Escape Close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "↑↓ Flytta   Retur Öppna   Escape Stäng"
+          }
+        }
+      }
+    },
     "↑↓ Move   Return Run   Escape Back" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54359,6 +54953,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "↑↓ Flytta   Retur Kör   Escape Stäng"
+          }
+        }
+      }
+    },
+    "↑↓ Move   Tab or Return Choose Project   Escape Close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "↑↓ Flytta   Tabb eller Retur Välj projekt   Escape Stäng"
           }
         }
       }

@@ -462,6 +462,18 @@ detached children, MCP monitors and workflows whose status is `running` or `pend
 empty array when there are none — measured against 2.1.220 by ending a turn on top of a
 `sleep 45`. Codex 0.144.6 sends no such key, so its sessions read zero and behave as they did.
 
+**The same lesson, one key further over: every payload also carries `cwd`.** Claude builds each
+one as `session_id` / `transcript_path` / `cwd`, and Threading read the first and the third for a
+long time while stepping straight over the second. Codex 0.151.0 sends it too, captured through
+Threading's own installed hook on `sessionStarted`, `turnStarted` and `turnFinished`. It is the
+only sound answer to where an agent is actually working, because a runtime that prefixes each
+command with `cd` moves neither OSC 7 nor its own process's cwd — and reading it is what stops a
+chat building in a sibling worktree from being filed, grouped and labelled under the checkout it
+launched from. What is done with it belongs to
+[sessions.md](sessions.md#where-a-chat-runs-is-not-where-its-agent-is); what belongs here is that
+it arrives on **every** event, that it is therefore on the highest-frequency callback in the app
+carrying a path, and that its consumer must do no work at all for an unchanged value.
+
 `pausedOnOwnWork` is therefore a **fourth fact rather than a longer turn**, and the distinction
 is the one the split above already paid for: the turn is what a `Notification` is read against,
 so borrowing it here would make Claude's idle-prompt notice — which holds nothing up — arrive

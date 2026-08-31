@@ -40,12 +40,24 @@ enum GitWorktree {
             .appendingPathComponent("\(root.lastPathComponent)-\(safeBranch)")
     }
 
-    /// Creates a worktree at `destination` on a new `branch`.
+    /// Creates a worktree at `destination` on `branch`.
     ///
     /// Returns the created directory, which is a checkout of the same repository and so will
     /// group with its siblings in the sidebar.
+    ///
+    /// `createsBranch` is what tells the two real requests apart, and defaulting it wrong is why
+    /// this parameter exists. "Give me a worktree for a new branch" needs `-b`; "check this
+    /// existing branch out in a worktree" must not pass it, because `-b` on a name that already
+    /// exists fails outright. The composer only ever asks for the first, and the agent-facing
+    /// route needs both — the request that started this was literally *check out
+    /// `dev/feature/x` in a new worktree*.
     @discardableResult
-    static func create(branch: String, at destination: URL, from project: Project) throws -> URL {
+    static func create(
+        branch: String,
+        at destination: URL,
+        from project: Project,
+        createsBranch: Bool = true
+    ) throws -> URL {
         ThreadingLogger.git.info(
             "Worktree creation started project=\(project.id.uuidString, privacy: .public) branch=\(branch, privacy: .private(mask: .hash)) destination=\(destination.path, privacy: .private(mask: .hash))"
         )
@@ -64,10 +76,13 @@ enum GitWorktree {
         }
 
         // -b creates the branch; without it an existing branch already checked out elsewhere
-        // would be refused, which is the common case when reusing a name.
+        // would be refused, which is the common case when reusing a name. Checking an existing
+        // branch out names it *after* the path instead, which is the other of git's two spellings.
         do {
             try run(
-                ["worktree", "add", "-b", branch, destination.path],
+                createsBranch
+                    ? ["worktree", "add", "-b", branch, destination.path]
+                    : ["worktree", "add", destination.path, branch],
                 in: root
             )
         } catch {

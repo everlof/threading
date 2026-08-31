@@ -405,6 +405,153 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         ))
     }
 
+    /// The basis nobody requested, and the one condition that lowers its bar.
+    ///
+    /// An observation is not a request, so under the shipped default it is asked about like an
+    /// agent's own decision. The exception is the case where refusing to act preserves a defect
+    /// instead of preventing one: the conversation has already left, so the chat is *already*
+    /// unresumable where Threading would launch it, and the move copies nothing. `alwaysAsk`
+    /// still asks, because that is what it means.
+    func testObservedExecutionAuthorityMatrix() {
+        XCTAssertTrue(SessionCheckoutCoordinator.requiresApproval(
+            policy: .allowExplicitRequests, authorityBasis: .observedExecution
+        ))
+        XCTAssertFalse(SessionCheckoutCoordinator.requiresApproval(
+            policy: .allowExplicitRequests,
+            authorityBasis: .observedExecution,
+            repairsDetachedConversation: true
+        ))
+        XCTAssertTrue(SessionCheckoutCoordinator.requiresApproval(
+            policy: .alwaysAsk,
+            authorityBasis: .observedExecution,
+            repairsDetachedConversation: true
+        ))
+        XCTAssertFalse(SessionCheckoutCoordinator.requiresApproval(
+            policy: .allowSameRepository, authorityBasis: .observedExecution
+        ))
+
+        // The repair condition belongs to the observed basis alone. A move an agent asked for
+        // is judged on the asking, and letting a filesystem coincidence quietly grant it would
+        // make the audited bases mean different things on different days.
+        XCTAssertTrue(SessionCheckoutCoordinator.requiresApproval(
+            policy: .allowExplicitRequests,
+            authorityBasis: .agentInitiated,
+            repairsDetachedConversation: true
+        ))
+    }
+
+    /// The four states of the two transcript paths, and why only one of them is the repair.
+    ///
+    /// This is the condition that decides whether an observed move happens without asking, so
+    /// it is asserted directly rather than inferred from the drift that occasioned it. The real
+    /// defect it was written from: one chat's `.jsonl` had followed its agent into a sibling
+    /// worktree's slug and was no longer under the checkout Threading launches from, so the
+    /// `--resume` branch could no longer find it and the next launch would have minted an empty
+    /// conversation under the same id. A second chat of the same repository, reporting the same
+    /// kind of drift, had *not* re-filed and was in no danger at all.
+    func testConversationDetachmentNeedsBothHalves() throws {
+        let owned = root.appendingPathComponent("owned.jsonl")
+        let destination = root.appendingPathComponent("destination.jsonl")
+        let manager = FileManager.default
+        func detached() -> Bool {
+            SessionCheckoutCoordinator.conversationHasLeft(
+                owned: owned,
+                destination: destination,
+                fileManager: manager
+            )
+        }
+
+        // Neither: a chat that has not written a conversation yet.
+        XCTAssertFalse(detached())
+
+        // Owned only: the ordinary healthy chat, and the overwhelmingly common case.
+        try Data("conversation".utf8).write(to: owned)
+        XCTAssertFalse(detached())
+
+        // Both: a copy exists at the destination, but resume still works where it is filed.
+        try Data("copy".utf8).write(to: destination)
+        XCTAssertFalse(detached())
+
+        // Destination only: the conversation has left and resume is already broken.
+        try manager.removeItem(at: owned)
+        XCTAssertTrue(detached())
+    }
+
+    /// A runtime whose conversations are not checkout-scoped can never be in the repair case:
+    /// it resumes by a provider-owned id that no directory can invalidate.
+    func testConversationDetachmentIsFalseForNonCheckoutScopedRuntimes() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+
+        XCTAssertFalse(makeCoordinator().conversationHasLeftOwnedCheckout(
+            sessionID: session.id,
+            forDestination: sibling.path
+        ))
+    }
+
+    /// An observed drift travels the same path as a requested one, and records what it was.
+    func testObservedExecutionQueuesAMoveUnderItsOwnBasis() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+
+        let result = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: ObservedCheckout(
+                root: sibling.path,
+                worktreeIdentity: try XCTUnwrap(GitInfo.worktreeIdentity(for: sibling.path)),
+                repositoryIdentity: try XCTUnwrap(GitInfo.repositoryIdentity(for: sibling.path)),
+                branch: "feature/move",
+                displayName: "sibling"
+            ),
+            policy: .allowSameRepository
+        )
+
+        guard case .queued(let pending) = result else {
+            return XCTFail("expected the observed move to be queued, got \(result)")
+        }
+        XCTAssertEqual(pending.authorityBasis, .observedExecution)
+        XCTAssertEqual(pending.checkoutPath, sibling.path)
+        XCTAssertEqual(
+            pending.worktreeIdentity,
+            GitInfo.worktreeIdentity(for: sibling.path)
+        )
+    }
+
+    /// Re-reporting the same directory must not rewrite the pending record or restart its
+    /// fence. The reports arrive several times a turn; only the first is a question.
+    func testObservedExecutionIsIdempotentWhileAMoveIsPending() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+        let checkout = ObservedCheckout(
+            root: sibling.path,
+            worktreeIdentity: try XCTUnwrap(GitInfo.worktreeIdentity(for: sibling.path)),
+            repositoryIdentity: try XCTUnwrap(GitInfo.repositoryIdentity(for: sibling.path)),
+            branch: "feature/move",
+            displayName: "sibling"
+        )
+
+        _ = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: sibling.path,
+            authorityBasis: .observedExecution,
+            reason: "first",
+            policy: .allowSameRepository,
+            waitForCurrentTurnBoundary: true
+        )
+        let first = store.session(withID: session.id)?.pendingCheckoutMove
+
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: checkout,
+            policy: .allowSameRepository
+        )
+
+        XCTAssertEqual(store.session(withID: session.id)?.pendingCheckoutMove, first)
+        XCTAssertEqual(first?.reason, "first")
+    }
+
     func testMCPArgumentsDecodeAbsolutePathAuthorityAndReason() throws {
         let arguments = try JSONDecoder().decode(
             SetSessionCheckoutArguments.self,
@@ -427,6 +574,62 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         })
     }
 
+
+    /// The route that did not exist, which is why both drifted chats were made with raw git.
+    ///
+    /// `New Worktree…` lives in the composer where no agent can press it, and
+    /// `set_session_checkout` only moves into a checkout that already exists. An agent asked for
+    /// a worktree therefore had one option, and it left ownership behind.
+    func testCreateSessionWorktreeIsOfferedWithItsFullContract() throws {
+        let arguments = try JSONDecoder().decode(
+            CreateSessionWorktreeArguments.self,
+            from: Data(#"{"branch":"dev/feature/x","authority_basis":"explicit_user_request","reason":"the user asked for a worktree"}"#.utf8)
+        )
+
+        XCTAssertEqual(arguments.branch, "dev/feature/x")
+        XCTAssertEqual(arguments.authorityBasis, .explicitUserRequest)
+
+        let definition = try XCTUnwrap(MCPTools.definition(for: .createSessionWorktree))
+        XCTAssertEqual(definition.inputSchema.required, ["branch", "authority_basis", "reason"])
+        XCTAssertEqual(definition.annotations?.destructiveHint, false)
+        // Not idempotent, unlike a move: calling it twice makes two checkouts, or refuses the
+        // second on a destination that now exists.
+        XCTAssertEqual(definition.annotations?.idempotentHint, false)
+        XCTAssertTrue(MCPToolCatalog.project.tools.contains {
+            $0.name == "create_session_worktree"
+        })
+    }
+
+    /// Both of git's spellings, because the request that started this asked for the second and
+    /// the composer's own route only ever needed the first. `-b` on a name that already exists
+    /// fails outright.
+    func testAWorktreeCanTakeAnExistingBranchOrMakeANewOne() throws {
+        let project = Project(name: "main", folderURL: main)
+        let made = root.appendingPathComponent("made")
+        let taken = root.appendingPathComponent("taken")
+        try git(["branch", "dev/existing"], in: main)
+
+        try GitWorktree.create(
+            branch: "dev/fresh",
+            at: made,
+            from: project,
+            createsBranch: true
+        )
+        try GitWorktree.create(
+            branch: "dev/existing",
+            at: taken,
+            from: project,
+            createsBranch: false
+        )
+
+        XCTAssertEqual(GitInfo.currentBranch(for: made.path), "dev/fresh")
+        XCTAssertEqual(GitInfo.currentBranch(for: taken.path), "dev/existing")
+        XCTAssertEqual(
+            GitInfo.repositoryIdentity(for: taken.path),
+            GitInfo.repositoryIdentity(for: main.path),
+            "a worktree Threading makes must be a sibling the coordinator will accept"
+        )
+    }
 
     func testApprovalIsResolvedBeforePendingStateIsWritten() throws {
         let project = try XCTUnwrap(store.addProject(folderURL: main))

@@ -295,6 +295,32 @@ struct AgentCapabilities: OptionSet {
   /// account-wide history tree. Codex only: its Threading lifecycle payload includes
   /// `rollout_path`; Claude's session-scoped transcript is already resolved from its preset id.
   static let lifecycleReportedTranscriptPath = Self(rawValue: 1 << 33)
+
+  /// Lifecycle reports name the directory the agent is *currently* working in, so the host can
+  /// tell where a conversation is executing from where it was launched.
+  ///
+  /// This is the only sound source for that fact, and the alternative was measured and found
+  /// wrong. `TerminalSession.effectiveWorkingDirectory()` reads OSC 7 or the PTY root process's
+  /// real cwd, and a runtime that runs `cd x && …` per tool call never moves either: a chat
+  /// observed building in a sibling worktree for ten minutes had a root process still sitting
+  /// in the checkout it launched from, while its own status line named the worktree. A process
+  /// reading therefore cannot see the drift that matters, and a *reported* one can.
+  ///
+  /// Both hook-capable runtimes, each measured. Claude CLI 2.1.251 builds every hook payload
+  /// with `cwd` beside `session_id` and `transcript_path`, and its status-line payload carries
+  /// the same fact as `workspace.current_dir` next to an explicit `workspace.git_worktree`.
+  /// Codex 0.151.0 was captured through Threading's own installed hook, pointed at a local
+  /// listener: `sessionStarted`, `turnStarted` and `turnFinished` each arrived carrying `cwd`,
+  /// naming the directory the run was started in.
+  ///
+  /// Grok, OpenCode and Cursor register no lifecycle hooks at all, so the question does not
+  /// arise for them; they are absent here for the same reason they are absent from
+  /// `HookLifecycleEvent`'s registrations.
+  ///
+  /// Reported, not guaranteed: the payload only arrives while the runtime's lifecycle hooks are
+  /// installed, so a session running with reporting turned off contributes nothing and the
+  /// observer must treat silence as "unknown", never as "has not moved".
+  static let lifecycleReportedWorkingDirectory = Self(rawValue: 1 << 34)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -386,7 +412,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .liveFastModeControl, .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch,
         .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord,
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
-        .checkoutScopedConversationStorage
+        .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory
       ]
     case .codex:
       return [
@@ -394,7 +420,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .serviceTierFastMode, .sharedSubagentIdentity, .terminalThreadingBridge,
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
-        .inlineTerminalViewport, .lifecycleReportedTranscriptPath
+        .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
+        .lifecycleReportedWorkingDirectory
       ]
     case .grok:
       return [

@@ -72,7 +72,9 @@ See [Display Panel](#display-panel).
 There is no title bar — the window controls sit over the top of the sidebar. That is also as
 narrow as the sidebar goes: drag its divider and it stops where those controls end, and pushing
 on past that stop closes the sidebar altogether. **⌘S** brings it back, as does the sidebar
-button beside the traffic lights.
+button beside the traffic lights. You can also pause at the far-left window edge to reveal it
+temporarily; move into the sidebar to navigate normally, including its menus and popovers, and it
+hides shortly after you leave.
 
 Widening has no fixed limit — the sidebar takes whatever the terminal beside it can spare — and
 the width you leave it at is the width it opens at next launch.
@@ -1356,6 +1358,35 @@ a move clearly requested in your prompt proceeds without a duplicate question, w
 agent proposes itself asks first. **Always Ask** asks in both cases; **Same Repository** allows
 either after Threading's same-repository validation. The claimed authority and reason are kept in
 the audit trail.
+
+Asking an agent for a worktree goes through `create_session_worktree(branch, authority_basis,
+reason)`, which makes the checkout **and** moves the chat into it in one call. The branch may
+already exist or be new, and Threading chooses where the worktree lives so a repository's
+worktrees stay together on disk. Use this rather than letting an agent run `git worktree add`
+itself: a worktree Threading did not make is invisible to the sidebar, and the chat goes on being
+filed under the checkout it started in.
+
+### When a chat wanders
+
+An agent can change directory without anything durable moving, so a chat could spend hours
+building in another worktree while its row, its branch heading and its hover card all named the
+checkout it launched from. Threading now reads the working directory each agent reports and
+compares it with the checkout that owns the chat.
+
+The hover card gains a **Working in** line, directly under the branch, whenever the two disagree.
+That line appears for any disagreement, including one that can never be resolved by moving, such
+as an agent working in a different repository altogether.
+
+When the agent is in another checkout of the **same** repository, Threading offers to move the
+chat there, as a band with a **Move Chat** button rather than a dialog that interrupts you. Your
+**Settings ▸ Tools ▸ Project** choice governs it: **Explicit Requests** and **Always Ask** both
+ask, **Same Repository** moves without asking.
+
+There is one exception, and it repairs real damage. Claude files each conversation under the
+folder it is running in, so a chat whose agent moved may have taken its conversation with it. When
+Threading finds the conversation is no longer under the checkout it would launch from, resuming
+that chat there would have started an empty conversation instead of the real one, so it follows
+the conversation without asking and reports what it did. **Always Ask** still asks.
 
 ### Copying identifiers and paths
 Everything about a chat that is needed *elsewhere* sits in the right-click menu's **Copy ▸**
@@ -2824,7 +2855,9 @@ by how much of that login's allowance is used, one ring per limit window: the we
 outside, the five hours inside it, and, for a chat running a model the plan meters separately,
 that model's own window innermost. Open the menu and the account row spells out those exact
 percentages followed by their next reset. A model-specific reset such as Codex Spark appears only
-when that chat runs the model it meters. It is the same disc the New session screen wears, so it
+when that chat runs the model it meters. The compact disc does not add an alternate login's badge
+by default; enable **Settings → Appearance → Account initials** to show it. The menu still names
+the account either way. It is the same disc the New session screen wears, so it
 stays put when a draft becomes a chat. Open it and choose **Workspace** for **Browser**,
 **Review**, **Files**, and **Attachments**; a swipe in from the right edge of the session opens
 the same thing. Workspace is a drawer: it slides in from the right over the chat and follows your finger
@@ -3399,8 +3432,10 @@ It has an address bar, history controls, persistent cookies, responsive viewport
 Web Inspector. Its overflow menu includes find in page, print, visible-page screenshots, 50–200%
 zoom, recent downloads, current-site data clearing, and browser settings. The responsive toolbar
 provides editable CSS-pixel dimensions, rotation, and desktop, tablet, foldable, and phone presets;
-hiding it returns the page to the panel's natural size. These are honest viewport presets, not
-claims of touch, device-scale, browser-engine, or complete hardware emulation.
+hiding it returns the page to its host's natural size. When the agent sets an exact responsive
+viewport, the toolbar opens too, keeping the fixed dimensions and the way back to a filling page
+visible above any unused canvas. These are honest viewport presets, not claims of touch,
+device-scale, browser-engine, or complete hardware emulation.
 The current address rests as plain toolbar text. Point at it to reveal the editable field; click it
 to edit. Focus and text selection use the ordinary macOS text editor.
 When the browser tab is visible, Cmd+F opens its native find bar inside that tab.
@@ -5099,6 +5134,19 @@ Shortcuts are right-aligned in each command row. Click an editable shortcut (inc
 an unbound command), then press the new combination. Delete clears it and Escape cancels. A chord
 already owned by another command is refused inline. The change is the same persistent override
 shown by menus and **Settings ▸ Keyboard**.
+
+**Every setting is in the palette too.** Each Settings page, and each row on it, is a result of its
+own: type "alert sound", "tailnet" or "compact tree" and press Return to open Settings on that page
+with the row scrolled to and briefly marked. A setting row shows where it lives underneath its name
+("General › Notifications"); a page shows the group holding it ("Settings › App"). Rows also answer
+to words they do not print — "beep" finds the terminal bell — and when a command and a setting match
+equally well, the command that *does* the thing is listed first. Settings results carry no shortcut,
+because there is nothing for a key to run.
+
+This covers extensions as well. An extension's own settings page and every field on it are results,
+as are the fields an extension adds to one of Threading's pages — those name their owner in the path
+("Tools › Marketeer — Capture"). Each installed extension is itself a result: type its name to land
+on it under **Settings ▸ Extensions**.
 
 ## Keyboard Shortcuts
 

@@ -1613,6 +1613,31 @@ struct SetSessionCheckoutArguments: Codable, Sendable {
   }
 }
 
+/// What an agent says when it asks for a checkout of its own to work in.
+///
+/// No path: where a worktree lives is Threading's to decide (`GitWorktree.suggestedLocation`), so
+/// sibling worktrees of one repository group together on disk instead of landing wherever an
+/// agent happened to think of. Agents asked for a worktree used to reach for `git worktree add`
+/// with a path of their own invention, and the resulting checkout was invisible to the sidebar
+/// and to session ownership alike.
+struct CreateSessionWorktreeArguments: Codable, Sendable {
+  let branch: String?
+  let authorityBasis: SessionCheckoutAuthorityBasis?
+  let reason: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case branch
+    case authorityBasis = "authority_basis"
+    case reason
+  }
+
+  init(branch: String?, authorityBasis: SessionCheckoutAuthorityBasis?, reason: String?) {
+    self.branch = branch
+    self.authorityBasis = authorityBasis
+    self.reason = reason
+  }
+}
+
 /// What an agent says when it files its own session away.
 ///
 /// Only a reason, because everything else is already decided by where the call arrived: the URL
@@ -3718,8 +3743,10 @@ enum MCPTools {
         Give the active browser tab an exact responsive-test viewport without resizing \
         Threading's window. The user sees the same live page inside a pannable frame, and \
         page media queries, viewport units, element geometry, interactions, and \
-        screenshots all use the requested CSS-pixel dimensions. Supply width and height \
-        together, or omit both to return to fitting the shared panel.
+        screenshots all use the requested CSS-pixel dimensions. Setting a viewport opens \
+        the Device Toolbar so the fixed dimensions and reset route remain visible. Supply \
+        width and height together, then omit both when responsive testing is finished to \
+        return the page to filling its host.
         """,
       inputSchema: MCPInputSchema(
         properties: [
@@ -5929,6 +5956,57 @@ enum MCPTools {
           ),
         ],
         required: ["checkout_path", "authority_basis", "reason"]
+      )
+    ),
+    MCPToolDefinition(
+      tool: .createSessionWorktree,
+      name: "create_session_worktree",
+      groupID: "project",
+      family: .project,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      ),
+      title: "Work in a new worktree",
+      detail: "Create a worktree for a branch and move this conversation into it.",
+      symbol: "arrow.triangle.branch",
+      decodeArguments: { container in
+        try container.decodeIfPresent(CreateSessionWorktreeArguments.self, forKey: .arguments)
+          ?? CreateSessionWorktreeArguments(branch: nil, authorityBasis: nil, reason: nil)
+      },
+      observesPanel: false,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.createSessionWorktree(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Create a Git worktree for this conversation's repository and move only this calling \
+        conversation into it. Use this whenever the user asks for work to happen in a worktree, \
+        instead of running `git worktree add` yourself: a worktree Threading did not make is \
+        invisible to the sidebar and to durable chat ownership, so the conversation goes on \
+        being filed under the checkout it started in and can be resumed there by mistake. \
+        branch may name an existing branch or a new one; Threading chooses the location. Call \
+        this before beginning work, then end the current turn. Use authority_basis \
+        explicit_user_request only when the user's prompt actually asked for a worktree; \
+        otherwise agent_initiated, and explain why in reason.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "branch": MCPPropertySchema(
+            type: .string,
+            description: "Branch to check out in the worktree. Existing or new."
+          ),
+          "authority_basis": MCPPropertySchema(
+            type: .string,
+            description: "One of: explicit_user_request, agent_initiated."
+          ),
+          "reason": MCPPropertySchema(
+            type: .string,
+            description: "Short factual reason, retained in the audit trail."
+          ),
+        ],
+        required: ["branch", "authority_basis", "reason"]
       )
     ),
     MCPToolDefinition(
