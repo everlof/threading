@@ -98,7 +98,9 @@ final class AgentSessionViewController: NSViewController {
     private var transcriptRecheckGeneration: [String: Int] = [:]
     private var agentTitleRefreshWorkItem: DispatchWorkItem?
     private var codexTranscriptURL: URL?
-    private var codexInterruptionRefreshWorkItem: DispatchWorkItem?
+    private var codexTurnBoundaryRefreshWorkItem: DispatchWorkItem?
+    private var codexContinuationBoundaryRefreshWorkItem: DispatchWorkItem?
+    private var codexContinuationBoundaryRefreshIsOutputPrompted = false
     private var claudeTranscriptURL: URL?
     private var claudeBoundaryRefreshWorkItem: DispatchWorkItem?
 
@@ -508,10 +510,13 @@ final class AgentSessionViewController: NSViewController {
     /// the session is working and — before this — none was coming to end the launch grace either:
     /// `noteUnattendedLaunch` made every burst inert, and a Codex session visibly painting
     /// "Working" sat at idle in the sidebar until its *next* turn ended. So the grace is armed
-    /// for the replay and ended at the replay's own boundary, which the link reports. The two
-    /// transcript readers cannot stand in for it: `ClaudeTranscriptTurnRefusal` and
-    /// `CodexTranscriptInterruption` recover a turn that *ended*, and there is no reader here
-    /// that says one is open.
+    /// for the replay and ended at the replay's own boundary, which the link reports. Claude's
+    /// readers still cannot stand in for it — `ClaudeTranscriptTurnRefusal` and
+    /// `ClaudeTranscriptInterruption` recover a turn that *ended*, and Claude's transcript
+    /// records no open one. Codex's rollout does, and `CodexTranscriptTurnBoundary` now reads
+    /// it, so a reattached Codex session recovers a running turn exactly rather than by
+    /// inference — but only once its rollout path is known, which arrives on its own hooks.
+    /// The grace is what covers everything before that, for every runtime.
     @discardableResult
     func reattachToBackgroundHost(
         socketPath: String,
@@ -973,8 +978,21 @@ final class AgentSessionViewController: NSViewController {
         }
 
         codexTranscriptURL = url
-        scheduleCodexInterruptionRefresh()
+        scheduleCodexTurnBoundaryRefresh()
         scheduleRunProgressTranscriptRefresh()
+    }
+
+    /// Looks past Codex's `Stop` for the `task_started` record goal mode writes shortly after it.
+    ///
+    /// This is separate from the output-coalesced refresh below. Coalescing is right for normal
+    /// transcript observation, but a continuation can keep painting for longer than the activity
+    /// grace; repeatedly postponing this read would publish the exact false attention edge the
+    /// rollout is authoritative enough to prevent.
+    func noteCodexTurnFinishedForContinuationDetection() {
+        scheduleCodexContinuationBoundaryRefresh(
+            after: CodexTurnBoundaryDefaults.continuationProbeDelay,
+            outputPrompted: false
+        )
     }
 
     /// Coalesces terminal repaint bursts into one resumable, off-main transcript pass.
@@ -1066,34 +1084,97 @@ final class AgentSessionViewController: NSViewController {
 
     /// Revalidates once after an output burst settles. The transcript reader performs the stat
     /// and capped tail scan off-main; this main-queue work is only cancellation and scheduling.
-    private func scheduleCodexInterruptionRefresh() {
+    ///
+    /// Deliberately **not** gated on a turn being in flight, unlike its Claude sibling: the
+    /// boundary this exists for most is a turn that began without anybody being told, so a
+    /// session the tracker believes is idle is exactly the state worth reading.
+    private func scheduleCodexTurnBoundaryRefresh() {
         guard codexTranscriptURL != nil else { return }
 
-        codexInterruptionRefreshWorkItem?.cancel()
+        codexTurnBoundaryRefreshWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self, let url = self.codexTranscriptURL else { return }
-            self.codexInterruptionRefreshWorkItem = nil
+            self.codexTurnBoundaryRefreshWorkItem = nil
 
-            CodexTranscriptInterruption.revalidate(at: url) { [weak self] interruption in
+            CodexTranscriptTurnBoundary.revalidate(at: url) { [weak self] boundary in
                 guard let self, self.isRunning, self.codexTranscriptURL == url,
-                      let interruption,
-                      self.activityTracker.noteTurnInterrupted(turnID: interruption.turnID)
-                else { return }
-
-                ThreadingLogger.agent.info(
-                    "Recovered interrupted Codex turn \(interruption.turnID, privacy: .public) from rollout"
-                )
-                EventLog.shared.record(.hooks, "Codex interruption recovered from transcript", [
-                    "session": self.sessionID.uuidString,
-                    "turn": interruption.turnID
-                ])
+                      let boundary else { return }
+                self.apply(boundary)
             }
         }
-        codexInterruptionRefreshWorkItem = item
+        codexTurnBoundaryRefreshWorkItem = item
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + CodexInterruptionDefaults.quietDelay,
+            deadline: .now() + CodexTurnBoundaryDefaults.quietDelay,
             execute: item
         )
+    }
+
+    /// Schedules one non-postponing continuation read. The first output after `Stop` replaces
+    /// the slower look-ahead with a prompt read; later chunks leave that earlier deadline alone.
+    private func scheduleCodexContinuationBoundaryRefresh(
+        after delay: TimeInterval,
+        outputPrompted: Bool
+    ) {
+        guard codexTranscriptURL != nil,
+              activityTracker.hasPendingReportedTurnFinish else { return }
+
+        if codexContinuationBoundaryRefreshWorkItem != nil {
+            // The first output after `Stop` is later evidence than the fallback timer and earns
+            // the earlier read. Further chunks may not slide that prompt read forward again.
+            guard outputPrompted, !codexContinuationBoundaryRefreshIsOutputPrompted else {
+                return
+            }
+            codexContinuationBoundaryRefreshWorkItem?.cancel()
+            codexContinuationBoundaryRefreshWorkItem = nil
+        }
+
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, let url = self.codexTranscriptURL else { return }
+            self.codexContinuationBoundaryRefreshWorkItem = nil
+            self.codexContinuationBoundaryRefreshIsOutputPrompted = false
+
+            CodexTranscriptTurnBoundary.revalidate(at: url) { [weak self] boundary in
+                guard let self, self.isRunning, self.codexTranscriptURL == url,
+                      let boundary else { return }
+                self.apply(boundary)
+            }
+        }
+        codexContinuationBoundaryRefreshWorkItem = item
+        codexContinuationBoundaryRefreshIsOutputPrompted = outputPrompted
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    /// Crosses the one activity edge a rollout boundary is allowed to cross, and says so.
+    ///
+    /// Each of the three is refused unless it is about the turn the tracker is actually in, so
+    /// the ordinary case — `task_complete` landing a few milliseconds behind the `Stop` that
+    /// already closed the turn — costs one comparison and writes nothing.
+    private func apply(_ boundary: CodexTurnBoundary) {
+        let admitted: Bool
+        switch boundary {
+        case .started(let turnID):
+            admitted = activityTracker.noteTurnStartedFromTranscript(turnID: turnID)
+        case .completed(let turnID):
+            admitted = activityTracker.noteTurnFinishedFromTranscript(
+                turnID: turnID,
+                continuationGrace: CodexTurnBoundaryDefaults.continuationGrace
+            )
+        case .interrupted(let turnID):
+            admitted = activityTracker.noteTurnInterrupted(turnID: turnID)
+        }
+        guard admitted else { return }
+
+        ThreadingLogger.agent.info(
+            """
+            Recovered Codex turn \(boundary.turnID, privacy: .public) \
+            (\(boundary.logName, privacy: .public)) from rollout
+            """
+        )
+        EventLog.shared.record(.hooks, "Codex turn boundary recovered from transcript", [
+            "session": sessionID.uuidString,
+            "turn": boundary.turnID,
+            "boundary": boundary.logName
+        ])
     }
 
     /// Revalidates once after an output burst settles, for the two turn boundaries Claude omits:
@@ -1206,8 +1287,11 @@ final class AgentSessionViewController: NSViewController {
     /// its own hooks, and its transcript is resolved again from whatever the session record says
     /// by then — a resumed conversation and a migrated account both change the answer.
     private func resetTranscriptFallbackObservation() {
-        codexInterruptionRefreshWorkItem?.cancel()
-        codexInterruptionRefreshWorkItem = nil
+        codexTurnBoundaryRefreshWorkItem?.cancel()
+        codexTurnBoundaryRefreshWorkItem = nil
+        codexContinuationBoundaryRefreshWorkItem?.cancel()
+        codexContinuationBoundaryRefreshWorkItem = nil
+        codexContinuationBoundaryRefreshIsOutputPrompted = false
         codexTranscriptURL = nil
         claudeBoundaryRefreshWorkItem?.cancel()
         claudeBoundaryRefreshWorkItem = nil
@@ -1387,7 +1471,11 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         }
         attachmentObserver?.noteOutput()
         scheduleProviderTitleRefresh()
-        scheduleCodexInterruptionRefresh()
+        scheduleCodexTurnBoundaryRefresh()
+        scheduleCodexContinuationBoundaryRefresh(
+            after: CodexTurnBoundaryDefaults.continuationOutputProbeDelay,
+            outputPrompted: true
+        )
         scheduleClaudeBoundaryRefresh()
         scheduleRunProgressTranscriptRefresh()
 

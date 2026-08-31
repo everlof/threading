@@ -99,6 +99,13 @@ enum SessionActivityCause: String {
     case turnStarted
     case turnFinished
 
+    /// A Codex turn the CLI opened for itself, read off its rollout because no hook reports it.
+    case turnStartedFromTranscript
+
+    /// A Codex turn closed by its rollout's own completion record, for the turn whose `Stop`
+    /// did not arrive.
+    case turnFinishedFromTranscript
+
     /// A Codex turn closed by its rollout rather than by the `Stop` that never came.
     case turnInterrupted
 
@@ -133,7 +140,10 @@ enum SessionActivityCause: String {
         case .turnStarted, .turnFinished, .turnInterrupted, .awaitingUserReported,
              .blockingAskOpened, .blockingAskClosed:
             return true
-        case .seen, .userInput, .output, .quiet, .turnRefused, .limitParked, .limitCleared, .bell,
+        // The two rollout boundaries are Threading reading a file, not the agent speaking —
+        // the same side of this line as `turnRefused`, which is read the same way.
+        case .seen, .userInput, .output, .quiet, .turnStartedFromTranscript,
+             .turnFinishedFromTranscript, .turnRefused, .limitParked, .limitCleared, .bell,
              .dormant, .running:
             return false
         }
@@ -152,9 +162,14 @@ enum SessionActivityCause: String {
 ///
 /// An agent with lifecycle hooks says so outright, and `noteTurnStarted`/`noteTurnFinished` are
 /// believed over anything inferred. The first such report latches `reportsOwnActivity`, after
-/// which output stops driving the state at all: the two disagree constantly and by design —
-/// a working agent is quiet while it waits on the model, and noisy after its turn has ended
-/// while the CLI redraws its footer. Falling back per-event would flicker between them.
+/// which output stops *ending* a turn: the two disagree constantly and by design — a working
+/// agent is quiet while it waits on the model, and noisy after its turn has ended while the CLI
+/// redraws its footer. Falling back per-event would flicker between them.
+///
+/// Output stops *opening* one on the narrower fact that the runtime has declared a start
+/// (`reportsTurnStarts`), because a `Stop` proves only that it declares endings — and a runtime
+/// that opens its own turns, as Codex does in goal mode, declares no start for them at all. See
+/// `outputMayOpenTurn`.
 ///
 /// Shells never report, so they keep the heuristic in full.
 ///
@@ -218,6 +233,22 @@ final class SessionActivityTracker {
     /// state straight back to the proxy this exists to replace.
     private(set) var reportsOwnActivity = false
 
+    /// Whether the runtime has ever declared a turn **beginning**.
+    ///
+    /// `reportsOwnActivity` is the right latch for *believing* a report and the wrong one for
+    /// switching off the half of the heuristic that opens a turn: a `Stop` proves the runtime
+    /// declares endings and says nothing about starts, so a session whose first report is one
+    /// has been given no beginning to be silent about. See `outputMayOpenTurn`.
+    private(set) var reportsTurnStarts = false
+
+    /// Whether the runtime has ever declared a turn **ending** — `Stop`, or one of the two
+    /// transcript readers standing in for it.
+    ///
+    /// The other half of the same split, and what decides whether silence ends a turn. A
+    /// runtime that declared one ending will declare the next, so its quiet stretches are the
+    /// agent thinking rather than the turn being over.
+    private(set) var reportsTurnEnds = false
+
     /// Whether this process has been heard from at all — its `SessionStart` hook, or any
     /// later lifecycle report. Deliberately weaker than `reportsOwnActivity`: hearing a
     /// SessionStart proves the CLI is up and the hook path works, without yet claiming turn
@@ -231,12 +262,30 @@ final class SessionActivityTracker {
     /// Whether a turn is open: begun, and not yet reported finished.
     private var turnInFlight = false
 
+    /// Whether the open turn was **declared** — by a hook, or by the runtime's own rollout —
+    /// rather than inferred from output.
+    ///
+    /// It decides one thing: whether silence may end this turn. A declared turn will be
+    /// declared over, so a gap in its output is the agent waiting on the model; an inferred
+    /// turn has nothing coming and the quiet timer is the only ending it will ever get. The
+    /// two are not a property of the *session* — a Codex session's first goal-continuation
+    /// burst opens a turn by inference half a second before its rollout names it — so this
+    /// belongs to the turn and is re-decided every time one opens.
+    private var turnWasDeclared = false
+
     /// The provider's identity for the reported turn, where it supplies one.
     ///
     /// Codex's transcript fallback lands after a background file read. Matching that record to
     /// the open turn prevents an old interruption from closing a newer turn that began before
     /// the read returned to main.
     private var reportedTurnID: String?
+
+    /// The last turn this tracker watched end, kept after its own `reportedTurnID` is cleared.
+    ///
+    /// The rollout's ending record and its `Stop` hook land milliseconds apart, so a background
+    /// scan can be taken before the ending was written and delivered after it was acted on.
+    /// Without this, that scan would re-open the finished turn from its `task_started`.
+    private var lastEndedTurnID: String?
 
     /// How many turns this session has begun.
     ///
@@ -382,6 +431,24 @@ final class SessionActivityTracker {
     private var bytesSinceQuiet = 0
     private var quietTimer: Timer?
 
+    /// A reported Codex `Stop` whose next protocol fact may be an automatic goal continuation.
+    ///
+    /// The turn's internal facts are already closed while this is present, but the published
+    /// activity remains `working`. A new turn cancels the pending finish without an intermediate
+    /// row edge; expiry commits the ordinary idle/unread answer exactly once.
+    private struct PendingReportedTurnFinish {
+        let cause: SessionActivityCause
+    }
+
+    private var pendingReportedTurnFinish: PendingReportedTurnFinish?
+    private var pendingReportedTurnFinishTimer: Timer?
+
+    /// Read by the Codex rollout observer so output can prompt an early, non-postponing boundary
+    /// scan while the published activity is being held continuous.
+    var hasPendingReportedTurnFinish: Bool {
+        pendingReportedTurnFinish != nil
+    }
+
     /// Output arriving before this instant is a redraw we provoked, not the agent working.
     private var suppressOutputUntil: Date?
 
@@ -416,17 +483,17 @@ final class SessionActivityTracker {
         guard bytesSinceQuiet >= ActivityDefaults.workingByteThreshold else { return nil }
         let acceptedByteCount = bytesSinceQuiet
 
-        // An agent that reports its own turns has already said what it is doing, and its output
-        // may not start or end one. It answers exactly one question the reports leave open: a
-        // burst *inside* a flagged turn means the user answered where they stood and the agent
-        // carried on, which no hook fires for. Moving only towards working, and only inside a
-        // turn the agent itself declared open, is what keeps this from re-opening the flicker
-        // the latch exists to close.
+        // An agent that reports its own turn *starts* has already said what it is doing, and its
+        // output may not start or end one. It answers exactly one question the reports leave
+        // open: a burst *inside* a flagged turn means the user answered where they stood and the
+        // agent carried on, which no hook fires for. Moving only towards working, and only
+        // inside a turn the agent itself declared open, is what keeps this from re-opening the
+        // flicker the latch exists to close.
         //
         // On screen only, for the same reason. Answering happens in the terminal being looked
         // at, so that is the one place output can mean "answered"; off screen the flag is the
         // only thing saying the session is waiting, and a stray redraw must not spend it.
-        guard !reportsOwnActivity else {
+        guard outputMayOpenTurn else {
             // Measured per burst here, unlike the heuristic below, so a prompt trickling a few
             // bytes at a time never adds up to an answer.
             bytesSinceQuiet = 0
@@ -442,12 +509,42 @@ final class SessionActivityTracker {
             return activity == .working ? acceptedByteCount : nil
         }
 
-        if !turnInFlight { attentionEpisodeOpen = false }
+        if !turnInFlight {
+            cancelPendingReportedTurnFinish()
+            attentionEpisodeOpen = false
+            turnWasDeclared = false
+        }
         turnInFlight = true
         awaitsUser = false
         settle(.output)
-        restartQuietTimer()
+        // Nothing is coming to say this one is over, so silence has to. A turn the runtime
+        // later declares cancels this timer where it adopts it.
+        if !turnWasDeclared { restartQuietTimer() }
         return acceptedByteCount
+    }
+
+    /// Whether output is still allowed to open a turn.
+    ///
+    /// Three cases, and the middle one is the bug this exists for:
+    ///
+    /// - **Nothing reports here.** Shells, Grok, OpenCode: the heuristic is all there is.
+    /// - **The runtime reports endings but has never declared a start.** Codex ends every turn
+    ///   with `Stop`, and in goal mode it *opens* the next one itself — an internal continuation
+    ///   that submits no user prompt, so `UserPromptSubmit` never fires and there is no other
+    ///   turn-start hook to register (`PreToolUse`, `PermissionRequest`, `PostToolUse`,
+    ///   `PreCompact`, `PostCompact`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`,
+    ///   `SubagentStart`, `SubagentStop`, `Stop`, `Interrupt` is the whole vocabulary). Latching
+    ///   on that first `Stop` left the session with no way back into `working` at all: the row
+    ///   read `idle` for over an hour while the pane painted "Working", which is what a phone
+    ///   showing a chat list of stopped-looking chats was reporting.
+    /// - **The runtime declared a start.** Believed outright, exactly as before.
+    ///
+    /// The `reportsTurnEnds` half of the middle case is deliberate rather than redundant: a
+    /// runtime whose first report is a *notice* — Claude's idle-prompt `Notification` — has said
+    /// it is waiting, and admitting a redraw as work there would overwrite what it just said.
+    private var outputMayOpenTurn: Bool {
+        guard !reportsTurnStarts else { return false }
+        return reportsTurnEnds || !reportsOwnActivity
     }
 
     /// Notes that the terminal was resized.
@@ -512,8 +609,54 @@ final class SessionActivityTracker {
     func noteTurnStarted(turnID: String? = nil) {
         launchedUnattended = false
         adoptOwnReports()
+        reportsTurnStarts = true
+        cancelPendingReportedTurnFinish()
+        beginDeclaredTurn(turnID: turnID, cause: .turnStarted)
+    }
+
+    /// Admits a turn the runtime opened **without declaring it**, read off the session's own
+    /// rollout. See `CodexTranscriptTurnBoundary`.
+    ///
+    /// Codex in goal mode continues a thread by itself: `Stop` fires, and about 250 ms later a
+    /// new turn begins from an internal message that submits no user prompt, so no
+    /// `UserPromptSubmit` follows and there is no other turn-start hook in the CLI's vocabulary.
+    /// Nothing here could see that turn, and the row read `idle` for the seventy minutes one of
+    /// them ran while the pane painted "Working" — which is the report this exists for.
+    ///
+    /// The same fallback contract as the two boundary readers that end turns: it cannot latch an
+    /// inferred session, it does not claim the runtime *declares* starts (`reportsTurnStarts`
+    /// stays false, so the next such turn is read the same way), and it cannot re-open the turn
+    /// it has already watched end. A turn output opened half a second earlier is **adopted**
+    /// rather than restarted: it is the same turn, and naming it is what lets the interruption
+    /// reader match it by id later.
+    @discardableResult
+    func noteTurnStartedFromTranscript(turnID: String) -> Bool {
+        guard reportsOwnActivity, turnID != lastEndedTurnID else { return false }
+
+        if turnInFlight {
+            guard reportedTurnID == nil else { return false }
+            reportedTurnID = turnID
+            // Declared now, so the quiet timer that was standing in for its ending stands down.
+            turnWasDeclared = true
+            quietTimer?.invalidate()
+            quietTimer = nil
+            settle(.turnStartedFromTranscript)
+            return true
+        }
+
+        cancelPendingReportedTurnFinish()
+        beginDeclaredTurn(turnID: turnID, cause: .turnStartedFromTranscript)
+        return true
+    }
+
+    /// The state every declared start moves, whether a hook or the rollout declared it.
+    private func beginDeclaredTurn(turnID: String?, cause: SessionActivityCause) {
         attentionEpisodeOpen = false
         turnInFlight = true
+        turnWasDeclared = true
+        quietTimer?.invalidate()
+        quietTimer = nil
+        bytesSinceQuiet = 0
         turnGeneration += 1
         reportedTurnID = turnID
         awaitsUser = false
@@ -524,7 +667,7 @@ final class SessionActivityTracker {
         // prompt, not that the provider accepted the request: `/loop` and a scheduled recovery
         // both raise this hook before an account that is still spent writes another refusal.
         // The transcript that raised the park is the authority that lowers it.
-        settle(.turnStarted)
+        settle(cause)
     }
 
     /// The agent reported that its turn ended.
@@ -537,9 +680,16 @@ final class SessionActivityTracker {
     /// this turn started it, and parked if an earlier one did. Either way, claiming the session
     /// finished posts a notification for an answer nobody has given yet and drops the mark while
     /// the agent is about to speak again. `BackgroundWorkLedger` draws both lines.
-    func noteTurnFinished(backgroundWork inFlight: [BackgroundTask] = []) {
+    func noteTurnFinished(
+        backgroundWork inFlight: [BackgroundTask] = [],
+        continuationGrace: TimeInterval? = nil
+    ) {
         adoptOwnReports()
-        finishReportedTurn(backgroundWork: inFlight, cause: .turnFinished)
+        finishReportedTurn(
+            backgroundWork: inFlight,
+            cause: .turnFinished,
+            continuationGrace: continuationGrace
+        )
     }
 
     /// Ends the active Codex turn when its rollout records the interrupt that `Stop` omitted.
@@ -556,6 +706,34 @@ final class SessionActivityTracker {
         }
 
         finishReportedTurn(backgroundWork: [], cause: .turnInterrupted)
+        return true
+    }
+
+    /// Ends the active Codex turn when its rollout records the completion its `Stop` did not.
+    ///
+    /// `Stop` fires about three milliseconds *before* Codex appends `task_complete`, so this is
+    /// refused as a no-op on every ordinary turn — the hook has already closed it. What it is
+    /// for is the turn whose `Stop` never arrived, which is the only way a turn this file
+    /// admitted from the rollout could otherwise stay `working` for ever: a declared turn arms
+    /// no quiet timer, so a declared start deserves a declared end that does not depend on one
+    /// hook surviving.
+    ///
+    /// Same fallback contract as the interruption beside it, including the id match.
+    @discardableResult
+    func noteTurnFinishedFromTranscript(
+        turnID: String,
+        continuationGrace: TimeInterval? = nil
+    ) -> Bool {
+        guard reportsOwnActivity, turnInFlight,
+              let reportedTurnID, reportedTurnID == turnID else {
+            return false
+        }
+
+        finishReportedTurn(
+            backgroundWork: [],
+            cause: .turnFinishedFromTranscript,
+            continuationGrace: continuationGrace
+        )
         return true
     }
 
@@ -609,9 +787,17 @@ final class SessionActivityTracker {
     /// apart by in the log: `Stop`, a rollout's interrupt, a refusal read off the transcript.
     private func finishReportedTurn(
         backgroundWork inFlight: [BackgroundTask],
-        cause: SessionActivityCause
+        cause: SessionActivityCause,
+        continuationGrace: TimeInterval? = nil
     ) {
+        cancelPendingReportedTurnFinish()
+        reportsTurnEnds = true
         turnInFlight = false
+        turnWasDeclared = false
+        // Remembered past the turn it belonged to, so a rollout read taken before this ending
+        // was written cannot re-open the turn it has just watched end. The scan is off-main and
+        // the two records are milliseconds apart, which is exactly the width of that race.
+        lastEndedTurnID = reportedTurnID ?? lastEndedTurnID
         reportedTurnID = nil
         // The turn cannot have ended around an open question, so an ask still held here is one
         // whose close was lost. Believed over the ask, because `Stop` is the stronger statement:
@@ -625,6 +811,49 @@ final class SessionActivityTracker {
         } else {
             pause = .none
         }
+
+        // A Codex `Stop` is not always the user-visible end of work. Goal mode writes the next
+        // `task_started` shortly afterwards but has no start hook, so publishing the ordinary
+        // unread state here produces a one-frame amber badge before the rollout corrects it.
+        // Keep only a genuinely working, unpaused state provisional; every other state has a
+        // stronger reason to settle immediately, and callers opt in only for Codex terminals.
+        if let continuationGrace,
+           continuationGrace > 0,
+           activity == .working,
+           !pausedOnOwnWork {
+            pendingReportedTurnFinish = PendingReportedTurnFinish(cause: cause)
+            pendingReportedTurnFinishTimer = Timer.scheduledTimer(
+                withTimeInterval: continuationGrace,
+                repeats: false
+            ) { [weak self] _ in
+                Task { @MainActor [weak self] in
+                    self?.commitPendingReportedTurnFinish()
+                }
+            }
+            return
+        }
+
+        commitReportedTurnFinish(cause: cause)
+    }
+
+    /// Publishes a finish after its continuation window closed without another turn beginning.
+    private func commitPendingReportedTurnFinish() {
+        guard let pendingReportedTurnFinish else { return }
+        self.pendingReportedTurnFinish = nil
+        pendingReportedTurnFinishTimer?.invalidate()
+        pendingReportedTurnFinishTimer = nil
+        commitReportedTurnFinish(cause: pendingReportedTurnFinish.cause)
+    }
+
+    /// Drops a provisional finish because a newer turn or process boundary superseded it.
+    private func cancelPendingReportedTurnFinish() {
+        pendingReportedTurnFinishTimer?.invalidate()
+        pendingReportedTurnFinishTimer = nil
+        pendingReportedTurnFinish = nil
+    }
+
+    /// The ordinary visible/off-screen finish rule, shared by immediate and deferred endings.
+    private func commitReportedTurnFinish(cause: SessionActivityCause) {
         // Not merely unflagged — *nothing* is waiting to be read, so an off-screen session must
         // not take the unread mark either.
         awaitsUser = !isVisible && !pausedOnOwnWork
@@ -646,6 +875,7 @@ final class SessionActivityTracker {
     /// The notice is `.unspecified` by default, which is the reading that changes nothing: a
     /// runtime that names no type, or names one this build has never heard of, still flags.
     func noteAwaitingUser(_ notice: HookNotificationKind = .unspecified) {
+        commitPendingReportedTurnFinish()
         // First, and unconditionally: the report proves the hooks reached this session whether
         // or not the notice it carried is worth anything.
         adoptOwnReports()
@@ -708,6 +938,7 @@ final class SessionActivityTracker {
     /// output is the only evidence there is that it was answered. Here the evidence exists: the
     /// call is open, and the hook that closes it is already registered.
     func noteBlockingAskOpened(id: String?) {
+        cancelPendingReportedTurnFinish()
         adoptOwnReports()
         // Unlike the runtime's own notice, an unattended launch is no reason to ignore this: a
         // boot repaint cannot call a tool, so nothing about a relaunch produces one of these.
@@ -743,6 +974,7 @@ final class SessionActivityTracker {
     /// process ends or relaunches. A local turn start is not provider acceptance: a loop can
     /// submit and be refused again while the account is still spent.
     func noteLimitParked(recoveryArmed: Bool) {
+        cancelPendingReportedTurnFinish()
         quietTimer?.invalidate()
         quietTimer = nil
         bytesSinceQuiet = 0
@@ -783,7 +1015,11 @@ final class SessionActivityTracker {
         hasHeardFromProcess = true
     }
 
-    /// Switches this session off the output heuristic, the first time it reports anything.
+    /// Records that this session reports, the first time it reports anything.
+    ///
+    /// It stops output from *ending* a turn immediately, because a report is a boundary and a
+    /// guess must not overrule one. What output may still *open* is a narrower question the
+    /// first report cannot answer on its own: see `outputMayOpenTurn`.
     private func adoptOwnReports() {
         guard !reportsOwnActivity else { return }
 
@@ -818,6 +1054,7 @@ final class SessionActivityTracker {
         attributesOtherPrograms: Bool = false,
         otherProgramHoldsPTY: () -> Bool = { false }
     ) -> SoundEvent {
+        cancelPendingReportedTurnFinish()
         quietTimer?.invalidate()
         quietTimer = nil
         bytesSinceQuiet = 0
@@ -856,11 +1093,13 @@ final class SessionActivityTracker {
 
     /// Marks the session as having no terminal.
     func markDormant() {
+        cancelPendingReportedTurnFinish()
         quietTimer?.invalidate()
         quietTimer = nil
         bytesSinceQuiet = 0
         isDormant = true
         turnInFlight = false
+        turnWasDeclared = false
         reportedTurnID = nil
         awaitsUser = false
         openAsks.removeAll()
@@ -904,17 +1143,24 @@ final class SessionActivityTracker {
     /// carrying the hooks is written per launch and can fail — if it did, this session has no
     /// reports coming, and staying latched would leave it permanently idle.
     func markRunning() {
+        cancelPendingReportedTurnFinish()
         bytesSinceQuiet = 0
         // Resize and pointer suppression belongs to the process that could have answered the
         // event. A freshly launched process did not receive an earlier terminal resize, so
         // carrying that deadline across the launch would discard its first legitimate output.
         suppressOutputUntil = nil
         reportsOwnActivity = false
+        reportsTurnStarts = false
+        reportsTurnEnds = false
         hasHeardFromProcess = false
         attentionEpisodeOpen = false
         isDormant = false
         turnInFlight = false
+        turnWasDeclared = false
         reportedTurnID = nil
+        // A new process writes a new rollout with new turn ids; the old one's last turn is not
+        // an answer about any of them.
+        lastEndedTurnID = nil
         awaitsUser = false
         openAsks.removeAll()
         pause = .none
@@ -1018,11 +1264,14 @@ final class SessionActivityTracker {
             session=\(self.sessionID?.uuidString ?? "unowned", privacy: .public) \
             visible=\(self.isVisible, privacy: .public) \
             turn=\(self.turnInFlight, privacy: .public) \
+            declared=\(self.turnWasDeclared, privacy: .public) \
             awaits=\(self.awaitsUser, privacy: .public) \
             asks=\(self.openAsks.count, privacy: .public) \
             park=\(self.limitPark.logName, privacy: .public) \
             paused=\(self.pause.logName, privacy: .public) \
             reports=\(self.reportsOwnActivity, privacy: .public) \
+            starts=\(self.reportsTurnStarts, privacy: .public) \
+            ends=\(self.reportsTurnEnds, privacy: .public) \
             unattended=\(self.launchedUnattended, privacy: .public)
             """
         )

@@ -125,6 +125,67 @@ carrying the prompt text. Terminal sessions additionally carry a *tool-scoped, o
 `PreToolUse`/`PostToolUse` pair for the tools that ask the user outright — see "A runtime's own
 'I am waiting'" below, which is where the difference between that pair and the broker is drawn.
 
+**The latch is split, because a report proves only the boundary it is.** `reportsOwnActivity`
+latches on the first report of any kind and stops output *ending* a turn: a guess must not
+overrule a boundary the agent declared. Switching off the half that *opens* one needs the
+narrower fact, `reportsTurnStarts`, and the difference is a bug a phone reported as "the chat
+isn't showing loading but it is clearly loading". **Codex opens turns by itself.** In goal mode
+the CLI continues the thread with an internal message — `<codex_internal_context source="goal">`
+in the rollout — which submits no user prompt, so `UserPromptSubmit` never fires, and there is no
+other hook to register: `PreToolUse`, `PermissionRequest`, `PostToolUse`, `PreCompact`,
+`PostCompact`, `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `SubagentStart`, `SubagentStop`,
+`Stop`, `Interrupt` is CLI 0.151.0's whole hook vocabulary. A session whose *first* report was
+therefore a `Stop` — the app had not been listening when the earlier turn began — was latched off
+output inference by an ending, and had no way back into `working` at all. Measured on 30 August
+2026: `Stop` at 13:12:00.931, the next turn opened by the CLI at 13:12:01.177, the row reading
+`idle` for the seventy minutes that turn ran while the pane painted "Working". `outputMayOpenTurn`
+is the rule that fixes it — output may open a turn where nothing reports, and where the runtime
+reports endings without ever having declared a start.
+
+The `reportsTurnEnds` condition is what keeps a runtime's *notice* out of this: Claude's
+idle-prompt `Notification` says the session is waiting, and a redraw arriving after it must not
+overwrite that with work nobody started.
+
+**But inference is the stopgap here, not the answer — the rollout says it outright.** Codex
+writes `task_started` with the turn's own id whether or not any hook reports it, so
+`CodexTranscriptTurnBoundary` reads the newest boundary off the same tail
+`CodexTranscriptInterruption` used to read, and `noteTurnStartedFromTranscript` admits a turn the
+CLI opened for itself. That matters beyond the latch accident above: a goal-mode session whose
+*first* turn came from a real prompt has `reportsTurnStarts` set, output is out of the decision
+for good, and **every continuation turn after it would be invisible** — the general case, which
+the byte fallback alone does not reach. The reader also **adopts** rather than restarts a turn
+output opened half a second earlier, because it is the same turn and naming it is what lets the
+interruption reader match it by id.
+
+This reverses one line of [Seeding from the transcript](#after-a-reattach): there is now a reader
+that says a turn is open, because a runtime that opens its own turns produced the evidence for
+one. It is still not a second activity source — it keeps the fallback contract the two ending
+readers keep, cannot latch a session that never reports, and does not claim the runtime declares
+starts, so the next such turn is read the same way.
+
+**A turn is ended by whatever kind of thing began it.** `turnWasDeclared` is that rule:
+a turn a hook or the rollout declared arms no quiet timer, because an agent waiting on the model
+is quiet and a declared ending is coming; a turn output inferred keeps the timer, because nothing
+is coming and silence is the only ending it will get. Guessing an ending for a declared turn was
+measured on the reported session before it latched: 18,724 inferred `working`/`idle` edges in ten
+hours, up to 81 a minute, each one an attention episode and an authorization-specific row push to
+every connected phone. The other direction — a declared turn with no timer whose `Stop` is lost —
+is closed by `task_complete` through the same reader, which is otherwise inert because Codex
+raises `Stop` about three milliseconds *before* it writes that record.
+
+**An ending followed by an automatic start is one published activity interval.** The protocol
+still has a real gap: on the measured goal continuation, `Stop` arrived at 13:12:00.931 and the
+next `task_started` at 13:12:01.177. Publishing that quarter-second as a completed off-screen turn
+moved the remote summary `working → needsAttention → working`, which made the iPhone dashboard's
+amber attention dot appear for one frame and also opened an attention episode nobody owed. Codex
+terminal finishes therefore receive a one-second reconciliation grace. The tracker closes the
+old turn's internal identity immediately, but keeps the published activity at `working`; a newer
+rollout start cancels the finish without an edge, while expiry commits the ordinary visible/idle
+or off-screen/unread result once. Output prompts a non-postponing rollout read during the grace,
+so a continuation that keeps painting cannot defer its own evidence past the timer. This is
+provider-boundary reconciliation, not UI debounce: other runtimes, interruptions, limit parks,
+blocking asks and background-work pauses keep their existing timing.
+
 **Run plans use the same observational boundary and never inspect terminal pixels.** When
 lifecycle reporting is enabled, Claude's session-only settings add silent, tool-scoped reports
 for `TodoWrite`, `TaskCreate`, and `TaskUpdate`; the account-shared Codex installer adds one
@@ -1268,11 +1329,16 @@ boundary the replay's query suppression already uses. Before it, the bytes are a
 screen that was already there. After it, they are the child working now, and inference reads them
 exactly as it reads a spawned session's.
 
-**Seeding from the transcript was considered and is not what the readers do.**
-`ClaudeTranscriptTurnRefusal` and `CodexTranscriptInterruption` recover a turn that *ended*; there
-is no reader here that says one is open, and inventing one would be a second activity source for
-the two runtimes that already have the most. Grok and OpenCode have no boundary reader at all and
-stay on output inference either way, which is the accepted cost R7 already names.
+**Seeding from the transcript was refused here and later earned on other evidence.** The rule
+this file kept was that a reader recovers a turn that *ended* — `ClaudeTranscriptTurnRefusal`,
+and what was then `CodexTranscriptInterruption` — and that inventing one which says a turn is
+*open* would be a second activity source for the two runtimes that already have the most. What
+overturned it was not a nicer design but a turn nothing else could see: Codex opens its own
+continuation turns, so for those there is no first source to be second to. `noteTurnStartedFromTranscript`
+is that reader; the paragraph above states its contract. It changes nothing on this reattach
+path, which still needs the grace, because a reattached session's rollout path is not known until
+its own hooks report it. Grok and OpenCode have no boundary reader at all and stay on output
+inference either way, which is the accepted cost R7 already names.
 
 ## The account's own status line
 

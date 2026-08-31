@@ -143,8 +143,8 @@ final class HookLifecycleTests: XCTestCase {
         ]
 
         XCTAssertEqual(
-            CodexTranscriptInterruption.interruption(in: record),
-            CodexTurnInterruption(turnID: "019fe33b-9f27-7e72-a5f1-6f54723f468c")
+            CodexTranscriptTurnBoundary.boundary(in: record),
+            .interrupted(turnID: "019fe33b-9f27-7e72-a5f1-6f54723f468c")
         )
     }
 
@@ -160,7 +160,7 @@ final class HookLifecycleTests: XCTestCase {
             ]
         ]
 
-        XCTAssertNil(CodexTranscriptInterruption.interruption(in: record))
+        XCTAssertNil(CodexTranscriptTurnBoundary.boundary(in: record))
     }
 
     func testOnlyAnExplicitInterruptedReasonClosesTheTurn() {
@@ -173,7 +173,7 @@ final class HookLifecycleTests: XCTestCase {
             ]
         ]
 
-        XCTAssertNil(CodexTranscriptInterruption.interruption(in: record))
+        XCTAssertNil(CodexTranscriptTurnBoundary.boundary(in: record))
     }
 
     func testCodexReadsAnInterruptionOnlyWhenItIsTheNewestTurnBoundary() throws {
@@ -190,8 +190,8 @@ final class HookLifecycleTests: XCTestCase {
         try Data(interrupted.utf8).write(to: transcript)
 
         XCTAssertEqual(
-            CodexTranscriptInterruption.newestInterruption(at: transcript),
-            CodexTurnInterruption(turnID: "turn-1")
+            CodexTranscriptTurnBoundary.newestBoundary(at: transcript),
+            .interrupted(turnID: "turn-1")
         )
 
         let newerTurn =
@@ -201,7 +201,11 @@ final class HookLifecycleTests: XCTestCase {
         try handle.write(contentsOf: Data(newerTurn.utf8))
         try handle.close()
 
-        XCTAssertNil(CodexTranscriptInterruption.newestInterruption(at: transcript))
+        XCTAssertEqual(
+            CodexTranscriptTurnBoundary.newestBoundary(at: transcript),
+            .started(turnID: "turn-2"),
+            "the newer turn is the boundary now, and it is one this build acts on"
+        )
     }
 
     /// The call's own id, so an ask is closed by the tool that opened it rather than by the next
@@ -1018,6 +1022,336 @@ final class HookLifecycleTests: XCTestCase {
         tracker.noteBlockingAskOpened(id: "toolu_01")
 
         XCTAssertTrue(tracker.reportsOwnActivity)
+        XCTAssertFalse(
+            tracker.reportsTurnStarts,
+            "an ask says a call is open, not that this runtime declares where turns begin"
+        )
+    }
+
+    // MARK: - Turns The Runtime Opens Itself
+
+    /// A goal continuation is one user-visible run even though Codex places `Stop` and a new
+    /// rollout turn between its internal steps. Publishing that protocol gap made the phone's
+    /// amber attention badge appear for a single frame.
+    @MainActor
+    func testCodexContinuationPublishesNoIntermediateAttentionState() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+        var states: [SessionActivity] = []
+        var attentionCount = 0
+        tracker.onChange = { states.append($0) }
+        tracker.onAttention = { attentionCount += 1 }
+
+        tracker.noteTurnStarted(turnID: "turn-1")
+        tracker.noteTurnFinished(continuationGrace: 0.05)
+
+        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertTrue(tracker.hasPendingReportedTurnFinish)
+        XCTAssertTrue(tracker.noteTurnStartedFromTranscript(turnID: "turn-2"))
+        waitOutContinuationGrace(0.05)
+
+        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertFalse(tracker.hasPendingReportedTurnFinish)
+        XCTAssertEqual(states, [.working], "no remote row edge exists for the badge to render")
+        XCTAssertEqual(attentionCount, 0)
+    }
+
+    /// The grace is reconciliation, not suppression: without a newer rollout start, the same
+    /// finish becomes the ordinary unread result exactly once.
+    @MainActor
+    func testCodexFinishCommitsAfterContinuationGraceExpires() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+        var attentionCount = 0
+        tracker.onAttention = { attentionCount += 1 }
+
+        tracker.noteTurnStarted(turnID: "turn-1")
+        tracker.noteTurnFinished(continuationGrace: 0.02)
+
+        XCTAssertEqual(tracker.activity, .working)
+        waitOutContinuationGrace(0.02)
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+        XCTAssertFalse(tracker.hasPendingReportedTurnFinish)
+        XCTAssertEqual(attentionCount, 1)
+    }
+
+    /// Visibility is evaluated when a real finish is committed, not frozen when `Stop` arrived.
+    /// Opening the session during the grace therefore settles the row to idle. The attention
+    /// episode callback remains participant-independent, as it is for every genuine finish.
+    @MainActor
+    func testVisibleCodexFinishSettlesIdleAfterGrace() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+        var attentionCount = 0
+        tracker.onAttention = { attentionCount += 1 }
+
+        tracker.noteTurnStarted(turnID: "turn-1")
+        tracker.noteTurnFinished(continuationGrace: 0.02)
+        tracker.isVisible = true
+        waitOutContinuationGrace(0.02)
+
+        XCTAssertEqual(tracker.activity, .idle)
+        XCTAssertEqual(attentionCount, 1)
+    }
+
+    /// The completion reader uses the same reconciliation when `Stop` was lost. Otherwise the
+    /// rare fallback path would reintroduce the flicker the ordinary hook path removed.
+    @MainActor
+    func testTranscriptCompletionCanBeReconciledWithAContinuation() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted(turnID: "turn-1")
+        XCTAssertTrue(
+            tracker.noteTurnFinishedFromTranscript(
+                turnID: "turn-1",
+                continuationGrace: 0.05
+            )
+        )
+        XCTAssertTrue(tracker.noteTurnStartedFromTranscript(turnID: "turn-2"))
+        waitOutContinuationGrace(0.05)
+
+        XCTAssertEqual(tracker.activity, .working)
+    }
+
+    /// A delayed scan of the turn that just ended must not spend the grace intended for a newer
+    /// id. It remains stale, and the genuine finish still commits.
+    @MainActor
+    func testStaleRolloutStartDoesNotCancelPendingFinish() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted(turnID: "turn-1")
+        tracker.noteTurnFinished(continuationGrace: 0.02)
+
+        XCTAssertFalse(tracker.noteTurnStartedFromTranscript(turnID: "turn-1"))
+        XCTAssertTrue(tracker.hasPendingReportedTurnFinish)
+        waitOutContinuationGrace(0.02)
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+    }
+
+    /// A runtime whose first observed report was an ending still uses output to open its next
+    /// turn. That evidence also cancels the provisional finish rather than letting its timer
+    /// overwrite the newly inferred work.
+    @MainActor
+    func testInferredContinuationCancelsPendingFinish() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+        tracker.noteTurnFinished(continuationGrace: 0.05)
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+        waitOutContinuationGrace(0.05)
+
+        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertFalse(tracker.hasPendingReportedTurnFinish)
+    }
+
+    /// The bug a phone reported as "the chat isn't showing loading but it is clearly loading".
+    ///
+    /// Codex ends every turn with `Stop`, and in goal mode it opens the next one itself — an
+    /// internal continuation that submits no user prompt, so `UserPromptSubmit` never fires.
+    /// Latching the whole heuristic on that first `Stop` left the session with no way back into
+    /// `working`: measured at over an hour of `idle` beside a pane painting "Working".
+    @MainActor
+    func testOutputStillOpensATurnForARuntimeThatOnlyEverReportedAnEnding() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnFinished()
+        XCTAssertTrue(tracker.reportsOwnActivity)
+        XCTAssertFalse(tracker.reportsTurnStarts)
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(tracker.activity, .working)
+    }
+
+    /// The same rule, the other way round: once the runtime has declared a start, its silence
+    /// means something and output goes back to saying nothing at all.
+    @MainActor
+    func testADeclaredStartPutsOutputBackOutOfTheDecision() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished()
+        XCTAssertEqual(tracker.activity, .needsAttention)
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(
+            tracker.activity,
+            .needsAttention,
+            "the CLI redrawing its footer after a reported turn is not the next turn"
+        )
+    }
+
+    /// A runtime that has only ever said "I am waiting" has declared no ending either, so a
+    /// redraw must not overwrite what it just said.
+    @MainActor
+    func testAnIdlePromptNoticeDoesNotHandTheTurnBackToOutput() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteAwaitingUser()
+        XCTAssertEqual(tracker.activity, .needsAttention)
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+    }
+
+    /// The rollout is where a turn Codex opened for itself is named, and reading it is what
+    /// turns an inference into a fact — with the turn's own id, so the interruption reader can
+    /// still match it later.
+    @MainActor
+    func testTheRolloutDeclaresATurnNoHookReported() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted(turnID: "turn-1")
+        tracker.noteTurnFinished()
+        XCTAssertEqual(tracker.activity, .needsAttention)
+
+        XCTAssertTrue(tracker.noteTurnStartedFromTranscript(turnID: "turn-2"))
+        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertTrue(
+            tracker.noteTurnInterrupted(turnID: "turn-2"),
+            "the turn it opened is the turn its id closes"
+        )
+    }
+
+    /// A turn output opened half a second before the rollout named it is the *same* turn.
+    /// Restarting it would spend a turn generation and clear an ask that is still open.
+    @MainActor
+    func testTheRolloutAdoptsATurnOutputAlreadyOpened() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnFinished()
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+        XCTAssertEqual(tracker.activity, .working)
+
+        XCTAssertTrue(tracker.noteTurnStartedFromTranscript(turnID: "turn-2"))
+        XCTAssertTrue(
+            tracker.noteTurnInterrupted(turnID: "turn-2"),
+            "adopting names the open turn rather than opening a second one"
+        )
+    }
+
+    /// A declared turn is ended by a declared boundary, never by a gap in its output: an agent
+    /// waiting on the model is quiet, and guessing an ending from that flapped the row ~80 times
+    /// a minute — one catalogue push per edge to every connected phone.
+    @MainActor
+    func testSilenceDoesNotEndATurnTheRolloutDeclared() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnFinished()
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+        tracker.noteTurnStartedFromTranscript(turnID: "turn-2")
+
+        waitOutTheQuietInterval()
+
+        XCTAssertEqual(tracker.activity, .working, "a declared boundary is what ends this turn")
+
+        tracker.noteTurnFinished()
+        XCTAssertEqual(tracker.activity, .needsAttention)
+    }
+
+    /// The rollout's scan is off-main and its `task_complete` lands milliseconds after the
+    /// `Stop` hook, so a read taken before that record can be delivered after it was acted on.
+    /// Re-opening the turn it just watched end is exactly the stale answer to refuse.
+    @MainActor
+    func testTheRolloutCannotReopenTheTurnItAlreadyWatchedEnd() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted(turnID: "turn-1")
+        tracker.noteTurnFinished()
+
+        XCTAssertFalse(tracker.noteTurnStartedFromTranscript(turnID: "turn-1"))
+        XCTAssertEqual(tracker.activity, .needsAttention)
+    }
+
+    /// A session with no reports of its own is driven by output alone, and a rollout read must
+    /// not quietly promote it — the same contract the two ending readers already keep.
+    @MainActor
+    func testTheRolloutCannotDeclareATurnForASessionThatNeverReports() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        XCTAssertFalse(tracker.noteTurnStartedFromTranscript(turnID: "turn-1"))
+        XCTAssertEqual(tracker.activity, .idle)
+    }
+
+    /// A declared turn arms no quiet timer, so a declared start needs an end that does not
+    /// depend on one hook surviving. Ordinarily inert: `Stop` closes the turn first and this
+    /// finds nothing left to close.
+    @MainActor
+    func testTheRolloutClosesATurnWhoseStopWasLost() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.noteTurnStarted(turnID: "turn-1")
+        tracker.noteTurnFinished()
+        tracker.noteTurnStartedFromTranscript(turnID: "turn-2")
+        XCTAssertEqual(tracker.activity, .working)
+
+        XCTAssertTrue(tracker.noteTurnFinishedFromTranscript(turnID: "turn-2"))
+        XCTAssertEqual(tracker.activity, .needsAttention)
+
+        XCTAssertFalse(
+            tracker.noteTurnFinishedFromTranscript(turnID: "turn-2"),
+            "the completion record is read again on every later burst and must stay inert"
+        )
+    }
+
+    /// Where nothing reports at all, silence is still the only ending there is.
+    @MainActor
+    func testSilenceStillEndsAnInferredTurnWhereNothingReports() {
+        let tracker = SessionActivityTracker()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4)
+        XCTAssertEqual(tracker.activity, .working)
+
+        waitOutTheQuietInterval()
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+    }
+
+    /// The quiet timer is a `Timer` on the main run loop, so a test that means to observe it
+    /// firing has to let that run loop turn rather than only suspending its own task.
+    @MainActor
+    private func waitOutTheQuietInterval() {
+        RunLoop.current.run(until: Date().addingTimeInterval(ActivityDefaults.quietInterval * 2))
+    }
+
+    /// Continuation tests use a deliberately tiny injected grace; the production value is the
+    /// measured protocol window and does not make focused tests wait a full second each.
+    @MainActor
+    private func waitOutContinuationGrace(_ grace: TimeInterval) {
+        RunLoop.current.run(until: Date().addingTimeInterval(grace * 2 + 0.01))
     }
 
     // MARK: - Unattended Launch

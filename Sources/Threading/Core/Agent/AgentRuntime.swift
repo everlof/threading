@@ -53,6 +53,7 @@ protocol AgentTerminalRuntimeSurface:
     func noteStateChanged()
     func applyRunProgress(_ report: HookRunProgressReport)
     func noteReportedCodexTranscript(path: String?, providerSessionID: TranscriptID?)
+    func noteCodexTurnFinishedForContinuationDetection()
     func noteTurnFinishedForAttachmentDetection(lastAssistantMessage: String?)
     func terminate()
 
@@ -75,6 +76,10 @@ extension AgentTerminalRuntimeSurface {
     var isHostBacked: Bool { false }
 
     func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
+
+    /// Only Codex terminal surfaces own a rollout reader. Other runtime surfaces and focused
+    /// test doubles have no continuation protocol to reconcile.
+    func noteCodexTurnFinishedForContinuationDetection() {}
 }
 
 /// The application/runtime surface retained for a natively rendered conversation.
@@ -595,7 +600,17 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
                     """
                 )
             }
-            tracker.noteTurnFinished(backgroundWork: report.backgroundWork)
+            let continuationGrace = ProjectStore.shared.session(withID: report.sessionID)?.kind
+                == .codex
+                ? CodexTurnBoundaryDefaults.continuationGrace
+                : nil
+            tracker.noteTurnFinished(
+                backgroundWork: report.backgroundWork,
+                continuationGrace: continuationGrace
+            )
+            if continuationGrace != nil {
+                controller.noteCodexTurnFinishedForContinuationDetection()
+            }
             // Usually the activity edge above has already scheduled this scan. Starting the
             // generation again here preserves the hook's intact fast-path message and also
             // covers turns that remain visually `working` because they left background work.
