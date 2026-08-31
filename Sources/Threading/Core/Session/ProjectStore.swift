@@ -1406,7 +1406,7 @@ final class ProjectStore {
         else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].customTitle = stored
         let sidebarImpact: ProjectsDidChange.SidebarImpact =
-            AppSettings.sidebarSessionOrder == .name
+            NativeSidebarPipelineOptions.sessionOrder == .name
                 ? .sessionOrder(sessionID)
                 : .sessionRow(sessionID)
         guard save() else {
@@ -1439,7 +1439,7 @@ final class ProjectStore {
 
         projects[location.projectIndex].sessions[location.sessionIndex].title = title
         let sidebarImpact: ProjectsDidChange.SidebarImpact =
-            AppSettings.sidebarSessionOrder == .name
+            NativeSidebarPipelineOptions.sessionOrder == .name
                 ? .sessionOrder(sessionID)
                 : .sessionRow(sessionID)
         guard save() else {
@@ -1530,7 +1530,7 @@ final class ProjectStore {
         } else {
             scheduleSessionSave(sessionID)
         }
-        let titleCanReorderSidebar = AppSettings.sidebarSessionOrder == .name
+        let titleCanReorderSidebar = NativeSidebarPipelineOptions.sessionOrder == .name
             && AppSettings.usesAgentTitleInSidebar
         notifyChanged(
             sidebarImpact: titleCanReorderSidebar
@@ -1564,7 +1564,7 @@ final class ProjectStore {
         projects[location.projectIndex].sessions[location.sessionIndex].title = title
         save()
         notifyChanged(
-            sidebarImpact: AppSettings.sidebarSessionOrder == .name
+            sidebarImpact: NativeSidebarPipelineOptions.sessionOrder == .name
                 ? .sessionOrder(sessionID)
                 : .sessionRow(sessionID)
         )

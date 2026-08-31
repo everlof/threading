@@ -207,7 +207,7 @@ final class ProjectSidebarViewController: NSViewController {
 
     /// The density the outline is currently *drawn* at — not the setting's live value, which
     /// is what lets `applyTreeDensity` answer only the changes that move a frame. See
-    /// `AppSettings.compactsSidebarTree` for what the compact tree is.
+    /// `NativeSidebarPipelineOptions.compactTree` for what the compact tree is.
     private var presentedTreeIsCompact = false
 
     /// The gutters and depth step the presented rows are stamped with, for the width the column
@@ -846,10 +846,12 @@ extension ProjectSidebarViewController {
             category: "sidebar",
             metadata: ["projects": String(projects.count)]
         )
+        let optionValues = NativeSidebarPipelineOptions.current
         let rebuilt = SidebarTreeBuilder.rootNodes(
             from: projects,
             visibility: sessionVisibility,
-            excludingSessionIDs: optimisticallyArchivedSessionIDs
+            excludingSessionIDs: optimisticallyArchivedSessionIDs,
+            optionValues: optionValues
         )
         treeSpan.end(metadata: ["roots": String(rebuilt.count)])
         #if DEBUG
@@ -963,7 +965,8 @@ extension ProjectSidebarViewController {
                   for: presentedProject.projectID,
                   from: projectStore.projects,
                   visibility: sessionVisibility,
-                  excludingSessionIDs: optimisticallyArchivedSessionIDs
+                  excludingSessionIDs: optimisticallyArchivedSessionIDs,
+                  optionValues: NativeSidebarPipelineOptions.current
               )
         else {
             reload()
@@ -1021,7 +1024,8 @@ extension ProjectSidebarViewController {
                   for: projectID,
                   from: projectStore.projects,
                   visibility: sessionVisibility,
-                  excludingSessionIDs: optimisticallyArchivedSessionIDs
+                  excludingSessionIDs: optimisticallyArchivedSessionIDs,
+                  optionValues: NativeSidebarPipelineOptions.current
               )
         else {
             reload()
@@ -1099,9 +1103,10 @@ extension ProjectSidebarViewController {
     /// regroup several rows; those uncommon boundaries retain the authoritative project-local
     /// builder instead of duplicating its policy here.
     private func applySessionAddition(_ sessionID: SessionID, to projectID: ProjectID) {
+        let optionValues = NativeSidebarPipelineOptions.current
         guard sessionVisibility == .attention,
-              AppSettings.sidebarSessionOrder == .manual,
-              !AppSettings.sidebarSessionOrderIsReversed,
+              optionValues.sessionOrder == .manual,
+              !optionValues.sessionOrderReversed,
               let session = projectStore.session(withID: sessionID),
               !session.isArchived,
               !session.isSnoozed(at: Date()),
@@ -1120,7 +1125,7 @@ extension ProjectSidebarViewController {
             child is TerminalNode
                 || ((child as? BranchGroupNode)?.sessionNodes.isEmpty == true)
         }
-        if AppSettings.groupsSessionsByBranch, let branch = session.branch {
+        if optionValues.branchGrouping, let branch = session.branch {
             if let group = projectNode.childNodes.compactMap({ $0 as? BranchGroupNode })
                 .first(where: { $0.branch == branch }) {
                 parent = group
@@ -1137,7 +1142,7 @@ extension ProjectSidebarViewController {
                     .contains { node in
                         projectStore.terminal(withID: node.terminalID)?.branch == branch
                     }
-                let loneBranchWouldEarnAGroup = AppSettings.groupsLoneBranches
+                let loneBranchWouldEarnAGroup = optionValues.loneBranchHeadings
                     && projectNode.childNodes.contains { $0 is BranchGroupNode }
                 guard !standingSessionSharesBranch,
                       !standingTerminalSharesBranch,
@@ -1562,10 +1567,7 @@ extension ProjectSidebarViewController {
     /// its new frame and height and reopens what should be open; `initial` skips it, because
     /// at setup the first `reload()` has not drawn anything to re-lay out.
     func applyTreeDensity(initial: Bool = false) {
-        let compact = NativeSidebarParity.option(
-            .compactTree,
-            AppSettings.shared.compactsSidebarTree
-        )
+        let compact = NativeSidebarPipelineOptions.current.compactTree
         guard initial || compact != presentedTreeIsCompact else { return }
 
         presentedTreeIsCompact = compact
@@ -2874,10 +2876,11 @@ private extension ProjectSidebarViewController {
     /// The menu behind a branch heading's hover gear: the grouping rules — the settings
     /// that govern the row it hangs from — and the door to the rest of Settings.
     private func showBranchGroupingOptions(from anchor: NSView) {
+        let optionValues = NativeSidebarPipelineOptions.current
         presentSidebarMenu(
             [
-                branchGroupingEntry(),
-                loneBranchHeadingsEntry(),
+                branchGroupingEntry(optionValues),
+                loneBranchHeadingsEntry(optionValues),
                 .separator,
                 .item(ThemedMenuItem(
                     title: L10n.string("All Settings…"),
@@ -2903,23 +2906,27 @@ private extension ProjectSidebarViewController {
     }
 
     /// The grouping toggle, its check showing the current state.
-    private func branchGroupingEntry() -> ThemedMenuEntry {
+    private func branchGroupingEntry(
+        _ optionValues: NativeSidebarPipelineOptionValues
+    ) -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: L10n.string("Group Sessions by Branch"),
             shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.groupByBranch),
-            isSelected: AppSettings.shared.groupsSessionsByBranch,
+            isSelected: optionValues.branchGrouping,
             onChoose: { [weak self] in self?.toggleBranchGroupingClicked() }
         ))
     }
 
     /// The lone-branch refinement, disabled while grouping is off — it refines the grouping
     /// rule, so without grouping there is nothing for it to say.
-    private func loneBranchHeadingsEntry() -> ThemedMenuEntry {
+    private func loneBranchHeadingsEntry(
+        _ optionValues: NativeSidebarPipelineOptionValues
+    ) -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: L10n.string("Headings for Lone Branches"),
             shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.loneBranchHeadings),
-            isSelected: AppSettings.shared.groupsLoneBranches,
-            isEnabled: AppSettings.shared.groupsSessionsByBranch,
+            isSelected: optionValues.loneBranchHeadings,
+            isEnabled: optionValues.branchGrouping,
             onChoose: { [weak self] in self?.toggleLoneBranchHeadingsClicked() }
         ))
     }
@@ -2927,20 +2934,25 @@ private extension ProjectSidebarViewController {
     /// The compact tree, in the menu that owns how the list presents itself. Grouped with the
     /// grouping toggles rather than the orders: all three say what the tree *is*, where an
     /// order says what comes first.
-    private func compactTreeEntry() -> ThemedMenuEntry {
+    private func compactTreeEntry(
+        _ optionValues: NativeSidebarPipelineOptionValues
+    ) -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: L10n.string("Compact Tree"),
             shortcut: ShortcutOverrideStore.shared.shortcut(forID: AppCommands.ID.compactTree),
-            isSelected: AppSettings.shared.compactsSidebarTree,
+            isSelected: optionValues.compactTree,
             onChoose: { [weak self] in self?.toggleCompactTreeClicked() }
         ))
     }
 
     /// One order as a checkable row; the chosen one carries the check.
-    private func orderEntry(_ order: SidebarSessionOrder) -> ThemedMenuEntry {
+    private func orderEntry(
+        _ order: SidebarSessionOrder,
+        optionValues: NativeSidebarPipelineOptionValues
+    ) -> ThemedMenuEntry {
         .item(ThemedMenuItem(
             title: order.menuTitle,
-            isSelected: AppSettings.shared.sidebarSessionOrder == order,
+            isSelected: optionValues.sessionOrder == order,
             onChoose: { [weak self] in self?.sessionOrderChosen(order) }
         ))
     }
@@ -2949,17 +2961,20 @@ private extension ProjectSidebarViewController {
     /// group under the orders rather than a modifier on each of them, so three sorts stay three
     /// rows instead of six. The wording follows the chosen order because "Descending" describes
     /// a comparator, not a list of sessions.
-    private func directionEntry(isReversed: Bool) -> ThemedMenuEntry {
-        let order = AppSettings.shared.sidebarSessionOrder
+    private func directionEntry(
+        isReversed: Bool,
+        optionValues: NativeSidebarPipelineOptionValues
+    ) -> ThemedMenuEntry {
+        let order = optionValues.sessionOrder
         return .item(ThemedMenuItem(
             title: isReversed ? order.reversedDirectionTitle : order.naturalDirectionTitle,
-            isSelected: AppSettings.shared.sidebarSessionOrderIsReversed == isReversed,
+            isSelected: optionValues.sessionOrderReversed == isReversed,
             onChoose: { [weak self] in self?.sessionOrderDirectionChosen(isReversed) }
         ))
     }
 
     @objc private func toggleBranchGroupingClicked() {
-        AppSettings.shared.groupsSessionsByBranch.toggle()
+        NativeSidebarPipelineOptions.toggleBranchGrouping()
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
         NotificationCenter.default.post(ProjectsDidChange())
     }
@@ -2970,7 +2985,7 @@ private extension ProjectSidebarViewController {
     }
 
     @objc private func toggleLoneBranchHeadingsClicked() {
-        AppSettings.shared.groupsLoneBranches.toggle()
+        NativeSidebarPipelineOptions.toggleLoneBranchHeadings()
         NotificationCenter.default.post(ProjectsDidChange())
     }
 
@@ -2978,16 +2993,16 @@ private extension ProjectSidebarViewController {
         // No `ProjectsDidChange`: the tree's shape is unchanged, so that route would answer
         // with a content refresh that moves no frame. The setter's own settings event reaches
         // `applyTreeDensity`, here and in every other window.
-        AppSettings.shared.compactsSidebarTree.toggle()
+        NativeSidebarPipelineOptions.toggleCompactTree()
     }
 
     private func sessionOrderChosen(_ order: SidebarSessionOrder) {
-        AppSettings.shared.sidebarSessionOrder = order
+        NativeSidebarPipelineOptions.setSessionOrder(order)
         NotificationCenter.default.post(ProjectsDidChange())
     }
 
     private func sessionOrderDirectionChosen(_ isReversed: Bool) {
-        AppSettings.shared.sidebarSessionOrderIsReversed = isReversed
+        NativeSidebarPipelineOptions.setSessionOrderReversed(isReversed)
         NotificationCenter.default.post(ProjectsDidChange())
     }
 }
@@ -3355,7 +3370,11 @@ extension ProjectSidebarViewController {
         } else if item is BranchGroupNode {
             // The heading offers the display options that created it, and nothing else — it
             // is a grouping, not a place.
-            entries = [branchGroupingEntry(), loneBranchHeadingsEntry()]
+            let optionValues = NativeSidebarPipelineOptions.current
+            entries = [
+                branchGroupingEntry(optionValues),
+                loneBranchHeadingsEntry(optionValues),
+            ]
         } else if let node = item as? SessionNode,
                   let session = projectStore.session(withID: node.sessionID) {
             // The right-click menu offers exactly what the row's `⋯` button does, built from
@@ -3433,6 +3452,7 @@ extension ProjectSidebarViewController {
     /// started by selecting the project, which opens its composer.
     func projectMenuEntries(row: Int) -> [ThemedMenuEntry] {
         let projectID = (outlineView.item(atRow: row) as? ProjectNode)?.projectID
+        let optionValues = NativeSidebarPipelineOptions.current
 
         var entries: [ThemedMenuEntry] = [
             .item(ThemedMenuItem(
@@ -3473,11 +3493,11 @@ extension ProjectSidebarViewController {
             onChoose: pinnedAction(row) { $0.reclaimDiskSpaceClicked() }
         )))
         entries.append(.separator)
-        entries.append(branchGroupingEntry())
+        entries.append(branchGroupingEntry(optionValues))
         // Only while grouping is on: a refinement with nothing to refine would read as live
         // here. The arrangement control and the View menu carry the disabled-but-visible form.
-        if AppSettings.shared.groupsSessionsByBranch {
-            entries.append(loneBranchHeadingsEntry())
+        if optionValues.branchGrouping {
+            entries.append(loneBranchHeadingsEntry(optionValues))
         }
         entries.append(.separator)
         entries.append(.item(ThemedMenuItem(
@@ -3957,20 +3977,21 @@ extension ProjectSidebarViewController {
     /// outside the private extension because a private extension's members are fileprivate
     /// no matter what they intend.
     func arrangementMenuEntries() -> [ThemedMenuEntry] {
+        let optionValues = NativeSidebarPipelineOptions.current
         var entries: [ThemedMenuEntry] = [
             snoozedSessionsEntry(),
             .separator,
-            branchGroupingEntry(),
-            loneBranchHeadingsEntry(),
-            compactTreeEntry(),
+            branchGroupingEntry(optionValues),
+            loneBranchHeadingsEntry(optionValues),
+            compactTreeEntry(optionValues),
             .separator
         ]
         for order in SidebarSessionOrder.allCases {
-            entries.append(orderEntry(order))
+            entries.append(orderEntry(order, optionValues: optionValues))
         }
         entries.append(.separator)
-        entries.append(directionEntry(isReversed: false))
-        entries.append(directionEntry(isReversed: true))
+        entries.append(directionEntry(isReversed: false, optionValues: optionValues))
+        entries.append(directionEntry(isReversed: true, optionValues: optionValues))
         return entries
     }
 }

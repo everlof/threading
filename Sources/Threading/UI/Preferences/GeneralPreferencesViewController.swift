@@ -124,6 +124,7 @@ final class GeneralPreferencesViewController: NSViewController {
     // MARK: - Setup
 
     private func setupControls() {
+        let nativeSidebarOptions = NativeSidebarPipelineOptions.current
         for kind in AgentKind.allCases {
             defaultAgentPopUp.addItem(
                 ThemedMenuItem(title: kind.displayName, representedValue: kind)
@@ -147,10 +148,10 @@ final class GeneralPreferencesViewController: NSViewController {
 
         configure(terminalTitleToggle, isOn: AppSettings.shared.usesAgentTitleInSidebar, action: #selector(terminalTitleChanged))
         configure(branchGroupingToggle,
-                  isOn: AppSettings.shared.groupsSessionsByBranch,
+                  isOn: nativeSidebarOptions.branchGrouping,
                   action: #selector(branchGroupingChanged))
         configure(compactTreeToggle,
-                  isOn: AppSettings.shared.compactsSidebarTree,
+                  isOn: nativeSidebarOptions.compactTree,
                   action: #selector(compactTreeChanged))
         configure(branchFollowToggle,
                   isOn: AppSettings.shared.followsCheckoutBranch,
@@ -1426,7 +1427,7 @@ final class GeneralPreferencesViewController: NSViewController {
     }
 
     @objc private func branchGroupingChanged() {
-        AppSettings.shared.groupsSessionsByBranch = branchGroupingToggle.state == .on
+        NativeSidebarPipelineOptions.setBranchGrouping(branchGroupingToggle.state == .on)
         // The sidebar rebuilds its tree on this, which is what adds or removes the level.
         NotificationCenter.default.post(ProjectsDidChange())
     }
@@ -1434,7 +1435,7 @@ final class GeneralPreferencesViewController: NSViewController {
     @objc private func compactTreeChanged() {
         // No extra post: density changes no node, and the setter's own settings event is what
         // the sidebar re-lays out on. See `ProjectSidebarViewController.applyTreeDensity`.
-        AppSettings.shared.compactsSidebarTree = compactTreeToggle.state == .on
+        NativeSidebarPipelineOptions.setCompactTree(compactTreeToggle.state == .on)
     }
 
     @objc private func branchFollowChanged() {

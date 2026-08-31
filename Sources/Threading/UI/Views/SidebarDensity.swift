@@ -26,7 +26,7 @@ import AppKit
 /// view actually allows, which is a runtime measurement rather than the constant below it — see
 /// `init(width:floor:)`.
 ///
-/// **This is not the compact tree.** `AppSettings.compactsSidebarTree` is a choice about what the
+/// **This is not the compact tree.** `NativeSidebarPipelineOptions.compactTree` is a choice about what the
 /// list says with depth at *any* width, and it flattens the tree outright; this is the same tree
 /// fitted to the column it has. They compose: in the compact tree the depth step is already gone,
 /// so a narrow column tightens only the row gutters. That tree's own edge does not move — see

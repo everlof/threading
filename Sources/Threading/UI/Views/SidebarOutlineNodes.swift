@@ -326,7 +326,8 @@ enum SidebarTreeBuilder {
         from projects: [Project],
         visibility: SidebarSessionVisibility = .attention,
         excludingSessionIDs: Set<SessionID> = [],
-        at date: Date = Date()
+        at date: Date = Date(),
+        optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current
     ) -> [NSObject] {
         let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
         let visibilityScope = NativeSidebarParity.host(.visibilityScope, visibility)
@@ -356,15 +357,6 @@ enum SidebarTreeBuilder {
                     GitInfo.repositoryIdentity(for: localRepositoryPath)
                 )
         }
-        let order = NativeSidebarParity.option(
-            .sessionOrder,
-            AppSettings.sidebarSessionOrder
-        )
-        let isReversed = NativeSidebarParity.option(
-            .sessionOrderDirection,
-            AppSettings.sidebarSessionOrderIsReversed
-        )
-
         var checkoutCounts: [String: Int] = [:]
         for identity in identities.compactMap({ $0 }) {
             checkoutCounts[identity, default: 0] += 1
@@ -385,8 +377,7 @@ enum SidebarTreeBuilder {
                 terminals: visibilityScope == .attention
                     ? terminals
                     : [],
-                order: order,
-                isReversed: isReversed,
+                optionValues: optionValues,
                 visibility: visibilityScope,
                 excludingSessionIDs: transientExclusions,
                 date: evaluationDate
@@ -442,7 +433,8 @@ enum SidebarTreeBuilder {
         for projectID: ProjectID,
         from projects: [Project],
         visibility: SidebarSessionVisibility = .attention,
-        excludingSessionIDs: Set<SessionID> = []
+        excludingSessionIDs: Set<SessionID> = [],
+        optionValues: NativeSidebarPipelineOptionValues = NativeSidebarPipelineOptions.current
     ) -> ProjectNode? {
         let classifiedProjectID = NativeSidebarParity.host(.entityIdentity, projectID)
         let classifiedProjects = NativeSidebarParity.fact(.projectManualOrder, projects)
@@ -461,14 +453,7 @@ enum SidebarTreeBuilder {
         return makeProjectNode(
             from: project,
             terminals: visibilityScope == .attention ? terminals : [],
-            order: NativeSidebarParity.option(
-                .sessionOrder,
-                AppSettings.sidebarSessionOrder
-            ),
-            isReversed: NativeSidebarParity.option(
-                .sessionOrderDirection,
-                AppSettings.sidebarSessionOrderIsReversed
-            ),
+            optionValues: optionValues,
             visibility: visibilityScope,
             excludingSessionIDs: transientExclusions
         )
@@ -477,12 +462,13 @@ enum SidebarTreeBuilder {
     private static func makeProjectNode(
         from project: Project,
         terminals: [ProjectTerminal],
-        order: SidebarSessionOrder,
-        isReversed: Bool,
+        optionValues: NativeSidebarPipelineOptionValues,
         visibility: SidebarSessionVisibility = .attention,
         excludingSessionIDs: Set<SessionID> = [],
         date: Date = Date()
     ) -> ProjectNode {
+        let order = optionValues.sessionOrder
+        let isReversed = optionValues.sessionOrderReversed
         let projectID = NativeSidebarParity.host(.entityIdentity, project.id)
         let projectSessions = NativeSidebarParity.facts(
             [.sessionProjectMembership, .sessionManualOrder],
@@ -520,8 +506,7 @@ enum SidebarTreeBuilder {
             sessionNodes: top.nodes,
             terminals: terminals,
             terminalNodes: node.terminalNodes,
-            order: order,
-            isReversed: isReversed
+            optionValues: optionValues
         )
         return node
     }
@@ -755,7 +740,7 @@ enum SidebarTreeBuilder {
     /// list keeps its familiar order.
     ///
     /// A branch with a *single* session earns a heading only once some branch has already
-    /// earned the level (`AppSettings.groupsLoneBranches`): a heading over the shared branch
+    /// earned the level (`loneBranchHeadings`): a heading over the shared branch
     /// beside a bare row on its own branch reads as though the bare row had none, but a
     /// project whose branches are all singletons stays flat — all-or-nothing labelling, so
     /// the extra level never appears without cause.
@@ -765,14 +750,12 @@ enum SidebarTreeBuilder {
         sessionNodes: [SessionNode],
         terminals: [ProjectTerminal],
         terminalNodes: [TerminalNode],
-        order: SidebarSessionOrder,
-        isReversed: Bool
+        optionValues: NativeSidebarPipelineOptionValues
     ) -> [NSObject] {
+        let order = optionValues.sessionOrder
+        let isReversed = optionValues.sessionOrderReversed
         let terminalsFirst = order == .type && isReversed
-        let usesBranchGrouping = NativeSidebarParity.option(
-            .branchGrouping,
-            AppSettings.groupsSessionsByBranch
-        )
+        let usesBranchGrouping = optionValues.branchGrouping
         guard usesBranchGrouping else {
             if terminalsFirst {
                 return terminalNodes.map { $0 as NSObject } + sessionNodes.map { $0 as NSObject }
@@ -793,10 +776,7 @@ enum SidebarTreeBuilder {
         }
 
         let hasSharedBranch = itemCounts.values.contains { $0 > 1 }
-        let groupsLoneBranches = NativeSidebarParity.option(
-            .loneBranchHeadings,
-            AppSettings.groupsLoneBranches
-        ) && hasSharedBranch
+        let groupsLoneBranches = optionValues.loneBranchHeadings && hasSharedBranch
 
         var children: [NSObject] = []
         var groupsByBranch: [String: BranchGroupNode] = [:]
