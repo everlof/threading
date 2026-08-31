@@ -108,6 +108,56 @@ final class RemoteNotificationSubscriptionStoreTests: XCTestCase {
         XCTAssertEqual(store.subscriptions.first?.deviceToken, newToken)
     }
 
+    func testHostedRegistrationPersistsOpaqueRecipientAndAdvertisesPush() {
+        let store = ControllableNotificationSubscriptionStore()
+        let service = RemoteNotificationService(subscriptionStore: store)
+        service.configureHostedPushSender(isAvailable: { true }) { _, _, _ in
+            RemoteAPNSDeliveryResult(statusCode: 200, reason: "", apnsID: nil)
+        }
+        let registrationID = "th_push_" + String(repeating: "a", count: 43)
+
+        XCTAssertEqual(
+            service.register(
+                registration(hostedRegistrationID: registrationID),
+                deviceID: "phone-1",
+                authorization: ownerAuthorization()
+            ),
+            .registered(RemoteNotificationRegistrationResponseDTO(delivery: .push))
+        )
+        XCTAssertEqual(store.subscriptions.first?.hostedRegistrationID, registrationID)
+
+        let restarted = RemoteNotificationService(subscriptionStore: store)
+        restarted.configureHostedPushSender(isAvailable: { true }) { _, _, _ in
+            RemoteAPNSDeliveryResult(statusCode: 200, reason: "", apnsID: nil)
+        }
+        XCTAssertEqual(restarted.activate(authorizations: [ownerAuthorization()]), 1)
+    }
+
+    func testHostedBrokerDoesNotClaimPushWithoutValidOpaqueRecipient() {
+        let store = ControllableNotificationSubscriptionStore()
+        let service = RemoteNotificationService(subscriptionStore: store)
+        service.configureHostedPushSender(isAvailable: { true }) { _, _, _ in
+            RemoteAPNSDeliveryResult(statusCode: 200, reason: "", apnsID: nil)
+        }
+
+        XCTAssertEqual(
+            service.register(
+                registration(),
+                deviceID: "phone-1",
+                authorization: ownerAuthorization()
+            ),
+            .registered(RemoteNotificationRegistrationResponseDTO(delivery: .live))
+        )
+        XCTAssertEqual(
+            service.register(
+                registration(hostedRegistrationID: "raw-apns-token"),
+                deviceID: "phone-1",
+                authorization: ownerAuthorization()
+            ),
+            .invalid
+        )
+    }
+
     func testFailedSaveNeverActivatesCandidateAndCanBeRetried() {
         let store = ControllableNotificationSubscriptionStore()
         let service = RemoteNotificationService(subscriptionStore: store)
@@ -231,10 +281,12 @@ final class RemoteNotificationSubscriptionStoreTests: XCTestCase {
     }
 
     private func registration(
-        token: String = String(repeating: "ab", count: 32)
+        token: String = String(repeating: "ab", count: 32),
+        hostedRegistrationID: String? = nil
     ) -> RemoteNotificationRegistrationDTO {
         RemoteNotificationRegistrationDTO(
             deviceToken: token,
+            hostedRegistrationID: hostedRegistrationID,
             environment: .sandbox,
             enabledKinds: [.permissionRequest, .agentMessage],
             soundEnabledKinds: [.permissionRequest]

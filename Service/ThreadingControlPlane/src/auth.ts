@@ -128,7 +128,7 @@ export async function handleRefresh(request: Request, env: Env): Promise<Respons
   const replacementToken = randomToken("th_refresh_");
   const replacementDigest = await sha256Hex(replacementToken);
   const encryptedReplacement = await encryptRefreshReplacement(replacementToken, env);
-  const replacementExpiresAt = now + refreshLifetimeSeconds;
+  const replacementExpiresAt = now + configuredRefreshLifetimeSeconds(env);
   const retryExpiresAt = now + refreshRetryLifetimeSeconds;
   const accessToken = await signAccessToken(active.account_id, env);
   let rotated: D1Result[];
@@ -426,7 +426,7 @@ async function disconnectHostsBestEffort(hosts: Array<{ id: string }>, env: Env)
   });
 }
 
-async function issueSession(accountID: string, env: Env, now: number): Promise<Response> {
+export async function issueSession(accountID: string, env: Env, now: number): Promise<Response> {
   await cleanupExpiredRefreshSessions(accountID, env, now);
   const refreshToken = randomToken("th_refresh_");
   const accessToken = await signAccessToken(accountID, env);
@@ -439,7 +439,7 @@ async function issueSession(accountID: string, env: Env, now: number): Promise<R
     ).bind(
       await sha256Hex(refreshToken),
       accountID,
-      now + refreshLifetimeSeconds,
+      now + configuredRefreshLifetimeSeconds(env),
       now,
       accountID,
       now,
@@ -455,9 +455,13 @@ async function issueSession(accountID: string, env: Env, now: number): Promise<R
     accountID,
     accessToken,
     refreshToken,
-    now + refreshLifetimeSeconds,
+    now + configuredRefreshLifetimeSeconds(env),
     now,
   );
+}
+
+function configuredRefreshLifetimeSeconds(env: Env): number {
+  return env.DEVELOPMENT_AUTH_MODE === "1" ? 24 * 60 * 60 : refreshLifetimeSeconds;
 }
 
 async function retryRefreshSession(digest: string, env: Env, now: number): Promise<Response> {

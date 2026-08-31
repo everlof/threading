@@ -77,8 +77,9 @@ Upgrading the zone plan and setting the period to 60 is the whole fix; no code c
   secrets and selection support. Verify one accepted delivery against each endpoint because the
   device tokens remain environment-specific.
 - [ ] Generate independent 32-byte-or-longer values for session signing, stored Apple-token
-  encryption, report pickup and triage webhook authentication. Install every name pinned by
-  `wrangler.jsonc` and retain operator copies only where explicitly required.
+  encryption, stored APNs-token encryption, report pickup and triage webhook authentication.
+  Install every name pinned by `wrangler.jsonc` and retain operator copies only where explicitly
+  required.
 - [ ] Configure an owned HTTPS `REPORT_ALERT_WEBHOOK_URL`. Its receiver must deduplicate on the
   report ID and accept only the metadata-only event documented in `docs/ISSUE_REPORTING.md`.
 

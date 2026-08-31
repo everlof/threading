@@ -58,7 +58,7 @@ enum RemoteLocalNetworkAddress {
         switch octets[0] {
         case 10: return true
         case 169: return octets[1] == 254
-        case 172: return (16...31).contains(octets[1])
+        case 172: return (16 ... 31).contains(octets[1])
         case 192: return octets[1] == 168
         default: return false
         }
@@ -85,25 +85,25 @@ enum RemoteClientError: LocalizedError {
             return MobileL10n.string(
                 "This invitation is expired or already used, or this membership was revoked."
             )
-        case .upgradeRequired(let target):
+        case let .upgradeRequired(target):
             return Self.upgradeMessage(for: target)
-        case .server(let status, let code, let detail):
+        case let .server(status, code, detail):
             return Self.serverMessage(status: status, code: code, detail: detail)
         }
     }
 
     var statusCode: Int? {
-        guard case .server(let status, _, _) = self else { return nil }
+        guard case let .server(status, _, _) = self else { return nil }
         return status
     }
 
     var refusalCode: String? {
-        guard case .server(_, let code, _) = self else { return nil }
+        guard case let .server(_, code, _) = self else { return nil }
         return code
     }
 
     var refusalDetail: String? {
-        guard case .server(_, _, let detail) = self else { return nil }
+        guard case let .server(_, _, detail) = self else { return nil }
         return detail
     }
 
@@ -111,7 +111,7 @@ enum RemoteClientError: LocalizedError {
     /// bounded refusal code, that answer is authoritative and must not be replaced by a later
     /// route's transport failure.
     var allowsMutationRouteFailover: Bool {
-        guard case .server(let status, let code, _) = self,
+        guard case let .server(status, code, _) = self,
               code == nil else { return false }
         return [502, 503, 504].contains(status)
     }
@@ -137,7 +137,8 @@ enum RemoteClientError: LocalizedError {
         let payload = try? JSONDecoder().decode(RemoteErrorDTO.self, from: data)
         let error = payload?.type == "error" ? payload : nil
         if status == 401,
-           error?.code == nil || error?.code == RemoteRESTErrorCode.unauthorized.rawValue {
+           error?.code == nil || error?.code == RemoteRESTErrorCode.unauthorized.rawValue
+        {
             return .unauthorized
         }
         return .server(status: status, code: error?.code, detail: error?.detail)
@@ -297,7 +298,6 @@ enum RemoteUpdateDefaults {
 /// the Mac; both halves of that are fixed by naming the cause, keeping a structural code beside
 /// the sentence a person reads, and stating what the one available next step is.
 struct RemoteConnectionFailure: Equatable {
-
     /// What the person can do about it, which is not always "try again".
     enum Recovery: Equatable {
         case reconnect
@@ -424,7 +424,7 @@ struct RemoteConnectionFailure: Equatable {
         if trustVerdict == .rejectedFingerprintMismatch {
             return pinnedIdentityMismatch()
         }
-        if let remote = error as? RemoteClientError, case .upgradeRequired(let target) = remote {
+        if let remote = error as? RemoteClientError, case let .upgradeRequired(target) = remote {
             return upgradeRequired(target)
         }
         if isLocalNetworkDenial(error, host: host) {
@@ -461,7 +461,8 @@ struct RemoteConnectionFailure: Equatable {
         var depth = 0
         while let candidate = current, depth < RemoteClientDefaults.underlyingErrorDepthLimit {
             if candidate.domain == NSPOSIXErrorDomain,
-               noRouteCodes.contains(Int32(candidate.code)) {
+               noRouteCodes.contains(Int32(candidate.code))
+            {
                 return true
             }
             current = candidate.userInfo[NSUnderlyingErrorKey] as? NSError
@@ -494,7 +495,6 @@ struct RemoteConnectionFailure: Equatable {
 /// exist — and it costs milliseconds rather than the timeout. When the same code arrives with a
 /// no-route POSIX error beneath it the chain, not the top code, is what decides.
 enum RemoteDoorWalk {
-
     /// What ended a door, as a bounded token a support report can carry.
     enum Ending: String {
         /// Something on the other side answered; the Mac's answer is the answer.
@@ -692,7 +692,7 @@ struct RemoteRequestMetrics: Equatable, Sendable {
 
     private static func milliseconds(from start: Date?, to end: Date?) -> Int? {
         guard let start, let end else { return nil }
-        return max(Int((end.timeIntervalSince(start) * 1_000).rounded()), 0)
+        return max(Int((end.timeIntervalSince(start) * 1000).rounded()), 0)
     }
 
     private static func protocolToken(_ value: String?) -> String? {
@@ -727,8 +727,8 @@ final class RemoteRequestMetricsCollector: NSObject, URLSessionTaskDelegate, @un
     }
 
     func urlSession(
-        _ session: URLSession,
-        task: URLSessionTask,
+        _: URLSession,
+        task _: URLSessionTask,
         didFinishCollecting metrics: URLSessionTaskMetrics
     ) {
         lock.lock()
@@ -918,7 +918,7 @@ struct RemoteClient {
         request.httpMethod = "POST"
         request.setValue(requestID, forHTTPHeaderField: RemoteHeader.requestID.rawValue)
         let (data, response) = try await dataReplayingNetworkFailure(for: request)
-        _ = try validate(data: data, response: response, accepted: 200...299)
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
     }
 
     func resumeTerminal(
@@ -929,7 +929,7 @@ struct RemoteClient {
         request.httpMethod = "POST"
         request.setValue(requestID, forHTTPHeaderField: RemoteHeader.requestID.rawValue)
         let (data, response) = try await dataReplayingNetworkFailure(for: request)
-        _ = try validate(data: data, response: response, accepted: 200...299)
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
     }
 
     func setAppTheme(
@@ -1166,7 +1166,7 @@ struct RemoteClient {
             throw RemoteClientError.invalidResponse
         }
         let (data, response) = try await Self.session.data(for: request(url: url))
-        _ = try validate(data: data, response: response, accepted: 200...299)
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
         return data
     }
 
@@ -1177,7 +1177,7 @@ struct RemoteClient {
             throw RemoteClientError.invalidResponse
         }
         let (data, response) = try await Self.session.data(for: request(url: url))
-        _ = try validate(data: data, response: response, accepted: 200...299)
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
         return data
     }
 
@@ -1203,7 +1203,7 @@ struct RemoteClient {
         let chunkCount = max(1, (data.count + chunkSize - 1) / chunkSize)
         var uploadID: String?
 
-        for index in 0..<chunkCount {
+        for index in 0 ..< chunkCount {
             try Task.checkCancellation()
             let start = index * chunkSize
             let end = min(start + chunkSize, data.count)
@@ -1214,7 +1214,7 @@ struct RemoteClient {
                 totalBytes: data.count,
                 chunkIndex: index,
                 chunkCount: chunkCount,
-                chunk: data[start..<end].base64EncodedString()
+                chunk: data[start ..< end].base64EncodedString()
             )
             // Each chunk carries its own request id: they are distinct mutations, and sharing one
             // would make the Mac's replay cache treat chunk two as a retry of chunk one.
@@ -1245,7 +1245,7 @@ struct RemoteClient {
             throw RemoteClientError.invalidResponse
         }
         let (data, response) = try await Self.session.data(for: request(url: url))
-        _ = try validate(data: data, response: response, accepted: 200...299)
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
         return data
     }
 
@@ -1306,7 +1306,7 @@ struct RemoteClient {
             throw RemoteClientError.invalidResponse
         }
         let (data, response) = try await Self.session.data(for: request(url: url))
-        _ = try validate(data: data, response: response, accepted: 200...299)
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
         return data
     }
 
@@ -1386,7 +1386,7 @@ struct RemoteClient {
         from url: URL
     ) async throws -> Response {
         let (data, response) = try await Self.session.data(for: request(url: url))
-        _ = try validate(data: data, response: response, accepted: 200...299)
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
         return try JSONDecoder().decode(responseType, from: data)
     }
 
@@ -1401,7 +1401,7 @@ struct RemoteClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(requestID, forHTTPHeaderField: RemoteHeader.requestID.rawValue)
         let (data, response) = try await dataReplayingNetworkFailure(for: request)
-        _ = try validate(data: data, response: response, accepted: 200...299)
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
         return try JSONDecoder().decode(Response.self, from: data)
     }
 
@@ -1430,7 +1430,7 @@ struct RemoteClient {
     }
 
     private func decodeMe(data: Data, response: URLResponse) throws -> RemoteMeDTO {
-        _ = try validate(data: data, response: response, accepted: 200...299)
+        _ = try validate(data: data, response: response, accepted: 200 ... 299)
         return try JSONDecoder().decode(RemoteMeDTO.self, from: data)
     }
 

@@ -11,6 +11,12 @@ import {
 } from "./auth";
 import { validateAppleConfiguration } from "./apple-tokens";
 import { handleAPNSPush, validateAPNSConfiguration } from "./apns";
+import {
+  authorizeDevelopmentSignIn,
+  redeemDevelopmentSignIn,
+  startDevelopmentSignIn,
+  validateDevelopmentAuthConfiguration,
+} from "./development-auth";
 import { sha256Hex, verifyRendezvousSessionToken } from "./crypto";
 import {
   authorizeRendezvousCredential,
@@ -28,6 +34,10 @@ import {
 } from "./issue-report-notifications";
 import { handleIssueReportPickup } from "./issue-report-pickup";
 import { BOUNDS, validateIdentifier } from "./protocol";
+import {
+  registerPushRecipient,
+  validatePushTokenEncryptionConfiguration,
+} from "./push-registrations";
 
 export { HostRendezvous } from "./host-rendezvous";
 
@@ -44,13 +54,24 @@ export default {
       if (request.method === "GET" && url.pathname === "/ready") {
         return await readinessResponse(env);
       }
-      if (request.method === "POST" && url.pathname === "/v1/auth/apple") {
+      if (request.method === "POST" && url.pathname === "/v1/auth/apple"
+        && !isOperatedDevelopment(env)) {
         return await handleAppleSignIn(request, env);
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/local-development") {
         return await handleLocalDevelopmentSignIn(request, env);
       }
-      if (request.method === "POST" && url.pathname === "/v1/auth/apple/events") {
+      if (request.method === "POST" && url.pathname === "/v1/auth/development/start") {
+        return await startDevelopmentSignIn(request, env);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/auth/development/authorize") {
+        return await authorizeDevelopmentSignIn(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/auth/development/redeem") {
+        return await redeemDevelopmentSignIn(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/auth/apple/events"
+        && !isOperatedDevelopment(env)) {
         return await handleAppleNotification(request, env);
       }
       if (request.method === "POST" && url.pathname === "/v1/auth/refresh") {
@@ -65,17 +86,22 @@ export default {
       if (request.method === "POST" && url.pathname === "/v1/hosts") {
         return await enrollHost(request, env);
       }
-      if (request.method === "POST" && url.pathname === "/v1/reports") {
+      if (request.method === "POST" && url.pathname === "/v1/reports"
+        && !isOperatedDevelopment(env)) {
         return await handleIssueReport(request, env);
       }
       if (request.method === "POST" && url.pathname === "/v1/push") {
         return await handleAPNSPush(request, env);
       }
-      if (request.method === "GET" && url.pathname === "/v1/developer/reports") {
+      if (request.method === "POST" && url.pathname === "/v1/push/registrations") {
+        return await registerPushRecipient(request, env);
+      }
+      if (request.method === "GET" && url.pathname === "/v1/developer/reports"
+        && !isOperatedDevelopment(env)) {
         return await handleIssueReportPickup(request, env);
       }
       const pickupMatch = /^\/v1\/developer\/reports\/([^/]+)$/u.exec(url.pathname);
-      if (request.method === "GET" && pickupMatch?.[1]) {
+      if (request.method === "GET" && pickupMatch?.[1] && !isOperatedDevelopment(env)) {
         return await handleIssueReportPickup(request, env, decodePath(pickupMatch[1]));
       }
 
@@ -139,11 +165,21 @@ export default {
             + "OR (revoked_at IS NOT NULL AND revoked_at < ?) "
             + `LIMIT ${cleanupPageSize})`,
         ).bind(now, now - 7 * 24 * 60 * 60),
+        env.DB.prepare(
+          "DELETE FROM development_auth_transactions WHERE transaction_digest IN "
+            + "(SELECT transaction_digest FROM development_auth_transactions "
+            + `WHERE expires_at < ? LIMIT ${cleanupPageSize})`,
+        ).bind(now),
+        env.DB.prepare(
+          "DELETE FROM push_registrations WHERE digest IN "
+            + "(SELECT digest FROM push_registrations WHERE revoked_at IS NOT NULL "
+            + `AND revoked_at < ? LIMIT ${cleanupPageSize})`,
+        ).bind(now - 7 * 24 * 60 * 60),
       );
       await env.DB.prepare("DELETE FROM issue_report_daily_quota WHERE day < ?")
         .bind(reportQuotaCutoffDay)
         .run();
-    } else {
+    } else if (!isOperatedDevelopment(env)) {
       await validateDueAppleSessions(env, now);
     }
     cleanupStatements.push(env.DB.prepare(
@@ -182,6 +218,24 @@ async function readinessResponse(env: Env): Promise<Response> {
       await probeStorage(env);
       return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
     }
+    if (isOperatedDevelopment(env)) {
+      const signingSecret = requiredConfigurationSecret(env.SESSION_SIGNING_SECRET, 32, 4096);
+      const pushSecret = requiredConfigurationSecret(
+        env.PUSH_TOKEN_ENCRYPTION_SECRET,
+        32,
+        4096,
+      );
+      if (signingSecret === pushSecret) {
+        throw new HttpError(503, "serviceConfiguration", "Service secrets are not independent");
+      }
+      requiredConfigurationSecret(env.TURN_KEY_ID, 1, 1024);
+      requiredConfigurationSecret(env.TURN_KEY_API_TOKEN, 1, 4096);
+      await validateAPNSConfiguration(env);
+      validatePushTokenEncryptionConfiguration(env);
+      validateDevelopmentAuthConfiguration(env);
+      await probeStorage(env, false);
+      return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
+    }
     const clientIDs = env.APPLE_CLIENT_IDS.split(",")
       .map((value) => value.trim())
       .filter(Boolean);
@@ -200,6 +254,14 @@ async function readinessResponse(env: Env): Promise<Response> {
     if (signingSecret === encryptionSecret) {
       throw new HttpError(503, "serviceConfiguration", "Service secrets are not independent");
     }
+    const pushEncryptionSecret = requiredConfigurationSecret(
+      env.PUSH_TOKEN_ENCRYPTION_SECRET,
+      32,
+      4096,
+    );
+    if (pushEncryptionSecret === signingSecret || pushEncryptionSecret === encryptionSecret) {
+      throw new HttpError(503, "serviceConfiguration", "Service secrets are not independent");
+    }
     requiredConfigurationSecret(env.TURN_KEY_ID, 1, 1024);
     requiredConfigurationSecret(env.TURN_KEY_API_TOKEN, 1, 4096);
     requiredConfigurationSecret(env.REPORT_PICKUP_TOKEN, 32, 4096);
@@ -209,7 +271,9 @@ async function readinessResponse(env: Env): Promise<Response> {
       validateAppleConfiguration(clientIDs, env),
       validateAPNSConfiguration(env),
     ]);
-    await probeStorage(env);
+    validatePushTokenEncryptionConfiguration(env);
+    validateDevelopmentAuthConfiguration(env);
+    await probeStorage(env, true);
     return json({ status: "ready", rendezvousProtocol: BOUNDS.protocolVersion });
   } catch (error) {
     console.warn("readiness_failed", {
@@ -219,7 +283,7 @@ async function readinessResponse(env: Env): Promise<Response> {
   }
 }
 
-async function probeStorage(env: Env): Promise<void> {
+async function probeStorage(env: Env, includeIssueReports = true): Promise<void> {
   await env.DB.batch([
     env.DB.prepare("SELECT auth_invalidated_at FROM accounts LIMIT 1"),
     env.DB.prepare(
@@ -233,8 +297,16 @@ async function probeStorage(env: Env): Promise<void> {
     env.DB.prepare("SELECT device_id, revoked_at FROM rendezvous_credentials LIMIT 1"),
     env.DB.prepare("SELECT jti_digest FROM apple_notifications LIMIT 1"),
     env.DB.prepare("SELECT accepted_count FROM issue_report_daily_quota LIMIT 1"),
+    env.DB.prepare("SELECT consumed_at FROM development_auth_transactions LIMIT 1"),
+    env.DB.prepare("SELECT revoked_at FROM push_registrations LIMIT 1"),
   ]);
-  await env.ISSUE_REPORTS.head("health/readiness-probe");
+  if (includeIssueReports) {
+    await env.ISSUE_REPORTS.head("health/readiness-probe");
+  }
+}
+
+function isOperatedDevelopment(env: Env): boolean {
+  return env.DEVELOPMENT_AUTH_MODE === "1" && env.LOCAL_DEVELOPMENT_MODE !== "1";
 }
 
 function requiredConfigurationSecret(
@@ -340,7 +412,9 @@ async function enforceRateLimit(request: Request, pathname: string, env: Env): P
       actor = `credential:${await sha256Hex(token)}`;
     }
   }
-  const limiter = pathname === "/v1/auth/apple" ? env.AUTH_RATE_LIMITER : env.API_RATE_LIMITER;
+  const limiter = pathname.startsWith("/v1/auth/")
+    ? env.AUTH_RATE_LIMITER
+    : env.API_RATE_LIMITER;
   const outcome = await limiter.limit({ key: `${actor}:${rateLimitGroup(pathname)}` });
   if (!outcome.success) {
     throw new HttpError(429, "rateLimited", "Too many requests; try again shortly");
@@ -353,7 +427,7 @@ function rateLimitGroup(pathname: string): string {
   if (pathname.startsWith("/v1/auth/")) return "auth";
   if (pathname.startsWith("/v1/developer/reports")) return "developerReports";
   if (pathname === "/v1/reports") return "reports";
-  if (pathname === "/v1/push") return "push";
+  if (pathname === "/v1/push" || pathname === "/v1/push/registrations") return "push";
   if (pathname === "/v1/account") return "account";
   return "unknown";
 }

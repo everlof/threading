@@ -41,6 +41,12 @@ public struct PeerControlPlaneBearer: Codable, Equatable, Hashable, Sendable, Cu
         try body(rawValue)
     }
 
+    public func withValue<Result>(
+        _ body: (String) async throws -> Result
+    ) async rethrows -> Result {
+        try await body(rawValue)
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         try self.init(container.decode(String.self))
@@ -102,6 +108,44 @@ public struct PeerDeviceServiceCredential: Codable, Equatable, Hashable, Sendabl
         self.deviceID = deviceID
         self.credential = credential
         self.expiresAt = expiresAt
+    }
+}
+
+public struct PeerDevelopmentSignInTransaction: Equatable, Sendable {
+    public let transactionID: PeerControlPlaneBearer
+    public let pollToken: PeerControlPlaneBearer
+    public let authorizationURL: URL
+    public let expiresAt: Date
+
+    public init(
+        transactionID: PeerControlPlaneBearer,
+        pollToken: PeerControlPlaneBearer,
+        authorizationURL: URL,
+        expiresAt: Date
+    ) {
+        self.transactionID = transactionID
+        self.pollToken = pollToken
+        self.authorizationURL = authorizationURL
+        self.expiresAt = expiresAt
+    }
+}
+
+public struct PeerPushRegistration: Equatable, Sendable {
+    public let registrationID: String
+    public let hostID: String
+    public let deviceID: String
+    public let environment: String
+
+    public init(
+        registrationID: String,
+        hostID: String,
+        deviceID: String,
+        environment: String
+    ) {
+        self.registrationID = registrationID
+        self.hostID = hostID
+        self.deviceID = deviceID
+        self.environment = environment
     }
 }
 
@@ -219,6 +263,60 @@ public struct PeerControlPlaneClient: Sendable {
             url: endpoint.route("v1", "auth", "local-development"),
             body: EmptyRequest()
         )
+        return try response.validated()
+    }
+
+    /// Begins the browser-authenticated flow exposed only by the isolated development service.
+    /// The verifier never crosses this request; only its SHA-256 challenge does.
+    public func startDevelopmentSignIn(
+        hostID: String,
+        codeChallenge: String
+    ) async throws -> PeerDevelopmentSignInTransaction {
+        try validateIdentifier(hostID)
+        guard codeChallenge.count == 64,
+              codeChallenge.unicodeScalars.allSatisfy({ scalar in
+                  (48...57).contains(scalar.value) || (97...102).contains(scalar.value)
+              }) else {
+            throw PeerControlPlaneError.invalidRequest
+        }
+        let response: DevelopmentSignInStartResponse = try await request(
+            method: "POST",
+            url: endpoint.route("v1", "auth", "development", "start"),
+            body: DevelopmentSignInStartRequest(hostID: hostID, codeChallenge: codeChallenge)
+        )
+        return try response.validated(endpoint: endpoint)
+    }
+
+    public func redeemDevelopmentSignIn(
+        transaction: PeerDevelopmentSignInTransaction,
+        hostID: String,
+        codeVerifier: String
+    ) async throws -> PeerControlPlaneSession {
+        try validateIdentifier(hostID)
+        guard (43...128).contains(codeVerifier.count),
+              codeVerifier.unicodeScalars.allSatisfy({ scalar in
+                  (48...57).contains(scalar.value)
+                      || (65...90).contains(scalar.value)
+                      || (97...122).contains(scalar.value)
+                      || scalar.value == 45 || scalar.value == 95
+              }), transaction.expiresAt > Date() else {
+            throw PeerControlPlaneError.invalidRequest
+        }
+        let response: SessionResponse = try await transaction.transactionID.withValue {
+            transactionID in
+            try await transaction.pollToken.withValue { pollToken in
+                try await request(
+                    method: "POST",
+                    url: endpoint.route("v1", "auth", "development", "redeem"),
+                    body: DevelopmentSignInRedeemRequest(
+                        transactionID: transactionID,
+                        pollToken: pollToken,
+                        codeVerifier: codeVerifier,
+                        hostID: hostID
+                    )
+                )
+            }
+        }
         return try response.validated()
     }
 
@@ -342,6 +440,40 @@ public struct PeerControlPlaneClient: Sendable {
         return try response.validated()
     }
 
+    /// Stores the APNs token under the paired phone's device credential and returns the only
+    /// recipient identifier a host is allowed to use for subsequent sends.
+    public func registerPushRecipient(
+        deviceCredential: PeerDeviceServiceCredential,
+        deviceToken: String,
+        environment: String
+    ) async throws -> PeerPushRegistration {
+        try validateIdentifier(deviceCredential.hostID)
+        try validateIdentifier(deviceCredential.deviceID)
+        guard deviceCredential.expiresAt > Date(),
+              (environment == "sandbox" || environment == "production"),
+              (32...512).contains(deviceToken.count),
+              deviceToken.count.isMultiple(of: 2),
+              deviceToken.unicodeScalars.allSatisfy({ scalar in
+                  (48...57).contains(scalar.value) || (97...102).contains(scalar.value)
+              }) else {
+            throw PeerControlPlaneError.invalidRequest
+        }
+        let response: PushRegistrationResponse = try await request(
+            method: "POST",
+            url: endpoint.route("v1", "push", "registrations"),
+            bearer: deviceCredential.credential,
+            body: PushRegistrationRequest(
+                deviceToken: deviceToken,
+                environment: environment
+            )
+        )
+        return try response.validated(
+            expectedHostID: deviceCredential.hostID,
+            expectedDeviceID: deviceCredential.deviceID,
+            expectedEnvironment: environment
+        )
+    }
+
     public func deleteAccount(accessToken: PeerControlPlaneBearer) async throws {
         try await requestWithoutResponse(
             method: "DELETE",
@@ -435,6 +567,23 @@ private struct AppleSignInRequest: Encodable {
     let nonce: String
 }
 
+private struct DevelopmentSignInStartRequest: Encodable {
+    let hostID: String
+    let codeChallenge: String
+}
+
+private struct DevelopmentSignInRedeemRequest: Encodable {
+    let transactionID: String
+    let pollToken: String
+    let codeVerifier: String
+    let hostID: String
+}
+
+private struct PushRegistrationRequest: Encodable {
+    let deviceToken: String
+    let environment: String
+}
+
 private struct RefreshRequest: Encodable { let refreshToken: String }
 private struct HostEnrollmentRequest: Encodable { let hostID: String; let displayName: String }
 private struct DeviceEnrollmentRequest: Encodable {
@@ -442,6 +591,74 @@ private struct DeviceEnrollmentRequest: Encodable {
     let lifetimeSeconds: Int?
 }
 private struct EmptyRequest: Encodable {}
+
+private struct DevelopmentSignInStartResponse: Decodable {
+    let transactionID: String
+    let pollToken: String
+    let authorizationURL: String
+    let expiresAt: Double
+
+    func validated(
+        endpoint: PeerControlPlaneServiceEndpoint,
+        now: Date = Date()
+    ) throws -> PeerDevelopmentSignInTransaction {
+        guard let url = URL(string: authorizationURL),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              components.scheme == endpoint.baseURL.scheme,
+              components.host?.lowercased() == endpoint.baseURL.host?.lowercased(),
+              components.port == endpoint.baseURL.port,
+              components.path == "/v1/auth/development/authorize",
+              components.fragment == nil,
+              components.queryItems?.count == 1,
+              components.queryItems?.first?.name == "transaction",
+              components.queryItems?.first?.value == transactionID else {
+            throw PeerControlPlaneError.invalidResponse
+        }
+        let expiry = try validatedFutureDate(expiresAt, now: now)
+        guard expiry <= now.addingTimeInterval(10 * 60) else {
+            throw PeerControlPlaneError.invalidResponse
+        }
+        return try PeerDevelopmentSignInTransaction(
+            transactionID: PeerControlPlaneBearer(transactionID),
+            pollToken: PeerControlPlaneBearer(pollToken),
+            authorizationURL: url,
+            expiresAt: expiry
+        )
+    }
+}
+
+private struct PushRegistrationResponse: Decodable {
+    let registrationID: String
+    let hostID: String
+    let deviceID: String
+    let environment: String
+
+    func validated(
+        expectedHostID: String,
+        expectedDeviceID: String,
+        expectedEnvironment: String
+    ) throws -> PeerPushRegistration {
+        guard hostID == expectedHostID,
+              deviceID == expectedDeviceID,
+              environment == expectedEnvironment,
+              registrationID.hasPrefix("th_push_"),
+              (40...256).contains(registrationID.count),
+              registrationID.unicodeScalars.allSatisfy({ scalar in
+                  (48...57).contains(scalar.value)
+                      || (65...90).contains(scalar.value)
+                      || (97...122).contains(scalar.value)
+                      || scalar.value == 45 || scalar.value == 95
+              }) else {
+            throw PeerControlPlaneError.invalidResponse
+        }
+        return PeerPushRegistration(
+            registrationID: registrationID,
+            hostID: hostID,
+            deviceID: deviceID,
+            environment: environment
+        )
+    }
+}
 
 private struct SessionResponse: Decodable {
     let accessToken: String

@@ -5,8 +5,9 @@ import { sha256Hex } from "./crypto";
 import { authorizeRendezvousCredential } from "./enrollment";
 import { assertExactKeys, bearerToken, json, readJSON } from "./http";
 import { validateIdentifier } from "./protocol";
+import { registeredPushRecipient, revokePushRegistration } from "./push-registrations";
 
-const requestKeys = ["deviceToken", "environment", "playsSound", "event"];
+const requestKeys = ["registrationID", "playsSound", "event"];
 const eventKeys = [
   "type", "id", "kind", "hostID", "sessionID", "title", "body",
   "titleLocalization", "bodyLocalization", "destination", "createdAt",
@@ -15,11 +16,16 @@ const localizationKeys = ["key", "arguments"];
 const destinationKeys = [
   "kind", "attachmentID", "browserTabID", "extensionIdentifier", "extensionPanelID",
 ];
-const kinds = new Set([
-  "sharedSession", "permissionRequest", "agentQuestion", "agentMessage", "attentionRequest",
-]);
+export enum NotificationKind {
+  sharedSession = "sharedSession",
+  permissionRequest = "permissionRequest",
+  agentQuestion = "agentQuestion",
+  turnCompleted = "turnCompleted",
+  agentMessage = "agentMessage",
+  attentionRequest = "attentionRequest",
+}
+const kinds = new Set<NotificationKind>(Object.values(NotificationKind));
 const destinationKinds = new Set(["session", "attachment", "browserTab", "extensionPanel"]);
-const deviceTokenPattern = /^[0-9a-f]+$/u;
 const machineTokenPattern = /^[A-Za-z0-9._:-]+$/u;
 const apnsKeyCache = new WeakMap<object, Promise<CryptoKey>>();
 const apnsJWTCache = new WeakMap<object, { value: string; issuedAt: number }>();
@@ -27,7 +33,7 @@ const apnsJWTCache = new WeakMap<object, { value: string; issuedAt: number }>();
 interface NotificationEvent {
   type: "notification";
   id: string;
-  kind: string;
+  kind: NotificationKind;
   hostID: string;
   sessionID: string;
   title: string;
@@ -52,19 +58,23 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
   if (principal.kind !== "host") throw new HttpError(403, "forbidden", "Host credential required");
   const body = await readJSON(request, 8 * 1024);
   assertExactKeys(body, requestKeys);
-  const deviceToken = normalizedDeviceToken(body.deviceToken);
-  const environment = boundedEnum(body.environment, new Set(["sandbox", "production"]));
   if (typeof body.playsSound !== "boolean") invalid("playsSound is invalid");
   const event = normalizedEvent(requiredObject(body.event, "event"));
   if (event.hostID !== principal.hostID) {
     throw new HttpError(403, "forbidden", "Notification host does not match credential");
   }
+  const registration = await registeredPushRecipient(
+    body.registrationID,
+    principal.hostID,
+    principal.accountID,
+    env,
+  );
 
   const apnsBody = await encodedAPNSBody(event, body.playsSound);
-  const host = environment === "sandbox"
+  const host = registration.environment === "sandbox"
     ? "api.sandbox.push.apple.com"
     : "api.push.apple.com";
-  const response = await fetch(`https://${host}/3/device/${deviceToken}`, {
+  const response = await fetch(`https://${host}/3/device/${registration.deviceToken}`, {
     method: "POST",
     headers: {
       Authorization: `bearer ${await apnsAuthorizationToken(env)}`,
@@ -82,11 +92,14 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
   });
   const reason = await apnsResponseReason(response);
   const apnsID = normalizedAPNSID(response.headers.get("apns-id"));
+  if (response.status === 410 || reason === "BadDeviceToken" || reason === "DeviceTokenNotForTopic") {
+    await revokePushRegistration(body.registrationID as string, env);
+  }
   console.info(response.ok ? "push_provider_accepted" : "push_provider_refused", {
     eventID: event.id,
     kind: event.kind,
-    device: `device-${(await sha256Hex(deviceToken)).slice(0, 12)}`,
-    environment,
+    device: `device-${registration.deviceTokenDigest.slice(0, 12)}`,
+    environment: registration.environment,
     status: response.status,
     ...(apnsID ? { providerTrace: apnsID } : {}),
   });
@@ -300,17 +313,9 @@ function normalizedAPNSID(value: string | null): string | null {
   return value;
 }
 
-function normalizedDeviceToken(value: unknown): string {
-  if (typeof value !== "string") invalid("deviceToken is invalid");
-  const token = value.toLowerCase();
-  if (token.length < 32 || token.length > 256 || token.length % 2 !== 0
-    || !deviceTokenPattern.test(token)) invalid("deviceToken is invalid");
-  return token;
-}
-
-function boundedEnum(value: unknown, accepted: Set<string>): string {
-  if (typeof value !== "string" || !accepted.has(value)) invalid("enum value is invalid");
-  return value;
+function boundedEnum<Value extends string>(value: unknown, accepted: Set<Value>): Value {
+  if (typeof value !== "string" || !accepted.has(value as Value)) invalid("enum value is invalid");
+  return value as Value;
 }
 
 function machineToken(value: unknown, name: string, maximumBytes: number): string {

@@ -694,6 +694,29 @@ let command = ExtensionCommand(
 let registration = ExtensionRegistration(commands: [command])
 ```
 
+An application-scoped command that can operate on any Threading project may ask Quick Open for a
+semantic project input:
+
+```swift
+let openInEditor = ExtensionCommand(
+    id: "open-in-editor",
+    title: "Open Project in Editor",
+    scope: .application,
+    menuPlacements: [.extensions, .project, .projectRow],
+    input: .init(
+        kind: .project,
+        prompt: "Choose a project to open.",
+        searchPlaceholder: "Search projects"
+    )
+)
+```
+
+Threading owns that second step: it projects the current project store, searches and caps the
+visible options, then revalidates the chosen opaque id immediately before invocation. The value
+arrives as `ExtensionCommandRequest.input`; for compatibility its validated project id is also in
+`context.projectID`. It is identity, not a checkout path or a file grant. Menu and project-row
+invocations do not raise Quick Open; they use the current or row project context instead.
+
 Choose `.application`, `.project`, or `.session` from the minimum context the command needs.
 The stable placements are `.extensions` for Threading's top-level Extensions menu, `.project`
 or `.view` for a host-owned Extensions group at the end of those existing menus, and

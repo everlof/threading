@@ -463,6 +463,17 @@
         }
       }
     },
+    "%@ already has this conversation open somewhere else. Close it there, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ har redan den här konversationen öppen någon annanstans. Stäng den där och försök igen."
+          }
+        }
+      }
+    },
     "%@ archived “%@”" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -690,17 +701,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ har den här chatten öppen"
-          }
-        }
-      }
-    },
-    "%@ is already using this conversation's identifier somewhere else." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ använder redan den här konversationens identifierare någon annanstans."
           }
         }
       }
@@ -39201,6 +39201,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stannar vid sin gräns"
+          }
+        }
+      }
+    },
+    "Stops at the %@ window’s scheduled reset, or sooner if the provider resets that same window early." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stannar vid %@-fönstrets planerade återställning, eller tidigare om leverantören återställer samma fönster i förtid."
+          }
+        }
+      }
+    },
+    "Stops at this window’s scheduled reset, or sooner if the provider resets this same window early." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stannar vid det här fönstrets planerade återställning, eller tidigare om leverantören återställer samma fönster i förtid."
           }
         }
       }

@@ -6,6 +6,8 @@ struct MobileSettingsView: View {
     @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var theme
     @Environment(\.dismiss) private var dismiss
+    @AppStorage(MobileSessionAccountBadgePreference.key)
+    private var showsAccountBadge = MobileSessionAccountBadgePreference.defaultValue
     @State private var showsNotifications = false
     @State private var showsDiagnostics = false
 
@@ -52,6 +54,14 @@ struct MobileSettingsView: View {
                                 MacAppearanceSettingsView()
                             }
                         }
+
+                        ThemedRowDivider()
+                        SettingsToggleRow(
+                            symbol: "person.text.rectangle",
+                            title: "Account initials",
+                            detail: "Show on session usage controls",
+                            isOn: $showsAccountBadge
+                        )
                     }
 
                     settingsSection("On this iPhone") {
@@ -356,6 +366,23 @@ private struct SettingsActionRow: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct SettingsToggleRow: View {
+    @Environment(\.remoteTheme) private var theme
+    let symbol: String
+    let title: LocalizedStringKey
+    let detail: LocalizedStringKey?
+    @Binding var isOn: Bool
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            SettingsRow(symbol: symbol, title: title, detail: detail)
+        }
+        .tint(theme.accent)
+        .padding(.horizontal, MobileDesign.Spacing.inset)
+        .padding(.vertical, MobileDesign.Spacing.small)
     }
 }
 

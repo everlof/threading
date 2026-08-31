@@ -1,4 +1,6 @@
+import AppKit
 import AuthenticationServices
+import CryptoKit
 import Foundation
 import Security
 import ThreadingPeerTransport
@@ -16,6 +18,7 @@ enum RemoteHostedServiceState: Equatable {
 private enum RemoteHostedServiceDefaults {
     static let keychainService = "codes.threading.remote.hosted-service"
     static let keychainAccount = "host-credentials-v1"
+    static let developmentKeychainAccount = "host-credentials-development-v1"
     static let recordVersion = 1
     static let maximumPendingRevocations = 64
     static let credentialRenewalLeadTime: TimeInterval = 60 * 60
@@ -53,6 +56,12 @@ private enum RemoteHostedServiceStoreError: LocalizedError {
 }
 
 private final class RemoteHostedServiceKeychainStore: RemoteHostedServicePersisting {
+    private let account: String
+
+    init(account: String = RemoteHostedServiceDefaults.keychainAccount) {
+        self.account = account
+    }
+
     func load() throws -> RemoteHostedServiceRecord? {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(readQuery as CFDictionary, &result)
@@ -102,7 +111,7 @@ private final class RemoteHostedServiceKeychainStore: RemoteHostedServicePersist
         [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: RemoteHostedServiceDefaults.keychainService,
-            kSecAttrAccount as String: RemoteHostedServiceDefaults.keychainAccount,
+            kSecAttrAccount as String: account,
         ]
     }
 
@@ -139,6 +148,7 @@ final class RemoteHostedServiceController {
     private let hostID: String
     private let hostName: String
     private let localDevelopmentAuthentication: Bool
+    private let developmentBrowserAuthentication: Bool
     private var record: RemoteHostedServiceRecord?
     private var persistenceError: String?
     private var listener: PeerHostedHostListener?
@@ -159,13 +169,16 @@ final class RemoteHostedServiceController {
         hostID: String = RemoteHostIdentity.current.id,
         hostName: String = RemoteHostIdentity.current.name,
         localDevelopmentAuthentication: Bool = RemoteHostedServiceController
-            .configuredLocalDevelopmentAuthentication()
+            .configuredLocalDevelopmentAuthentication(),
+        developmentBrowserAuthentication: Bool? = nil
     ) {
-        self.store = store ?? Self.defaultStore()
+        self.store = store ?? Self.defaultStore(endpoint: endpoint)
         self.endpoint = endpoint
         self.hostID = hostID
         self.hostName = hostName
         self.localDevelopmentAuthentication = localDevelopmentAuthentication
+        self.developmentBrowserAuthentication = developmentBrowserAuthentication
+            ?? Self.configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
         do {
             let loaded = try self.store.load()
             if let loaded, Self.isValid(loaded, endpoint: endpoint, hostID: hostID) {
@@ -204,6 +217,12 @@ final class RemoteHostedServiceController {
         endpoint?.isLoopback == false && canIssueDeviceCredentials
     }
 
+    private var sessionRenewalLeadTime: TimeInterval {
+        developmentBrowserAuthentication
+            ? 60 * 60
+            : RemoteHostedServiceDefaults.sessionRenewalLeadTime
+    }
+
     func start(targetPort: UInt16) {
         desiredPort = targetPort
         lifecycleGeneration &+= 1
@@ -222,6 +241,16 @@ final class RemoteHostedServiceController {
                 state = .connecting
                 connectionTask = Task { [weak self] in
                     await self?.bootstrapLocalDevelopment(
+                        targetPort: targetPort,
+                        generation: generation
+                    )
+                }
+                return
+            }
+            if developmentBrowserAuthentication, endpoint?.isLoopback == false {
+                state = .connecting
+                connectionTask = Task { [weak self] in
+                    await self?.bootstrapDevelopmentBrowserAuthentication(
                         targetPort: targetPort,
                         generation: generation
                     )
@@ -313,6 +342,69 @@ final class RemoteHostedServiceController {
         start(targetPort: targetPort)
     }
 
+    private func bootstrapDevelopmentBrowserAuthentication(
+        targetPort: UInt16,
+        generation: Int
+    ) async {
+        guard let endpoint, !endpoint.isLoopback else {
+            state = .signInRequired
+            return
+        }
+        let client = PeerControlPlaneClient(endpoint: endpoint)
+        do {
+            let verifier = try Self.developmentCodeVerifier()
+            let transaction = try await client.startDevelopmentSignIn(
+                hostID: hostID,
+                codeChallenge: Self.sha256(verifier)
+            )
+            guard NSWorkspace.shared.open(transaction.authorizationURL) else {
+                throw PeerControlPlaneError.transport("browser")
+            }
+            var session: PeerControlPlaneSession?
+            while !Task.isCancelled, Date() < transaction.expiresAt {
+                do {
+                    session = try await client.redeemDevelopmentSignIn(
+                        transaction: transaction,
+                        hostID: hostID,
+                        codeVerifier: verifier
+                    )
+                    break
+                } catch PeerControlPlaneError.rejected(
+                    let status,
+                    let code
+                ) where status == 409 && code == "developmentAuthPending" {
+                    try await Task.sleep(for: .seconds(1))
+                }
+            }
+            guard let session else {
+                throw PeerControlPlaneError.rejected(
+                    status: 410,
+                    code: "developmentAuthExpired"
+                )
+            }
+            let hostCredential = try await client.enrollHost(
+                accessToken: session.accessToken,
+                hostID: hostID,
+                displayName: hostName
+            )
+            try persist(RemoteHostedServiceRecord(
+                version: RemoteHostedServiceDefaults.recordVersion,
+                endpoint: endpoint.baseURL,
+                session: session,
+                hostCredential: hostCredential,
+                pendingRevokedDeviceIDs: []
+            ))
+        } catch is CancellationError {
+            return
+        } catch {
+            guard generation == lifecycleGeneration else { return }
+            state = persistenceError == nil ? .signInRequired : .unavailable("credentials")
+            return
+        }
+        guard generation == lifecycleGeneration else { return }
+        start(targetPort: targetPort)
+    }
+
     func signOut() async throws {
         lifecycleGeneration &+= 1
         stopConnection(keepingDesiredPort: true)
@@ -385,8 +477,7 @@ final class RemoteHostedServiceController {
 
     func sendHostedPush(
         event: RemoteNotificationEventDTO,
-        deviceToken: String,
-        environment: RemoteAPNSPushSender.Environment,
+        registrationID: String,
         playsSound: Bool
     ) async -> RemoteAPNSDeliveryResult {
         guard let endpoint, !endpoint.isLoopback else {
@@ -401,8 +492,7 @@ final class RemoteHostedServiceController {
             let result = try await PeerControlPlaneClient(endpoint: endpoint).sendHostedPush(
                 hostCredential: current.hostCredential.credential,
                 payload: RemoteHostedPushEnvelope(
-                    deviceToken: deviceToken,
-                    environment: environment.rawValue,
+                    registrationID: registrationID,
                     playsSound: playsSound,
                     event: event
                 )
@@ -464,6 +554,13 @@ final class RemoteHostedServiceController {
             return
         } catch {
             guard generation == lifecycleGeneration else { return }
+            if await reauthorizeDevelopmentIfNeeded(
+                after: error,
+                targetPort: targetPort,
+                generation: generation
+            ) {
+                return
+            }
             ThreadingLogger.remote.error(
                 "Hosted remote connection failed code=\(Self.errorCode(error), privacy: .public)"
             )
@@ -508,7 +605,7 @@ final class RemoteHostedServiceController {
         -> RemoteHostedServiceRecord {
         guard var current = record else { throw PeerControlPlaneError.invalidCredential }
         if current.session.refreshTokenExpiresAt
-            <= Date().addingTimeInterval(RemoteHostedServiceDefaults.sessionRenewalLeadTime) {
+            <= Date().addingTimeInterval(sessionRenewalLeadTime) {
             current.session = try await validSession(
                 current: &current,
                 client: client,
@@ -635,7 +732,7 @@ final class RemoteHostedServiceController {
         guard let record else { return }
         let nextDate = min(
             record.session.refreshTokenExpiresAt.addingTimeInterval(
-                -RemoteHostedServiceDefaults.sessionRenewalLeadTime
+                -sessionRenewalLeadTime
             ),
             record.hostCredential.expiresAt.addingTimeInterval(
                 -RemoteHostedServiceDefaults.credentialRenewalLeadTime
@@ -667,6 +764,13 @@ final class RemoteHostedServiceController {
             return
         } catch {
             guard generation == lifecycleGeneration, desiredPort == targetPort else { return }
+            if await reauthorizeDevelopmentIfNeeded(
+                after: error,
+                targetPort: targetPort,
+                generation: generation
+            ) {
+                return
+            }
             let requiresSignIn = Self.requiresSignIn(error)
             state = requiresSignIn ? .signInRequired : .unavailable("service")
             if !requiresSignIn {
@@ -711,6 +815,33 @@ final class RemoteHostedServiceController {
         }
     }
 
+    private func reauthorizeDevelopmentIfNeeded(
+        after error: Error,
+        targetPort: UInt16,
+        generation: Int
+    ) async -> Bool {
+        guard developmentBrowserAuthentication,
+              Self.requiresSignIn(error),
+              endpoint?.isLoopback == false,
+              generation == lifecycleGeneration,
+              desiredPort == targetPort else { return false }
+        do {
+            try store.delete()
+            record = nil
+            persistenceError = nil
+        } catch {
+            persistenceError = error.localizedDescription
+            state = .unavailable("credentials")
+            return true
+        }
+        state = .connecting
+        await bootstrapDevelopmentBrowserAuthentication(
+            targetPort: targetPort,
+            generation: generation
+        )
+        return true
+    }
+
     private static func isValid(
         _ record: RemoteHostedServiceRecord,
         endpoint: PeerControlPlaneServiceEndpoint?,
@@ -739,9 +870,15 @@ final class RemoteHostedServiceController {
             }
     }
 
-    private static func defaultStore() -> RemoteHostedServicePersisting {
+    private static func defaultStore(
+        endpoint: PeerControlPlaneServiceEndpoint?
+    ) -> RemoteHostedServicePersisting {
         NSClassFromString("XCTestCase") == nil
-            ? RemoteHostedServiceKeychainStore()
+            ? RemoteHostedServiceKeychainStore(
+                account: configuredDevelopmentBrowserAuthentication(endpoint: endpoint)
+                    ? RemoteHostedServiceDefaults.developmentKeychainAccount
+                    : RemoteHostedServiceDefaults.keychainAccount
+            )
             : InMemoryRemoteHostedServiceStore()
     }
 
@@ -770,6 +907,31 @@ final class RemoteHostedServiceController {
 #endif
     }
 
+    private static func configuredDevelopmentBrowserAuthentication(
+        endpoint: PeerControlPlaneServiceEndpoint?
+    ) -> Bool {
+#if DEBUG
+        endpoint?.baseURL.host?.lowercased() == "dev.remote.threading.codes"
+#else
+        false
+#endif
+    }
+
+    private static func developmentCodeVerifier() throws -> String {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes) == errSecSuccess else {
+            throw PeerControlPlaneError.transport("entropy")
+        }
+        return Data(bytes).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    private static func sha256(_ value: String) -> String {
+        SHA256.hash(data: Data(value.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
     private static func requiresSignIn(_ error: Error) -> Bool {
         if error as? PeerControlPlaneError == .invalidCredential { return true }
         if case .rejected(let status, _) = error as? PeerControlPlaneError, status == 401 {
@@ -793,8 +955,7 @@ final class RemoteHostedServiceController {
 }
 
 private struct RemoteHostedPushEnvelope: Encodable, Sendable {
-    let deviceToken: String
-    let environment: String
+    let registrationID: String
     let playsSound: Bool
     let event: RemoteNotificationEventDTO
 }

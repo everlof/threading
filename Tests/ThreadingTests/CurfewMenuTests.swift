@@ -294,6 +294,32 @@ final class CurfewMenuTests: XCTestCase {
         XCTAssertEqual(item(.exempt, in: entries)?.isSelected, false)
     }
 
+    func testAWeeklyResetConditionChecksOnlyTheWeeklyOffer() throws {
+        let reading = usage()
+        let expectedAt = try XCTUnwrap(reading.windows[1].resetsAt)
+        let answer = CurfewResolution.Answer(
+            scope: .session,
+            curfew: curfew(at: expectedAt, origin: .session),
+            condition: .usageReset(
+                expectedAt: expectedAt,
+                armedAt: now,
+                accountID: AccountID(provider: .codex, handle: .standard),
+                windowID: UsageDefaults.weeklyWindowID
+            )
+        )
+        let rows = entries(usage: reading, resolved: answer).compactMap(\.item)
+        let resetRow: (String) -> ThemedMenuItem? = { windowID in
+            rows.first {
+                ($0.representedValue as? String)
+                    == "\(PresetDefaults.curfewResetIDPrefix)\(windowID)"
+            }
+        }
+
+        XCTAssertEqual(resetRow(UsageDefaults.weeklyWindowID)?.isSelected, true)
+        XCTAssertEqual(resetRow(UsageDefaults.fiveHourWindowID)?.isSelected, false)
+        XCTAssertNil(item(.endsAt, in: entries(usage: reading, resolved: answer)))
+    }
+
     func testTheStatementLeadsTheRulesItIsNotOneOf() {
         let entries = self.entries(resolved: ownMoment)
         let named = entries.compactMap { $0.item?.representedValue as? CurfewMenu.RowID }
@@ -338,6 +364,24 @@ final class CurfewMenuTests: XCTestCase {
 
         XCTAssertNotNil(expected?.date)
         XCTAssertEqual(chosen, expected?.date)
+    }
+
+    func testAUsageResetOfferHandsBackTheExactWindowItNames() throws {
+        var chosen: (expectedAt: Date, windowID: String)?
+        let entries = self.entries(usage: usage(), onChoose: { choice in
+            guard case .untilUsageReset(let expectedAt, let windowID) = choice else { return }
+            chosen = (expectedAt, windowID)
+        })
+        let rowID = "\(PresetDefaults.curfewResetIDPrefix)\(UsageDefaults.weeklyWindowID)"
+        let row = try XCTUnwrap(entries.compactMap(\.item).first {
+            ($0.representedValue as? String) == rowID
+        })
+
+        row.onChoose?()
+
+        XCTAssertEqual(chosen?.windowID, UsageDefaults.weeklyWindowID)
+        XCTAssertEqual(chosen?.expectedAt, usage().windows[1].resetsAt)
+        XCTAssertEqual(row.help?.isEmpty, false)
     }
 
     func testTheCustomSheetIsAlwaysTheLastWayOut() {
@@ -411,9 +455,26 @@ final class CurfewMenuTests: XCTestCase {
 
     /// The whole menu, drawn. A statement row that reads as a disabled choice, or a run of
     /// offers padded to a second line's height, is the sort of defect that is obvious in a
-    /// picture and invisible in every assertion anyone would think to write.
+    /// picture and invisible in every assertion anyone would think to write. The weekly reset
+    /// is selected so the evidence also proves the checkmark stayed on 7d rather than Spark/5h.
     func testRendersTheOffersToImages() throws {
-        let entries = self.entries(usage: usage(), holds: true)
+        let reading = usage()
+        let expectedAt = try XCTUnwrap(reading.windows[1].resetsAt)
+        let resolved = CurfewResolution.Answer(
+            scope: .session,
+            curfew: curfew(at: expectedAt, origin: .session),
+            condition: .usageReset(
+                expectedAt: expectedAt,
+                armedAt: now,
+                accountID: AccountID(provider: .codex, handle: .standard),
+                windowID: UsageDefaults.weeklyWindowID
+            )
+        )
+        let entries = self.entries(
+            usage: reading,
+            resolved: resolved,
+            holds: true
+        )
 
         let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
             .flatMap { $0.isEmpty ? nil : $0 }

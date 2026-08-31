@@ -40,7 +40,7 @@ public enum RemoteThemeMode: RemoteLosslessStringToken {
         switch self {
         case .light: return "light"
         case .dark: return "dark"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -68,7 +68,7 @@ public enum RemoteThemeTypeface: RemoteLosslessStringToken {
         case .serif: return "serif"
         case .rounded: return "rounded"
         case .monospaced: return "monospaced"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -90,7 +90,7 @@ public enum RemoteManagedWorkspaceDelivery: RemoteLosslessStringToken {
         switch self {
         case .mergeAndCleanUp: return "mergeAndCleanUp"
         case .keepForReview: return "keepForReview"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 
@@ -117,7 +117,7 @@ public enum RemoteManagedWorkspacePublication: RemoteLosslessStringToken {
         switch self {
         case .draft: return "draft"
         case .ready: return "ready"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 
@@ -147,7 +147,7 @@ public enum RemoteUsageLimitResetCause: RemoteLosslessStringToken {
         case .scheduled: return "scheduled"
         case .provider: return "provider"
         case .bankedCredit: return "bankedCredit"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -175,7 +175,7 @@ public enum RemoteUsageCoverageState: RemoteLosslessStringToken {
         case .partial: return "partial"
         case .unavailable: return "unavailable"
         case .failed: return "failed"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -200,7 +200,7 @@ public enum RemoteShareScope: RemoteLosslessStringToken {
         case .all: return "all"
         case .session: return "session"
         case .terminal: return "terminal"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -231,7 +231,7 @@ public enum RemoteAdvertisedCapability: RemoteLosslessStringToken {
         switch self {
         case .view: return "view"
         case .interact: return "interact"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 
@@ -261,7 +261,7 @@ public enum RemoteDeviceApprovalState: RemoteLosslessStringToken {
         switch self {
         case .pendingApproval: return "pendingApproval"
         case .denied: return "denied"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -288,7 +288,7 @@ public enum RemoteNotificationDelivery: RemoteLosslessStringToken {
         switch self {
         case .push: return "push"
         case .live: return "live"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -315,7 +315,7 @@ public enum RemoteDiffLineKind: RemoteLosslessStringToken {
         case .context: return "context"
         case .addition: return "addition"
         case .removal: return "removal"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -349,7 +349,7 @@ public enum RemoteGitFileChange: RemoteLosslessStringToken {
         case .untracked: return "untracked"
         case .renamed: return "renamed"
         case .binary: return "binary"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -392,7 +392,7 @@ public enum RemoteAttachmentKind: RemoteLosslessStringToken {
         case .video: return "video"
         case .media: return "media"
         case .text: return "text"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -414,7 +414,7 @@ public enum RemoteAttachmentOrigin: RemoteLosslessStringToken {
         switch self {
         case .agent: return "agent"
         case .user: return "user"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -436,7 +436,7 @@ public enum RemoteComposerCapabilityKind: RemoteLosslessStringToken {
         switch self {
         case .command: return "command"
         case .skill: return "skill"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -458,7 +458,7 @@ public enum RemoteComposerCapabilityTrigger: RemoteLosslessStringToken {
         switch self {
         case .slash: return "slash"
         case .dollar: return "dollar"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -480,7 +480,7 @@ public enum RemoteComposerCapabilityPresentation: RemoteLosslessStringToken {
         switch self {
         case .turn: return "turn"
         case .command: return "command"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -502,7 +502,7 @@ public enum RemoteConversationContextKind: RemoteLosslessStringToken {
         switch self {
         case .reference: return "reference"
         case .comment: return "comment"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -533,7 +533,7 @@ public enum RemoteConversationContextSource: RemoteLosslessStringToken {
         case .attachment: return "attachment"
         case .workspaceFile: return "workspaceFile"
         case .session: return "session"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -564,7 +564,7 @@ public enum RemoteConversationRowKind: RemoteLosslessStringToken {
         case .thinking: return "thinking"
         case .tool: return "tool"
         case .notice: return "notice"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -704,7 +704,7 @@ public enum RemotePresenceState: RemoteLosslessStringToken {
         case .typing: return "typing"
         case .left: return "left"
         case .idle: return "idle"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -740,7 +740,7 @@ public enum RemoteMobileApplicationState: RemoteLosslessStringToken {
         case .active: return "active"
         case .inactive: return "inactive"
         case .background: return "background"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -768,7 +768,7 @@ public enum RemoteMobileConnectionState: RemoteLosslessStringToken {
         case .connecting: return "connecting"
         case .online: return "online"
         case .offline: return "offline"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -790,7 +790,7 @@ public enum RemoteMobileDiagnosticsScreenshotKind: RemoteLosslessStringToken {
         switch self {
         case .current: return "current"
         case .incident: return "incident"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -812,7 +812,7 @@ public enum RemoteCollaborationRole: RemoteLosslessStringToken {
         switch self {
         case .owner: return "owner"
         case .member: return "member"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -853,7 +853,7 @@ public enum RemoteInputControlEventAction: RemoteLosslessStringToken {
         case .reclaimed: return "reclaimed"
         case .requested: return "requested"
         case .released: return "released"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }

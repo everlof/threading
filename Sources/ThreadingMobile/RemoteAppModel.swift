@@ -170,7 +170,7 @@ final class RemoteAppModel: ObservableObject {
         /// made the root screen unable to choose a recovery action, and it fell back to an
         /// indeterminate loading card after the request had already failed.
         var failure: RemoteConnectionFailure? {
-            guard case .offline(let failure) = self else { return nil }
+            guard case let .offline(failure) = self else { return nil }
             return failure
         }
     }
@@ -217,12 +217,14 @@ final class RemoteAppModel: ObservableObject {
             discoveryHostsChanged()
         }
     }
+
     @Published private(set) var me: RemoteMeDTO? {
         didSet {
             catalogueRevision &+= 1
             rememberCurrentTheme()
         }
     }
+
     /// Every transition is recorded, not only the current one. A support report that says only
     /// "offline" cannot tell a phone that never reached this Mac from one that reached it and
     /// lost it.
@@ -237,6 +239,7 @@ final class RemoteAppModel: ObservableObject {
             }
         }
     }
+
     @Published private(set) var connectionProgress: ConnectionProgress?
     @Published private(set) var routeWalkStatus: RouteWalkStatus?
     @Published private(set) var activeHostID: String?
@@ -252,6 +255,7 @@ final class RemoteAppModel: ObservableObject {
     @Published var navigationPath: [MobileNavigationRoute] = [] {
         didSet { recordLastRoute() }
     }
+
     /// Sessions whose archive/restore transaction is still being committed by the Mac.
     ///
     /// The phone removes these from whichever catalogue they currently occupy at the press
@@ -342,134 +346,135 @@ final class RemoteAppModel: ObservableObject {
         self.continuity = continuity
         self.newSessionDefaults = newSessionDefaults
         self.themeCache = themeCache
-#if DEBUG
-        if let wire = MobileTerminalWireFixtureConfiguration.current {
-            isEphemeralTerminalWireFixture = true
-            let host = PairedRemoteHost(
-                id: "terminal-wire-lab",
-                hostID: "terminal-wire-lab",
-                shareID: "terminal-wire-lab",
-                scope: "all",
-                name: "Terminal Replay",
-                link: wire.link,
-                lastConnectedAt: Date(),
-                // Nil intentionally means "this exact paired door". Adopting the integration
-                // host's advertised production routes would move a later refresh off loopback.
-                endpoints: nil,
-                connectionPolicy: nil,
-                activeEndpointKind: RemoteHostEndpointKind.lan
-            )
-            hosts = [host]
-            activeHostID = host.id
-            phase = .connecting
-            return
-        }
-        if let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey],
-           let link = RemoteConnectionLink(
-            string: MobileDemoFixture.isMarketing(demoMode)
-                ? "https://remote.threading.invalid/#preview"
-                : "https://david-mac.tailnet-demo.ts.net:8443/#preview"
-           ) {
-            isDemo = true
-            let isMarketing = MobileDemoFixture.isMarketing(demoMode)
-            // This scene photographs a row containing the connection time. Its clock is part of
-            // the fixture, not ambient machine state: otherwise every minute creates a visual
-            // regression and accepting it merely blesses the time at which the test happened.
-            let demoNow = demoMode == "connection-status"
-                ? Date(timeIntervalSince1970: 1_800_000_000)
-                : Date()
-            var host = PairedRemoteHost(
-                id: "demo-mac",
-                hostID: "demo-mac",
-                shareID: "my-devices",
-                scope: "all",
-                name: "David’s MacBook Pro",
-                link: link,
-                lastConnectedAt: demoNow,
-                endpoints: isMarketing
-                    ? [RemoteHostEndpointDTO(
-                        kind: .hosted,
-                        baseURL: link.baseURL,
-                        isStable: true
-                    )]
-                    : [
-                        RemoteHostEndpointDTO(
-                            kind: .tailscale,
+        #if DEBUG
+            if let wire = MobileTerminalWireFixtureConfiguration.current {
+                isEphemeralTerminalWireFixture = true
+                let host = PairedRemoteHost(
+                    id: "terminal-wire-lab",
+                    hostID: "terminal-wire-lab",
+                    shareID: "terminal-wire-lab",
+                    scope: "all",
+                    name: "Terminal Replay",
+                    link: wire.link,
+                    lastConnectedAt: Date(),
+                    // Nil intentionally means "this exact paired door". Adopting the integration
+                    // host's advertised production routes would move a later refresh off loopback.
+                    endpoints: nil,
+                    connectionPolicy: nil,
+                    activeEndpointKind: RemoteHostEndpointKind.lan
+                )
+                hosts = [host]
+                activeHostID = host.id
+                phase = .connecting
+                return
+            }
+            if let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey],
+               let link = RemoteConnectionLink(
+                   string: MobileDemoFixture.isMarketing(demoMode)
+                       ? "https://\(DemoExperience.sentinelHost)/#marketing"
+                       : "https://david-mac.tailnet-demo.ts.net:8443/#preview"
+               )
+            {
+                isDemo = true
+                let isMarketing = MobileDemoFixture.isMarketing(demoMode)
+                // This scene photographs a row containing the connection time. Its clock is part of
+                // the fixture, not ambient machine state: otherwise every minute creates a visual
+                // regression and accepting it merely blesses the time at which the test happened.
+                let demoNow = demoMode == "connection-status"
+                    ? Date(timeIntervalSince1970: 1_800_000_000)
+                    : Date()
+                var host = PairedRemoteHost(
+                    id: "demo-mac",
+                    hostID: "demo-mac",
+                    shareID: "my-devices",
+                    scope: "all",
+                    name: "David’s MacBook Pro",
+                    link: link,
+                    lastConnectedAt: demoNow,
+                    endpoints: isMarketing
+                        ? [RemoteHostEndpointDTO(
+                            kind: .hosted,
                             baseURL: link.baseURL,
                             isStable: true
-                        ),
-                        RemoteHostEndpointDTO(
-                            kind: .lan,
-                            baseURL: URL(string: "https://192.168.1.42:8760/")!,
-                            isStable: true
-                        ),
-                    ],
-                connectionPolicy: isMarketing ? nil : .privateOnly,
-                activeEndpointKind: isMarketing ? .hosted : .tailscale
-            )
-            if demoMode == "sessions-offline" || demoMode == "connection-status" {
-                // A public, deterministic certificate fingerprint gives the recovery fixture the
-                // same 26-character comparison code a real paired record carries. No credential
-                // or machine state enters UI evidence.
-                host.pinnedFingerprint = RemoteHostFingerprint(
-                    certificateDER: Data("offline recovery evidence".utf8)
-                ).hex
-            }
-            let studioLink = RemoteConnectionLink(
-                string: "https://studio-mac.tailnet-demo.ts.net:8443/#preview"
-            )!
-            let studio = PairedRemoteHost(
-                id: "demo-studio",
-                hostID: "demo-studio",
-                shareID: "my-devices",
-                scope: "all",
-                name: "Studio Mac",
-                link: studioLink,
-                lastConnectedAt: demoNow.addingTimeInterval(-600),
-                endpoints: [RemoteHostEndpointDTO(
-                    kind: .tailscale,
-                    baseURL: studioLink.baseURL,
-                    isStable: true
-                )],
-                connectionPolicy: .privateOnly,
-                activeEndpointKind: .tailscale
-            )
-            hosts = isMarketing ? [host] : [host, studio]
-            activeHostID = host.id
-            continuity.setActiveHostID(host.id)
-            if demoMode == "sessions-offline" {
-                me = nil
-                phase = .offline(.transport(URLError(.timedOut), host: link.baseURL.host))
-                // This fixture is the settled recovery state, after automatic retries have had
-                // their chance. `isDemo` prevents another attempt from being scheduled.
-                connectionRecoveryAttempt = MobileConnectionRecoveryPolicy.settledFailureAttempt
-            } else if demoMode == "sessions-connecting" {
-                me = nil
-                phase = .connecting
-                connectionProgress = .tryingRoute(
-                    kind: RemoteHostEndpointKind.lan,
-                    previousKind: RemoteHostEndpointKind.hosted,
-                    number: 2,
-                    total: 3
+                        )]
+                        : [
+                            RemoteHostEndpointDTO(
+                                kind: .tailscale,
+                                baseURL: link.baseURL,
+                                isStable: true
+                            ),
+                            RemoteHostEndpointDTO(
+                                kind: .lan,
+                                baseURL: URL(string: "https://192.168.1.42:8760/")!,
+                                isStable: true
+                            ),
+                        ],
+                    connectionPolicy: isMarketing ? nil : .privateOnly,
+                    activeEndpointKind: isMarketing ? .hosted : .tailscale
                 )
-            } else {
-                me = Self.demoResponse(for: demoMode)
-                phase = .online
-                lastConnection = .demo(
-                    hostID: host.id,
-                    baseURL: link.baseURL,
-                    kind: isMarketing ? .hosted : .tailscale,
-                    now: demoNow
+                if demoMode == "sessions-offline" || demoMode == "connection-status" {
+                    // A public, deterministic certificate fingerprint gives the recovery fixture the
+                    // same 26-character comparison code a real paired record carries. No credential
+                    // or machine state enters UI evidence.
+                    host.pinnedFingerprint = RemoteHostFingerprint(
+                        certificateDER: Data("offline recovery evidence".utf8)
+                    ).hex
+                }
+                let studioLink = RemoteConnectionLink(
+                    string: "https://studio-mac.tailnet-demo.ts.net:8443/#preview"
+                )!
+                let studio = PairedRemoteHost(
+                    id: "demo-studio",
+                    hostID: "demo-studio",
+                    shareID: "my-devices",
+                    scope: "all",
+                    name: "Studio Mac",
+                    link: studioLink,
+                    lastConnectedAt: demoNow.addingTimeInterval(-600),
+                    endpoints: [RemoteHostEndpointDTO(
+                        kind: .tailscale,
+                        baseURL: studioLink.baseURL,
+                        isStable: true
+                    )],
+                    connectionPolicy: .privateOnly,
+                    activeEndpointKind: .tailscale
                 )
+                hosts = isMarketing ? [host] : [host, studio]
+                activeHostID = host.id
+                continuity.setActiveHostID(host.id)
+                if demoMode == "sessions-offline" {
+                    me = nil
+                    phase = .offline(.transport(URLError(.timedOut), host: link.baseURL.host))
+                    // This fixture is the settled recovery state, after automatic retries have had
+                    // their chance. `isDemo` prevents another attempt from being scheduled.
+                    connectionRecoveryAttempt = MobileConnectionRecoveryPolicy.settledFailureAttempt
+                } else if demoMode == "sessions-connecting" {
+                    me = nil
+                    phase = .connecting
+                    connectionProgress = .tryingRoute(
+                        kind: RemoteHostEndpointKind.lan,
+                        previousKind: RemoteHostEndpointKind.hosted,
+                        number: 2,
+                        total: 3
+                    )
+                } else {
+                    me = Self.demoResponse(for: demoMode)
+                    phase = .online
+                    lastConnection = .demo(
+                        hostID: host.id,
+                        baseURL: link.baseURL,
+                        kind: isMarketing ? .hosted : .tailscale,
+                        now: demoNow
+                    )
+                }
+                return
             }
-            return
-        }
-#endif
+        #endif
         let loaded: [PairedRemoteHost]
         switch store.load() {
-        case .success(let hosts):
+        case let .success(hosts):
             loaded = hosts
-        case .failure(let error):
+        case let .failure(error):
             loaded = []
             storageIssue = error.localizedDescription
         }
@@ -529,9 +534,9 @@ final class RemoteAppModel: ObservableObject {
         me = nil
         let loaded: [PairedRemoteHost]
         switch store.load() {
-        case .success(let hosts):
+        case let .success(hosts):
             loaded = hosts
-        case .failure(let error):
+        case let .failure(error):
             loaded = []
             storageIssue = error.localizedDescription
         }
@@ -724,7 +729,8 @@ final class RemoteAppModel: ObservableObject {
         var hostedServiceURL = hosts.first(where: { $0.id == id })?.hostedServiceURL
         var hostedCredential = hosts.first(where: { $0.id == id })?.hostedCredential
         if me.share.scope == .all,
-           me.features?.contains(RemoteRESTFeature.hostedPeerTransport.rawValue) == true {
+           me.features?.contains(RemoteRESTFeature.hostedPeerTransport.rawValue) == true
+        {
             let provisioningStartedAt = MobileDiagnostics.monotonicNow()
             let provisioningFields = pairingFields.merging([
                 .peer: MobileDiagnostics.pseudonym(id, prefix: "peer"),
@@ -940,7 +946,7 @@ final class RemoteAppModel: ObservableObject {
 
     func remove(_ host: PairedRemoteHost) {
         MobileDiagnostics.record(.hostRemoved, fields: [
-            .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer")
+            .peer: MobileDiagnostics.pseudonym(host.id, prefix: "peer"),
         ])
         let previousHosts = hosts
         hosts.removeAll { $0.id == host.id }
@@ -987,7 +993,8 @@ final class RemoteAppModel: ObservableObject {
         if hostRefreshSingleFlight.hasFlight(for: hostID)
             || phase != .online
             || me == nil
-            || MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(attempt: attempt) {
+            || MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(attempt: attempt)
+        {
             await refresh()
         }
         guard activeHostID == hostID else { return nil }
@@ -1268,7 +1275,7 @@ final class RemoteAppModel: ObservableObject {
         let client = RemoteClient(link: link)
         guard activeHostID == hostID else { throw CancellationError() }
 
-        for _ in 0..<30 {
+        for _ in 0 ..< 30 {
             try Task.checkCancellation()
             let response = try await client.fetchMe()
             guard activeHostID == hostID else { throw CancellationError() }
@@ -1294,7 +1301,7 @@ final class RemoteAppModel: ObservableObject {
         }
         let client = RemoteClient(link: link)
         guard activeHostID == hostID else { throw CancellationError() }
-        for _ in 0..<30 {
+        for _ in 0 ..< 30 {
             try Task.checkCancellation()
             let response = try await client.fetchMe()
             guard activeHostID == hostID else { throw CancellationError() }
@@ -1411,8 +1418,14 @@ final class RemoteAppModel: ObservableObject {
             prompt: prompt
         )
         if isDemo {
+            // The demo Mac starts nothing, so the draft becomes an existing canned chat — one
+            // on the surface that was asked for, or the demo would answer a terminal draft
+            // with a conversation and open a screen the choices never named.
+            let sessions = me?.sessions ?? Self.demoResponse.sessions
             return MobileCreatedSession(
-                session: me?.sessions.first ?? Self.demoResponse.sessions[0],
+                session: sessions.first { $0.surface == surface }
+                    ?? sessions.first
+                    ?? Self.demoResponse.sessions[0],
                 openingStrategy: .awaitCreatedSession
             )
         }
@@ -1693,7 +1706,8 @@ final class RemoteAppModel: ObservableObject {
         Task {
             await refresh()
             guard activeHostID == candidate.id,
-                  me?.sessions.contains(where: { $0.id == event.sessionID }) == true else {
+                  me?.sessions.contains(where: { $0.id == event.sessionID }) == true
+            else {
                 return
             }
             if openSessionID != event.sessionID {
@@ -1904,7 +1918,8 @@ final class RemoteAppModel: ObservableObject {
         let isOnlyCandidateInRace = localCandidates.count + (hasHostedRoute ? 1 : 0) == 1
 
         if reportsProgress, let firstKind = localCandidates.first?.kind
-            ?? (hasHostedRoute ? RemoteHostEndpointKind.hosted : nil) {
+            ?? (hasHostedRoute ? RemoteHostEndpointKind.hosted : nil)
+        {
             connectionProgress = .tryingRoute(
                 kind: firstKind,
                 previousKind: nil,
@@ -2260,7 +2275,8 @@ final class RemoteAppModel: ObservableObject {
             ]) { current, _ in current }
             fields.merge(metrics.fields) { current, _ in current }
             if let remote = error as? RemoteClientError,
-               case .server(let status, _, _) = remote {
+               case let .server(status, _, _) = remote
+            {
                 fields[.status] = String(status)
             }
             MobileDiagnostics.recordConnectivity(
@@ -2351,7 +2367,8 @@ final class RemoteAppModel: ObservableObject {
                 // A mutation that had to fail over is now the route in use; the panel says so
                 // without waiting for the next catalogue refresh.
                 if let current = lastConnection, current.hostID == hostID,
-                   current.baseURL != candidate.link.baseURL || current.isHosted != candidate.isHosted {
+                   current.baseURL != candidate.link.baseURL || current.isHosted != candidate.isHosted
+                {
                     lastConnection = MobileConnectionRecord(
                         hostID: hostID,
                         kind: candidate.kind,
@@ -2363,9 +2380,10 @@ final class RemoteAppModel: ObservableObject {
                     )
                 }
                 if let index = hosts.firstIndex(where: { $0.id == hostID }),
-                   (candidate.isHosted
-                        ? hosts[index].activeEndpointKind != .hosted
-                        : hosts[index].link != candidate.link) {
+                   candidate.isHosted
+                   ? hosts[index].activeEndpointKind != .hosted
+                   : hosts[index].link != candidate.link
+                {
                     hosts[index].merge(
                         identity: nil,
                         successfulLink: candidate.link,
@@ -2392,7 +2410,7 @@ final class RemoteAppModel: ObservableObject {
                     .code: MobileDiagnostics.errorCode(error),
                     .durationMS: MobileDiagnostics.elapsedMilliseconds(since: startedAt),
                 ]) { _, new in new }
-                if case .server(let status, _, _) = error {
+                if case let .server(status, _, _) = error {
                     failedFields[.status] = String(status)
                 }
                 MobileDiagnostics.recordConnectivity(
@@ -2479,7 +2497,8 @@ final class RemoteAppModel: ObservableObject {
             await hostedConnectionFailed(hostID: host.id)
         }
         for candidate in host.candidates(preferring: discoveredAddresses[host.id])
-        where !candidates.contains(where: { $0.link == candidate.link }) {
+            where !candidates.contains(where: { $0.link == candidate.link })
+        {
             candidates.append(ConnectionCandidate(
                 link: candidate.link,
                 isHosted: false,
@@ -2551,7 +2570,8 @@ final class RemoteAppModel: ObservableObject {
                 expectedHostID: hosts[index].hostID ?? hostID
             )
             guard activeHostID == hostID, refreshGeneration == generation,
-                  let currentIndex = hosts.firstIndex(where: { $0.id == hostID }) else {
+                  let currentIndex = hosts.firstIndex(where: { $0.id == hostID })
+            else {
                 MobileDiagnostics.recordConnectivity(
                     .hostRouteEnded,
                     level: .warning,
@@ -2637,13 +2657,15 @@ final class RemoteAppModel: ObservableObject {
         guard response.hostID == expectedHostID,
               response.deviceID == RemoteDeviceIdentity.current,
               response.expiresAt.isFinite,
-              let rawURL = URL(string: response.serviceURL) else {
+              let rawURL = URL(string: response.serviceURL)
+        else {
             throw RemoteClientError.invalidResponse
         }
         let endpoint = try PeerControlPlaneServiceEndpoint(rawURL)
-        let expiresAt = Date(timeIntervalSince1970: response.expiresAt / 1_000)
+        let expiresAt = Date(timeIntervalSince1970: response.expiresAt / 1000)
         guard expiresAt > Date().addingTimeInterval(60),
-              expiresAt < Date().addingTimeInterval(370 * 24 * 60 * 60) else {
+              expiresAt < Date().addingTimeInterval(370 * 24 * 60 * 60)
+        else {
             throw RemoteClientError.invalidResponse
         }
         let credential = try PeerDeviceServiceCredential(
@@ -2739,10 +2761,11 @@ final class RemoteAppModel: ObservableObject {
         do {
             while !Task.isCancelled,
                   themeEventsGeneration == generation,
-                  themeEventsTask === task {
+                  themeEventsTask === task
+            {
                 let message = try await task.receive()
                 guard activeHostID == hostID else { return }
-                guard case .string(let text) = message else { continue }
+                guard case let .string(text) = message else { continue }
                 let data = Data(text.utf8)
                 struct Envelope: Decodable { let type: String }
                 guard let envelope = try? JSONDecoder().decode(Envelope.self, from: data) else {
@@ -2780,7 +2803,8 @@ final class RemoteAppModel: ObservableObject {
                     ) else { continue }
                     if me != nil,
                        update.session != nil || update.removedSessionID != nil
-                        || update.terminal != nil || update.removedTerminalID != nil {
+                       || update.terminal != nil || update.removedTerminalID != nil
+                    {
                         scheduleSessionDelta(update, for: hostID)
                     } else {
                         discardPendingSessionDeltas()
@@ -2809,7 +2833,8 @@ final class RemoteAppModel: ObservableObject {
             }
             if !Task.isCancelled,
                themeEventsGeneration == generation,
-               themeEventsTask === task {
+               themeEventsTask === task
+            {
                 cancelThemeEventsHelloDeadline()
                 MobileDiagnostics.recordConnectivity(
                     .socketEnded,
@@ -3339,6 +3364,45 @@ final class RemoteAppModel: ObservableObject {
         ]
     )
 
+    /// A coordinated terminal palette for a marketing capture's selected app theme.
+    ///
+    /// Real sessions keep app and terminal themes independently assignable. The marketing flow is
+    /// different: one `--theme` input promises a coherent visual variant of the whole frame. Its
+    /// terminal therefore resolves from the same semantic colours as the surrounding chrome,
+    /// including a genuinely light terminal for light app themes.
+    static func demoMarketingTerminalTheme(
+        matching appTheme: RemoteThemeDTO
+    ) -> RemoteTerminalThemeDTO {
+        let colours = appTheme.colors
+        let isLight = appTheme.mode == .light
+        let foreground = colours["label"] ?? (isLight ? "#111111" : "#F3F4F6")
+        let secondary = colours["secondary_label"] ?? (isLight ? "#555555" : "#A7ABB4")
+        let tertiary = colours["tertiary_label"] ?? (isLight ? "#777777" : "#747983")
+        let background = colours["ground"] ?? (isLight ? "#FFFFFF" : "#16181D")
+        let accent = colours["accent"] ?? (isLight ? "#155DB1" : "#64A8FF")
+        let positive = colours["status_positive"] ?? (isLight ? "#197149" : "#74C49A")
+        let warning = colours["status_warning"] ?? (isLight ? "#9A6700" : "#E6A35D")
+        let negative = colours["status_negative"] ?? (isLight ? "#B42318" : "#E06E65")
+        let blue = isLight ? "#2457A7" : "#6EA8D8"
+        let magenta = isLight ? "#8F3F97" : "#C486B9"
+        let cyan = isLight ? "#137C8B" : "#7DC9D2"
+
+        return RemoteTerminalThemeDTO(
+            id: "marketing-\(appTheme.id)-terminal",
+            name: "\(appTheme.name) Marketing",
+            foreground: foreground,
+            boldForeground: foreground,
+            background: background,
+            cursor: accent,
+            selection: colours["selection"] ?? colours["accent_muted"] ?? accent,
+            ansi: [
+                isLight ? foreground : (colours["surface"] ?? "#1B1E24"),
+                negative, positive, warning, blue, magenta, cyan, secondary,
+                tertiary, negative, positive, warning, accent, magenta, cyan, foreground,
+            ]
+        )
+    }
+
     /// The Claude demo login's windows, held apart from the catalogue literal: three windows and
     /// a model list inside that one expression put the type checker past its budget.
     private static let demoClaudeModels: [RemoteModelChoiceDTO] = [
@@ -3462,7 +3526,8 @@ final class RemoteAppModel: ObservableObject {
                 terminalTheme: demoTerminalTheme,
                 inheritedTerminalThemeName: demoTerminalTheme.name,
                 inheritedTerminalTheme: demoTerminalTheme,
-                account: .init(name: "David", glyph: "🧑‍💻", isEmoji: true, hue: nil),
+                // The standard Codex login is still the routed account, but like the real host
+                // projection it carries no visual chip: the Codex mark already identifies it.
                 accountID: "default",
                 model: "gpt-5.6-sol"
             )
@@ -3626,7 +3691,7 @@ final class RemoteAppModel: ObservableObject {
                     state: .dormant,
                     projectName: "AnotherTerminal",
                     isAvailable: false,
-                    lastActiveAt: now - 86_400,
+                    lastActiveAt: now - 86400,
                     terminalTheme: demoTerminalTheme
                 ),
                 .init(
@@ -3676,7 +3741,7 @@ final class RemoteAppModel: ObservableObject {
                     projectName: "Strom",
                     state: .dormant,
                     isAvailable: false,
-                    createdAt: now - 7_200,
+                    createdAt: now - 7200,
                     terminalTheme: demoTerminalTheme
                 ),
             ],
@@ -3756,7 +3821,7 @@ final class RemoteAppModel: ObservableObject {
                                         ],
                                         defaultReasoningID: "medium",
                                         supportsFastMode: false
-                                    )
+                                    ),
                                 ],
                                 defaultModelID: "gpt-5.6-sol"
                             ),
@@ -3776,7 +3841,7 @@ final class RemoteAppModel: ObservableObject {
                                         ],
                                         defaultReasoningID: "high",
                                         supportsFastMode: true
-                                    )
+                                    ),
                                 ],
                                 defaultModelID: "gpt-5.6-sol"
                             ),
@@ -3792,7 +3857,7 @@ final class RemoteAppModel: ObservableObject {
                                 ],
                                 defaultReasoningID: "high",
                                 supportsFastMode: true
-                            )
+                            ),
                         ],
                         defaultModelID: "gpt-5.6-sol",
                         supportsConversation: true,

@@ -78,11 +78,19 @@ final class DemoSessionScript {
     private var replyIndex = 0
     private var pendingReply: Task<Void, Never>?
     private var terminalLine = ""
+#if DEBUG
+    private let marketingProvider: MobileMarketingTerminalFixture.Provider?
+#endif
 
     private init(session: RemoteSessionSummaryDTO) {
         self.session = session
         rows = Self.seedRows(for: session)
         nextRowID = rows.count
+#if DEBUG
+        marketingProvider = MobileMarketingTerminalFixture.provider(
+            marketingSessionID: session.id
+        )
+#endif
     }
 
     func cancel() {
@@ -95,23 +103,63 @@ final class DemoSessionScript {
 
     func begin(on connection: RemoteSessionConnection) {
         self.connection = connection
+#if DEBUG
+        let marketingFixture = marketingProvider.flatMap {
+            try? MobileMarketingTerminalFixture.load($0)
+        }
+        let helloTheme = marketingProvider == nil
+            ? RemoteAppModel.demoTheme
+            : Self.requestedMarketingTheme
+        let helloTerminalTheme = marketingProvider.map { _ in
+            RemoteAppModel.demoMarketingTerminalTheme(matching: Self.requestedMarketingTheme)
+        } ?? RemoteAppModel.demoTerminalTheme
+        let helloColumns = session.surface == .terminal ? marketingFixture?.columns ?? 80 : 0
+        let helloRows = session.surface == .terminal ? marketingFixture?.rows ?? 24 : 0
+#else
+        let helloTheme = RemoteAppModel.demoTheme
+        let helloTerminalTheme = RemoteAppModel.demoTerminalTheme
+        let helloColumns = session.surface == .terminal ? 80 : 0
+        let helloRows = session.surface == .terminal ? 24 : 0
+#endif
+        var helloFeatures = [
+            RemoteWebSocketFeature.submitAcknowledgement.rawValue,
+            RemoteWebSocketFeature.conversationContextAttachments.rawValue,
+            RemoteWebSocketFeature.atomicTerminalSubmission.rawValue,
+            RemoteWebSocketFeature.terminalInputLatencyProbe.rawValue,
+            RemoteWebSocketFeature.terminalHydrationBoundary.rawValue,
+        ]
+#if DEBUG
+        if marketingProvider != nil {
+            helloFeatures.append(RemoteWebSocketFeature.focusedInputControl.rawValue)
+            helloFeatures.append(RemoteWebSocketFeature.runPlanProgress.rawValue)
+        }
+#endif
         deliver(RemoteHelloDTO(
             surface: session.surface,
             capability: .interact,
-            cols: session.surface == .terminal ? 80 : 0,
-            rows: session.surface == .terminal ? 24 : 0,
+            cols: helloColumns,
+            rows: helloRows,
             title: session.title,
-            theme: RemoteAppModel.demoTheme,
-            terminalTheme: RemoteAppModel.demoTerminalTheme,
-            features: [
-                RemoteWebSocketFeature.submitAcknowledgement.rawValue,
-                RemoteWebSocketFeature.conversationContextAttachments.rawValue,
-                RemoteWebSocketFeature.atomicTerminalSubmission.rawValue,
-                RemoteWebSocketFeature.terminalInputLatencyProbe.rawValue,
-                RemoteWebSocketFeature.terminalHydrationBoundary.rawValue,
-            ]
+            theme: helloTheme,
+            terminalTheme: helloTerminalTheme,
+            features: helloFeatures
         ))
+#if DEBUG
+        if marketingProvider != nil {
+            deliver(Self.ownerInputControl)
+        }
+#endif
         if session.surface == .terminal {
+#if DEBUG
+            if let marketingFixture {
+                connection.receiveDemoTerminalOutput(marketingFixture.payload)
+                if marketingProvider == .claude {
+                    deliver(Self.marketingRunPlan)
+                    deliver(Self.marketingRunPlanPage)
+                }
+                return
+            }
+#endif
             connection.receiveDemoTerminalOutput(Data(Self.terminalSeed.utf8))
         } else {
             deliverSnapshot()
@@ -348,4 +396,59 @@ final class DemoSessionScript {
             return "demo: '\(trimmed)' is canned output. Pair your Mac for a real shell\r\n"
         }
     }
+
+#if DEBUG
+    private static var requestedMarketingTheme: RemoteThemeDTO {
+        let requested = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"]
+        switch requested {
+        case "light": return RemoteAppModel.demoLightTheme
+        case "threading": return RemoteAppModel.demoThreadingTheme
+        case "system-remote": return RemoteAppModel.demoSystemRemoteTheme
+        case let requested?:
+            return RemoteAppModel.demoCatalogThemes.first(where: { $0.id == requested })
+                ?? RemoteAppModel.demoTheme
+        case nil:
+            return RemoteAppModel.demoTheme
+        }
+    }
+
+    private static let ownerInputControl = RemoteInputControlStateDTO(
+        mode: .collaborative,
+        currentParticipantID: RemoteCollaborationParticipantDTO.ownerID,
+        canWrite: true,
+        canManage: true,
+        canHandOff: false,
+        participants: [
+            .init(
+                id: RemoteCollaborationParticipantDTO.ownerID,
+                displayName: "David",
+                role: .owner,
+                isOnline: true
+            ),
+        ],
+        revision: 0
+    )
+
+    private static let marketingRunPlan = RemoteRunPlanUpdateDTO(
+        revision: 1,
+        plan: RemoteRunPlanSummaryDTO(
+            activeTitle: "Render theme variants",
+            current: 3,
+            completed: 2,
+            active: 1,
+            total: 3
+        )
+    )
+
+    private static let marketingRunPlanPage = RemoteRunPlanPageDTO(
+        revision: 1,
+        offset: 0,
+        total: 3,
+        steps: [
+            .init(id: "0", title: "Build deterministic provider fixtures", status: .completed),
+            .init(id: "1", title: "Capture five marketing checkpoints", status: .completed),
+            .init(id: "2", title: "Render theme variants", status: .inProgress),
+        ]
+    )
+#endif
 }

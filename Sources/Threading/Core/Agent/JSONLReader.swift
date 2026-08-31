@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 /// Streams newline-delimited JSON records from a file.
 ///
@@ -155,31 +156,45 @@ enum JSONLReader {
                   !chunk.isEmpty else { reachedEndOfFile = true; break }
 
             consumed += chunk.count
+            // `buffer` is only the incomplete tail from the preceding chunk. Every byte in it
+            // was already searched, so start at the newly appended bytes. Starting again at
+            // zero makes one large JSON record quadratic in its size: a measured 22 MB Codex
+            // record was searched 336 times while the usage index waited behind it.
+            var searchOffset = buffer.count
             buffer.append(chunk)
 
             // Lines are handed out as slices and the buffer is compacted **once per chunk**,
             // not once per line. Rebuilding `Data` after every line is quadratic in the chunk's
             // length, which is invisible on a short head-read and ruinous over a gigabyte: it
             // was the difference between four seconds and five minutes across this corpus.
-            var lineStart = buffer.startIndex
-            while let index = buffer[lineStart...].firstIndex(of: newline) {
+            var lineStartOffset = 0
+            while let newlineOffset = firstOffset(
+                of: newline,
+                in: buffer,
+                startingAt: searchOffset
+            ) {
+                let lineStart = buffer.index(buffer.startIndex, offsetBy: lineStartOffset)
+                let index = buffer.index(buffer.startIndex, offsetBy: newlineOffset)
                 let line = buffer[lineStart ..< index]
-                let next = buffer.index(after: index)
 
-                let lineStartOffset = bufferStartOffset + UInt64(lineStart - buffer.startIndex)
-                let lineEndOffset = bufferStartOffset + UInt64(next - buffer.startIndex)
+                let absoluteLineStart = bufferStartOffset + UInt64(lineStartOffset)
+                let absoluteLineEnd = bufferStartOffset + UInt64(newlineOffset + 1)
                 if discardingLeadingFragment {
                     discardingLeadingFragment = false
                 } else if !line.isEmpty,
-                          try !handle(Data(line), lineStartOffset, lineEndOffset)
+                          try !handle(Data(line), absoluteLineStart, absoluteLineEnd)
                 {
-                    return lineEndOffset
+                    return absoluteLineEnd
                 }
-                lineStart = next
+                lineStartOffset = newlineOffset + 1
+                searchOffset = lineStartOffset
             }
 
-            bufferStartOffset += UInt64(lineStart - buffer.startIndex)
-            buffer.removeSubrange(buffer.startIndex ..< lineStart)
+            bufferStartOffset += UInt64(lineStartOffset)
+            if lineStartOffset > 0 {
+                let lineStart = buffer.index(buffer.startIndex, offsetBy: lineStartOffset)
+                buffer.removeSubrange(buffer.startIndex ..< lineStart)
+            }
         }
 
         // A trailing record with no newline is still a record — but only at **end of file**.
@@ -215,6 +230,27 @@ enum JSONLReader {
             return bufferStartOffset
         }
         return offset + UInt64(consumed)
+    }
+
+    /// Finds one byte through libc's contiguous-memory search rather than the generic
+    /// `Collection.firstIndex(of:)` witness path. `Data`'s generic subscript has substantial
+    /// per-byte overhead in an unoptimised app build; it occupied a utility core continuously
+    /// while a cold usage scan walked a large rollout.
+    private static func firstOffset(
+        of byte: UInt8,
+        in data: Data,
+        startingAt startOffset: Int
+    ) -> Int? {
+        guard startOffset >= 0, startOffset < data.count else { return nil }
+
+        return data.withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return nil }
+            let start = base.advanced(by: startOffset)
+            guard let match = memchr(start, Int32(byte), bytes.count - startOffset) else {
+                return nil
+            }
+            return base.distance(to: UnsafeRawPointer(match))
+        }
     }
 
     /// Reads the last complete JSON object without walking the whole file.

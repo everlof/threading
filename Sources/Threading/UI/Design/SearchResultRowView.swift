@@ -16,7 +16,22 @@ final class SearchResultRowView: BackdropThemedControl {
     private enum Layout {
         /// Rounded rect at the control corner, the tab's own silhouette.
         @MainActor static var radius: CGFloat { Design.Radius.control }
+        static let verticalInset: CGFloat = Design.Spacing.small
+
+        /// The row reserves both line slots even when one result has no path. Otherwise a mixed
+        /// result run moves its titles between two vertical axes and appears uneven even though
+        /// every table frame has the same height.
+        @MainActor static var preferredHeight: CGFloat {
+            Design.Typography.lineHeight(of: Design.Typography.controlRegular())
+                + Design.Spacing.hairline
+                + Design.Typography.lineHeight(of: Design.Typography.caption())
+                + verticalInset * 2
+        }
     }
+
+    /// The component's own two-line measure. A table host asks this value instead of restating a
+    /// row height that can drift away from the labels and the active theme's typeface.
+    static var preferredTableRowHeight: CGFloat { Layout.preferredHeight }
 
     // MARK: - Properties
 
@@ -28,7 +43,12 @@ final class SearchResultRowView: BackdropThemedControl {
 
     private let titleLabel: SearchMatchLabel
     private let pathLabel = NSTextField(labelWithString: "")
-    private var isPressed = false { didSet { needsDisplay = true } }
+    private var isPressed = false {
+        didSet {
+            needsDisplay = true
+            synchronizeContainingRowHighlight()
+        }
+    }
 
     private var title = ""
     private var path: String?
@@ -75,8 +95,8 @@ final class SearchResultRowView: BackdropThemedControl {
         addSubview(labels)
 
         NSLayoutConstraint.activate([
-            labels.topAnchor.constraint(equalTo: topAnchor, constant: Design.Spacing.tight),
-            labels.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Design.Spacing.tight),
+            labels.topAnchor.constraint(equalTo: topAnchor, constant: Layout.verticalInset),
+            labels.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -Layout.verticalInset),
             labels.leadingAnchor.constraint(equalTo: leadingAnchor, constant: leadingInset),
             labels.trailingAnchor.constraint(
                 lessThanOrEqualTo: trailingAnchor,
@@ -87,14 +107,14 @@ final class SearchResultRowView: BackdropThemedControl {
 
     // MARK: - Content
 
-    /// Restates the row for a new query or a reused position. The path line disappears rather
-    /// than standing empty when the result has no section to name.
+    /// Restates the row for a new query or a reused position. A missing path draws nothing while
+    /// retaining its line slot, so a run containing both kinds keeps one title axis.
     func show(title: String, path: String?, matching query: String) {
         self.title = title
         self.path = path
         titleLabel.show(title, matching: query)
         pathLabel.stringValue = path ?? ""
-        pathLabel.isHidden = path == nil
+        pathLabel.isHidden = false
         setAccessibilityTitle(path.map { "\(title) — \($0)" } ?? title)
         needsDisplay = true
     }
@@ -102,13 +122,18 @@ final class SearchResultRowView: BackdropThemedControl {
     // MARK: - Drawing
 
     override func applyInk(_ ink: Design.Ink) {
+        invalidateIntrinsicContentSize()
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
         // The tab's own ramp, minus selection: a result is never the open page, so it rests
         // quiet and lifts for pointer, press and keyboard focus alike.
-        let fill: NSColor = isPressed || isHovered || hasKeyboardFocus ? ink.surface : .clear
+        // Inside a table the containing row paints that lift using its selection path. Outside a
+        // table (Settings' retained search stack) this component still owns its complete plate.
+        let fill: NSColor = drawsOwnInteractionPlate && isInteractionHighlighted
+            ? ink.surface
+            : .clear
 
         let shape = ThemedSurface.draw(
             bounds,
@@ -120,6 +145,62 @@ final class SearchResultRowView: BackdropThemedControl {
 
         pathLabel.textColor = ink.tertiary
     }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: Self.preferredTableRowHeight)
+    }
+
+    private var isInteractionHighlighted: Bool {
+        isPressed || isHovered || hasKeyboardFocus
+    }
+
+    private var containingTableRow: ThemedTableRowView? {
+        var ancestor = superview
+        while let view = ancestor {
+            if let row = view as? ThemedTableRowView { return row }
+            ancestor = view.superview
+        }
+        return nil
+    }
+
+    private var drawsOwnInteractionPlate: Bool { containingTableRow == nil }
+
+    private func synchronizeContainingRowHighlight() {
+        containingTableRow?.setInteractionHighlight(
+            isInteractionHighlighted,
+            from: self,
+            inkSource: inkSource
+        )
+    }
+
+    override func hoverDidChange() {
+        super.hoverDidChange()
+        synchronizeContainingRowHighlight()
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let accepted = super.becomeFirstResponder()
+        synchronizeContainingRowHighlight()
+        return accepted
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let resigned = super.resignFirstResponder()
+        synchronizeContainingRowHighlight()
+        return resigned
+    }
+
+    override func viewWillMove(toSuperview newSuperview: NSView?) {
+        containingTableRow?.setInteractionHighlight(false, from: self, inkSource: inkSource)
+        super.viewWillMove(toSuperview: newSuperview)
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        synchronizeContainingRowHighlight()
+    }
+
+    var drawsOwnInteractionPlateForTesting: Bool { drawsOwnInteractionPlate }
 
     // MARK: - Interaction
 

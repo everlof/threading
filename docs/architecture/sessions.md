@@ -943,6 +943,15 @@ falls through to a fresh `--session-id` launch. That fallthrough is only safe wh
 right: relaunching with an id Claude has already used makes it exit 1 in under a second, and what
 the user sees is a Resume button that does nothing, seven times in ninety seconds.
 
+An identifier can also name a conversation that is healthy but already open outside Threading.
+Codex 0.151.0 exposes the exact ownership pair as `resume <id>` in the live process's argv and
+refuses a concurrent owner. That earns `.detectableExternalResume`; it does not follow merely from
+supporting resume, so no other runtime inherits it without the same measurement. Terminal launch
+checks the process table off-main, reads argv only for matching executable names, and revalidates
+the stored id on the main actor before acting. A match becomes the durable
+`identifier-in-use` launch failure rather than a short-lived process and a generic exit-code-1
+message. The process id and command line remain diagnostic inputs only and are never persisted.
+
 `ClaudeTranscript.projectSlug` is that lookup, and it had replaced `/` and nothing else. Claude
 replaces **every character outside `[a-zA-Z0-9]`**, per UTF-16 code unit — measured, not inferred:
 a folder named `slug probe_v1.2 åäö-🎉` is filed under `slug-probe-v1-2-------`, the astral scalar

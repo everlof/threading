@@ -42,15 +42,18 @@
     {"id": "pairing-keyboard-dismissed-custom-dark", "entryID": "ios-pairing", "demo": "pairing", "appearance": "dark", "theme": "custom", "keyboardState": "dismissed-after-open", "captureMode": "app", "assertions": ["keyboardShownOnce", "keyboardHidden", "noFirstResponder", "safeAreaRestored", "editorFrameRestored"]},
     {"id": "session-dashboard-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "dark", "theme": "custom"},
     {"id": "marketing-sessions", "entryID": "ios-marketing-flow", "demo": "marketing-sessions", "appearance": "dark", "theme": "threading", "contentSize": "large", "captureMode": "stable-display"},
-    {"id": "marketing-claude-tui", "entryID": "ios-marketing-flow", "demo": "marketing-claude-tui", "appearance": "dark", "theme": "threading", "contentSize": "large", "captureMode": "stable-display", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
-    {"id": "marketing-codex-tui", "entryID": "ios-marketing-flow", "demo": "marketing-codex-tui", "appearance": "dark", "theme": "threading", "contentSize": "large", "captureMode": "stable-display", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
-    {"id": "marketing-claude-usage-menu", "entryID": "ios-marketing-flow", "demo": "marketing-claude-usage-menu", "appearance": "dark", "theme": "threading", "contentSize": "large", "keyboardState": "open", "captureMode": "display", "interaction": {"tapAccessibilityLabel": "Session actions", "waitForAccessibilityLabels": ["Vera Keller", "Workspace", "Interface", "Archive"]}, "assertions": ["editorFocused", "keyboardShown", "hostInteractionPrepared"]},
+    {"id": "marketing-main-menu", "entryID": "ios-marketing-flow", "demo": "marketing-sessions", "appearance": "dark", "theme": "threading", "contentSize": "large", "captureMode": "display", "interaction": {"tapAccessibilityLabel": "Remote access options", "waitForAccessibilityLabels": ["Organize", "Sessions", "Appearance", "Usage", "Settings", "Macs"]}, "assertions": ["hostInteractionPrepared"]},
+    {"id": "marketing-claude-tui", "entryID": "ios-marketing-flow", "demo": "marketing-claude-tui", "appearance": "dark", "theme": "threading", "contentSize": "large", "terminalFontSize": 10, "captureMode": "stable-display", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "marketing-codex-tui", "entryID": "ios-marketing-flow", "demo": "marketing-codex-tui", "appearance": "dark", "theme": "threading", "contentSize": "large", "terminalFontSize": 10, "captureMode": "stable-display", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "marketing-claude-usage-menu", "entryID": "ios-marketing-flow", "demo": "marketing-claude-usage-menu", "appearance": "dark", "theme": "threading", "contentSize": "large", "terminalFontSize": 10, "keyboardState": "open", "captureMode": "display", "interaction": {"tapAccessibilityLabel": "Session actions", "waitForAccessibilityLabels": ["Vera Keller", "Workspace", "Interface", "Archive"]}, "assertions": ["editorFocused", "keyboardShown", "hostInteractionPrepared"]},
     {"id": "marketing-settings", "entryID": "ios-marketing-flow", "demo": "marketing-settings", "appearance": "dark", "theme": "threading", "contentSize": "large", "captureMode": "stable-display"},
     {"id": "session-dashboard-custom-light", "entryID": "ios-session-dashboard", "demo": "sessions", "appearance": "light", "theme": "custom-light"},
     {"id": "session-dashboard-project-custom-dark", "entryID": "ios-session-dashboard", "demo": "project-sessions", "appearance": "dark", "theme": "custom"},
     {"id": "standalone-terminal-dashboard-custom-dark", "entryID": "ios-standalone-terminal", "demo": "sessions", "appearance": "dark", "theme": "custom"},
     {"id": "session-dashboard-connecting-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-connecting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "session-dashboard-offline-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-offline", "appearance": "dark", "theme": "custom"},
+    {"id": "universal-search-custom-dark", "entryID": "ios-universal-search", "demo": "universal-search", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "universal-search-custom-light", "entryID": "ios-universal-search", "demo": "universal-search", "appearance": "light", "theme": "custom-light", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "connection-progress-lab-custom-dark", "entryID": "ios-connection-progress", "demo": "connection-progress-lab", "appearance": "dark", "theme": "custom"},
     {"id": "connection-status-custom-dark", "entryID": "ios-connection-status", "demo": "connection-status", "appearance": "dark", "theme": "custom"},
     {"id": "connection-status-custom-light", "entryID": "ios-connection-status", "demo": "connection-status", "appearance": "light", "theme": "custom-light"},
@@ -186,12 +189,35 @@
       "schemaVersion": 1,
       "fps": 30,
       "shots": [
-        {"captureID": "marketing-sessions", "filename": "01-sessions.png", "holdFrames": 60, "transition": {"name": "fade", "frames": 12}},
-        {"captureID": "marketing-claude-tui", "filename": "02-claude-tui.png", "holdFrames": 60, "transition": {"name": "fade", "frames": 12}},
-        {"captureID": "marketing-claude-usage-menu", "filename": "03-claude-usage-menu.png", "holdFrames": 60, "transition": {"name": "fade", "frames": 12}},
-        {"captureID": "marketing-codex-tui", "filename": "04-codex-tui.png", "holdFrames": 60, "transition": {"name": "fade", "frames": 12}},
-        {"captureID": "marketing-settings", "filename": "05-settings.png", "holdFrames": 60}
-      ]
+        {"captureID": "marketing-sessions", "filename": "01-sessions.png"},
+        {"captureID": "marketing-claude-tui", "filename": "02-claude-tui.png"},
+        {"captureID": "marketing-claude-usage-menu", "filename": "03-claude-usage-menu.png"},
+        {"captureID": "marketing-codex-tui", "filename": "04-codex-tui.png"},
+        {"captureID": "marketing-settings", "filename": "05-settings.png"}
+      ],
+      "movie": {
+        "demo": "marketing-sessions",
+        "terminalFontSize": 10,
+        "durationFrames": 900,
+        "maximumActionLatenessSeconds": 0.15,
+        "readyAccessibilityLabels": ["Polish launch screenshots", "Build App Store capture flow"],
+        "actions": [
+          {"atFrame": 30, "kind": "tap", "label": "New session in Threading", "waitForAccessibilityLabels": ["Prompt", "Start session", "Model and effort"]},
+          {"atFrame": 130, "kind": "tap", "label": "Model and effort", "refreshAccessibility": true, "waitForAccessibilityLabels": ["Model × effort", "GPT-5.6 Sol, Extra High"]},
+          {"atFrame": 205, "kind": "tap", "label": "GPT-5.6 Sol, Extra High", "refreshAccessibility": true, "waitForAccessibilityLabels": ["Prompt", "Start session"]},
+          {"atFrame": 260, "kind": "tapSequence", "text": "Polish the flow", "intervalFrames": 6, "points": [[381, 612], [341, 612], [365, 666], [301, 612], [82, 666], [244, 666], [201, 774], [182, 612], [244, 666], [103, 612], [201, 774], [163, 666], [365, 666], [341, 612], [63, 612]]},
+          {"atFrame": 375, "kind": "tapPoint", "point": [369, 469]},
+          {"atFrame": 450, "kind": "swipe", "from": [200, 430], "to": [200, 700], "duration": 0.5},
+          {"atFrame": 510, "kind": "swipe", "from": [4, 390], "to": [360, 390], "duration": 0.45},
+          {"atFrame": 565, "kind": "tap", "label": "Polish launch screenshots"},
+          {"atFrame": 620, "kind": "tapPoint", "point": [200, 130]},
+          {"atFrame": 665, "kind": "tapPoint", "point": [200, 700]},
+          {"atFrame": 700, "kind": "tapPoint", "point": [365, 84], "waitForAccessibilityLabels": ["Vera Keller", "Workspace", "Archive"]},
+          {"atFrame": 745, "kind": "tap", "label": "Vera Keller", "waitForAccessibilityLabels": ["Usage", "Done", "Current capacity"]},
+          {"atFrame": 790, "kind": "tapPoint", "point": [300, 159], "waitForAccessibilityLabels": ["Daily cost chart"]},
+          {"atFrame": 840, "kind": "swipe", "from": [200, 700], "to": [200, 390], "duration": 0.55, "waitForAccessibilityLabels": ["Processed tokens"]}
+        ]
+      }
     }
   ],
   "entries": [
@@ -201,8 +227,8 @@
       "status": "implemented",
       "priority": "critical",
       "title": "Marketing screenshot and video flow",
-      "description": "Five privacy-safe product-shell checkpoints with real provider PTY recordings, one swappable theme input, semantic menu readiness and a fixed-frame offline video timeline.",
-      "states": ["One project and four mixed chats", "Claude TUI with tasks", "Codex TUI", "Keyboard and complete session menu", "Settings"],
+      "description": "Five privacy-safe product-shell checkpoints plus a 30-second recorded walkthrough that drives the real dashboard, provider terminals, task plan, usage sheet and a new-session draft into its live chat on one fixed-frame interaction clock.",
+      "states": ["One project and four mixed chats", "Bounded dashboard menu", "Claude TUI with tasks", "Codex TUI", "Keyboard and complete session menu", "Settings"],
       "source": {"path": "scripts/capture_marketing_ios.sh", "command": "capture"},
       "capture": {"glob": "ios/marketing-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Theme-defined"], "themes": ["One --theme value per complete flow"]}
@@ -254,6 +280,18 @@
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/session-settings-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}
+    },
+    {
+      "id": "ios-universal-search",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Universal search",
+      "description": "The native owner search surface backed by the Mac's bounded search graph, with visible scope, stable result groups, highlighted literal matches, provenance and honest provider coverage.",
+      "states": ["Project and Everywhere scopes", "Destination", "Historical conversation", "Project source match", "Partial coverage"],
+      "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
+      "capture": {"glob": "ios/universal-search-*.png"},
+      "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied"]}
     },
     {
       "id": "ios-standalone-terminal",

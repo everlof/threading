@@ -571,6 +571,16 @@ final class ListSelectionStrength {
 /// accent, its emphasized and unemphasized strengths, its vibrancy — is untouched.
 class ThemedTableRowView: NSTableRowView, ThemedComponent {
 
+    /// The interactive cell currently asking this row to draw its hover/press plate.
+    ///
+    /// Selection already belongs to the row. Keeping an adjacent cell's hover inside the cell
+    /// produces two subtly different silhouettes: inset-style tables hold the row plate in from
+    /// the list while the cell is inset again, and the cell's full-height fill can meet the
+    /// selected row beside it. The row therefore owns both states through one path. The source is
+    /// weak so AppKit's reuse queue cannot be kept alive by presentation state.
+    private weak var interactionHighlightSource: NSView?
+    private var interactionHighlightInkSource: InkSource?
+
     /// A drag is over this row and would land on it.
     ///
     /// **On the row, not on the cell inside it, and that is the whole reason it lives here.** A
@@ -600,11 +610,50 @@ class ThemedTableRowView: NSTableRowView, ThemedComponent {
 
     override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
+
+        if let source = interactionHighlightSource,
+           source.isDescendant(of: self),
+           let interactionHighlightInkSource
+        {
+            interactionHighlightInkSource.ink.surface.setFill()
+            platePath.fill()
+        }
+
         guard isDropTarget else { return }
 
         Design.Surface.dropTarget.setFill()
         platePath.fill()
     }
+
+    /// Lets an interactive cell borrow the row's plate without exposing row geometry to the
+    /// cell. A later cell cannot be cleared by an earlier reused one: only the source that owns
+    /// the current claim may release it.
+    func setInteractionHighlight(
+        _ highlighted: Bool,
+        from source: NSView,
+        inkSource: InkSource
+    ) {
+        if highlighted {
+            // A cell may claim only the row that actually contains it. This keeps a delayed
+            // callback from a reused view from painting whichever row it used to belong to.
+            guard source.isDescendant(of: self) else { return }
+            interactionHighlightSource = source
+            interactionHighlightInkSource = inkSource
+        } else if interactionHighlightSource === source {
+            interactionHighlightSource = nil
+            interactionHighlightInkSource = nil
+        } else {
+            return
+        }
+        needsDisplay = true
+    }
+
+    var interactionHighlightIsActiveForTesting: Bool {
+        guard let source = interactionHighlightSource else { return false }
+        return source.isDescendant(of: self)
+    }
+
+    var plateRectForTesting: NSRect { platePath.bounds }
 
     override func drawSelection(in dirtyRect: NSRect) {
         guard !AppThemeLibrary.current.isSystem else {

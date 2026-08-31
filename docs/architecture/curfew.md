@@ -8,9 +8,12 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index. Shipped August 2026 from
 
 ## The case, and the split
 
-The 5-hour window resets at 04:00 while the user sleeps. They want a session to spend what is
-left of *this* window overnight — driving it with the provider's own `/loop` or `/goal` — and not
-eat into the fresh one. Threading could already schedule a start ([`scheduled-messages.md`](scheduled-messages.md))
+One of the account's usage windows resets while the user sleeps. They want a session to spend
+what is left of *that specific window* overnight — driving it with the provider's own `/loop` or
+`/goal` — and not eat into the fresh one. The provider may also restore that window early, with
+or without advance notice; that earlier reset must move the end forward without letting a 5-hour
+or model-scoped reset satisfy a curfew armed for the weekly window. Threading could already
+schedule a start ([`scheduled-messages.md`](scheduled-messages.md))
 and hold an account at a line of the user's own ([`accounts.md`](accounts.md)); it had no way to
 schedule an end.
 
@@ -32,10 +35,11 @@ menu for a number almost nobody moves):
 | **T** | **Hold.** Threading stops spending the session: the native outbox stops draining at the turn boundary, scheduled sends stand aside, `send_to_session`/resume/spawn are refused, the usage-window poke stands down. The keyboard still works — the tier-4 park's rule, and the strip says so. | `CurfewHoldPolicy` |
 | **T + grace** (5 min) | **Interrupt** a turn still in flight: `ConversationTurnControl.interrupt` for a native chat, one Escape for a terminal. | `SessionCurfewCenter` |
 
-**The deadline is the instance's identity.** `SessionCurfewState.deadline` is a `let`; a new
-deadline is a new curfew that owes its wind-down again, announces its hold again and starts its
-interrupt budget at zero. `ProjectStore.setCurfewRule(_:forSessionID:)` clears the state in the
-same write as a changed deadline so SQLite never holds a deadline over somebody else's receipts.
+**The rule is the instance's identity.** `SessionCurfewState.deadline` is a `let`; a changed rule
+is a new curfew that owes its wind-down again, announces its hold again and starts its interrupt
+budget at zero. This matters for a reset-conditioned rule, whose expected boundary may be
+replaced by earlier provider evidence. `ProjectStore.setCurfewRule(_:forSessionID:)` clears the
+state in the same write as every changed rule so SQLite never carries receipts across instances.
 
 The ladder is **conduct, not weather**: a held row wears the `RowConductSummary` mark rather than
 the provider triangle, the strip is `LimitEscapeStripView` with `Offer.Source.curfew`, there is no
@@ -122,8 +126,10 @@ failure sentence are all the ones every other send has. Three things are its own
 `CurfewResolution` follows `LimitRecoveryResolution` — narrowest first, **absent means inherit,
 not none**, the chain pure and the store passed as a parameter:
 
-- **Session**: `.exempt`, or `.until(Date)` — an instant, not a time of day, because the whole
-  feature exists for the hours the user sleeps across; never re-anchored on a zone change.
+- **Session**: `.exempt`, `.until(Date)`, or
+  `.untilUsageReset(expectedAt:armedAt:accountID:windowID:)`. The reset rule keeps the provider's
+  expected boundary as its latest end, but matching reset evidence can move it earlier. Account
+  and window are both part of the rule: a 5h/Spark event cannot satisfy a 7d rule.
 - **Project**: `.exempt` only. `setCurfewRule(_:forProjectID:)` refuses `.until` — a moment on a
   checkout would keep ending chats created weeks later at a time nobody chose. A stored one
   decodes and falls through.
@@ -149,6 +155,23 @@ nearest pending moment across sessions and only makes the comparison happen; not
 elapsed time. It observes clock and zone changes, app activation, `NSWorkspace.didWakeNotification`
 **on the workspace centre** (the `ScheduledMessageScheduler` lesson), `SessionActivityDidChange`
 for the per-session O(1) edge, and the settings and store change events.
+
+A reset-conditioned curfew also polls the selected account at the usage service's one-minute
+floor until its expected boundary. Polls are deduplicated by account before reaching
+`AccountUsageService`, which still provides single-flight, bounded provider concurrency and
+`Retry-After` handling. Ordinary history changes carry no reset payload and cost O(1). A rare
+new `UsageLimitResetEvent` scans stored sessions, but matches exact account ID, window ID and an
+observation no older than `armedAt`. Live curfew evidence requires a sharp clear, a moved reset
+boundary and a plausibly low post-reset fraction. That is intentionally distinct from the
+dashboard's durable ledger: an early Codex clear without a spent banked credit is delivered live
+to an explicitly armed exact-window curfew, but is not retained as historical reset fact where a
+rolling window could resemble one without that user intent.
+
+When matching evidence moves the deadline forward, no wrap-up is sent: the reset is knowable only
+after it happened, and a new message would spend the capacity the curfew just protected. If the
+normal scheduled-boundary wrap-up was already queued because the reset landed only minutes early,
+it is withdrawn before the reset state replaces that instance. The hold and configured
+grace/interrupt ladder begin at the observed reset instead.
 
 - **Core announces, the coordinator performs.** A native interrupt is `CurfewInterruptRequested`,
   performed by `SessionCoordinator` through `stopCurrentTurn(completion:)` and reported back via
@@ -185,8 +208,9 @@ otherwise have held it), and the session popover.
 
 - **Draft view**: a moon beside the clock ("End this session at a time") opens `CurfewMenu`;
   the choice becomes a footer chip ("Until 04:00", tooltip = the whole ladder) present only when
-  chosen, frozen into `ScheduledSessionPlan.curfew` as a *plan* (`.at(Date)` or
-  `.atQuietHours`, resolved at fire time — a plan that wrote down Tuesday's 04:00 and fired on
+  chosen, frozen into `ScheduledSessionPlan.curfew` as a *plan* (`.at(Date)`,
+  `.atQuietHours`, or `.untilUsageReset(expectedAt:windowID:)`; quiet hours resolve at fire time —
+  a plan that wrote down Tuesday's 04:00 and fired on
   Thursday would name a deadline before its own session started). **Armed when the session
   actually starts, never while the row waits**; a moment already passed is journalled and skipped.
   The waiting placeholder's configuration line carries "Until 04:00".
@@ -195,9 +219,10 @@ otherwise have held it), and the session popover.
   Follow/Exempt only when quiet hours are configured, and the native chat shows the same chip
   while a curfew resolves.
 - **Presets** mirror the start ones — "In an hour", "In 3 hours", "Tonight at 23:00", "At quiet
-  hours (04:00)", "Custom time…" — and **"Until the 5h window resets" lands on `resetsAt`
-  exactly**: the start presets' one-minute padding exists so a *send* lands after the provider
-  rolls its counter; on an end it points the wrong way.
+  hours (04:00)", "Custom time…" — and each **"Until the [window] window resets"** row binds to
+  that row's exact `windowID`. Its current `resetsAt` is the latest end (with none of the start
+  preset's one-minute padding), while provider-proven evidence for that same window may end it
+  sooner. Choosing 7d never listens to the 5h or Spark window.
 - **Settings ▸ Usage Windows ▸ Quiet Hours & Curfews**: the explanation, the two margins, the
   wrap-up template, the give-up choice, the quiet-hours toggle with From/To, and a live *Tonight*
   sentence built by a pure helper so the ladder the popups produce is readable before anything

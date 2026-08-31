@@ -54,7 +54,14 @@ final class ScheduledCurfewPlanTests: XCTestCase {
     }
 
     func testEachCurfewChoiceSurvivesTheWait() throws {
-        for choice in [ScheduledCurfewPlan.at(deadline), .atQuietHours] {
+        for choice in [
+            ScheduledCurfewPlan.at(deadline),
+            .atQuietHours,
+            .untilUsageReset(
+                expectedAt: deadline,
+                windowID: UsageDefaults.weeklyWindowID
+            ),
+        ] {
             let written = plan(curfew: choice)
             let decoded = try JSONDecoder().decode(
                 ScheduledSessionPlan.self,

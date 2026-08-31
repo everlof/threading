@@ -38,6 +38,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Mobile terminal key bar | — | host-only | Direct/Compose resolution, collaboration override, PTY encoding, input permission, modifier/press lifecycle, haptics, accessibility, user-authored layout fallback | Host-only |
 | Mobile terminal return-to-end control | — | host-only | emulator scroll-end truth, TUI/local ownership, follow-mode transition, motion and accessibility | Host-only |
 | Mobile terminal selection quote tray | — | host-only | selected-text snapshot, bracketed-paste decision, insertion/submission path, removal, accessibility | Host-only |
+| Mobile session usage/action disc | — | host-only | provider/account identity, usage truth, session action, menu and accessibility; device-local account-badge preference changes only the overlay | Host-only |
 | Mobile connection reuse settings and metrics | — | host-only | authenticated transport lifecycle, mirror detach/resume truth, bounded pool policy, privacy-safe telemetry | Host-only |
 | Mobile connection details panel | — | host-only | active-route and address truth, endpoint ordering, certificate verdict, bounded network inspection, refresh authority and device-local clipboard policy | Host-only |
 | Local iOS diagnostics settings | — | host-only | independent consent, pairing and authorization, request nonces, evidence allowlist, screenshot policy and bounded custody | Host-only |
@@ -133,11 +134,21 @@ session row and header through their existing contracts; no new checkout-move co
 authority is introduced.
 
 The command palette remains host-only even though extensions may contribute semantic commands to
-its registry. Threading owns the query and keyboard state, the 100-row presentation cap, shortcut
-conflict policy, input prompts, session-target revalidation, overlay dismissal and the one host
-invoker. An extension may customize its command's published title, detail, icon, scope and default
-shortcut through the command contract; it may not replace the shell and visually claim a disabled
-command, stolen shortcut or stale target is executable.
+its registry and declare that Quick Open should collect a project identity. Threading owns the
+project option set, query and keyboard state, the 100-row presentation cap, shortcut conflict
+policy, input prompts, project/session-target revalidation, overlay dismissal and the one host
+invoker. An extension may customize its command's published title, detail, icon, scope, default
+shortcut and semantic input prompt through the command contract; it may not replace the shell and
+visually claim a disabled command, stolen shortcut or stale target is executable. A project-row or
+menu invocation continues to use host-owned context and never lets the extension substitute a
+different project behind the label the person selected.
+
+The same holds for the settings destinations the palette now offers beside those commands. An
+extension's settings pages, its own fields, and the fields it adds to a Threading page all become
+palette rows automatically through the existing settings contract — the extension declares titles,
+descriptions and options, and the host owns the catalogue projection, the identity, the ranking
+against real commands, and the reveal. There is no new seam here and no new declaration to make: an
+extension that can already put a field on a settings page can already be found by its name.
 
 The mobile terminal key bar is host-only even though its key layout and solo Direct/Compose choice
 are deliberately customizable by the person using that phone. Its presentation is inseparable
@@ -183,6 +194,13 @@ with owner authorization, the selected LAN route, single-use request ids, the fi
 allowlist, screenshot provenance and bounded custody. An extension may not replace or relabel
 these settings and claim evidence or an error screenshot is disabled when the host would still
 accept or collect it.
+
+Mobile notification settings and their automatic turn-completion trigger are host-only because
+the switches are the visible consent boundary for APNs delivery and the trigger states a runtime
+fact. Threading retains notification authorization, authenticated recipient scope, provider-neutral
+turn boundaries, foreground suppression, deduplication, sound policy and deep-link validation. An
+extension may request a bounded notification through the separately brokered extension capability;
+it may not replace these settings or claim a turn finished when the host activity model did not.
 
 The sidebar workload analyzer is deliberately not a second extension component around the brand
 row. It is one presentation of an existing theme-owned slot: any installed theme may select the

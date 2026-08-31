@@ -16,7 +16,8 @@ The machine-readable declaration is `ThreadingExtensionAPI` in the app-shipped
 
 - WebAssembly command modules using `runtime: "webAssembly"`.
 - Manifest format 1 and process, host, companion, and remote-surface protocol version 1.
-- Commands, globally conflict-checked shortcuts, stable menu anchors, and a semantic
+- Commands, globally conflict-checked shortcuts, stable menu anchors, optional host-collected
+  project input, and a semantic
   ordinary/destructive risk classification. Destructive invocation is gated by host-authored
   confirmation UI before a request reaches the extension. Menu anchors cover the menu bar
   (`extensions`, `project`, `view`) and the sidebar rows (`session-row`, `project-row`),

@@ -189,6 +189,202 @@ final class UsageScanCacheTests: XCTestCase {
         XCTAssertTrue(streamed.isEmpty)
     }
 
+    func testParserGenerationLeavesLegacyLedgerUntouchedUntilFileLevelCommit() throws {
+        let cacheDirectory = directory.appendingPathComponent("generation-cache")
+        try FileManager.default.createDirectory(
+            at: cacheDirectory,
+            withIntermediateDirectories: true
+        )
+        let legacyURL = cacheDirectory.appendingPathComponent(
+            UsageLedgerIndexDefaults.legacyFileName
+        )
+        do {
+            let legacy = try SQLiteDatabase(path: legacyURL.path)
+            try legacy.execute("CREATE TABLE sentinel(value TEXT NOT NULL)")
+            try legacy.execute("INSERT INTO sentinel(value) VALUES ('old-generation')")
+            legacy.close()
+        }
+        let legacyBytes = try Data(contentsOf: legacyURL)
+        let legacyWAL = URL(fileURLWithPath: legacyURL.path + "-wal")
+        let legacySHM = URL(fileURLWithPath: legacyURL.path + "-shm")
+        try Data("obsolete-wal".utf8).write(to: legacyWAL)
+        try Data("obsolete-shm".utf8).write(to: legacySHM)
+
+        let generation = "fixture-generation-v2"
+        let index = try UsageLedgerIndex(
+            directory: cacheDirectory,
+            parserGenerationID: generation
+        )
+        index.beginScan()
+        _ = try index.update(source: source, parserID: "fixture-v2") {
+            UsageScanCache.Result(
+                records: [makeRecord(identity: "new-generation")],
+                wasCacheHit: false
+            )
+        }
+        XCTAssertEqual(try index.finishScan(), 1)
+
+        XCTAssertEqual(try Data(contentsOf: legacyURL), legacyBytes)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyWAL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacySHM.path))
+
+        try index.commitGeneration()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacyWAL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: legacySHM.path))
+        let currentName = UsageLedgerIndexDefaults.fileName(
+            forParserGenerationID: generation
+        )
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: cacheDirectory.appendingPathComponent(currentName).path
+        ))
+        let manifest = try String(
+            contentsOf: cacheDirectory.appendingPathComponent(
+                UsageLedgerIndexDefaults.manifestFileName
+            ),
+            encoding: .utf8
+        )
+        XCTAssertTrue(manifest.contains(currentName))
+    }
+
+    func testCommitPreservesFutureSchemaDatabaseAndSidecars() throws {
+        let cacheDirectory = directory.appendingPathComponent("future-schema-cache")
+        try FileManager.default.createDirectory(
+            at: cacheDirectory,
+            withIntermediateDirectories: true
+        )
+        let futureVersion = UsageLedgerIndexDefaults.schemaVersion + 1
+        let futureName = "\(UsageLedgerIndexDefaults.fileNamePrefix)\(futureVersion)-future.sqlite"
+        let futureURLs = ([""] + UsageLedgerIndexDefaults.sidecarSuffixes).map { suffix in
+            cacheDirectory.appendingPathComponent(futureName + suffix)
+        }
+        for (index, url) in futureURLs.enumerated() {
+            try Data("future-artifact-\(index)".utf8).write(to: url)
+        }
+        let futureManifest = Data(
+            """
+            {"schemaVersion":\(futureVersion),"parserGenerationID":"future",\
+            "databaseFileName":"\(futureName)"}
+            """.utf8
+        )
+        let manifestURL = cacheDirectory.appendingPathComponent(
+            UsageLedgerIndexDefaults.manifestFileName
+        )
+        try futureManifest.write(to: manifestURL)
+
+        let index = try UsageLedgerIndex(
+            directory: cacheDirectory,
+            parserGenerationID: "fixture-current-schema"
+        )
+        index.beginScan()
+        _ = try index.update(source: source, parserID: "fixture-current") {
+            UsageScanCache.Result(
+                records: [makeRecord(identity: "current")],
+                wasCacheHit: false
+            )
+        }
+        XCTAssertEqual(try index.finishScan(), 1)
+        try index.commitGeneration()
+
+        for (artifactIndex, url) in futureURLs.enumerated() {
+            XCTAssertEqual(
+                try Data(contentsOf: url),
+                Data("future-artifact-\(artifactIndex)".utf8),
+                "a downgraded build must not retire a future-schema ledger artifact"
+            )
+        }
+        XCTAssertEqual(
+            try Data(contentsOf: manifestURL),
+            futureManifest,
+            "a downgraded build must not replace the future build's durable ledger pointer"
+        )
+    }
+
+    func testAbandonedParserGenerationKeepsCommittedLedgerAndResumesPerSource() throws {
+        let cacheDirectory = directory.appendingPathComponent("resumable-generation-cache")
+        let secondSource = directory.appendingPathComponent("second-generation-source.jsonl")
+        try Data("two".utf8).write(to: secondSource)
+        let oldGeneration = "fixture-generation-v1"
+        let newGeneration = "fixture-generation-v2"
+        let oldName = UsageLedgerIndexDefaults.fileName(
+            forParserGenerationID: oldGeneration
+        )
+        let newName = UsageLedgerIndexDefaults.fileName(
+            forParserGenerationID: newGeneration
+        )
+
+        var oldIndex: UsageLedgerIndex? = try UsageLedgerIndex(
+            directory: cacheDirectory,
+            parserGenerationID: oldGeneration
+        )
+        oldIndex?.beginScan()
+        _ = try oldIndex?.update(source: source, parserID: "fixture-v1") {
+            UsageScanCache.Result(
+                records: [makeRecord(identity: "old")],
+                wasCacheHit: false
+            )
+        }
+        XCTAssertEqual(try oldIndex?.finishScan(), 1)
+        try oldIndex?.commitGeneration()
+        oldIndex = nil
+
+        var stagingIndex: UsageLedgerIndex? = try UsageLedgerIndex(
+            directory: cacheDirectory,
+            parserGenerationID: newGeneration
+        )
+        stagingIndex?.beginScan()
+        _ = try stagingIndex?.update(source: source, parserID: "fixture-v2") {
+            UsageScanCache.Result(
+                records: [makeRecord(identity: "resumed")],
+                wasCacheHit: false
+            )
+        }
+        stagingIndex = nil // Simulates process loss before finish/commit.
+
+        let manifestURL = cacheDirectory.appendingPathComponent(
+            UsageLedgerIndexDefaults.manifestFileName
+        )
+        XCTAssertTrue(try String(contentsOf: manifestURL, encoding: .utf8).contains(oldName))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: cacheDirectory.appendingPathComponent(oldName).path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: cacheDirectory.appendingPathComponent(newName).path
+        ))
+
+        let resumedIndex = try UsageLedgerIndex(
+            directory: cacheDirectory,
+            parserGenerationID: newGeneration
+        )
+        resumedIndex.beginScan()
+        let resumed = try resumedIndex.update(source: source, parserID: "fixture-v2") {
+            XCTFail("the completed source in an abandoned generation should resume warm")
+            return UsageScanCache.Result(records: [], wasCacheHit: false)
+        }
+        XCTAssertTrue(resumed.wasCacheHit)
+        _ = try resumedIndex.update(source: secondSource, parserID: "fixture-v2") {
+            UsageScanCache.Result(
+                records: [makeRecord(identity: "second")],
+                wasCacheHit: false
+            )
+        }
+        XCTAssertEqual(try resumedIndex.finishScan(), 2)
+
+        var streamed: [UsageLedgerRecord] = []
+        try resumedIndex.forEachRecord { streamed.append($0) }
+        XCTAssertEqual(Set(streamed.map(\.identity)), ["resumed", "second"])
+        try resumedIndex.commitGeneration()
+
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: cacheDirectory.appendingPathComponent(oldName).path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: cacheDirectory.appendingPathComponent(newName).path
+        ))
+        XCTAssertTrue(try String(contentsOf: manifestURL, encoding: .utf8).contains(newName))
+    }
+
     func testCacheEnforcesOneAggregateDirectoryBound() throws {
         let cacheDirectory = directory.appendingPathComponent("bounded-cache")
         let maximumBytes: Int64 = 2_500

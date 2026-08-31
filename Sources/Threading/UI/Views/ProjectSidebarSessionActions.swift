@@ -1392,6 +1392,19 @@ extension ProjectSidebarViewController {
             // Late resolution — "whenever quiet hours next begin", read again at fire time —
             // belongs to a plan for a session that has not started yet.
             setCurfew(.until(deadline), forSessionID: sessionID)
+        case .untilUsageReset(let expectedAt, let windowID):
+            guard SessionCurfewCenter.shared
+                .setCurfewUntilUsageReset(
+                    expectedAt: expectedAt,
+                    windowID: windowID,
+                    forSessionID: sessionID
+                )
+                .succeeded else {
+                reload()
+                presentProjectNotice(L10n.string("The project data could not be saved."))
+                return
+            }
+            reload()
         case .exempt:
             // Nil where the answer already matches what would have been inherited, so a chat
             // keeps *following* its checkout and Settings and a later change there still reaches

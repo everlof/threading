@@ -1700,11 +1700,18 @@ have no clock of their own; the curfew is the clock.
 
 **Setting one.** When writing a new session, the moon beside the clock (**End this session at a
 time**) offers the same kind of choices the clock does — *In an hour*, *In 3 hours*, *Tonight at
-23:00*, **Until the 5h window resets** (exactly at the reset, not a minute past), *At quiet hours*
+23:00*, **Until the 5h window resets**, **Until the 7d window resets**, *At quiet hours*
 when you have them, or a custom time. The choice becomes a chip in the footer ("Until 04:00";
 hover it for the whole plan) and is armed the moment the session starts — never while a scheduled
 start is still waiting. For a session that is already running, the row's menu has a **Curfew**
 fold, and a native chat shows the same chip while a curfew applies.
+
+A usage-window choice follows the **specific row you picked**. Its displayed reset is the latest
+time Threading will stop, but a provider-proven early reset of that same window stops it sooner.
+So choosing **7d** will react to an announced or unannounced 7d reset and will **not** react to the
+5h/Spark reset. An unused rollover does not count as a reset: Threading requires observed used
+capacity to be restored. If an early reset triggers the curfew, Threading does not send a wrap-up
+afterward, because that message would spend the capacity that was just restored.
 
 **What happens.** Three moments, with margins you set once in Settings:
 
@@ -2690,6 +2697,13 @@ session list without re-pairing. The app remembers the selected Mac and the last
 Because continuity uses the paired host identity rather than its current URL, moving between this
 Mac's addresses keeps the same saved state, while two different Macs that happen to expose
 the same provider session id remain separate.
+
+The dashboard's **…** menu stays as six destinations even when every owner capability is
+available: **Organize**, **Sessions**, **Appearance**, **Usage**, **Settings**, and **Macs**.
+Organization order and direction live under Organize; active/snoozed/archived views live under
+Sessions; Pair and Forget live under Macs. Appearance opens the same scrollable Mac-appearance
+page as Settings. Keeping those choices behind their named destination means the menu itself never
+depends on iOS's over-height menu scrolling.
 
 Choose a project heading to open that project. This screen contains only the project's chats;
 its title keeps the connection status visible, and the **+** in the navigation bar starts a chat

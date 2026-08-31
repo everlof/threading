@@ -1,6 +1,6 @@
-import XCTest
 @testable import Threading
 import ThreadingRemoteKit
+import XCTest
 
 /// The one test that puts **both ends of the remote wire in the same process**.
 ///
@@ -20,7 +20,6 @@ import ThreadingRemoteKit
 /// compile error in this file until somebody says which builder and which matcher own it, which
 /// is what stops a route from shipping untested.
 final class RemoteRouteRoundTripTests: XCTestCase {
-
     // MARK: - Fixture
 
     /// An origin whose path is `/`, so a built URL's path is the route and nothing else.
@@ -66,12 +65,12 @@ final class RemoteRouteRoundTripTests: XCTestCase {
             from: Data(raw.utf8),
             maximumBodyBytes: RemoteAccessDefaults.maximumRequestBytes
         ) {
-        case .request(let request, _):
+        case let .request(request, _):
             return request
         case .incomplete:
             XCTFail("the fixture request head was not recognised as complete")
             throw UnparsedRequest()
-        case .malformed(let status, let reason):
+        case let .malformed(status, reason):
             XCTFail("the fixture request head was refused: \(status) \(reason)")
             throw UnparsedRequest()
         }
@@ -214,7 +213,7 @@ final class RemoteRouteRoundTripTests: XCTestCase {
                 matched = RemoteRouter.repositoryFilesSessionID(forPath: built)
             case .repositoryFile:
                 built = try wirePath(
-                    try XCTUnwrap(link.repositoryFileURL(sessionID: sessionID, path: "Sources/App.swift"))
+                    XCTUnwrap(link.repositoryFileURL(sessionID: sessionID, path: "Sources/App.swift"))
                 )
                 matched = RemoteRouter.repositoryFileSessionID(forPath: built)
             case .attachments:
@@ -222,12 +221,12 @@ final class RemoteRouteRoundTripTests: XCTestCase {
                 matched = RemoteRouter.attachmentsSessionID(forPath: built)
             case .attachment:
                 built = try wirePath(
-                    try XCTUnwrap(link.attachmentURL(sessionID: sessionID, id: "attachment-1"))
+                    XCTUnwrap(link.attachmentURL(sessionID: sessionID, id: "attachment-1"))
                 )
                 matched = RemoteRouter.attachmentSessionID(forPath: built)
             case .attachmentThumbnail:
                 built = try wirePath(
-                    try XCTUnwrap(link.attachmentThumbnailURL(sessionID: sessionID, id: "attachment-1"))
+                    XCTUnwrap(link.attachmentThumbnailURL(sessionID: sessionID, id: "attachment-1"))
                 )
                 matched = RemoteRouter.attachmentThumbnailSessionID(forPath: built)
             case .attachmentUpload:
@@ -238,18 +237,18 @@ final class RemoteRouteRoundTripTests: XCTestCase {
                 matched = RemoteRouter.workspaceSessionID(forPath: built)
             case .browserPreview:
                 built = try wirePath(
-                    try XCTUnwrap(link.browserPreviewURL(sessionID: sessionID, tabID: "tab-1"))
+                    XCTUnwrap(link.browserPreviewURL(sessionID: sessionID, tabID: "tab-1"))
                 )
                 matched = RemoteRouter.browserPreviewSessionID(forPath: built)
             case .extensionPanel:
-                built = try wirePath(try XCTUnwrap(link.extensionPanelURL(
+                built = try wirePath(XCTUnwrap(link.extensionPanelURL(
                     sessionID: sessionID,
                     extensionIdentifier: "com.example.extension",
                     panelID: "panel-1"
                 )))
                 matched = RemoteRouter.extensionPanelSessionID(forPath: built)
             case .extensionPanelResource:
-                built = try wirePath(try XCTUnwrap(link.extensionPanelResourceURL(
+                built = try wirePath(XCTUnwrap(link.extensionPanelResourceURL(
                     sessionID: sessionID,
                     extensionIdentifier: "com.example.extension",
                     panelID: "panel-1",
@@ -309,10 +308,10 @@ final class RemoteRouteRoundTripTests: XCTestCase {
         for route in RemoteSocketRoute.allCases {
             switch route {
             case .events:
-                let built = try wirePath(try XCTUnwrap(link.eventsWebSocketURL))
+                let built = try wirePath(XCTUnwrap(link.eventsWebSocketURL))
                 XCTAssertEqual(built, RemoteRouter.themeEventsPath)
             case .session:
-                let built = try wirePath(try XCTUnwrap(link.webSocketURL(sessionID: sessionID)))
+                let built = try wirePath(XCTUnwrap(link.webSocketURL(sessionID: sessionID)))
                 XCTAssertTrue(
                     built.hasPrefix(RemoteSocketRoute.session.prefix),
                     "the client built its session socket outside "
@@ -324,7 +323,7 @@ final class RemoteRouteRoundTripTests: XCTestCase {
                     "the host did not recognise the session upgrade path the client opens: \(built)"
                 )
             case .terminal:
-                let built = try wirePath(try XCTUnwrap(link.terminalWebSocketURL(terminalID: terminalID)))
+                let built = try wirePath(XCTUnwrap(link.terminalWebSocketURL(terminalID: terminalID)))
                 XCTAssertTrue(
                     built.hasPrefix(RemoteSocketRoute.terminal.prefix),
                     "the client built its terminal socket outside "
@@ -416,7 +415,7 @@ final class RemoteRouteRoundTripTests: XCTestCase {
             "the host must refuse a multi-segment id rather than read back a truncated one"
         )
 
-        let socket = try wirePath(try XCTUnwrap(link.webSocketURL(sessionID: "tenant/session")))
+        let socket = try wirePath(XCTUnwrap(link.webSocketURL(sessionID: "tenant/session")))
         XCTAssertEqual(
             socket,
             "/ws/session/tenant/session",
@@ -428,7 +427,7 @@ final class RemoteRouteRoundTripTests: XCTestCase {
         )
 
         let terminal = try wirePath(
-            try XCTUnwrap(link.terminalWebSocketURL(terminalID: "tenant/terminal"))
+            XCTUnwrap(link.terminalWebSocketURL(terminalID: "tenant/terminal"))
         )
         XCTAssertEqual(terminal, "/ws/terminal/tenant/terminal")
         XCTAssertNil(

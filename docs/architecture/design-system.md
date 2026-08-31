@@ -75,7 +75,9 @@ is available without turning the row itself into a recorder. When a descriptor c
 session input, Tab or Return advances in place to a searchable session list and Escape returns to
 the preserved command query. Disabled reasons, prompts and selection remain visible and
 accessible. The controller owns this focus and presentation state; command meaning and target
-revalidation stay in the host command plane.
+revalidation stay in the host command plane. Settings pages and rows arrive through that same
+plane as `.settings`-origin descriptors and draw as ordinary rows with no shortcut column — see
+[`control-plane.md`](control-plane.md#settings-are-destinations-not-commands).
 
 Four consequences worth knowing before adding UI:
 
@@ -3424,3 +3426,29 @@ translucent palette themes and opaque period materials without adding a Pure Bla
 appearances since it became adaptive, alongside the existing System, Cyberpunk and Windows 98
 evidence, and a focused assertion holds the intermediate fill
 strictly between that theme's resting and hover states.
+
+## 2026-08-31 — A table result owns its measure; its row owns every adjacent plate
+
+Universal Search had two independent descriptions of one result. `SearchResultRowView` laid out a
+two-line stack from live semantic fonts, while its host assigned every result a fixed 54-point
+height. The unused height landed asymmetrically around the labels, and the two descriptions could
+drift again whenever a theme typeface, its text scale, or the app text-size preference changed.
+Results without detail also removed the second line entirely, moving their title onto a different
+vertical axis from the results beside them.
+
+The component now publishes the height implied by its two line heights, line spacing and vertical
+insets. The table only asks for that measure and invalidates AppKit's row-height cache on the same
+theme event that changes those metrics. Both line slots stay reserved even when the lower one has
+no text. Equal result frames therefore imply equal internal rhythm by construction; the host no
+longer has a second spacing constant that can disagree.
+
+The apparent overlap had the same split ownership in paint. Selection was a
+`ThemedTableRowView` plate inset from the table, while hover and press were a full-height surface
+drawn by the cell inside it. Adjacent selected and hovered results could consequently meet even
+though the selection plates themselves were disjoint. An interactive result hosted by a table now
+borrows the row's existing plate path. The claim is weak and source-identified so reuse cannot
+retain an old cell or let an earlier cell clear a later cell's state; outside a table, the result
+still draws its own complete plate. The Universal Search evidence fixture deliberately keeps a
+selected result beside a hovered result, and the focused geometry assertion holds their plates
+apart. Presentation remains host-only; selection, activation, virtualization and result limits are
+still owned by Universal Search.

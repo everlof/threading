@@ -19,7 +19,7 @@ extension AgentToolCoordinator {
                 title: page.title,
                 group: page.group,
                 terms: page.displayTerms,
-                settings: page.entries.map {
+                settings: page.liveEntries.map {
                     SettingsCataloguePage.Setting(title: $0.title, section: $0.section)
                 }
             )

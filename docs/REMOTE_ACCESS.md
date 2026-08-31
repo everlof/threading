@@ -1413,28 +1413,38 @@ Publication is refused on this route: a phone cannot open a change request.
 Notification preferences can be set before pairing from the iPhone's Settings. If permission is
 still undecided after pairing or accepting a shared chat, the dashboard explains what
 notifications do before iOS is asked. The system prompt appears only after **Turn on
-notifications**. Notification settings keep five choices independent:
+notifications**. Notification settings keep six choices independent:
 
 - a chat shared with this phone;
 - a Native chat waiting for a permission decision;
 - a session whose provider-neutral activity state changed to waiting for the user's response;
+- a declared agent turn that finished, targeted to the participant who initiated that turn;
 - another participant explicitly asking for this person's input;
 - an update the user explicitly asked the agent to send.
 
 The response-needed event is an activity edge supplied by the hook/BEL/session layer; the
 notification service never scrapes Claude Code or Codex terminal text. A structured Native
 permission request uses its more specific permission notification instead of also sending the
-generic response-needed event. Notification sounds have a master switch and an independent
+generic response-needed event. Turn completion uses the same provider-neutral lifecycle and is
+emitted only when a session that declares its own turn boundaries crosses from an in-flight turn
+to a read or unread completed state. Generic shell quiet timers, refusals and process teardown
+cannot claim completion. Notification sounds have a master switch and an independent
 switch for every category, so a useful banner does not have to imply an audible interruption.
 
 The phone owns token acquisition: after notification permission and whenever APNs rotates the
-token, iOS registers it over the authenticated paired-device route together with its sandbox or
-production environment and current preferences. Nothing is copied by hand in the product path.
-The Mac persists that device-bound routing metadata separately from credentials and re-authorizes
-it against the current pairing/share records whenever Remote Access starts. A Mac restart thus
-does not require waking or foregrounding the phone; revoking the pairing or membership still
-makes the saved routing record inert immediately. The hosted service remains stateless for this
-mapping — the Mac supplies the token and environment on each bounded `/v1/push` request.
+token, iOS first registers it directly with an operated hosted service using the scoped credential
+issued to that exact paired device. The service encrypts the token at rest, binds it to the
+account/host/device and APNs environment, and returns an opaque registration id. iOS sends that id
+with its ordinary authenticated notification preferences; the Mac can ask only for delivery to a
+registration belonging to its own current host credential. The hosted `/v1/push` request therefore
+contains no APNs token or caller-selected environment. Revoking the pairing, device credential or
+host immediately makes the mapping inert, and APNs invalid-token responses revoke it too.
+
+Nothing is copied by hand in the product path. The Mac persists the device-bound registration id
+separately from credentials and re-authorizes it against the current pairing/share records whenever
+Remote Access starts. A Mac restart thus does not require waking or foregrounding the phone.
+The explicit Mac-local APNs provider remains a development/self-hosted override and retains its
+direct token-and-environment route; it is not used by the operated hosted service.
 
 Opening a notification deep-links to the relevant chat. A requested agent update may additionally
 carry one closed, authenticated destination: an attachment id, a browser-tab id, or an extension
@@ -1623,9 +1633,21 @@ not trusted because the configured path can be replaced or grown between inspect
 The implemented Cloudflare Worker/D1/Durable Object service owns Sign in with Apple, bounded daily
 Apple grant validation, scoped host/device credentials, bounded ICE signaling, TURN provisioning,
 and APNs provider signing. It never receives the remote HTTP/WebSocket payload carried inside
-WebRTC and does not retain APNs device mappings: an authenticated Mac submits one bounded,
-sanitized event, token and environment for each delivery. Presence remains connection-derived
-rather than a database heartbeat.
+WebRTC. Its only push mapping is the encrypted, device-credential-bound APNs registration above;
+an authenticated Mac submits one bounded, sanitized event and opaque registration id for each
+delivery. Presence remains connection-derived rather than a database heartbeat.
+
+Physical-device development uses a separate `dev.remote.threading.codes` Worker and D1 database.
+A Debug Mac pointed at that exact origin starts a five-minute PKCE-style browser transaction and
+opens its Cloudflare Access-protected authorization path. Access allows exact configured email
+addresses—never Everyone, a whole email domain or the one-time-PIN login method as an allow rule—
+and the Worker independently validates the signed Access assertion, issuer, application audience
+and the same email allowlist. Only the initiating Mac holds both the verifier and high-entropy
+poll secret, and the transaction is host-bound and single-use. Development sessions and host
+credentials last 24 hours and live in a Keychain item separate from production. The development
+Worker exposes neither Sign in with Apple nor issue-report intake; its app-facing routes continue
+to use their scoped session, host and device bearer credentials rather than an Access browser
+cookie.
 
 Scheduled expiry cleanup keeps each D1 delete to a 1,000-row page, then immediately repeats only
 the statements that filled their page. An accumulated assertion, notification, rendezvous, or

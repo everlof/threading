@@ -1,43 +1,43 @@
-import ThreadingRemoteKit
 import PhotosUI
 import SwiftUI
+import ThreadingRemoteKit
 import UIKit
 import UniformTypeIdentifiers
 
 #if DEBUG
-/// The session screen's opening states, held still for the iOS evidence catalogue.
-///
-/// Against a real Mac this screen passes through connecting, waking and failure in a moment,
-/// which is how a placeholder that painted the theme's ground as a plate the width of its own
-/// sentence reached a phone unnoticed. A fixture holds each one so it can be captured.
-enum MobileSessionOpeningFixture: String {
-    case connecting = "session-opening-connecting"
-    case resuming = "session-opening-resuming"
-    case failed = "session-opening-failed"
+    /// The session screen's opening states, held still for the iOS evidence catalogue.
+    ///
+    /// Against a real Mac this screen passes through connecting, waking and failure in a moment,
+    /// which is how a placeholder that painted the theme's ground as a plate the width of its own
+    /// sentence reached a phone unnoticed. A fixture holds each one so it can be captured.
+    enum MobileSessionOpeningFixture: String {
+        case connecting = "session-opening-connecting"
+        case resuming = "session-opening-resuming"
+        case failed = "session-opening-failed"
 
-    static var current: MobileSessionOpeningFixture? {
-        ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-            .flatMap(MobileSessionOpeningFixture.init(rawValue:))
-    }
+        static var current: MobileSessionOpeningFixture? {
+            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                .flatMap(MobileSessionOpeningFixture.init(rawValue:))
+        }
 
-    var session: RemoteSessionSummaryDTO {
-        RemoteSessionSummaryDTO(
-            id: "session-opening-demo",
-            title: "Remote access review",
-            agentKind: "claude",
-            surface: .conversation,
-            state: self == .resuming ? .dormant : .idle,
-            projectName: "Threading",
-            isAvailable: self != .resuming
-        )
-    }
+        var session: RemoteSessionSummaryDTO {
+            RemoteSessionSummaryDTO(
+                id: "session-opening-demo",
+                title: "Remote access review",
+                agentKind: "claude",
+                surface: .conversation,
+                state: self == .resuming ? .dormant : .idle,
+                projectName: "Threading",
+                isAvailable: self != .resuming
+            )
+        }
 
-    /// The failure the screen reports is a real client error's own sentence, so the fixture
-    /// carries no copy of its own.
-    var launchError: String? {
-        self == .failed ? RemoteClientError.invalidResponse.localizedDescription : nil
+        /// The failure the screen reports is a real client error's own sentence, so the fixture
+        /// carries no copy of its own.
+        var launchError: String? {
+            self == .failed ? RemoteClientError.invalidResponse.localizedDescription : nil
+        }
     }
-}
 #endif
 
 /// What the session screen's single trailing menu contains, and therefore whether it is shown.
@@ -155,7 +155,8 @@ enum MobileSessionChrome {
     static func usageMenuAddress(for account: RemoteAccountChoiceDTO) -> String? {
         guard let email = account.email?.trimmingCharacters(in: .whitespacesAndNewlines),
               !email.isEmpty,
-              email.compare(account.name, options: .caseInsensitive) != .orderedSame else {
+              email.compare(account.name, options: .caseInsensitive) != .orderedSame
+        else {
             return nil
         }
         return email
@@ -212,12 +213,12 @@ enum MobileUsageMenuShape: String {
     case header
 
     static var current: MobileUsageMenuShape {
-#if DEBUG
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_USAGE_MENU"]
-            .flatMap(MobileUsageMenuShape.init(rawValue:)) ?? .reset
-#else
-        .reset
-#endif
+        #if DEBUG
+            ProcessInfo.processInfo.environment["THREADING_MOBILE_USAGE_MENU"]
+                .flatMap(MobileUsageMenuShape.init(rawValue:)) ?? .reset
+        #else
+            .reset
+        #endif
     }
 }
 
@@ -239,6 +240,14 @@ struct SessionDetailView: View {
     @Environment(\.displayScale) private var displayScale
     let session: RemoteSessionSummaryDTO
     let openingStrategy: MobileSessionOpeningStrategy
+    /// Whether the terminal surface installs the principal two-line navigation title.
+    /// The draft that started this chat keeps its own title mounted while it fades out over
+    /// this screen — that is what lets "New session" morph into the chat's name — and hands
+    /// the slot over only once it has retired. Two principal items must never stand at once.
+    /// The conversation surface is not gated: its title is a UIKit `titleView` the controller
+    /// re-installs on appearance, and the draft hands off to it immediately instead — see
+    /// `SessionDraftView`'s principal item.
+    let installsPrincipalTitle: Bool
     @StateObject private var workspaceActivity: MobileWorkspaceActivity
     @State private var connection: RemoteSessionConnection?
     @State private var isShowingUsage = false
@@ -253,6 +262,8 @@ struct SessionDetailView: View {
     @State private var pendingSurface = RemoteSessionSurface.terminal
     @State private var isShowingWorkspace = false
     @State private var isShowingSessionSettings = false
+    @State private var isShowingUniversalSearch = false
+    @State private var isShowingTerminalFind = false
     @State private var initialWorkspaceDestination: RemoteNotificationDestinationDTO?
     @State private var initialWorkspaceEventID: String?
     @Environment(\.dismiss) private var dismiss
@@ -263,27 +274,32 @@ struct SessionDetailView: View {
 
     init(
         session: RemoteSessionSummaryDTO,
-        openingStrategy: MobileSessionOpeningStrategy = .resumeIfNeeded
+        openingStrategy: MobileSessionOpeningStrategy = .resumeIfNeeded,
+        installsPrincipalTitle: Bool = true,
+        initialWorkspaceDestination: RemoteNotificationDestinationDTO? = nil
     ) {
         self.session = session
         self.openingStrategy = openingStrategy
+        self.installsPrincipalTitle = installsPrincipalTitle
         _workspaceActivity = StateObject(wrappedValue: MobileWorkspaceActivity(
             sessionID: session.id
         ))
+        _initialWorkspaceDestination = State(initialValue: initialWorkspaceDestination)
     }
 
-#if DEBUG
-    /// Installs an already-connected, local PTY fixture behind the shipping session chrome.
-    /// Evidence can therefore exercise the real toolbar/menu without opening a socket.
-    init(evidenceConnection: RemoteSessionConnection) {
-        session = evidenceConnection.session
-        openingStrategy = .resumeIfNeeded
-        _workspaceActivity = StateObject(wrappedValue: MobileWorkspaceActivity(
-            sessionID: evidenceConnection.session.id
-        ))
-        _connection = State(initialValue: evidenceConnection)
-    }
-#endif
+    #if DEBUG
+        /// Installs an already-connected, local PTY fixture behind the shipping session chrome.
+        /// Evidence can therefore exercise the real toolbar/menu without opening a socket.
+        init(evidenceConnection: RemoteSessionConnection) {
+            session = evidenceConnection.session
+            openingStrategy = .resumeIfNeeded
+            installsPrincipalTitle = true
+            _workspaceActivity = StateObject(wrappedValue: MobileWorkspaceActivity(
+                sessionID: evidenceConnection.session.id
+            ))
+            _connection = State(initialValue: evidenceConnection)
+        }
+    #endif
 
     var body: some View {
         Group {
@@ -291,7 +307,11 @@ struct SessionDetailView: View {
                 if connection.surface == .conversation {
                     ConversationRemoteView(connection: connection)
                 } else {
-                    TerminalRemoteView(connection: connection)
+                    TerminalRemoteView(
+                        connection: connection,
+                        installsPrincipalTitle: installsPrincipalTitle,
+                        isShowingFind: $isShowingTerminalFind
+                    )
                 }
             } else if let launchError {
                 ContentUnavailableView {
@@ -388,8 +408,20 @@ struct SessionDetailView: View {
                     .mobileTheme(theme)
             }
         }
+        .sheet(isPresented: $isShowingUniversalSearch) {
+            NavigationStack {
+                MobileUniversalSearchView(initialScope: universalSearchScope) { route in
+                    model.navigationPath.append(route)
+                }
+            }
+            .mobileTheme(theme)
+        }
         .task {
             await open()
+            if initialWorkspaceDestination != nil, canOpenWorkspace {
+                initialWorkspaceEventID = "search-result"
+                isShowingWorkspace = true
+            }
             openPendingNotificationDestination()
         }
         .onChange(of: model.notificationOpenRequest?.eventID) { _, _ in
@@ -443,7 +475,7 @@ struct SessionDetailView: View {
         .themedConfirmationDialog(
             MobileL10n.string("Switch to %@?", surfaceTitle(pendingSurface)),
             message:
-                "The agent restarts in the other UI and resumes this same session. "
+            "The agent restarts in the other UI and resumes this same session. "
                 + "Work currently in progress is interrupted.",
             isPresented: $isConfirmingSurfaceSwitch,
             actions: [
@@ -464,6 +496,23 @@ struct SessionDetailView: View {
         )
     }
 
+    private var universalSearchScope: MobileUniversalSearchScope {
+        let projectID = currentSession.projectID ?? uniqueCatalogProjectID(
+            named: currentSession.projectName
+        )
+        return .session(
+            id: currentSession.id,
+            projectID: projectID,
+            projectName: currentSession.projectName
+        )
+    }
+
+    private func uniqueCatalogProjectID(named name: String) -> String? {
+        let matches = model.me?.newSessionCatalog?.projects.filter { $0.name == name } ?? []
+        guard matches.count == 1 else { return nil }
+        return matches[0].id
+    }
+
     /// Everything the session's own chrome can do, gathered under the one trailing control.
     ///
     /// Workspace and the terminal palette used to sit beside it as separate toolbar buttons.
@@ -471,12 +520,38 @@ struct SessionDetailView: View {
     /// of the two is reached often enough to spend a permanent slot on.
     @ViewBuilder
     private var sessionMenuContent: some View {
+        if connection?.surface == .terminal {
+            Button {
+                isShowingTerminalFind = true
+            } label: {
+                Label("Find in terminal", systemImage: "text.magnifyingglass")
+            }
+            .keyboardShortcut("f", modifiers: .command)
+        }
+        if model.canUseUniversalSearch {
+            Button {
+                isShowingUniversalSearch = true
+            } label: {
+                Label(
+                    MobileL10n.string(
+                        connection?.surface == .terminal ? "Search session" : "Search conversation"
+                    ),
+                    systemImage: "magnifyingglass"
+                )
+            }
+            .keyboardShortcut(
+                "f",
+                modifiers: connection?.surface == .terminal ? [.command, .shift] : .command
+            )
+            Divider()
+        }
         // The disc that opens this menu is ringed by the account's usage; the row leads with
         // that same drawing at glyph size, states its exact values and relevant reset, and takes
         // the reader to the dashboard for the rest.
         if let account = sessionAccount,
            let reading = sessionUsageReading,
-           MobileSessionChrome.showsUsageMenuRow(reading: reading) {
+           MobileSessionChrome.showsUsageMenuRow(reading: reading)
+        {
             usageMenuRows(account: account, reading: reading)
             Divider()
         }
@@ -613,7 +688,7 @@ struct SessionDetailView: View {
     }
 
     private var showsSessionMenu: Bool {
-        MobileSessionChrome.showsSessionMenu(
+        model.canUseUniversalSearch || MobileSessionChrome.showsSessionMenu(
             canManageSessions: model.canManageSessions,
             canChooseTerminalTheme: canChooseTerminalTheme
         )
@@ -761,20 +836,20 @@ struct SessionDetailView: View {
     }
 
     private func open() async {
-#if DEBUG
-        // The marketing terminal is a privacy-reviewed PTY resource already installed by the
-        // DEBUG initializer above. Treating it as a dormant row would replace it with a socket.
-        if MobileDemoFixture.isMarketing(
-            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-        ), connection != nil {
-            return
-        }
-        // An evidence run asks for one opening state and stays in it; nothing connects.
-        if let fixture = MobileSessionOpeningFixture.current {
-            launchError = fixture.launchError
-            return
-        }
-#endif
+        #if DEBUG
+            // The marketing terminal is a privacy-reviewed PTY resource already installed by the
+            // DEBUG initializer above. Treating it as a dormant row would replace it with a socket.
+            if MobileDemoFixture.isMarketing(
+                ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+            ), connection != nil {
+                return
+            }
+            // An evidence run asks for one opening state and stays in it; nothing connects.
+            if let fixture = MobileSessionOpeningFixture.current {
+                launchError = fixture.launchError
+                return
+            }
+        #endif
         guard let hostID = model.activeHostID else {
             launchError = RemoteClientError.invalidResponse.localizedDescription
             return
@@ -953,9 +1028,12 @@ struct SessionActionsToolbarIcon: View {
     @ObservedObject var activity: MobileWorkspaceActivity
     let identity: MobileAgentIdentity
     let reading: MobileAccountUsageReading?
-    /// Only for a chat on an alternate login; see `MobileAccountDisc.account`.
+    /// The alternate login, when there is one. Its badge is device-local and opt-in; the menu
+    /// continues to name the account regardless of this compact presentation choice.
     let account: RemoteSessionAccountDTO?
 
+    @AppStorage(MobileSessionAccountBadgePreference.key)
+    private var showsAccountBadge = MobileSessionAccountBadgePreference.defaultValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.remoteTheme) private var theme
 
@@ -992,7 +1070,15 @@ struct SessionActionsToolbarIcon: View {
     /// mark is not a symbol, so the breath is a scale phase rather than a symbol effect.
     @ViewBuilder
     private var disc: some View {
-        let disc = MobileAccountDisc(identity: identity, reading: reading, account: account)
+        let presentedAccount = MobileSessionAccountBadgePreference.presentedAccount(
+            account,
+            isEnabled: showsAccountBadge
+        )
+        let disc = MobileAccountDisc(
+            identity: identity,
+            reading: reading,
+            account: presentedAccount
+        )
         if reduceMotion {
             disc
         } else {
@@ -1050,7 +1136,7 @@ private struct RemoteNavigationTitle: View {
         case .openLocalNetworkSettings:
             guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
             openURL(url)
-        case .openUpdatePage(let url):
+        case let .openUpdatePage(url):
             openURL(url)
         }
     }
@@ -1083,14 +1169,18 @@ private struct RemoteNavigationTitle: View {
                 : MobileL10n.string("Opening chat…")
         case .connected:
             return model.activeHost?.name ?? MobileL10n.string("Connected")
-        case .ended(let reason): return reason
-        case .failed(let failure): return failure.message
+        case let .ended(reason): return reason
+        case let .failed(failure): return failure.message
         }
     }
 }
 
 struct TerminalRemoteView: View {
     @ObservedObject var connection: RemoteSessionConnection
+    /// False only while the draft that started this session still shows its own title over
+    /// this screen; see `SessionDetailView.installsPrincipalTitle`.
+    var installsPrincipalTitle = true
+    @Binding private var isShowingFind: Bool
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
@@ -1119,11 +1209,25 @@ struct TerminalRemoteView: View {
     @State private var pendingDirectAttachmentInsertionID: String?
     @State private var selectionQuotes: [RemoteTerminalSelectionQuote] = []
     @State private var selectedInputPreference: MobileTerminalInputPreference?
+    @State private var findQuery = ""
+    @State private var findMatchIndex = 0
+    @State private var findMatchTotal = 0
+    @FocusState private var findFieldFocused: Bool
     @StateObject private var keyBridge = TerminalKeyBridge()
     @AppStorage(MobileTerminalFontSize.preferenceKey)
     private var terminalFontSize = MobileTerminalFontSize.defaultValue
     @AppStorage(MobileTerminalInputPreference.defaultPreferenceKey)
     private var defaultInputPreference = MobileTerminalInputPreference.direct
+
+    init(
+        connection: RemoteSessionConnection,
+        installsPrincipalTitle: Bool = true,
+        isShowingFind: Binding<Bool> = .constant(false)
+    ) {
+        self.connection = connection
+        self.installsPrincipalTitle = installsPrincipalTitle
+        _isShowingFind = isShowingFind
+    }
 
     private var theme: RemoteThemePalette {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
@@ -1174,18 +1278,19 @@ struct TerminalRemoteView: View {
 
     private var terminalBackground: Color {
         guard let hex = connection.terminalTheme?.background,
-              let color = UIColor(remoteHex: hex) else {
+              let color = UIColor(remoteHex: hex)
+        else {
             return theme.ground
         }
         return Color(color)
     }
 
     private var inputPreference: MobileTerminalInputPreference {
-#if DEBUG
-        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-compose" {
-            return .compose
-        }
-#endif
+        #if DEBUG
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-compose" {
+                return .compose
+            }
+        #endif
         return selectedInputPreference
             ?? terminalContinuity?.terminalInputPreference
             ?? defaultInputPreference
@@ -1216,6 +1321,9 @@ struct TerminalRemoteView: View {
     var body: some View {
         VStack(spacing: 0) {
             MobileRunPlanDisclosure(connection: connection)
+            if isShowingFind {
+                terminalFindBar
+            }
             terminalSurface
             TerminalCollaborationBar(
                 connection: connection,
@@ -1262,8 +1370,10 @@ struct TerminalRemoteView: View {
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                RemoteNavigationTitle(connection: connection)
+            if installsPrincipalTitle {
+                ToolbarItem(placement: .principal) {
+                    RemoteNavigationTitle(connection: connection)
+                }
             }
         }
         .mobileTheme(theme)
@@ -1280,6 +1390,14 @@ struct TerminalRemoteView: View {
         .onAppear(perform: configureDirectAttachments)
         .onAppear(perform: seedSelectionQuotesForEvidence)
         .onAppear { keyBridge.seedKeyboardWanted(rememberedTerminalKeyboardUp) }
+        .onChange(of: isShowingFind) { _, isShowing in
+            if isShowing {
+                keyBridge.dismissKeyboardForModeSwitch()
+                findFieldFocused = true
+            } else {
+                clearTerminalFind()
+            }
+        }
         .onDisappear(perform: rememberTerminalKeyboard)
         .onReceive(
             NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
@@ -1333,6 +1451,92 @@ struct TerminalRemoteView: View {
         }
     }
 
+    private var terminalFindBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(theme.secondaryLabel)
+                .accessibilityHidden(true)
+            TextField(MobileL10n.string("Find in terminal"), text: $findQuery)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($findFieldFocused)
+                .submitLabel(.search)
+                .onSubmit { findNextTerminalMatch() }
+                .onChange(of: findQuery) { _, query in
+                    guard !query.isEmpty else {
+                        clearTerminalSearchSelection()
+                        return
+                    }
+                    findNextTerminalMatch()
+                }
+            Text(findMatchSummary)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(theme.secondaryLabel)
+                .frame(minWidth: 38, alignment: .trailing)
+                .accessibilityLabel(MobileL10n.string("Search matches"))
+            Button(action: findPreviousTerminalMatch) {
+                Image(systemName: "chevron.up")
+            }
+            .disabled(findQuery.isEmpty || findMatchTotal == 0)
+            .accessibilityLabel(MobileL10n.string("Previous match"))
+            Button(action: findNextTerminalMatch) {
+                Image(systemName: "chevron.down")
+            }
+            .disabled(findQuery.isEmpty || findMatchTotal == 0)
+            .accessibilityLabel(MobileL10n.string("Next match"))
+            Button(MobileL10n.string("Done")) {
+                isShowingFind = false
+            }
+        }
+        .font(.body)
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .foregroundStyle(theme.label)
+        .background(theme.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
+        }
+    }
+
+    private var findMatchSummary: String {
+        guard !findQuery.isEmpty else { return "" }
+        return "\(findMatchIndex)/\(findMatchTotal)"
+    }
+
+    private func findNextTerminalMatch() {
+        guard !findQuery.isEmpty, let terminal = keyBridge.terminalView else {
+            clearTerminalSearchSelection()
+            return
+        }
+        _ = terminal.findNext(findQuery)
+        updateTerminalFindSummary(terminal)
+    }
+
+    private func findPreviousTerminalMatch() {
+        guard !findQuery.isEmpty, let terminal = keyBridge.terminalView else { return }
+        _ = terminal.findPrevious(findQuery)
+        updateTerminalFindSummary(terminal)
+    }
+
+    private func updateTerminalFindSummary(_ terminal: RemoteTerminalView) {
+        let summary = terminal.searchMatchSummary(findQuery)
+        findMatchIndex = summary.index
+        findMatchTotal = summary.total
+    }
+
+    private func clearTerminalSearchSelection() {
+        keyBridge.terminalView?.clearSearch()
+        findMatchIndex = 0
+        findMatchTotal = 0
+    }
+
+    private func clearTerminalFind() {
+        clearTerminalSearchSelection()
+        findQuery = ""
+        findFieldFocused = false
+    }
+
     private var terminalSurface: some View {
         TerminalViewRepresentable(
             connection: connection,
@@ -1355,11 +1559,11 @@ struct TerminalRemoteView: View {
             switch presentation {
             case .live:
                 EmptyView()
-            case .lockedLive(let showsLoader):
+            case let .lockedLive(showsLoader):
                 if showsLoader {
                     MobileLoadingPlaceholder(MobileL10n.string("Reconnecting…"), standsOnContent: true)
                 }
-            case .snapshot(let showsLoader):
+            case let .snapshot(showsLoader):
                 ZStack {
                     if let openingSnapshot {
                         Image(uiImage: openingSnapshot)
@@ -1412,14 +1616,15 @@ struct TerminalRemoteView: View {
 
     private var initialTerminalScrollProgress: Double? {
         if let persisted = terminalContinuity?.terminalViewportProgress { return persisted }
-#if DEBUG
-        // The scrollback evidence uses the shipping continuity path to hold the real SwiftTerm
-        // viewport above its live edge. No snapshot-only overlay manufactures the button.
-        if ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?
-            .hasPrefix("terminal-scrollback-") == true {
-            return 0.32
-        }
-#endif
+        #if DEBUG
+            // The scrollback evidence uses the shipping continuity path to hold the real SwiftTerm
+            // viewport above its live edge. No snapshot-only overlay manufactures the button.
+            if ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"]?
+                .hasPrefix("terminal-scrollback-") == true
+            {
+                return 0.32
+            }
+        #endif
         return nil
     }
 
@@ -1456,14 +1661,14 @@ struct TerminalRemoteView: View {
 
     private func restoreInputPreference() {
         guard selectedInputPreference == nil else { return }
-#if DEBUG
-        // Evidence fixtures share one demo session inside a single cloned simulator. The Compose
-        // fixture forces presentation only; persisting it would turn every later Direct fixture
-        // into Compose and make the keyboard-open evidence test the wrong surface.
-        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-compose" {
-            return
-        }
-#endif
+        #if DEBUG
+            // Evidence fixtures share one demo session inside a single cloned simulator. The Compose
+            // fixture forces presentation only; persisting it would turn every later Direct fixture
+            // into Compose and make the keyboard-open evidence test the wrong surface.
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-compose" {
+                return
+            }
+        #endif
         if let restored = terminalContinuity?.terminalInputPreference {
             selectedInputPreference = restored
         } else {
@@ -1528,22 +1733,22 @@ struct TerminalRemoteView: View {
     }
 
     private var isSelectionQuoteEvidence: Bool {
-#if DEBUG
-        ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-selection"
-#else
-        false
-#endif
+        #if DEBUG
+            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey] == "terminal-selection"
+        #else
+            false
+        #endif
     }
 
     private func seedSelectionQuotesForEvidence() {
-#if DEBUG
-        guard isSelectionQuoteEvidence, selectionQuotes.isEmpty,
-              let quote = RemoteTerminalSelectionQuote(selectedText: """
-              nginx: [emerg] unknown directive "serer_name" in /etc/nginx/sites-enabled/app:12
-              nginx: configuration file /etc/nginx/nginx.conf test failed
-              """) else { return }
-        selectionQuotes = [quote]
-#endif
+        #if DEBUG
+            guard isSelectionQuoteEvidence, selectionQuotes.isEmpty,
+                  let quote = RemoteTerminalSelectionQuote(selectedText: """
+                  nginx: [emerg] unknown directive "serer_name" in /etc/nginx/sites-enabled/app:12
+                  nginx: configuration file /etc/nginx/nginx.conf test failed
+                  """) else { return }
+            selectionQuotes = [quote]
+        #endif
     }
 
     // MARK: - Clipboard
@@ -1649,7 +1854,8 @@ struct TerminalRemoteView: View {
         }
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self),
-                  let type = item.supportedContentTypes.first else {
+                  let type = item.supportedContentTypes.first
+            else {
                 tray.reportUnreadableFile()
                 continue
             }
@@ -1778,8 +1984,8 @@ private struct TerminalCollaborationBar: View {
         let label = notifications.typingIndicatorsEnabled && !typing.isEmpty
             ? label(for: typing, action: .typing)
             : notifications.peoplePresenceEnabled && !viewing.isEmpty
-                ? label(for: viewing, action: .viewing)
-                : nil
+            ? label(for: viewing, action: .viewing)
+            : nil
         if label != nil || canAskForInput {
             HStack(spacing: MobileDesign.Spacing.small) {
                 if let label {
@@ -2114,7 +2320,8 @@ private struct TerminalLineComposer: View {
         defer { attachmentPicksInFlight -= 1 }
         for item in items {
             guard let data = try? await item.loadTransferable(type: Data.self),
-                  let type = item.supportedContentTypes.first else {
+                  let type = item.supportedContentTypes.first
+            else {
                 tray.reportUnreadableFile()
                 continue
             }
@@ -2156,13 +2363,14 @@ private struct TerminalLineComposer: View {
     }
 
     private func restoreDraft() {
-#if DEBUG
-        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-            == "terminal-compose" {
-            draft = "Review the attachment spacing, then let every wrapped line use the full composer width."
-            return
-        }
-#endif
+        #if DEBUG
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "terminal-compose"
+            {
+                draft = "Review the attachment spacing, then let every wrapped line use the full composer width."
+                return
+            }
+        #endif
         guard draft.isEmpty, let hostID = model.activeHostID else { return }
         draft = continuity.draft(
             surface: .terminal,
@@ -2283,7 +2491,7 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView: IntrinsicTextView,
-        context: Context
+        context _: Context
     ) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
         uiView.updateFirstLineAccessoryExclusions(for: width)
@@ -2320,17 +2528,17 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
             textView.invalidateIntrinsicContentSize()
         }
 
-        func textViewDidBeginEditing(_ textView: UITextView) {
+        func textViewDidBeginEditing(_: UITextView) {
             isFocused.wrappedValue = true
         }
 
-        func textViewDidEndEditing(_ textView: UITextView) {
+        func textViewDidEndEditing(_: UITextView) {
             isFocused.wrappedValue = false
         }
 
         func textView(
             _ textView: UITextView,
-            shouldChangeTextIn range: NSRange,
+            shouldChangeTextIn _: NSRange,
             replacementText replacement: String
         ) -> Bool {
             guard replacement == "\n", textView.markedTextRange == nil else { return true }
@@ -2350,6 +2558,7 @@ private enum TerminalLinePromptMetrics {
         )
         return UIEdgeInsets(top: vertical, left: 0, bottom: vertical, right: 0)
     }
+
     static var maximumHeight: CGFloat {
         let insets = textInsets
         return ceil(font.lineHeight * maximumLines + insets.top + insets.bottom)
@@ -2384,96 +2593,97 @@ private struct LegacyConversationRemoteView: View {
             },
             onViewportChange: saveConversationViewport
         )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                VStack(spacing: 0) {
-                    if !completionItems.isEmpty {
-                        ConversationCapabilityList(
-                            items: completionItems,
-                            onChoose: chooseCapability
-                        )
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
-
-                    presenceBanner
-
-                    InputControlBar(connection: connection)
-
-                    AttentionActivityBanner(connection: connection)
-
-                    submissionBanner
-
-                    ConversationComposer(
-                        text: $draft,
-                        isEnabled: connection.phase == .connected
-                            && connection.capability == .interact
-                            && connection.inputControl?.canWrite != false
-                            && connection.conversationCanSend
-                            && !connection.isPromptSubmissionPending,
-                        isInitiallyFocused: initiallyFocusesComposer,
-                        hasCapabilities: connection.capability == .interact
-                            && !connection.composerCapabilities.isEmpty,
-                        toggleCapabilities: toggleCapabilityCatalog,
-                        canAskForInput: connection.phase == .connected
-                            && connection.capability == .interact
-                            && connection.supportsAttentionRequests
-                            && !connection.attentionRecipients.isEmpty,
-                        askForInput: { showsAttentionRequest = true },
-                        submit: submitDraft
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                if !completionItems.isEmpty {
+                    ConversationCapabilityList(
+                        items: completionItems,
+                        onChoose: chooseCapability
                     )
-                    .onChange(of: draft) { _, value in
-                        submissionNotice = nil
-                        connection.reportTyping(!value.isEmpty)
-                        saveDraft(value)
-                        if RemoteComposerCompletionQuery.parse(value) == nil,
-                           !value.isEmpty {
-                            showsCapabilityCatalog = false
-                            capabilityKindFilter = nil
-                            preservedSkillArguments = nil
-                        }
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+
+                presenceBanner
+
+                InputControlBar(connection: connection)
+
+                AttentionActivityBanner(connection: connection)
+
+                submissionBanner
+
+                ConversationComposer(
+                    text: $draft,
+                    isEnabled: connection.phase == .connected
+                        && connection.capability == .interact
+                        && connection.inputControl?.canWrite != false
+                        && connection.conversationCanSend
+                        && !connection.isPromptSubmissionPending,
+                    isInitiallyFocused: initiallyFocusesComposer,
+                    hasCapabilities: connection.capability == .interact
+                        && !connection.composerCapabilities.isEmpty,
+                    toggleCapabilities: toggleCapabilityCatalog,
+                    canAskForInput: connection.phase == .connected
+                        && connection.capability == .interact
+                        && connection.supportsAttentionRequests
+                        && !connection.attentionRecipients.isEmpty,
+                    askForInput: { showsAttentionRequest = true },
+                    submit: submitDraft
+                )
+                .onChange(of: draft) { _, value in
+                    submissionNotice = nil
+                    connection.reportTyping(!value.isEmpty)
+                    saveDraft(value)
+                    if RemoteComposerCompletionQuery.parse(value) == nil,
+                       !value.isEmpty
+                    {
+                        showsCapabilityCatalog = false
+                        capabilityKindFilter = nil
+                        preservedSkillArguments = nil
                     }
-                    .fixedSize(horizontal: false, vertical: true)
                 }
-                .padding(.bottom, keyboardOverlap)
-                .background(theme.ground)
+                .fixedSize(horizontal: false, vertical: true)
             }
-            .toolbar {
-                ToolbarItem(placement: .principal) {
-                    RemoteNavigationTitle(connection: connection)
-                }
-            }
-            .task {
-                if initiallyFocusesComposer, draft.isEmpty {
-                    draft = MobileL10n.string(
-                        "Check the final layout with the keyboard open and a longer prompt."
-                    )
-                }
-            }
-            .mobileTheme(theme)
+            .padding(.bottom, keyboardOverlap)
             .background(theme.ground)
-            .ignoresSafeArea(.keyboard, edges: .bottom)
-            .onReceive(
-                NotificationCenter.default.publisher(
-                    for: UIResponder.keyboardWillChangeFrameNotification
+        }
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                RemoteNavigationTitle(connection: connection)
+            }
+        }
+        .task {
+            if initiallyFocusesComposer, draft.isEmpty {
+                draft = MobileL10n.string(
+                    "Check the final layout with the keyboard open and a longer prompt."
                 )
-            ) { notification in
-                updateKeyboardOverlap(from: notification)
             }
-            .onReceive(
-                NotificationCenter.default.publisher(
-                    for: UIResponder.keyboardWillHideNotification
-                )
-            ) { notification in
-                updateKeyboardOverlap(from: notification, hiding: true)
-            }
-            .onChange(of: connection.promptSubmissionFeedback) { _, feedback in
-                handleSubmissionFeedback(feedback)
-            }
-            .onAppear(perform: restoreDraft)
-            .sheet(isPresented: $showsAttentionRequest) {
-                AttentionRequestSheet(connection: connection)
-                    .mobileTheme(theme)
-            }
+        }
+        .mobileTheme(theme)
+        .background(theme.ground)
+        .ignoresSafeArea(.keyboard, edges: .bottom)
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillChangeFrameNotification
+            )
+        ) { notification in
+            updateKeyboardOverlap(from: notification)
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillHideNotification
+            )
+        ) { notification in
+            updateKeyboardOverlap(from: notification, hiding: true)
+        }
+        .onChange(of: connection.promptSubmissionFeedback) { _, feedback in
+            handleSubmissionFeedback(feedback)
+        }
+        .onAppear(perform: restoreDraft)
+        .sheet(isPresented: $showsAttentionRequest) {
+            AttentionRequestSheet(connection: connection)
+                .mobileTheme(theme)
+        }
     }
 
     private var completionItems: [RemoteComposerCapabilityDTO] {
@@ -2536,7 +2746,8 @@ private struct LegacyConversationRemoteView: View {
         if trimmed.caseInsensitiveCompare("/skills") == .orderedSame,
            connection.composerCapabilities.contains(where: {
                $0.id == RemoteComposerCatalog.skillsCommandID
-           }) {
+           })
+        {
             openSkillCatalog(preserving: nil)
             return
         }
@@ -2590,7 +2801,8 @@ private struct LegacyConversationRemoteView: View {
     @ViewBuilder
     private var submissionBanner: some View {
         if connection.isPromptSubmissionPending,
-           pendingSubmissionID != nil {
+           pendingSubmissionID != nil
+        {
             HStack(spacing: MobileDesign.Spacing.small) {
                 ProgressView()
                     .controlSize(.small)
@@ -2702,12 +2914,12 @@ private struct LegacyConversationRemoteView: View {
     }
 
     private var initiallyFocusesComposer: Bool {
-#if DEBUG
-        ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-            == "conversation-keyboard"
-#else
-        false
-#endif
+        #if DEBUG
+            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "conversation-keyboard"
+        #else
+            false
+        #endif
     }
 
     private func updateKeyboardOverlap(
@@ -2740,7 +2952,8 @@ private struct LegacyConversationRemoteView: View {
 private func remotePresenceLabel(_ presence: RemotePresenceDTO) -> String {
     guard let deviceName = presence.deviceName,
           !deviceName.isEmpty,
-          deviceName != presence.displayName else {
+          deviceName != presence.displayName
+    else {
         return presence.displayName
     }
     return MobileL10n.string("%@ on %@", presence.displayName, deviceName)
@@ -2779,7 +2992,7 @@ private struct ConversationComposer: View {
             }
 
             TextField("Add feedback…", text: $text, axis: .vertical)
-                .lineLimit(1...6)
+                .lineLimit(1 ... 6)
                 .submitLabel(.send)
                 .onSubmit(submit)
                 .focused($isFocused)
@@ -2994,32 +3207,33 @@ private struct AttentionActivityBanner: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 10)) { context in
             if let event = connection.attentionEvents.last,
-               context.date.timeIntervalSince1970 - event.createdAt < 90 {
-            HStack(alignment: .top, spacing: MobileDesign.Spacing.small) {
-                Image(systemName: "person.wave.2")
-                    .foregroundStyle(theme.accent)
-                    .frame(width: MobileDesign.Size.terminalStatusIconColumn)
-                VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
-                    Text(MobileL10n.string(
-                        "%@ asked %@ for input",
-                        event.senderDisplayName,
-                        event.recipientDisplayName
-                    ))
-                    .font(.caption.weight(.medium))
-                    if let note = event.note, !note.isEmpty {
-                        Text(note)
-                            .font(.caption)
-                            .foregroundStyle(theme.secondaryLabel)
-                            .lineLimit(2)
+               context.date.timeIntervalSince1970 - event.createdAt < 90
+            {
+                HStack(alignment: .top, spacing: MobileDesign.Spacing.small) {
+                    Image(systemName: "person.wave.2")
+                        .foregroundStyle(theme.accent)
+                        .frame(width: MobileDesign.Size.terminalStatusIconColumn)
+                    VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                        Text(MobileL10n.string(
+                            "%@ asked %@ for input",
+                            event.senderDisplayName,
+                            event.recipientDisplayName
+                        ))
+                        .font(.caption.weight(.medium))
+                        if let note = event.note, !note.isEmpty {
+                            Text(note)
+                                .font(.caption)
+                                .foregroundStyle(theme.secondaryLabel)
+                                .lineLimit(2)
+                        }
                     }
+                    Spacer(minLength: 0)
                 }
-                Spacer(minLength: 0)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, MobileDesign.Spacing.inset)
-            .padding(.vertical, MobileDesign.Spacing.small)
-            .background(theme.accentMuted)
-            .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, MobileDesign.Spacing.inset)
+                .padding(.vertical, MobileDesign.Spacing.small)
+                .background(theme.accentMuted)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -3070,7 +3284,7 @@ struct AttentionRequestSheet: View {
                     TextField("Optional note…", text: $note, axis: .vertical)
                         .focused($noteIsFocused)
                         .mobileUIEvidenceKeyboardFocus($noteIsFocused)
-                        .lineLimit(2...4)
+                        .lineLimit(2 ... 4)
                         .onChange(of: note) { _, value in
                             note = Self.truncatedNote(value)
                             notice = nil

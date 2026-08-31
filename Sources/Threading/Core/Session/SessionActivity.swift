@@ -73,6 +73,42 @@ enum SessionActivity: Sendable {
     }
 }
 
+/// The semantic turn edges observed while activity presentations change.
+///
+/// `working` / `awaitingUser` are the two presentations of one unfinished turn. Moving between
+/// them is not a new turn and moving between two finished presentations is not a completion.
+/// Keeping this judgement next to `hasTurnInFlight` prevents UI callbacks from interpreting
+/// every non-working state as a fresh, expensive finish boundary.
+struct SessionActivityTransition {
+    let beganTurn: Bool
+    let completedTurn: Bool
+}
+
+/// Remembers one scalar activity per session and derives semantic turn edges in O(1).
+///
+/// Session count is the bound: no per-output or per-turn history is retained. The first observed
+/// in-flight state is a beginning so a surface attached after its process started still receives
+/// the presentation edge; a first observed finished state is never invented into a completion.
+struct SessionActivityTransitionLedger {
+    private var lastActivity: [SessionID: SessionActivity] = [:]
+
+    mutating func observe(
+        _ activity: SessionActivity,
+        for sessionID: SessionID
+    ) -> SessionActivityTransition {
+        let previous = lastActivity.updateValue(activity, forKey: sessionID)
+        let previouslyHadTurn = previous?.hasTurnInFlight ?? false
+        return SessionActivityTransition(
+            beganTurn: !previouslyHadTurn && activity.hasTurnInFlight,
+            completedTurn: previous != nil && previouslyHadTurn && !activity.hasTurnInFlight
+        )
+    }
+
+    mutating func remove(_ sessionID: SessionID) {
+        lastActivity.removeValue(forKey: sessionID)
+    }
+}
+
 // MARK: - Session Activity Cause
 
 /// What moved a fact, for the one line the tracker leaves behind when the state changes.
@@ -212,6 +248,13 @@ final class SessionActivityTracker {
     /// worth flagging.
     var isVisible: Bool = false {
         didSet {
+            guard isVisible else { return }
+
+            // The person looked at this episode, so later inferred output is allowed to describe
+            // new work again. This is independent of whether `awaitsUser` needs clearing: a bell
+            // inside an open turn remains blocked, but its interruption episode was still seen.
+            attentionEpisodeOpen = false
+
             // Looking at a finished session spends its unread mark. It does not answer a
             // question inside an open turn: presentation is not interaction, and treating it as
             // one both cleared real prompts early and admitted a restored TUI's later repaint as
@@ -220,7 +263,7 @@ final class SessionActivityTracker {
             // `turnInFlight` is the distinction: after a turn finished, the same flag is its
             // unread result and being seen spends it. `openAsks` and `limitPark` are deliberately
             // untouched; their explicit close/recovery boundaries remain their owners.
-            guard isVisible, awaitsUser, !turnInFlight else { return }
+            guard awaitsUser, !turnInFlight else { return }
             awaitsUser = false
             settle(.seen)
         }
@@ -430,6 +473,7 @@ final class SessionActivityTracker {
 
     private var bytesSinceQuiet = 0
     private var quietTimer: Timer?
+    private let quietInterval: TimeInterval
 
     /// A reported Codex `Stop` whose next protocol fact may be an automatic goal continuation.
     ///
@@ -451,6 +495,10 @@ final class SessionActivityTracker {
 
     /// Output arriving before this instant is a redraw we provoked, not the agent working.
     private var suppressOutputUntil: Date?
+
+    init(quietInterval: TimeInterval = ActivityDefaults.quietInterval) {
+        self.quietInterval = quietInterval
+    }
 
     // MARK: - Public Methods
 
@@ -509,9 +557,20 @@ final class SessionActivityTracker {
             return activity == .working ? acceptedByteCount : nil
         }
 
+        // Once an off-screen inferred result has raised its hand, more bytes do not prove that a
+        // new turn began. Full-screen CLIs repaint their idle prompt periodically, and treating
+        // every repaint as a turn produced an unbounded working/quiet loop plus all of the Git,
+        // transcript and project work attached to those fake edges. The episode is re-armed only
+        // by a real interaction (`noteUserInput` or being viewed), an authoritative start, or a
+        // process boundary. A runtime that has reported an ending keeps the Codex continuation
+        // fallback: its next self-opened turn may have output before the rollout names it.
+        if !turnInFlight, attentionEpisodeOpen, !reportsOwnActivity, !isVisible {
+            bytesSinceQuiet = 0
+            return nil
+        }
+
         if !turnInFlight {
             cancelPendingReportedTurnFinish()
-            attentionEpisodeOpen = false
             turnWasDeclared = false
         }
         turnInFlight = true
@@ -589,6 +648,13 @@ final class SessionActivityTracker {
     /// that a question has been answered.
     func noteUserInput(submitsLine: Bool) {
         launchedUnattended = false
+
+        // A committed line is a genuine new interaction even when the previous inferred result
+        // is still unread on this Mac. It earns one new output/quiet episode; editing alone does
+        // not, because a periodic repaint can follow cursor movement without a submitted turn.
+        if submitsLine {
+            attentionEpisodeOpen = false
+        }
 
         guard submitsLine, awaitsUser, turnInFlight, openAsks.isEmpty else { return }
         awaitsUser = false
@@ -1281,7 +1347,7 @@ final class SessionActivityTracker {
     private func restartQuietTimer() {
         quietTimer?.invalidate()
         quietTimer = Timer.scheduledTimer(
-            withTimeInterval: ActivityDefaults.quietInterval,
+            withTimeInterval: quietInterval,
             repeats: false
         ) { [weak self] _ in
             Task { @MainActor [weak self] in

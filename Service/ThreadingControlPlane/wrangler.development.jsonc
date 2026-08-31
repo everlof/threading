@@ -1,0 +1,103 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "threading-control-plane-development",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "routes": [
+    {
+      "pattern": "dev.remote.threading.codes",
+      "custom_domain": true
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "HOST_RENDEZVOUS",
+        "class_name": "HostRendezvous"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["HostRendezvous"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "threading-control-plane-development",
+      "database_id": "9c4898bf-4485-4f78-be13-2a755569532b",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "934723001",
+      "simple": {
+        "limit": 30,
+        "period": 60
+      }
+    },
+    {
+      "name": "API_RATE_LIMITER",
+      "namespace_id": "934723002",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "SOURCE_RATE_LIMITER",
+      "namespace_id": "934723003",
+      "simple": {
+        "limit": 600,
+        "period": 60
+      }
+    },
+    {
+      "name": "REPORT_RATE_LIMITER",
+      "namespace_id": "934723004",
+      "simple": {
+        "limit": 6,
+        "period": 60
+      }
+    },
+    {
+      "name": "REPORT_GLOBAL_RATE_LIMITER",
+      "namespace_id": "934723005",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
+  "vars": {
+    "APNS_TOPIC": "codes.threading.mobile",
+    "DEVELOPMENT_AUTH_MODE": "1",
+    "DEVELOPMENT_ACCESS_ISSUER": "REPLACE_WITH_ACCESS_ISSUER",
+    "DEVELOPMENT_ACCESS_AUDIENCE": "REPLACE_WITH_ACCESS_AUDIENCE",
+    "DEVELOPMENT_ACCESS_EMAILS": "REPLACE_WITH_ALLOWED_EMAILS"
+  },
+  "secrets": {
+    "required": [
+      "SESSION_SIGNING_SECRET",
+      "APNS_TEAM_ID",
+      "APNS_KEY_ID",
+      "APNS_PRIVATE_KEY",
+      "PUSH_TOKEN_ENCRYPTION_SECRET",
+      "TURN_KEY_ID",
+      "TURN_KEY_API_TOKEN"
+    ]
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 0.1
+  },
+  "triggers": {
+    "crons": ["17 3 * * *"]
+  }
+}

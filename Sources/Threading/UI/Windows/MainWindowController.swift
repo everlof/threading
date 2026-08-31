@@ -43,7 +43,8 @@ struct WorkspaceNavigatorIntentDispatcher {
     ) -> WorkspaceNavigatorIntentDispatchResult {
         guard let session = projectStore.session(withID: sessionID),
               !session.isArchived,
-              !hasScheduledStart(sessionID) else {
+              !hasScheduledStart(sessionID)
+        else {
             return .targetUnavailable
         }
 
@@ -65,14 +66,13 @@ struct WorkspaceNavigatorIntentDispatcher {
 
 /// The application's single window: a project sidebar beside the active session's terminal.
 final class MainWindowController: ThemedWindowController, RemoteWorkspaceProviding {
-
-#if DEBUG
-    struct DisplayPaneRequestPhaseDurations {
-        var preparationNanoseconds: UInt64 = 0
-        var collapseNanoseconds: UInt64 = 0
-        var toolbarNanoseconds: UInt64 = 0
-    }
-#endif
+    #if DEBUG
+        struct DisplayPaneRequestPhaseDurations {
+            var preparationNanoseconds: UInt64 = 0
+            var collapseNanoseconds: UInt64 = 0
+            var toolbarNanoseconds: UInt64 = 0
+        }
+    #endif
 
     private(set) var startupPerformance = MainWindowStartupPerformance()
     private var isMeasuringStartupToolbarItems = false
@@ -165,6 +165,30 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Retained so the sidebar can be collapsed and restored directly.
     private lazy var sidebarItem = NSSplitViewItem(viewController: workspaceSidebarViewController)
 
+    /// The invisible leading-edge target and the timing state around the real sidebar it opens.
+    /// Keeping the split item as the revealed surface preserves selection, scrolling, extension
+    /// navigator state and every ordinary row interaction.
+    private lazy var sidebarEdgeRevealCoordinator: SidebarEdgeRevealCoordinator = {
+        let coordinator = SidebarEdgeRevealCoordinator()
+        coordinator.onReveal = { [weak self] in self?.revealSidebarTemporarily() }
+        coordinator.onDismiss = { [weak self] in self?.dismissTemporarilyRevealedSidebar() }
+        return coordinator
+    }()
+
+    private lazy var sidebarEdgeTrackingView: HoverTrackingView = {
+        let tracker = HoverTrackingView()
+        tracker.passesHitTestingThrough = true
+        tracker.tracksOnlyInKeyWindow = true
+        tracker.onHoverChange = { [weak self] hovering in
+            self?.sidebarEdgeHoverChanged(hovering)
+        }
+        return tracker
+    }()
+
+    #if DEBUG
+        private var allowsUnkeyedSidebarEdgeRevealForTesting = false
+    #endif
+
     /// Owns session creation, import, worktree targeting, surface switches, and closing.
     lazy var sessionCoordinator = SessionCoordinator(
         sidebar: sidebarViewController,
@@ -212,7 +236,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // pane holds one — which is exactly the case the feature is for.
         return [
             (.displayPanel, displayPaneController),
-            (.drawer, containerViewController.drawerHostController)
+            (.drawer, containerViewController.drawerHostController),
         ] + orderedDetachedWindows.map { (.detachedWindow($0.windowID), $0.host) }
     })
 
@@ -241,7 +265,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             switch hostID {
             case .displayPanel: setDisplayPaneVisible(true)
             case .drawer: containerViewController.openShellDrawer()
-            case .detachedWindow(let id):
+            case let .detachedWindow(id):
                 // Ordered front, never made key: an agent acting on a page must not take the
                 // keyboard out from under whatever the user is typing into. `showWindow` is
                 // what the *user's* own "Focus" does.
@@ -265,10 +289,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Store-change observations, released with the window.
     private let appEvents = AppEventObservations()
+    /// One scalar per session, so high-frequency presentation callbacks can drive expensive
+    /// post-turn work only on the semantic edge out of an unfinished turn.
+    private var sessionActivityTransitions = SessionActivityTransitionLedger()
     private var lastBlockedInputToastAt = Date.distantPast
-#if DEBUG
-    private(set) var lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations()
-#endif
+    #if DEBUG
+        private(set) var lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations()
+    #endif
 
     /// Paces the startup relaunch of the sessions that were running at the last quit.
     /// Retained for the stagger's duration; it retires its own timer when the plan is spent.
@@ -316,7 +343,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         title.isHidden = containerViewController.isShowingSettings
         title.maxWidth = SessionTitleDefaults.maxWidth
         NSLayoutConstraint.activate([
-            title.widthAnchor.constraint(lessThanOrEqualToConstant: SessionTitleDefaults.maxWidth)
+            title.widthAnchor.constraint(lessThanOrEqualToConstant: SessionTitleDefaults.maxWidth),
         ])
         sessionContextToolbarButton = title.actionsAnchor
 
@@ -324,6 +351,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         paneHeaderStackView?.insertArrangedSubview(title, at: 0)
         return title
     }
+
     var pageTitleViewIsMaterialized: Bool { materializedPageTitleView != nil }
 
     /// Settings replaces the workspace temporarily rather than opening a document. Its header
@@ -395,6 +423,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         return item
     }
+
     var accountUsageItemIsMaterialized: Bool {
         materializedAccountUsageItemView != nil
     }
@@ -482,11 +511,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// the composer follows the selected project. Settings deliberately carries no checkout.
     var currentExecutionDirectoryURL: URL? {
         if let currentSessionID,
-           let path = environment.projectStore.workingDirectory(forSessionID: currentSessionID) {
+           let path = environment.projectStore.workingDirectory(forSessionID: currentSessionID)
+        {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
         if let currentTerminalID,
-           let terminal = environment.projectStore.terminal(withID: currentTerminalID) {
+           let terminal = environment.projectStore.terminal(withID: currentTerminalID)
+        {
             return URL(fileURLWithPath: terminal.currentDirectory, isDirectory: true)
         }
         return containerViewController.currentComposerProjectID
@@ -512,7 +543,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
     }
 
-    required init?(coder: NSCoder) {
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -623,21 +655,21 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func applyInitialFrame(_ plan: MainWindowInitialFramePlan) {
         guard let window else { return }
 
-#if DEBUG
-        if let scenarioSize = MainWindowUIScenarioSize.requested() {
-            window.setContentSize(scenarioSize)
-            if let primaryScreen = NSScreen.screens.first {
-                let bounds = primaryScreen.visibleFrame
-                window.setFrameOrigin(NSPoint(
-                    x: bounds.midX - window.frame.width / 2,
-                    y: bounds.midY - window.frame.height / 2
-                ))
-            } else {
-                window.center()
+        #if DEBUG
+            if let scenarioSize = MainWindowUIScenarioSize.requested() {
+                window.setContentSize(scenarioSize)
+                if let primaryScreen = NSScreen.screens.first {
+                    let bounds = primaryScreen.visibleFrame
+                    window.setFrameOrigin(NSPoint(
+                        x: bounds.midX - window.frame.width / 2,
+                        y: bounds.midY - window.frame.height / 2
+                    ))
+                } else {
+                    window.center()
+                }
+                return
             }
-            return
-        }
-#endif
+        #endif
 
         let restoredSavedFrame = plan == .restoreSavedFrame
             && window.setFrameUsingName(MainWindowDefaults.frameAutosaveName)
@@ -694,6 +726,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func setupSplitViewController() {
         let sidebarStarted = DispatchTime.now().uptimeNanoseconds
         sidebarViewController.delegate = self
+        workspaceSidebarViewController.onHoverChange = { [weak self] hovering in
+            self?.sidebarEdgeRevealCoordinator.sidebarHoverChanged(hovering)
+        }
+        workspaceSidebarViewController.onThemedPresentationChange = { [weak self] presented in
+            self?.sidebarEdgeRevealCoordinator.sidebarPresentationDidChange(
+                isPresented: presented
+            )
+        }
 
         // A **plain** item, not `sidebarWithViewController:`, and that is the whole of the
         // sidebar's new silhouette.
@@ -754,6 +794,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         let contentInstallStarted = DispatchTime.now().uptimeNanoseconds
         window?.contentViewController = chromeHostViewController
+        installSidebarEdgeTrackingView()
         startupPerformance.splitContentInstallNanoseconds = DispatchTime.now().uptimeNanoseconds
             - contentInstallStarted
 
@@ -810,6 +851,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         splitViewController.paneCollapseStateDidChange = { [weak self] item, collapsed in
             guard let self else { return }
+            if item === self.sidebarItem {
+                self.sidebarEdgeTrackingView.isHidden = !collapsed
+                if collapsed {
+                    self.sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
+                }
+            }
             self.updatePaneToggleSelection()
             // A panel dragged shut leaves by the same door as one closed from its own ✕:
             // the app-wide theme document is put away with the pane that was showing it.
@@ -824,7 +871,33 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             self.updateHeaderInset(sidebarIsCollapsed: collapsed)
             if !collapsed {
                 self.applyPendingWorkspaceNavigatorWidth()
+                if self.sidebarEdgeRevealCoordinator.isTemporarilyRevealed {
+                    self.sidebarEdgeRevealCoordinator.revealDidComplete(
+                        pointerIsInsideSidebar:
+                        self.workspaceSidebarViewController.view.isPointerInside
+                    )
+                }
             }
+        }
+
+        if let window {
+            for name in [
+                NSWindow.didResignKeyNotification,
+                NSWindow.didMiniaturizeNotification,
+            ] {
+                appEvents.observe(name, object: window) {
+                    [weak self] in
+                    guard let self else { return }
+                    if name == NSWindow.didResignKeyNotification {
+                        self.sidebarWindowDidResignKey()
+                    } else {
+                        self.sidebarEdgeRevealCoordinator.dismissImmediately()
+                    }
+                }
+            }
+        }
+        appEvents.observe(NSApplication.didResignActiveNotification, object: NSApp) {
+            [weak self] in self?.sidebarEdgeRevealCoordinator.dismissImmediately()
         }
 
         // The toolbar was installed a moment ago and has not laid its items out yet, so the
@@ -848,6 +921,111 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         startupPerformance.splitFinalizeNanoseconds = DispatchTime.now().uptimeNanoseconds
             - finalizeStarted
     }
+
+    // MARK: - Collapsed Sidebar Edge Reveal
+
+    private func installSidebarEdgeTrackingView() {
+        let tracker = sidebarEdgeTrackingView
+        guard tracker.superview == nil else { return }
+
+        tracker.translatesAutoresizingMaskIntoConstraints = false
+        tracker.isHidden = !sidebarItem.isCollapsed
+        chromeHostViewController.view.addSubview(tracker, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            tracker.leadingAnchor.constraint(
+                equalTo: chromeHostViewController.overlayArea.leadingAnchor
+            ),
+            tracker.topAnchor.constraint(equalTo: chromeHostViewController.overlayArea.topAnchor),
+            tracker.bottomAnchor.constraint(
+                equalTo: chromeHostViewController.overlayArea.bottomAnchor
+            ),
+            tracker.widthAnchor.constraint(
+                equalToConstant: SidebarEdgeRevealCoordinator.triggerWidth
+            ),
+        ])
+    }
+
+    private func sidebarEdgeHoverChanged(_ hovering: Bool) {
+        if hovering {
+            guard sidebarEdgeRevealIsEligible else {
+                sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
+                return
+            }
+        }
+        sidebarEdgeRevealCoordinator.edgeHoverChanged(hovering)
+    }
+
+    private var sidebarEdgeRevealIsEligible: Bool {
+        #if DEBUG
+            if allowsUnkeyedSidebarEdgeRevealForTesting { return sidebarItem.isCollapsed }
+        #endif
+        guard sidebarItem.isCollapsed,
+              let window,
+              window.isKeyWindow,
+              window.attachedSheet == nil,
+              NSApp.modalWindow == nil else { return false }
+        return true
+    }
+
+    private func revealSidebarTemporarily() {
+        // Eligibility is checked again after the dwell: a sheet, command or window switch may
+        // have taken ownership while the timer was pending.
+        guard sidebarEdgeRevealIsEligible else {
+            sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
+            return
+        }
+
+        splitViewController.setCollapsed(false, on: sidebarItem)
+    }
+
+    private func dismissTemporarilyRevealedSidebar() {
+        guard !sidebarItem.isCollapsed else { return }
+        splitViewController.setCollapsed(true, on: sidebarItem)
+        // Match the explicit toggle's start-of-transition fallback. The completion and resize
+        // callbacks still refine it from final geometry.
+        updateHeaderInset(sidebarIsCollapsed: true)
+    }
+
+    private func sidebarWindowDidResignKey() {
+        // A popover with an editor becomes the key child window. Wait until AppKit has installed
+        // the successor, then preserve only a child presentation that originated in the sidebar.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let window = self.window,
+               NSApp.keyWindow?.parent === window,
+               self.sidebarEdgeRevealCoordinator.isHoldingPresentedInteraction
+            {
+                return
+            }
+            self.sidebarEdgeRevealCoordinator.dismissImmediately()
+        }
+    }
+
+    #if DEBUG
+        var sidebarEdgeRevealPolicyForTesting: SidebarEdgeRevealCoordinator.Policy {
+            get { sidebarEdgeRevealCoordinator.policy }
+            set { sidebarEdgeRevealCoordinator.policy = newValue }
+        }
+
+        var sidebarIsTemporarilyRevealedForTesting: Bool {
+            sidebarEdgeRevealCoordinator.isTemporarilyRevealed
+        }
+
+        var sidebarEdgeTrackingViewForTesting: HoverTrackingView { sidebarEdgeTrackingView }
+
+        func simulateSidebarEdgeHoverForTesting(_ hovering: Bool) {
+            allowsUnkeyedSidebarEdgeRevealForTesting = true
+            sidebarEdgeHoverChanged(hovering)
+        }
+
+        func simulateSidebarHoverForTesting(_ hovering: Bool) {
+            sidebarEdgeRevealCoordinator.sidebarHoverChanged(hovering)
+        }
+
+        func simulateSidebarPresentationForTesting(_ presented: Bool) {
+            sidebarEdgeRevealCoordinator.sidebarPresentationDidChange(isPresented: presented)
+        }
+    #endif
 
     /// Attributes only the delegate work nested inside the initial `NSWindow.setToolbar` call.
     /// Theme reinstalls and later AppKit requests are deliberately excluded from the launch
@@ -1000,7 +1178,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         extensionIdentifier: String
     ) -> NSView? {
         switch surface {
-        case .metal(let specification):
+        case let .metal(specification):
             guard let source = ExtensionManager.shared.customSurfaceSource(
                 relativePath: specification.shaderResource,
                 extensionIdentifier: extensionIdentifier
@@ -1029,9 +1207,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case .activeAccountUsageRemaining:
             guard let account = materializedAccountUsageItemView?.account,
                   let used = AccountUsageService.shared
-                    .usage(for: account)?
-                    .peakWindow()?
-                    .fraction else {
+                  .usage(for: account)?
+                  .peakWindow()?
+                  .fraction
+            else {
                 return nil
             }
             return 1 - min(max(used, 0), 1)
@@ -1106,7 +1285,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             actions: [
                 PaneNoticeAction(title: L10n.string("Undo")) { [weak self] in
                     self?.undoManagerMove(move)
-                }
+                },
             ],
             onDismiss: { [weak self] in
                 ManagerActionNoticeStore.shared.dismissMove(for: sessionID)
@@ -1131,7 +1310,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 limits: CustomLimitSettings.shared.rules(for: source.id)
             )
             guard case .current = AccountUsageService.shared.reading(for: source),
-                  LimitEscapeRanking.hasHeadroom(candidate, metering: nil) else {
+                  LimitEscapeRanking.hasHeadroom(candidate, metering: nil)
+            else {
                 self.showManagerMoveUndoFailure(
                     L10n.string("The previous account has no fresh reading with headroom.")
                 )
@@ -1325,7 +1505,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         containerViewController.shellRootPid(for: sessionID)
     }
 
-    @objc private func splitViewDidResize(_ notification: Notification) {
+    @objc private func splitViewDidResize(_: Notification) {
         // Fires while a divider is dragged and when a pane collapses, which are the two ways the
         // content pane can arrive at the window's leading edge.
         updateHeaderInset()
@@ -1486,9 +1666,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         animated: Bool = true,
         remembersSessionChoice: Bool = true
     ) {
-#if DEBUG
-        let requestStarted = DispatchTime.now().uptimeNanoseconds
-#endif
+        #if DEBUG
+            let requestStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
         // The pane is the authority here. During a session transition the terminal container
         // and the panel can briefly name different sessions, while the close gesture always
         // applies to the content the user can actually see in the panel.
@@ -1508,27 +1688,27 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
 
         guard visible else {
-#if DEBUG
-            let collapseStarted = DispatchTime.now().uptimeNanoseconds
-#endif
+            #if DEBUG
+                let collapseStarted = DispatchTime.now().uptimeNanoseconds
+            #endif
             splitViewController.setCollapsed(
                 true,
                 on: displayItem,
                 animated: animated,
                 completion: nil
             )
-#if DEBUG
-            let collapseEnded = DispatchTime.now().uptimeNanoseconds
-#endif
+            #if DEBUG
+                let collapseEnded = DispatchTime.now().uptimeNanoseconds
+            #endif
             updateToolbarControlStates()
-#if DEBUG
-            let toolbarEnded = DispatchTime.now().uptimeNanoseconds
-            lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations(
-                preparationNanoseconds: collapseStarted - requestStarted,
-                collapseNanoseconds: collapseEnded - collapseStarted,
-                toolbarNanoseconds: toolbarEnded - collapseEnded
-            )
-#endif
+            #if DEBUG
+                let toolbarEnded = DispatchTime.now().uptimeNanoseconds
+                lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations(
+                    preparationNanoseconds: collapseStarted - requestStarted,
+                    collapseNanoseconds: collapseEnded - collapseStarted,
+                    toolbarNanoseconds: toolbarEnded - collapseEnded
+                )
+            #endif
             return
         }
 
@@ -1539,9 +1719,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // therefore still the full content width.
         let target = DisplayPaneWidth.opening(in: splitView.bounds.width)
         isRestoringDisplayPaneWidth = true
-#if DEBUG
-        let collapseStarted = DispatchTime.now().uptimeNanoseconds
-#endif
+        #if DEBUG
+            let collapseStarted = DispatchTime.now().uptimeNanoseconds
+        #endif
         splitViewController.setCollapsed(
             false,
             on: displayItem,
@@ -1563,18 +1743,18 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             // chrome floor followed by a second 200 ms width restoration.
             self.isRestoringDisplayPaneWidth = false
         }
-#if DEBUG
-        let collapseEnded = DispatchTime.now().uptimeNanoseconds
-#endif
+        #if DEBUG
+            let collapseEnded = DispatchTime.now().uptimeNanoseconds
+        #endif
         updateToolbarControlStates()
-#if DEBUG
-        let toolbarEnded = DispatchTime.now().uptimeNanoseconds
-        lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations(
-            preparationNanoseconds: collapseStarted - requestStarted,
-            collapseNanoseconds: collapseEnded - collapseStarted,
-            toolbarNanoseconds: toolbarEnded - collapseEnded
-        )
-#endif
+        #if DEBUG
+            let toolbarEnded = DispatchTime.now().uptimeNanoseconds
+            lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations(
+                preparationNanoseconds: collapseStarted - requestStarted,
+                collapseNanoseconds: collapseEnded - collapseStarted,
+                toolbarNanoseconds: toolbarEnded - collapseEnded
+            )
+        #endif
     }
 
     /// Opens the panel at the width it was last left at.
@@ -1756,7 +1936,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             PaneNoticeAction(title: L10n.string("Restore")) { [weak self] in
                 self?.containerViewController.dismissNotice()
                 restore()
-            }
+            },
         ]
         if let submitter = issueReportSubmitter {
             actions.append(
@@ -1814,7 +1994,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     ) {
         let alert = ThemedAlert()
         switch outcome {
-        case .delivered(let reference):
+        case let .delivered(reference):
             alert.messageText = L10n.string("Report received")
             alert.informativeText = L10n.format(
                 "Threading’s developer inbox received the crash summary. Reference: %@",
@@ -1830,7 +2010,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             alert.informativeText = L10n.string(
                 "The crash summary is saved securely and will retry when Threading is active."
             )
-        case .failed(let message):
+        case let .failed(message):
             alert.alertStyle = .warning
             alert.messageText = L10n.string("Couldn’t send report")
             alert.informativeText = message
@@ -1870,7 +2050,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             actions: [
                 PaneNoticeAction(title: RecoveryModeDefaults.bandAction) { [weak self] in
                     self?.containerViewController.showRecoverySurface()
-                }
+                },
             ]
         )
         containerViewController.showNotice(notice)
@@ -1914,7 +2094,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 PaneNoticeAction(title: L10n.string("Open Extensions Settings")) { [weak self] in
                     self?.containerViewController.dismissNotice()
                     self?.showSettingsPage(id: SettingsPages.extensionsID)
-                }
+                },
             ],
             onDismiss: { [weak self] in self?.containerViewController.dismissNotice() }
         )
@@ -2043,7 +2223,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let resumable = sessionIDs.filter { environment.projectStore.session(withID: $0) != nil }
         guard !resumable.isEmpty else { return }
         environment.eventLog.record(.session, "Resuming sessions the PTY host lost", [
-            "sessions": String(resumable.count)
+            "sessions": String(resumable.count),
         ])
         let relauncher = StartupSessionRelauncher(sessionIDs: resumable) { [weak self] sessionID in
             self?.containerViewController.launchInBackground(sessionID: sessionID)
@@ -2086,7 +2266,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             "relaunching": String(plan.sessionIDs.count),
             // Said out loud beside the other two: "recorded 3, relaunching 0" reads as a feature
             // that did nothing until this number says three of them never stopped.
-            "heldByHost": String(heldByHost.count)
+            "heldByHost": String(heldByHost.count),
         ])
 
         guard !plan.sessionIDs.isEmpty else { return }
@@ -2170,6 +2350,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Shows or hides the sidebar. Shared by the View menu and the themed toolbar action.
     func toggleSidebar() {
+        // A command is an explicit visibility decision. If hover opened the pane, the command
+        // acts on the visible sidebar and owns whatever state follows instead of leaving an
+        // exit timer capable of undoing it later.
+        sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
         let targetIsCollapsed = !sidebarItem.isCollapsed
         splitViewController.toggleSidebar(nil)
         // Move clear of the window controls at the start of a collapse. AppKit may withhold both
@@ -2185,11 +2369,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         workspaceSidebarViewController.synchronizeSelection(
             with: currentWorkspaceNavigatorDestination
         )
-        if case .extensionNavigator(let extensionIdentifier, let navigatorID) = selection,
+        if case let .extensionNavigator(extensionIdentifier, navigatorID) = selection,
            let width = workspaceNavigatorRouting.registeredWorkspaceNavigator(
                extensionIdentifier: extensionIdentifier,
                navigatorID: navigatorID
-           )?.navigator.preferredWidth {
+           )?.navigator.preferredWidth
+        {
             requestWorkspaceNavigatorWidth(CGFloat(width))
         }
     }
@@ -2247,25 +2432,28 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         _ destination: ExtensionWorkspaceNavigatorDestination
     ) -> String? {
         switch destination {
-        case .project(let rawID):
+        case let .project(rawID):
             guard let projectID = ProjectID(uuidString: rawID),
-                  environment.projectStore.project(withID: projectID) != nil else {
+                  environment.projectStore.project(withID: projectID) != nil
+            else {
                 return L10n.string("That project is no longer available.")
             }
             exitSettingsForNavigation()
             sidebarViewController.select(projectID: projectID)
             return nil
 
-        case .session(let rawID, let rawProjectID):
+        case let .session(rawID, rawProjectID):
             guard let sessionID = SessionID(uuidString: rawID),
                   let session = environment.projectStore.session(withID: sessionID),
                   !session.isArchived,
-                  let project = environment.projectStore.project(forSessionID: sessionID) else {
+                  let project = environment.projectStore.project(forSessionID: sessionID)
+            else {
                 return L10n.string("That session is no longer available.")
             }
             if let rawProjectID {
                 guard let expectedProjectID = ProjectID(uuidString: rawProjectID),
-                      expectedProjectID == project.id else {
+                      expectedProjectID == project.id
+                else {
                     return L10n.string("That session does not belong to the requested project.")
                 }
             }
@@ -2318,7 +2506,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 toolTip: project.map { "\($0.name) — \(session.displayTitle)" }
             )
         } else if let terminalID = containerViewController.currentTerminalID,
-                  let terminal = environment.projectStore.terminal(withID: terminalID) {
+                  let terminal = environment.projectStore.terminal(withID: terminalID)
+        {
             showPageTitle(
                 title: ProjectTerminalTitle.displayTitle(for: terminal),
                 symbolName: "terminal",
@@ -2366,7 +2555,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         pageTitleView.toolTip = toolTip ?? title
     }
 
-    @objc private func settingsDoneClicked(_ sender: ThemedButton) {
+    @objc private func settingsDoneClicked(_: ThemedButton) {
         guard containerViewController.isShowingSettings else { return }
         toggleSettings()
     }
@@ -2379,7 +2568,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         switch hostID {
         case .displayPanel: return displayPaneController
         case .drawer: return containerViewController.drawerHostController
-        case .detachedWindow(let id): return detachedBrowserWindows[id]?.host
+        case let .detachedWindow(id): return detachedBrowserWindows[id]?.host
         }
     })
 
@@ -2398,9 +2587,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     ) -> Bool {
         guard let source = tabTransfer.resolve(sourceID),
               let tab = source.tabs(for: nil).first(where: { $0.id == tabID })
-                ?? currentSessionID.flatMap({ session in
-                    source.tabs(for: session).first { $0.id == tabID }
-                }),
+              ?? currentSessionID.flatMap({ session in
+                  source.tabs(for: session).first { $0.id == tabID }
+              }),
               let sessionID = tab.owningSessionID ?? currentSessionID
         else {
             SystemAlert.refuse()
@@ -2513,7 +2702,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// session's document comes *back* moments after the sweep that removed it.
     func closeDetachedWindows(forSessionsOutside liveSessionIDs: Set<SessionID>) {
         for controller in orderedDetachedWindows
-        where !liveSessionIDs.contains(controller.sessionID) {
+            where !liveSessionIDs.contains(controller.sessionID)
+        {
             forgetDetachedWindow(controller.windowID)
             controller.close()
         }
@@ -2709,7 +2899,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private var dropBandHosts: [(TabHostID, TabDropBandHosting)] {
         [
             (.displayPanel, displayPaneController),
-            (.drawer, containerViewController.drawerHostController)
+            (.drawer, containerViewController.drawerHostController),
         ] + detachedBrowserWindows.values.map { (.detachedWindow($0.windowID), $0.host) }
     }
 
@@ -2735,7 +2925,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case newWindow
 
         var hostID: TabHostID? {
-            if case .host(let id) = self { return id }
+            if case let .host(id) = self { return id }
             return nil
         }
     }
@@ -2798,7 +2988,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             if dragSpring.revealedPanel {
                 setDisplayPaneVisible(false)
             }
-            if case .some(let previous) = dragSpring.paneSessionBeforeSpring {
+            if case let .some(previous) = dragSpring.paneSessionBeforeSpring {
                 displayPaneController.showSessionTabs(previous)
             }
             updateToolbarControlStates()
@@ -2848,8 +3038,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         // A window's only tab has nowhere to go: the source would close as the destination
         // opened, which is an expensive way to move a window.
-        if case .detachedWindow(let id) = sourceID,
-           detachedBrowserWindows[id]?.host.tabCount ?? 0 <= 1 {
+        if case let .detachedWindow(id) = sourceID,
+           detachedBrowserWindows[id]?.host.tabCount ?? 0 <= 1
+        {
             return false
         }
 
@@ -2866,7 +3057,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         dragSpring.dropped = true
 
         switch landing {
-        case .host(let destinationID):
+        case let .host(destinationID):
             // The slot the pointer names, by the destination strip's own midpoint rule — a drop
             // lands where it was aimed, not at the end of the row.
             let index = dropBandHosts
@@ -2984,7 +3175,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                   to: destinationID,
                   index: insertionIndex,
                   sessionID: sessionID
-              ) else {
+              )
+        else {
             SystemAlert.refuse()
             return
         }
@@ -3000,7 +3192,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             }
             displayPaneController.showSessionTabs(sessionID)
             setDisplayPaneVisible(true)
-        case .detachedWindow(let id):
+        case let .detachedWindow(id):
             detachedBrowserWindows[id]?.showWindow(nil)
         }
     }
@@ -3012,14 +3204,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     func closeActiveTab() {
         if displayPaneController.isShowingCurrentTheme, !displayItem.isCollapsed,
            let responder = window?.firstResponder as? NSView,
-           responder.isDescendant(of: displayPaneController.view) {
+           responder.isDescendant(of: displayPaneController.view)
+        {
             setDisplayPaneVisible(false)
             return
         }
 
         if let host = focusedTabHost() {
             if let activeID = host.activeTabID(for: currentSessionID),
-               host.closeTab(id: activeID, for: currentSessionID) {
+               host.closeTab(id: activeID, for: currentSessionID)
+            {
                 return
             }
             SystemAlert.refuse()
@@ -3029,7 +3223,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         if containerViewController.isShowingSettings
             || containerViewController.currentComposerProjectID != nil
             || containerViewController.currentSessionID != nil
-            || containerViewController.currentTerminalID != nil {
+            || containerViewController.currentTerminalID != nil
+        {
             closeActivePageTab()
         } else {
             SystemAlert.refuse()
@@ -3041,7 +3236,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     var canCloseActiveTab: Bool {
         if displayPaneController.isShowingCurrentTheme, !displayItem.isCollapsed,
            let responder = window?.firstResponder as? NSView,
-           responder.isDescendant(of: displayPaneController.view) {
+           responder.isDescendant(of: displayPaneController.view)
+        {
             return true
         }
         if let host = focusedTabHost() {
@@ -3076,17 +3272,21 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return false
         }
 
+        // The page title is the explicit reveal route and may hand the keyboard to the sidebar.
+        // Promote a hover reveal to ordinary persistent visibility before doing either.
+        sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
+
         // The title names a native sidebar row. An extension navigator may currently occupy the
         // column, so selecting inside the hidden native controller alone reveals nothing. Switch
         // the column first and persist that explicit navigation choice.
         selectWorkspaceNavigator(.native)
 
         switch destination {
-        case .session(let sessionID):
+        case let .session(sessionID):
             sidebarViewController.reveal(sessionID: sessionID)
-        case .terminal(let terminalID):
+        case let .terminal(terminalID):
             sidebarViewController.reveal(terminalID: terminalID)
-        case .project(let projectID):
+        case let .project(projectID):
             sidebarViewController.reveal(projectID: projectID)
         case .repository, .branch:
             return false
@@ -3095,10 +3295,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard sidebarViewController.selectedRowKey == destination else { return false }
 
         if sidebarItem.isCollapsed {
-            splitViewController.setCollapsed(false, on: sidebarItem) { [weak self] in
-                guard focusingSidebar else { return }
-                _ = self?.sidebarViewController.focusSelection()
-            }
+            splitViewController.setCollapsed(
+                false,
+                on: sidebarItem,
+                completion: { [weak self] in
+                    guard focusingSidebar else { return }
+                    _ = self?.sidebarViewController.focusSelection()
+                }
+            )
         } else if focusingSidebar {
             _ = sidebarViewController.focusSelection()
         }
@@ -3157,7 +3361,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let usageItem = accountUsageItemView
         let destinations: [AgentAccount]
         if let project = environment.projectStore.executionProject(forSessionID: session.id),
-           SessionMigration.canMigrate(session, in: project) {
+           SessionMigration.canMigrate(session, in: project)
+        {
             destinations = SessionMigration.destinations(for: session)
         } else {
             destinations = []
@@ -3171,8 +3376,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // limit binds it, without the account moving at all. Migration eligibility moves too:
         // the first persisted transcript can make the same account/model movable.
         guard usageItem.account?.id != accountID
-                || usageItem.model != model
-                || usageItem.handoffAccountIDs != destinationIDs else { return }
+            || usageItem.model != model
+            || usageItem.handoffAccountIDs != destinationIDs else { return }
 
         usageItem.configure(
             account: account,
@@ -3285,7 +3490,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard !RecoveryMode.isActive,
               let projectID = currentProjectID,
               ProjectScriptService.shared.activeCatalog?.repositoryRoot
-                == invocation.repositoryRoot else { return nil }
+              == invocation.repositoryRoot else { return nil }
 
         guard let terminal = environment.projectStore.addTerminal(
             to: projectID,
@@ -3347,7 +3552,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         return receipt
     }
 
-
     /// What the pane is showing now, as a page — a session, a project's composer, or nothing.
     /// Settings is not one of the answers: it is what the caller is about to replace.
     private func currentPage() -> NavigationHistory.Page? {
@@ -3365,19 +3569,19 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// selection happens for a retraced one too.
     private func present(_ page: NavigationHistory.Page) {
         switch page {
-        case .session(let sessionID):
+        case let .session(sessionID):
             exitSettingsForNavigation()
             sidebarViewController.select(sessionID: sessionID)
 
-        case .terminal(let terminalID):
+        case let .terminal(terminalID):
             exitSettingsForNavigation()
             sidebarViewController.select(terminalID: terminalID)
 
-        case .composer(let projectID):
+        case let .composer(projectID):
             exitSettingsForNavigation()
             sidebarViewController.select(projectID: projectID)
 
-        case .settings(let pageID):
+        case let .settings(pageID):
             showSettingsPage(id: pageID)
 
         case .settingsAISearch:
@@ -3490,7 +3694,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             setDisplayPaneVisible(true)
         case .drawer:
             containerViewController.openShellDrawer()
-        case .detachedWindow(let id):
+        case let .detachedWindow(id):
             // The user's own gesture, so this one does take the keyboard — unlike the agent's
             // reveal, which only orders the window forward.
             detachedBrowserWindows[id]?.showWindow(nil)
@@ -3524,10 +3728,11 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard let browser = browserResolver.locations(for: sessionID)
             .first(where: { $0.tabID == tabID })?
             .browser,
-              browser.contextKind == .shared,
-              browser.currentURL != nil,
-              let capture = try? await browser.screenshot(),
-              capture.data.count <= RemoteWorkspaceDefaults.maximumPreviewBytes else {
+            browser.contextKind == .shared,
+            browser.currentURL != nil,
+            let capture = try? await browser.screenshot(),
+            capture.data.count <= RemoteWorkspaceDefaults.maximumPreviewBytes
+        else {
             return nil
         }
         return capture.data
@@ -3670,11 +3875,13 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         for project in environment.projectStore.projects {
             for session in project.sessions where !session.isArchived {
                 if commandID == AppCommands.ID.makeManager,
-                   ControlGrantStore.shared.isManager(session.id) {
+                   ControlGrantStore.shared.isManager(session.id)
+                {
                     continue
                 }
                 if commandID == AppCommands.ID.revokeManager,
-                   !ControlGrantStore.shared.isManager(session.id) {
+                   !ControlGrantStore.shared.isManager(session.id)
+                {
                     continue
                 }
                 options.append(HostCommandInputOption(
@@ -3726,7 +3933,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     func toggleCurrentSessionSurface() {
         guard let sessionID = currentSessionID,
               let session = environment.projectStore.session(withID: sessionID),
-              session.kind.supportsNativeUI else {
+              session.kind.supportsNativeUI
+        else {
             SystemAlert.refuse()
             return
         }
@@ -3807,12 +4015,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard let responder = window?.firstResponder as? NSView else { return nil }
         let drawerHost = containerViewController.drawerHostController
         if containerViewController.isShellDrawerOpen,
-           responder.isDescendant(of: drawerHost.view) {
+           responder.isDescendant(of: drawerHost.view)
+        {
             return drawerHost
         }
         if displayPaneController.isViewLoaded,
            !displayItem.isCollapsed,
-           responder.isDescendant(of: displayPaneController.view) {
+           responder.isDescendant(of: displayPaneController.view)
+        {
             return displayPaneController
         }
         return nil
@@ -3836,7 +4046,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let tabs = host.tabs(for: sessionID)
         guard tabs.count > 1,
               let activeID = host.activeTabID(for: sessionID),
-              let index = tabs.firstIndex(where: { $0.id == activeID }) else {
+              let index = tabs.firstIndex(where: { $0.id == activeID })
+        else {
             SystemAlert.refuse()
             return
         }
@@ -3902,7 +4113,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         window?.makeKeyAndOrderFront(nil)
 
         guard let sessionID = containerViewController.currentSessionID,
-              let browser = visibleBrowser(for: sessionID) else {
+              let browser = visibleBrowser(for: sessionID)
+        else {
             SystemAlert.refuse()
             return
         }
@@ -3955,8 +4167,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         case .attachment:
             guard let attachmentID = destination.attachmentID,
                   let attachment = SessionAttachmentStore.shared.attachment(
-                    for: sessionID,
-                    id: attachmentID
+                      for: sessionID,
+                      id: attachmentID
                   ),
                   let controller = displayPaneController.activateAttachments(for: sessionID)
             else { return }
@@ -3968,7 +4180,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let rawTabID = destination.browserTabID,
                   let tabID = UUID(uuidString: rawTabID),
                   let location = browserResolver.locations(for: sessionID).first(where: {
-                    $0.tabID == tabID
+                      $0.tabID == tabID
                   }) else { return }
             browserResolver.activate(location, for: sessionID)
             revealBrowserHost(location.hostID, for: sessionID)
@@ -3977,8 +4189,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let extensionIdentifier = destination.extensionIdentifier,
                   let panelID = destination.extensionPanelID,
                   let item = ExtensionManager.shared.registeredPanel(
-                    extensionIdentifier: extensionIdentifier,
-                    panelID: panelID
+                      extensionIdentifier: extensionIdentifier,
+                      panelID: panelID
                   ) else { return }
             displayPaneController.activateExtensionPanel(
                 extensionIdentifier: extensionIdentifier,
@@ -3999,17 +4211,17 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             workspaceSidebarViewController.setSettingsOverride(false)
 
             switch navigation.takeSettingsReturnTarget() {
-            case .session(let sessionID):
+            case let .session(sessionID):
                 containerViewController.show(sessionID: sessionID)
                 syncDisplayPane(to: sessionID)
                 recordVisit(.session(sessionID))
 
-            case .terminal(let terminalID):
+            case let .terminal(terminalID):
                 containerViewController.show(terminalID: terminalID)
                 syncDisplayPane(to: nil)
                 recordVisit(.terminal(terminalID))
 
-            case .composer(let projectID):
+            case let .composer(projectID):
                 // Put back as it was left, choices, attachments and half-written prompt
                 // included: showing the composer the project it already holds is a return to
                 // it. Settings is a detour, not a change of project, so nothing about it
@@ -4097,20 +4309,20 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         _ = ControlGrantStore.shared.revokeManager(sessionID: sessionID)
     }
 
-#if DEBUG
-    /// Opens the chat a development build's report is sent to. Lives here rather than in
-    /// `MainWindowInspector`, which raises the sheets, because `sessionCoordinator` is private
-    /// to this file — and the fallback project is this window's own answer to "what am I
-    /// looking at", which only this file can give.
-    func startDeveloperReportChat(
-        _ request: DeveloperReportChatRequest
-    ) -> DeveloperReportChatOutcome {
-        sessionCoordinator.startDeveloperReportChat(
-            request,
-            fallbackProjectID: currentProjectID
-        )
-    }
-#endif
+    #if DEBUG
+        /// Opens the chat a development build's report is sent to. Lives here rather than in
+        /// `MainWindowInspector`, which raises the sheets, because `sessionCoordinator` is private
+        /// to this file — and the fallback project is this window's own answer to "what am I
+        /// looking at", which only this file can give.
+        func startDeveloperReportChat(
+            _ request: DeveloperReportChatRequest
+        ) -> DeveloperReportChatOutcome {
+            sessionCoordinator.startDeveloperReportChat(
+                request,
+                fallbackProjectID: currentProjectID
+            )
+        }
+    #endif
 
     func addProject() {
         guard !showRecoverySurfaceIfActive() else { return }
@@ -4470,70 +4682,70 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 }
 
 #if DEBUG
-/// Debug-only launch input used by the out-of-process UI runner.
-///
-/// Requiring the isolated scenario-home marker keeps ordinary debug launches and a developer's
-/// saved window frame entirely untouched. Both dimensions must be present and valid; a partial
-/// contract is rejected instead of producing a misleading compact-layout test.
-private enum MainWindowUIScenarioSize {
-    private static let markerName = ".threading-ui-scenario-home"
-    private static let widthKey = "THREADING_UI_WINDOW_WIDTH"
-    private static let heightKey = "THREADING_UI_WINDOW_HEIGHT"
+    /// Debug-only launch input used by the out-of-process UI runner.
+    ///
+    /// Requiring the isolated scenario-home marker keeps ordinary debug launches and a developer's
+    /// saved window frame entirely untouched. Both dimensions must be present and valid; a partial
+    /// contract is rejected instead of producing a misleading compact-layout test.
+    private enum MainWindowUIScenarioSize {
+        private static let markerName = ".threading-ui-scenario-home"
+        private static let widthKey = "THREADING_UI_WINDOW_WIDTH"
+        private static let heightKey = "THREADING_UI_WINDOW_HEIGHT"
 
-    static func requested(
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        fileManager: FileManager = .default
-    ) -> NSSize? {
-        let widthValue = environment[widthKey]
-        let heightValue = environment[heightKey]
-        guard widthValue != nil || heightValue != nil else { return nil }
+        static func requested(
+            environment: [String: String] = ProcessInfo.processInfo.environment,
+            fileManager: FileManager = .default
+        ) -> NSSize? {
+            let widthValue = environment[widthKey]
+            let heightValue = environment[heightKey]
+            guard widthValue != nil || heightValue != nil else { return nil }
 
-        guard let scenarioHome = environment["THREADING_UI_SCENARIO_HOME"],
-              environment["HOME"] == scenarioHome,
-              environment["CFFIXED_USER_HOME"] == scenarioHome,
-              fileManager.fileExists(
-                atPath: URL(fileURLWithPath: scenarioHome, isDirectory: true)
-                    .appendingPathComponent(markerName)
-                    .path
-              ),
-              let widthValue,
-              let heightValue,
-              let width = Double(widthValue),
-              let height = Double(heightValue),
-              width.isFinite,
-              height.isFinite,
-              width >= Double(WindowDefaults.minWidth),
-              height >= Double(WindowDefaults.minHeight),
-              width <= 10_000,
-              height <= 10_000 else {
-            assertionFailure("Invalid Threading UI scenario window contract")
-            return nil
+            guard let scenarioHome = environment["THREADING_UI_SCENARIO_HOME"],
+                  environment["HOME"] == scenarioHome,
+                  environment["CFFIXED_USER_HOME"] == scenarioHome,
+                  fileManager.fileExists(
+                      atPath: URL(fileURLWithPath: scenarioHome, isDirectory: true)
+                          .appendingPathComponent(markerName)
+                          .path
+                  ),
+                  let widthValue,
+                  let heightValue,
+                  let width = Double(widthValue),
+                  let height = Double(heightValue),
+                  width.isFinite,
+                  height.isFinite,
+                  width >= Double(WindowDefaults.minWidth),
+                  height >= Double(WindowDefaults.minHeight),
+                  width <= 10000,
+                  height <= 10000
+            else {
+                assertionFailure("Invalid Threading UI scenario window contract")
+                return nil
+            }
+            return NSSize(width: width, height: height)
         }
-        return NSSize(width: width, height: height)
     }
-}
 #endif
 
 // MARK: - ProjectSidebarViewControllerDelegate
 
 extension MainWindowController: ProjectSidebarViewControllerDelegate {
-
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         startScheduledMessageNow id: ScheduledMessageID
     ) {
         sessionCoordinator.startScheduledMessageNow(id)
     }
 
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         cancelScheduledMessage id: ScheduledMessageID
     ) {
         sessionCoordinator.cancelScheduledMessage(id)
     }
 
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         editScheduledMessage id: ScheduledMessageID
     ) {
         sessionCoordinator.editScheduledMessage(id)
@@ -4629,21 +4841,21 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     /// Archiving and closing are lifecycle decisions, so both route through the coordinator,
     /// which stops a running agent first and may ask before doing so.
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         setArchived archived: Bool,
         for sessionID: SessionID
     ) {
         sessionCoordinator.setArchived(archived, for: sessionID)
     }
 
-    func projectSidebar(_ sidebar: ProjectSidebarViewController, closeSession sessionID: SessionID) {
+    func projectSidebar(_: ProjectSidebarViewController, closeSession sessionID: SessionID) {
         sessionCoordinator.closeSession(sessionID)
     }
 
     /// Naming is a decision about the session record, so it routes through the coordinator with
     /// the rest of them rather than the sidebar reaching for the running agent itself.
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         askAgentToRename sessionID: SessionID
     ) {
         sessionCoordinator.askAgentToRename(sessionID)
@@ -4652,7 +4864,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     /// Report-back is a lifecycle decision like the rename request: one line into the side
     /// chat, asking its agent to send the conclusion to the session it was forked from.
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         sendResultToParentOf sessionID: SessionID
     ) {
         sessionCoordinator.askAgentToReportBack(sessionID)
@@ -4667,7 +4879,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     /// deliberately — two live processes sharing one id would interleave their writes into
     /// that single transcript.
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         setUsesNativeUI usesNative: Bool,
         for sessionID: SessionID
     ) {
@@ -4698,7 +4910,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     /// conversation arrives with its full context; what it cannot keep is the process, which
     /// belonged to the account it is leaving.
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         moveSession sessionID: SessionID,
         toAccount account: AgentAccount
     ) {
@@ -4708,7 +4920,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     /// Starts a new provider-native conversation from a frozen, MCP-readable snapshot. The
     /// source stays as its own resumable session; this is lineage, not a transcript move.
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         continueSession sessionID: SessionID,
         withAccount account: AgentAccount
     ) {
@@ -4724,7 +4936,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     /// An opening question travels the same one-shot coordinator route as the composer's,
     /// so "Ask on the Side…" needs no launch path of its own.
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         createSideChatOf sessionID: SessionID,
         prompt: String?
     ) {
@@ -4732,7 +4944,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     }
 
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         didRemoveSession sessionID: SessionID
     ) {
         let span = PerformanceRecorder.shared.begin(
@@ -4756,19 +4968,20 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         DisplayPaneStore.shared.removeSession(sessionID)
         MCPSessionRegistry.remove(sessionID: sessionID)
         GitTurnBaselineStore.shared.remove(sessionID: sessionID)
+        sessionActivityTransitions.remove(sessionID)
         BrowserAutoCaptureRing.shared.clear(for: sessionID)
 
         // `discardDeletedSession` already removed the live controller and subagent state at the
         // durable mutation boundary. Prune only pages naming this chat from window history.
         navigation.prune { page in
-            guard case .session(let candidate) = page else { return true }
+            guard case let .session(candidate) = page else { return true }
             return candidate != sessionID
         }
         updateNavigationButtons()
         syncDisplayPane(to: containerViewController.currentSessionID)
     }
 
-    func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController) {
+    func projectSidebarDidRemoveSessions(_: ProjectSidebarViewController) {
         // A window pinned to a session that no longer exists goes with it — before the store
         // sweep, or its own persistence writes the deleted session's document back.
         closeDetachedWindows(
@@ -4807,11 +5020,11 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         // Nor stay reachable through Back: a retraced page must exist to be presented.
         navigation.prune { page in
             switch page {
-            case .session(let sessionID):
+            case let .session(sessionID):
                 return liveSessionIDs.contains(sessionID)
-            case .terminal(let terminalID):
+            case let .terminal(terminalID):
                 return liveTerminalIDs.contains(terminalID)
-            case .composer(let projectID):
+            case let .composer(projectID):
                 return environment.projectStore.project(withID: projectID) != nil
             case .settings, .settingsAISearch:
                 return true
@@ -4823,12 +5036,12 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     }
 
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         didCloseTerminal terminalID: TerminalID
     ) {
         containerViewController.closeTerminal(for: terminalID)
         navigation.prune { page in
-            if case .terminal(let candidate) = page { return candidate != terminalID }
+            if case let .terminal(candidate) = page { return candidate != terminalID }
             return true
         }
         updateNavigationButtons()
@@ -4836,12 +5049,12 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         updateWindowTitle()
     }
 
-    func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController) {
+    func projectSidebarDidToggleSettings(_: ProjectSidebarViewController) {
         toggleSettings()
     }
 
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         didSelectSettingsPage pageID: String
     ) {
         containerViewController.showSettingsPage(id: pageID)
@@ -4850,7 +5063,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     }
 
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         didSelectSettingsPage pageID: String,
         revealing anchorTitle: String
     ) {
@@ -4860,7 +5073,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     }
 
     func projectSidebar(
-        _ sidebar: ProjectSidebarViewController,
+        _: ProjectSidebarViewController,
         askAIAboutSettings query: String
     ) {
         let controller = containerViewController.showSettingsAISearch(query: query)
@@ -4872,52 +5085,50 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         // rather than gone.
         recordVisit(.settingsAISearch)
     }
-
 }
 
 // MARK: - TerminalContainerViewControllerDelegate
 
 extension MainWindowController: TerminalContainerViewControllerDelegate {
-
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         startScheduledMessageNow id: ScheduledMessageID
     ) {
         sessionCoordinator.startScheduledMessageNow(id)
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         cancelScheduledMessage id: ScheduledMessageID
     ) {
         sessionCoordinator.cancelScheduledMessage(id)
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         editScheduledMessage id: ScheduledMessageID
     ) {
         sessionCoordinator.editScheduledMessage(id)
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         didRequestSettingsPage pageID: String
     ) {
         showSettingsPage(id: pageID)
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
-        visibleSessionDidChange sessionID: SessionID?
+        _: TerminalContainerViewController,
+        visibleSessionDidChange _: SessionID?
     ) {
         updateSessionTitleItem()
         updateWindowTitle()
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
-        sessionTitleChanged title: String,
+        _: TerminalContainerViewController,
+        sessionTitleChanged _: String,
         for sessionID: SessionID
     ) {
         // The sidebar row carries the session name; the window stays named after the app.
@@ -4929,23 +5140,23 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         sessionDidExit sessionID: SessionID,
-        exitCode: Int32?
+        exitCode _: Int32?
     ) {
         sidebarViewController.refreshRows()
         NotificationCenter.default.post(TerminalSessionDidEnd(sessionID: sessionID))
     }
 
-    func terminalContainerDidRequestGitReview(_ container: TerminalContainerViewController) {
+    func terminalContainerDidRequestGitReview(_: TerminalContainerViewController) {
         showReview()
     }
 
-    func terminalContainerDidRequestSessionInfo(_ container: TerminalContainerViewController) {
+    func terminalContainerDidRequestSessionInfo(_: TerminalContainerViewController) {
         showInfo()
     }
 
-    func terminalContainerDidRequestSharing(_ container: TerminalContainerViewController) {
+    func terminalContainerDidRequestSharing(_: TerminalContainerViewController) {
         showSharing()
     }
 
@@ -4963,9 +5174,10 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         }
         if let attachmentID,
            let attachment = SessionAttachmentStore.shared.attachment(
-            for: sessionID,
-            id: attachmentID
-           ) {
+               for: sessionID,
+               id: attachmentID
+           )
+        {
             controller.showAttachment(at: attachment.url)
         }
         displayPaneController.showSessionTabs(sessionID)
@@ -4973,14 +5185,14 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         didRequestTurnDiff checkpointID: GitTurnCheckpointID
     ) {
         showReview(mode: .lastTurn, checkpointID: checkpointID)
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         didRequestOpenSession sessionID: SessionID
     ) {
         guard environment.projectStore.session(withID: sessionID) != nil else {
@@ -4990,35 +5202,41 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         sidebarViewController.select(sessionID: sessionID)
     }
 
-    func terminalContainerDidRequestNewSession(_ container: TerminalContainerViewController) {
+    func terminalContainerDidRequestNewSession(_: TerminalContainerViewController) {
         newSession()
     }
 
-    func terminalContainerDidChangeShellDrawer(_ container: TerminalContainerViewController) {
+    func terminalContainerDidChangeShellDrawer(_: TerminalContainerViewController) {
         updateToolbarControlStates()
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         sessionStateDidChange sessionID: SessionID
     ) {
+        let activity = environment.agentRuntime.activity(sessionID: sessionID)
+        let transition = sessionActivityTransitions.observe(activity, for: sessionID)
+
         // Only the affected row, so a working session does not rebuild the whole list.
         sidebarViewController.refreshRow(sessionID: sessionID)
 
         // The review's Last Turn baseline is captured on the entering-working edge; the store
         // watches every change and finds that edge itself.
         GitTurnBaselineStore.shared.noteActivity(
-            environment.agentRuntime.activity(sessionID: sessionID),
+            activity,
             sessionID: sessionID,
             hasAuthoritativeReporting: environment.agentRuntime.reportsOwnTurns(sessionID: sessionID)
         )
 
-        if environment.agentRuntime.activity(sessionID: sessionID) == .working {
+        if transition.beganTurn {
             displayPaneController.noteSessionStartedWorking(sessionID)
         }
 
-        // An agent that just stopped working may have switched branches on the way.
-        if environment.agentRuntime.activity(sessionID: sessionID) != .working {
+        // A blocked turn, a read receipt and a visibility change are all non-working
+        // presentations, but none completed a turn. Filesystem/process work belongs only to the
+        // semantic edge out of `hasTurnInFlight`; otherwise one repainting off-screen terminal
+        // can launch this whole fan-out on every quiet interval.
+        if transition.completedTurn {
             // A finished turn is the useful freshness boundary for this receipt. The global
             // scan is off-main and warm files resolve through the usage cache.
             SessionUsageService.shared.refresh(sessionID, forceIndex: true)
@@ -5049,14 +5267,15 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
             // It also just spent tokens, so the finish is the moment the pill is most
             // likely stale. The service's spacing keeps a chatty session polite.
             if sessionID == currentSessionID,
-               let account = materializedAccountUsageItemView?.account {
+               let account = materializedAccountUsageItemView?.account
+            {
                 AccountUsageService.shared.refresh(account, force: true)
             }
         }
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         gitStatusLoadingDidChange isLoading: Bool,
         for sessionID: SessionID
     ) {
@@ -5064,7 +5283,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         didSelectSubagent agent: SubagentTimeline.Agent,
         for sessionID: SessionID
     ) {
@@ -5080,7 +5299,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         didUpdateSelectedSubagent agent: SubagentTimeline.Agent,
         for sessionID: SessionID
     ) {
@@ -5093,7 +5312,7 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
     }
 
     func terminalContainer(
-        _ container: TerminalContainerViewController,
+        _: TerminalContainerViewController,
         subagentsDidChange timeline: SubagentTimeline,
         for sessionID: SessionID
     ) {
@@ -5106,13 +5325,11 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
             for: sessionID
         )
     }
-
 }
 
 // MARK: - NSWindowDelegate
 
 extension MainWindowController: NSWindowDelegate {
-
     /// Closing the only window *is* quitting — `applicationShouldTerminateAfterLastWindowClosed`
     /// answers true — so the close asks the application to quit and closes nothing itself.
     ///
@@ -5127,7 +5344,7 @@ extension MainWindowController: NSWindowDelegate {
     /// Returning false is what keeps the declined quit harmless: both close affordances — the
     /// chrome button and the window menu's Close — ask this first and close only on true, so a
     /// cancelled confirmation leaves the window exactly as it was.
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
+    func windowShouldClose(_: NSWindow) -> Bool {
         requestsApplicationQuit()
         return false
     }
@@ -5136,14 +5353,14 @@ extension MainWindowController: NSWindowDelegate {
     /// `close()` directly, which never consults `windowShouldClose`. On the ordinary quit this
     /// runs after `applicationShouldTerminate` has already recorded and terminated, and both
     /// calls are no-ops on an empty runtime.
-    func windowWillClose(_ notification: Notification) {
+    func windowWillClose(_: Notification) {
         environment.agentRuntime.terminateAll()
         ProjectTerminalRuntime.shared.terminateAll()
     }
 
     /// A theme change that arrived while the window was fullscreen parked its frame exchange
     /// (`WindowChromeCoordinator.applyCurrentTheme`); this is where the parked change runs.
-    func windowDidExitFullScreen(_ notification: Notification) {
+    func windowDidExitFullScreen(_: Notification) {
         chromeCoordinator?.windowDidExitFullScreen()
         (window as? TitlebarActionWindow)?.refreshScreenshotDropDestination()
     }
@@ -5156,7 +5373,6 @@ enum MainWindowDefaults {
     static let frameAutosaveName = "ThreadingMainWindow"
     static let toolbarIdentifier = NSToolbar.Identifier("ThreadingMainToolbar")
     static let minContentWidth: CGFloat = 320
-
 }
 
 // MARK: - Sidebar Width

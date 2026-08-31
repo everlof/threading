@@ -67,6 +67,7 @@ struct AppCommand {
     let scope: ExtensionCommandScope
     let risk: ExtensionCommandRisk
     let menuPlacements: [ExtensionMenuPlacement]
+    let extensionInput: ExtensionCommandInput?
     let iconName: String?
 
     init(
@@ -80,6 +81,7 @@ struct AppCommand {
         scope: ExtensionCommandScope = .application,
         risk: ExtensionCommandRisk = .ordinary,
         menuPlacements: [ExtensionMenuPlacement] = [],
+        extensionInput: ExtensionCommandInput? = nil,
         iconName: String? = nil
     ) {
         self.id = id
@@ -98,6 +100,7 @@ struct AppCommand {
         self.scope = scope
         self.risk = risk
         self.menuPlacements = menuPlacements
+        self.extensionInput = extensionInput
         self.iconName = iconName
     }
 }

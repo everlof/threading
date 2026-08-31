@@ -1112,6 +1112,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return
         case .arm(let deadline):
             SessionCurfewCenter.shared.setCurfew(.until(deadline), forSessionID: sessionID)
+        case .armUsageReset(let expectedAt, let windowID):
+            SessionCurfewCenter.shared.setCurfewUntilUsageReset(
+                expectedAt: expectedAt,
+                windowID: windowID,
+                forSessionID: sessionID
+            )
         case .skipped(let reason):
             environment.eventLog.record(.curfew, "Planned curfew not armed", [
                 "session": sessionID.uuidString,

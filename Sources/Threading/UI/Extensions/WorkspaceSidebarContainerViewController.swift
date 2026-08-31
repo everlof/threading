@@ -5,6 +5,14 @@ import ThreadingExtensionKit
 /// extension document. Keeping this shell separate makes the Native fallback an orchestration
 /// invariant rather than another branch inside collection rendering.
 final class WorkspaceSidebarContainerViewController: NSViewController {
+    var onHoverChange: ((Bool) -> Void)? {
+        didSet { trackingView.onHoverChange = onHoverChange }
+    }
+    var onThemedPresentationChange: ((Bool) -> Void)? {
+        didSet { trackingView.onThemedPresentationChange = onThemedPresentationChange }
+    }
+
+    private let trackingView = HoverTrackingView()
     private let nativeController: ProjectSidebarViewController
     private let routing: ExtensionWorkspaceNavigatorRouting
     private let contextProvider: WorkspaceNavigatorHostViewController.ContextProvider
@@ -65,7 +73,9 @@ final class WorkspaceSidebarContainerViewController: NSViewController {
     }
 
     override func loadView() {
-        view = NSView()
+        trackingView.onHoverChange = onHoverChange
+        trackingView.onThemedPresentationChange = onThemedPresentationChange
+        view = trackingView
         show(nativeController)
     }
 

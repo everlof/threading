@@ -54,6 +54,20 @@ enum SessionLaunchDiagnosis {
         return nil
     }
 
+    /// The proactive form of the output rule below. A process-table preflight has stronger
+    /// evidence than words captured after a failed launch, but both routes must present the same
+    /// cause and action rather than maintaining two explanations for one refusal.
+    static func identifierInUse(kind: AgentKind) -> Match {
+        Match(
+            summary: L10n.format(
+                "%@ already has this conversation open somewhere else. Close it there, then try again.",
+                kind.displayName
+            ),
+            knownCause: Cause.identifierInUse,
+            isRecoverable: false
+        )
+    }
+
     // MARK: - Private Methods
 
     private struct Rule: Sendable {
@@ -110,10 +124,7 @@ enum SessionLaunchDiagnosis {
             cause: Cause.identifierInUse,
             isRecoverable: false,
             summary: { kind in
-                L10n.format(
-                    "%@ is already using this conversation's identifier somewhere else.",
-                    kind.displayName
-                )
+                identifierInUse(kind: kind).summary
             }
         ),
         Rule(

@@ -35,6 +35,19 @@ struct MobileMarketingTerminalFixture: Decodable, Equatable {
 
     var payload: Data { Data(base64Encoded: payloadBase64) ?? Data() }
 
+    /// The provider recording behind one row in the marketing dashboard.
+    ///
+    /// Static screenshot fixtures name the provider in their launch id. The recorded walkthrough
+    /// starts at the dashboard and reaches the same recordings by tapping a real session row, so
+    /// the session id is the durable join between those two entry paths.
+    static func provider(marketingSessionID: String) -> Provider? {
+        switch marketingSessionID {
+        case "marketing-claude-session": .claude
+        case "marketing-codex-session": .codex
+        default: nil
+        }
+    }
+
     static func load(_ provider: Provider, bundle: Bundle = .main) throws -> Self {
         let resourceName = provider.resourceName
         let url = bundle.url(

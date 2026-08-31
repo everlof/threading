@@ -33,11 +33,6 @@ final class RemoteNotificationService {
         case persistenceUnavailable
     }
 
-    private enum InteractionActor: Equatable {
-        case owner
-        case member(id: String, name: String)
-    }
-
     private enum RequestedRecipient: Equatable {
         case requester
         case owner
@@ -65,6 +60,7 @@ final class RemoteNotificationService {
     private struct Subscription {
         let deviceID: String
         let deviceToken: String
+        let hostedRegistrationID: String?
         let environment: RemoteAPNSPushSender.Environment
         let authorization: RemoteAuthorization
         let enabledKinds: Set<RemoteNotificationKind>
@@ -85,7 +81,6 @@ final class RemoteNotificationService {
     typealias HostedPushSender = @MainActor (
         RemoteNotificationEventDTO,
         String,
-        RemoteAPNSPushSender.Environment,
         Bool
     ) async -> RemoteAPNSDeliveryResult
 
@@ -96,7 +91,7 @@ final class RemoteNotificationService {
     private var hostedPushAvailability: (@MainActor () -> Bool)?
     private let observations = AppEventObservations()
     private var announcedGuestShares: Set<String> = []
-    private var currentActorBySession: [SessionID: InteractionActor] = [:]
+    private var currentActorBySession: [SessionID: RemoteNotificationInteractionActor] = [:]
     private var lastActivityBySession: [SessionID: SessionActivity] = [:]
     private(set) var persistenceError: String?
     private var persistenceWritesBlocked = false
@@ -130,7 +125,10 @@ final class RemoteNotificationService {
             Task { @MainActor in self?.activityChanged(sessionID: event.sessionID) }
         }
         observations.observe(TerminalSessionDidEnd.self) { [weak self] event in
-            Task { @MainActor in self?.lastActivityBySession[event.sessionID] = nil }
+            Task { @MainActor in
+                self?.lastActivityBySession[event.sessionID] = nil
+                self?.currentActorBySession[event.sessionID] = nil
+            }
         }
     }
 
@@ -237,6 +235,9 @@ final class RemoteNotificationService {
            authorization.boundDeviceID == deviceID,
            RemoteInboundPolicy.normalizedDeviceID(deviceID) == deviceID,
            RemoteNotificationSubscriptionDefaults.acceptsDeviceToken(deviceToken),
+           RemoteNotificationSubscriptionDefaults.acceptsHostedRegistrationID(
+               registration.hostedRegistrationID
+           ),
            enabledKinds.count == registration.enabledKinds.count,
            soundEnabledKinds.isSubset(of: enabledKinds) else {
             return .invalid
@@ -246,6 +247,7 @@ final class RemoteNotificationService {
             shareID: authorization.shareID,
             deviceID: deviceID,
             deviceToken: deviceToken,
+            hostedRegistrationID: registration.hostedRegistrationID,
             environment: registration.environment,
             enabledKinds: enabledKinds.sorted { $0.rawValue < $1.rawValue },
             soundEnabledKinds: soundEnabledKinds.sorted { $0.rawValue < $1.rawValue }
@@ -273,6 +275,7 @@ final class RemoteNotificationService {
         subscriptions[record.key] = Subscription(
             deviceID: record.deviceID,
             deviceToken: record.deviceToken,
+            hostedRegistrationID: record.hostedRegistrationID,
             environment: environment,
             authorization: authorization,
             enabledKinds: enabledKinds,
@@ -304,8 +307,12 @@ final class RemoteNotificationService {
             }
         }
 
+        let registrationSupportsPush = localPushSender != nil
+            || (registration.hostedRegistrationID != nil
+                && hostedPushAvailability?() == true
+                && hostedPushSender != nil)
         return .registered(RemoteNotificationRegistrationResponseDTO(
-            delivery: supportsPush ? .push : .live
+            delivery: registrationSupportsPush ? .push : .live
         ))
     }
 
@@ -344,14 +351,41 @@ final class RemoteNotificationService {
         }
     }
 
-    /// A provider-neutral session edge says the terminal is waiting for a human response.
-    /// The hook/BEL layer owns detecting that state; notifications never scrape terminal text.
+    /// Turns provider-neutral lifecycle edges into completion or response-needed notifications.
+    /// The hook/BEL layer owns those states; notifications never scrape terminal text.
     private func activityChanged(sessionID: SessionID) {
         let activity = AgentRuntime.shared.activity(sessionID: sessionID)
         let previous = lastActivityBySession[sessionID] ?? .dormant
         lastActivityBySession[sessionID] = activity
-        guard activity == .awaitingUser, previous != .awaitingUser,
-              let session = ProjectStore.shared.session(withID: sessionID) else { return }
+        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
+
+        if RemoteTurnCompletionNotificationPolicy.shouldNotify(
+            from: previous,
+            to: activity,
+            reportsOwnTurns: AgentRuntime.shared.reportsOwnTurns(sessionID: sessionID)
+        ) {
+            let event = RemoteNotificationEventDTO(
+                kind: .turnCompleted,
+                hostID: RemoteHostIdentity.current.id,
+                sessionID: sessionID.uuidString,
+                title: Self.safeText(
+                    session.displayTitle,
+                    bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
+                ),
+                body: "Finished its turn",
+                bodyLocalization: .init(key: "Finished its turn")
+            )
+            let actor = currentActorBySession[sessionID] ?? .owner
+            deliver(event) {
+                $0.authorization.scope.covers(sessionID)
+                    && RemoteTurnCompletionRecipientPolicy.matches(
+                        actor,
+                        authorization: $0.authorization
+                    )
+            }
+        }
+
+        guard activity == .awaitingUser, previous != .awaitingUser else { return }
 
         // Native permission requests already have a dedicated, safer notification that names
         // the tool and reaches only people allowed to decide it.
@@ -595,6 +629,9 @@ final class RemoteNotificationService {
         let targets = subscriptions.values.filter {
             $0.enabledKinds.contains(event.kind) && predicate($0)
         }
+        let pushTargets = localPushSender == nil
+            ? targets.filter { $0.hostedRegistrationID != nil }
+            : targets
         let liveRecipients = RemoteSessionMirrorRegistry.shared.broadcastNotification(event) {
             authorization, deviceID in
             // The authenticated socket proves access, while this exact device registration proves
@@ -629,7 +666,7 @@ final class RemoteNotificationService {
             ])
             return DeliverySummary(liveRecipients: liveRecipients, pushTargets: 0)
         }
-        for target in targets {
+        for target in pushTargets {
             let device = Self.diagnosticID(target.deviceID, prefix: "device")
             Task {
                 let result: RemoteAPNSDeliveryResult
@@ -640,11 +677,11 @@ final class RemoteNotificationService {
                         environment: target.environment,
                         playsSound: target.soundEnabledKinds.contains(event.kind)
                     )
-                } else if let hostedPushSender {
+                } else if let hostedPushSender,
+                          let hostedRegistrationID = target.hostedRegistrationID {
                     result = await hostedPushSender(
                         event,
-                        target.deviceToken,
-                        target.environment,
+                        hostedRegistrationID,
                         target.soundEnabledKinds.contains(event.kind)
                     )
                 } else {
@@ -686,7 +723,7 @@ final class RemoteNotificationService {
         }
         return DeliverySummary(
             liveRecipients: liveRecipients,
-            pushTargets: targets.count
+            pushTargets: pushTargets.count
         )
     }
 
@@ -725,6 +762,7 @@ final class RemoteNotificationService {
         return Subscription(
             deviceID: record.deviceID,
             deviceToken: record.deviceToken,
+            hostedRegistrationID: record.hostedRegistrationID,
             environment: environment,
             authorization: authorization,
             enabledKinds: Set(record.enabledKinds),

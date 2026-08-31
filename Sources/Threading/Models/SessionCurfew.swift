@@ -16,11 +16,24 @@ enum CurfewRule: Equatable, Sendable {
     case exempt
     case until(Date)
 
+    /// Hold at this window's expected boundary, or at an earlier provider-proven reset of it.
+    ///
+    /// The estimate is the latest deadline. `SessionCurfewCenter` can materialize an earlier one
+    /// from `UsageLimitResetEvent.detectedAt`, then the ordinary hold and interrupt ladder takes
+    /// over. Account and window are captured when the choice is armed, so an unrelated login,
+    /// 5h/Spark window, or older reset cannot satisfy a weekly choice.
+    case untilUsageReset(
+        expectedAt: Date,
+        armedAt: Date,
+        accountID: AccountID,
+        windowID: String
+    )
+
     // MARK: - Stored Shape
 
     /// The tagged form on disk.
     ///
-    /// Two fields rather than an enum with associated values, because this is the shape a
+    /// A tagged record rather than an enum with associated values, because this is the shape a
     /// *later* build has to stay able to read: a kind this version has never heard of decodes as
     /// a `Stored` with an unfamiliar tag, which `init?(stored:)` answers with nil — "never
     /// chose" — instead of throwing the surrounding session record away over one setting. That
@@ -29,6 +42,23 @@ enum CurfewRule: Equatable, Sendable {
     struct Stored: Codable, Equatable, Sendable {
         let kind: String
         let deadline: Date?
+        let armedAt: Date?
+        let accountID: AccountID?
+        let windowID: String?
+
+        init(
+            kind: String,
+            deadline: Date?,
+            armedAt: Date? = nil,
+            accountID: AccountID? = nil,
+            windowID: String? = nil
+        ) {
+            self.kind = kind
+            self.deadline = deadline
+            self.armedAt = armedAt
+            self.accountID = accountID
+            self.windowID = windowID
+        }
     }
 
     /// The tags written to disk. Raw strings, never `Int`, so a reader can be diagnosed by
@@ -36,6 +66,7 @@ enum CurfewRule: Equatable, Sendable {
     enum Kind: String {
         case exempt
         case until
+        case untilUsageReset
     }
 
     /// Reads a stored rule, answering nil for anything this build does not recognise.
@@ -48,6 +79,20 @@ enum CurfewRule: Equatable, Sendable {
             // rather than "until never", which would be a curfew that silently holds forever.
             guard let deadline = stored.deadline else { return nil }
             self = .until(deadline)
+        case .untilUsageReset:
+            guard let expectedAt = stored.deadline,
+                  let armedAt = stored.armedAt,
+                  let accountID = stored.accountID,
+                  let windowID = stored.windowID,
+                  !windowID.isEmpty else {
+                return nil
+            }
+            self = .untilUsageReset(
+                expectedAt: expectedAt,
+                armedAt: armedAt,
+                accountID: accountID,
+                windowID: windowID
+            )
         case nil:
             return nil
         }
@@ -59,13 +104,25 @@ enum CurfewRule: Equatable, Sendable {
             return Stored(kind: Kind.exempt.rawValue, deadline: nil)
         case .until(let deadline):
             return Stored(kind: Kind.until.rawValue, deadline: deadline)
+        case .untilUsageReset(let expectedAt, let armedAt, let accountID, let windowID):
+            return Stored(
+                kind: Kind.untilUsageReset.rawValue,
+                deadline: expectedAt,
+                armedAt: armedAt,
+                accountID: accountID,
+                windowID: windowID
+            )
         }
     }
 
-    /// The moment this rule ends the session, if it names one.
+    /// The fixed deadline, or the latest expected deadline for a reset-conditioned rule.
     var deadline: Date? {
-        guard case .until(let deadline) = self else { return nil }
-        return deadline
+        switch self {
+        case .until(let deadline), .untilUsageReset(let deadline, _, _, _):
+            return deadline
+        case .exempt:
+            return nil
+        }
     }
 }
 
@@ -108,6 +165,10 @@ extension CurfewRule: Codable {
 enum CurfewOrigin: Codable, Equatable, Sendable {
     case session
     case quietHours(endsAt: Date)
+
+    /// A provider observation proved that used capacity on the armed account was restored.
+    /// `armedAt` links the state to the exact conditional rule that produced it.
+    case usageReset(armedAt: Date, accountID: AccountID, windowID: String)
 }
 
 // MARK: - Curfew Receipt
@@ -343,6 +404,11 @@ enum CurfewDefaults {
     /// The shortest gap between two interrupts. Also what keeps a second Escape away from an
     /// idle prompt, where Claude reads it as "open the rewind chooser".
     static let reinterruptSpacing: TimeInterval = 30
+
+    /// While a reset-conditioned curfew is armed, ask for a fresh reading at the service's
+    /// existing per-account floor. AccountUsageService still single-flights accounts, caps
+    /// provider concurrency, and honours provider Retry-After responses.
+    static let usageResetPollInterval = UsageDefaults.minimumRefreshSpacing
 
     /// How much of the log rides in the session's payload. See `SessionCurfewState.record`.
     static let maximumReceipts = 8

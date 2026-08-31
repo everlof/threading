@@ -151,12 +151,31 @@ public actor PeerRendezvousWebSocket {
 
     public func receive(timeout: TimeInterval) async throws -> PeerRendezvousEnvelope {
         guard timeout > 0 else { throw PeerRendezvousError.timedOut }
-        let timeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+        let timeoutTask = Self.scheduleTimeout(after: timeout) { [weak self] in
             await self?.timeoutConnection()
         }
         defer { timeoutTask.cancel() }
         return try await receive()
+    }
+
+    /// Returns without running `onTimeout` when the waiter is cancelled. Swallowing
+    /// `CancellationError` and then continuing would close a healthy WebSocket as soon as the
+    /// awaited message arrived and the caller cancelled its no-longer-needed timeout task.
+    static func scheduleTimeout(
+        after timeout: TimeInterval,
+        onTimeout: @escaping @Sendable () async -> Void
+    ) -> Task<Void, Never> {
+        Task {
+            do {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            await onTimeout()
+        }
     }
 
     public func ping() async throws {

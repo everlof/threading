@@ -152,6 +152,15 @@ The content supplies no second plate or outer border. It receives the complete t
 application-owned popovers only; action sheets, document pickers, permission prompts and other
 iOS trust surfaces keep their native chrome.
 
+The background view must be born with its style, not styled after the fact. UIKit instantiates
+`popoverBackgroundViewClass` itself during `present`, and the first hook the presenter gets to
+the created instance is the presentation's completion — after the pop-in has run. Styling only
+there shipped as a visible defect: the grid arrived over a clear body and the theme's box faded
+in behind content that was already standing. The presenter therefore stages
+`MobileThemedPopoverBackgroundView.pendingStyle` immediately before `present`, the initializer
+adopts it, and the completion clears the staging and reapplies the current style as the ordinary
+update path.
+
 The new-session model-and-effort chooser is the first consumer. This is a correction to an
 existing host-only surface, not a new extension component: Threading continues to own catalogue
 validity, inherited/default resolution and the choice submitted to the runtime. Themes own its
@@ -185,6 +194,26 @@ editors, Notifications, Diagnostics, Mac appearance, Ask for input and the issue
   `panel` exactly once and a theme's panel may be translucent. A screen picks one: a `List` when
   its rows are editable or reordered, the group when the form is a small fixed shape or the
   screen already builds its rows lazily.
+
+## System menus stay bounded
+
+An iOS `Menu` is system chrome, but it is not a general scroll container. On iOS 26 an upward
+drag in the dashboard's over-height **…** menu dismissed the menu and continued into the session
+row underneath, opening a chat instead of revealing the last menu action. The gesture is inside
+UIKit's private menu presentation, so there is no app-owned recognizer to repair.
+
+The dashboard menu therefore renders a fixed directory of at most six root destinations:
+Organize, Sessions, Appearance, Usage, Settings and Macs. Organization and session filters live
+in short, fixed-cardinality submenus; Mac pairing and forgetting share another. Appearance opens
+the existing `MacAppearanceSettingsView`, whose `List` virtualizes the Mac-supplied theme
+catalogue instead of putting an externally sized catalogue in another system menu. At the
+all-capabilities stress point the root remains six rows, each fixed submenu remains at five or
+fewer, and no scroll gesture is required.
+
+`marketing-main-menu` in the iOS evidence catalogue opens the shipping menu against the complete
+owner fixture and waits for all six destinations. Do not weaken the fixture by removing a
+capability to make a screenshot fit; new dashboard actions join the destination that owns them,
+or earn a new bounded surface and an explicit revision of this contract.
 
 ## Placeholder states
 

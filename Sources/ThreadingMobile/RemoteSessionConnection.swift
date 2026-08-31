@@ -2319,9 +2319,15 @@ final class RemoteSessionConnection: ObservableObject {
         case nil:
             connection.theme = RemoteAppModel.demoTheme
         }
-        connection.terminalTheme = requestedTheme == "threading"
-            ? RemoteAppModel.demoThreadingTerminalTheme
-            : RemoteAppModel.demoTerminalTheme
+        if marketingProvider != nil, let appTheme = connection.theme {
+            connection.terminalTheme = RemoteAppModel.demoMarketingTerminalTheme(
+                matching: appTheme
+            )
+        } else {
+            connection.terminalTheme = requestedTheme == "threading"
+                ? RemoteAppModel.demoThreadingTerminalTheme
+                : RemoteAppModel.demoTerminalTheme
+        }
         connection.terminalColumns = 48
         connection.terminalRows = 18
         // This DEBUG-only snapshot fixture preloads bytes directly and has no demo script or

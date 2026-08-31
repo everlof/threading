@@ -91,6 +91,21 @@ avoiding. Claude's branch has gated `--resume` on `ClaudeTranscript.exists` sinc
 bug; this is the same question asked one step further, because Codex's failure mode is a file that
 exists and cannot be opened.
 
+The same launch boundary asks one live-ownership question before it builds a plan. Codex refuses a
+second process for an identifier already held by `codex … resume <id>`, but the failed bootstrap
+can exit without leaving useful terminal output; waiting for output therefore produced the generic
+“stopped right after starting” record. `.detectableExternalResume` is the measured capability for
+both facts — exact resume ownership is visible in argv, and concurrent ownership is a refusal —
+and is currently Codex-only.
+
+The process-table walk runs on a user-initiated worker. It takes one kernel snapshot, filters by the
+runtime executable before reading argument vectors, and requires the exact adjacent `resume`, id
+pair; an id merely mentioned elsewhere in a prompt is not ownership. The main actor rechecks that
+the stored session still has the id that was inspected, then either continues through every normal
+preflight or records a no-process `.preflight` failure with cause `identifier-in-use`. No argv or
+identifier is logged. The existing failure surface says to close the conversation elsewhere and
+try again, so selecting the row no longer spends a doomed process merely to discover the lock.
+
 ## What the user sees
 
 `LaunchFailureView` replaces the dormant placeholder rather than annotating it, for the reason

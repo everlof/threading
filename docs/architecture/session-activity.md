@@ -749,6 +749,23 @@ holding a turn up on a question has said something new. `curfew` is exempt outri
 posted once per curfew episode by a ladder that has already run out, and it is the only alert
 that reports Threading trying something and failing.
 
+The episode is also the compute boundary for hookless terminals. A live Codex TUI was measured
+repainting an off-screen idle prompt after each 0.8-second quiet interval; 379 identical
+working/quiet cycles in eleven minutes launched 2,415 Git processes, 399 checkpoint writes and
+339 attachment scans even though the unread result had never been viewed. Once the first inferred
+turn finishes off screen, later output bursts remain presentation inside that unread episode.
+Viewing it, submitting a line, an authoritative turn start, or a new process re-arms inference.
+This deliberately prefers one stable unread state over pretending that periodic paint proves a
+second autonomous turn.
+
+The window's expensive completion fan-out follows the same semantic edge. A per-session
+`SessionActivityTransitionLedger` turns `hasTurnInFlight` true→false into one completion; moving
+between `working` and `awaitingUser`, reading `needsAttention` back to `idle`, or repeating a
+finished presentation launches no usage scan, hydration, Git/branch read, naming pass, project
+statistics process or display-pane refresh. The ledger retains one scalar state per durable
+session and no event history. `HookLifecycleTests` drives eight repaint/quiet periods through the
+real timer and requires one attention episode and one completion before a genuine boundary.
+
 **A banner carries the project's icon as an attachment** (`AttentionAlertIcon`), on the
 trailing side — the leading slot is the app's and cannot be taken. That was measured, not
 assumed (July 2026, macOS 26): the one sanctioned replacement is a communication

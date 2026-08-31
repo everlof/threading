@@ -1,3 +1,4 @@
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 import SwiftUI
 import UIKit
@@ -35,6 +36,16 @@ enum RemoteNotificationPayloadDecoder {
             return nil
         }
         return try? JSONDecoder().decode(RemoteNotificationEventDTO.self, from: data)
+    }
+}
+
+/// Live delivery and APNs must make the same foreground decision or one transport can show a
+/// banner that the other suppresses. Only a milestone explicitly requested from an agent is
+/// worth interrupting while the app itself is already on screen; ordinary state changes already
+/// have an in-app representation.
+enum RemoteNotificationPresentationPolicy {
+    static func presentsInForeground(_ kind: RemoteNotificationKind) -> Bool {
+        kind == .agentMessage
     }
 }
 
@@ -225,12 +236,23 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         if let event = RemoteNotificationPayloadDecoder.event(
             from: notification.request.content.userInfo
         ) {
-            await MainActor.run {
+            let suppressRoutineCompletion = await MainActor.run {
                 MobileDiagnostics.record(.notificationReceived, fields: [
                     .trace: event.id,
                     .kind: event.kind.rawValue,
                     .transport: "apns",
                 ])
+                return notifications.scenePhase == .active
+                    && !RemoteNotificationPresentationPolicy.presentsInForeground(event.kind)
+            }
+            if suppressRoutineCompletion {
+                await MainActor.run {
+                    MobileDiagnostics.record(.notificationSuppressed, fields: [
+                        .trace: event.id,
+                        .reason: "foreground",
+                    ])
+                }
+                return []
             }
         }
         return [.banner, .list, .sound]
@@ -998,6 +1020,46 @@ extension View {
     }
 }
 
+/// Serializes notification-registration refreshes while retaining the newest request that
+/// arrived during an in-flight refresh. Launch, APNs-token, host and foreground callbacks can
+/// all legitimately ask for the same refresh; letting those requests overlap can revoke the
+/// hosted registration whose opaque id an older request later writes back to the Mac.
+@MainActor
+final class RemoteNotificationSyncGate<Value> {
+
+    typealias Operation = @MainActor (Value) async -> Void
+
+    private let operation: Operation
+    private var pendingValue: Value?
+    private var drainTask: Task<Void, Never>?
+
+    init(operation: @escaping Operation) {
+        self.operation = operation
+    }
+
+    /// Returns the one task draining this request and any newer value submitted before it ends.
+    /// The synchronous enqueue makes tests and callers independent of task scheduling order.
+    func request(_ value: Value) -> Task<Void, Never> {
+        pendingValue = value
+        if let drainTask { return drainTask }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            while let value = self.takePendingValue() {
+                await self.operation(value)
+            }
+            self.drainTask = nil
+        }
+        drainTask = task
+        return task
+    }
+
+    private func takePendingValue() -> Value? {
+        defer { pendingValue = nil }
+        return pendingValue
+    }
+}
+
 @MainActor
 final class RemoteNotificationManager: ObservableObject {
 
@@ -1014,6 +1076,9 @@ final class RemoteNotificationManager: ObservableObject {
     }
     @Published var agentQuestionsEnabled: Bool {
         didSet { defaults.set(agentQuestionsEnabled, forKey: Keys.agentQuestions) }
+    }
+    @Published var turnCompletionsEnabled: Bool {
+        didSet { defaults.set(turnCompletionsEnabled, forKey: Keys.turnCompletions) }
     }
     @Published var agentUpdatesEnabled: Bool {
         didSet { defaults.set(agentUpdatesEnabled, forKey: Keys.agentUpdates) }
@@ -1036,6 +1101,11 @@ final class RemoteNotificationManager: ObservableObject {
     @Published var questionSoundsEnabled: Bool {
         didSet { defaults.set(questionSoundsEnabled, forKey: Keys.questionSounds) }
     }
+    @Published var turnCompletionSoundsEnabled: Bool {
+        didSet {
+            defaults.set(turnCompletionSoundsEnabled, forKey: Keys.turnCompletionSounds)
+        }
+    }
     @Published var attentionSoundsEnabled: Bool {
         didSet { defaults.set(attentionSoundsEnabled, forKey: Keys.attentionSounds) }
     }
@@ -1051,12 +1121,17 @@ final class RemoteNotificationManager: ObservableObject {
     private var observers: [NSObjectProtocol] = []
     private var registeredSignatures: Set<String> = []
     private var deliveredEventIDs: [String] = []
+    private lazy var syncGate = RemoteNotificationSyncGate<[PairedRemoteHost]> {
+        [weak self] hosts in
+        await self?.performSync(hosts: hosts)
+    }
 
     private enum Keys {
         static let onboardingDeferred = "remoteNotificationsOnboardingDeferred"
         static let sharedChats = "remoteNotificationsSharedChats"
         static let permissions = "remoteNotificationsPermissions"
         static let agentQuestions = "remoteNotificationsAgentQuestions"
+        static let turnCompletions = "remoteNotificationsTurnCompletions"
         static let agentUpdates = "remoteNotificationsAgentUpdates"
         static let attentionRequests = "remoteNotificationsAttentionRequests"
         static let peoplePresence = "remoteCollaborationPeoplePresence"
@@ -1064,6 +1139,7 @@ final class RemoteNotificationManager: ObservableObject {
         static let notificationSounds = "remoteNotificationSounds"
         static let permissionSounds = "remoteNotificationPermissionSounds"
         static let questionSounds = "remoteNotificationQuestionSounds"
+        static let turnCompletionSounds = "remoteNotificationTurnCompletionSounds"
         static let attentionSounds = "remoteNotificationAttentionSounds"
         static let updateSounds = "remoteNotificationUpdateSounds"
         static let sharedChatSounds = "remoteNotificationSharedChatSounds"
@@ -1074,6 +1150,7 @@ final class RemoteNotificationManager: ObservableObject {
             Keys.sharedChats: true,
             Keys.permissions: true,
             Keys.agentQuestions: true,
+            Keys.turnCompletions: true,
             Keys.agentUpdates: true,
             Keys.attentionRequests: true,
             Keys.peoplePresence: true,
@@ -1081,6 +1158,7 @@ final class RemoteNotificationManager: ObservableObject {
             Keys.notificationSounds: true,
             Keys.permissionSounds: true,
             Keys.questionSounds: true,
+            Keys.turnCompletionSounds: false,
             Keys.attentionSounds: true,
             Keys.updateSounds: false,
             Keys.sharedChatSounds: false,
@@ -1088,6 +1166,7 @@ final class RemoteNotificationManager: ObservableObject {
         sharedChatsEnabled = defaults.bool(forKey: Keys.sharedChats)
         permissionsEnabled = defaults.bool(forKey: Keys.permissions)
         agentQuestionsEnabled = defaults.bool(forKey: Keys.agentQuestions)
+        turnCompletionsEnabled = defaults.bool(forKey: Keys.turnCompletions)
         agentUpdatesEnabled = defaults.bool(forKey: Keys.agentUpdates)
         attentionRequestsEnabled = defaults.bool(forKey: Keys.attentionRequests)
         peoplePresenceEnabled = defaults.bool(forKey: Keys.peoplePresence)
@@ -1095,6 +1174,7 @@ final class RemoteNotificationManager: ObservableObject {
         notificationSoundsEnabled = defaults.bool(forKey: Keys.notificationSounds)
         permissionSoundsEnabled = defaults.bool(forKey: Keys.permissionSounds)
         questionSoundsEnabled = defaults.bool(forKey: Keys.questionSounds)
+        turnCompletionSoundsEnabled = defaults.bool(forKey: Keys.turnCompletionSounds)
         attentionSoundsEnabled = defaults.bool(forKey: Keys.attentionSounds)
         updateSoundsEnabled = defaults.bool(forKey: Keys.updateSounds)
         sharedChatSoundsEnabled = defaults.bool(forKey: Keys.sharedChatSounds)
@@ -1139,6 +1219,7 @@ final class RemoteNotificationManager: ObservableObject {
         if sharedChatsEnabled { result.append(.sharedSession) }
         if permissionsEnabled { result.append(.permissionRequest) }
         if agentQuestionsEnabled { result.append(.agentQuestion) }
+        if turnCompletionsEnabled { result.append(.turnCompleted) }
         if agentUpdatesEnabled { result.append(.agentMessage) }
         if attentionRequestsEnabled { result.append(.attentionRequest) }
         return result
@@ -1150,6 +1231,7 @@ final class RemoteNotificationManager: ObservableObject {
         if sharedChatSoundsEnabled { result.append(.sharedSession) }
         if permissionSoundsEnabled { result.append(.permissionRequest) }
         if questionSoundsEnabled { result.append(.agentQuestion) }
+        if turnCompletionSoundsEnabled { result.append(.turnCompleted) }
         if updateSoundsEnabled { result.append(.agentMessage) }
         if attentionSoundsEnabled { result.append(.attentionRequest) }
         return result
@@ -1192,6 +1274,10 @@ final class RemoteNotificationManager: ObservableObject {
     }
 
     func sync(hosts: [PairedRemoteHost]) async {
+        await syncGate.request(hosts).value
+    }
+
+    private func performSync(hosts: [PairedRemoteHost]) async {
         guard isAuthorized else {
             MobileDiagnostics.record(
                 .notificationRegistrationFailed,
@@ -1211,12 +1297,19 @@ final class RemoteNotificationManager: ObservableObject {
         let kinds = enabledKinds
         let soundKinds = soundEnabledKinds
         for host in hosts {
+#if DEBUG
+            let pushEnvironment = RemoteNotificationEnvironment.sandbox
+#else
+            let pushEnvironment = RemoteNotificationEnvironment.production
+#endif
             let signature = [
                 host.id,
                 deviceToken,
                 kinds.map(\.rawValue).sorted().joined(separator: ","),
                 soundKinds.map(\.rawValue).sorted().joined(separator: ","),
                 host.link.token,
+                host.hostedServiceURL?.absoluteString ?? "",
+                host.hostedCredential?.expiresAt.timeIntervalSince1970.description ?? "",
             ].joined(separator: ":")
             guard !registeredSignatures.contains(signature) else { continue }
             let peer = MobileDiagnostics.pseudonym(host.id, prefix: "peer")
@@ -1225,20 +1318,39 @@ final class RemoteNotificationManager: ObservableObject {
                 .enabledKindCount: String(kinds.count),
             ])
 
-#if DEBUG
-            let pushEnvironment = RemoteNotificationEnvironment.sandbox
-#else
-            let pushEnvironment = RemoteNotificationEnvironment.production
-#endif
-            // Register the established kinds first. An older Mac cannot decode a newly added
-            // enum case, so sending attentionRequest in the only registration would also turn
-            // off otherwise-compatible notifications. The second registration upgrades the
-            // preference atomically on hosts that know the optional feature.
-            let baselineKinds = kinds.filter {
-                $0 != .attentionRequest && $0 != .agentQuestion
+            var hostedRegistrationID: String?
+            var hostedRegistrationSucceeded = true
+            if host.hostedServiceURL != nil || host.hostedCredential != nil {
+                do {
+                    hostedRegistrationID = try await registerHostedPushRecipient(
+                        deviceToken: deviceToken,
+                        environment: pushEnvironment,
+                        host: host
+                    )
+                } catch {
+                    hostedRegistrationSucceeded = false
+                    MobileDiagnostics.record(
+                        .notificationRegistrationFailed,
+                        level: .warning,
+                        fields: [
+                            .peer: peer,
+                            .reason: "hostedRecipient",
+                            .code: MobileDiagnostics.errorCode(error),
+                        ]
+                    )
+                }
             }
+            // Register the established kinds first. An older Mac cannot decode a newly added
+            // enum case, so sending a newer kind in the only registration would also turn off
+            // otherwise-compatible notifications. The second registration upgrades the
+            // preference atomically on hosts that know the optional features.
+            let optionalKinds: Set<RemoteNotificationKind> = [
+                .attentionRequest, .agentQuestion, .turnCompleted,
+            ]
+            let baselineKinds = kinds.filter { !optionalKinds.contains($0) }
             let baselineRegistration = RemoteNotificationRegistrationDTO(
                 deviceToken: deviceToken,
+                hostedRegistrationID: hostedRegistrationID,
                 environment: pushEnvironment,
                 enabledKinds: baselineKinds,
                 soundEnabledKinds: soundKinds.filter { baselineKinds.contains($0) }
@@ -1248,9 +1360,10 @@ final class RemoteNotificationManager: ObservableObject {
                     baselineRegistration,
                     with: host
                 )
-                if kinds.contains(.attentionRequest) || kinds.contains(.agentQuestion) {
+                if !optionalKinds.isDisjoint(with: kinds) {
                     let extendedRegistration = RemoteNotificationRegistrationDTO(
                         deviceToken: deviceToken,
+                        hostedRegistrationID: hostedRegistrationID,
                         environment: pushEnvironment,
                         enabledKinds: kinds,
                         soundEnabledKinds: soundKinds
@@ -1279,7 +1392,9 @@ final class RemoteNotificationManager: ObservableObject {
                     }
                 }
                 deliveryByConnection[host.id] = result.delivery
-                registeredSignatures.insert(signature)
+                if hostedRegistrationSucceeded {
+                    registeredSignatures.insert(signature)
+                }
                 MobileDiagnostics.record(.notificationRegistrationSucceeded, fields: [
                     .peer: peer,
                     .transport: result.delivery.rawValue,
@@ -1297,6 +1412,28 @@ final class RemoteNotificationManager: ObservableObject {
                 // The ordinary refresh will retry once the Mac is reachable again.
             }
         }
+    }
+
+    private func registerHostedPushRecipient(
+        deviceToken: String,
+        environment: RemoteNotificationEnvironment,
+        host: PairedRemoteHost
+    ) async throws -> String {
+        guard let serviceURL = host.hostedServiceURL,
+              let credential = host.hostedCredential,
+              credential.hostID == host.hostID,
+              credential.deviceID == RemoteDeviceIdentity.current,
+              credential.expiresAt > Date().addingTimeInterval(60) else {
+            throw PeerControlPlaneError.invalidCredential
+        }
+        let endpoint = try PeerControlPlaneServiceEndpoint(serviceURL)
+        let registration = try await PeerControlPlaneClient(endpoint: endpoint)
+            .registerPushRecipient(
+                deviceCredential: credential,
+                deviceToken: deviceToken,
+                environment: environment.rawValue
+            )
+        return registration.registrationID
     }
 
     private func registerNotifications(
@@ -1436,7 +1573,8 @@ final class RemoteNotificationManager: ObservableObject {
         }
         // Ordinary state changes have an in-app card/dot. An agent update is an explicit
         // milestone the user asked to receive, including while looking at another chat.
-        guard scenePhase != .active || event.kind == .agentMessage else {
+        guard scenePhase != .active
+                || RemoteNotificationPresentationPolicy.presentsInForeground(event.kind) else {
             MobileDiagnostics.record(.notificationSuppressed, fields: [
                 .trace: event.id,
                 .reason: "foreground",
@@ -1480,6 +1618,7 @@ final class RemoteNotificationManager: ObservableObject {
         case .sharedSession: return sharedChatsEnabled
         case .permissionRequest: return permissionsEnabled
         case .agentQuestion: return agentQuestionsEnabled
+        case .turnCompleted: return turnCompletionsEnabled
         case .agentMessage: return agentUpdatesEnabled
         case .attentionRequest: return attentionRequestsEnabled
         }
@@ -1579,6 +1718,7 @@ struct NotificationSettingsView: View {
                     Toggle("Chats shared with me", isOn: $notifications.sharedChatsEnabled)
                     Toggle("Permission requests", isOn: $notifications.permissionsEnabled)
                     Toggle("Agent needs my response", isOn: $notifications.agentQuestionsEnabled)
+                    Toggle("Agent finishes a turn", isOn: $notifications.turnCompletionsEnabled)
                     Toggle("Requests for my input", isOn: $notifications.attentionRequestsEnabled)
                     Toggle("Agent updates I request", isOn: $notifications.agentUpdatesEnabled)
                 } header: {
@@ -1593,6 +1733,8 @@ struct NotificationSettingsView: View {
                             .disabled(!notifications.permissionsEnabled)
                         Toggle("Agent needs my response", isOn: $notifications.questionSoundsEnabled)
                             .disabled(!notifications.agentQuestionsEnabled)
+                        Toggle("Completed turns", isOn: $notifications.turnCompletionSoundsEnabled)
+                            .disabled(!notifications.turnCompletionsEnabled)
                         Toggle("Requests from people", isOn: $notifications.attentionSoundsEnabled)
                             .disabled(!notifications.attentionRequestsEnabled)
                         Toggle("Requested agent updates", isOn: $notifications.updateSoundsEnabled)
@@ -1680,11 +1822,13 @@ struct NotificationSettingsView: View {
             .onChange(of: notifications.sharedChatsEnabled) { _, _ in sync() }
             .onChange(of: notifications.permissionsEnabled) { _, _ in sync() }
             .onChange(of: notifications.agentQuestionsEnabled) { _, _ in sync() }
+            .onChange(of: notifications.turnCompletionsEnabled) { _, _ in sync() }
             .onChange(of: notifications.agentUpdatesEnabled) { _, _ in sync() }
             .onChange(of: notifications.attentionRequestsEnabled) { _, _ in sync() }
             .onChange(of: notifications.notificationSoundsEnabled) { _, _ in sync() }
             .onChange(of: notifications.permissionSoundsEnabled) { _, _ in sync() }
             .onChange(of: notifications.questionSoundsEnabled) { _, _ in sync() }
+            .onChange(of: notifications.turnCompletionSoundsEnabled) { _, _ in sync() }
             .onChange(of: notifications.attentionSoundsEnabled) { _, _ in sync() }
             .onChange(of: notifications.updateSoundsEnabled) { _, _ in sync() }
             .onChange(of: notifications.sharedChatSoundsEnabled) { _, _ in sync() }

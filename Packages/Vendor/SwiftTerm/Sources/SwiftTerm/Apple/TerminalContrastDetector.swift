@@ -13,25 +13,71 @@ import Foundation
 /// Metal layer can prepare and draw a frame off the main thread, and no view or
 /// AppKit state may be reached from there. The result is a checked-Sendable
 /// value delivered with the rest of the frame's main-actor effects.
-enum TerminalContrastDetector {
-    static func detect (snapshot: TerminalSnapshot,
-                        context: SnapshotRenderContext) -> [TerminalTextColorConflict] {
+final class TerminalContrastDetector {
+    struct Counters: Sendable {
+        var rowsScanned = 0
+        var rowsReused = 0
+    }
+
+    private struct RowEntry {
+        let sourceIdentity: ObjectIdentifier
+        let sourceGeneration: UInt64
+        let revision: UInt64
+        let contextIdentity: UInt64
+        let cols: Int
+        let conflicts: [TerminalTextColorConflict]
+
+        func matches(row: TerminalSnapshot.Row,
+                     context: SnapshotRenderContext) -> Bool {
+            sourceIdentity == row.sourceIdentity &&
+                sourceGeneration == row.sourceGeneration &&
+                revision == row.revision &&
+                contextIdentity == context.identity &&
+                cols == context.cols
+        }
+    }
+
+    private static let rowCapacity = 256
+    private var rows: [Int: RowEntry] = [:]
+    private var retainedRowRange: Range<Int>?
+    private(set) var counters = Counters()
+
+    func resetCounters() {
+        counters = Counters()
+    }
+
+    func detect (snapshot: TerminalSnapshot,
+                 context: SnapshotRenderContext) -> [TerminalTextColorConflict] {
         var conflicts: [TerminalTextColorConflict] = []
         var seen: Set<TerminalTextContrastPair> = []
 
-        for row in snapshot.rows {
-            var column = 0
-            var runAttribute: Attribute?
-            var runText = ""
+        let visibleRange = snapshot.firstRow..<(snapshot.firstRow + snapshot.rowCount)
+        if retainedRowRange != visibleRange {
+            retainedRowRange = visibleRange
+            rows = rows.filter { visibleRange.contains($0.key) }
+        }
 
-            func flushRun () {
-                guard let attribute = runAttribute,
-                      let finding = conflict(
-                        in: runText, attribute: attribute, context: context)
-                else {
-                    runText.removeAll(keepingCapacity: true)
-                    return
+        for (index, row) in snapshot.rows.enumerated() {
+            let absoluteRow = snapshot.firstRow + index
+            let rowConflicts: [TerminalTextColorConflict]
+            if let cached = rows[absoluteRow], cached.matches(row: row, context: context) {
+                counters.rowsReused += 1
+                rowConflicts = cached.conflicts
+            } else {
+                counters.rowsScanned += 1
+                rowConflicts = Self.detect(row: row, cols: snapshot.cols, context: context)
+                if let sourceIdentity = row.sourceIdentity,
+                   rows.count < Self.rowCapacity || rows[absoluteRow] != nil {
+                    rows[absoluteRow] = RowEntry(
+                        sourceIdentity: sourceIdentity,
+                        sourceGeneration: row.sourceGeneration,
+                        revision: row.revision,
+                        contextIdentity: context.identity,
+                        cols: context.cols,
+                        conflicts: rowConflicts)
                 }
+            }
+            for finding in rowConflicts {
                 let pair = TerminalTextContrastPair(
                     foregroundSource: finding.foregroundSource,
                     backgroundSource: finding.backgroundSource,
@@ -40,21 +86,50 @@ enum TerminalContrastDetector {
                 if seen.insert(pair).inserted {
                     conflicts.append(finding)
                 }
-                runText.removeAll(keepingCapacity: true)
             }
-
-            while column < min(snapshot.cols, row.line.count) {
-                let cell = row.line.packedView(at: column)
-                let attribute = cell.attribute
-                if let previous = runAttribute, previous != attribute {
-                    flushRun()
-                }
-                runAttribute = attribute
-                runText.append(row.character(at: column, cell: cell))
-                column += max(1, Int(cell.width))
-            }
-            flushRun()
         }
+        return conflicts
+    }
+
+    private static func detect(row: TerminalSnapshot.Row, cols: Int,
+                               context: SnapshotRenderContext)
+        -> [TerminalTextColorConflict] {
+        var conflicts: [TerminalTextColorConflict] = []
+        var seen: Set<TerminalTextContrastPair> = []
+        var column = 0
+        var runAttribute: Attribute?
+        var runText = ""
+
+        func flushRun () {
+            guard let attribute = runAttribute,
+                  let finding = Self.conflict(
+                    in: runText, attribute: attribute, context: context)
+            else {
+                runText.removeAll(keepingCapacity: true)
+                return
+            }
+            let pair = TerminalTextContrastPair(
+                foregroundSource: finding.foregroundSource,
+                backgroundSource: finding.backgroundSource,
+                foreground: finding.foreground,
+                background: finding.background)
+            if seen.insert(pair).inserted {
+                conflicts.append(finding)
+            }
+            runText.removeAll(keepingCapacity: true)
+        }
+
+        while column < min(cols, row.line.count) {
+            let cell = row.line.packedView(at: column)
+            let attribute = cell.attribute
+            if let previous = runAttribute, previous != attribute {
+                flushRun()
+            }
+            runAttribute = attribute
+            runText.append(row.character(at: column, cell: cell))
+            column += max(1, Int(cell.width))
+        }
+        flushRun()
         return conflicts
     }
 

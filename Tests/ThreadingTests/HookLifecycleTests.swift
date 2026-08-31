@@ -1918,6 +1918,90 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(admitted, ActivityDefaults.workingByteThreshold + 1)
     }
 
+    /// A hookless full-screen CLI may repaint its idle prompt forever. Once its first inferred
+    /// result is unread, those bytes are not evidence of another turn: before this boundary the
+    /// 0.8-second quiet timer turned every repaint into Git checkpoints, transcript scans,
+    /// project stats and another attention generation. Genuine input and an authoritative start
+    /// are the two facts that may open a new episode without the person first viewing it.
+    @MainActor
+    func testOffscreenRepaintsStayInsideOneSemanticEpisodeUntilARealBoundary() {
+        let quietInterval: TimeInterval = 0.01
+        let tracker = SessionActivityTracker(quietInterval: quietInterval)
+        let sessionID = SessionID()
+        tracker.markRunning()
+        tracker.isVisible = false
+
+        var transitions = SessionActivityTransitionLedger()
+        var completions = 0
+        var attentionEpisodes = 0
+        var activityChanges = 0
+        tracker.onChange = { activity in
+            activityChanges += 1
+            if transitions.observe(activity, for: sessionID).completedTurn {
+                completions += 1
+            }
+        }
+        tracker.onAttention = { attentionEpisodes += 1 }
+
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold + 1)
+        RunLoop.current.run(until: Date().addingTimeInterval(quietInterval * 3))
+        XCTAssertEqual(tracker.activity, .needsAttention)
+        XCTAssertEqual(completions, 1)
+        XCTAssertEqual(attentionEpisodes, 1)
+        XCTAssertEqual(activityChanges, 2)
+
+        for _ in 0..<8 {
+            XCTAssertNil(
+                tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold * 4),
+                "an unread repaint is presentation, not a new activity pulse"
+            )
+            RunLoop.current.run(until: Date().addingTimeInterval(quietInterval * 2))
+        }
+
+        XCTAssertEqual(tracker.activity, .needsAttention)
+        XCTAssertEqual(completions, 1, "the window fan-out runs once for the unread episode")
+        XCTAssertEqual(attentionEpisodes, 1)
+        XCTAssertEqual(activityChanges, 2, "repaints publish no false working/quiet edges")
+
+        tracker.noteUserInput(submitsLine: true)
+        tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold + 1)
+        RunLoop.current.run(until: Date().addingTimeInterval(quietInterval * 3))
+        XCTAssertEqual(completions, 2, "submitted input earns one new inferred completion")
+        XCTAssertEqual(attentionEpisodes, 2)
+
+        tracker.noteTurnStarted(turnID: "provider-turn")
+        tracker.noteTurnFinished()
+        XCTAssertEqual(completions, 3, "an authoritative start earns its own completion")
+        XCTAssertEqual(attentionEpisodes, 3)
+    }
+
+    @MainActor
+    func testTransitionLedgerTreatsBlockedAndReadPresentationAsTheSameTurn() {
+        var transitions = SessionActivityTransitionLedger()
+        let sessionID = SessionID()
+
+        XCTAssertFalse(transitions.observe(.idle, for: sessionID).completedTurn)
+        XCTAssertTrue(transitions.observe(.working, for: sessionID).beganTurn)
+
+        let blocked = transitions.observe(.awaitingUser, for: sessionID)
+        XCTAssertFalse(blocked.beganTurn)
+        XCTAssertFalse(blocked.completedTurn)
+
+        let finished = transitions.observe(.needsAttention, for: sessionID)
+        XCTAssertTrue(finished.completedTurn)
+
+        let read = transitions.observe(.idle, for: sessionID)
+        XCTAssertFalse(read.beganTurn)
+        XCTAssertFalse(read.completedTurn)
+
+        transitions.remove(sessionID)
+        XCTAssertFalse(
+            transitions.observe(.needsAttention, for: sessionID).completedTurn,
+            "a removed session cannot inherit a completion edge if its identifier is reused"
+        )
+        XCTAssertTrue(transitions.observe(.working, for: sessionID).beganTurn)
+    }
+
     // MARK: - Asking Inside a Turn
 
     /// Merely presenting a permission prompt is not an answer. The old visibility edge made a

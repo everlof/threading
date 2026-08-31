@@ -50,7 +50,8 @@ struct SessionDraftView: View {
             if let startedSession {
                 SessionDetailView(
                     session: startedSession,
-                    openingStrategy: startedDraft?.openingStrategy ?? .resumeIfNeeded
+                    openingStrategy: startedDraft?.openingStrategy ?? .resumeIfNeeded,
+                    installsPrincipalTitle: !draftIsMounted
                 )
             } else if startedSessionID != nil {
                 ContentUnavailableView(
@@ -77,6 +78,28 @@ struct SessionDraftView: View {
             }
         }
         .background(theme.ground)
+        // The route's one navigation title, mounted for as long as the drafting screen is.
+        // Start does not swap it for the session's: the same morphing label stays in the bar
+        // and is told the chat's name, so "New session" morphs into it while the status line
+        // plays its own change to "Opening chat…" — the transition every rename on this bar
+        // already has. The terminal surface installs its own principal item, saying the same
+        // thing, only once the draft has retired, so the handoff changes no pixels and the two
+        // items never race for the slot. A chat opening on the conversation surface is handed
+        // off immediately instead: its title is a UIKit `titleView` the controller installs on
+        // appearance, and SwiftUI's cleanup of a removed principal item lands on the same
+        // navigation item later, wiping whatever stood there — holding the slot through the
+        // fade left that chat with no two-line title at all.
+        .toolbar {
+            if draftIsMounted, isDrafting || startedSession?.surface != .conversation {
+                ToolbarItem(placement: .principal) {
+                    MobileConnectionStatusButton(
+                        title: principalTitle,
+                        status: principalStatus,
+                        statusColor: principalStatusColor
+                    )
+                }
+            }
+        }
         .onChange(of: isDrafting) { _, isDrafting in
             guard !isDrafting else { return }
             retireDraft()
@@ -85,6 +108,31 @@ struct SessionDraftView: View {
             // Reached with the draft already started — a screen rebuilt on the stack — so
             // there is nothing to fade from.
             if !isDrafting { draftIsMounted = false }
+        }
+    }
+
+    private var principalTitle: String {
+        guard let startedSession else { return MobileL10n.string("New session") }
+        return MobileSessionChrome.navigationTitle(
+            for: startedSession,
+            in: model.me,
+            liveTitle: nil
+        )
+    }
+
+    /// The started chat's opening line is the one its own title will show while it connects,
+    /// so the status the draft hands over is the status the session picks up.
+    private var principalStatus: String {
+        guard isDrafting else { return MobileL10n.string("Opening chat…") }
+        return model.activeHost?.name ?? MobileL10n.string("Connected")
+    }
+
+    private var principalStatusColor: Color {
+        guard isDrafting else { return theme.warning }
+        switch model.phase {
+        case .online: return theme.positive
+        case .connecting: return theme.warning
+        case .idle, .offline: return theme.tertiaryLabel
         }
     }
 
@@ -113,8 +161,45 @@ enum SessionDraftMotion {
     /// The hint in the empty ground comes and goes with the first character typed.
     static let hintDuration: TimeInterval = 0.2
     /// The action row unfolds under the prompt as the keyboard rises and folds as it goes —
-    /// the keyboard's own duration, so the two read as one motion.
+    /// the keyboard's own duration and ease, so the two read as one motion. Measured, not
+    /// assumed: a frame-by-frame read of an on-device recording put the keyboard's top edge
+    /// on a smooth ~0.25 s deceleration, exactly what its notification announces. An
+    /// "accurate keyboard spring" (mass 3, stiffness 1000, damping 500) was tried against it
+    /// and shipped visibly worse — overdamped, it starts slow, opening a gap behind the
+    /// departing keyboard, then creeps for half a second after the keyboard has gone.
     static let foldDuration: TimeInterval = 0.25
+    /// Slack between the announced duration and when the handoff may mount the chat's screen:
+    /// one frame of margin, not a parked pause.
+    static let rideSettleMargin: TimeInterval = 0.05
+    /// How long after appearing a keyboard frame still belongs to the entrance transition.
+    /// The navigation push runs about 0.4 s; a keyboard announced inside this window is the
+    /// one sliding in with the screen, not one moving on a settled screen.
+    static let entranceSettleDuration: TimeInterval = 0.6
+}
+
+/// What a keyboard announcement means for a composer standing in the bottom safe-area inset.
+enum MobileKeyboardOverlap {
+    /// How far the announced end frame reaches above the window's bottom safe-area inset —
+    /// the padding that puts the composer's bottom edge on the keyboard's top edge.
+    static func target(from notification: Notification) -> CGFloat {
+        guard let frame = notification.userInfo?[
+            UIResponder.keyboardFrameEndUserInfoKey
+        ] as? CGRect,
+            let window = UIApplication.shared.connectedScenes
+                .compactMap({ ($0 as? UIWindowScene)?.keyWindow })
+                .first
+        else { return 0 }
+        return max(
+            0,
+            window.screen.bounds.maxY - frame.minY - window.safeAreaInsets.bottom
+        )
+    }
+
+    /// The duration the keyboard announces for the move, so the composer's ride matches it.
+    static func duration(from notification: Notification) -> Double {
+        notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey]
+            as? Double ?? 0
+    }
 }
 
 /// The draft before Start: a quiet ground and one composer.
@@ -165,6 +250,29 @@ private struct SessionDraftComposerScreen: View {
     /// and a row folding then is a second motion after the first; folding on the announcement
     /// lets the row fold as the keyboard drops.
     @State private var keyboardIsLeaving = false
+    /// The keyboard's announced overlap with the screen's bottom, tracked by hand the way the
+    /// conversation composer tracks it. SwiftUI's automatic avoidance moved the composer on its
+    /// own schedule: it collapsed the inset the moment Start resigned focus — the composer
+    /// teleported behind the still-departing keyboard and was revealed by it — and raised it
+    /// mid-push while the keyboard was already standing, so the field arrived after the
+    /// keyboard it belongs on. The announcement carries the end frame and the duration, which
+    /// is enough to ride the keyboard exactly.
+    @State private var keyboardOverlap: CGFloat = 0
+    /// How far the composer's picture still is from its laid-out slot. A keyboard move snaps
+    /// `keyboardOverlap` — one layout — and puts the distance here, animated back to zero on
+    /// the keyboard's own duration. Animating the padding itself re-measured the editor and
+    /// re-centred the ground on every frame of the ride, which shipped as a ride-down visibly
+    /// below the keyboard's frame rate; an offset is a render-pass transform and costs no
+    /// layout at all.
+    @State private var keyboardRideOffset: CGFloat = 0
+    /// When the ride now animating comes to rest. The handoff to the started chat waits for
+    /// this moment: a Mac that answers Start inside the ride would otherwise mount the whole
+    /// session screen — terminal view, fonts, socket — on the very frames the ride still
+    /// needs, and the composer's move down shipped stuttering under that boot.
+    @State private var rideSettlesAt: Date?
+    /// When this screen appeared. A keyboard frame announced inside the push that brought the
+    /// screen in belongs to that transition, not to an interaction on a settled screen.
+    @State private var appearedAt: Date?
     @State private var runPickerIsPresented = false
     @State private var attachmentTray: ComposerAttachmentTray?
     @State private var attachmentItems: [ComposerAttachmentItem] = []
@@ -240,6 +348,18 @@ private struct SessionDraftComposerScreen: View {
             suggestion = Self.promptSuggestions.randomElement() ?? Self.promptSuggestions[0]
         }
         _promptSuggestion = State(initialValue: suggestion)
+        // Focused from the first layout, not from `onAppear`: a prompt that takes focus after
+        // appearing unfolds the action row while the push is still sliding the screen in, and
+        // the strip crossfaded at its final position while the field was still travelling.
+        // Born focused, the composer is complete — field and actions — before the transition's
+        // first frame, and the keyboard rises as part of the push.
+#if DEBUG
+        _promptIsFocused = State(initialValue: ProcessInfo.processInfo.environment[
+            "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
+        ] == nil)
+#else
+        _promptIsFocused = State(initialValue: true)
+#endif
     }
 
     // MARK: - Catalogue
@@ -355,14 +475,6 @@ private struct SessionDraftComposerScreen: View {
         )
     }
 
-    private var hostStatusColor: Color {
-        switch appModel.phase {
-        case .online: return theme.positive
-        case .connecting: return theme.warning
-        case .idle, .offline: return theme.tertiaryLabel
-        }
-    }
-
     // MARK: - Body
 
     var body: some View {
@@ -372,18 +484,33 @@ private struct SessionDraftComposerScreen: View {
             ScrollView {
                 hint
                     .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                    // Half the composer's ride: the hint centres in the space the composer and
+                    // keyboard leave, so a ride that moves the composer by Δ moves this centre
+                    // by Δ/2 — carried by the same render-pass offset, not by re-centring
+                    // layout every frame.
+                    .offset(y: keyboardRideOffset / 2)
             }
-            .scrollDismissesKeyboard(.interactively)
+            // Immediately rather than interactively: the composer rides `keyboardOverlap`,
+            // which the keyboard announces only when it commits a move, so a keyboard dragged
+            // down by the finger would leave the composer floating over the gap until release.
+            .scrollDismissesKeyboard(.immediately)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             composer
+                .padding(.bottom, keyboardOverlap)
+                .offset(y: keyboardRideOffset)
         }
         .background(theme.ground)
+        // The composer follows the keyboard through `keyboardOverlap`, on the keyboard's own
+        // duration. Automatic avoidance moved it on a schedule of its own — see the state's
+        // comment — so it is switched off rather than doubled.
+        .ignoresSafeArea(.keyboard, edges: .bottom)
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(theme.surface, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         )
         .onAppear {
+            appearedAt = Date()
             applyCatalogDefaults()
             configureAttachments()
             hintAnimated = true
@@ -425,13 +552,6 @@ private struct SessionDraftComposerScreen: View {
                 presentedAttachmentEvidence = true
                 Task { @MainActor in beginChoosingAttachmentSource() }
             }
-            if ProcessInfo.processInfo.environment[
-                "THREADING_MOBILE_UI_EVIDENCE_KEYBOARD_STATE"
-            ] == nil {
-                promptIsFocused = true
-            }
-#else
-            promptIsFocused = true
 #endif
         }
         .onChange(of: agentID) { _, _ in
@@ -468,13 +588,21 @@ private struct SessionDraftComposerScreen: View {
         }
         .onReceive(
             NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
-        ) { _ in
+        ) { notification in
             keyboardIsLeaving = true
+            updateKeyboardOverlap(from: notification, hiding: true)
         }
         .onReceive(
             NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
         ) { _ in
             keyboardIsLeaving = false
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: UIResponder.keyboardWillChangeFrameNotification
+            )
+        ) { notification in
+            updateKeyboardOverlap(from: notification)
         }
         .themedAlert(
             "Couldn’t start session",
@@ -502,23 +630,57 @@ private struct SessionDraftComposerScreen: View {
 
     /// Removing the modifier itself matters here. Leaving an empty `.toolbar` attached while the
     /// draft fades lets SwiftUI retain its previous items and merge them with the session's bar.
+    /// Only the identity disc is this screen's: the principal title belongs to
+    /// `SessionDraftView`, which keeps it mounted through Start so the name morphs into the
+    /// chat's instead of being swapped with it.
     @ViewBuilder
     private func navigationChrome<Content: View>(around content: Content) -> some View {
         if showsNavigationChrome {
             content.toolbar {
-                ToolbarItem(placement: .principal) {
-                    MobileConnectionStatusButton(
-                        title: MobileL10n.string("New session"),
-                        status: appModel.activeHost?.name ?? MobileL10n.string("Connected"),
-                        statusColor: hostStatusColor
-                    )
-                }
                 ToolbarItem(placement: .topBarTrailing) {
                     identityMenu
                 }
             }
         } else {
             content
+        }
+    }
+
+    /// Moves the composer to the keyboard's announced end frame.
+    ///
+    /// A frame that arrives while the push that brought this screen in is still running is part
+    /// of that transition: the keyboard slides in with the screen already risen, so the
+    /// composer is placed on its top edge without animation and the one motion is the push.
+    /// On a settled screen the keyboard's own duration carries the composer with it — up when
+    /// the prompt takes focus again after a chooser, down when Start resigns it.
+    private func updateKeyboardOverlap(from notification: Notification, hiding: Bool = false) {
+        let target = hiding ? 0 : MobileKeyboardOverlap.target(from: notification)
+        guard target != keyboardOverlap else { return }
+        let isSettled = appearedAt.map {
+            Date().timeIntervalSince($0) > SessionDraftMotion.entranceSettleDuration
+        } ?? false
+        var snap = Transaction()
+        snap.disablesAnimations = true
+        if isSettled {
+            // One layout, then transforms: the padding snaps to the destination while the
+            // offset carries the picture back to where it stood, and only the offset animates.
+            // `+=` keeps a ride that is retargeted mid-flight visually continuous.
+            withTransaction(snap) {
+                keyboardRideOffset += target - keyboardOverlap
+                keyboardOverlap = target
+            }
+            let duration = MobileKeyboardOverlap.duration(from: notification)
+            rideSettlesAt = Date().addingTimeInterval(
+                duration + SessionDraftMotion.rideSettleMargin
+            )
+            withAnimation(.easeOut(duration: duration)) {
+                keyboardRideOffset = 0
+            }
+        } else {
+            withTransaction(snap) {
+                keyboardOverlap = target
+                keyboardRideOffset = 0
+            }
         }
     }
 
@@ -806,7 +968,10 @@ private struct SessionDraftComposerScreen: View {
                     .font(.system(size: 15, weight: .bold))
                     .opacity(isSubmitting ? 0 : 1)
                 ProgressView()
-                    .tint(theme.ground)
+                    // The ink chosen against the accent itself, like the arrow it replaces.
+                    // `ground` was near-invisible on the accent disc: a dark theme's ground
+                    // over an orange accent is orange-on-orange.
+                    .tint(theme.accentForeground)
                     .opacity(isSubmitting ? 1 : 0)
             }
             .frame(
@@ -1454,6 +1619,16 @@ private struct SessionDraftComposerScreen: View {
                     appModel.rememberNewSessionChoice(launchChoice, for: launchIdentity)
                 }
                 attachmentTray?.clear()
+                // The second half of the motion waits for the first. A Mac can answer inside
+                // the composer's ride down; mounting the chat's screen then puts its whole
+                // boot on the frames the ride still needs. The hold is bounded by the
+                // keyboard's own duration and is zero whenever the answer took longer.
+                if let rideSettlesAt {
+                    let remaining = rideSettlesAt.timeIntervalSinceNow
+                    if remaining > 0 {
+                        try? await Task.sleep(for: .seconds(remaining))
+                    }
+                }
                 // Turns this screen into the session's: `SessionDraftView` fades this one
                 // out over the chat the model now says the draft became.
                 appModel.noteDraftStarted(draft, creation: creation)
@@ -1558,27 +1733,54 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         }
     }
 
+    /// Measured once per distinct input, not once per layout pass. While the action row folds
+    /// or the composer rides the keyboard, SwiftUI lays the composer out on every animation
+    /// frame and asks this editor its size each time; crossing into TextKit for an answer that
+    /// cannot have changed was a per-frame cost the ride paid in dropped frames. The cache key
+    /// is everything the measurement reads.
     func sizeThatFits(
         _ proposal: ProposedViewSize,
         uiView: IntrinsicTextView,
         context: Context
     ) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
+        let key = Coordinator.MeasurementKey(
+            width: width,
+            text: uiView.text ?? "",
+            fontPointSize: uiView.font?.pointSize ?? 0,
+            leadingAccessoryWidth: firstLineLeadingAccessoryWidth,
+            trailingAccessoryWidth: firstLineTrailingAccessoryWidth,
+            accessoryHeight: firstLineAccessoryHeight
+        )
+        if let cached = context.coordinator.cachedMeasurement, cached.key == key {
+            return CGSize(width: width, height: cached.height)
+        }
         uiView.updateFirstLineAccessoryExclusions(for: width)
         let measured = uiView.sizeThatFits(
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
-        return CGSize(
-            width: width,
-            height: min(
-                max(measured.height, MobileDesign.Size.compactControl),
-                uiView.maximumIntrinsicHeight
-            )
+        let height = min(
+            max(measured.height, MobileDesign.Size.compactControl),
+            uiView.maximumIntrinsicHeight
         )
+        context.coordinator.cachedMeasurement = (key, height)
+        return CGSize(width: width, height: height)
     }
 
     @MainActor
     final class Coordinator: NSObject, UITextViewDelegate {
+        struct MeasurementKey: Equatable {
+            let width: CGFloat
+            let text: String
+            let fontPointSize: CGFloat
+            let leadingAccessoryWidth: CGFloat
+            let trailingAccessoryWidth: CGFloat
+            let accessoryHeight: CGFloat
+        }
+
+        /// The last measurement and the inputs it was taken under; see `sizeThatFits`.
+        var cachedMeasurement: (key: MeasurementKey, height: CGFloat)?
+
         private var text: Binding<String>
         private var isFocused: Binding<Bool>
         private var isOverflowing: Binding<Bool>

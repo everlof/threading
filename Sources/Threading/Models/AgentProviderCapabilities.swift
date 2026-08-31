@@ -321,6 +321,17 @@ struct AgentCapabilities: OptionSet {
   /// installed, so a session running with reporting turned off contributes nothing and the
   /// observer must treat silence as "unknown", never as "has not moved".
   static let lifecycleReportedWorkingDirectory = Self(rawValue: 1 << 34)
+
+  /// A running terminal invocation exposes an exact `resume <conversation-id>` argument pair,
+  /// and the runtime refuses a second process that tries to own that identifier concurrently.
+  /// Threading can therefore recognise the refusal before launching, without reading another
+  /// process's output or guessing from a transcript lock.
+  ///
+  /// Codex only, measured on 0.151.0. Claude's resume syntax is visible too, but concurrent
+  /// ownership has not been measured as an explicit refusal there; Grok and OpenCode have
+  /// likewise not earned both halves of the claim. A visible argv without measured exclusivity
+  /// is not enough to block a launch.
+  static let detectableExternalResume = Self(rawValue: 1 << 35)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -421,7 +432,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .headlessResearch, .providerTitleMetadata, .providerArchive, .transcriptUsageIndex,
         .transcriptInterruptedTurnRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .inlineTerminalViewport, .lifecycleReportedTranscriptPath,
-        .lifecycleReportedWorkingDirectory
+        .lifecycleReportedWorkingDirectory, .detectableExternalResume
       ]
     case .grok:
       return [

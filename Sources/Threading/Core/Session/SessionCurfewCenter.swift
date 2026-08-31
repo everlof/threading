@@ -59,6 +59,9 @@ final class SessionCurfewCenter {
         /// Ends the agent, keeping the terminal so its final output stays readable.
         var stopAgent: @MainActor (SessionID) -> Void
 
+        /// Requests a fresh provider reading while a reset-conditioned curfew is waiting.
+        var refreshUsage: @MainActor (AccountID) -> Void
+
         /// Tells the user the ladder ran out, and whether the agent was stopped as well.
         var postGaveUpAlert: @MainActor (SessionID, Int, Bool) -> Void
 
@@ -83,6 +86,13 @@ final class SessionCurfewCenter {
                 },
                 stopAgent: { sessionID in
                     AgentRuntime.shared.terminate(sessionID: sessionID)
+                },
+                refreshUsage: { accountID in
+                    guard let account = AgentAccountDiscovery.account(
+                        for: accountID.provider,
+                        handle: accountID.handle
+                    ) else { return }
+                    AccountUsageService.shared.refresh(account, force: true)
                 },
                 postGaveUpAlert: { sessionID, interrupts, stopped in
                     AttentionAlertCenter.shared.postCurfewGaveUp(
@@ -129,6 +139,11 @@ final class SessionCurfewCenter {
     /// The next moment each session has something to do, so the timer can be re-armed from a
     /// map rather than by walking every project again on every activity edge.
     private var pendingMoments: [SessionID: Date] = [:]
+
+    /// One polling edge per account however many sessions are waiting on it. The usage service
+    /// supplies the second line of defence — per-account single-flight and bounded provider
+    /// concurrency — while this map prevents duplicate discovery and refresh requests up front.
+    private var nextUsageRefreshAt: [AccountID: Date] = [:]
 
     /// Whether the turn now in flight began in front of the user.
     ///
@@ -223,6 +238,9 @@ final class SessionCurfewCenter {
         }
         observations.observe(CurfewSettingsDidChange.self) { [weak self] _ in
             self?.evaluateAll()
+        }
+        observations.observe(UsageLimitHistoryDidChange.self) { [weak self] event in
+            self?.usageHistoryChanged(event)
         }
         // A rule written on a session or its checkout changes what resolves for it, and the store
         // is the only place that says so.
@@ -325,6 +343,33 @@ final class SessionCurfewCenter {
         return outcome
     }
 
+    /// Arms one selected window's expected boundary and any earlier material reset of that window.
+    ///
+    /// The account identity belongs in the durable rule rather than being rediscovered when an
+    /// event arrives: a conversation can be migrated, and a reset on a different login must not
+    /// retroactively satisfy the choice the user made here.
+    @discardableResult
+    func setCurfewUntilUsageReset(
+        expectedAt: Date,
+        windowID: String,
+        forSessionID sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let session = projectStore.session(withID: sessionID) else {
+            return .targetNotFound
+        }
+        let accountID = AccountID(provider: session.kind, handle: session.accountHandle)
+        nextUsageRefreshAt[accountID] = nil
+        return setCurfew(
+            .untilUsageReset(
+                expectedAt: expectedAt,
+                armedAt: now(),
+                accountID: accountID,
+                windowID: windowID
+            ),
+            forSessionID: sessionID
+        )
+    }
+
     /// Ends the curfew this session is under, by the only route that ever ends one early.
     ///
     /// Two shapes, because "not tonight" and "never" are different sentences. A curfew the user
@@ -343,7 +388,7 @@ final class SessionCurfewCenter {
 
         suspendingEvaluation {
             switch curfew.origin {
-            case .session:
+            case .session, .usageReset:
                 projectStore.setCurfewRule(nil, forSessionID: sessionID)
             case .quietHours:
                 break
@@ -430,6 +475,84 @@ final class SessionCurfewCenter {
         evaluateSession(sessionID)
     }
 
+    /// Materializes only the sessions addressed by newly discovered reset evidence.
+    ///
+    /// Ordinary history samples publish the same typed event with an empty payload, so the
+    /// minute-scale polling path remains O(1). A reset is rare; when one arrives, this pass is
+    /// O(stored sessions + matching evidence) and creates one ordinary deadline per matching
+    /// armed session before handing enforcement back to `evaluate`.
+    private func usageHistoryChanged(_ event: UsageLimitHistoryDidChange) {
+        guard !event.resetEvents.isEmpty, !isEvaluating else { return }
+
+        let resetsByAccount = Dictionary(grouping: event.resetEvents) { $0.accountID }
+        var triggered: [(SessionID, CurfewRule, UsageLimitResetEvent)] = []
+        walkSessions { [weak self] sessionID in
+            guard let self,
+                  let session = projectStore.session(withID: sessionID),
+                  let rule = session.curfewRule,
+                  case .untilUsageReset(
+                    let expectedAt, let armedAt, let accountID, let windowID
+                  ) = rule,
+                  let reset = resetsByAccount[accountID.rawValue]?
+                    .filter({
+                        $0.windowID == windowID
+                            && $0.detectedAt >= armedAt
+                            && $0.detectedAt < expectedAt
+                    })
+                    .min(by: { $0.detectedAt < $1.detectedAt }) else { return }
+            if case .usageReset(let stateArmedAt, let stateAccountID, let stateWindowID)? =
+                session.curfewState?.origin,
+               stateArmedAt == armedAt,
+               stateAccountID == accountID,
+               stateWindowID == windowID {
+                return
+            }
+            triggered.append((sessionID, rule, reset))
+        }
+        guard !triggered.isEmpty else { return }
+
+        isEvaluating = true
+        defer {
+            isEvaluating = false
+            rearmTimer()
+        }
+
+        let moment = now()
+        for (sessionID, rule, reset) in triggered {
+            guard case .untilUsageReset(
+                _, let armedAt, let accountID, let windowID
+            ) = rule else { continue }
+            // The scheduled-boundary path may already have filed its wrap-up when a provider
+            // reset lands only a few minutes early. If it has not delivered yet, withdraw it
+            // before replacing the instance: sending it now would spend the capacity that was
+            // just restored, and the new reset state intentionally has no wind-down phase.
+            removeUndeliveredWindDown(
+                projectStore.session(withID: sessionID)?.curfewState?.windDownMessageID
+            )
+            let state = SessionCurfewState(
+                deadline: reset.detectedAt,
+                origin: .usageReset(
+                    armedAt: armedAt,
+                    accountID: accountID,
+                    windowID: windowID
+                )
+            )
+            projectStore.updateCurfewState(state, forSessionID: sessionID)
+            eventLog.record(.curfew, "Usage reset triggered curfew", [
+                "session": sessionID.uuidString,
+                "account": accountID.rawValue,
+                "window": reset.windowID,
+                "cause": reset.cause.rawValue,
+                "detectedAt": Self.stamp(reset.detectedAt)
+            ])
+            evaluate(
+                sessionID,
+                at: moment,
+                materializing: reset.detectedAt < moment
+            )
+        }
+    }
+
     // MARK: - Private Methods — Resolution
 
     private func resolve(_ sessionID: SessionID, at moment: Date) -> CurfewResolution.Answer? {
@@ -468,7 +591,11 @@ final class SessionCurfewCenter {
             pendingMoments[sessionID] = nil
             return
         }
-        guard let curfew = resolve(sessionID, at: moment)?.curfew else {
+        guard let answer = resolve(sessionID, at: moment) else {
+            pendingMoments[sessionID] = nil
+            return
+        }
+        guard let curfew = answer.curfew else {
             closeStaleInstance(session.curfewState, for: sessionID, at: moment)
             // A lifted standing instance resolves to *nothing* until its own window closes, and
             // then tomorrow's resolves again. Without an alarm for that end, a machine left alone
@@ -497,7 +624,31 @@ final class SessionCurfewCenter {
             projectStore.updateCurfewState(state, forSessionID: sessionID)
             notificationCenter.post(CurfewDidChange(sessionID: sessionID))
         }
-        pendingMoments[sessionID] = nextMoment(curfew: curfew, state: state, after: moment)
+        var next = nextMoment(curfew: curfew, state: state, after: moment)
+        let wasTriggeredByReset: Bool
+        if case .usageReset = curfew.origin {
+            wasTriggeredByReset = true
+        } else {
+            wasTriggeredByReset = false
+        }
+        if case .usageReset(let expectedAt, _, let accountID, _)? = answer.condition,
+           moment < expectedAt,
+           !wasTriggeredByReset {
+            let poll = nextUsagePoll(for: accountID, at: moment)
+            next = next.map { min($0, poll) } ?? poll
+        }
+        pendingMoments[sessionID] = next
+    }
+
+    /// Requests one reading per account and returns the next time the condition needs attention.
+    private func nextUsagePoll(for accountID: AccountID, at moment: Date) -> Date {
+        if let scheduled = nextUsageRefreshAt[accountID], scheduled > moment {
+            return scheduled
+        }
+        performers.refreshUsage(accountID)
+        let next = moment.addingTimeInterval(CurfewDefaults.usageResetPollInterval)
+        nextUsageRefreshAt[accountID] = next
+        return next
     }
 
     /// Closes the books on an instance the resolution has moved past.
@@ -805,6 +956,9 @@ final class SessionCurfewCenter {
         switch rule {
         case .exempt: return "exempt"
         case .until(let deadline): return "until \(stamp(deadline))"
+        case .untilUsageReset(let expectedAt, let armedAt, let accountID, let windowID):
+            return "until \(windowID) usage reset by \(stamp(expectedAt)); armed "
+                + "\(stamp(armedAt)) for \(accountID.rawValue)"
         }
     }
 

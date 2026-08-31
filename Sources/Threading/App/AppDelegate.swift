@@ -2791,8 +2791,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         commandID: String,
         input: HostCommandInputRequest
     ) -> [HostCommandInputOption] {
-        guard input.kind == .session else { return [] }
-        return mainWindowController?.commandSessionOptions(for: commandID) ?? []
+        switch input.kind {
+        case .session:
+            return mainWindowController?.commandSessionOptions(for: commandID) ?? []
+        case .project:
+            return ProjectStore.shared.projects.map { project in
+                HostCommandInputOption(
+                    id: project.id.uuidString.lowercased(),
+                    title: project.name,
+                    detail: project.folderPath
+                )
+            }
+        }
     }
 
     private struct HostCommandState {
@@ -2815,12 +2825,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 )
             )
         }
+
+        static func declaredInput(
+            _ input: ExtensionCommandInput,
+            availability: HostCommandDescriptor.Availability
+        ) -> HostCommandState {
+            let kind: HostCommandInputRequest.Kind
+            switch input.kind {
+            case .project: kind = .project
+            }
+            return HostCommandState(
+                availability: availability,
+                nextInput: HostCommandInputRequest(
+                    kind: kind,
+                    prompt: input.prompt,
+                    searchPlaceholder: input.searchPlaceholder
+                )
+            )
+        }
     }
 
     /// Resolves both menu availability and the palette's optional next input. Commands that
-    /// need more than a session (a visible browser or review, for example) keep that specific
-    /// refusal; commands whose only missing value is session identity become a second palette
-    /// step while remaining disabled in the menu bar.
+    /// need more than a semantic target (a visible browser or review, for example) keep that
+    /// specific refusal. Session identity can become a second step when it is the only missing
+    /// prerequisite; declared extension project input always becomes a second Quick Open step
+    /// while menus keep using their current host context.
     private func hostCommandState(for command: AppCommand) -> HostCommandState {
         if RecoveryMode.isActive, !RecoveryModeCommandPolicy.allows(commandID: command.id) {
             return .unavailable(L10n.string("This command is unavailable in Recovery Mode."))
@@ -2863,6 +2892,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             }
         default:
             break
+        }
+
+        if let input = command.extensionInput {
+            switch input.kind {
+            case .project:
+                guard !ProjectStore.shared.projects.isEmpty else {
+                    return .unavailable(L10n.string("Add a project first."))
+                }
+                let availability: HostCommandDescriptor.Availability =
+                    mainWindowController?.currentProjectID == nil
+                        ? .unavailable(reason: L10n.string("Select a project first."))
+                        : .available
+                return .declaredInput(input, availability: availability)
+            }
         }
 
         switch command.scope {
@@ -2946,32 +2989,53 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
 
         if let input = request.input {
-            guard input.kind == .session,
-                  command.scope == .session,
-                  let sessionID = SessionID(uuidString: input.id),
-                  let controller = mainWindowController,
-                  controller.isCommandTargetSessionAvailable(sessionID) else {
-                return .refused(
-                    commandID: id,
-                    reason: L10n.string("That session is no longer available.")
-                )
-            }
-
-            if case .extensionCommand = command.origin {
-                let context = ExtensionCommandContext(
-                    projectID: controller.projectID(forCommandTarget: sessionID)?
-                        .uuidString.lowercased(),
-                    sessionID: sessionID.uuidString.lowercased()
-                )
+            switch input.kind {
+            case .project:
+                guard command.extensionInput?.kind == .project,
+                      case .extensionCommand = command.origin,
+                      let projectID = ProjectID(uuidString: input.id),
+                      ProjectStore.shared.project(withID: projectID) != nil else {
+                    return .refused(
+                        commandID: id,
+                        reason: L10n.string("That project is no longer available.")
+                    )
+                }
+                let opaqueID = projectID.uuidString.lowercased()
                 ExtensionCommandInvoker.perform(
                     command,
-                    context: context,
-                    window: controller.window
+                    context: ExtensionCommandContext(projectID: opaqueID),
+                    input: ExtensionCommandInputValue(kind: .project, id: opaqueID),
+                    window: mainWindowController?.window
                 )
                 return .invoked(commandID: id)
-            }
 
-            switch id {
+            case .session:
+                guard input.kind == .session,
+                      command.scope == .session,
+                      let sessionID = SessionID(uuidString: input.id),
+                      let controller = mainWindowController,
+                      controller.isCommandTargetSessionAvailable(sessionID) else {
+                    return .refused(
+                        commandID: id,
+                        reason: L10n.string("That session is no longer available.")
+                    )
+                }
+
+                if case .extensionCommand = command.origin {
+                    let context = ExtensionCommandContext(
+                        projectID: controller.projectID(forCommandTarget: sessionID)?
+                            .uuidString.lowercased(),
+                        sessionID: sessionID.uuidString.lowercased()
+                    )
+                    ExtensionCommandInvoker.perform(
+                        command,
+                        context: context,
+                        window: controller.window
+                    )
+                    return .invoked(commandID: id)
+                }
+
+                switch id {
             case AppCommands.ID.closeSession:
                 controller.closeSession(sessionID)
                 return .invoked(commandID: id)
@@ -3008,6 +3072,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                     )
                 }
                 return .invoked(commandID: id)
+                }
             }
         }
 

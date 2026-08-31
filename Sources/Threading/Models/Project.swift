@@ -123,11 +123,11 @@ struct Project: Codable, Identifiable {
   /// Settings answer; a chat with an answer of its own overrides it either way. See
   /// `CurfewResolution`.
   ///
-  /// **Only `.exempt` or nothing is ever written here.** `.until` is a wall-clock moment, and
-  /// one stored on a checkout would keep ending chats created weeks later at a time nobody
-  /// chose — `ProjectStore.setCurfewRule(_:forProjectID:)` refuses it. A record carrying one
-  /// anyway decodes rather than costing the checkout, and the chain falls through it to the
-  /// standing window.
+  /// **Only `.exempt` or nothing is ever written here.** Fixed and reset-conditioned rules are
+  /// one-shot session choices; one stored on a checkout would keep ending chats created weeks
+  /// later for a condition nobody chose. `ProjectStore.setCurfewRule(_:forProjectID:)` refuses
+  /// both. A record carrying one anyway decodes rather than costing the checkout, and the chain
+  /// falls through it to the standing window.
   var curfewRule: CurfewRule?
 
   /// Whether this is the scratchpad — the one folder Threading owns itself, for chats that are

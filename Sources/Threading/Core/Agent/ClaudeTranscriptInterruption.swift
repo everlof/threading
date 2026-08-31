@@ -43,7 +43,7 @@ struct ClaudeTurnInterruption: Equatable, Sendable {
 /// This is the fourth instance of that one shape, and the second of it Claude has.
 /// `ClaudeTranscriptUsageLimit` covers the refusal whose reason is the spent allowance,
 /// `ClaudeTranscriptTurnRefusal` covers the request that failed outright,
-/// `CodexTranscriptInterruption` covers the same Escape on the other runtime, and this covers the
+/// `CodexTranscriptTurnBoundary` covers the same Escape on the other runtime, and this covers the
 /// Escape here. All four close the same hole: a reported session whose last turn boundary never
 /// arrived.
 ///

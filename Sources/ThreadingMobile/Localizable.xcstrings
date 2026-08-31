@@ -1135,6 +1135,17 @@
         }
       }
     },
+    "Account initials" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontoinitialer"
+          }
+        }
+      }
+    },
     "Account · Usage" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1362,6 +1373,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agent"
+          }
+        }
+      }
+    },
+    "Agent finishes a turn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten avslutar en tur"
           }
         }
       }
@@ -2528,6 +2550,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fullständig"
+          }
+        }
+      }
+    },
+    "Completed turns" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avslutade turer"
           }
         }
       }
@@ -4013,6 +4046,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Söker efter bilagor…"
+          }
+        }
+      }
+    },
+    "Finished its turn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avslutade sin tur"
           }
         }
       }
@@ -8732,6 +8776,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa tangentbordet"
+          }
+        }
+      }
+    },
+    "Show on session usage controls" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visa i sessionens användningskontroller"
           }
         }
       }

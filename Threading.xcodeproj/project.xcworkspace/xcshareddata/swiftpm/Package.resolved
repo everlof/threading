@@ -1,5 +1,5 @@
 {
-  "originHash" : "beebda8fe7d536c47d561e730c96d0eef3b2825f24896e91f6ef494937e75aec",
+  "originHash" : "928d64f220724f3e8029c7c3d7f19e5da0dbfa1aacd87dee0ca66cf97494042a",
   "pins" : [
     {
       "identity" : "nativediffkit",
@@ -51,7 +51,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/stasel/WebRTC.git",
       "state" : {
-        "revision" : "19aa8c1fc7120d50df987b7111f42d5024df3d54",
+        "revision" : "3e43fa9b8d149d2f8adb9bb1e53152cb955ec72b",
         "version" : "151.0.0"
       }
     }

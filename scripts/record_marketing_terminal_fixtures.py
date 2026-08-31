@@ -34,17 +34,18 @@ FIXTURE_DIRECTORY = REPOSITORY / "Sources/ThreadingMobile/TerminalFixtures"
 WORKSPACE = Path("/private/tmp/threading-marketing-tui")
 CLAUDE_SESSION_ID = "7ee72d66-0e50-4e5d-912b-96104c5919bd"
 FIXED_TIMESTAMP = "2026-08-30T12:00:00.000Z"
+GRID_COLUMNS = 62
 
 PROVIDERS = {
     "claude": {
         "binary": "claude",
-        "rows": 38,
+        "rows": 49,
         "settled_marker": b"recapture",
         "version_prefix": "Claude Code ",
     },
     "codex": {
         "binary": "codex",
-        "rows": 42,
+        "rows": 55,
         "settled_marker": b"Evidence assertions passed",
         "version_prefix": "codex-cli ",
     },
@@ -52,53 +53,78 @@ PROVIDERS = {
 
 
 CLAUDE_PROMPT = (
-    "Prepare the repeatable App Store capture flow and verify every checkpoint."
+    "Verify the App Store capture checkpoints."
 )
-CLAUDE_RESPONSE = """I’ll verify the fixture-backed capture path and its fixed video timeline.
+CLAUDE_INTRO = "I’ll verify the capture plan and tighten the replay checkpoints."
+CLAUDE_EDIT_PATH = WORKSPACE / "capture-plan.md"
+CLAUDE_OLD_CONTENT = """# App Store capture
 
-```diff
-- Crossfade static screenshots
-+ Begin in the draft and open its model picker
-+ Scroll Codex toward older output
-+ Finish on the Usage chart
-```
+Opening scene: Active terminal
+Terminal gesture: Scroll past the bottom
+Final scene: Settings
+Timeline: Best effort
+"""
+CLAUDE_NEW_CONTENT = """# App Store capture
+
+Opening scene: New Session draft
+Terminal gesture: Reveal earlier tool output
+Final scene: Daily Usage chart
+Timeline: Fixed 900-frame clock
+"""
+CLAUDE_RESPONSE = """Capture flow verified.
 
 Completed:
-- Recorded real Claude and Codex TUI fixtures
-- Seeded four mixed-provider sessions
-- Replayed one fixed-frame interaction clock
-- Verified Usage chart and provider palettes
+- Recorded the installed Claude and Codex TUIs
+- Seeded four chats across two providers and accounts
+- Replayed the exact 900-frame interaction clock
+- Verified the task strip, terminal palette, and Usage chart
 
-Every recapture replays local PTY bytes, so it is deterministic and spends no provider usage."""
+Every recapture replays local PTY bytes.
+The timing stays deterministic and spends no provider usage."""
 
 CODEX_PROMPT = "Verify the App Store capture flow."
-CODEX_RESPONSE = """Implemented and verified the repeatable capture flow.
+CODEX_RESPONSE = """The capture contract is now implemented and repeatable.
 
-## What changed
+- Draft opens first and uses the real model picker.
+- Codex reveals earlier tool and diff output naturally.
+- Claude keeps its task plan in shipping chrome.
+- Usage ends on the real daily provider chart.
 
-```diff
-- Begin on an already-open terminal
-+ Begin in the New Session draft
-+ Choose GPT-5.6 Sol · Extra High
-- Push the terminal past its bottom edge
-+ Scroll back toward earlier Codex output
-```
+Validation
 
-## Capture contract
-
-- The draft becomes the real fixture-backed chat.
-- Claude exposes its task plan through shipping chrome.
-- Usage ends on the daily provider chart.
-- Every theme follows the same 900-frame clock.
-
-## Validation
-
-✓ 5 product screenshots render at native scale
-✓ 900 video frames render at 30 fps
+✓ 5 product screenshots at native scale
+✓ 900 video frames at 30 fps
 ✓ Evidence assertions passed
 ✓ 0 provider calls during recapture
 
-The fixtures now exercise each provider’s own diff colors while remaining deterministic."""
+The reviewed PTY recording is deterministic across every theme."""
+
+CODEX_PATCH = """*** Begin Patch
+*** Update File: capture-notes.md
+@@
+-Status: Draft
+-Opening scene: Active terminal
+-Terminal gesture: Scroll past the bottom
+-Final scene: Settings
++Status: Ready for review
++Opening scene: New Session draft and model picker
++Terminal gesture: Reveal earlier tool output
++Final scene: Daily Usage chart
+@@
+-Theme timing: Best effort
++Theme timing: Fixed 900-frame clock at 30 fps
++Provider usage during recapture: 0 turns
+*** Add File: evidence/checkpoints.md
++# App Store checkpoints
++
++- [x] Four mixed-provider sessions
++- [x] Claude task progress
++- [x] Codex tool activity and file diff
++- [x] Keyboard and complete session menu
++- [x] Daily Usage chart
++
++All scenes use privacy-reviewed synthetic data.
+*** End Patch"""
 
 
 def _json_line(value: dict[str, Any]) -> str:
@@ -112,7 +138,17 @@ def _write_claude_session() -> Path:
     project = config / "projects" / "-private-tmp-threading-marketing-tui"
     project.mkdir(parents=True, exist_ok=True)
     user_id = "62987373-0c8f-4aa1-a50a-294f4b62e752"
-    assistant_id = "8c73f143-c624-410a-9ea3-984bc2b93bc0"
+    intro_id = "8c73f143-c624-410a-9ea3-984bc2b93bc0"
+    edit_id = "10cb918b-27bb-4cea-8a04-a5083ad136e4"
+    result_id = "11fb1d72-78de-4d05-820a-a09c6b97f113"
+    final_id = "13f26014-d319-4e08-8627-2c76db78340e"
+    edit_tool_id = "toolu_01_threading_marketing_edit"
+    usage = {
+        "input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "output_tokens": 0,
+    }
     common = {
         "isSidechain": False,
         "cwd": str(WORKSPACE),
@@ -124,7 +160,7 @@ def _write_claude_session() -> Path:
         {"type": "mode", "mode": "normal", "sessionId": CLAUDE_SESSION_ID},
         {
             "type": "permission-mode",
-            "permissionMode": "plan",
+            "permissionMode": "acceptEdits",
             "sessionId": CLAUDE_SESSION_ID,
         },
         {
@@ -146,17 +182,106 @@ def _write_claude_session() -> Path:
                 "type": "message",
                 "role": "assistant",
                 "model": "claude-fable-5",
+                "content": [{"type": "text", "text": CLAUDE_INTRO}],
+                "stop_reason": "tool_use",
+                "stop_sequence": None,
+                "usage": usage,
+            },
+            "uuid": intro_id,
+            "timestamp": FIXED_TIMESTAMP,
+        },
+        {
+            **common,
+            "parentUuid": intro_id,
+            "type": "assistant",
+            "message": {
+                "id": "msg_01_threading_marketing_fixture",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-fable-5",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": edit_tool_id,
+                        "name": "Edit",
+                        "input": {
+                            "replace_all": False,
+                            "file_path": str(CLAUDE_EDIT_PATH),
+                            "old_string": CLAUDE_OLD_CONTENT,
+                            "new_string": CLAUDE_NEW_CONTENT,
+                        },
+                        "caller": {"type": "direct"},
+                    }
+                ],
+                "stop_reason": "tool_use",
+                "stop_sequence": None,
+                "usage": usage,
+            },
+            "uuid": edit_id,
+            "timestamp": FIXED_TIMESTAMP,
+        },
+        {
+            **common,
+            "parentUuid": edit_id,
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": edit_tool_id,
+                        "content": f"The file {CLAUDE_EDIT_PATH} has been updated successfully.",
+                    }
+                ],
+            },
+            "toolUseResult": {
+                "filePath": str(CLAUDE_EDIT_PATH),
+                "oldString": CLAUDE_OLD_CONTENT,
+                "newString": CLAUDE_NEW_CONTENT,
+                "originalFile": CLAUDE_OLD_CONTENT,
+                "structuredPatch": [
+                    {
+                        "oldStart": 1,
+                        "oldLines": 6,
+                        "newStart": 1,
+                        "newLines": 6,
+                        "lines": [
+                            " # App Store capture",
+                            " ",
+                            "-Opening scene: Active terminal",
+                            "+Opening scene: New Session draft",
+                            "-Terminal gesture: Scroll past the bottom",
+                            "+Terminal gesture: Reveal earlier tool output",
+                            "-Final scene: Settings",
+                            "+Final scene: Daily Usage chart",
+                            "-Timeline: Best effort",
+                            "+Timeline: Fixed 900-frame clock",
+                        ],
+                    }
+                ],
+                "userModified": False,
+                "replaceAll": False,
+            },
+            "uuid": result_id,
+            "timestamp": FIXED_TIMESTAMP,
+            "userType": "external",
+            "entrypoint": "cli",
+        },
+        {
+            **common,
+            "parentUuid": result_id,
+            "type": "assistant",
+            "message": {
+                "id": "msg_02_threading_marketing_fixture",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-fable-5",
                 "content": [{"type": "text", "text": CLAUDE_RESPONSE}],
                 "stop_reason": "end_turn",
                 "stop_sequence": None,
-                "usage": {
-                    "input_tokens": 0,
-                    "cache_creation_input_tokens": 0,
-                    "cache_read_input_tokens": 0,
-                    "output_tokens": 0,
-                },
+                "usage": usage,
             },
-            "uuid": assistant_id,
+            "uuid": final_id,
             "timestamp": FIXED_TIMESTAMP,
         },
     ]
@@ -201,39 +326,12 @@ class _CodexFixtureHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         length = int(self.headers.get("content-length", "0"))
-        self.rfile.read(length)
+        request = json.loads(self.rfile.read(length))
         if not self.path.endswith("/responses"):
             self.send_error(404)
             return
-        self.server.requests.put(self.path)
-        response_id = "resp_threading_marketing_fixture"
-        body = _sse(
-            [
-                {"type": "response.created", "response": {"id": response_id}},
-                {
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "message",
-                        "role": "assistant",
-                        "id": "msg_threading_marketing_fixture",
-                        "content": [{"type": "output_text", "text": CODEX_RESPONSE}],
-                    },
-                },
-                {
-                    "type": "response.completed",
-                    "response": {
-                        "id": response_id,
-                        "usage": {
-                            "input_tokens": 0,
-                            "input_tokens_details": {"cached_tokens": 0},
-                            "output_tokens": 0,
-                            "output_tokens_details": {"reasoning_tokens": 0},
-                            "total_tokens": 0,
-                        },
-                    },
-                },
-            ]
-        )
+        self.server.requests.put(request)
+        body = _sse(self.server.events_for(request))
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("content-length", str(len(body)))
@@ -252,12 +350,76 @@ class _CodexFixtureHandler(BaseHTTPRequestHandler):
 class _CodexFixtureServer(ThreadingHTTPServer):
     def __init__(self) -> None:
         super().__init__(("127.0.0.1", 0), _CodexFixtureHandler)
-        self.requests: queue.Queue[str] = queue.Queue()
+        self.requests: queue.Queue[dict[str, Any]] = queue.Queue()
+        self.response_count = 0
 
     @property
     def base_url(self) -> str:
         host, port = self.server_address
         return f"http://{host}:{port}/v1"
+
+    def events_for(self, request: dict[str, Any]) -> list[dict[str, Any]]:
+        self.response_count += 1
+        response_id = f"resp_threading_marketing_fixture_{self.response_count}"
+        events: list[dict[str, Any]] = [
+            {"type": "response.created", "response": {"id": response_id}}
+        ]
+        if self.response_count == 1:
+            events.extend(
+                [
+                    {
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "reasoning",
+                            "id": "reasoning_threading_fixture",
+                            "summary": [
+                                {
+                                    "type": "summary_text",
+                                    "text": "Reviewing the capture timeline and fixture contract",
+                                }
+                            ],
+                            "encrypted_content": "dGhyZWFkaW5nLWZpeHR1cmU=",
+                        },
+                    },
+                    {
+                        "type": "response.output_item.done",
+                        "item": {
+                            "type": "custom_tool_call",
+                            "name": "apply_patch",
+                            "input": CODEX_PATCH,
+                            "call_id": "call_threading_fixture_patch",
+                        },
+                    },
+                ]
+            )
+        else:
+            events.append(
+                {
+                    "type": "response.output_item.done",
+                    "item": {
+                        "type": "message",
+                        "role": "assistant",
+                        "id": "msg_threading_marketing_fixture",
+                        "content": [{"type": "output_text", "text": CODEX_RESPONSE}],
+                    },
+                }
+            )
+        events.append(
+            {
+                "type": "response.completed",
+                "response": {
+                    "id": response_id,
+                    "usage": {
+                        "input_tokens": 0,
+                        "input_tokens_details": {"cached_tokens": 0},
+                        "output_tokens": 0,
+                        "output_tokens_details": {"reasoning_tokens": 0},
+                        "total_tokens": 0,
+                    },
+                },
+            }
+        )
+        return events
 
 
 def provider_version(provider: str) -> str:
@@ -300,6 +462,7 @@ def _terminal_response(chunk: bytes) -> bytes:
 def capture_pty(
     command: list[str],
     *,
+    columns: int,
     rows: int,
     environment: dict[str, str],
     settled_marker: bytes,
@@ -307,7 +470,7 @@ def capture_pty(
 ) -> bytes:
     pid, descriptor = pty.fork()
     if pid == 0:
-        size = struct.pack("HHHH", rows, 48, 0, 0)
+        size = struct.pack("HHHH", rows, columns, 0, 0)
         fcntl.ioctl(0, termios.TIOCSWINSZ, size)
         os.chdir(WORKSPACE)
         os.execvpe(command[0], command, environment)
@@ -421,6 +584,8 @@ def capture_pty(
 
 
 def record_claude() -> bytes:
+    WORKSPACE.mkdir(parents=True, exist_ok=True)
+    CLAUDE_EDIT_PATH.write_text(CLAUDE_OLD_CONTENT)
     session = _write_claude_session()
     environment = os.environ.copy()
     environment.update(
@@ -441,17 +606,29 @@ def record_claude() -> bytes:
                 "--settings",
                 '{"theme":"dark-ansi"}',
                 "--permission-mode",
-                "plan",
+                "acceptEdits",
             ],
+            columns=GRID_COLUMNS,
             rows=PROVIDERS["claude"]["rows"],
             environment=environment,
             settled_marker=PROVIDERS["claude"]["settled_marker"],
         )
     finally:
         session.unlink(missing_ok=True)
+        CLAUDE_EDIT_PATH.unlink(missing_ok=True)
 
 
 def record_codex() -> bytes:
+    (WORKSPACE / "evidence").mkdir(parents=True, exist_ok=True)
+    (WORKSPACE / "capture-notes.md").write_text(
+        "# App Store capture\n\n"
+        "Status: Draft\n"
+        "Opening scene: Active terminal\n"
+        "Terminal gesture: Scroll past the bottom\n"
+        "Final scene: Settings\n\n"
+        "Theme timing: Best effort\n"
+    )
+    (WORKSPACE / "evidence" / "checkpoints.md").unlink(missing_ok=True)
     server = _CodexFixtureServer()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -482,7 +659,7 @@ def record_codex() -> bytes:
                 "-a",
                 "never",
                 "-s",
-                "read-only",
+                "workspace-write",
                 "-c",
                 'model_provider="threading_fixture"',
                 "-c",
@@ -498,14 +675,25 @@ def record_codex() -> bytes:
                 "-c",
                 "plugins={}",
                 "-c",
+                "tui.show_tooltips=false",
+                "-c",
                 'model_reasoning_effort="xhigh"',
                 CODEX_PROMPT,
             ],
+            columns=GRID_COLUMNS,
             rows=PROVIDERS["codex"]["rows"],
             environment=environment,
             settled_marker=PROVIDERS["codex"]["settled_marker"],
         )
         server.requests.get(timeout=1)
+        second_request = server.requests.get(timeout=1)
+        if (
+            not second_request.get("input")
+            or "Status: Ready for review"
+            not in (WORKSPACE / "capture-notes.md").read_text()
+            or not (WORKSPACE / "evidence" / "checkpoints.md").is_file()
+        ):
+            raise RuntimeError("Codex fixture did not execute and return the synthetic patch")
         return payload
     finally:
         server.shutdown()
@@ -518,14 +706,16 @@ def fixture(provider: str, payload: bytes) -> dict[str, Any]:
     if provider == "claude":
         provenance = (
             f"Installed Claude Code {version} rendering of a synthetic saved session at "
-            "48 × 38 in safe mode with its built-in dark ANSI theme. The temporary session is "
+            f"{GRID_COLUMNS} × {PROVIDERS['claude']['rows']} in safe mode with its built-in "
+            "dark ANSI theme. The temporary session is "
             "deleted immediately after recording. "
             "Screenshot capture only replays these bytes and cannot spend provider usage."
         )
     else:
         provenance = (
-            f"Installed Codex {version} rendering a deterministic response from a "
-            "localhost-only fixture provider in an ephemeral MCP-free profile. Screenshot "
+            f"Installed Codex {version} rendering a deterministic patch and response at "
+            f"{GRID_COLUMNS} × {PROVIDERS['codex']['rows']} from a localhost-only fixture "
+            "provider in an ephemeral MCP-free profile and disposable workspace. Screenshot "
             "capture only replays these bytes and cannot spend provider usage."
         )
     return {
@@ -533,7 +723,7 @@ def fixture(provider: str, payload: bytes) -> dict[str, Any]:
         "kind": "threading-mobile-terminal-pty-fixture",
         "provider": provider,
         "providerVersion": version,
-        "columns": 48,
+        "columns": GRID_COLUMNS,
         "rows": PROVIDERS[provider]["rows"],
         "provenance": provenance,
         "payloadBase64": base64.b64encode(payload).decode(),
@@ -550,11 +740,19 @@ def validate(provider: str, payload: bytes) -> None:
         raise RuntimeError(f"{provider} recording contains a provider startup failure")
     codes = set(re.findall(rb"\x1b\[([0-9;:]*)m", payload))
     if provider == "claude":
+        if (
+            b"capture-plan.md" not in payload
+            or b"Added" not in payload
+            or b"removed" not in payload
+        ):
+            raise RuntimeError("Claude recording did not render its native Edit diff")
         if not any(code in payload for code in (b"\x1b[31m", b"\x1b[91m")):
             raise RuntimeError(f"Claude recording has no removed-line ANSI colour; SGR={codes}")
         if not any(code in payload for code in (b"\x1b[32m", b"\x1b[92m")):
             raise RuntimeError(f"Claude recording has no added-line ANSI colour; SGR={codes}")
     else:
+        if b"Edited" not in payload or b"capture-notes.md" not in payload:
+            raise RuntimeError("Codex recording did not render its native file-change block")
         rich_foregrounds = {code for code in codes if code.startswith(b"38;")}
         if len(rich_foregrounds) < 4:
             raise RuntimeError(

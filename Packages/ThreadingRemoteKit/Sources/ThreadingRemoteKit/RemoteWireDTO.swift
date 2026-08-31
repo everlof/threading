@@ -255,7 +255,7 @@ public enum RemoteLimitRecoveryPolicyDTO: Codable, Equatable, Sendable {
         case ("flagOnly", nil): self = .flagOnly
         case ("waitForReset", nil): self = .waitForReset
         case ("resumeOnBestAccount", nil): self = .resumeOnBestAccount
-        case ("resumeVia", .some(let accountID)) where !accountID.isEmpty:
+        case let ("resumeVia", .some(accountID)) where !accountID.isEmpty:
             self = .resumeVia(accountID: accountID)
         default:
             self = .unknown(action: action, accountID: accountID)
@@ -274,14 +274,14 @@ public enum RemoteLimitRecoveryPolicyDTO: Codable, Equatable, Sendable {
         case .waitForReset: return "waitForReset"
         case .resumeOnBestAccount: return "resumeOnBestAccount"
         case .resumeVia: return "resumeVia"
-        case .unknown(let action, _): return action
+        case let .unknown(action, _): return action
         }
     }
 
     public var accountID: String? {
         switch self {
-        case .resumeVia(let accountID): return accountID
-        case .unknown(_, let accountID): return accountID
+        case let .resumeVia(accountID): return accountID
+        case let .unknown(_, accountID): return accountID
         case .flagOnly, .waitForReset, .resumeOnBestAccount: return nil
         }
     }
@@ -328,7 +328,7 @@ public enum RemoteSessionActivity: RawRepresentable, Codable, Equatable, Hashabl
         case .awaitingUser: return "awaitingUser"
         case .needsAttention: return "needsAttention"
         case .limitReached: return "limitReached"
-        case .unknown(let rawValue): return rawValue
+        case let .unknown(rawValue): return rawValue
         }
     }
 
@@ -338,7 +338,7 @@ public enum RemoteSessionActivity: RawRepresentable, Codable, Equatable, Hashabl
     }
 
     public init(from decoder: Decoder) throws {
-        self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+        try self.init(rawValue: decoder.singleValueContainer().decode(String.self))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -540,12 +540,12 @@ public enum RemoteTerminalActivity: RawRepresentable, Codable, Equatable, Hashab
         case .dormant: return "dormant"
         case .idle: return "idle"
         case .working: return "working"
-        case .unknown(let rawValue): return rawValue
+        case let .unknown(rawValue): return rawValue
         }
     }
 
     public init(from decoder: Decoder) throws {
-        self.init(rawValue: try decoder.singleValueContainer().decode(String.self))
+        try self.init(rawValue: decoder.singleValueContainer().decode(String.self))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -898,7 +898,7 @@ public enum RemoteSessionRole: RemoteLosslessStringToken {
         switch self {
         case .chat: return "chat"
         case .manager: return "manager"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -964,7 +964,7 @@ public enum RemoteHostEndpointKind: RemoteLosslessStringToken {
         case .tailscale: return "tailscale"
         case .hosted: return "hosted"
         case .relay: return "relay"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -996,7 +996,7 @@ public enum RemoteHostEndpointIdentity: RemoteLosslessStringToken {
     public var rawValue: String {
         switch self {
         case .pinned: return "pinned"
-        case .unknown(let value): return value
+        case let .unknown(value): return value
         }
     }
 }
@@ -1839,7 +1839,8 @@ public enum RemoteReportScreenshotPolicy {
         guard let data = Data(base64Encoded: screenshot.jpegBase64, options: []),
               data.count >= 3,
               data.count <= PublicIssueReportPolicy.maximumScreenshotPreviewBytes,
-              data.starts(with: [0xff, 0xd8, 0xff]) else {
+              data.starts(with: [0xFF, 0xD8, 0xFF])
+        else {
             return nil
         }
         return data
@@ -1945,8 +1946,8 @@ public struct RemoteCreateSessionResponseDTO: Codable, Equatable, Sendable {
     public init(sessionID: String, me: RemoteMeDTO) {
         self.sessionID = sessionID
         self.me = me
-        self.session = nil
-        self.startup = nil
+        session = nil
+        startup = nil
     }
 
     public init(
@@ -1955,7 +1956,7 @@ public struct RemoteCreateSessionResponseDTO: Codable, Equatable, Sendable {
         startup: RemoteSessionStartupState
     ) {
         self.sessionID = sessionID
-        self.me = nil
+        me = nil
         self.session = session
         self.startup = startup
     }
@@ -2403,7 +2404,7 @@ public struct RemoteUpgradeRequiredDTO: Codable, Equatable, Sendable {
     public let message: String
 
     public init(update: RemoteUpdateTarget, serverProtocol: RemoteProtocolInfo = RemoteProtocolInfo(), message: String) {
-        self.error = "protocolMismatch"
+        error = "protocolMismatch"
         self.update = update
         self.serverProtocol = serverProtocol
         self.message = message
@@ -2414,7 +2415,7 @@ public struct RemoteUpgradeRequiredDTO: Codable, Equatable, Sendable {
 
 /// Sent once, immediately after a socket authenticates, describing the surface it is watching.
 public struct RemoteHelloDTO: Codable, Equatable, Sendable {
-    public let type: String        // "hello"
+    public let type: String // "hello"
     public let surface: RemoteSessionSurface
     public let capability: RemoteAdvertisedCapability
     public let cols: Int
@@ -2437,7 +2438,7 @@ public struct RemoteHelloDTO: Codable, Equatable, Sendable {
         terminalTheme: RemoteTerminalThemeDTO? = nil,
         features: [String]? = nil
     ) {
-        self.type = "hello"
+        type = "hello"
         self.surface = surface
         self.capability = capability
         self.cols = cols
@@ -2532,7 +2533,7 @@ public struct RemoteRunPlanUpdateDTO: Codable, Equatable, Sendable {
     public let plan: RemoteRunPlanSummaryDTO?
 
     public init(revision: Int, plan: RemoteRunPlanSummaryDTO?) {
-        self.type = "runPlan"
+        type = "runPlan"
         self.revision = revision
         self.plan = plan
     }
@@ -2546,7 +2547,7 @@ public struct RemoteRunPlanPageDTO: Codable, Equatable, Sendable {
     public let steps: [RemoteRunPlanStepDTO]
 
     public init(revision: Int, offset: Int, total: Int, steps: [RemoteRunPlanStepDTO]) {
-        self.type = "runPlanPage"
+        type = "runPlanPage"
         self.revision = revision
         self.offset = offset
         self.total = total
@@ -2561,7 +2562,7 @@ public struct RemoteThemeUpdateDTO: Codable, Equatable, Sendable {
     public let terminalTheme: RemoteTerminalThemeDTO
 
     public init(theme: RemoteThemeDTO, terminalTheme: RemoteTerminalThemeDTO) {
-        self.type = "theme"
+        type = "theme"
         self.theme = theme
         self.terminalTheme = terminalTheme
     }
@@ -2573,7 +2574,7 @@ public struct RemoteAppThemeUpdateDTO: Codable, Equatable, Sendable {
     public let theme: RemoteThemeDTO
 
     public init(theme: RemoteThemeDTO) {
-        self.type = "appTheme"
+        type = "appTheme"
         self.theme = theme
     }
 }
@@ -2595,7 +2596,7 @@ public struct RemoteMobileDiagnosticsCaptureRequestDTO: Codable, Equatable, Send
     public let screenshotPolicy: ScreenshotPolicy
 
     public init(requestID: String, screenshotPolicy: ScreenshotPolicy) {
-        self.type = "mobileDiagnosticsCaptureRequest"
+        type = "mobileDiagnosticsCaptureRequest"
         self.requestID = requestID
         self.screenshotPolicy = screenshotPolicy
     }
@@ -2681,6 +2682,7 @@ public struct RemoteMobileDiagnosticsCaptureUploadResponseDTO: Codable, Equatabl
         self.storedAt = storedAt
     }
 }
+
 /// A scoped session-catalogue change. Row-only mutations carry one already-authorised summary so
 /// clients can update in O(changed) work. Structural mutations leave both delta fields nil and
 /// ask the client to fetch its own authoritative `/api/me` snapshot.
@@ -2697,7 +2699,7 @@ public struct RemoteSessionsChangedDTO: Codable, Equatable, Sendable {
         terminal: RemoteProjectTerminalSummaryDTO? = nil,
         removedTerminalID: String? = nil
     ) {
-        self.type = "sessionsChanged"
+        type = "sessionsChanged"
         self.session = session
         self.removedSessionID = removedSessionID
         self.terminal = terminal
@@ -2725,7 +2727,7 @@ public struct RemoteWorkspaceChangedDTO: Codable, Equatable, Sendable {
         activityID: String? = nil,
         occurredAt: Double = Date().timeIntervalSince1970
     ) {
-        self.type = "workspaceChanged"
+        type = "workspaceChanged"
         self.kind = kind
         self.activityID = activityID
         self.occurredAt = occurredAt
@@ -2757,7 +2759,7 @@ public struct RemotePresenceDTO: Codable, Equatable, Identifiable, Sendable {
         state: RemotePresenceState,
         updatedAt: Double = Date().timeIntervalSince1970
     ) {
-        self.type = "presence"
+        type = "presence"
         self.presenceID = presenceID
         self.memberID = memberID
         self.displayName = displayName
@@ -2797,7 +2799,7 @@ public struct RemoteCollaborationParticipantsDTO: Codable, Equatable, Sendable {
     public let participants: [RemoteCollaborationParticipantDTO]
 
     public init(participants: [RemoteCollaborationParticipantDTO]) {
-        self.type = "collaborationParticipants"
+        type = "collaborationParticipants"
         self.participants = participants
     }
 }
@@ -2835,7 +2837,7 @@ public struct RemoteInputControlStateDTO: Codable, Equatable, Sendable {
         participants: [RemoteCollaborationParticipantDTO],
         revision: Int
     ) {
-        self.type = "inputControl"
+        type = "inputControl"
         self.mode = mode
         self.controllerID = controllerID
         self.controllerDisplayName = controllerDisplayName
@@ -2863,7 +2865,7 @@ public struct RemoteInputControlResultDTO: Codable, Equatable, Sendable {
     public let status: RemoteInputControlResultStatus
 
     public init(requestID: String, status: RemoteInputControlResultStatus) {
-        self.type = "inputControlResult"
+        type = "inputControlResult"
         self.requestID = requestID
         self.status = status
     }
@@ -2889,7 +2891,7 @@ public struct RemoteInputControlEventDTO: Codable, Equatable, Identifiable, Send
         targetDisplayName: String? = nil,
         createdAt: Double = Date().timeIntervalSince1970
     ) {
-        self.type = "inputControlEvent"
+        type = "inputControlEvent"
         self.id = id
         self.action = action
         self.actorID = actorID
@@ -2915,7 +2917,7 @@ public struct RemoteAttentionRequestResultDTO: Codable, Equatable, Sendable {
     public let status: RemoteAttentionRequestStatus
 
     public init(requestID: String, status: RemoteAttentionRequestStatus) {
-        self.type = "attentionResult"
+        type = "attentionResult"
         self.requestID = requestID
         self.status = status
     }
@@ -2944,7 +2946,7 @@ public struct RemoteAttentionEventDTO: Codable, Equatable, Identifiable, Sendabl
         note: String? = nil,
         createdAt: Double = Date().timeIntervalSince1970
     ) {
-        self.type = "attention"
+        type = "attention"
         self.id = id
         self.requestID = requestID
         self.senderID = senderID
@@ -2977,7 +2979,7 @@ public struct RemotePromptSubmissionResultDTO: Codable, Equatable, Sendable {
     public let status: RemotePromptSubmissionStatus
 
     public init(requestID: String, status: RemotePromptSubmissionStatus) {
-        self.type = "submitResult"
+        type = "submitResult"
         self.requestID = requestID
         self.status = status
     }
@@ -2995,7 +2997,7 @@ public struct RemoteTerminalInputProbeResultDTO: Codable, Equatable, Sendable {
     public let accepted: Bool
 
     public init(requestID: String, accepted: Bool) {
-        self.type = "inputProbeResult"
+        type = "inputProbeResult"
         self.requestID = requestID
         self.accepted = accepted
     }
@@ -3004,12 +3006,12 @@ public struct RemoteTerminalInputProbeResultDTO: Codable, Equatable, Sendable {
 /// The active PTY size. An interactive phone owns this grid while its terminal is visible;
 /// view-only clients follow it, just as they follow the Mac's grid when no controller is active.
 public struct RemoteResizeDTO: Codable, Equatable, Sendable {
-    public let type: String        // "resize"
+    public let type: String // "resize"
     public let cols: Int
     public let rows: Int
 
     public init(cols: Int, rows: Int) {
-        self.type = "resize"
+        type = "resize"
         self.cols = cols
         self.rows = rows
     }
@@ -3022,11 +3024,11 @@ public struct RemoteResizeDTO: Codable, Equatable, Sendable {
 /// a delayed ready frame from an earlier grid from revealing a newer hydration transaction.
 /// View-only clients do not lease a grid and therefore receive a boundary without an id.
 public struct RemoteTerminalReadyDTO: Codable, Equatable, Sendable {
-    public let type: String        // "terminalReady"
+    public let type: String // "terminalReady"
     public let requestID: String?
 
     public init(requestID: String? = nil) {
-        self.type = "terminalReady"
+        type = "terminalReady"
         self.requestID = requestID
     }
 }
@@ -3037,7 +3039,7 @@ public struct RemoteSessionStartingDTO: Codable, Equatable, Sendable {
     public let type: String
 
     public init() {
-        self.type = "sessionStarting"
+        type = "sessionStarting"
     }
 }
 
@@ -3050,17 +3052,17 @@ public struct RemoteSessionParkedDTO: Codable, Equatable, Sendable {
     public let type: String
 
     public init() {
-        self.type = "sessionParked"
+        type = "sessionParked"
     }
 }
 
 /// The terminal title changed after the initial hello (usually through OSC 0/2).
 public struct RemoteTitleDTO: Codable, Equatable, Sendable {
-    public let type: String        // "title"
+    public let type: String // "title"
     public let title: String
 
     public init(title: String) {
-        self.type = "title"
+        type = "title"
         self.title = title
     }
 }
@@ -3071,6 +3073,7 @@ public enum RemoteNotificationKind: String, Codable, CaseIterable, Sendable {
     case sharedSession
     case permissionRequest
     case agentQuestion
+    case turnCompleted
     case agentMessage
     case attentionRequest
 }
@@ -3191,7 +3194,7 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
         destination: RemoteNotificationDestinationDTO = .session,
         createdAt: Double = Date().timeIntervalSince1970
     ) {
-        self.type = "notification"
+        type = "notification"
         self.id = id
         self.kind = kind
         self.hostID = hostID
@@ -3236,6 +3239,9 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
 
 public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     public let deviceToken: String
+    /// Opaque recipient binding minted by the hosted service under this phone's device
+    /// credential. The Mac never needs the corresponding APNs token for hosted delivery.
+    public let hostedRegistrationID: String?
     public let environment: RemoteNotificationEnvironment
     public let enabledKinds: [RemoteNotificationKind]
     /// Kinds that may make sound on this device. Nil preserves the behavior of an older client;
@@ -3244,11 +3250,13 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
 
     public init(
         deviceToken: String,
+        hostedRegistrationID: String? = nil,
         environment: RemoteNotificationEnvironment,
         enabledKinds: [RemoteNotificationKind],
         soundEnabledKinds: [RemoteNotificationKind]? = nil
     ) {
         self.deviceToken = deviceToken
+        self.hostedRegistrationID = hostedRegistrationID
         self.environment = environment
         self.enabledKinds = enabledKinds
         self.soundEnabledKinds = soundEnabledKinds
@@ -3278,8 +3286,8 @@ public enum RemoteViewportRefusal: String, Codable, Sendable {
     case malformedSessionID
 
     /// The accepted grid. Stated here so the host and the client agree on one bound.
-    public static let columns = 20...240
-    public static let rows = 4...160
+    public static let columns = 20 ... 240
+    public static let rows = 4 ... 160
 }
 
 /// Stable failure vocabulary for the REST transport.
@@ -3344,14 +3352,14 @@ public enum RemoteRESTErrorCode: String, Codable, CaseIterable, Sendable {
 }
 
 public struct RemoteErrorDTO: Codable, Equatable, Sendable {
-    public let type: String        // "error"
+    public let type: String // "error"
     public let code: String
     /// A bounded machine token qualifying `code`, such as the guard clause that refused. It is
     /// optional because a host from before this field simply omits it.
     public let detail: String?
 
     public init(code: String, detail: String? = nil) {
-        self.type = "error"
+        type = "error"
         self.code = code
         self.detail = detail
     }
@@ -3364,12 +3372,12 @@ public struct RemoteErrorDTO: Codable, Equatable, Sendable {
 /// The session's mirror is ending. `update` is set only when the reason is a protocol mismatch,
 /// naming the side that must update.
 public struct RemoteEndedDTO: Codable, Equatable, Sendable {
-    public let type: String        // "ended"
+    public let type: String // "ended"
     public let reason: String
     public let update: RemoteUpdateTarget?
 
     public init(reason: String, update: RemoteUpdateTarget? = nil) {
-        self.type = "ended"
+        type = "ended"
         self.reason = reason
         self.update = update
     }
@@ -3534,7 +3542,7 @@ public struct RemoteConversationSnapshotDTO: Codable, Equatable, Sendable {
         revision: Int = 0,
         hasEarlier: Bool = false
     ) {
-        self.type = "conversation"
+        type = "conversation"
         self.rows = rows
         self.streamingText = streamingText
         self.canSend = canSend
@@ -3604,7 +3612,7 @@ public struct RemoteConversationDeltaDTO: Codable, Equatable, Sendable {
         permission: RemotePermissionRequestDTO? = nil,
         hasEarlier: Bool? = nil
     ) {
-        self.type = "conversationDelta"
+        type = "conversationDelta"
         self.baseRevision = baseRevision
         self.revision = revision
         self.appendedRows = appendedRows
@@ -3630,7 +3638,7 @@ public struct RemoteConversationPageDTO: Codable, Equatable, Sendable {
         beforeRowID: String?,
         hasEarlier: Bool
     ) {
-        self.type = "conversationPage"
+        type = "conversationPage"
         self.rows = rows
         self.beforeRowID = beforeRowID
         self.hasEarlier = hasEarlier
@@ -3672,7 +3680,7 @@ public struct RemotePermissionRequestDTO: Codable, Equatable, Identifiable, Send
         canDecide: Bool = true,
         unavailableReason: String? = nil
     ) {
-        self.type = "permission"
+        type = "permission"
         self.id = id
         self.toolName = toolName
         self.summary = summary

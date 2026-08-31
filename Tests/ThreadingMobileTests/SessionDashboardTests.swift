@@ -19,6 +19,31 @@ final class SessionDashboardTests: XCTestCase {
         XCTAssertEqual(SessionOrganization.type.title, "By type")
     }
 
+    /// An over-height UIKit menu has no dependable scroll gesture: the drag can dismiss it and
+    /// continue into a session row underneath. Every capability must therefore add content to a
+    /// short submenu, never another unbounded run of root rows.
+    func testDashboardMenuHasSixRootDestinationsWithEveryCapability() {
+        XCTAssertEqual(
+            MobileDashboardMenuDestination.available(
+                canManageSessions: true,
+                canManageThemes: true,
+                canReadUsage: true
+            ),
+            [.organize, .sessions, .appearance, .usage, .settings, .macs]
+        )
+    }
+
+    func testDashboardMenuOmitsOnlyCapabilityOwnedDestinations() {
+        XCTAssertEqual(
+            MobileDashboardMenuDestination.available(
+                canManageSessions: false,
+                canManageThemes: false,
+                canReadUsage: false
+            ),
+            [.organize, .settings, .macs]
+        )
+    }
+
     func testArchivedRowsUseArchiveChronologyAndIgnoreActiveListPinning() {
         let archivedFirst = RemoteSessionSummaryDTO(
             id: "first",
@@ -512,16 +537,82 @@ final class MobileDemoSceneTests: XCTestCase {
         for provider in MobileMarketingTerminalFixture.Provider.allCases {
             let fixture = try MobileMarketingTerminalFixture.load(provider)
             XCTAssertEqual(fixture.provider, provider.rawValue)
-            XCTAssertEqual(fixture.columns, 48)
+            XCTAssertEqual(fixture.columns, 62)
+            XCTAssertEqual(fixture.rows, provider == .claude ? 49 : 55)
+            XCTAssertGreaterThan(fixture.payload.count, 1_500)
             XCTAssertFalse(fixture.payload.isEmpty)
             XCTAssertTrue(fixture.payload.contains(0x1B))
+            let transcriptMarker = provider == .claude ? "Completed:" : "Validation"
+            XCTAssertTrue(fixture.payload.contains(Data(transcriptMarker.utf8)))
+            if provider == .claude {
+                XCTAssertTrue(fixture.payload.contains(Data("capture-plan.md".utf8)))
+                XCTAssertTrue(fixture.payload.contains(Data("Added".utf8)))
+                XCTAssertTrue(fixture.payload.contains(Data("removed".utf8)))
+                XCTAssertTrue(fixture.payload.contains(Data("\u{1B}[31m".utf8)))
+                XCTAssertTrue(fixture.payload.contains(Data("\u{1B}[32m".utf8)))
+            } else {
+                XCTAssertTrue(fixture.payload.contains(Data("Edited".utf8)))
+                XCTAssertTrue(fixture.payload.contains(Data("capture-notes.md".utf8)))
+                XCTAssertTrue(
+                    fixture.payload.contains(Data("\u{1B}[38;2;".utf8)),
+                    "the installed Codex renderer must contribute its real syntax palette"
+                )
+            }
+            XCTAssertFalse(fixture.payload.contains(Data("authentication rejected".utf8)))
+            XCTAssertFalse(fixture.payload.contains(Data("MCP client".utf8)))
             XCTAssertFalse(fixture.payload.contains(Data("/Users/".utf8)))
             XCTAssertFalse(fixture.payload.contains(Data("/home/".utf8)))
         }
+        XCTAssertEqual(
+            MobileMarketingTerminalFixture.provider(
+                marketingSessionID: "marketing-claude-session"
+            ),
+            .claude
+        )
+        XCTAssertEqual(
+            MobileMarketingTerminalFixture.provider(
+                marketingSessionID: "marketing-codex-session"
+            ),
+            .codex
+        )
+        XCTAssertNil(
+            MobileMarketingTerminalFixture.provider(marketingSessionID: "ordinary-session")
+        )
     }
 
     @MainActor
-    func testMarketingStoryHasOneProjectFourMixedChatsAndNoStandaloneTerminal() {
+    func testMarketingSessionNavigationReplaysTheReviewedPTYFixtureThroughTheDemoWire() throws {
+        let session = try XCTUnwrap(RemoteAppModel.marketingResponse.sessions.first {
+            $0.id == "marketing-claude-session"
+        })
+        let expected = try MobileMarketingTerminalFixture.load(.claude)
+        let connection = RemoteSessionConnection(
+            session: session,
+            client: RemoteClient(link: DemoExperience.link)
+        )
+        var received = Data()
+        connection.onTerminalOutput = { received.append($0) }
+
+        connection.connect()
+        defer { connection.disconnect(markEnded: false) }
+
+        XCTAssertEqual(connection.phase, .connected)
+        XCTAssertEqual(
+            Data(received.suffix(expected.payload.count)),
+            expected.payload,
+            "the connection's ordinary terminal reset may precede the reviewed replay"
+        )
+        XCTAssertTrue(connection.supportsFocusedInputControl)
+        XCTAssertEqual(connection.runPlan?.activeTitle, "Render theme variants")
+        XCTAssertEqual(connection.runPlanSteps.map(\.title), [
+            "Build deterministic provider fixtures",
+            "Capture five marketing checkpoints",
+            "Render theme variants",
+        ])
+    }
+
+    @MainActor
+    func testMarketingStoryHasOneProjectFourMixedChatsAndNoStandaloneTerminal() throws {
         let response = RemoteAppModel.marketingResponse
         XCTAssertEqual(response.newSessionCatalog?.projects.map(\.name), ["Threading"])
         XCTAssertEqual(response.sessions.count, 4)
@@ -533,6 +624,29 @@ final class MobileDemoSceneTests: XCTestCase {
         XCTAssertEqual(Set(response.sessions.map(\.state)), [
             .dormant, .idle, .needsAttention, .working,
         ])
+
+        let codexTerminal = try XCTUnwrap(response.sessions.first {
+            $0.id == "marketing-codex-session"
+        })
+        XCTAssertEqual(codexTerminal.accountID, "default")
+        XCTAssertNil(
+            codexTerminal.account,
+            "the standard Codex login should not add an account chip to its agent mark"
+        )
+    }
+
+    @MainActor
+    func testMarketingTerminalPaletteMatchesEverySelectedAppTheme() {
+        for appTheme in RemoteAppModel.demoCatalogThemes {
+            let terminal = RemoteAppModel.demoMarketingTerminalTheme(matching: appTheme)
+
+            XCTAssertEqual(terminal.id, "marketing-\(appTheme.id)-terminal")
+            XCTAssertEqual(terminal.background, appTheme.colors["ground"])
+            XCTAssertEqual(terminal.foreground, appTheme.colors["label"])
+            XCTAssertEqual(terminal.cursor, appTheme.colors["accent"])
+            XCTAssertEqual(terminal.selection, appTheme.colors["selection"])
+            XCTAssertEqual(terminal.ansi.count, 16)
+        }
     }
 
     @MainActor
@@ -660,6 +774,7 @@ final class MobileDemoSceneTests: XCTestCase {
             case .workspace: expected = ("workspace", .workspace)
             case .browserPrivate: expected = ("browser-private", .browserPrivate)
             case .attachments: expected = ("attachments", .attachments)
+            case .universalSearch: expected = ("universal-search", .universalSearch)
             case .attachmentDetailHTML:
                 expected = ("attachment-detail-html", .attachmentDetail(kind: .html))
             case .attachmentDetailImage:
@@ -743,10 +858,29 @@ final class MobileDemoSceneTests: XCTestCase {
         XCTAssertEqual(MobileDemoScene.resolve("terminal-key-editor"), .terminalKeyEditor)
     }
 
+    func testRecordedProviderPTYsKeepTheirCapturedGridWhileUsingInteractiveChrome() {
+        XCTAssertEqual(MobileDemoScene.recordedPTYFixtureIDs, [
+            "marketing-claude-tui",
+            "marketing-claude-usage-menu",
+            "marketing-codex-tui",
+        ])
+        XCTAssertFalse(TerminalViewRepresentable.usesLocalViewport(
+            capability: .interact,
+            replaysRecordedGrid: true
+        ))
+        XCTAssertTrue(TerminalViewRepresentable.usesLocalViewport(
+            capability: .interact,
+            replaysRecordedGrid: false
+        ))
+        XCTAssertFalse(TerminalViewRepresentable.usesLocalViewport(
+            capability: .view,
+            replaysRecordedGrid: false
+        ))
+    }
+
     /// The variable is spelled once, and every reader in the app goes through it.
     func testTheEnvironmentVariableIsSpelledOnce() {
         XCTAssertEqual(MobileDemoScene.environmentKey, "THREADING_MOBILE_DEMO")
-            case .universalSearch: expected = ("universal-search", .universalSearch)
     }
 }
 #endif

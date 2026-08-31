@@ -363,6 +363,23 @@ enum MobileUsageSeverity {
 
 // MARK: - Mobile Account Disc
 
+/// Device-local presentation of the alternate-login badge on a session's usage/action disc.
+///
+/// Account identity remains present in the menu and its accessibility content. This preference
+/// controls only the small visual badge layered over the navigation-bar item, where an initial or
+/// custom emoji competes with the provider mark and usage rings. It is deliberately opt-in.
+enum MobileSessionAccountBadgePreference {
+    static let key = "threading.mobile.session-actions.show-account-badge"
+    static let defaultValue = false
+
+    static func presentedAccount(
+        _ account: RemoteSessionAccountDTO?,
+        isEnabled: Bool
+    ) -> RemoteSessionAccountDTO? {
+        isEnabled ? account : nil
+    }
+}
+
 /// The account as a bar control: the runtime's mark on the toolbar's disc, ringed by how much
 /// of the account's allowance is used.
 ///

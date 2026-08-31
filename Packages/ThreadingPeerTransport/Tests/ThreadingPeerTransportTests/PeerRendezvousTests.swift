@@ -3,6 +3,29 @@ import XCTest
 @testable import ThreadingPeerTransport
 
 final class PeerRendezvousTests: XCTestCase {
+    func testCancelledReceiveTimeoutDoesNotRunItsExpiryAction() async {
+        let timeoutFired = TimeoutProbe()
+        let timeout = PeerRendezvousWebSocket.scheduleTimeout(after: 60) {
+            await timeoutFired.fire()
+        }
+
+        timeout.cancel()
+        await timeout.value
+
+        XCTAssertFalse(await timeoutFired.didFire())
+    }
+
+    func testReceiveTimeoutRunsItsExpiryActionAfterTheDeadline() async {
+        let timeoutFired = TimeoutProbe()
+        let timeout = PeerRendezvousWebSocket.scheduleTimeout(after: 0.001) {
+            await timeoutFired.fire()
+        }
+
+        await timeout.value
+
+        XCTAssertTrue(await timeoutFired.didFire())
+    }
+
     func testReadyEnvelopeRoundTripsOnlyBoundedICEConfiguration() throws {
         let now = Date()
         let server = try PeerIceServer(
@@ -149,5 +172,17 @@ final class PeerRendezvousTests: XCTestCase {
         XCTAssertThrowsError(try PeerControlPlaneBearer(
             String(repeating: "x", count: PeerControlPlaneBounds.maximumBearerBytes + 1)
         ))
+    }
+}
+
+private actor TimeoutProbe {
+    private var fired = false
+
+    func fire() {
+        fired = true
+    }
+
+    func didFire() -> Bool {
+        fired
     }
 }

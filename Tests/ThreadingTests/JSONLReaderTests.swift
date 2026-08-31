@@ -108,6 +108,27 @@ final class JSONLReaderTests: XCTestCase {
         XCTAssertEqual((found.first?["pad"] as? String)?.count, JSONLDefaults.chunkBytes * 2)
     }
 
+    /// Codex can put a complete tool result in one JSON record. A 22 MB record in the measured
+    /// corpus made the old chunk loop search its incomplete prefix again after every 64 KB read,
+    /// keeping the usage-index worker busy for minutes. Eight MiB is large enough to distinguish
+    /// that quadratic walk from a single pass while remaining a modest test fixture.
+    func testAMultiMegabyteRecordIsScannedOnceAcrossChunkBoundaries() throws {
+        let paddingBytes = 8 * 1024 * 1024
+        let record = #"{"id":"wide","pad":"\#(String(repeating: "x", count: paddingBytes))"}"#
+        let url = try write(record + "\n")
+        let started = Date()
+
+        let found = records(at: url)
+
+        XCTAssertEqual(found.first?["id"] as? String, "wide")
+        XCTAssertEqual((found.first?["pad"] as? String)?.count, paddingBytes)
+        XCTAssertLessThan(
+            Date().timeIntervalSince(started),
+            2,
+            "an 8 MiB record was rescanned as its chunks arrived"
+        )
+    }
+
     /// The same record read from the end, where the reassembly runs in the other direction.
     func testAnOversizedFinalRecordIsFoundFromTheEnd() throws {
         let url = try write(#"{"id":"first"}"# + "\n" + oversizedRecord(id: "last") + "\n")

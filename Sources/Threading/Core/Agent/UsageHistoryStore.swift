@@ -52,6 +52,7 @@ final class UsageHistoryStore {
     func record(_ usage: AccountUsage, for account: AgentAccount) {
         var persistedSamples: [UsageSample] = []
         var persistedResets: [UsageLimitResetEvent] = []
+        var curfewResets: [UsageLimitResetEvent] = []
         let accountName = AccountName.display(for: account)
         let source = sampleSource(for: account.provider, usageSource: usage.source)
 
@@ -88,10 +89,16 @@ final class UsageHistoryStore {
                     >= UsageHistoryDefaults.forcedInterval
                 guard moved || resetMoved || creditChanged || waited else { continue }
 
-                if let event = UsageLimitHistoryAnalysis.reset(between: last, and: sample),
-                   !resetEvents.contains(where: { $0.id == event.id }) {
-                    resetEvents.append(event)
-                    persistedResets.append(event)
+                if let event = UsageLimitHistoryAnalysis.curfewReset(
+                    between: last,
+                    and: sample
+                ) {
+                    curfewResets.append(event)
+                }
+                if let durable = UsageLimitHistoryAnalysis.reset(between: last, and: sample),
+                   !resetEvents.contains(where: { $0.id == durable.id }) {
+                    resetEvents.append(durable)
+                    persistedResets.append(durable)
                 }
             }
 
@@ -103,7 +110,9 @@ final class UsageHistoryStore {
         pruneEvents(now: usage.observedAt)
         persist(samples: persistedSamples, resets: persistedResets)
         if !persistedSamples.isEmpty {
-            NotificationCenter.default.post(UsageLimitHistoryDidChange())
+            NotificationCenter.default.post(UsageLimitHistoryDidChange(
+                resetEvents: curfewResets
+            ))
         }
     }
 
@@ -222,7 +231,9 @@ final class UsageHistoryStore {
                 }
             }
         }
-        NotificationCenter.default.post(UsageLimitHistoryDidChange())
+        NotificationCenter.default.post(UsageLimitHistoryDidChange(
+            resetEvents: prepared.resets
+        ))
     }
 
     private func merge(_ prepared: PreparedJournal) {

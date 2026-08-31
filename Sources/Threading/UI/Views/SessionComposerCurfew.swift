@@ -73,8 +73,25 @@ extension SessionComposerViewController {
         preferences: CurfewPreferences,
         now: Date
     ) -> CurfewResolution.Answer {
-        CurfewResolution.resolve(
-            session: chosenCurfewDeadline(preferences: preferences, now: now).map(CurfewRule.until),
+        let sessionRule: CurfewRule?
+        if case .untilUsageReset(let expectedAt, let windowID)? = selectedCurfew {
+            sessionRule = .untilUsageReset(
+                expectedAt: expectedAt,
+                armedAt: now,
+                accountID: AccountID(
+                    provider: selectedAgent,
+                    handle: selectedAccountHandle
+                ),
+                windowID: windowID
+            )
+        } else {
+            sessionRule = chosenCurfewDeadline(
+                preferences: preferences,
+                now: now
+            ).map(CurfewRule.until)
+        }
+        return CurfewResolution.resolve(
+            session: sessionRule,
             project: projectID
                 .flatMap { ProjectStore.shared.project(withID: $0) }?
                 .curfewRule,
@@ -98,6 +115,12 @@ extension SessionComposerViewController {
             // Tuesday's 04:00 would name a deadline before its own session began; the window is
             // read again when the session actually starts.
             selectedCurfew = .atQuietHours
+
+        case .untilUsageReset(let expectedAt, let windowID):
+            selectedCurfew = .untilUsageReset(
+                expectedAt: expectedAt,
+                windowID: windowID
+            )
 
         case .inherit:
             // "No curfew" and "Follow quiet hours" are the same answer from a draft: it says
@@ -149,6 +172,12 @@ extension SessionComposerViewController {
     /// the chip keeps its own title then rather than inventing times for a window nobody set.
     func curfewLadderSentence(now: Date = Date()) -> String? {
         let preferences = CurfewSettings.shared.preferences
+        if case .untilUsageReset(_, let windowID)? = selectedCurfew {
+            return L10n.format(
+                "Stops at the %@ window’s scheduled reset, or sooner if the provider resets that same window early.",
+                windowID
+            )
+        }
         guard let deadline = chosenCurfewDeadline(preferences: preferences, now: now) else {
             return nil
         }

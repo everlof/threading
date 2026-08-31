@@ -149,10 +149,17 @@ export async function revokeDeviceCredential(
     throw new HttpError(400, "invalidRequest", "Host or device ID is invalid");
   }
   await authorizeHostMutation(request, env, hostID);
-  await env.DB.prepare(
-    "UPDATE rendezvous_credentials SET revoked_at = ? "
-      + "WHERE host_id = ? AND device_id = ? AND kind = 'device' AND revoked_at IS NULL",
-  ).bind(Math.floor(Date.now() / 1000), hostID, deviceID).run();
+  const now = Math.floor(Date.now() / 1000);
+  await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE rendezvous_credentials SET revoked_at = ? "
+        + "WHERE host_id = ? AND device_id = ? AND kind = 'device' AND revoked_at IS NULL",
+    ).bind(now, hostID, deviceID),
+    env.DB.prepare(
+      "UPDATE push_registrations SET revoked_at = ?, updated_at = ? "
+        + "WHERE host_id = ? AND device_id = ? AND revoked_at IS NULL",
+    ).bind(now, now, hostID, deviceID),
+  ]);
   await disconnectDevice(hostID, deviceID, env);
   return new Response(null, { status: 204 });
 }
@@ -183,6 +190,10 @@ export async function revokeHost(
       "UPDATE rendezvous_credentials SET revoked_at = ? "
         + "WHERE host_id = ? AND revoked_at IS NULL",
     ).bind(now, hostID),
+    env.DB.prepare(
+      "UPDATE push_registrations SET revoked_at = ?, updated_at = ? "
+        + "WHERE host_id = ? AND revoked_at IS NULL",
+    ).bind(now, now, hostID),
   ]);
   await env.HOST_RENDEZVOUS.getByName(hostID).fetch("https://internal/disconnect-host", {
     method: "POST",
@@ -229,7 +240,9 @@ async function rotateHostCredential(
   now: number,
 ): Promise<Response> {
   const token = randomToken("th_host_");
-  const expiresAt = now + hostCredentialLifetimeSeconds;
+  const expiresAt = now + (
+    env.DEVELOPMENT_AUTH_MODE === "1" ? 24 * 60 * 60 : hostCredentialLifetimeSeconds
+  );
   await env.DB.batch([
     env.DB.prepare(
       "UPDATE rendezvous_credentials SET revoked_at = ? "

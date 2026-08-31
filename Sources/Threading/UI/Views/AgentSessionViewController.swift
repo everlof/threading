@@ -59,6 +59,9 @@ final class AgentSessionViewController: NSViewController {
     /// Set when the terminal is not yet large enough to start the process, so the launch
     /// can be retried from the size-change callback.
     private var pendingLaunchPlan: AgentLaunchPlan?
+    /// While the off-main process-table preflight decides whether another CLI owns this resume
+    /// identifier. It is also the duplicate-launch guard for clicks arriving before that answer.
+    private var externalResumePreflightID: UUID?
     private var identifierLaunchDate: Date?
 
     /// When this controller's current process started, for every launch rather than only the
@@ -411,6 +414,14 @@ final class AgentSessionViewController: NSViewController {
     /// `initialPrompt` opens the conversation and applies to a first launch only; the
     /// launcher drops it on resume, where the conversation already has an opening.
     func launch(initialPrompt: String? = nil) {
+        guard externalResumePreflightID == nil else { return }
+        continueLaunch(initialPrompt: initialPrompt, checksExternalOwner: true)
+    }
+
+    /// The main-actor half of launch. A successful external-owner check re-enters here with that
+    /// one check suppressed; every store and filesystem preflight is intentionally asked again
+    /// because the process-table read crossed an executor boundary.
+    private func continueLaunch(initialPrompt: String?, checksExternalOwner: Bool) {
         guard !isRunning else { return }
 
         // The last line before a PTY exists, which is where recovery's refusal has to be. The
@@ -432,14 +443,7 @@ final class AgentSessionViewController: NSViewController {
         // shell spends a process on a `cd` that cannot succeed; this also gives an existing row a
         // durable, actionable failure instead of an empty exit-code-1 report.
         if let refusal = ProjectLaunchPreflight.launchFailure(for: project) {
-            EventLog.shared.record(.session, "Refused agent launch", [
-                "session": sessionID.uuidString,
-                "cause": refusal.knownCause ?? "unrecognised"
-            ])
-            ProjectStore.shared.update(sessionID: sessionID) { stored in
-                stored.lastLaunchFailure = refusal
-            }
-            delegate?.agentSession(self, didExitWithCode: nil)
+            recordLaunchRefusal(refusal)
             return
         }
 
@@ -448,14 +452,22 @@ final class AgentSessionViewController: NSViewController {
         // built from here either fails the same way or quietly opens a different conversation.
         // Recording it as a launch failure is what makes the pane say so.
         if let refusal = AgentLauncher.resumeRefusal(for: agentSession, in: project) {
-            EventLog.shared.record(.session, "Refused agent launch", [
-                "session": sessionID.uuidString,
-                "cause": refusal.knownCause ?? "unrecognised"
-            ])
-            ProjectStore.shared.update(sessionID: sessionID) { stored in
-                stored.lastLaunchFailure = refusal
-            }
-            delegate?.agentSession(self, didExitWithCode: nil)
+            recordLaunchRefusal(refusal)
+            return
+        }
+
+        // Reading every process's argv is variable work supplied by the machine, not the row.
+        // The cheap process-table filter and the matching command-line reads therefore stay off
+        // the main actor. Only runtimes with a measured exclusive-resume contract enter here.
+        if checksExternalOwner,
+           agentSession.kind.supports(.detectableExternalResume),
+           let transcriptID = agentSession.resumeState.transcriptID
+        {
+            beginExternalResumePreflight(
+                executableName: agentSession.kind.executableName,
+                transcriptID: transcriptID,
+                initialPrompt: initialPrompt
+            )
             return
         }
 
@@ -477,6 +489,70 @@ final class AgentSessionViewController: NSViewController {
         DispatchQueue.main.async { [weak self] in
             self?.startIfTerminalIsSized()
         }
+    }
+
+    private func beginExternalResumePreflight(
+        executableName: String,
+        transcriptID: TranscriptID,
+        initialPrompt: String?
+    ) {
+        let requestID = UUID()
+        externalResumePreflightID = requestID
+        let rawTranscriptID = transcriptID.rawValue
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let owner = ExternalConversationPreflight.runningProcessID(
+                executableName: executableName,
+                transcriptID: rawTranscriptID
+            )
+
+            DispatchQueue.main.async {
+                guard let self, self.externalResumePreflightID == requestID else { return }
+                self.externalResumePreflightID = nil
+                guard !self.isRunning else { return }
+
+                // A migration or provider discovery could replace the id during the queue hop.
+                // The answer belongs only to the exact id it checked; restart every preflight for
+                // a different state rather than applying a stale refusal or skipping its owner.
+                guard ProjectStore.shared.session(withID: self.sessionID)?
+                    .resumeState.transcriptID?.rawValue == rawTranscriptID
+                else {
+                    self.continueLaunch(
+                        initialPrompt: initialPrompt,
+                        checksExternalOwner: true
+                    )
+                    return
+                }
+
+                if owner != nil {
+                    let transcriptPath = ProjectStore.shared.session(withID: self.sessionID)
+                        .flatMap { stored -> URL? in
+                            guard let project = ProjectStore.shared.project(
+                                forSessionID: self.sessionID
+                            ) else { return nil }
+                            return SessionTranscript.existingURL(for: stored, in: project)
+                        }?.path
+                    self.recordLaunchRefusal(ExternalConversationPreflight.launchFailure(
+                        kind: self.agentKind,
+                        transcriptPath: transcriptPath
+                    ))
+                    return
+                }
+
+                self.continueLaunch(initialPrompt: initialPrompt, checksExternalOwner: false)
+            }
+        }
+    }
+
+    private func recordLaunchRefusal(_ refusal: SessionLaunchFailure) {
+        EventLog.shared.record(.session, "Refused agent launch", [
+            "session": sessionID.uuidString,
+            "cause": refusal.knownCause ?? "unrecognised"
+        ])
+        ProjectStore.shared.update(sessionID: sessionID) { stored in
+            stored.lastLaunchFailure = refusal
+        }
+        delegate?.agentSession(self, didExitWithCode: nil)
     }
 
     /// Terminates the agent, leaving the terminal view in place showing its final output.

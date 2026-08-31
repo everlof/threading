@@ -4,8 +4,9 @@ import Foundation
 
 /// What a frozen `ScheduledCurfewPlan` means at the moment its session finally starts.
 ///
-/// A plan is a decision — *this* moment, or whenever quiet hours next begin — and the decision is
-/// what survives the wait. Turning it back into a deadline is therefore something that happens at
+/// A plan is a decision — *this* moment, whenever quiet hours next begin, or one named usage
+/// window's reset — and the decision is what survives the wait. Turning it back into a rule
+/// is therefore something that happens at
 /// fire time, against the clock and the settings in force then, and it can legitimately answer
 /// *nothing to arm*: a start that fired late has a wall-clock end that is already behind it, and a
 /// standing window the user switched off in the meantime names no moment at all.
@@ -28,6 +29,9 @@ enum ScheduledCurfewPlanResolution {
         /// Arm this session's curfew at this moment.
         case arm(Date)
 
+        /// Arm this exact window's boundary and any earlier material reset of the same window.
+        case armUsageReset(expectedAt: Date, windowID: String)
+
         /// The plan named an end that cannot be armed, and why.
         case skipped(Reason)
     }
@@ -47,7 +51,7 @@ enum ScheduledCurfewPlanResolution {
 
     // MARK: - Public Methods
 
-    /// The moment this plan ends its session, or the reason it ends nothing.
+    /// The rule this plan arms, or the reason it arms nothing.
     ///
     /// `atQuietHours` resolves to the **next** window's start rather than to the one `now` may
     /// already be standing inside, so the deadline is always ahead of the session that is about to
@@ -74,6 +78,10 @@ enum ScheduledCurfewPlanResolution {
                 return .skipped(.quietHoursNotConfigured)
             }
             return .arm(next.start)
+
+        case .untilUsageReset(let expectedAt, let windowID):
+            guard expectedAt > now else { return .skipped(.deadlineAlreadyPassed) }
+            return .armUsageReset(expectedAt: expectedAt, windowID: windowID)
         }
     }
 }

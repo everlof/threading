@@ -52,7 +52,10 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("transcriptInterruptedMessageRecord", .transcriptInterruptedMessageRecord),
             ("escapeInterruptsTerminalTurn", .escapeInterruptsTerminalTurn),
             ("inlineTerminalViewport", .inlineTerminalViewport),
-            ("checkoutScopedConversationStorage", .checkoutScopedConversationStorage)
+            ("checkoutScopedConversationStorage", .checkoutScopedConversationStorage),
+            ("lifecycleReportedTranscriptPath", .lifecycleReportedTranscriptPath),
+            ("lifecycleReportedWorkingDirectory", .lifecycleReportedWorkingDirectory),
+            ("detectableExternalResume", .detectableExternalResume)
         ]
 
         var seen: [Int: String] = [:]
@@ -87,6 +90,18 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
                 kind.supports(.inlineTerminalViewport),
                 kind == .codex,
                 "\(kind) inline terminal viewport contract drifted"
+            )
+        }
+    }
+
+    /// Codex is the runtime for which both halves were measured: its argv names the resumed id,
+    /// and a second owner is refused. A visible resume flag alone does not earn this capability.
+    func testOnlyCodexCanPreflightAnExternalResumeOwner() {
+        for kind in AgentKind.allCases {
+            XCTAssertEqual(
+                kind.supports(.detectableExternalResume),
+                kind == .codex,
+                "\(kind) external resume detection contract drifted"
             )
         }
     }

@@ -1,5 +1,5 @@
-import ThreadingRemoteKit
 import SwiftUI
+import ThreadingRemoteKit
 
 struct MobileSnoozeChoice: Identifiable {
     let id: String
@@ -12,7 +12,7 @@ enum MobileSnoozePresets {
         var result = [MobileSnoozeChoice(
             id: "hour",
             title: MobileL10n.string("In an hour"),
-            deadline: now.addingTimeInterval(3_600)
+            deadline: now.addingTimeInterval(3600)
         )]
         if let tomorrow = calendar.nextDate(
             after: now,
@@ -91,8 +91,8 @@ enum DashboardRowItem: Identifiable, Equatable {
     /// ever handed both the same UUID.
     var id: String {
         switch self {
-        case .chat(let session): return "chat:\(session.id)"
-        case .terminal(let terminal): return "terminal:\(terminal.id)"
+        case let .chat(session): return "chat:\(session.id)"
+        case let .terminal(terminal): return "terminal:\(terminal.id)"
         }
     }
 
@@ -160,7 +160,7 @@ enum MobileDashboardChrome {
             return MobileL10n.string("Not connected")
         case .connecting:
             switch progress {
-            case .tryingRoute(let kind, _, _, _):
+            case let .tryingRoute(kind, _, _, _):
                 return MobileL10n.string(
                     "Trying %@",
                     PairedRemoteHost.connectionLabelInSentence(forEndpointKind: kind)
@@ -177,6 +177,41 @@ enum MobileDashboardChrome {
                 "Connected · %@",
                 connectionLabel ?? MobileL10n.string("Direct")
             )
+        }
+    }
+}
+
+/// The dashboard's system menu is a directory, not the full contents of every directory.
+///
+/// UIKit does not give the app a reliable scrolling contract for an over-height `Menu`: a
+/// vertical drag can dismiss the menu and continue into the dashboard underneath it. Keep the
+/// root cardinality fixed while capabilities add or remove whole destinations; each destination
+/// owns either a short submenu or an existing virtualized surface, so no row depends on that
+/// private scroll path.
+enum MobileDashboardMenuDestination: CaseIterable, Hashable {
+    case organize
+    case sessions
+    case appearance
+    case usage
+    case settings
+    case macs
+
+    static func available(
+        canManageSessions: Bool,
+        canManageThemes: Bool,
+        canReadUsage: Bool
+    ) -> [Self] {
+        allCases.filter { destination in
+            switch destination {
+            case .sessions:
+                canManageSessions
+            case .appearance:
+                canManageThemes
+            case .usage:
+                canReadUsage
+            case .organize, .settings, .macs:
+                true
+            }
         }
     }
 }
@@ -205,7 +240,7 @@ struct MobileConnectionProgressPresentation: Equatable {
                 )
             )
 
-        case .tryingRoute(let kind, _, _, _):
+        case let .tryingRoute(kind, _, _, _):
             let label = PairedRemoteHost.connectionLabelInSentence(forEndpointKind: kind)
             return MobileConnectionProgressPresentation(
                 currentStep: Step(
@@ -264,188 +299,188 @@ struct MobileConnectionProgressCard: View {
 }
 
 #if DEBUG
-/// One authored transport checkpoint shared by the lab's body and navigation previews.
-/// The list is deliberately fixed: adding a real progress case makes the lab and its test ask how
-/// that case should look, without building a view for every endpoint or retry.
-enum MobileConnectionProgressLabStory: String, CaseIterable, Identifiable {
-    case checking
-    case direct
-    case fallback
-    case lastRoute
-    case loadingSessions
-    case retrying
+    /// One authored transport checkpoint shared by the lab's body and navigation previews.
+    /// The list is deliberately fixed: adding a real progress case makes the lab and its test ask how
+    /// that case should look, without building a view for every endpoint or retry.
+    enum MobileConnectionProgressLabStory: String, CaseIterable, Identifiable {
+        case checking
+        case direct
+        case fallback
+        case lastRoute
+        case loadingSessions
+        case retrying
 
-    static let defaultStory: Self = .fallback
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .checking: return MobileL10n.string("Checking routes")
-        case .direct: return MobileL10n.string("Direct · 1/3")
-        case .fallback: return MobileL10n.string("LAN · 2/3")
-        case .lastRoute: return MobileL10n.string("Tailscale · 3/3")
-        case .loadingSessions: return MobileL10n.string("Loading sessions")
-        case .retrying: return MobileL10n.string("Trying again…")
-        }
-    }
-
-    var progress: RemoteAppModel.ConnectionProgress {
-        switch self {
-        case .checking:
-            return .preparingRoutes
-        case .direct:
-            return .tryingRoute(
-                kind: RemoteHostEndpointKind.hosted,
-                previousKind: nil,
-                number: 1,
-                total: 3
-            )
-        case .fallback:
-            return .tryingRoute(
-                kind: RemoteHostEndpointKind.lan,
-                previousKind: RemoteHostEndpointKind.hosted,
-                number: 2,
-                total: 3
-            )
-        case .lastRoute:
-            return .tryingRoute(
-                kind: RemoteHostEndpointKind.tailscale,
-                previousKind: RemoteHostEndpointKind.lan,
-                number: 3,
-                total: 3
-            )
-        case .loadingSessions:
-            return .loadingSessions(routeKind: RemoteHostEndpointKind.lan)
-        case .retrying:
-            return .waitingToRetry(attempt: 1)
-        }
-    }
-
-    var navigationStatus: String {
-        MobileDashboardChrome.connectionStatus(
-            phase: .connecting,
-            connectionLabel: nil,
-            progress: progress
-        )
-    }
-}
-
-/// An interactive, DEBUG-only host for the two production connection-progress components.
-/// It is reachable from Settings > Developer and through the `connection-progress-lab` demo scene.
-struct MobileConnectionProgressLab: View {
-    private enum Surface: String, CaseIterable, Identifiable {
-        case both
-        case navigation
-        case body
+        static let defaultStory: Self = .fallback
 
         var id: String { rawValue }
 
         var title: String {
             switch self {
-            case .both: return MobileL10n.string("Both")
-            case .navigation: return MobileL10n.string("Navigation bar")
-            case .body: return MobileL10n.string("Body")
+            case .checking: return MobileL10n.string("Checking routes")
+            case .direct: return MobileL10n.string("Direct · 1/3")
+            case .fallback: return MobileL10n.string("LAN · 2/3")
+            case .lastRoute: return MobileL10n.string("Tailscale · 3/3")
+            case .loadingSessions: return MobileL10n.string("Loading sessions")
+            case .retrying: return MobileL10n.string("Trying again…")
             }
+        }
+
+        var progress: RemoteAppModel.ConnectionProgress {
+            switch self {
+            case .checking:
+                return .preparingRoutes
+            case .direct:
+                return .tryingRoute(
+                    kind: RemoteHostEndpointKind.hosted,
+                    previousKind: nil,
+                    number: 1,
+                    total: 3
+                )
+            case .fallback:
+                return .tryingRoute(
+                    kind: RemoteHostEndpointKind.lan,
+                    previousKind: RemoteHostEndpointKind.hosted,
+                    number: 2,
+                    total: 3
+                )
+            case .lastRoute:
+                return .tryingRoute(
+                    kind: RemoteHostEndpointKind.tailscale,
+                    previousKind: RemoteHostEndpointKind.lan,
+                    number: 3,
+                    total: 3
+                )
+            case .loadingSessions:
+                return .loadingSessions(routeKind: RemoteHostEndpointKind.lan)
+            case .retrying:
+                return .waitingToRetry(attempt: 1)
+            }
+        }
+
+        var navigationStatus: String {
+            MobileDashboardChrome.connectionStatus(
+                phase: .connecting,
+                connectionLabel: nil,
+                progress: progress
+            )
         }
     }
 
-    private static let hostName = "David’s MacBook Pro"
+    /// An interactive, DEBUG-only host for the two production connection-progress components.
+    /// It is reachable from Settings > Developer and through the `connection-progress-lab` demo scene.
+    struct MobileConnectionProgressLab: View {
+        private enum Surface: String, CaseIterable, Identifiable {
+            case both
+            case navigation
+            case body
 
-    @Environment(\.remoteTheme) private var theme
-    @State private var story = MobileConnectionProgressLabStory.defaultStory
-    @State private var surface = Surface.both
+            var id: String { rawValue }
 
-    private var freezesAnimatedComponents: Bool {
-        ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] != nil
-    }
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
-                VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
-                    Text("Connection progress")
-                        .font(.title2.bold())
-                        .foregroundStyle(theme.label)
-                    Text("Choose a connection step and see it in the dashboard card, the navigation bar, or both.")
-                        .font(.subheadline)
-                        .foregroundStyle(theme.secondaryLabel)
-                        .fixedSize(horizontal: false, vertical: true)
+            var title: String {
+                switch self {
+                case .both: return MobileL10n.string("Both")
+                case .navigation: return MobileL10n.string("Navigation bar")
+                case .body: return MobileL10n.string("Body")
                 }
+            }
+        }
 
-                ThemedRowGroup {
-                    pickerRow("State") {
-                        Picker("State", selection: $story) {
-                            ForEach(MobileConnectionProgressLabStory.allCases) { story in
-                                Text(story.title).tag(story)
-                            }
-                        }
-                    }
-                    ThemedRowDivider()
-                    pickerRow("Surface") {
-                        Picker("Surface", selection: $surface) {
-                            ForEach(Surface.allCases) { surface in
-                                Text(surface.title).tag(surface)
-                            }
-                        }
-                    }
-                }
+        private static let hostName = "David’s MacBook Pro"
 
-                if surface != .navigation {
-                    VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
-                        Text("Dashboard body")
-                            .font(.headline)
+        @Environment(\.remoteTheme) private var theme
+        @State private var story = MobileConnectionProgressLabStory.defaultStory
+        @State private var surface = Surface.both
+
+        private var freezesAnimatedComponents: Bool {
+            ProcessInfo.processInfo.environment["THREADING_MOBILE_UI_EVIDENCE_ID"] != nil
+        }
+
+        var body: some View {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
+                    VStack(alignment: .leading, spacing: MobileDesign.Spacing.tight) {
+                        Text("Connection progress")
+                            .font(.title2.bold())
                             .foregroundStyle(theme.label)
+                        Text("Choose a connection step and see it in the dashboard card, the navigation bar, or both.")
+                            .font(.subheadline)
+                            .foregroundStyle(theme.secondaryLabel)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    ThemedRowGroup {
+                        pickerRow("State") {
+                            Picker("State", selection: $story) {
+                                ForEach(MobileConnectionProgressLabStory.allCases) { story in
+                                    Text(story.title).tag(story)
+                                }
+                            }
+                        }
+                        ThemedRowDivider()
+                        pickerRow("Surface") {
+                            Picker("Surface", selection: $surface) {
+                                ForEach(Surface.allCases) { surface in
+                                    Text(surface.title).tag(surface)
+                                }
+                            }
+                        }
+                    }
+
+                    if surface != .navigation {
+                        VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
+                            Text("Dashboard body")
+                                .font(.headline)
+                                .foregroundStyle(theme.label)
+                                .padding(.horizontal, MobileDesign.Spacing.inset)
+                            MobileConnectionProgressCard(
+                                progress: story.progress,
+                                freezesMotion: freezesAnimatedComponents
+                            )
+                        }
+                    } else {
+                        Text("The navigation component is shown above. Choose another state to check its wording and transition.")
+                            .font(.footnote)
+                            .foregroundStyle(theme.secondaryLabel)
                             .padding(.horizontal, MobileDesign.Spacing.inset)
-                        MobileConnectionProgressCard(
-                            progress: story.progress,
-                            freezesMotion: freezesAnimatedComponents
+                    }
+                }
+                .padding(MobileDesign.Spacing.inset)
+            }
+            .background(theme.ground)
+            .navigationTitle(surface == .body ? "Component Lab" : "")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(theme.surface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                if surface != .body {
+                    ToolbarItem(placement: .principal) {
+                        MobileConnectionNavigationTitle(
+                            title: Self.hostName,
+                            status: story.navigationStatus,
+                            statusColor: theme.warning
                         )
                     }
-                } else {
-                    Text("The navigation component is shown above. Choose another state to check its wording and transition.")
-                        .font(.footnote)
-                        .foregroundStyle(theme.secondaryLabel)
-                        .padding(.horizontal, MobileDesign.Spacing.inset)
-                }
-            }
-            .padding(MobileDesign.Spacing.inset)
-        }
-        .background(theme.ground)
-        .navigationTitle(surface == .body ? "Component Lab" : "")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbarBackground(theme.surface, for: .navigationBar)
-        .toolbarBackground(.visible, for: .navigationBar)
-        .toolbar {
-            if surface != .body {
-                ToolbarItem(placement: .principal) {
-                    MobileConnectionNavigationTitle(
-                        title: Self.hostName,
-                        status: story.navigationStatus,
-                        statusColor: theme.warning
-                    )
                 }
             }
         }
-    }
 
-    private func pickerRow<Control: View>(
-        _ title: LocalizedStringKey,
-        @ViewBuilder control: () -> Control
-    ) -> some View {
-        HStack(spacing: MobileDesign.Spacing.medium) {
-            Text(title)
-                .foregroundStyle(theme.label)
-            Spacer(minLength: MobileDesign.Spacing.small)
-            control()
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .tint(theme.accent)
+        private func pickerRow<Control: View>(
+            _ title: LocalizedStringKey,
+            @ViewBuilder control: () -> Control
+        ) -> some View {
+            HStack(spacing: MobileDesign.Spacing.medium) {
+                Text(title)
+                    .foregroundStyle(theme.label)
+                Spacer(minLength: MobileDesign.Spacing.small)
+                control()
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .tint(theme.accent)
+            }
+            .padding(.horizontal, MobileDesign.Spacing.inset)
+            .padding(.vertical, MobileDesign.Spacing.small)
         }
-        .padding(.horizontal, MobileDesign.Spacing.inset)
-        .padding(.vertical, MobileDesign.Spacing.small)
     }
-}
 #endif
 
 /// The bounded, user-facing explanation for an owner dashboard that could not reach its Mac.
@@ -530,7 +565,7 @@ enum MobileConnectionRecoveryDisplay {
             return nil
         case .connecting:
             return current
-        case .offline(let failure):
+        case let .offline(failure):
             return MobileConnectionRecoveryPolicy.presentsFullRecovery(
                 for: failure,
                 attempt: attempt
@@ -601,10 +636,7 @@ struct SessionDashboard: View {
         SessionOrganization.project.rawValue
     @AppStorage("sessionDashboardTypeDirection") private var typeDirectionRaw =
         SessionTypeDirection.chatsFirst.rawValue
-    @State private var searchText = ""
     @State private var isConfirmingForget = false
-    @State private var themeError: String?
-    @State private var pendingThemeID: String?
     @State private var showsArchived = false
     @State private var showsSnoozed = false
     @State private var renamingSession: RemoteSessionSummaryDTO?
@@ -618,21 +650,26 @@ struct SessionDashboard: View {
     @State private var optimisticallyHiddenSessionIDs = Set<String>()
     @State private var surfaceChangeRequest: SurfaceChangeRequest?
     @State private var shareRequest: ShareChatRequest?
+    @State private var showsAppearance = false
     @State private var showsUsage = false
+    @State private var showsUniversalSearch = false
     /// Once disclosed, recovery stays put while the next automatic attempt runs. Clearing it on
     /// `.connecting` made the full card and the compact progress card replace each other on every
     /// backoff tick — the page-sized flicker this state deliberately prevents.
     @State private var disclosedConnectionFailure: RemoteConnectionFailure?
     private let projectName: String?
+    private let projectID: String?
     let openSettings: () -> Void
     let reportConnectionIssue: () -> Void
 
     init(
         projectName: String? = nil,
+        projectID: String? = nil,
         openSettings: @escaping () -> Void,
         reportConnectionIssue: @escaping () -> Void
     ) {
         self.projectName = projectName
+        self.projectID = projectID
         self.openSettings = openSettings
         self.reportConnectionIssue = reportConnectionIssue
     }
@@ -646,15 +683,16 @@ struct SessionDashboard: View {
     }
 
     private var showsDemoBanner: Bool {
-#if DEBUG
-        // This evidence fixture borrows demo data plumbing, but represents a real failed owner
-        // connection. Suppressing the demo disclaimer keeps the captured state truthful.
-        if let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey],
-           ["sessions-offline", "sessions-connecting"].contains(demoMode)
-            || MobileDemoFixture.isMarketing(demoMode) {
-            return false
-        }
-#endif
+        #if DEBUG
+            // This evidence fixture borrows demo data plumbing, but represents a real failed owner
+            // connection. Suppressing the demo disclaimer keeps the captured state truthful.
+            if let demoMode = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey],
+               ["sessions-offline", "sessions-connecting"].contains(demoMode)
+               || MobileDemoFixture.isMarketing(demoMode)
+            {
+                return false
+            }
+        #endif
         return model.isDemo
     }
 
@@ -665,31 +703,39 @@ struct SessionDashboard: View {
         let scoped = showsArchived ? all : all.filter {
             showsSnoozed ? $0.isSnoozed() : !$0.isSnoozed()
         }
-        let projectScoped = projectName.map { projectName in
-            scoped.filter { $0.projectName == projectName }
-        } ?? scoped
+        let projectScoped: [RemoteSessionSummaryDTO]
+        if let projectID {
+            projectScoped = scoped.filter {
+                $0.projectID == projectID
+                    || ($0.projectID == nil && $0.projectName == projectName)
+            }
+        } else if let projectName {
+            projectScoped = scoped.filter { $0.projectName == projectName }
+        } else {
+            projectScoped = scoped
+        }
         let visible = projectScoped.filter {
             !optimisticallyHiddenSessionIDs.contains($0.id)
                 && !model.archiveMutationSessionIDs.contains($0.id)
         }
-        let filtered = searchText.isEmpty ? visible : visible.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText)
-                || $0.projectName.localizedCaseInsensitiveContains(searchText)
-        }
-        return MobileSessionOrdering.sorted(filtered, archived: showsArchived)
+        return MobileSessionOrdering.sorted(visible, archived: showsArchived)
     }
 
     private var terminals: [RemoteProjectTerminalSummaryDTO] {
         guard !showsArchived, !showsSnoozed else { return [] }
         let all = model.me?.terminals ?? []
-        let scoped = projectName.map { name in
-            all.filter { $0.projectName == name }
-        } ?? all
-        let filtered = searchText.isEmpty ? scoped : scoped.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText)
-                || $0.projectName.localizedCaseInsensitiveContains(searchText)
+        let scoped: [RemoteProjectTerminalSummaryDTO]
+        if let projectID {
+            scoped = all.filter {
+                $0.projectID == projectID
+                    || ($0.projectID == nil && $0.projectName == projectName)
+            }
+        } else if let projectName {
+            scoped = all.filter { $0.projectName == projectName }
+        } else {
+            scoped = all
         }
-        return filtered.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
+        return scoped.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
     }
 
     private var groupedProjects: [DashboardProjectSection] {
@@ -806,13 +852,13 @@ struct SessionDashboard: View {
     }
 
     private var shouldOfferNotificationOnboarding: Bool {
-#if DEBUG
-        if MobileDemoFixture.isMarketing(
-            ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-        ) {
-            return false
-        }
-#endif
+        #if DEBUG
+            if MobileDemoFixture.isMarketing(
+                ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+            ) {
+                return false
+            }
+        #endif
         return notifications.shouldOfferOnboarding
     }
 
@@ -864,141 +910,151 @@ struct SessionDashboard: View {
 
     private var dashboardNavigation: some View {
         dashboardContent
-        .refreshable { await model.refresh() }
-        .searchable(
-            text: $searchText,
-            prompt: MobileL10n.string(
-                showsArchived ? "Search archived sessions" : "Search sessions and terminals"
-            )
-        )
-        .navigationTitle(navigationTitle)
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { dashboardToolbar }
-        .task(id: model.activeHostID) { await model.activateDashboard() }
-        .onChange(of: model.phase) { _, _ in
-            updateConnectionFailurePresentation()
-        }
-        .onChange(of: model.connectionRecoveryAttempt) { _, _ in
-            updateConnectionFailurePresentation()
-        }
-        .onChange(of: model.activeHostID) { _, _ in
-            disclosedConnectionFailure = nil
-        }
-        .onAppear {
-            updateConnectionFailurePresentation()
-#if DEBUG
-            if model.isDemo,
-               ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]?
-                .hasPrefix("usage") == true {
-                showsUsage = true
+            .refreshable { await model.refresh() }
+            .navigationTitle(navigationTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { dashboardToolbar }
+            .task(id: model.activeHostID) { await model.activateDashboard() }
+            .onChange(of: model.phase) { _, _ in
+                updateConnectionFailurePresentation()
             }
-#endif
-        }
+            .onChange(of: model.connectionRecoveryAttempt) { _, _ in
+                updateConnectionFailurePresentation()
+            }
+            .onChange(of: model.activeHostID) { _, _ in
+                disclosedConnectionFailure = nil
+            }
+            .onAppear {
+                updateConnectionFailurePresentation()
+                #if DEBUG
+                    if model.isDemo,
+                       ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]?
+                       .hasPrefix("usage") == true
+                    {
+                        showsUsage = true
+                    }
+                #endif
+            }
     }
 
     private var dashboardSheets: some View {
         dashboardNavigation
-        .sheet(item: $shareRequest) { request in
-            ShareChatSheet(
-                chatTitle: request.session.title,
-                isChatRunning: request.session.isAvailable,
-                mint: { role in try await mintShareLink(for: request.session, role: role) }
-            )
-            .mobileTheme(theme)
-        }
-        .sheet(isPresented: $showsUsage) {
-            if let link = model.activeHost?.link {
-                RemoteUsageDashboardView(link: link, isDemo: model.isDemo)
-                    .mobileTheme(theme)
+            .sheet(item: $shareRequest) { request in
+                ShareChatSheet(
+                    chatTitle: request.session.title,
+                    isChatRunning: request.session.isAvailable,
+                    mint: { role in try await mintShareLink(for: request.session, role: role) }
+                )
+                .mobileTheme(theme)
             }
-        }
+            .sheet(isPresented: $showsUsage) {
+                if let link = model.activeHost?.link {
+                    RemoteUsageDashboardView(link: link, isDemo: model.isDemo)
+                        .mobileTheme(theme)
+                }
+            }
+            .sheet(isPresented: $showsAppearance) {
+                NavigationStack {
+                    MacAppearanceSettingsView()
+                }
+                .mobileTheme(theme)
+            }
+            .sheet(isPresented: $showsUniversalSearch) {
+                NavigationStack {
+                    MobileUniversalSearchView(
+                        initialScope: universalSearchScope
+                    ) { route in
+                        model.navigationPath.append(route)
+                    }
+                }
+                .mobileTheme(theme)
+            }
+    }
+
+    private var universalSearchScope: MobileUniversalSearchScope {
+        guard let projectName else { return .everywhere }
+        if let projectID { return .project(id: projectID, name: projectName) }
+        let matches = model.me?.newSessionCatalog?.projects.filter { $0.name == projectName } ?? []
+        guard matches.count == 1, let project = matches.first else { return .everywhere }
+        return .project(id: project.id, name: project.name)
     }
 
     private var dashboardDialogs: some View {
         dashboardSheets
-        .themedConfirmationDialog(
-            MobileL10n.string(
-                "Forget %@?",
-                model.activeHost?.name ?? MobileL10n.string("this Mac")
-            ),
-            message:
-                "Its private link will be removed from this iPhone. "
-                + "You can pair it again from the Mac.",
-            isPresented: $isConfirmingForget,
-            actions: [
-                ThemedDialogAction(
-                    "Forget Mac",
-                    systemImage: "trash",
-                    role: .destructive
-                ) {
-                    guard let host = model.activeHost else { return }
-                    model.remove(host)
-                },
-                ThemedDialogAction("Cancel", role: .cancel),
-            ]
-        )
-        .themedConfirmationDialog(
-            surfaceChangeRequest.map {
+            .themedConfirmationDialog(
                 MobileL10n.string(
-                    "Show in %@?",
-                    surfaceTitle($0.surface, session: $0.session)
-                )
-            } ?? "Switch UI?",
-            message:
+                    "Forget %@?",
+                    model.activeHost?.name ?? MobileL10n.string("this Mac")
+                ),
+                message:
+                "Its private link will be removed from this iPhone. "
+                    + "You can pair it again from the Mac.",
+                isPresented: $isConfirmingForget,
+                actions: [
+                    ThemedDialogAction(
+                        "Forget Mac",
+                        systemImage: "trash",
+                        role: .destructive
+                    ) {
+                        guard let host = model.activeHost else { return }
+                        model.remove(host)
+                    },
+                    ThemedDialogAction("Cancel", role: .cancel),
+                ]
+            )
+            .themedConfirmationDialog(
+                surfaceChangeRequest.map {
+                    MobileL10n.string(
+                        "Show in %@?",
+                        surfaceTitle($0.surface, session: $0.session)
+                    )
+                } ?? "Switch UI?",
+                message:
                 "The agent restarts in the selected UI and resumes this same session. "
-                + "Work currently in progress is interrupted.",
-            isPresented: Binding(
-                get: { surfaceChangeRequest != nil },
-                set: { if !$0 { surfaceChangeRequest = nil } }
-            ),
-            actions: surfaceChangeActions(for: surfaceChangeRequest)
-        )
-        .themedAlert(
-            "Rename session",
-            message: "This name is shared with the Mac.",
-            isPresented: Binding(
-                get: { renamingSession != nil },
-                set: { if !$0 { renamingSession = nil } }
-            ),
-            textField: ThemedDialogTextField("Session name", text: $renameText),
-            actions: [
-                ThemedDialogAction("Cancel", role: .cancel) {
-                    renamingSession = nil
-                },
-                ThemedDialogAction("Rename") {
-                    guard let session = renamingSession else { return }
-                    renamingSession = nil
-                    mutate(session) { try await model.renameSession(session, to: renameText) }
-                },
-            ]
-        )
+                    + "Work currently in progress is interrupted.",
+                isPresented: Binding(
+                    get: { surfaceChangeRequest != nil },
+                    set: { if !$0 { surfaceChangeRequest = nil } }
+                ),
+                actions: surfaceChangeActions(for: surfaceChangeRequest)
+            )
+            .themedAlert(
+                "Rename session",
+                message: "This name is shared with the Mac.",
+                isPresented: Binding(
+                    get: { renamingSession != nil },
+                    set: { if !$0 { renamingSession = nil } }
+                ),
+                textField: ThemedDialogTextField("Session name", text: $renameText),
+                actions: [
+                    ThemedDialogAction("Cancel", role: .cancel) {
+                        renamingSession = nil
+                    },
+                    ThemedDialogAction("Rename") {
+                        guard let session = renamingSession else { return }
+                        renamingSession = nil
+                        mutate(session) { try await model.renameSession(session, to: renameText) }
+                    },
+                ]
+            )
     }
 
     private var dashboardAlerts: some View {
         dashboardDialogs
-        .themedAlert(
-            "Couldn’t change appearance",
-            message: themeError ?? "",
-            isPresented: Binding(
-                get: { themeError != nil },
-                set: { if !$0 { themeError = nil } }
-            ),
-            actions: [ThemedDialogAction("OK")]
-        )
-        .themedAlert(
-            "Remote action failed",
-            message: actionError ?? model.archiveMutationError ?? "",
-            isPresented: Binding(
-                get: { actionError != nil || model.archiveMutationError != nil },
-                set: {
-                    if !$0 {
-                        actionError = nil
-                        model.clearArchiveMutationFailure()
+            .themedAlert(
+                "Remote action failed",
+                message: actionError ?? model.archiveMutationError ?? "",
+                isPresented: Binding(
+                    get: { actionError != nil || model.archiveMutationError != nil },
+                    set: {
+                        if !$0 {
+                            actionError = nil
+                            model.clearArchiveMutationFailure()
+                        }
                     }
-                }
-            ),
-            actions: [ThemedDialogAction("OK")]
-        )
+                ),
+                actions: [ThemedDialogAction("OK")]
+            )
     }
 
     @ToolbarContentBuilder
@@ -1037,6 +1093,21 @@ struct SessionDashboard: View {
             )
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
+            if model.canUseUniversalSearch {
+                Button {
+                    showsUniversalSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .frame(
+                            width: MobileDesign.Size.compactControl,
+                            height: MobileDesign.Size.compactControl
+                        )
+                        .background(theme.controlResting, in: Circle())
+                }
+                .accessibilityLabel(MobileL10n.string("Search"))
+                .keyboardShortcut("f", modifiers: .command)
+            }
+
             NewSessionButton(
                 accessibilityLabel: projectName.map { MobileL10n.string("New session in %@", $0) }
                     ?? MobileL10n.string("New session")
@@ -1046,108 +1117,8 @@ struct SessionDashboard: View {
 
             if projectName == nil {
                 Menu {
-                    Section("Organize") {
-                        ForEach(SessionOrganization.allCases, id: \.rawValue) { option in
-                            Button {
-                                organizationRaw = option.rawValue
-                            } label: {
-                                Label(
-                                    option.title,
-                                    systemImage: organization == option
-                                        ? "checkmark"
-                                        : option.symbol
-                                )
-                            }
-                        }
-                    }
-
-                    if organization == .type {
-                        Section("Direction") {
-                            ForEach(SessionTypeDirection.allCases, id: \.rawValue) { option in
-                                Button {
-                                    typeDirectionRaw = option.rawValue
-                                } label: {
-                                    Label(
-                                        option.title,
-                                        systemImage: typeDirection == option
-                                            ? "checkmark"
-                                            : option.symbol
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    if model.canManageSessions {
-                        Section("Manage") {
-                            Button {
-                                showsArchived = false
-                                showsSnoozed.toggle()
-                            } label: {
-                                Label(
-                                    MobileL10n.string(showsSnoozed ? "Active sessions" : "Snoozed sessions"),
-                                    systemImage: showsSnoozed ? "tray" : "moon.zzz"
-                                )
-                            }
-                            Button {
-                                showsArchived.toggle()
-                                if showsArchived { showsSnoozed = false }
-                            } label: {
-                                Label(
-                                    MobileL10n.string(
-                                        showsArchived ? "Active sessions" : "Archived sessions"
-                                    ),
-                                    systemImage: showsArchived ? "tray" : "archivebox"
-                                )
-                            }
-                        }
-                    }
-
-                    if model.canManageThemes, let catalog = model.me?.themeCatalog {
-                        Menu {
-                            ForEach(catalog.appThemes, id: \.id) { option in
-                                Button {
-                                    chooseAppTheme(option.id)
-                                } label: {
-                                    if model.me?.theme?.id == option.id {
-                                        Label(option.name, systemImage: "checkmark")
-                                    } else {
-                                        Text(option.name)
-                                    }
-                                }
-                                .disabled(pendingThemeID != nil)
-                            }
-                        } label: {
-                            Label("Appearance", systemImage: "paintpalette")
-                        }
-                    }
-
-                    if model.canReadUsage {
-                        Button {
-                            showsUsage = true
-                        } label: {
-                            Label("Usage", systemImage: "chart.bar.xaxis")
-                        }
-                    }
-
-                    Button {
-                        openSettings()
-                    } label: {
-                        Label("Settings", systemImage: "gearshape")
-                    }
-
-                    Divider()
-                    Button {
-                        model.isPairing = true
-                    } label: {
-                        Label("Pair another Mac", systemImage: "qrcode.viewfinder")
-                    }
-                    if let host = model.activeHost {
-                        Button(role: .destructive) {
-                            isConfirmingForget = true
-                        } label: {
-                            Label("Forget \(host.name)", systemImage: "trash")
-                        }
+                    ForEach(dashboardMenuDestinations, id: \.self) { destination in
+                        dashboardMenuItem(destination)
                     }
                 } label: {
                     Image(systemName: "ellipsis")
@@ -1158,6 +1129,118 @@ struct SessionDashboard: View {
                         .background(theme.controlResting, in: Circle())
                 }
                 .accessibilityLabel(MobileL10n.string("Remote access options"))
+            }
+        }
+    }
+
+    private var dashboardMenuDestinations: [MobileDashboardMenuDestination] {
+        MobileDashboardMenuDestination.available(
+            canManageSessions: model.canManageSessions,
+            canManageThemes: model.canManageThemes,
+            canReadUsage: model.canReadUsage
+        )
+    }
+
+    @ViewBuilder
+    private func dashboardMenuItem(_ destination: MobileDashboardMenuDestination) -> some View {
+        switch destination {
+        case .organize:
+            Menu {
+                ForEach(SessionOrganization.allCases, id: \.rawValue) { option in
+                    Button {
+                        organizationRaw = option.rawValue
+                    } label: {
+                        Label(
+                            option.title,
+                            systemImage: organization == option ? "checkmark" : option.symbol
+                        )
+                    }
+                }
+                if organization == .type {
+                    Section("Direction") {
+                        ForEach(SessionTypeDirection.allCases, id: \.rawValue) { option in
+                            Button {
+                                typeDirectionRaw = option.rawValue
+                            } label: {
+                                Label(
+                                    option.title,
+                                    systemImage: typeDirection == option
+                                        ? "checkmark"
+                                        : option.symbol
+                                )
+                            }
+                        }
+                    }
+                }
+            } label: {
+                Label("Organize", systemImage: "arrow.up.arrow.down")
+            }
+
+        case .sessions:
+            Menu {
+                Button {
+                    showsArchived = false
+                    showsSnoozed.toggle()
+                } label: {
+                    Label(
+                        MobileL10n.string(
+                            showsSnoozed ? "Active sessions" : "Snoozed sessions"
+                        ),
+                        systemImage: showsSnoozed ? "tray" : "moon.zzz"
+                    )
+                }
+                Button {
+                    showsArchived.toggle()
+                    if showsArchived { showsSnoozed = false }
+                } label: {
+                    Label(
+                        MobileL10n.string(
+                            showsArchived ? "Active sessions" : "Archived sessions"
+                        ),
+                        systemImage: showsArchived ? "tray" : "archivebox"
+                    )
+                }
+            } label: {
+                Label("Sessions", systemImage: "tray.full")
+            }
+
+        case .appearance:
+            Button {
+                showsAppearance = true
+            } label: {
+                Label("Appearance", systemImage: "paintpalette")
+            }
+
+        case .usage:
+            Button {
+                showsUsage = true
+            } label: {
+                Label("Usage", systemImage: "chart.bar.xaxis")
+            }
+
+        case .settings:
+            Button {
+                openSettings()
+            } label: {
+                Label("Settings", systemImage: "gearshape")
+            }
+
+        case .macs:
+            Menu {
+                Button {
+                    model.isPairing = true
+                } label: {
+                    Label("Pair another Mac", systemImage: "qrcode.viewfinder")
+                }
+                if let host = model.activeHost {
+                    Button(role: .destructive) {
+                        isConfirmingForget = true
+                    } label: {
+                        Label("Forget \(host.name)", systemImage: "trash")
+                    }
+                }
+            } label: {
+                Label("Macs", systemImage: "laptopcomputer")
             }
         }
     }
@@ -1184,9 +1267,9 @@ struct SessionDashboard: View {
             mutate(session, optimisticallyHides: true) {
                 try await model.setArchived(false, for: session)
             }
-        case .snooze(let deadline):
+        case let .snooze(deadline):
             mutate(session) { try await model.setSnoozed(until: deadline, for: session) }
-        case .surface(let surface):
+        case let .surface(surface):
             guard surface != session.surface else { return }
             surfaceChangeRequest = .init(session: session, surface: surface)
         case .share:
@@ -1273,22 +1356,6 @@ struct SessionDashboard: View {
         }
     }
 
-    private func chooseAppTheme(_ id: String) {
-        guard pendingThemeID == nil else { return }
-        pendingThemeID = id
-        Task {
-            defer { pendingThemeID = nil }
-            do {
-                try await model.selectAppTheme(id)
-            } catch is CancellationError {
-                return
-            } catch {
-                MobileDiagnostics.logDegraded(.themeSelection, error: error)
-                themeError = error.localizedDescription
-            }
-        }
-    }
-
     private var navigationTitle: String {
         MobileDashboardChrome.title(
             projectName: projectName,
@@ -1314,8 +1381,8 @@ struct SessionDashboard: View {
         if let disclosedConnectionFailure { return disclosedConnectionFailure }
         guard let failure = model.phase.failure,
               MobileConnectionRecoveryPolicy.presentsFullRecovery(
-                for: failure,
-                attempt: model.connectionRecoveryAttempt
+                  for: failure,
+                  attempt: model.connectionRecoveryAttempt
               ) else { return nil }
         return failure
     }
@@ -1500,7 +1567,7 @@ struct SessionDashboard: View {
         case .openLocalNetworkSettings:
             guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
             openURL(url)
-        case .openUpdatePage(let url):
+        case let .openUpdatePage(url):
             openURL(url)
         }
     }
@@ -1534,8 +1601,8 @@ struct SessionDashboard: View {
                 MobileL10n.string(showsArchived
                     ? "Sessions you archive from your Mac or iPhone appear here."
                     : model.canManageSessions
-                        ? "Start one from this iPhone or your Mac."
-                        : "Start a Claude Code or Codex session on your Mac.")
+                    ? "Start one from this iPhone or your Mac."
+                    : "Start a Claude Code or Codex session on your Mac.")
             )
         )
         .frame(maxWidth: .infinity)
@@ -1577,7 +1644,7 @@ private struct MobileConnectionProgressStepTitle: UIViewRepresentable {
         Coordinator()
     }
 
-    func makeUIView(context: Context) -> MobileMorphingTitleLabel {
+    func makeUIView(context _: Context) -> MobileMorphingTitleLabel {
         MobileMorphingTitleLabel()
     }
 
@@ -1599,7 +1666,7 @@ private struct MobileConnectionProgressStepTitle: UIViewRepresentable {
         )
     }
 
-    static func dismantleUIView(_ view: MobileMorphingTitleLabel, coordinator: Coordinator) {
+    static func dismantleUIView(_: MobileMorphingTitleLabel, coordinator: Coordinator) {
         coordinator.stop()
     }
 
@@ -1760,14 +1827,14 @@ private struct DashboardRowGroup: View {
                             )
                         }
                         switch row {
-                        case .chat(let session):
+                        case let .chat(session):
                             SessionListItem(
                                 session: session,
                                 isArchived: isArchived,
                                 showsActions: showsActions,
                                 action: action
                             )
-                        case .terminal(let terminal):
+                        case let .terminal(terminal):
                             TerminalListItem(
                                 terminal: terminal,
                                 showsProjectName: showsProjectName

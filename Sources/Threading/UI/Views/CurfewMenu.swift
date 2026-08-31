@@ -28,6 +28,9 @@ enum CurfewMenu {
         /// End when quiet hours next begin. The date is what the menu named, so a caller that
         /// arms immediately has the moment and one that freezes a plan can store the *choice*.
         case atQuietHours(Date)
+        /// End at this exact window's scheduled boundary, or at an earlier proven reset of it.
+        /// A 5h or Spark reset cannot satisfy a 7d choice.
+        case untilUsageReset(expectedAt: Date, windowID: String)
         /// Never hold this session, whatever the standing window says.
         case exempt
         /// Say nothing of its own and follow whatever the scope above answers.
@@ -99,7 +102,11 @@ enum CurfewMenu {
         if !resets.isEmpty {
             entries.append(.separator)
             for preset in resets {
-                entries.append(.item(row(preset, onChoose: onChoose)))
+                entries.append(.item(resetRow(
+                    preset,
+                    resolved: resolved,
+                    onChoose: onChoose
+                )))
             }
         }
 
@@ -178,6 +185,8 @@ enum CurfewMenu {
                 "Until quiet hours (%@)",
                 ScheduledTimePresets.time(start, locale: locale)
             )
+        case .untilUsageReset(_, let windowID):
+            return L10n.format("Until the %@ window resets", windowID)
         }
     }
 
@@ -199,7 +208,9 @@ enum CurfewMenu {
     ) -> [ThemedMenuEntry] {
         var entries: [ThemedMenuEntry] = []
 
-        if resolved.scope == .session, let curfew = resolved.curfew {
+        if resolved.scope == .session,
+           resolved.condition == nil,
+           let curfew = resolved.curfew {
             entries.append(.item(ThemedMenuItem(
                 title: L10n.format(
                     "Ends at %@",
@@ -263,5 +274,36 @@ enum CurfewMenu {
         )
         if preset.anchor == .wallClock { item.titleDetail = preset.detail }
         return item
+    }
+
+    /// A usage end follows one named window, never whichever provider counter happens to move
+    /// first. Its scheduled boundary remains the latest end; matching provider evidence may
+    /// bring it forward, while a reset on another window cannot satisfy it.
+    private static func resetRow(
+        _ preset: ScheduledTimePreset,
+        resolved: CurfewResolution.Answer,
+        onChoose: @escaping (Choice) -> Void
+    ) -> ThemedMenuItem {
+        guard let windowID = preset.anchor.usageWindowID else {
+            return row(preset, onChoose: onChoose)
+        }
+        let isSelected: Bool
+        if case .usageReset(_, _, _, let selectedWindowID)? = resolved.condition {
+            isSelected = selectedWindowID == windowID
+        } else {
+            isSelected = false
+        }
+        return ThemedMenuItem(
+            title: preset.title,
+            help: L10n.string(
+                "Stops at this window’s scheduled reset, or sooner if the provider resets this same window early."
+            ),
+            subtitle: preset.detail,
+            representedValue: preset.id,
+            isSelected: isSelected,
+            onChoose: {
+                onChoose(.untilUsageReset(expectedAt: preset.date, windowID: windowID))
+            }
+        )
     }
 }

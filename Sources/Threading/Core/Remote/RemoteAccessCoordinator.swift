@@ -91,7 +91,6 @@ enum RemoteSharePreparationError: LocalizedError, Equatable {
 /// server and its selected HTTPS transports, and publishes statuses other views can render.
 @MainActor
 final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostCommanding {
-
     static let shared = RemoteAccessCoordinator(
         ownerDeviceStore: defaultOwnerDeviceStore(),
         appSettings: AppSettings.shared
@@ -198,7 +197,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             isAvailable: { [weak hostedPushService] in
                 hostedPushService?.canSendHostedPush == true
             },
-            send: { [weak hostedPushService] event, token, environment, playsSound in
+            send: { [weak hostedPushService] event, registrationID, playsSound in
                 guard let hostedPushService else {
                     return RemoteAPNSDeliveryResult(
                         statusCode: nil,
@@ -208,8 +207,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 }
                 return await hostedPushService.sendHostedPush(
                     event: event,
-                    deviceToken: token,
-                    environment: environment,
+                    registrationID: registrationID,
                     playsSound: playsSound
                 )
             }
@@ -299,7 +297,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 let report = transcriptUsage.report
                 let isBuilding = transcriptUsage.isBuilding
                 let snapshot = await usageHistory.loadSnapshot(
-                    since: now.addingTimeInterval(-90 * 86_400),
+                    since: now.addingTimeInterval(-90 * 86400),
                     now: now
                 )
                 let preparation = Task.detached(priority: .utility) {
@@ -320,7 +318,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             usageLimit: { seriesID, days in
                 let now = Date()
                 let snapshot = await usageHistory.loadSnapshot(
-                    since: now.addingTimeInterval(-90 * 86_400),
+                    since: now.addingTimeInterval(-90 * 86400),
                     now: now
                 )
                 let preparation = Task.detached(priority: .utility) {
@@ -400,7 +398,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// The `tailscale` door, with its addresses in the order the pairing code picks between them.
     var tailscaleDoorState: RemoteAccessDoorState {
         let state = listenerStatus.state(of: .tailscale)
-        guard case .bound(let bindings) = state else { return state }
+        guard case let .bound(bindings) = state else { return state }
         return .bound(Self.orderedBindings(
             bindings,
             primaryInterfaceName: Self.primaryInterfaceName()
@@ -420,7 +418,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// The `lan` door, with its addresses in the order the pairing code picks between them.
     var thisNetworkDoorState: RemoteAccessDoorState {
         let state = listenerStatus.state(of: .lan)
-        guard case .bound(let bindings) = state else { return state }
+        guard case let .bound(bindings) = state else { return state }
         return .bound(Self.orderedBindings(
             bindings,
             primaryInterfaceName: Self.primaryInterfaceName()
@@ -460,7 +458,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     func issueHostedDeviceCredential(deviceID: String) async throws
-        -> RemoteHostedDeviceCredentialDTO {
+        -> RemoteHostedDeviceCredentialDTO
+    {
         guard let serviceURL = hostedService.serviceURL else {
             throw PeerControlPlaneError.invalidEndpoint
         }
@@ -471,7 +470,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 hostID: issued.hostID,
                 deviceID: issued.deviceID,
                 credential: credential,
-                expiresAt: issued.expiresAt.timeIntervalSince1970 * 1_000
+                expiresAt: issued.expiresAt.timeIntervalSince1970 * 1000
             )
         }
     }
@@ -720,7 +719,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// The local browser pairing door for this launch. The bootstrap bearer stays in the
     /// fragment and is exchanged for a device-bound credential before any session is returned.
     var localURL: URL? {
-        guard case .listening(let port) = status, let pairingBootstrapToken else { return nil }
+        guard case let .listening(port) = status, let pairingBootstrapToken else { return nil }
         var components = URLComponents()
         components.scheme = "http"
         components.host = RemoteAccessDefaults.host
@@ -764,7 +763,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         }
         if let hostedPairingLink,
            hostedPairingLink.bootstrapToken == pairingBootstrapToken,
-           !hostedPairingLink.isExpired {
+           !hostedPairingLink.isExpired
+        {
             return hostedPairingLink.scannablePayload
         }
         return pairingLink?.scannablePayload
@@ -926,7 +926,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             return .failure(refusal)
         }
         guard let invitationToken = Self.randomToken(),
-              let url = invitationURL(token: invitationToken) else {
+              let url = invitationURL(token: invitationToken)
+        else {
             return .failure(.remoteAccessUnavailable)
         }
         let id = UUID().uuidString.lowercased()
@@ -1093,7 +1094,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             guard var shares = sessionShares[sessionID],
                   let index = shares.firstIndex(where: {
                       $0.invitationToken == token && $0.expiresAt > Date()
-                  }) else {
+                  })
+            else {
                 continue
             }
 
@@ -1394,7 +1396,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     func revokeLink(_ shareID: String, in sessionID: SessionID) -> Bool {
         guard var shares = sessionShares[sessionID],
               let index = shares.firstIndex(where: { $0.id == shareID }),
-              shares[index].invitationToken != nil else {
+              shares[index].invitationToken != nil
+        else {
             return false
         }
         shares[index].invitationToken = nil
@@ -1419,7 +1422,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         guard persistGuestShares(candidate) else { return }
         sessionShares = candidate
         for share in removed {
-            for member in share.members.values { revoke(member) }
+            for member in share.members.values {
+                revoke(member)
+            }
         }
         sharingChanged()
         ThreadingLogger.remote.notice(
@@ -1434,7 +1439,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         guard persistTerminalGuestShares(candidate) else { return }
         terminalShares = candidate
         for share in removed {
-            for member in share.members.values { revoke(member) }
+            for member in share.members.values {
+                revoke(member)
+            }
         }
         sharingChanged()
         ThreadingLogger.remote.notice(
@@ -1503,7 +1510,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                     members: members
                 )
                 switch scope {
-                case .session(let sessionID):
+                case let .session(sessionID):
                     restored[sessionID, default: []].append(share)
                     if let invitation {
                         DispatchQueue.main.asyncAfter(
@@ -1512,7 +1519,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                             self?.expireInvitation(token: invitation, sessionID: sessionID)
                         }
                     }
-                case .projectTerminal(let terminalID):
+                case let .projectTerminal(terminalID):
                     restoredTerminals[terminalID, default: []].append(share)
                     if let invitation {
                         DispatchQueue.main.asyncAfter(
@@ -1648,8 +1655,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private func expireInvitation(token: String, sessionID: SessionID) {
         guard var shares = sessionShares[sessionID],
               let index = shares.firstIndex(where: {
-            $0.invitationToken == token
-        })
+                  $0.invitationToken == token
+              })
         else { return }
         // A consumed invitation has already been cleared and its membership intentionally
         // survives the invitation timer.
@@ -1671,7 +1678,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     private func expireInvitation(token: String, terminalID: TerminalID) {
         guard var shares = terminalShares[terminalID],
-              let index = shares.firstIndex(where: { $0.invitationToken == token }) else {
+              let index = shares.firstIndex(where: { $0.invitationToken == token })
+        else {
             return
         }
         let share = shares.remove(at: index)
@@ -1679,7 +1687,9 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         candidate[terminalID] = shares.isEmpty ? nil : shares
         guard persistTerminalGuestShares(candidate) else { return }
         terminalShares = candidate
-        for member in share.members.values { revoke(member) }
+        for member in share.members.values {
+            revoke(member)
+        }
         sharingChanged()
     }
 
@@ -1705,7 +1715,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     func setTailscaleDoorEnabled(_ enabled: Bool) {
         guard appSettings.remoteAccessTailscaleEnabled != enabled else { return }
         appSettings.remoteAccessTailscaleEnabled = enabled
-        guard case .listening(let port) = status else {
+        guard case let .listening(port) = status else {
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
             return
         }
@@ -1733,7 +1743,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     func setTailscaleServeEnabled(_ enabled: Bool) {
         guard appSettings.remoteAccessTailscaleServeEnabled != enabled else { return }
         appSettings.remoteAccessTailscaleServeEnabled = enabled
-        guard case .listening(let port) = status else {
+        guard case let .listening(port) = status else {
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
             return
         }
@@ -1747,7 +1757,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     }
 
     func retryTransports() {
-        guard case .listening(let port) = status else { return }
+        guard case let .listening(port) = status else { return }
         startTransports(port: port)
     }
 
@@ -1838,11 +1848,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         server.start(configuration: listenerConfiguration()) { [weak self] outcome in
             guard let self else { return }
             guard self.lifecycleGeneration == generation,
-                  appSettings.remoteAccessEnabled else {
+                  appSettings.remoteAccessEnabled
+            else {
                 return
             }
             switch outcome {
-            case .listening(let port):
+            case let .listening(port):
                 self.notifications.activate(authorizations: self.notificationAuthorizations)
                 self.status = .listening(port: port)
                 self.applyListenerStatus(self.server.listenerStatus)
@@ -1858,7 +1869,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 MacRemoteDiagnostics.record(.hostListenerStarted, fields: [
                     .transport: RemoteAccessDoor.loopback.rawValue,
                 ])
-            case .failed(let failure):
+            case let .failed(failure):
                 self.stopTransports()
                 self.notifications.reset()
                 self.authority.removeAll()
@@ -2012,12 +2023,14 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         guard hostedPairingTask == nil,
               hostedService.canIssueDeviceCredentials,
               case .listening = status,
-              let bootstrap = pairingBootstrapToken else {
+              let bootstrap = pairingBootstrapToken
+        else {
             return
         }
         if let current = hostedPairingLink,
            current.bootstrapToken == bootstrap,
-           !current.isExpired {
+           !current.isExpired
+        {
             return
         }
 
@@ -2032,7 +2045,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 guard !Task.isCancelled,
                       generation == transportGeneration,
                       pairingBootstrapToken == bootstrap,
-                      let serviceURL = hostedService.serviceURL else {
+                      let serviceURL = hostedService.serviceURL
+                else {
                     return
                 }
                 let link = issued.credential.withValue { credential in
@@ -2099,7 +2113,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         tailscaleServeStatus = state
 
         switch state {
-        case .connected(let origin):
+        case let .connected(origin):
             // The published origin, hashed. Without it a report says a transport connected and
             // cannot say to what, which is exactly the question a browser failing against a dead
             // address needs answered.
@@ -2112,12 +2126,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 "transport": Self.serveTransportName,
                 "origin": digest,
             ])
-        case .unavailable(let reason):
+        case let .unavailable(reason):
             var fields: [RemoteDiagnosticField: String] = [
                 .transport: Self.serveTransportName,
                 .reason: Self.diagnosticReason(reason),
             ]
-            if case .actionRequired(let issue, _) = tailscale.readiness {
+            if case let .actionRequired(issue, _) = tailscale.readiness {
                 fields[.code] = issue.rawValue
             }
             MacRemoteDiagnostics.record(
@@ -2185,7 +2199,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
 
     /// Security.framework owns this operation; it does not touch coordinator state and is safe
     /// to pass through the nonisolated entropy seam without erasing a main-actor function type.
-    nonisolated private static func secureEntropy(bytes count: Int) -> [UInt8]? {
+    private nonisolated static func secureEntropy(bytes count: Int) -> [UInt8]? {
         var bytes = [UInt8](repeating: 0, count: count)
         let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
         guard status == errSecSuccess else {

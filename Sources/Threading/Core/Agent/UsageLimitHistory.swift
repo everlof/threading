@@ -84,6 +84,37 @@ enum UsageLimitHistoryAnalysis {
         between previous: UsageSample,
         and current: UsageSample
     ) -> UsageLimitResetEvent? {
+        classifiedReset(
+            between: previous,
+            and: current,
+            acceptsUncreditedCodexProviderClear: false
+        )
+    }
+
+    /// Evidence strong enough to stop a curfew explicitly armed for this exact series.
+    ///
+    /// The durable dashboard remains conservative about an early Codex clear with no spent
+    /// banked credit because a rolling window can resemble one in long history. A curfew already
+    /// names the exact account and window, though, and its job is deliberately stricter: when
+    /// that selected counter sharply clears and its provider boundary advances, stop before the
+    /// newly restored capacity is spent. The event is delivered live but is not added to the
+    /// historical reset ledger unless `reset(between:and:)` also accepts it.
+    static func curfewReset(
+        between previous: UsageSample,
+        and current: UsageSample
+    ) -> UsageLimitResetEvent? {
+        classifiedReset(
+            between: previous,
+            and: current,
+            acceptsUncreditedCodexProviderClear: true
+        )
+    }
+
+    private static func classifiedReset(
+        between previous: UsageSample,
+        and current: UsageSample,
+        acceptsUncreditedCodexProviderClear: Bool
+    ) -> UsageLimitResetEvent? {
         guard previous.limitSeriesID == current.limitSeriesID,
               let seriesID = previous.limitSeriesID,
               current.at > previous.at,
@@ -110,10 +141,14 @@ enum UsageLimitHistoryAnalysis {
         if earlyBy <= UsageLimitHistoryDefaults.scheduledResetTolerance {
             cause = .scheduled
         } else if runtimeID == AgentKind.codex.rawValue {
-            guard let before = previous.resetCreditCount,
-                  let after = current.resetCreditCount,
-                  after < before else { return nil }
-            cause = .bankedCredit
+            if let before = previous.resetCreditCount,
+               let after = current.resetCreditCount,
+               after < before {
+                cause = .bankedCredit
+            } else {
+                guard acceptsUncreditedCodexProviderClear else { return nil }
+                cause = .provider
+            }
         } else {
             cause = .provider
         }
