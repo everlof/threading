@@ -1648,6 +1648,12 @@ final class DisplayPaneController: NSViewController {
     return tabsBySession[sessionID] ?? []
   }
 
+  /// The already-materialized catalogue only. Search snapshots use this rather than restoring
+  /// every dormant session's controller tree merely to discover browser metadata.
+  func loadedTabs(for sessionID: SessionID) -> [DisplayTab] {
+    tabsBySession[sessionID] ?? []
+  }
+
   func activeTabID(for sessionID: SessionID) -> UUID? {
     restoreIfNeeded(sessionID)
     return activeTab(for: sessionID)?.id

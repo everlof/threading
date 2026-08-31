@@ -121,6 +121,9 @@ enum AppCommands {
         static let renameSession = "session.rename"
         static let closeTab = "tab.close"
         static let find = "edit.find"
+        static let findNext = "edit.findNext"
+        static let findPrevious = "edit.findPrevious"
+        static let searchEverywhere = "edit.searchEverywhere"
         static let openIn = "session.openIn"
         static let commandPalette = "app.commandPalette"
 
@@ -203,6 +206,15 @@ enum AppCommands {
                    isEditable: true, scope: .session),
         AppCommand(id: ID.find, group: .session, title: "Find…",
                    defaultShortcut: KeyboardShortcut(key: "f", modifiers: .command), isEditable: true),
+        AppCommand(id: ID.findNext, group: .session, title: "Find Next",
+                   defaultShortcut: KeyboardShortcut(key: "g", modifiers: .command), isEditable: true),
+        AppCommand(id: ID.findPrevious, group: .session, title: "Find Previous",
+                   defaultShortcut: KeyboardShortcut(key: "g", modifiers: [.command, .shift]),
+                   isEditable: true),
+        AppCommand(id: ID.searchEverywhere, group: .session, title: "Search Everywhere…",
+                   detail: "Searches projects, sessions, terminals, commands, settings and indexed history.",
+                   defaultShortcut: KeyboardShortcut(key: "f", modifiers: [.command, .shift]),
+                   isEditable: true),
         AppCommand(id: ID.commandPalette, group: .view, title: "Command Palette…",
                    detail: "Searches every currently available app and extension command.",
                    defaultShortcut: KeyboardShortcut(key: "p", modifiers: [.command, .shift]), isEditable: true),

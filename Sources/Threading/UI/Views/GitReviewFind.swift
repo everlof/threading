@@ -161,6 +161,10 @@ extension GitReviewViewController {
         }
     }
 
+    func repeatFind(backwards: Bool) {
+        find(findBar.queryField.stringValue, backwards: backwards)
+    }
+
     func hideFind() {
         guard isFindBarVisible else { return }
         isFindBarVisible = false

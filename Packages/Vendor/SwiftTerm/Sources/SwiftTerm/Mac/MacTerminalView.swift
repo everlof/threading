@@ -3156,6 +3156,16 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         }
     }
 
+    /// Host-facing counterparts to AppKit's menu-item actions. Embedders can route their own
+    /// command plane without manufacturing a synthetic `NSMenuItem` merely to carry a tag.
+    public func showFindInterface() {
+        showFindBar(prefillSelection: true)
+    }
+
+    public func repeatFind(backwards: Bool) {
+        performFind(next: !backwards)
+    }
+
     private func setFindPasteboardFromSelection() {
         let selected = withTerminal { _ in
             selection.getSelectedText()

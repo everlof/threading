@@ -370,6 +370,7 @@
 				ThreadingMobile/MobileThemeCacheStore.swift,
 				ThreadingMobile/MobileThemeEnvironment.swift,
 				ThreadingMobile/MobileThemedPopoverChrome.swift,
+				ThreadingMobile/MobileUniversalSearchView.swift,
 				ThreadingMobile/MobileWorkingOrbView.swift,
 				ThreadingMobile/MobileWorkspaceActivity.swift,
 				ThreadingMobile/PairingView.swift,

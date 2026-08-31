@@ -1,13 +1,11 @@
 # Universal Search
 
-**Status:** Draft — researched 2026-08-29, concretized 2026-08-31; implementation has not
-started.
+**Status:** Implemented baseline — researched 2026-08-29 and shipped in-tree 2026-08-31.
 
-This draft preserves the SEARCH investigation that previously existed only in a Codex session.
-It turns that recommendation into an implementation plan and adds the missing remote-iOS product,
-transport, navigation, privacy and performance contracts. It is a plan, not a durable architecture
-record; when implementation starts, re-check every seam below against the current code and move
-shipping decisions into the relevant files under `docs/architecture/`.
+This document preserves the SEARCH investigation, the competitor/user-feedback synthesis, and the
+resulting product contract. It also records the implementation now present on macOS, the remote
+host, and iPhone. Sections explicitly labelled future work remain design constraints rather than
+claims about the shipping baseline.
 
 ## Decision
 
@@ -31,6 +29,29 @@ It never downloads or maintains a second transcript or repository index.
 
 Literal and structured retrieval ship first. Semantic retrieval does not silently participate in
 ordinary ranking; a later **Ask History** mode may be evaluated separately.
+
+## Shipping baseline (2026-08-31)
+
+- macOS has contextual `Command-F` for Browser, Git Review and terminal buffers, a themed
+  window-local universal overlay elsewhere, `Command-Shift-F` for Everywhere, and `Command-G` /
+  `Command-Shift-G` match navigation.
+- View, Project and Everywhere scopes share typed query, hit, locator, coverage, cap and ranking
+  contracts. Structured navigation, conversations, file paths, attachment/browser metadata,
+  registries and cancellable on-demand project text are bounded providers.
+- Conversation text uses a rebuildable FTS5 index and resolves to a bounded, exact historical
+  window. File and project-text hits resolve through contained, bounded readers.
+- The remote host exposes owner-only `POST /api/search` and `POST /api/search/resolve`. Opaque
+  locators are process-, device-, generation- and time-bound, single-use, and reauthorized on
+  resolve.
+- iPhone has a native, themed, lazy Search destination from the dashboard and session menu, visible
+  scopes, external-keyboard shortcuts, exact project/session/terminal/archive routes, and bounded
+  read-only conversation/file landings. The local terminal has its own SwiftTerm-backed find bar.
+- Empty universal queries show recent destinations. Result caps and partial/indexing coverage are
+  visible. Query text is not retained as search history.
+
+Not in this baseline: pagination beyond the visible bounded result set, filter chips/completion UI,
+offline catalogue search, Git Review remote landing, two-direction paging beyond the centered
+conversation/file window, semantic retrieval, and the stress/latency measurements listed below.
 
 ## Why this is one feature rather than a larger command palette
 
@@ -187,7 +208,7 @@ Default ordering inside each result group is:
 4. Metadata fuzzy match.
 5. Recency as a tie-breaker only.
 
-Supported filters are available as visible chips and as textual aliases:
+The parser ships these textual filters:
 
 - `type:conversation`, `type:file`, `type:command`, `type:session`;
 - `from:you`, `from:agent`;
@@ -196,9 +217,10 @@ Supported filters are available as visible chips and as textual aliases:
 - `before:`, `after:`;
 - quoted phrases and negative terms.
 
-Typing `from:` or `type:` offers completions. Choosing a chip writes the same textual form into
-the query so the search remains copyable and keyboard-operable. Unknown filters produce a visible
-query error; they do not degrade into surprising literal tokens.
+Unknown filters produce a visible query error; they do not degrade into surprising literal tokens.
+Visible chips and `from:` / `type:` completion are a follow-up presentation enhancement. When
+added, they must write the same textual form into the query so search remains copyable and fully
+keyboard-operable.
 
 Providers return a **score tier and deterministic keys**, not arbitrary incomparable floating
 scores. `SearchCoordinator` owns group order and tie-breaking. Once keyboard or VoiceOver
@@ -221,13 +243,13 @@ frame geometry. Implementing the shell requires updating the durable Find rule i
 [`window-chrome.md`](../architecture/window-chrome.md): View providers remain surface-owned, while
 the universal shell is a named window overlay that delegates matching and reveal to them.
 
-The shell has two layouts under one state model:
+The shipping presentation has two cooperating layouts under one semantic contract:
 
-- **View mode:** field, visible scope control, match count, Previous, Next and Close. A provider
-  that can enumerate meaningful matches may also show a short result list; Browser is not forced
-  to manufacture snippets merely to resemble transcript search.
-- **Project/Everywhere mode:** the same header above grouped virtualized results, provider
-  progress, visible caps and pagination.
+- **View mode:** the existing Browser, Git Review or terminal surface owns its compact field,
+  count, Previous, Next and Close behavior. Browser is not forced to manufacture snippets merely
+  to resemble transcript search.
+- **Project/Everywhere mode:** a themed universal overlay presents visible scope above grouped,
+  virtualized results, provider progress and visible caps.
 
 Escape closes Search and restores focus to the surface that opened it. Return opens/reveals the
 selected result; Command-G and Command-Shift-G navigate View matches. Changing scope preserves the
@@ -247,7 +269,8 @@ about Browser, Git Review, conversation and SwiftTerm cases. A provider states:
 
 The existing Browser and Git Review implementations adapt to it. SwiftTerm uses its public search
 helpers, but Threading does not ship the vendored `MacFindBarView` as product chrome. Native
-conversation search uses the shared historical locator service once it exists.
+conversation results use the shared historical locator service; a separate compact loaded-row
+View adapter remains future work.
 
 ## Remote iOS product design
 
@@ -256,9 +279,8 @@ semantic coordinator with a deliberately smaller result eligibility set.
 
 ### Entry points
 
-- The dashboard's current session-title filter is replaced by the universal Search destination.
-  An empty query can still present recent sessions immediately; typing searches the selected
-  scope rather than maintaining a second, look-alike filter contract.
+- The dashboard exposes the universal Search destination. An empty query presents recent
+  destinations immediately; typing searches the selected scope.
 - A session's existing trailing actions menu gains **Search**. It does not add another permanent
   toolbar glyph to the already constrained session title row.
 - Workspace destinations may expose Search through their existing action/menu chrome when View
@@ -284,7 +306,7 @@ themed row plates. If it crosses a sheet/hosting boundary, the complete theme cr
 - Switching scope preserves the query. Leaving Search discards it.
 - The scope control remains visible while results scroll.
 - When the Mac is unreachable, Project and Everywhere show an explicit connection requirement.
-  View may continue over content already present on the phone.
+  Only the currently mounted terminal's local View search continues without the Mac.
 
 The phone does not remember query history. It may remember the last chosen scope only within the
 current Search presentation; a later invocation derives its scope from context again.
@@ -297,12 +319,12 @@ A host result is eligible only when the paired iPhone has a native landing route
 |---|---|---|
 | Projects, active sessions and project terminals | Open the existing project/session/terminal route | Yes |
 | Archived session metadata | Open the Archived destination and reveal the row | Yes |
-| Active or archived conversation messages | Open a read-only or live native conversation window centered on the matched row | After historical landing slice |
-| Tool calls and errors represented as conversation rows | Same centered conversation landing | After historical landing slice |
+| Active or archived conversation messages | Open a bounded read-only native conversation window centered on the matched row | Yes |
+| Tool calls and errors represented as conversation rows | Same centered conversation landing | Yes |
 | Current mobile terminal scrollback | Search the local SwiftTerm mirror and reveal locally; never ask the Mac to pretend buffers match | Yes, View only |
-| Git Review paths, hunks and diff lines | Open Review at the exact file/hunk/line | After typed review locator ships |
-| Repository file paths | Open Files at the exact relative path | After typed file locator ships |
-| Repository text | Show bounded snippets only when Files can reveal the exact line/range | Later explicit provider |
+| Git Review paths, hunks and diff lines | Omitted until a typed mobile review locator ships | Deferred |
+| Repository file paths | Open a bounded read-only file window at the exact relative path | Yes |
+| Repository text | Open the same bounded file window centered on the exact line/range | Yes, explicit provider |
 | Attachment names and bounded metadata | Open the existing attachment preview by session and attachment ID | Yes |
 | Browser tab title and URL metadata | Open Browser Follow at the exact tab | Yes |
 | Browser page body | View search only when Browser Follow gains an honest host-backed match/reveal contract | Deferred |
@@ -332,15 +354,10 @@ state.
 
 ### Offline and degraded behavior
 
-The global index stays on the Mac. A disconnected phone may search:
-
-- its currently mounted terminal scrollback;
-- already loaded native-conversation rows;
-- the last bounded session/project catalogue only as an explicitly labelled **On This iPhone**
-  metadata fallback.
-
-It may not present cached snippets as complete Everywhere results. Reconnecting reruns the current
-query against the host; stale cached rows do not merge into the authoritative result groups.
+The global index stays on the Mac. In the shipping baseline a disconnected phone may search its
+currently mounted terminal scrollback. Project and Everywhere require the host and say so; cached
+snippets are never presented as complete results. An explicitly labelled **On This iPhone**
+catalogue fallback and loaded-conversation View search remain future work.
 
 An older Mac that does not advertise universal search keeps the existing dashboard filter and
 local surface search. The phone explains that broader search requires an updated Mac rather than
@@ -492,15 +509,15 @@ existing remote destinations.
 
 ### Routes
 
-Use additive REST routes rather than the per-session live WebSocket:
+The baseline uses additive REST routes rather than the per-session live WebSocket:
 
 - `POST /api/search` — start one bounded Project or Everywhere query and return the first grouped
   snapshot.
-- `POST /api/search/page` — request an opaque continuation for one group/query generation.
 - `POST /api/search/resolve` — revalidate one opaque hit locator and return a typed mobile landing
   payload.
-- a conversation-window page route, shared with macOS history loading internally, to page before
-  or after a resolved historical anchor.
+
+The first response is intentionally capped and asks the person to refine the query. Opaque group
+pagination and before/after conversation-window routes remain future additions.
 
 View search normally stays on the active client surface. Native-conversation View search may use
 the host transcript provider to cover history not loaded on the phone, but it still sends a
@@ -508,28 +525,26 @@ session-constrained query and receives only conversation hits for that authorize
 
 ### Wire values
 
-Add lossless-string enums and DTOs to `ThreadingRemoteKit`:
+The additive DTOs in `ThreadingRemoteKit` are:
 
-- `RemoteSearchScopeDTO`;
-- `RemoteSearchFilterDTO`;
+- `RemoteSearchScopeKindDTO`;
 - `RemoteSearchRequestDTO`;
 - `RemoteSearchGroupDTO` and `RemoteSearchHitDTO`;
 - `RemoteSearchCoverageDTO`;
-- `RemoteSearchContinuationDTO`;
-- `RemoteSearchResolveRequestDTO` and `RemoteSearchLandingDTO`;
-- `RemoteConversationWindowDTO` for centered historical navigation.
+- `RemoteSearchResolveRequestDTO` and `RemoteSearchResolutionDTO`;
+- `RemoteSearchConversationWindowDTO` and `RemoteSearchFileWindowDTO` for bounded read-only
+  historical navigation.
 
 The remote hit carries presentation values plus an opaque locator token. It never carries an
 absolute provider transcript path, account configuration path, raw SQLite row ID or authorization
 claim. The token is bound to the authenticated device, search generation and current host process,
 expires after a short fixed interval, and is reauthorized when resolved.
 
-`RemoteSearchLandingDTO` is a closed, typed set:
+`RemoteSearchResolutionDTO` is a closed, typed set:
 
 - project/session/project-terminal;
 - archived-session-row;
 - conversation-window;
-- review file/hunk/line;
 - repository file/line;
 - attachment;
 - browser tab.
@@ -539,30 +554,30 @@ An older host advertises no feature, so a current client never probes these rout
 
 ### Transport bounds and cancellation
 
-Initial proposed wire bounds, to be pinned in shared constants and adjusted only from measurement:
+Shipping wire bounds are pinned in shared constants and may be adjusted only from measurement:
 
 | Quantity | Bound |
 |---|---:|
 | UTF-8 query | 512 bytes |
 | Parsed filters | 16 |
 | Groups per response | 8 |
-| Hits per group/page | 64 |
+| Hits per group | 64 |
 | Total hits in first response | 128 |
 | Title | 512 UTF-8 bytes |
 | Snippet | 1,024 UTF-8 bytes |
 | Provenance fields | 8 |
-| Encoded first response | 256 KiB |
+| Encoded search/resolve response | 1 MiB |
 | Active query per authenticated device | 1 |
-| Continuation lifetime | 60 seconds |
+| Opaque result-token lifetime | 60 seconds |
 
-The phone debounces network search by 100 ms after the last edit while opening the UI immediately.
+The phone debounces network search by 140 ms after the last edit while opening the UI immediately.
 Each request carries a client generation. Starting a later generation cancels the URL task and
 invalidates host work for the previous generation; a response from an old generation is dropped
 before it touches UI state.
 
-Continuation tokens capture query fingerprint, provider/group, stable cursor and index generation.
-They do not expose SQL offsets. If the generation becomes invalid, the host asks the client to
-rerun the query rather than returning a shifted page.
+Future continuation tokens must capture query fingerprint, provider/group, stable cursor and index
+generation. They must not expose SQL offsets. Until then, visible caps instruct the person to
+refine the query.
 
 ## Privacy and security
 
@@ -658,111 +673,42 @@ Add deterministic fixtures for:
 - iPhone cold Search open, first result, scrolling, pagination, exact landing and reconnect;
 - index unavailable/rebuilding while structured providers remain useful.
 
-Record before/after measurements in `docs/architecture/performance.md` when implementation begins.
+Record before/after measurements in `docs/architecture/performance.md` before turning these targets
+into release claims. The bounded implementation is present; this stress matrix is still pending.
 
-## Implementation plan
+## Implementation record
 
-Each slice is independently truthful and shippable. A later slice may add result kinds; it may not
-retroactively make earlier dead rows navigable.
+The baseline was delivered in vertical slices, while keeping every emitted result navigable:
 
-### Slice 0 — Contracts, fixtures and durable documentation
+1. **Core contracts:** typed scopes, parser, filters, deterministic score tiers, stable ordering,
+   groups, caps, coverage, generations, client capabilities and opaque typed locators.
+2. **Bounded providers:** warm navigation projection, rebuildable transcript FTS5, workspace path
+   catalogue, live attachment/browser metadata, command/settings registries and cancellable
+   checkout-contained project text. Conversation and file loaders return bounded exact windows.
+3. **macOS:** the themed Design-system overlay is mounted through the window overlay boundary;
+   Browser, Git Review and SwiftTerm retain honest surface-local find; unsupported views fall back
+   to universal Everywhere search. Existing Command-P and Command-Shift-P routes remain intact.
+4. **Remote authority:** additive DTOs and owner-only routes enforce request bounds, stable project
+   identity, iOS capability filtering, generation replacement and short-lived one-use resolution
+   tokens. Resolve rechecks current projects, sessions, metadata and file containment.
+5. **iPhone:** native grouped search with a 140 ms debounce, recent destinations, visible scope,
+   caps and coverage; stable project/session/terminal/archive navigation; bounded conversation/file
+   landings; attachment/browser routes; and local terminal find.
 
-1. Move the shipping decisions from this draft into the relevant architecture documents as code
-   lands.
-2. Define `SearchQuery`, `SearchHit`, provider/batch/coverage/locator types and deterministic
-   ranking tests.
-3. Add the scaling fixtures and measurement harness before building the UI.
-4. Add exact client-capability filtering tests, including macOS, current iOS, older iOS and guest.
-5. Pin query parsing, caps, cancellation and stable-selection behavior.
-
-**Exit:** the semantic contract can be tested without AppKit, UIKit, SQLite or a remote server.
-
-### Slice 1 — Universal macOS shell and View providers
-
-1. Add the themed Search shell in `UI/Design/` and the structural window overlay/controller.
-2. Implement `SearchCoordinator` plus the minimal `NavigationSearchProvider` for project and
-   session destinations, so an unsupported View has a useful Everywhere fallback from day one.
-3. Route `Command-F`, `Command-Shift-F`, `Command-G` and `Command-Shift-G` through the host command
-   plane.
-4. Introduce `SurfaceSearchProvider` and adapt Browser and Git Review.
-5. Wire SwiftTerm search through its public API and remove the terminal's current Find
-   unavailability.
-6. Add Native conversation View search over currently loaded rows, explicitly labelled partial
-   until historical landing exists.
-7. Verify focus return, Escape, selection stability and real-window placement under System and an
-   authored chrome theme.
-
-**Exit:** Command-F works from every macOS main-window state; unsupported views fall into
-Everywhere rather than opening a nonfunctional bar.
-
-### Slice 2 — Structured Project/Everywhere search
-
-1. Expand `NavigationSearchProvider`; add `WorkspaceFileSearchProvider`,
-   `WorkspaceMetadataSearchProvider` and local `RegistrySearchProvider`.
-2. Reuse existing project/session/command/file identities and navigation paths.
-3. Add grouped virtualized results, visible caps, filter chips and stable pagination.
-4. Keep Command-P and Command-Shift-P direct routes unchanged.
-5. Add archived metadata as its own labelled group with exact sidebar/archive landing.
-
-**Exit:** macOS Project and Everywhere are useful before transcript indexing and never scan the
-filesystem per keystroke.
-
-### Slice 3 — Rebuildable transcript index and exact historical landing
-
-1. Add the separate FTS5 database, source ledger, schema generation and rebuild path.
-2. Backfill Claude and Codex under bounded batches, then attach live normalized event updates.
-3. Implement `TranscriptSearchProvider` with per-provider quotas and visible coverage.
-4. Implement `ConversationWindowLoader`, two-direction paging and reveal highlighting.
-5. Make active and archived conversation hits land exactly on macOS.
-6. Stress source append/rewrite/truncate/delete and the older-than-400-events case.
-
-**Exit:** Threading may honestly say it searches supported conversation history.
-
-### Slice 4 — Remote iOS shell and structured search
-
-1. Add additive feature discovery, remote DTOs, `/api/search`, pagination and locator resolve.
-2. Advertise only to all-session owner devices and test view/interact owners plus guest refusal.
-3. Add `MobileSearchView`, the root keyboard command router and context-derived scope.
-4. Replace the dashboard's narrow title filter with the universal destination; add Search to the
-   existing session action menu.
-5. Add stable-ID mobile project landing for Search rather than reparsing the current
-   name-addressed project route; ship destinations for projects, sessions, terminals, archived
-   rows, attachments and browser tabs.
-6. Add local mobile-terminal View search through SwiftTerm.
-7. Add offline/local fallback and older-host messaging.
-
-**Exit:** an iPhone can search everything the initial remote response promises and every row opens
-somewhere real.
-
-### Slice 5 — Remote conversation and workspace landing
-
-1. Project centered conversation windows through `ThreadingRemoteKit` without exposing provider
-   paths.
-2. Mount active and archived native conversation hits at the anchor without a recent live snapshot
-   overwriting the historical window.
-3. Add typed Git Review and repository-file locators and their mobile navigation routes.
-4. Include conversation/tool-summary, review and file-path hits only after those routes pass exact
-   landing tests.
-5. Add VoiceOver announcement and reveal evidence on compact and large iPhones.
-
-**Exit:** iOS reaches the substantive conversation and workspace corpus, not merely catalogue
-metadata.
-
-### Slice 6 — Explicit project text and advanced retrieval
-
-1. Add cancellable, checkout-contained project-text search on demand.
-2. Add textual/chip filters and saved scope preferences only if measured use warrants them.
-3. Evaluate bounded Work details, Git history, execution audit and subagent providers.
-4. Design the extension-provider disclosure/permission contract before accepting extension hits.
-5. Evaluate Ask History as a separate mode; do not blend it into literal ranking.
-
-**Exit:** advanced providers preserve the same exact-landing, permission and scaling contracts.
+The remaining roadmap is deliberately separate from the shipping claim: group/window pagination,
+filter chips and completion, native-conversation compact View search, offline catalogue fallback,
+typed mobile Git Review landing, broader history providers, extension disclosure, Ask History, and
+the stress/latency evidence below.
 
 ## Test ownership
 
+The baseline owns the core/provider/remote contract tests and the macOS/iOS render fixtures now in
+the tree. Items involving pagination, offline fallback, Git Review remote landing, large stress
+fixtures, VoiceOver announcements and performance targets describe follow-up coverage.
+
 ### Core/unit
 
-- query tokenizer/parser, quoted phrases, negative terms, filter completion and invalid filters;
+- query tokenizer/parser, quoted phrases, negative terms, textual filters and invalid filters;
 - deterministic ranking/ties and group order;
 - provider quotas, cancellation, generation drop and stable selection;
 - locator coding/revalidation and deleted/moved targets;
@@ -809,16 +755,16 @@ metadata.
 - 32-client remote fan-out and reconnect;
 - repeated open/close with no retained provider tasks, SQLite statements or mobile result views.
 
-## Acceptance criteria
+## Baseline acceptance criteria
 
-The feature is complete only when all of these are true:
+The implemented baseline is accepted when all of these are true:
 
 - Command-F is a useful entry from every macOS main-window state and every relevant iOS context.
 - View/Project/Everywhere is visible and means the same semantic scope on both platforms.
 - SwiftTerm search is exposed on macOS and in the local iOS terminal mirror.
 - Project/session/file navigation results arrive without transcript indexing.
 - Supported historical conversations are incrementally indexed with honest coverage.
-- A conversation result older than the recent replay window lands on the exact row on macOS and
+- Conversation hits resolve to a bounded window centered on the exact indexed row on macOS and
   iOS without loading the whole transcript.
 - Every iOS result kind has a native landing; unsupported Mac-only actions are filtered by the
   host.
@@ -827,8 +773,10 @@ The feature is complete only when all of these are true:
 - Search never persists query text or emits it to diagnostics.
 - Guest/session-scoped remote credentials cannot query the global index.
 - UI appearance has inspected rendered evidence from the real macOS and iOS product shells.
-- Stress measurements satisfy the scaling contract or this draft is updated with the measured
-  tradeoff before release.
+
+Release follow-ups are tracked explicitly rather than silently claimed: finish the stress/latency
+matrix, broaden rendered accessibility/device coverage, and add pagination only if measured result
+caps show that refinement is insufficient.
 
 ## Competitor research distilled
 
@@ -882,13 +830,12 @@ but scope, provenance, stable ordering, exact navigation and honest limits must 
 
 The core product decisions above are closed. These values remain deliberately measurable:
 
-- whether the 100 ms iOS debounce is the best typing/network tradeoff;
+- whether the shipping 140 ms iOS debounce is the best typing/network tradeoff;
 - the final page/response/continuation bounds after real corpus and tailnet measurements;
 - whether Browser Follow can provide remote page-body View search without mutating or leaking the
   Mac browser state;
 - which non-Claude/Codex providers can support incremental historical locators honestly;
-- whether users need Work details or Ask History after literal search ships;
-- whether the dashboard should show an empty-query recent-destination list or focus an empty field
-  over the existing dashboard until the first character.
+- whether users need Work details or Ask History after literal search ships.
 
-None of these questions blocks the contracts, slices or initial iOS result set above.
+The empty-query question is closed: universal Search shows a bounded recent-destination list.
+None of the remaining questions blocks the shipped baseline above.
