@@ -45,6 +45,12 @@ reshuffling it is a line move.
   Claude half (B5) can ship ahead of the rest.
 ### Next — researched and ready, waiting for a slot
 
+- [Universal Search](universal-search.md) — make `Command-F` a host-owned Search capability with
+  visible View, Project and Everywhere scopes; reuse the real Browser, Git Review and SwiftTerm
+  engines; add incremental FTS5 conversation history with exact bounded-window landing; and expose
+  only natively navigable results to the paired iPhone through a bounded owner-only remote
+  contract. The semantic plan, remote iOS result matrix, scaling gate and delivery slices are
+  concrete; implementation has not started.
 - [Observed work for terminal sessions](observed-work-for-terminal-sessions.md) — feed the Activity
   tab from the transcript, export and git checkpoint a session already leaves behind, so a chat
   Threading does not render itself stops reporting zeros over a full repository atlas. **The
