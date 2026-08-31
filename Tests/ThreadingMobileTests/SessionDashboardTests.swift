@@ -548,8 +548,14 @@ final class MobileDemoSceneTests: XCTestCase {
                 XCTAssertTrue(fixture.payload.contains(Data("capture-plan.md".utf8)))
                 XCTAssertTrue(fixture.payload.contains(Data("Added".utf8)))
                 XCTAssertTrue(fixture.payload.contains(Data("removed".utf8)))
-                XCTAssertTrue(fixture.payload.contains(Data("\u{1B}[31m".utf8)))
-                XCTAssertTrue(fixture.payload.contains(Data("\u{1B}[32m".utf8)))
+                XCTAssertTrue(
+                    fixture.payload.contains(Data("\u{1B}[91m".utf8)),
+                    "the installed Claude renderer must retain removed-line syntax color"
+                )
+                XCTAssertTrue(
+                    fixture.payload.contains(Data("\u{1B}[92m".utf8)),
+                    "the installed Claude renderer must retain added-line syntax color"
+                )
             } else {
                 XCTAssertTrue(fixture.payload.contains(Data("Edited".utf8)))
                 XCTAssertTrue(fixture.payload.contains(Data("capture-notes.md".utf8)))
@@ -881,7 +887,6 @@ final class MobileDemoSceneTests: XCTestCase {
     /// The variable is spelled once, and every reader in the app goes through it.
     func testTheEnvironmentVariableIsSpelledOnce() {
         XCTAssertEqual(MobileDemoScene.environmentKey, "THREADING_MOBILE_DEMO")
-            case .universalSearch: expected = ("universal-search", .universalSearch)
     }
 }
 #endif

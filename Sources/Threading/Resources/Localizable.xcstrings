@@ -5314,6 +5314,17 @@
         }
       }
     },
+    "Add the regression case beside the existing redirect tests." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till regressionsfallet bredvid de befintliga omdirigeringstesterna."
+          }
+        }
+      }
+    },
     "Add this build’s repository as a project, or open one first." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9065,6 +9076,17 @@
         }
       }
     },
+    "CallbackHandler.swift:84" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CallbackHandler.swift:84"
+          }
+        }
+      }
+    },
     "Can reply" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9094,6 +9116,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kan väcka den här Mac-datorn ur viloläge"
+          }
+        }
+      }
+    },
+    "Can we prove which callback state reached the app?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kan vi bevisa vilket återanropstillstånd som nådde appen?"
           }
         }
       }
@@ -9468,6 +9501,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ändrad sedan senaste delningen"
+          }
+        }
+      }
+    },
+    "Changed the search destination preview." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bytte förhandsvisning av sökdestination."
           }
         }
       }
@@ -10451,6 +10495,17 @@
         }
       }
     },
+    "Claude · 10:43" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude · 10:43"
+          }
+        }
+      }
+    },
     "Claude's own bridge to claude.ai and the Claude mobile app, separate from Threading's Remote Access. Following leaves it to the account's own /config. A single chat can still be set on or off from its ⋯ menu." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11012,6 +11067,28 @@
         }
       }
     },
+    "Closed conversation history." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stängde konversationshistoriken."
+          }
+        }
+      }
+    },
+    "Closed project text preview." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stängde förhandsvisningen av projekttext."
+          }
+        }
+      }
+    },
     "Closed the %@ tab." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11041,6 +11118,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stängde den aktiva sidan utan att stoppa dess konversation."
+          }
+        }
+      }
+    },
+    "Closed universal search." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stängde universalsökningen."
           }
         }
       }
@@ -12691,6 +12779,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ConversationOutboxRailView"
+          }
+        }
+      }
+    },
+    "ConversationSearchWindowViewController, ProjectTextSearchPreviewViewController & UniversalSearchOverlayViewController" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ConversationSearchWindowViewController, ProjectTextSearchPreviewViewController och UniversalSearchOverlayViewController"
           }
         }
       }
@@ -15742,6 +15841,17 @@
         }
       }
     },
+    "Dwell over the enlarged edge target, cross onto the sidebar, then leave both surfaces. The coordinator holds the temporary reveal across that crossing and dismisses it after its grace." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stanna över den förstorade kantytan, gå över till sidofältet och lämna sedan båda ytorna. Samordnaren behåller den tillfälliga visningen under övergången och stänger den efter respittiden."
+          }
+        }
+      }
+    },
     "EVENTS" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18081,6 +18191,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anpassa till iPhone · %lld×%lld"
+          }
+        }
+      }
+    },
+    "Fix auth callback" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Åtgärda autentiseringsåteranrop"
           }
         }
       }
@@ -23387,6 +23508,17 @@
         }
       }
     },
+    "Matched message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Matchande meddelande"
+          }
+        }
+      }
+    },
     "Matches for “%@”" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -26764,6 +26896,17 @@
         }
       }
     },
+    "OAuth redirect investigation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utredning av OAuth-omdirigering"
+          }
+        }
+      }
+    },
     "OK" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30027,6 +30170,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Projektkonfigurationens version måste vara %lld."
+          }
+        }
+      }
+    },
+    "Project file" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projektfil"
           }
         }
       }
@@ -35080,6 +35234,17 @@
         }
       }
     },
+    "Search destination preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Förhandsvisning av sökdestination"
+          }
+        }
+      }
+    },
     "Search exact records" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37533,6 +37698,28 @@
         }
       }
     },
+    "Sidebar is collapsed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidofältet är infällt"
+          }
+        }
+      }
+    },
+    "Sidebar is temporarily revealed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sidofältet visas tillfälligt"
+          }
+        }
+      }
+    },
     "SidebarBackdropView" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -37551,6 +37738,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "SidebarBrandView"
+          }
+        }
+      }
+    },
+    "SidebarEdgeRevealCoordinator" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SidebarEdgeRevealCoordinator"
           }
         }
       }
@@ -38123,6 +38321,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Vissa konversationsmappar kunde inte läsas. Resultaten är ofullständiga."
+          }
+        }
+      }
+    },
+    "Some conversation history is still indexing." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Viss konversationshistorik indexeras fortfarande."
           }
         }
       }
@@ -41064,6 +41273,17 @@
         }
       }
     },
+    "The auth callback now rejects mismatched state before exchanging a token." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Autentiseringsåteranropet avvisar nu felaktigt tillstånd innan en token utväxlas."
+          }
+        }
+      }
+    },
     "The background host cannot open its socket: the path inside your home folder is too long." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -43744,6 +43964,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Endast tråden. Terminalen behåller sin egen typsnitt i Profil."
+          }
+        }
+      }
+    },
+    "The three bounded search landings. Switch destinations, type or change scope, scroll the virtualized results, and use their close controls." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De tre avgränsade sökdestinationerna. Byt destination, skriv eller ändra omfattning, rulla de virtualiserade resultaten och använd deras stängningskontroller."
           }
         }
       }
@@ -46564,6 +46795,28 @@
         }
       }
     },
+    "Threading › Claude › The auth callback now rejects mismatched state." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading › Claude › Autentiseringsåteranropet avvisar nu felaktigt tillstånd."
+          }
+        }
+      }
+    },
+    "Threading › Codex › auth" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading › Codex › autentisering"
+          }
+        }
+      }
+    },
     "Threading's included extension resources are unavailable." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47671,6 +47924,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ångra det senaste meddelandet"
+          }
+        }
+      }
+    },
+    "Universal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Universell"
+          }
+        }
+      }
+    },
+    "Universal search opened %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Universalsökningen öppnade %@."
+          }
+        }
+      }
+    },
+    "Universal search query changed to %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Universalsökningens fråga ändrades till %@."
+          }
+        }
+      }
+    },
+    "Universal search scope changed to %@." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Universalsökningens omfattning ändrades till %@."
           }
         }
       }
@@ -50487,6 +50784,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Du höll ned alt vid start, så Threading startade i återställningsläge."
+          }
+        }
+      }
+    },
+    "You · 10:42" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du · 10:42"
+          }
+        }
+      }
+    },
+    "You · 10:45" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du · 10:45"
           }
         }
       }

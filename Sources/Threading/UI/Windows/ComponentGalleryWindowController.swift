@@ -96,6 +96,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ConversationHandoffView",
         "ConversationOutboxRailView",
         "ConversationOutboxRowView",
+        "ConversationSearchWindowViewController",
         "ScheduledSessionPlaceholderView",
         "ScheduledMessageStripView",
         "ScheduledMessageRowView",
@@ -136,6 +137,7 @@ final class ComponentGalleryViewController: NSViewController {
         "PanelListView",
         "PromptCompletionPresenter",
         "PromptView",
+        "ProjectTextSearchPreviewViewController",
         "RevealHighlightView",
         "RunPlanDisclosureView",
         "SearchMatchLabel",
@@ -147,6 +149,7 @@ final class ComponentGalleryViewController: NSViewController {
         "ShortcutRecorderView",
         "SidebarBackdropView",
         "SidebarBrandView",
+        "SidebarEdgeRevealCoordinator",
         "SimulatorScreenView",
         "SplitButtonView",
         "SplitIconButtonView",
@@ -218,6 +221,7 @@ final class ComponentGalleryViewController: NSViewController {
         "UsageDashboardView",
         "UsageLimitLegendView",
         "UsageReadingLabel",
+        "UniversalSearchOverlayViewController",
         "WorkspaceNavigatorPipelinePlaceholderView",
         "WorkspaceNavigatorPipelineResultsView",
         "WorkspaceNavigatorPipelineSearchBandView",
@@ -251,6 +255,8 @@ final class ComponentGalleryViewController: NSViewController {
     private var galleryCommandPalette: CommandPaletteViewController?
     private var galleryActionPopover: ThemedActionPopoverViewController?
     private var galleryModelEffortPicker: ModelEffortPickerViewController?
+    private var gallerySearchDestinationControllers: [NSViewController] = []
+    private var gallerySidebarEdgeRevealCoordinator: SidebarEdgeRevealCoordinator?
 
     /// The hover-policy story's demos, retained so their schedulers and popovers outlive the
     /// pass that built the section.
@@ -2942,9 +2948,269 @@ final class ComponentGalleryViewController: NSViewController {
                     "HoverTrackingView",
                     "Reports the pointer arriving and leaving without drawing anything, so a surface can count the crossing onto it as staying.",
                     makeHoverTrackingSample()
+                ),
+                story(
+                    "ConversationSearchWindowViewController, ProjectTextSearchPreviewViewController & UniversalSearchOverlayViewController",
+                    "The three bounded search landings. Switch destinations, type or change scope, scroll the virtualized results, and use their close controls.",
+                    makeSearchDestinationSample()
+                ),
+                story(
+                    "SidebarEdgeRevealCoordinator",
+                    "Dwell over the enlarged edge target, cross onto the sidebar, then leave both surfaces. The coordinator holds the temporary reveal across that crossing and dismisses it after its grace.",
+                    makeSidebarEdgeRevealSample()
                 )
             ]
         )
+    }
+
+    private func makeSearchDestinationSample() -> NSView {
+        let universal = UniversalSearchOverlayViewController()
+        universal.apply(UniversalSearchOverlayState(
+            query: "auth",
+            scopes: [
+                UniversalSearchScopeOption(id: "view", title: L10n.string("View")),
+                UniversalSearchScopeOption(id: "project", title: L10n.string("Project")),
+                UniversalSearchScopeOption(id: "everywhere", title: L10n.string("Everywhere")),
+            ],
+            selectedScopeID: "project",
+            rows: [
+                .group(id: "destinations", title: L10n.string("Destinations")),
+                .result(UniversalSearchResultRow(
+                    id: SearchHitID(rawValue: "gallery-session"),
+                    title: L10n.string("Fix auth callback"),
+                    detail: L10n.string("Threading › Codex › auth")
+                )),
+                .group(id: "conversations", title: L10n.string("Conversations")),
+                .result(UniversalSearchResultRow(
+                    id: SearchHitID(rawValue: "gallery-conversation"),
+                    title: L10n.string("OAuth redirect investigation"),
+                    detail: L10n.string(
+                        "Threading › Claude › The auth callback now rejects mismatched state."
+                    )
+                )),
+                .group(id: "files", title: L10n.string("Files")),
+                .result(UniversalSearchResultRow(
+                    id: SearchHitID(rawValue: "gallery-file"),
+                    title: L10n.string("CallbackHandler.swift:84"),
+                    detail: "Sources/Auth/CallbackHandler.swift"
+                )),
+            ],
+            selectedHitID: SearchHitID(rawValue: "gallery-conversation"),
+            status: L10n.string("Some conversation history is still indexing."),
+            queryError: nil
+        ))
+        universal.onQueryChange = { [weak self] query in
+            self?.showReceipt(L10n.format("Universal search query changed to %@.", query))
+        }
+        universal.onScopeChange = { [weak self] scope in
+            self?.showReceipt(L10n.format("Universal search scope changed to %@.", scope))
+        }
+        universal.onActivate = { [weak self] hit in
+            self?.showReceipt(L10n.format("Universal search opened %@.", hit.rawValue))
+        }
+        universal.onDismiss = { [weak self] in
+            self?.showReceipt(L10n.string("Closed universal search."))
+        }
+
+        let conversation = ConversationSearchWindowViewController()
+        conversation.apply(ConversationSearchWindowPresentation(
+            title: L10n.string("OAuth redirect investigation"),
+            subtitle: L10n.string("Nearby conversation history"),
+            rows: [
+                ConversationSearchWindowRowPresentation(
+                    id: SearchSourceRecordID(rawValue: "gallery-conversation-before"),
+                    eyebrow: L10n.string("You · 10:42"),
+                    title: nil,
+                    body: L10n.string("Can we prove which callback state reached the app?"),
+                    match: nil,
+                    isAnchor: false
+                ),
+                ConversationSearchWindowRowPresentation(
+                    id: SearchSourceRecordID(rawValue: "gallery-conversation-anchor"),
+                    eyebrow: L10n.string("Claude · 10:43"),
+                    title: L10n.string("Matched message"),
+                    body: L10n.string(
+                        "The auth callback now rejects mismatched state before exchanging a token."
+                    ),
+                    match: SearchTextRange(utf16Location: 4, utf16Length: 4),
+                    isAnchor: true
+                ),
+                ConversationSearchWindowRowPresentation(
+                    id: SearchSourceRecordID(rawValue: "gallery-conversation-after"),
+                    eyebrow: L10n.string("You · 10:45"),
+                    title: nil,
+                    body: L10n.string(
+                        "Add the regression case beside the existing redirect tests."
+                    ),
+                    match: nil,
+                    isAnchor: false
+                ),
+            ],
+            anchorRowID: SearchSourceRecordID(rawValue: "gallery-conversation-anchor"),
+            hasEarlier: true,
+            hasLater: true
+        ))
+        conversation.onClose = { [weak self] in
+            self?.showReceipt(L10n.string("Closed conversation history."))
+        }
+
+        let project = ProjectTextSearchPreviewViewController()
+        project.apply(ProjectTextSearchPreviewPresentation(
+            path: "Sources/Auth/CallbackHandler.swift",
+            project: "Threading",
+            lines: [
+                ProjectTextSearchPreviewLinePresentation(
+                    number: 82,
+                    text: "let expected = pendingCallback.state",
+                    match: nil,
+                    isAnchor: false
+                ),
+                ProjectTextSearchPreviewLinePresentation(
+                    number: 83,
+                    text: "guard authState == expected else {",
+                    match: SearchTextRange(utf16Location: 6, utf16Length: 9),
+                    isAnchor: true
+                ),
+                ProjectTextSearchPreviewLinePresentation(
+                    number: 84,
+                    text: "    throw CallbackError.mismatchedState",
+                    match: nil,
+                    isAnchor: false
+                ),
+                ProjectTextSearchPreviewLinePresentation(
+                    number: 85,
+                    text: "}",
+                    match: nil,
+                    isAnchor: false
+                ),
+            ],
+            anchorLine: 83,
+            hasEarlier: true,
+            hasLater: true
+        ))
+        project.onClose = { [weak self] in
+            self?.showReceipt(L10n.string("Closed project text preview."))
+        }
+
+        let controllers: [NSViewController] = [universal, conversation, project]
+        gallerySearchDestinationControllers = controllers
+        for controller in controllers { addChild(controller) }
+
+        let host = NSView()
+        host.translatesAutoresizingMaskIntoConstraints = false
+        for (index, controller) in controllers.enumerated() {
+            let destination = controller.view
+            destination.translatesAutoresizingMaskIntoConstraints = false
+            destination.isHidden = index != 0
+            host.addSubview(destination)
+            NSLayoutConstraint.activate([
+                destination.topAnchor.constraint(equalTo: host.topAnchor),
+                destination.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+                destination.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+                destination.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            ])
+        }
+        NSLayoutConstraint.activate([
+            host.widthAnchor.constraint(equalToConstant: 760),
+            host.heightAnchor.constraint(equalToConstant: 440),
+        ])
+
+        let chooser = ThemedSegmentedControl()
+        chooser.configure(
+            titles: [
+                L10n.string("Universal"),
+                L10n.string("Conversation"),
+                L10n.string("Project file"),
+            ],
+            selectedIndex: 0
+        )
+        chooser.setAccessibilityLabel(L10n.string("Search destination preview"))
+        chooser.onSelect = { [weak self, weak host] selected in
+            guard let self, let host else { return }
+            for (index, destination) in host.subviews.enumerated() {
+                destination.isHidden = index != selected
+            }
+            host.layoutSubtreeIfNeeded()
+            self.showReceipt(L10n.string("Changed the search destination preview."))
+        }
+
+        let sample = NSStackView(views: [chooser, host])
+        sample.orientation = .vertical
+        sample.alignment = .leading
+        sample.spacing = Design.Spacing.small
+        return sample
+    }
+
+    private func makeSidebarEdgeRevealSample() -> NSView {
+        let state = NSTextField(labelWithString: L10n.string("Sidebar is collapsed"))
+        state.applyFont(.control)
+        state.textColor = Design.Text.secondary
+
+        func trackedSurface(_ title: String, width: CGFloat) -> HoverTrackingView {
+            let label = NSTextField(labelWithString: L10n.string(title))
+            label.applyFont(.control)
+            label.textColor = Design.Text.label
+            label.translatesAutoresizingMaskIntoConstraints = false
+
+            let surface = ThemedSurfaceView()
+            surface.translatesAutoresizingMaskIntoConstraints = false
+            surface.applySurface(
+                fill: Design.Surface.elevated,
+                radius: .control,
+                border: Design.Surface.border
+            )
+            surface.addSubview(label)
+
+            let tracker = HoverTrackingView()
+            tracker.translatesAutoresizingMaskIntoConstraints = false
+            tracker.addSubview(surface)
+            NSLayoutConstraint.activate([
+                tracker.widthAnchor.constraint(equalToConstant: width),
+                tracker.heightAnchor.constraint(equalToConstant: 92),
+                surface.topAnchor.constraint(equalTo: tracker.topAnchor),
+                surface.bottomAnchor.constraint(equalTo: tracker.bottomAnchor),
+                surface.leadingAnchor.constraint(equalTo: tracker.leadingAnchor),
+                surface.trailingAnchor.constraint(equalTo: tracker.trailingAnchor),
+                label.centerXAnchor.constraint(equalTo: surface.centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: surface.centerYAnchor),
+            ])
+            return tracker
+        }
+
+        let edge = trackedSurface("Window edge", width: 96)
+        edge.setAccessibilityIdentifier("gallery.presentation.sidebarEdge")
+        let sidebar = trackedSurface("Temporarily revealed sidebar", width: 340)
+        sidebar.setAccessibilityIdentifier("gallery.presentation.revealedSidebar")
+        sidebar.alphaValue = 0.42
+
+        let coordinator = SidebarEdgeRevealCoordinator()
+        gallerySidebarEdgeRevealCoordinator = coordinator
+        edge.onHoverChange = { [weak coordinator] hovering in
+            coordinator?.edgeHoverChanged(hovering)
+        }
+        sidebar.onHoverChange = { [weak coordinator] hovering in
+            coordinator?.sidebarHoverChanged(hovering)
+        }
+        coordinator.onReveal = { [weak sidebar, weak state] in
+            sidebar?.alphaValue = 1
+            state?.stringValue = L10n.string("Sidebar is temporarily revealed")
+            state?.textColor = Design.Status.positive
+        }
+        coordinator.onDismiss = { [weak sidebar, weak state] in
+            sidebar?.alphaValue = 0.42
+            state?.stringValue = L10n.string("Sidebar is collapsed")
+            state?.textColor = Design.Text.secondary
+        }
+
+        let surfaces = NSStackView(views: [edge, sidebar])
+        surfaces.orientation = .horizontal
+        surfaces.alignment = .centerY
+        surfaces.spacing = Design.Spacing.small
+        let sample = NSStackView(views: [state, surfaces])
+        sample.orientation = .vertical
+        sample.alignment = .leading
+        sample.spacing = Design.Spacing.small
+        return sample
     }
 
     private func makeActionPopoverSample() -> NSView {
