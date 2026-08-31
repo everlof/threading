@@ -51,6 +51,8 @@
     {"id": "standalone-terminal-dashboard-custom-dark", "entryID": "ios-standalone-terminal", "demo": "sessions", "appearance": "dark", "theme": "custom"},
     {"id": "session-dashboard-connecting-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-connecting", "appearance": "dark", "theme": "custom", "captureMode": "display"},
     {"id": "session-dashboard-offline-custom-dark", "entryID": "ios-session-dashboard", "demo": "sessions-offline", "appearance": "dark", "theme": "custom"},
+    {"id": "universal-search-custom-dark", "entryID": "ios-universal-search", "demo": "universal-search", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
+    {"id": "universal-search-custom-light", "entryID": "ios-universal-search", "demo": "universal-search", "appearance": "light", "theme": "custom-light", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "connection-progress-lab-custom-dark", "entryID": "ios-connection-progress", "demo": "connection-progress-lab", "appearance": "dark", "theme": "custom"},
     {"id": "connection-status-custom-dark", "entryID": "ios-connection-status", "demo": "connection-status", "appearance": "dark", "theme": "custom"},
     {"id": "connection-status-custom-light", "entryID": "ios-connection-status", "demo": "connection-status", "appearance": "light", "theme": "custom-light"},
@@ -254,6 +256,18 @@
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/session-settings-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}
+    },
+    {
+      "id": "ios-universal-search",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Universal search",
+      "description": "The native owner search surface backed by the Mac's bounded search graph, with visible scope, stable result groups, highlighted literal matches, provenance and honest provider coverage.",
+      "states": ["Project and Everywhere scopes", "Destination", "Historical conversation", "Project source match", "Partial coverage"],
+      "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
+      "capture": {"glob": "ios/universal-search-*.png"},
+      "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Light", "Dark"], "themes": ["Mac-supplied"]}
     },
     {
       "id": "ios-standalone-terminal",
