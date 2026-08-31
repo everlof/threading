@@ -2127,6 +2127,156 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(try XCTUnwrap(get("/api/usage", bearer: "revoked")).status, 401)
     }
 
+    func testUniversalSearchIsAdvertisedAndRoutedOnlyForWholeHostOwners() throws {
+        server.universalSearchLoader = { request, deviceID in
+            XCTAssertEqual(deviceID, "test-device")
+            return RemoteSearchResponseDTO(
+                generation: request.generation,
+                groups: [RemoteSearchGroupResultDTO(
+                    group: .destinations,
+                    hits: [RemoteSearchHitDTO(
+                        id: "result-1",
+                        token: "opaque-token",
+                        group: .destinations,
+                        kind: .project,
+                        title: "Threading",
+                        snippet: nil,
+                        provenance: RemoteSearchProvenanceDTO(projectName: "Threading")
+                    )],
+                    coverage: [RemoteSearchCoverageDTO(kind: .complete)],
+                    isCapped: false
+                )],
+                isComplete: true
+            )
+        }
+        server.universalSearchResolver = { token, deviceID in
+            XCTAssertEqual(token, "opaque-token")
+            XCTAssertEqual(deviceID, "test-device")
+            return RemoteSearchResolutionDTO(kind: .project, projectName: "Threading")
+        }
+
+        let ownerMe = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "goodtoken")).body
+        )
+        XCTAssertTrue(
+            ownerMe.features?.contains(RemoteRESTFeature.universalSearch.rawValue) ?? false
+        )
+
+        let request = RemoteSearchRequestDTO(query: "thread", generation: 17)
+        let search = try XCTUnwrap(post(
+            RemoteRouter.searchPath,
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(request)
+        ))
+        XCTAssertEqual(search.status, 200)
+        let response = try JSONDecoder().decode(RemoteSearchResponseDTO.self, from: search.body)
+        XCTAssertEqual(response.generation, 17)
+        XCTAssertEqual(response.groups.first?.hits.first?.token, "opaque-token")
+        XCTAssertLessThanOrEqual(search.body.count, RemoteAccessDefaults.maximumSearchResponseBytes)
+
+        let resolution = try XCTUnwrap(post(
+            RemoteRouter.searchResolvePath,
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(RemoteSearchResolveRequestDTO(token: "opaque-token"))
+        ))
+        XCTAssertEqual(resolution.status, 200)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteSearchResolutionDTO.self, from: resolution.body),
+            RemoteSearchResolutionDTO(kind: .project, projectName: "Threading")
+        )
+
+        let guestSessionID = SessionID()
+        authority.set(
+            RemoteAuthorization(
+                shareID: "search-guest",
+                capability: .interact,
+                scope: .session(guestSessionID),
+                principal: .guest
+            ),
+            forToken: "searchguesttoken"
+        )
+        let guestMe = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "searchguesttoken")).body
+        )
+        XCTAssertFalse(
+            guestMe.features?.contains(RemoteRESTFeature.universalSearch.rawValue) ?? false
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                RemoteRouter.searchPath,
+                bearer: "searchguesttoken",
+                body: try JSONEncoder().encode(request)
+            )).status,
+            404,
+            "a guest must not even learn that the whole-host search route exists"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                RemoteRouter.searchResolvePath,
+                bearer: "searchguesttoken",
+                body: try JSONEncoder().encode(RemoteSearchResolveRequestDTO(
+                    token: "opaque-token"
+                ))
+            )).status,
+            404
+        )
+    }
+
+    func testUniversalSearchRechecksRevocationBeforeReturningData() throws {
+        server.universalSearchLoader = { request, _ in
+            self.authority.set(nil, forToken: "goodtoken")
+            return RemoteSearchResponseDTO(
+                generation: request.generation,
+                groups: [],
+                isComplete: true
+            )
+        }
+        defer {
+            authority.set(
+                RemoteAuthorization(
+                    shareID: "test",
+                    capability: .interact,
+                    scope: .allSessions
+                ),
+                forToken: "goodtoken"
+            )
+        }
+
+        let response = try XCTUnwrap(post(
+            RemoteRouter.searchPath,
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(RemoteSearchRequestDTO(
+                query: "secret",
+                generation: 1
+            ))
+        ))
+        XCTAssertEqual(response.status, 401)
+
+        authority.set(
+            RemoteAuthorization(
+                shareID: "test",
+                capability: .interact,
+                scope: .allSessions
+            ),
+            forToken: "goodtoken"
+        )
+        server.universalSearchResolver = { token, _ in
+            XCTAssertEqual(token, "opaque-token")
+            self.authority.set(nil, forToken: "goodtoken")
+            return RemoteSearchResolutionDTO(kind: .project, projectName: "Threading")
+        }
+        let resolution = try XCTUnwrap(post(
+            RemoteRouter.searchResolvePath,
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(RemoteSearchResolveRequestDTO(
+                token: "opaque-token"
+            ))
+        ))
+        XCTAssertEqual(resolution.status, 401)
+    }
+
     func testGuestShareCannotManageSessionLifecycle() throws {
         let sessionID = SessionID()
         authority.set(

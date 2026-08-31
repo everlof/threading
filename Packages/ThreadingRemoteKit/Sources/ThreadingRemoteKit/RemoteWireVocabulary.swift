@@ -618,6 +618,7 @@ public enum RemoteTerminalRouteAction: String, CaseIterable, Codable, Equatable,
 /// rooted spelling is derived rather than stored, so the two cannot disagree.
 public enum RemoteRoute: String, CaseIterable, Sendable {
     case me = "api/me"
+    case search = "api/search"
     case usage = "api/usage"
     case usageLimit = "api/usage/limit"
     case session = "api/session"

@@ -407,6 +407,7 @@ final class RemoteSessionMirrorRegistry {
             return makeMeCatalogue(
                 sessions: [summary(
                     for: session,
+                    projectID: project.id,
                     projectName: project.name,
                     projectLimitRecovery: project.limitRecoveryPolicy,
                     authorization: authorization
@@ -431,6 +432,7 @@ final class RemoteSessionMirrorRegistry {
                 sessions: [],
                 terminals: [terminalSummary(
                     for: terminal,
+                    projectID: project?.id,
                     projectName: project?.name ?? ""
                 )],
                 archivedSessions: nil,
@@ -479,6 +481,7 @@ final class RemoteSessionMirrorRegistry {
                     .map {
                         summary(
                             for: $0,
+                            projectID: project.id,
                             projectName: project.name,
                             projectLimitRecovery: project.limitRecoveryPolicy,
                             authorization: authorization
@@ -489,7 +492,11 @@ final class RemoteSessionMirrorRegistry {
         let terminals = ProjectStore.shared.projects
             .flatMap { project in
                 project.terminals.map {
-                    terminalSummary(for: $0, projectName: project.name)
+                    terminalSummary(
+                        for: $0,
+                        projectID: project.id,
+                        projectName: project.name
+                    )
                 }
             }
             .sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
@@ -498,6 +505,7 @@ final class RemoteSessionMirrorRegistry {
                 .map {
                     summary(
                         for: $0.session,
+                    projectID: $0.project.id,
                         projectName: $0.project.name,
                         projectLimitRecovery: $0.project.limitRecoveryPolicy,
                         authorization: authorization
@@ -548,6 +556,7 @@ final class RemoteSessionMirrorRegistry {
               authorization.scope.covers(sessionID) else { return nil }
         return summary(
             for: session,
+            projectID: project.id,
             projectName: project.name,
             projectLimitRecovery: project.limitRecoveryPolicy,
             authorization: authorization
@@ -556,6 +565,7 @@ final class RemoteSessionMirrorRegistry {
 
     private func terminalSummary(
         for terminal: ProjectTerminal,
+        projectID: ProjectID?,
         projectName: String
     ) -> RemoteProjectTerminalSummaryDTO {
         let running = ProjectTerminalRuntime.shared.isRunning(terminalID: terminal.id)
@@ -564,6 +574,7 @@ final class RemoteSessionMirrorRegistry {
             id: terminal.id.uuidString,
             title: ProjectTerminalTitle.displayTitle(for: terminal),
             projectName: projectName,
+            projectID: projectID?.uuidString,
             state: running ? (busy ? .working : .idle) : .dormant,
             isAvailable: running,
             createdAt: terminal.createdAt.timeIntervalSince1970,
@@ -579,11 +590,15 @@ final class RemoteSessionMirrorRegistry {
 
     private func restFeatures(for authorization: RemoteAuthorization) -> [String]? {
         var features: [String] = []
+        if authorization.canUseUniversalSearch {
+            features.append(RemoteRESTFeature.universalSearch.rawValue)
+        }
         if authorization.canReadHostUsage {
             features.append(RemoteRESTFeature.usageDashboard.rawValue)
         }
         if authorization.canManageHost,
-           RemoteAccessCoordinator.shared.canIssueHostedDeviceCredentials {
+           RemoteAccessCoordinator.shared.canIssueHostedDeviceCredentials
+        {
             features.append(RemoteRESTFeature.hostedPeerTransport.rawValue)
         }
         // The thumbnail route is gated exactly like the attachment route it shrinks, so it is
@@ -599,6 +614,7 @@ final class RemoteSessionMirrorRegistry {
 
     private func summary(
         for session: AgentSession,
+        projectID: ProjectID,
         projectName: String,
         projectLimitRecovery: LimitRecoveryPolicy?,
         authorization: RemoteAuthorization
@@ -620,6 +636,7 @@ final class RemoteSessionMirrorRegistry {
                 participantID: authorization.collaborationParticipantID
             )),
             projectName: projectName,
+            projectID: projectID.uuidString,
             isAvailable: available,
             lastActiveAt: session.lastActiveAt.timeIntervalSince1970,
             isPinned: session.isPinned,
@@ -2688,6 +2705,7 @@ final class RemoteSessionMirrorRegistry {
                     let project = ProjectStore.shared.homeProject(forTerminalID: terminalID)
                     return terminalSummary(
                         for: candidate,
+                        projectID: project?.id,
                         projectName: project?.name ?? ""
                     )
                 }
@@ -2719,6 +2737,7 @@ final class RemoteSessionMirrorRegistry {
                           let project else { return nil }
                     return summary(
                         for: candidate,
+                        projectID: project.id,
                         projectName: project.name,
                         projectLimitRecovery: project.limitRecoveryPolicy,
                         authorization: authorization
@@ -2745,6 +2764,7 @@ final class RemoteSessionMirrorRegistry {
                   authorization.scope.covers(sessionID) else { continue }
             connection.sendText(encode(RemoteSessionsChangedDTO(session: summary(
                 for: session,
+                projectID: project.id,
                 projectName: project.name,
                 projectLimitRecovery: project.limitRecoveryPolicy,
                 authorization: authorization

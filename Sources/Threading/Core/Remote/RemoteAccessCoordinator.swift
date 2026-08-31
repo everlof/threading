@@ -244,6 +244,19 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         mirrors.installTerminalApplication(terminalApplication)
     }
 
+    /// Installs the application-owned search graph before any remote door starts. The server
+    /// retains only narrow closures; provider stores and opaque token state remain in Search.
+    func installUniversalSearch(_ service: RemoteUniversalSearchService) {
+        server.universalSearchLoader = { [weak service] request, deviceID in
+            guard let service else { throw RemoteUniversalSearchError.unavailable }
+            return try await service.search(request, deviceID: deviceID)
+        }
+        server.universalSearchResolver = { [weak service] token, deviceID in
+            guard let service else { throw RemoteUniversalSearchError.unavailable }
+            return try await service.resolve(token: token, deviceID: deviceID)
+        }
+    }
+
     /// The transport the app ships with, unless a caller injected a substitute.
     ///
     /// A hosted test process gets `RefusedRemoteTransport` instead: the test bundle lives inside
