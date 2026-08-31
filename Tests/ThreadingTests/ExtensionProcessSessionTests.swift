@@ -536,10 +536,12 @@ final class ExtensionProcessSessionTests: XCTestCase {
             projectID: "project-1",
             sessionID: "session-1"
         )
+        let input = ExtensionCommandInputValue(kind: .project, id: "project-1")
         let completed = expectation(description: "command response")
         started.session.invokeCommand(
             commandID: command.id,
             context: context,
+            input: input,
             requestID: response.requestID
         ) { result in
             XCTAssertEqual(try? result.get(), response)
@@ -555,6 +557,7 @@ final class ExtensionProcessSessionTests: XCTestCase {
         )
         XCTAssertEqual(received.commandID, command.id)
         XCTAssertEqual(received.context, context)
+        XCTAssertEqual(received.input, input)
     }
 
     func testCommandResponseMustNameTheCommandThatWasInvoked() throws {

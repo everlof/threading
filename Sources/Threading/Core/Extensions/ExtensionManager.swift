@@ -1490,6 +1490,7 @@ final class ExtensionManager:
         extensionIdentifier: String,
         commandID: String,
         context: ExtensionCommandContext,
+        input: ExtensionCommandInputValue? = nil,
         requestID: String = UUID().uuidString.lowercased(),
         completion: @escaping (Result<ExtensionCommandResponse, Error>) -> Void
     ) -> Bool {
@@ -1508,6 +1509,7 @@ final class ExtensionManager:
         process.invokeCommand(
             commandID: commandID,
             context: context,
+            input: input,
             requestID: requestID,
             completion: { result in
                 completion(result.map(localization.commandResponse))
