@@ -341,16 +341,33 @@ final class MediaTransportTests: XCTestCase {
 
     // MARK: - Movie overlay
 
-    /// Play remains discoverable while a movie is paused, but only the drawn target claims a
-    /// click. The rest of the overlay is deliberately transparent to the canvas underneath it.
-    func testThePausedMovieOverlayShowsPlayAndOnlyHitsItsCentre() {
+    /// Play remains discoverable while a movie is paused, and the whole picture is the same
+    /// primary action rather than a 48-point interaction island. It also accepts the click that
+    /// activates an inactive window, as an ordinary playback button does.
+    func testThePausedMovieOverlayShowsPlayAndHitsTheWholeCanvas() {
         let overlay = makeHostedPlaybackOverlay()
+        var toggles = 0
+        overlay.onToggle = { toggles += 1 }
 
         XCTAssertTrue(overlay.isControlVisibleForTesting)
         XCTAssertEqual(overlay.accessibilityRole(), .button)
         XCTAssertEqual(overlay.accessibilityTitle(), L10n.string("Play"))
         XCTAssertTrue(overlay.hitTest(NSPoint(x: 100, y: 60)) === overlay)
-        XCTAssertNil(overlay.hitTest(NSPoint(x: 4, y: 4)))
+        XCTAssertTrue(overlay.hitTest(NSPoint(x: 4, y: 4)) === overlay)
+        XCTAssertNil(overlay.hitTest(NSPoint(x: -1, y: -1)))
+        XCTAssertTrue(overlay.acceptsFirstMouse(for: nil))
+
+        overlay.mouseDown(with: pointerEvent(
+            atFractionOfWidth: 0.02,
+            in: overlay,
+            type: .leftMouseDown
+        ))
+        overlay.mouseUp(with: pointerEvent(
+            atFractionOfWidth: 0.02,
+            in: overlay,
+            type: .leftMouseUp
+        ))
+        XCTAssertEqual(toggles, 1)
     }
 
     /// Once playback is under way the picture clears. Entering anywhere over the canvas reveals
