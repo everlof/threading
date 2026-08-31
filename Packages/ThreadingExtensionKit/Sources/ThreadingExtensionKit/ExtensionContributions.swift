@@ -15,6 +15,50 @@ public enum ExtensionCommandRisk: String, Codable, Equatable, Sendable {
     case destructive
 }
 
+/// A value Threading's command palette collects before invoking an extension command.
+///
+/// The host owns the picker, its contents, and last-moment revalidation. Extensions receive only
+/// the selected opaque identity; declaring an input never grants filesystem or host-data access.
+public enum ExtensionCommandInputKind: String, Codable, Equatable, Sendable {
+    case project
+}
+
+public struct ExtensionCommandInput: Codable, Equatable, Sendable {
+    public let kind: ExtensionCommandInputKind
+    public let prompt: String
+    public let searchPlaceholder: String
+
+    public init(
+        kind: ExtensionCommandInputKind,
+        prompt: String,
+        searchPlaceholder: String
+    ) {
+        self.kind = kind
+        self.prompt = prompt
+        self.searchPlaceholder = searchPlaceholder
+    }
+
+    public func validationIssues(path: String) -> [ExtensionValidationIssue] {
+        var issues: [ExtensionValidationIssue] = []
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedPrompt.isEmpty {
+            issues.append(.init(path: "\(path).prompt", message: "must not be empty"))
+        } else if prompt.count > 240 {
+            issues.append(.init(path: "\(path).prompt", message: "must contain at most 240 characters"))
+        }
+        let trimmedPlaceholder = searchPlaceholder.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedPlaceholder.isEmpty {
+            issues.append(.init(path: "\(path).searchPlaceholder", message: "must not be empty"))
+        } else if searchPlaceholder.count > 120 {
+            issues.append(.init(
+                path: "\(path).searchPlaceholder",
+                message: "must contain at most 120 characters"
+            ))
+        }
+        return issues
+    }
+}
+
 public enum ExtensionShortcutModifier: String, Codable, CaseIterable, Equatable, Sendable {
     case control
     case option
@@ -82,6 +126,9 @@ public struct ExtensionCommand: Codable, Equatable, Sendable {
     public let risk: ExtensionCommandRisk
     public let defaultShortcut: ExtensionKeyboardShortcut?
     public let menuPlacements: [ExtensionMenuPlacement]
+    /// Optional second step shown only by interactive command frontends such as Quick Open.
+    /// Menu invocation keeps using the menu's current host context.
+    public let input: ExtensionCommandInput?
 
     public init(
         id: String,
@@ -90,7 +137,8 @@ public struct ExtensionCommand: Codable, Equatable, Sendable {
         scope: ExtensionCommandScope = .application,
         risk: ExtensionCommandRisk = .ordinary,
         defaultShortcut: ExtensionKeyboardShortcut? = nil,
-        menuPlacements: [ExtensionMenuPlacement] = [.extensions]
+        menuPlacements: [ExtensionMenuPlacement] = [.extensions],
+        input: ExtensionCommandInput? = nil
     ) {
         self.id = id
         self.title = title
@@ -99,10 +147,11 @@ public struct ExtensionCommand: Codable, Equatable, Sendable {
         self.risk = risk
         self.defaultShortcut = defaultShortcut
         self.menuPlacements = menuPlacements
+        self.input = input
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, description, scope, risk, defaultShortcut, menuPlacements
+        case id, title, description, scope, risk, defaultShortcut, menuPlacements, input
     }
 
     public init(from decoder: Decoder) throws {
@@ -126,6 +175,7 @@ public struct ExtensionCommand: Codable, Equatable, Sendable {
             [ExtensionMenuPlacement].self,
             forKey: .menuPlacements
         ) ?? [.extensions]
+        input = try container.decodeIfPresent(ExtensionCommandInput.self, forKey: .input)
     }
 
     public func validationIssues(path: String) -> [ExtensionValidationIssue] {
@@ -160,6 +210,9 @@ public struct ExtensionCommand: Codable, Equatable, Sendable {
                 path: "\(path).menuPlacements",
                 message: "a session-scoped command cannot appear in a project row's menu"
             ))
+        }
+        if let input {
+            issues.append(contentsOf: input.validationIssues(path: "\(path).input"))
         }
         return issues
     }

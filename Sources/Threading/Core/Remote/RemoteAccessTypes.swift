@@ -32,7 +32,6 @@ enum RemoteInputControlDefault: String, CaseIterable {
 /// handshake. `RemoteSessionMirrorRegistry` resolves that per project before publishing anything,
 /// so a phone is never offered a workspace the Mac would then refuse.
 enum PhoneReportWorkspacePolicy: String, CaseIterable, Sendable {
-
     /// The project's own checkout, alongside whatever the Mac is doing in it.
     case sameCheckout
 
@@ -93,7 +92,7 @@ enum RemoteScope: Equatable, Sendable {
     func covers(_ sessionID: SessionID) -> Bool {
         switch self {
         case .allSessions: return true
-        case .session(let allowed): return allowed == sessionID
+        case let .session(allowed): return allowed == sessionID
         case .projectTerminal: return false
         }
     }
@@ -101,7 +100,7 @@ enum RemoteScope: Equatable, Sendable {
     func covers(_ terminalID: TerminalID) -> Bool {
         switch self {
         case .allSessions: return true
-        case .projectTerminal(let allowed): return allowed == terminalID
+        case let .projectTerminal(allowed): return allowed == terminalID
         case .session: return false
         }
     }
@@ -317,7 +316,8 @@ enum RemoteInboundPolicy {
         guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty,
               value.utf8.count <= RemoteAccessDefaults.maximumMutationRequestIDBytes,
-              value.utf8.allSatisfy({ $0 >= 0x21 && $0 <= 0x7e }) else {
+              value.utf8.allSatisfy({ $0 >= 0x21 && $0 <= 0x7E })
+        else {
             return nil
         }
         return value
@@ -327,7 +327,8 @@ enum RemoteInboundPolicy {
         guard let value = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines),
               !value.isEmpty,
               value.utf8.count <= RemoteAccessDefaults.maximumDeviceIDBytes,
-              value.unicodeScalars.allSatisfy(isAllowedDeviceScalar) else {
+              value.unicodeScalars.allSatisfy(isAllowedDeviceScalar)
+        else {
             return nil
         }
         return value
@@ -374,7 +375,8 @@ enum RemoteInboundPolicy {
             .split(whereSeparator: \.isWhitespace)
             .joined(separator: " ")
         guard !value.isEmpty,
-              value.utf8.count <= RemoteAccessDefaults.maximumMemberNameBytes else {
+              value.utf8.count <= RemoteAccessDefaults.maximumMemberNameBytes
+        else {
             return nil
         }
         return value
@@ -499,7 +501,7 @@ enum RemoteInboundPolicy {
 
     private static func isAllowedDeviceScalar(_ scalar: UnicodeScalar) -> Bool {
         switch scalar.value {
-        case 45, 46, 58, 95, 48...57, 65...90, 97...122:
+        case 45, 46, 58, 95, 48 ... 57, 65 ... 90, 97 ... 122:
             return true
         default:
             return false
@@ -582,7 +584,9 @@ struct RemotePromptReplayCache {
 
     mutating func remove(sessionID: String) {
         let keys = entries.keys.filter { $0.sessionID == sessionID }
-        for key in keys { entries[key] = nil }
+        for key in keys {
+            entries[key] = nil
+        }
         order.removeAll { $0.sessionID == sessionID }
     }
 
@@ -597,7 +601,9 @@ struct RemotePromptReplayCache {
         }
         guard !expired.isEmpty else { return }
         let expiredSet = Set(expired)
-        for key in expiredSet { entries[key] = nil }
+        for key in expiredSet {
+            entries[key] = nil
+        }
         order.removeAll { expiredSet.contains($0) }
     }
 }
@@ -695,7 +701,9 @@ struct RemoteAttentionRequestPolicy {
 
     mutating func remove(sessionID: String) {
         let requestKeys = entries.keys.filter { $0.sessionID == sessionID }
-        for key in requestKeys { entries[key] = nil }
+        for key in requestKeys {
+            entries[key] = nil
+        }
         order.removeAll { $0.sessionID == sessionID }
         latestDelivery = latestDelivery.filter { $0.key.sessionID != sessionID }
     }
@@ -711,7 +719,9 @@ struct RemoteAttentionRequestPolicy {
             now.timeIntervalSince(entry.createdAt) > lifetime ? key : nil
         }
         let expiredSet = Set(expiredRequests)
-        for key in expiredSet { entries[key] = nil }
+        for key in expiredSet {
+            entries[key] = nil
+        }
         if !expiredSet.isEmpty { order.removeAll { expiredSet.contains($0) } }
         latestDelivery = latestDelivery.filter {
             now.timeIntervalSince($0.value) <= max(lifetime, cooldown)
@@ -792,7 +802,8 @@ enum RemoteConversationWirePolicy {
     ) -> RemoteConversationPageDTO {
         let beforeIndex: Int
         if let beforeRowID,
-           let index = snapshot.rows.firstIndex(where: { $0.id == beforeRowID }) {
+           let index = snapshot.rows.firstIndex(where: { $0.id == beforeRowID })
+        {
             beforeIndex = index
         } else {
             beforeIndex = snapshot.rows.count
@@ -939,7 +950,8 @@ enum RemoteConversationWirePolicy {
 
     static func safePermission(_ request: RemotePermissionRequestDTO) -> RemotePermissionRequestDTO {
         if let size = try? JSONEncoder().encode(request).count,
-           size <= RemoteAccessDefaults.maximumRemotePermissionBytes {
+           size <= RemoteAccessDefaults.maximumRemotePermissionBytes
+        {
             return request
         }
         return RemotePermissionRequestDTO(
@@ -989,7 +1001,7 @@ enum RemoteConversationWirePolicy {
                 id: truncated(capability.id, toUTF8Bytes: 512),
                 name: truncated(capability.name, toUTF8Bytes: 256),
                 displayName: truncated(capability.displayName, toUTF8Bytes: 256),
-                description: truncated(capability.description, toUTF8Bytes: 1_500),
+                description: truncated(capability.description, toUTF8Bytes: 1500),
                 argumentHint: truncated(capability.argumentHint, toUTF8Bytes: 512),
                 aliases: capability.aliases.prefix(12).map {
                     truncated($0, toUTF8Bytes: 256)
@@ -1025,7 +1037,7 @@ enum RemoteConversationWirePolicy {
         )
         let end = min(max(0, beforeIndex), rows.count)
         let start = max(0, end - limit)
-        let candidates = Array(rows[start..<end])
+        let candidates = Array(rows[start ..< end])
         let fitted = fittedRows(candidates)
         let omittedWithinWindow = fitted.rows.count < candidates.count
         return (

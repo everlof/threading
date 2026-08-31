@@ -21,6 +21,11 @@ export interface Env {
   APNS_KEY_ID?: string;
   APNS_PRIVATE_KEY?: string;
   APNS_TOPIC?: string;
+  PUSH_TOKEN_ENCRYPTION_SECRET?: string;
+  DEVELOPMENT_AUTH_MODE?: string;
+  DEVELOPMENT_ACCESS_ISSUER?: string;
+  DEVELOPMENT_ACCESS_AUDIENCE?: string;
+  DEVELOPMENT_ACCESS_EMAILS?: string;
   TURN_KEY_ID?: string;
   TURN_KEY_API_TOKEN?: string;
   LOCAL_DEVELOPMENT_MODE?: string;

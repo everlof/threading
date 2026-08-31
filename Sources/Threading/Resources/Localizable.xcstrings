@@ -463,6 +463,17 @@
         }
       }
     },
+    "%@ already has this conversation open somewhere else. Close it there, then try again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ har redan den här konversationen öppen någon annanstans. Stäng den där och försök igen."
+          }
+        }
+      }
+    },
     "%@ archived “%@”" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -690,17 +701,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ har den här chatten öppen"
-          }
-        }
-      }
-    },
-    "%@ is already using this conversation's identifier somewhere else." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%@ använder redan den här konversationens identifierare någon annanstans."
           }
         }
       }
@@ -5178,6 +5178,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Lägg till en anteckning — den visar vägen till kopierade rapporter"
+          }
+        }
+      }
+    },
+    "Add a project first." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lägg till ett projekt först."
           }
         }
       }
@@ -13186,6 +13197,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kunde inte koda kontrollbegäran."
+          }
+        }
+      }
+    },
+    "Could not move to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte flytta till %@"
           }
         }
       }
@@ -21231,6 +21253,17 @@
         }
       }
     },
+    "Its conversation had already moved there, so resuming it here would have started an empty one. Threading followed it." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dess konversation hade redan flyttat dit, så att återuppta den här hade startat en tom. Threading följde efter."
+          }
+        }
+      }
+    },
     "Its curfew passed before the session was free." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24065,6 +24098,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Flytta chatten till en annan checkout?"
+          }
+        }
+      }
+    },
+    "Move this chat to the new worktree?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flytta chatten till den nya arbetskopian?"
           }
         }
       }
@@ -39227,6 +39271,28 @@
         }
       }
     },
+    "Stops at the %@ window’s scheduled reset, or sooner if the provider resets that same window early." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stannar vid %@-fönstrets planerade återställning, eller tidigare om leverantören återställer samma fönster i förtid."
+          }
+        }
+      }
+    },
+    "Stops at this window’s scheduled reset, or sooner if the provider resets this same window early." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stannar vid det här fönstrets planerade återställning, eller tidigare om leverantören återställer samma fönster i förtid."
+          }
+        }
+      }
+    },
     "Stops using the helper and removes it from Login Items. Sessions it is still holding keep running; it is removed at the next launch that finds it idle." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40569,6 +40635,17 @@
         }
       }
     },
+    "The agent created %@ and wants to continue this conversation there. Reason: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten skapade %@ och vill fortsätta konversationen där. Orsak: %@"
+          }
+        }
+      }
+    },
     "The agent did not answer the control request." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40598,6 +40675,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten lämnade ingen redogörelse för vad den hittade."
+          }
+        }
+      }
+    },
+    "The agent has been working there." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten har arbetat där."
           }
         }
       }
@@ -46311,6 +46399,17 @@
         }
       }
     },
+    "Threading still resumes it in the checkout it started from. Move it to keep the two together." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading återupptar den fortfarande i utcheckningen den startade i. Flytta den för att hålla ihop de två."
+          }
+        }
+      }
+    },
     "Threading stops the agent, moves the conversation to a login with room, and queues “continue” there. A login whose fresh reading has no room is refused rather than used." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -50014,6 +50113,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Arbetskatalog: %@"
+          }
+        }
+      }
+    },
+    "Working in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbetar i %@"
           }
         }
       }
@@ -54979,6 +55089,28 @@
         }
       }
     },
+    "“%@” is working in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” arbetar i %@"
+          }
+        }
+      }
+    },
+    "“%@” now runs in %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "”%@” körs nu i %@"
+          }
+        }
+      }
+    },
     "“%@” requests %@, but neither it nor its fallback fonts are installed. Using the system font." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55045,6 +55177,17 @@
         }
       }
     },
+    "↑↓ Move   Return Open   Escape Close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "↑↓ Flytta   Retur Öppna   Escape Stäng"
+          }
+        }
+      }
+    },
     "↑↓ Move   Return Run   Escape Back" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55063,6 +55206,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "↑↓ Flytta   Retur Kör   Escape Stäng"
+          }
+        }
+      }
+    },
+    "↑↓ Move   Tab or Return Choose Project   Escape Close" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "↑↓ Flytta   Tabb eller Retur Välj projekt   Escape Stäng"
           }
         }
       }

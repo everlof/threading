@@ -34,6 +34,13 @@ The sidebar groups **only when a repository has more than one checkout added**, 
 single-checkout case keeps the flatter two-level layout. Grouped checkouts are labelled by
 branch, since the repository name is already shown above them.
 
+The grouping is about checkouts Threading has been **added**, which is not the same as checkouts
+that exist. A worktree an agent makes with `git worktree add` is invisible here until something
+adds it, and the sidebar's flatter layout for a repository that in fact has three worktrees is
+correct about ownership and silent about everything else. Where an agent is actually *running* is
+a separate observed fact that no reading in this file supplies; see
+[Where a chat runs is not where its agent is](sessions.md#where-a-chat-runs-is-not-where-its-agent-is).
+
 A branch belongs to a *checkout*, not to a repository: two worktrees of one repo are on
 different branches simultaneously. A chat re-reads it when the agent stops working, which is
 when an agent is most likely to have just switched. A standalone terminal updates it with its

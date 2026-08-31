@@ -1180,13 +1180,13 @@ final class ProjectStore {
     /// checkout, and the standing quiet hours beyond that — the same three scopes as the mute
     /// and the limit recovery above, and optional for the same reason.
     ///
-    /// **A moved deadline clears the state in the same write.** The deadline is the curfew
+    /// **A changed rule clears the state in the same write.** The complete rule is the curfew
     /// instance's identity: a new one owes its wrap-up again, announces its hold again and
-    /// starts its interrupt budget at zero, so leaving the old receipts beneath it would read
-    /// as a curfew that had already done everything it was going to do. Clearing the rule does
-    /// the same, because the receipts describe a fence that no longer stands. Both happen here
-    /// rather than in the engine so that the two facts reach SQLite as one write and a crash
-    /// between them cannot leave a deadline describing somebody else's receipts.
+    /// starts its interrupt budget at zero. This matters even when two reset conditions share
+    /// an expected date, because their account, window and arming moment are different fences.
+    /// Clearing the rule does the same, because the receipts describe a fence that no longer
+    /// stands. Both happen here rather than in the engine so that the two facts reach SQLite as
+    /// one write and a crash between them cannot leave somebody else's receipts behind.
     ///
     /// Arming the fence is all this stores. Acting on it — the wrap-up, the hold, the
     /// interrupt — is `SessionCurfewCenter`'s, because it needs a live session to act on.
@@ -1199,9 +1199,10 @@ final class ProjectStore {
         let standing = projects[location.projectIndex].sessions[location.sessionIndex].curfewRule
         guard standing != rule else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].curfewRule = rule
-        if rule == nil || standing?.deadline != rule?.deadline {
-            projects[location.projectIndex].sessions[location.sessionIndex].curfewState = nil
-        }
+        // The rule itself is the instance identity. This used to compare only deadlines, but a
+        // reset-conditioned rule has no deadline until its provider event arrives; re-arming it
+        // must not inherit the previous condition's hold or interrupt receipts.
+        projects[location.projectIndex].sessions[location.sessionIndex].curfewState = nil
         guard save() else {
             notifyChanged()
             return .persistenceRefused
@@ -1212,16 +1213,22 @@ final class ProjectStore {
 
     /// The same for a whole checkout, which can exempt its chats and cannot end them.
     ///
-    /// `.until` is refused rather than stored: it names a wall-clock moment, and one written
-    /// here would keep ending chats created weeks later at a time nobody chose. The scope that
-    /// names a moment is the conversation; the scope that names a standing window is Settings.
+    /// Deadline and reset-conditioned rules are refused rather than stored: each names one
+    /// session's finite fence, and one written here would keep ending chats created weeks later
+    /// for a condition nobody chose. The scope that names a one-shot end is the conversation;
+    /// the scope that names a standing window is Settings.
     @discardableResult
     func setCurfewRule(
         _ rule: CurfewRule?,
         forProjectID projectID: ProjectID
     ) -> ProjectMutationResult {
         guard let index = index(ofProject: projectID) else { return .targetNotFound }
-        if case .until = rule { return .unsupportedValue }
+        switch rule {
+        case .until, .untilUsageReset:
+            return .unsupportedValue
+        case .exempt, nil:
+            break
+        }
         guard projects[index].curfewRule != rule else { return .unchanged }
         projects[index].curfewRule = rule
         guard save() else {

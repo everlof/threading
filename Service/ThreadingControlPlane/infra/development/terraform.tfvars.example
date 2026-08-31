@@ -1,0 +1,8 @@
+cloudflare_account_id = "replace-with-32-character-account-id"
+access_team_domain    = "replace-me.cloudflareaccess.com"
+
+# Exact individual identities only. Keep these lowercase; never replace this with an email-domain
+# or Everyone policy.
+allowed_emails = [
+  "developer@example.com",
+]

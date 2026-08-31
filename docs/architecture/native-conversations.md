@@ -509,6 +509,13 @@ ink via `ThemedButton.plainTitleLeadingInset` so a mixed list is not ragged. The
 picks the detail pane's notice, so a finished child stops claiming a file is on its way. See
 [`session-activity.md`](session-activity.md) for the hook reports that made empty rows possible.
 
+The navigator is also the standing work receipt, not merely a list of provider role names.
+Every bounded row keeps the delegated prompt visible, then adds the model/reasoning configuration,
+provider progress and indexed usage when known, plus the latest distinct activity or result. These
+are projections of the descriptor, timeline and usage snapshot already in memory; opening the pane
+does not start another provider read or poll. Selection still changes only the transcript beneath
+the navigator, and a page still constructs at most 40 child rows.
+
 Codex app-server reports child `thread/started`, `thread/status/changed`,
 `collabAgentToolCall`, and `subAgentActivity` events with real thread ids.
 `CodexSubagentEvent` translates those into `SubagentEvent`, including the child's complete

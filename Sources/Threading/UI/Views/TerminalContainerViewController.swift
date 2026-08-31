@@ -15,7 +15,6 @@ private enum StatusCardRemoteDefaults {
 /// `ProjectTerminalRuntime`, so switching selection swaps views without restarting processes
 /// or losing scrollback.
 final class TerminalContainerViewController: NSViewController {
-
     // MARK: - Properties
 
     typealias SessionComposerFactory = @MainActor () -> SessionComposerViewController
@@ -172,6 +171,7 @@ final class TerminalContainerViewController: NSViewController {
         host.translatesAutoresizingMaskIntoConstraints = false
         return host
     }()
+
     private lazy var drawerDivider: ShellDrawerDivider = {
         let divider = ShellDrawerDivider()
         divider.translatesAutoresizingMaskIntoConstraints = false
@@ -180,6 +180,7 @@ final class TerminalContainerViewController: NSViewController {
         divider.onDragEnded = { [weak self] in self?.drawerDividerDragEnded() }
         return divider
     }()
+
     private lazy var drawerHeight = drawerHost.heightAnchor.constraint(equalToConstant: 0)
 
     /// Window geometry, like the display panel's width: a drawer height is a working
@@ -253,7 +254,7 @@ final class TerminalContainerViewController: NSViewController {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -355,7 +356,8 @@ final class TerminalContainerViewController: NSViewController {
         StatusCardVisibility.isEnabled.toggle()
         if StatusCardVisibility.isEnabled,
            let sessionID = currentSessionID,
-           let project = ProjectStore.shared.executionProject(forSessionID: sessionID) {
+           let project = ProjectStore.shared.executionProject(forSessionID: sessionID)
+        {
             refreshGitStatusOverlayChangeRequest(
                 for: sessionID,
                 root: project.folderURL,
@@ -436,7 +438,7 @@ final class TerminalContainerViewController: NSViewController {
             headerHost.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             contentGuide.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             contentGuide.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            contentGuide.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            contentGuide.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
         // Everything else in the pane hangs off this rather than off the safe area directly, so
@@ -471,7 +473,7 @@ final class TerminalContainerViewController: NSViewController {
         NSLayoutConstraint.activate([
             notice.topAnchor.constraint(equalTo: headerHost.bottomAnchor),
             notice.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            notice.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            notice.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
         noticeView = notice
         noticeOwner = owner
@@ -490,7 +492,8 @@ final class TerminalContainerViewController: NSViewController {
         guard !TerminalTextVisibilityDismissals.shared.contains(issue) else { return }
         if terminalTextVisibilityIssues.count >= 32,
            terminalTextVisibilityIssues[issue.identity] == nil,
-           let expired = terminalTextVisibilityIssues.keys.first {
+           let expired = terminalTextVisibilityIssues.keys.first
+        {
             terminalTextVisibilityIssues.removeValue(forKey: expired)
         }
         terminalTextVisibilityIssues[issue.identity] = issue
@@ -531,7 +534,7 @@ final class TerminalContainerViewController: NSViewController {
                         self,
                         didRequestSettingsPage: SettingsPages.themesID
                     )
-                }
+                },
             ],
             onDismiss: { [weak self] in
                 self?.dismissTerminalTextVisibilityIssue(issue)
@@ -546,7 +549,8 @@ final class TerminalContainerViewController: NSViewController {
         }
         guard let sessionID = currentSessionID else { return nil }
         if drawerHostController.isOpen(for: sessionID),
-           let shellIssue = terminalTextVisibilityIssues[.sessionShell(sessionID)] {
+           let shellIssue = terminalTextVisibilityIssues[.sessionShell(sessionID)]
+        {
             return shellIssue
         }
         guard currentChild?.sessionID == sessionID else { return nil }
@@ -587,7 +591,7 @@ final class TerminalContainerViewController: NSViewController {
                 equalTo: headerHost.trailingAnchor,
                 constant: -PaneHeaderDefaults.inset
             ),
-            content.centerYAnchor.constraint(equalTo: headerHost.contentCenterYAnchor)
+            content.centerYAnchor.constraint(equalTo: headerHost.contentCenterYAnchor),
         ])
     }
 
@@ -621,7 +625,7 @@ final class TerminalContainerViewController: NSViewController {
             composer.topAnchor.constraint(equalTo: contentTopAnchor),
             composer.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             composer.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            composer.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            composer.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
     }
 
@@ -805,7 +809,7 @@ final class TerminalContainerViewController: NSViewController {
             drawerDivider.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             drawerDivider.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             drawerDivider.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
-            drawerDivider.heightAnchor.constraint(equalToConstant: ShellDrawerDefaults.dividerHeight)
+            drawerDivider.heightAnchor.constraint(equalToConstant: ShellDrawerDefaults.dividerHeight),
         ])
 
         // Installed once and never re-parented: the zero-high band hides it when closed, and a
@@ -826,7 +830,7 @@ final class TerminalContainerViewController: NSViewController {
             drawerHostController.view.topAnchor.constraint(equalTo: drawerHost.topAnchor),
             drawerContentBottom,
             drawerHostController.view.leadingAnchor.constraint(equalTo: drawerHost.leadingAnchor),
-            drawerHostController.view.trailingAnchor.constraint(equalTo: drawerHost.trailingAnchor)
+            drawerHostController.view.trailingAnchor.constraint(equalTo: drawerHost.trailingAnchor),
         ])
     }
 
@@ -1001,7 +1005,7 @@ final class TerminalContainerViewController: NSViewController {
             launchFailureView.topAnchor.constraint(equalTo: contentTopAnchor),
             launchFailureView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             launchFailureView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            launchFailureView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            launchFailureView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
     }
 
@@ -1020,7 +1024,7 @@ final class TerminalContainerViewController: NSViewController {
             placeholderView.topAnchor.constraint(equalTo: contentTopAnchor),
             placeholderView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             placeholderView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            placeholderView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            placeholderView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
     }
 
@@ -1060,7 +1064,8 @@ final class TerminalContainerViewController: NSViewController {
         applyDrawer(for: sessionID)
 
         guard let sessionID,
-              let agentSession = ProjectStore.shared.session(withID: sessionID) else {
+              let agentSession = ProjectStore.shared.session(withID: sessionID)
+        else {
             currentSessionID = nil
             showEmptyState()
             return
@@ -1079,7 +1084,8 @@ final class TerminalContainerViewController: NSViewController {
         // retry is a button on the surface below instead, which is a decision rather than a
         // side effect of navigating.
         if let failure = agentSession.lastLaunchFailure,
-           !AgentRuntime.shared.hasTerminal(sessionID: sessionID) {
+           !AgentRuntime.shared.hasTerminal(sessionID: sessionID)
+        {
             applyDrawer(for: nil)
             showLaunchFailureState(failure, session: agentSession)
             return
@@ -1096,7 +1102,8 @@ final class TerminalContainerViewController: NSViewController {
         // must still support it — a session flagged native for an agent since disabled falls
         // back to the terminal rather than launching a mode it should no longer use.
         if agentSession.usesNativeUI, agentSession.kind.supportsNativeUI,
-           let project = ProjectStore.shared.executionProject(forSessionID: sessionID) {
+           let project = ProjectStore.shared.executionProject(forSessionID: sessionID)
+        {
             showConversation(
                 agentSession,
                 in: project,
@@ -1194,7 +1201,8 @@ final class TerminalContainerViewController: NSViewController {
            let conversation = AgentRuntime.shared.makeConversation(
                for: agentSession,
                in: project
-           ) {
+           )
+        {
             conversation.delegate = self
             conversation.view.frame = frame
             conversation.view.layoutSubtreeIfNeeded()
@@ -1258,7 +1266,8 @@ final class TerminalContainerViewController: NSViewController {
     private var backgroundLaunchSize: NSSize {
         let bounds = view.bounds.size
         guard bounds.width >= StartupRelaunchDefaults.minimumPaneDimension,
-              bounds.height >= StartupRelaunchDefaults.minimumPaneDimension else {
+              bounds.height >= StartupRelaunchDefaults.minimumPaneDimension
+        else {
             return StartupRelaunchDefaults.fallbackSize
         }
         return bounds
@@ -1320,7 +1329,7 @@ final class TerminalContainerViewController: NSViewController {
             controller.view.topAnchor.constraint(equalTo: contentTopAnchor),
             controller.view.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
             controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
 
         currentChild = controller
@@ -1347,7 +1356,7 @@ final class TerminalContainerViewController: NSViewController {
             controller.view.topAnchor.constraint(equalTo: contentTopAnchor),
             controller.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             controller.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            controller.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
 
         currentProjectTerminal = controller
@@ -1474,7 +1483,7 @@ final class TerminalContainerViewController: NSViewController {
             conversation.view.topAnchor.constraint(equalTo: contentTopAnchor),
             conversation.view.bottomAnchor.constraint(equalTo: drawerHost.topAnchor),
             conversation.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            conversation.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            conversation.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
 
         currentConversation = conversation
@@ -1653,7 +1662,7 @@ final class TerminalContainerViewController: NSViewController {
         let color: NSColor
         switch ground {
         case .chrome: color = Design.Surface.ground
-        case .terminal(let terminal): color = terminal
+        case let .terminal(terminal): color = terminal
         }
         view.applyLayerBackground(color)
 
@@ -1756,7 +1765,7 @@ final class TerminalContainerViewController: NSViewController {
         _ message: ScheduledMessage,
         session: AgentSession
     ) {
-        guard case .newSession(let plan) = message.target else { return }
+        guard case let .newSession(plan) = message.target else { return }
         let scheduledView = scheduledPlaceholderForPresentation()
 
         hideComposerIfLoaded()
@@ -1792,7 +1801,7 @@ final class TerminalContainerViewController: NSViewController {
     }
 
     private func watchedSessionTitle(for message: ScheduledMessage) -> String? {
-        guard case .sessionFinished(let watchedSessionID) = message.trigger else { return nil }
+        guard case let .sessionFinished(watchedSessionID) = message.trigger else { return nil }
         return ProjectStore.shared.session(withID: watchedSessionID)?.displayTitle
     }
 
@@ -1805,7 +1814,7 @@ final class TerminalContainerViewController: NSViewController {
             scheduled.topAnchor.constraint(equalTo: contentTopAnchor),
             scheduled.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             scheduled.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            scheduled.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            scheduled.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
         scheduledPlaceholderView = scheduled
         return scheduled
@@ -1868,7 +1877,7 @@ final class TerminalContainerViewController: NSViewController {
             surface.topAnchor.constraint(equalTo: contentTopAnchor),
             surface.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             surface.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            surface.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+            surface.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
         showRecoverySurface()
     }
@@ -2015,7 +2024,7 @@ final class TerminalContainerViewController: NSViewController {
                     didRequestProblemReport: failure,
                     for: sessionID
                 )
-            }
+            },
         ]
 
         if LaunchRecoveryBrief.canAttempt(failure) {
@@ -2104,7 +2113,6 @@ final class TerminalContainerViewController: NSViewController {
 
 /// Split from the class body purely for size, like the sidebar's action extension.
 private extension TerminalContainerViewController {
-
     /// Floats at the pane's top-right corner, above every session surface — installed after
     /// the static views, and the surfaces attach `positioned: .below` it, so nothing added
     /// later ever covers it. Git opens Review; the child-agent segment opens Subagents.
@@ -2140,7 +2148,7 @@ private extension TerminalContainerViewController {
             gitStatusOverlay.trailingAnchor.constraint(
                 equalTo: view.trailingAnchor,
                 constant: -Design.Spacing.inset
-            )
+            ),
         ])
     }
 
@@ -2367,7 +2375,7 @@ private extension TerminalContainerViewController {
                 guard !Task.isCancelled,
                       expected == self.changeRequestGeneration,
                       self.currentSessionID == sessionID else { return }
-                guard case .supported(let repository) = ChangeRequestRepository.detect(
+                guard case let .supported(repository) = ChangeRequestRepository.detect(
                     remote: local.remote
                 ) else {
                     self.lastChangeRequestReading = nil
@@ -2380,7 +2388,8 @@ private extension TerminalContainerViewController {
                    let last = self.lastChangeRequestRead,
                    last.signature == signature,
                    Date().timeIntervalSince(last.date)
-                    < StatusCardRemoteDefaults.remoteRefreshInterval {
+                   < StatusCardRemoteDefaults.remoteRefreshInterval
+                {
                     if self.lastChangeRequestReading?.checks.shouldPoll == true {
                         self.scheduleGitStatusOverlayPendingChecks(
                             for: sessionID,
@@ -2400,7 +2409,7 @@ private extension TerminalContainerViewController {
                       self.currentSessionID == sessionID else { return }
                 self.lastChangeRequestRead = (signature, Date())
                 switch outcome {
-                case .loaded(let status):
+                case let .loaded(status):
                     let reading = GitStatusOverlayView.ChangeRequestReading(status: status)
                     self.lastChangeRequestReading = reading
                     self.gitStatusOverlay.updateChangeRequest(reading)
@@ -2613,7 +2622,6 @@ private extension TerminalContainerViewController {
     private func openSharing() {
         delegate?.terminalContainerDidRequestSharing(self)
     }
-
 }
 
 extension TerminalContainerViewController {
@@ -2675,7 +2683,7 @@ extension TerminalContainerViewController {
                 signature: signature,
                 eventCount: events.count
             ) {
-            case .retryAfter(let delay):
+            case let .retryAfter(delay):
                 self.scheduleRetainedTranscriptRecheck(
                     state: state,
                     sessionID: sessionID,
@@ -2752,7 +2760,6 @@ extension TerminalContainerViewController: ProjectTerminalViewControllerDelegate
 // MARK: - AgentSessionViewControllerDelegate
 
 extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
-
     func agentSession(_ controller: AgentSessionViewController, titleChangedTo title: String) {
         // Agents report progress through the terminal title, so this drives the sidebar
         // name as well as the window subtitle.
@@ -2776,7 +2783,8 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
                 // The controller has already written the record by the time this runs, so the
                 // store is the one place both this route and a later selection read it from.
                 if let stored = ProjectStore.shared.session(withID: sessionID),
-                   let failure = stored.lastLaunchFailure {
+                   let failure = stored.lastLaunchFailure
+                {
                     self.showLaunchFailureState(failure, session: stored)
                 } else {
                     self.showDormantState(for: sessionID)
@@ -2937,7 +2945,6 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
 // MARK: - ConversationViewControllerDelegate
 
 extension TerminalContainerViewController: ConversationViewControllerDelegate {
-
     func conversation(_ controller: ConversationViewController, didExitWithCode code: Int32) {
         // Unlike a terminal, the view is kept rather than swapped for the dormant placeholder:
         // the conversation it is showing is the only record of the turn on screen, and the
@@ -2946,14 +2953,14 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
     }
 
     func conversation(
-        _ controller: ConversationViewController,
+        _: ConversationViewController,
         didRequestTurnDiff checkpointID: GitTurnCheckpointID
     ) {
         delegate?.terminalContainer(self, didRequestTurnDiff: checkpointID)
     }
 
     func conversation(
-        _ controller: ConversationViewController,
+        _: ConversationViewController,
         didRequestOpenSession sessionID: SessionID
     ) {
         delegate?.terminalContainer(self, didRequestOpenSession: sessionID)

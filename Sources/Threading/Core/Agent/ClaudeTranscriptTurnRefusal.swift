@@ -38,7 +38,7 @@ struct ClaudeTurnRefusal: Equatable, Sendable {
 /// for hours, and for `watch_session` and every waiting sibling delivery as well.
 ///
 /// This is the third instance of that one shape. `ClaudeTranscriptUsageLimit` covers the refusal
-/// whose reason is the spent allowance, `CodexTranscriptInterruption` covers a Codex turn the
+/// whose reason is the spent allowance, `CodexTranscriptTurnBoundary` covers a Codex turn the
 /// user stopped by hand, and this covers what is left: the request that failed. The three read
 /// different records and settle differently — a spent account is `limitReached` and has a
 /// recovery, an interrupt and a failure are simply turns that ended — but they close the same
@@ -102,7 +102,7 @@ enum ClaudeTranscriptTurnRefusal {
 enum ClaudeRefusalDefaults {
     /// How long an output burst must settle before the transcript is revalidated. The CLI paints
     /// its error and its prompt in several frames, and one read after they stop is the whole
-    /// cost — the same beat `CodexInterruptionDefaults` keeps for the same reason.
+    /// cost — the same beat `CodexTurnBoundaryDefaults` keeps for the same reason.
     ///
     /// It is the beat for both of Claude's boundary reads: `scheduleClaudeBoundaryRefresh` asks
     /// this reader and `ClaudeTranscriptInterruption` on one quiet edge, since they answer off the

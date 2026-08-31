@@ -65,6 +65,15 @@ final class BrowserCaptureGeometryTests: XCTestCase {
 
         let resized = await browser.agentSetResponsiveViewport(width: 760, height: 656)
         XCTAssertTrue(resized.ok, resized.message)
+        let deviceToolbar = try XCTUnwrap(
+            browser.view.subviews.compactMap { $0 as? BrowserDeviceToolbar }.first
+        )
+        XCTAssertFalse(
+            deviceToolbar.isHidden,
+            "the live browser must name the fixed viewport that leaves spare canvas below it"
+        )
+        XCTAssertEqual(deviceToolbar.widthField.stringValue, "760")
+        XCTAssertEqual(deviceToolbar.heightField.stringValue, "656")
         _ = try await browser.evaluate(
             """
             document.documentElement.style.margin = '0';

@@ -3,6 +3,7 @@ node_modules/
 .dev.vars.local
 .wrangler/
 .wrangler.production.generated.jsonc
+.wrangler.development.generated.jsonc
 worker-configuration.d.ts
 infra/.terraform/
 infra/*.tfstate
@@ -11,3 +12,10 @@ infra/*.tfplan
 infra/.threading.tfplan
 infra/terraform.tfvars
 infra/backend.hcl
+infra/development/.terraform/
+infra/development/*.tfstate
+infra/development/*.tfstate.*
+infra/development/*.tfplan
+infra/development/.threading.tfplan
+infra/development/terraform.tfvars
+infra/development/backend.hcl

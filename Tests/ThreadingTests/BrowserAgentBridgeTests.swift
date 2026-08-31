@@ -2086,6 +2086,30 @@ final class BrowserAgentBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func testAgentResponsiveViewportMakesItsFixedCanvasExplicitUntilReset() throws {
+        let browser = BrowserViewController(contextKind: .private)
+        _ = browser.view
+        let toolbar = try XCTUnwrap(
+            browser.view.subviews.compactMap { $0 as? BrowserDeviceToolbar }.first
+        )
+
+        browser.presentAgentResponsiveViewport(width: 760, height: 656)
+
+        XCTAssertEqual(browser.responsiveViewport, CGSize(width: 760, height: 656))
+        XCTAssertFalse(
+            toolbar.isHidden,
+            "a fixed agent viewport must not leave unexplained spare canvas in the browser"
+        )
+        XCTAssertEqual(toolbar.widthField.stringValue, "760")
+        XCTAssertEqual(toolbar.heightField.stringValue, "656")
+
+        browser.presentAgentResponsiveViewport(width: nil, height: nil)
+
+        XCTAssertNil(browser.responsiveViewport)
+        XCTAssertTrue(toolbar.isHidden)
+    }
+
+    @MainActor
     func testBrowserAnnotationOverlayDoesNotInterceptPageOutsideAnnotationMode() throws {
         let overlay = BrowserAnnotationOverlay(
             frame: NSRect(x: 0, y: 0, width: 390, height: 844)

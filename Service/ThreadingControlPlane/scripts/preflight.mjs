@@ -20,13 +20,17 @@ const exampleVariables = parseDotVariables(
 );
 const exampleSigningSecret = exampleVariables.get("SESSION_SIGNING_SECRET") ?? "";
 const exampleEncryptionSecret = exampleVariables.get("APPLE_TOKEN_ENCRYPTION_SECRET") ?? "";
+const examplePushEncryptionSecret = exampleVariables.get("PUSH_TOKEN_ENCRYPTION_SECRET") ?? "";
 const examplePickupSecret = exampleVariables.get("REPORT_PICKUP_TOKEN") ?? "";
 const exampleAlertSecret = exampleVariables.get("REPORT_ALERT_WEBHOOK_TOKEN") ?? "";
 if (new TextEncoder().encode(exampleSigningSecret).byteLength < 32
   || new TextEncoder().encode(exampleEncryptionSecret).byteLength < 32
+  || new TextEncoder().encode(examplePushEncryptionSecret).byteLength < 32
   || new TextEncoder().encode(examplePickupSecret).byteLength < 32
   || new TextEncoder().encode(exampleAlertSecret).byteLength < 32
-  || exampleSigningSecret === exampleEncryptionSecret) {
+  || exampleSigningSecret === exampleEncryptionSecret
+  || exampleSigningSecret === examplePushEncryptionSecret
+  || exampleEncryptionSecret === examplePushEncryptionSecret) {
   failures.push("local example secrets must satisfy the independent 32-byte runtime contract");
 }
 
@@ -138,6 +142,7 @@ const expectedSecrets = [
   "APNS_TEAM_ID",
   "APNS_KEY_ID",
   "APNS_PRIVATE_KEY",
+  "PUSH_TOKEN_ENCRYPTION_SECRET",
   "TURN_KEY_ID",
   "TURN_KEY_API_TOKEN",
   "REPORT_PICKUP_TOKEN",
@@ -165,6 +170,7 @@ const expectedMigrations = [
   "0005_apple_session_validation.sql",
   "0006_refresh_rotation.sql",
   "0007_issue_report_quota.sql",
+  "0008_development_auth_and_push_registrations.sql",
 ];
 if (JSON.stringify(migrations) !== JSON.stringify(expectedMigrations)) {
   failures.push("the production migration set differs from the reviewed ordered list");

@@ -2018,12 +2018,18 @@ final class ExtensionContractTests: XCTestCase {
                 key: "b",
                 modifiers: [.option, .command]
             ),
-            menuPlacements: [.project, .view]
+            menuPlacements: [.project, .view],
+            input: .init(
+                kind: .project,
+                prompt: "Choose a project to open.",
+                searchPlaceholder: "Choose a project"
+            )
         )
         let request = ExtensionCommandRequest(
             requestID: "command-request-1",
             commandID: command.id,
-            context: .init(projectID: "project-1", sessionID: "session-1")
+            context: .init(projectID: "project-1", sessionID: "session-1"),
+            input: .init(kind: .project, id: "project-1")
         )
         let response = ExtensionCommandResponse(
             requestID: request.requestID,
@@ -2043,6 +2049,7 @@ final class ExtensionContractTests: XCTestCase {
         )
         XCTAssertEqual(command.menuPlacements, [.project, .view])
         XCTAssertEqual(command.risk, .destructive)
+        XCTAssertEqual(command.input?.kind, .project)
         XCTAssertEqual(
             try JSONDecoder().decode(
                 ExtensionCommandRequest.self,
@@ -2057,6 +2064,14 @@ final class ExtensionContractTests: XCTestCase {
             ),
             response
         )
+
+        let legacyCommand = Data(#"{"id":"refresh","title":"Refresh"}"#.utf8)
+        XCTAssertNil(try JSONDecoder().decode(ExtensionCommand.self, from: legacyCommand).input)
+
+        let legacyRequest = Data(
+            #"{"protocolVersion":1,"requestID":"r","commandID":"refresh","context":{}}"#.utf8
+        )
+        XCTAssertNil(try JSONDecoder().decode(ExtensionCommandRequest.self, from: legacyRequest).input)
     }
 
     func testSettingsContributionAndRuntimeUpdateRoundTrip() throws {

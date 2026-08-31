@@ -37,6 +37,14 @@ final class HostCommandPlaneTests: XCTestCase {
         )
     }
 
+    private var projectInput: HostCommandInputRequest {
+        HostCommandInputRequest(
+            kind: .project,
+            prompt: "Choose a project to continue.",
+            searchPlaceholder: "Choose a project"
+        )
+    }
+
     func testInvocationUsesStableIdentityAndRechecksAvailability() {
         var available = true
         var invoked: [String] = []
@@ -131,6 +139,39 @@ final class HostCommandPlaneTests: XCTestCase {
         XCTAssertEqual(invoked, [request], "a stale session target must not reach the command")
     }
 
+    func testInvocationRequiresAndRevalidatesTheCollectedProject() {
+        var options = [HostCommandInputOption(id: "project-1", title: "Threading", detail: nil)]
+        var invoked: [HostCommandInvocationRequest] = []
+        let plane = HostCommandPlane(
+            catalog: {
+                [self.descriptor(
+                    id: "extension.marketeer.open",
+                    title: "Open in Marketeer",
+                    nextInput: self.projectInput
+                )]
+            },
+            inputOptions: { _, _ in options },
+            invokeRequest: {
+                invoked.append($0)
+                return .invoked(commandID: $0.commandID)
+            }
+        )
+        let request = HostCommandInvocationRequest(
+            commandID: "extension.marketeer.open",
+            input: HostCommandInputValue(kind: .project, id: "project-1")
+        )
+
+        XCTAssertEqual(plane.invoke(request), .invoked(commandID: request.commandID))
+        XCTAssertEqual(invoked, [request])
+
+        options.removeAll()
+        XCTAssertEqual(
+            plane.invoke(request),
+            .refused(commandID: request.commandID, reason: "That selection is no longer available.")
+        )
+        XCTAssertEqual(invoked, [request])
+    }
+
     func testHostProjectionRetainsRegistryIdentityMetadataAndResolvedShortcut() throws {
         let registry = CommandRegistry(builtInCommands: [])
         registry.replaceExtensionCommands(
@@ -143,7 +184,12 @@ final class HostCommandPlaneTests: XCTestCase {
                     description: "Drops the current build.",
                     scope: .project,
                     risk: .destructive,
-                    defaultShortcut: .init(key: "r", modifiers: [.option, .command])
+                    defaultShortcut: .init(key: "r", modifiers: [.option, .command]),
+                    input: .init(
+                        kind: .project,
+                        prompt: "Choose a project.",
+                        searchPlaceholder: "Choose a project"
+                    )
                 )
             ]
         )
@@ -158,6 +204,7 @@ final class HostCommandPlaneTests: XCTestCase {
         XCTAssertEqual(host.shortcut, command.defaultShortcut?.displayString)
         XCTAssertEqual(host.scope, .project)
         XCTAssertEqual(host.risk, .destructive)
+        XCTAssertEqual(command.extensionInput?.kind, .project)
         XCTAssertEqual(
             host.origin,
             .extensionCommand(identifier: "com.example.ci", name: "CI", localID: "reset")
@@ -408,6 +455,37 @@ final class HostCommandPlaneTests: XCTestCase {
         registry.removeExtensionCommands(extensionIdentifier: "com.example.live")
         drainMainRunLoop(until: { controller.visibleCommandIDsForTesting.isEmpty })
         XCTAssertTrue(controller.visibleCommandIDsForTesting.isEmpty)
+    }
+
+    /// A settings destination navigates; the footer has to stop promising it will run something.
+    func testPaletteSaysOpenOverASettingsRowAndRunOverACommand() {
+        let settings = SettingsDestination(
+            pageID: "general",
+            pageTitle: "General",
+            group: "App",
+            section: "Notifications",
+            rowTitle: "Alert sound"
+        ).hostDescriptor()
+        let controller = CommandPaletteViewController(
+            catalog: { [self.descriptor(id: "view.files", title: "Files"), settings] },
+            invoke: { .invoked(commandID: $0) }
+        )
+        _ = controller.view
+        drainMainRunLoop(until: { controller.visibleCommandIDsForTesting.count == 2 })
+
+        XCTAssertEqual(controller.selectedCommandIDForTesting, "view.files")
+        XCTAssertEqual(
+            controller.leadingHintForTesting,
+            L10n.string("↑↓ Move   Return Run   Escape Close")
+        )
+
+        controller.moveSelectionForTesting(by: 1)
+
+        XCTAssertEqual(controller.selectedCommandIDForTesting, settings.id)
+        XCTAssertEqual(
+            controller.leadingHintForTesting,
+            L10n.string("↑↓ Move   Return Open   Escape Close")
+        )
     }
 
     private func drainMainRunLoop(

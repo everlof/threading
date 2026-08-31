@@ -127,6 +127,9 @@ private struct TerminalRenderState {
     var renderer: MetalTerminalRenderer?
     var needsExternalDraw = false
 #endif
+#if os(macOS)
+    let contrastDetector = TerminalContrastDetector()
+#endif
 }
 
 /// The single owner of mutable frame state for one terminal view.
@@ -618,7 +621,7 @@ final class TerminalRenderOwner: Sendable {
 #if os(macOS)
         if request.viewState.detectsLowContrastText,
            let context = session.snapshot.renderContext {
-            update?.lowContrastText = TerminalContrastDetector.detect(
+            update?.lowContrastText = renderState.contrastDetector.detect(
                 snapshot: session.snapshot, context: context)
         }
 #endif
@@ -628,6 +631,16 @@ final class TerminalRenderOwner: Sendable {
         return update
         }
     }
+
+#if os(macOS)
+    var contrastCounters: TerminalContrastDetector.Counters {
+        withRenderState { $0.contrastDetector.counters }
+    }
+
+    func resetContrastCounters() {
+        withRenderState { $0.contrastDetector.resetCounters() }
+    }
+#endif
 
     private func applyPendingSize (
         _ pending: FrameTerminalSize?,

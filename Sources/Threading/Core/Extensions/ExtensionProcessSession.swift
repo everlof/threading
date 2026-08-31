@@ -572,6 +572,7 @@ final class ExtensionProcessSession: @unchecked Sendable {
     func invokeCommand(
         commandID: String,
         context: ExtensionCommandContext,
+        input: ExtensionCommandInputValue? = nil,
         requestID: String = UUID().uuidString.lowercased(),
         timeout: TimeInterval = defaultTimeout,
         completion: @escaping CommandCompletion
@@ -579,7 +580,8 @@ final class ExtensionProcessSession: @unchecked Sendable {
         let request = ExtensionCommandRequest(
             requestID: requestID,
             commandID: commandID,
-            context: context
+            context: context,
+            input: input
         )
 
         do {

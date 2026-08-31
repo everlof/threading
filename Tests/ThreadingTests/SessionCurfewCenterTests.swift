@@ -42,6 +42,7 @@ final class SessionCurfewCenterTests: XCTestCase {
     private var terminalInterrupts: [SessionID] = []
     private var terminalInterruptLands = true
     private var stoppedAgents: [SessionID] = []
+    private var usageRefreshes: [AccountID] = []
     private var gaveUpAlerts: [(session: SessionID, interrupts: Int, stopped: Bool)] = []
     private var withdrawnAlerts: [SessionID] = []
     private var announcedChanges: [SessionID] = []
@@ -125,6 +126,7 @@ final class SessionCurfewCenterTests: XCTestCase {
                 return self.terminalInterruptLands
             },
             stopAgent: { [weak self] in self?.stoppedAgents.append($0) },
+            refreshUsage: { [weak self] in self?.usageRefreshes.append($0) },
             postGaveUpAlert: { [weak self] sessionID, interrupts, stopped in
                 self?.gaveUpAlerts.append((sessionID, interrupts, stopped))
             },
@@ -162,6 +164,29 @@ final class SessionCurfewCenterTests: XCTestCase {
     /// makes the test independent of whether that delivery is inlined on the posting thread.
     private func settle() {
         RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+    }
+
+    private func resetEvent(
+        accountID: AccountID,
+        windowID: String,
+        detectedAt: Date
+    ) -> UsageLimitResetEvent {
+        UsageLimitResetEvent(
+            id: "\(accountID.rawValue)|\(windowID)|\(detectedAt.timeIntervalSince1970)",
+            runtimeID: accountID.provider.rawValue,
+            accountID: accountID.rawValue,
+            accountName: accountID.handle.name,
+            windowID: windowID,
+            windowLabel: windowID,
+            previousObservedAt: detectedAt.addingTimeInterval(-60),
+            detectedAt: detectedAt,
+            oldScheduledResetAt: detectedAt.addingTimeInterval(86_400),
+            newScheduledResetAt: detectedAt.addingTimeInterval(7 * 86_400),
+            restoredFraction: 0.75,
+            elapsedFraction: 0,
+            secondsEarly: 86_400,
+            cause: .provider
+        )
     }
 
     // MARK: - The Wrap-Up
@@ -227,6 +252,111 @@ final class SessionCurfewCenterTests: XCTestCase {
     }
 
     // MARK: - The Hold
+
+    func testAWindowResetCurfewIgnoresSparkAndStopsOnlyForItsSelectedWindow() throws {
+        setPreferences()
+        let projectID = try XCTUnwrap(store.projects.first?.id)
+        let codexID = try XCTUnwrap(
+            store.addSession(to: projectID, kind: .codex, usesNativeUI: true)?.id
+        )
+        center.start()
+        activities[codexID] = .working
+        let accountID = AccountID(provider: .codex, handle: .standard)
+        let armedAt = now!
+        let expectedAt = now.addingTimeInterval(7 * 86_400)
+
+        XCTAssertEqual(
+            center.setCurfewUntilUsageReset(
+                expectedAt: expectedAt,
+                windowID: UsageDefaults.weeklyWindowID,
+                forSessionID: codexID
+            ),
+            .applied
+        )
+        XCTAssertEqual(usageRefreshes, [accountID], "arming did not ask for fresh evidence")
+
+        now = now.addingTimeInterval(60)
+        events.post(UsageLimitHistoryDidChange(resetEvents: [
+            resetEvent(
+                accountID: accountID,
+                windowID: UsageDefaults.fiveHourWindowID,
+                detectedAt: now
+            ),
+            resetEvent(
+                accountID: accountID,
+                windowID: "GPT-5.3-Codex-Spark",
+                detectedAt: now
+            ),
+        ]))
+        XCTAssertNil(
+            state(of: codexID),
+            "a 5h or model-scoped Spark reset satisfied a curfew armed for the 7d window"
+        )
+
+        now = expectedAt.addingTimeInterval(-CurfewDefaults.windDownMargin)
+        center.evaluateAll()
+        XCTAssertEqual(
+            messages.messages(for: codexID).count,
+            1,
+            "the ordinary scheduled boundary did not prepare its configured wrap-up"
+        )
+
+        now = now.addingTimeInterval(60)
+        events.post(UsageLimitHistoryDidChange(resetEvents: [resetEvent(
+            accountID: accountID,
+            windowID: UsageDefaults.weeklyWindowID,
+            detectedAt: now
+        )]))
+
+        let state = try XCTUnwrap(state(of: codexID))
+        XCTAssertEqual(state.deadline, now, "the early reset was replaced by the later estimate")
+        XCTAssertTrue(state.has(.held))
+        XCTAssertEqual(
+            state.origin,
+            .usageReset(
+                armedAt: armedAt,
+                accountID: accountID,
+                windowID: UsageDefaults.weeklyWindowID
+            )
+        )
+        XCTAssertTrue(
+            messages.messages(for: codexID).isEmpty,
+            "an early reset left the scheduled-boundary wrap-up able to spend restored capacity"
+        )
+    }
+
+    func testAResetDetectedAfterTheExpectedBoundaryDoesNotReplaceTheFiredCurfew() throws {
+        setPreferences(windDownMargin: nil, grace: nil)
+        center.start()
+        let accountID = AccountID(provider: .claude, handle: .standard)
+        let expectedAt = now.addingTimeInterval(60)
+
+        XCTAssertEqual(
+            center.setCurfewUntilUsageReset(
+                expectedAt: expectedAt,
+                windowID: UsageDefaults.weeklyWindowID,
+                forSessionID: chatID
+            ),
+            .applied
+        )
+
+        now = expectedAt
+        center.evaluateAll()
+        XCTAssertEqual(state(of: chatID)?.deadline, expectedAt)
+        XCTAssertEqual(state(of: chatID)?.origin, .session)
+        XCTAssertEqual(state(of: chatID)?.has(.held), true)
+
+        now = expectedAt.addingTimeInterval(60)
+        events.post(UsageLimitHistoryDidChange(resetEvents: [resetEvent(
+            accountID: accountID,
+            windowID: UsageDefaults.weeklyWindowID,
+            detectedAt: now
+        )]))
+
+        let state = try XCTUnwrap(state(of: chatID))
+        XCTAssertEqual(state.deadline, expectedAt)
+        XCTAssertEqual(state.origin, .session)
+    }
 
     func testHoldIsRecordedAtTheDeadlineAndAnnouncedOnce() {
         setPreferences(windDownMargin: nil, grace: nil)

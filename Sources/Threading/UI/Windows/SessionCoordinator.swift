@@ -24,7 +24,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     private let archiveStateSetter: ArchiveStateSetter
     /// Window composition routes sidebar receipts through the swappable navigator shell. Tests
     /// and standalone hosts default to the native sidebar presenter.
-    private let toastPresenter: (ToastRequest) -> Void
+    let toastPresenter: (ToastRequest) -> Void
 
     /// Consumed by the next selected session exactly once.
     private var pendingPrompt: String?
@@ -75,6 +75,14 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
                 reason: event.reason,
                 requestedByManagerID: event.requestedByManagerID
             )
+        }
+
+        // The same arrangement again: `SessionExecutionLocusTracker` is in Core and owns only
+        // the observation. What to do about a chat found working in another checkout is a
+        // policy decision with a confirmation and a receipt attached, so it is decided here.
+        // See `reconcileObservedExecutionDrift(_:)`.
+        appEvents.observe(SessionExecutionDriftDidChange.self) { [weak self] event in
+            self?.reconcileObservedExecutionDrift(event.sessionID)
         }
 
         // The same arrangement, one feature along: `ScheduledMessageScheduler` is in Core and
@@ -1104,6 +1112,12 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             return
         case .arm(let deadline):
             SessionCurfewCenter.shared.setCurfew(.until(deadline), forSessionID: sessionID)
+        case .armUsageReset(let expectedAt, let windowID):
+            SessionCurfewCenter.shared.setCurfewUntilUsageReset(
+                expectedAt: expectedAt,
+                windowID: windowID,
+                forSessionID: sessionID
+            )
         case .skipped(let reason):
             environment.eventLog.record(.curfew, "Planned curfew not armed", [
                 "session": sessionID.uuidString,

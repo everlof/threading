@@ -158,6 +158,39 @@ value model, viewport ownership, stable identity, and a stress fixture by defaul
 fixed-schema form remains free to use a retained stack and wholesale rebuild; recycled-cell
 cleanup and one-controller-for-another lifecycle replacement are also not findings by themselves.
 
+### Transcript JSONL scanning contract
+
+JSONL record size is provider data and is not bounded by the 64 KiB read chunk. Codex embeds tool
+results in one escaped JSON record: the measured usage corpus includes a 302,608,718-byte rollout
+whose longest record is 22,025,450 bytes. In the Debug app, the old forward reader searched the
+entire incomplete record again after every chunk and used generic `Data.Collection.firstIndex` for
+every byte. A live sample held `codes.threading.usage-index` there for every one of 2,130 samples;
+after fifteen minutes its file descriptor had only reached 296 MiB.
+
+`JSONLReader.scanForward` now carries two linear-time invariants. Bytes retained from the prior
+chunk have already been searched, so the next search begins at the first appended byte; and newline
+discovery uses `memchr` over `Data`'s contiguous storage rather than a per-byte protocol-witness
+walk. Record delivery, exact offsets and finite-pass fragment handling remain unchanged. The
+ordinary test suite includes an 8 MiB single-record boundary and requires it to scan in under two
+seconds in Debug; the fixture is large enough that restoring the prefix rescan fails before a
+machine-speed fluctuation matters.
+
+The usage index remains off-main and revision-gated. A changed rollout still requires a complete
+stateful parse because its later usage cells inherit session metadata, model and child-boundary
+state from earlier records; “incremental” must not mean totals assembled without that context.
+The shared reader makes that necessary parse proportional to bytes read rather than bytes times
+the number of chunks in a large record.
+
+Parser-version migration is bounded at the physical database generation, not at rows. The former
+single-file design put a 7.7-million-record Codex generation beside its 600,000-record replacement,
+then reclaimed the former through source cascades in one transaction. A live Debug scan was still
+CPU-bound after 22 minutes while its 13 GB database grew a 7 GB WAL. The current parser-version set
+instead writes a fresh, per-source-resumable database and keeps the persisted report visible.
+After a successful aggregate it checkpoints, atomically commits a small generation manifest, and
+retires the old database and sidecars by file unlink. There is no old-row enumeration, cascade, or
+deletion WAL on the parser-change path. `UsageScanCacheTests` pins legacy-file immutability before
+commit, sidecar retirement, and restart from an abandoned staging generation.
+
 ### Project-stats scaling contract
 
 Project count and repository history both scale, while pointer entry can repeat quickly. The
@@ -1746,6 +1779,32 @@ system handoff remains separately visible as 3.5 ms installation plus 30.8 ms na
 stress fixture forces that deferred handoff after every selected HTML row, so switching results do
 not become artificially cheap. `Attachment Preview Presentation` and `Attachment HTML Navigation`
 spans carry the same split into self-profile traces and xctrace.
+
+## Desktop terminal repeated-frame rendering
+
+A live Debug capture with the app otherwise in background work put 38–40% of sampled main-thread
+time in the Core Graphics terminal path: snapshot preparation, `SnapshotTextBuilder`, Core Text
+line/run construction, glyph fitting, low-contrast detection and `draw`. The display driver was
+already visibility/occlusion-aware and PTY parsing was already off-main. The remaining defect was
+repeat work: AppKit may promote a narrow invalidation to a full-surface draw, and Core Graphics
+rebuilt every exposed row even when the immutable snapshot revision had not changed. Metal already
+kept the corresponding row cache.
+
+The Core Graphics renderer now retains at most 256 prepared visible rows keyed by the source
+identity and generation, snapshot revision, render-context identity and custom block-glyph mode.
+A hit reuses the attributed segments, shaped `CTLine`s and extracted run attributes. Content,
+selection/link/command/blink style, ANSI palette, BiDi dependencies and images all advance the row
+revision; fonts, default colours, fallback provider and true-colour transform move the context
+identity. Wide/fallback glyph slot fitting has a separate 4,096-entry cache keyed by both retained
+font identities, glyph, cell geometry, width and placement policy, so a font object cannot be
+deallocated and ABA-reused into stale metrics.
+
+Low-contrast observation applies the same immutable-row boundary inside the render owner. It
+rescans only changed visible rows, retains at most 256, and still globally deduplicates the row
+findings before publishing them. Diagnostics expose built/reused Core Graphics rows, glyph-fit
+hits/misses and contrast rows scanned/reused. The regression draws exercise unchanged and
+single-row content, selection/style, BiDi dependencies and appearance invalidation; image changes
+share the snapshot's existing revision gate rather than adding a second cache authority.
 
 ## Whole-window resize stress target
 
@@ -3841,6 +3900,9 @@ and filtering runs at keystroke frequency. Their implementation-time gate is exp
 
 - command catalogs filter off-main, cancel superseded work, check cancellation during the pass,
   and hand the main actor at most 100 value rows for a virtual table;
+- semantic project input reads the in-memory `ProjectStore` once when the second step opens; the
+  extension never enumerates checkouts, and project filtering shares the same cancellable 100-row
+  result boundary as session input;
 - workspace discovery uses `git ls-files -co --exclude-standard -z` once per execution checkout,
   never recursive enumeration per keystroke; the queue-confined index admits at most 100,000
   contained regular paths and 16 MiB of Git output, cancels superseded queued queries, and returns

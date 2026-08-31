@@ -45,6 +45,12 @@ reshuffling it is a line move.
   Claude half (B5) can ship ahead of the rest.
 ### Next — researched and ready, waiting for a slot
 
+- [Universal Search](universal-search.md) — make `Command-F` a host-owned Search capability with
+  visible View, Project and Everywhere scopes; reuse the real Browser, Git Review and SwiftTerm
+  engines; add incremental FTS5 conversation history with exact bounded-window landing; and expose
+  only natively navigable results to the paired iPhone through a bounded owner-only remote
+  contract. The semantic plan, remote iOS result matrix, scaling gate and delivery slices are
+  concrete; implementation has not started.
 - [Observed work for terminal sessions](observed-work-for-terminal-sessions.md) — feed the Activity
   tab from the transcript, export and git checkpoint a session already leaves behind, so a chat
   Threading does not render itself stops reporting zeros over a full repository atlas. **The
@@ -120,6 +126,11 @@ reshuffling it is a line move.
 - [Skin and Chrome Imports](skin-and-chrome-imports.md) — translate established declarative theme
   formats into Threading's existing theme and window-chrome model. Recorded for future
   evaluation; no format support committed.
+- [Native Linux host and UI](linux-host-runtime.md) — finish the structural UI boundary rather
+  than porting AppKit controllers one by one: keep product behavior and extension contracts
+  semantic, retain AppKit as the macOS leaf, and admit a Linux backend only after dual-render,
+  text/IME, accessibility and virtual-list spikes pass. Gated on the application-layer extraction
+  and on Linux becoming a funded product priority rather than a toolkit experiment.
 - [Durable sessions](durable-sessions.md) — stop a restart from killing every running turn, by
   first making a session's bridge outlive one app launch (durable tokens, a unix socket, an MCP
   stdio shim) and then moving PTY ownership into a small always-on host. **Part one shipped

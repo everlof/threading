@@ -84,8 +84,18 @@ final class SessionCurfewModelTests: XCTestCase {
     func testARuleRoundTripsThroughItsStoredForm() throws {
         let calendar = calendar()
         let deadline = date(2026, 8, 10, 4, 0, in: calendar)
+        let accountID = AccountID(provider: .codex, handle: .standard)
 
-        for rule in [CurfewRule.exempt, CurfewRule.until(deadline)] {
+        for rule in [
+            CurfewRule.exempt,
+            CurfewRule.until(deadline),
+            CurfewRule.untilUsageReset(
+                expectedAt: deadline,
+                armedAt: deadline.addingTimeInterval(-3_600),
+                accountID: accountID,
+                windowID: UsageDefaults.weeklyWindowID
+            ),
+        ] {
             let data = try JSONEncoder().encode(rule)
             XCTAssertEqual(try JSONDecoder().decode(CurfewRule.self, from: data), rule)
         }
@@ -391,6 +401,84 @@ final class SessionCurfewModelTests: XCTestCase {
         XCTAssertEqual(curfew.deadline, deadline)
         XCTAssertEqual(curfew.origin, .session)
         XCTAssertNil(curfew.endsAt, "a curfew the user set is lifted explicitly or not at all")
+    }
+
+    func testAUsageResetRuleKeepsItsSelectedWindowAndMovesOnlyForMatchingEvidence() throws {
+        let calendar = calendar()
+        let now = date(2026, 8, 10, 5, 0, in: calendar)
+        let expectedAt = date(2026, 8, 15, 4, 0, in: calendar)
+        let armedAt = date(2026, 8, 10, 4, 30, in: calendar)
+        let detectedAt = date(2026, 8, 11, 2, 0, in: calendar)
+        let accountID = AccountID(provider: .codex, handle: .standard)
+        let rule = CurfewRule.untilUsageReset(
+            expectedAt: expectedAt,
+            armedAt: armedAt,
+            accountID: accountID,
+            windowID: UsageDefaults.weeklyWindowID
+        )
+
+        let waiting = CurfewResolution.resolve(
+            session: rule,
+            project: nil,
+            preferences: preferences(),
+            state: nil,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(waiting.curfew?.deadline, expectedAt)
+        XCTAssertEqual(
+            waiting.condition,
+            .usageReset(
+                expectedAt: expectedAt,
+                armedAt: armedAt,
+                accountID: accountID,
+                windowID: UsageDefaults.weeklyWindowID
+            )
+        )
+
+        let sparkState = SessionCurfewState(
+            deadline: detectedAt,
+            origin: .usageReset(
+                armedAt: armedAt,
+                accountID: accountID,
+                windowID: UsageDefaults.fiveHourWindowID
+            )
+        )
+        let afterSpark = CurfewResolution.resolve(
+            session: rule,
+            project: nil,
+            preferences: preferences(),
+            state: sparkState,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(
+            afterSpark.curfew?.deadline,
+            expectedAt,
+            "5h/Spark evidence moved a rule armed for the 7d window"
+        )
+
+        let weeklyState = SessionCurfewState(
+            deadline: detectedAt,
+            origin: .usageReset(
+                armedAt: armedAt,
+                accountID: accountID,
+                windowID: UsageDefaults.weeklyWindowID
+            )
+        )
+        let afterWeekly = CurfewResolution.resolve(
+            session: rule,
+            project: nil,
+            preferences: preferences(),
+            state: weeklyState,
+            now: now,
+            calendar: calendar
+        )
+        XCTAssertEqual(afterWeekly.curfew?.deadline, detectedAt)
+        XCTAssertNil(
+            afterWeekly.curfew?.windDownAt,
+            "detecting the reset must not spend newly restored usage on a wrap-up"
+        )
     }
 
     func testAProjectsExemptionBeatsTheStandingWindow() {

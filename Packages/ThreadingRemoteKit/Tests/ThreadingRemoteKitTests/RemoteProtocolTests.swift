@@ -88,7 +88,8 @@ final class RemoteProtocolTests: XCTestCase {
             deviceToken: "abcd",
             environment: .sandbox,
             enabledKinds: [
-                .sharedSession, .permissionRequest, .agentQuestion, .attentionRequest,
+                .sharedSession, .permissionRequest, .agentQuestion, .turnCompleted,
+                .attentionRequest,
             ],
             soundEnabledKinds: [.permissionRequest, .agentQuestion]
         )
@@ -105,6 +106,16 @@ final class RemoteProtocolTests: XCTestCase {
             from: Data(#"{"deviceToken":"abcd","environment":"sandbox","enabledKinds":["permissionRequest"]}"#.utf8)
         )
         XCTAssertNil(legacy.soundEnabledKinds)
+    }
+
+    func testNotificationKindsKeepTheirWireVocabulary() {
+        XCTAssertEqual(
+            RemoteNotificationKind.allCases.map(\.rawValue),
+            [
+                "sharedSession", "permissionRequest", "agentQuestion", "turnCompleted",
+                "agentMessage", "attentionRequest",
+            ]
+        )
     }
 
     func testHumanAttentionProtocolStaysSeparateFromPromptAndTerminalInput() throws {

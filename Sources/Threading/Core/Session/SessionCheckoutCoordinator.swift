@@ -138,7 +138,19 @@ final class SessionCheckoutCoordinator {
                 reason: String(reason.prefix(2_000)),
                 requestedAt: Date()
             )
-            if Self.requiresApproval(policy: policy, authorityBasis: authorityBasis) {
+            // Asked only for the basis that can be lowered by it, and only after validation has
+            // produced a canonical destination: the answer is about two exact transcript paths,
+            // and the reported directory is routinely a subdirectory of the checkout root.
+            let repairs = authorityBasis == .observedExecution
+                && conversationHasLeftOwnedCheckout(
+                    sessionID: sessionID,
+                    forDestination: checkout.path
+                )
+            if Self.requiresApproval(
+                policy: policy,
+                authorityBasis: authorityBasis,
+                repairsDetachedConversation: repairs
+            ) {
                 guard let approval else { return .approvalRequired(pending) }
                 guard approval else {
                     recordAudit("Checkout move denied", sessionID: sessionID, pending: pending)
@@ -155,6 +167,39 @@ final class SessionCheckoutCoordinator {
             }
             return .queued(pending)
         }
+    }
+
+    /// Reconciles one observed drift into checkout ownership.
+    ///
+    /// The whole of the decision is delegated to `requestMove`, which is the point: an observed
+    /// move is validated, fenced, transcript-copied, committed and audited by exactly the same
+    /// path as one an agent asks for, and differs only in the basis it records and in what the
+    /// policy will grant that basis. A separate route would be a second way to change durable
+    /// ownership, which is the thing this type exists to prevent.
+    ///
+    /// The turn boundary is left to `requestMove`'s own reading rather than forced. An
+    /// observation raised by a mid-turn hook finds a turn in flight and is fenced until Stop; one
+    /// raised by the Stop hook itself finds none and settles at once, which matters because that
+    /// event's own checkout fence has already run by the time the report is relayed.
+    @discardableResult
+    func reconcileObservedExecution(
+        sessionID: SessionID,
+        checkout: ObservedCheckout,
+        policy: SessionCheckoutAuthorityPolicy = AppSettings.shared.sessionCheckoutAuthorityPolicy
+    ) -> SessionCheckoutMoveRequestResult {
+        // A queued move is already the answer to this question, and re-asking it every time
+        // another tool call reports the same directory would rewrite the pending record and
+        // restart its fence for no change.
+        if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove {
+            return .queued(pending)
+        }
+        return requestMove(
+            sessionID: sessionID,
+            checkoutPath: checkout.root,
+            authorityBasis: .observedExecution,
+            reason: "Observed running in \(checkout.displayName)",
+            policy: policy
+        )
     }
 
     @discardableResult
@@ -302,15 +347,96 @@ final class SessionCheckoutCoordinator {
         }
     }
 
+    /// Whether one request needs a human answer before it may change durable ownership.
+    ///
+    /// `repairsDetachedConversation` is the one condition that can *lower* the bar, and only for
+    /// `observedExecution`. It means the chat's provider conversation is already filed under the
+    /// checkout the agent moved to and is no longer under the one that owns it — so resume is
+    /// already broken, the move copies nothing, and refusing to act preserves a defect rather
+    /// than preventing one. Everywhere else the bar is unchanged: asking about a move that will
+    /// copy a transcript and replace a runtime is exactly what the policy is for.
+    ///
+    /// `alwaysAsk` still asks. It is the answer of someone who has said they want to be asked
+    /// about every one of these, and a repair is still a change of ownership.
     static func requiresApproval(
         policy: SessionCheckoutAuthorityPolicy,
-        authorityBasis: SessionCheckoutAuthorityBasis
+        authorityBasis: SessionCheckoutAuthorityBasis,
+        repairsDetachedConversation: Bool = false
     ) -> Bool {
         switch policy {
         case .alwaysAsk: return true
-        case .allowExplicitRequests: return authorityBasis == .agentInitiated
+        case .allowExplicitRequests:
+            switch authorityBasis {
+            case .explicitUserRequest: return false
+            case .agentInitiated: return true
+            case .observedExecution: return !repairsDetachedConversation
+            }
         case .allowSameRepository: return false
         }
+    }
+
+    /// Whether the chat's provider conversation has already followed the agent out of the
+    /// checkout that owns it, leaving the chat unresumable where Threading would launch it.
+    ///
+    /// This is a filesystem question and must not be inferred from the reported directory, which
+    /// was measured to disagree with it. Two chats of one repository both reported working in a
+    /// sibling worktree; one runtime had re-filed its conversation under that worktree's slug
+    /// and the other had not, and only reading both paths tells them apart. Where the answer is
+    /// true, `AgentLauncher` has already stopped finding the transcript and its `--resume`
+    /// branch has already fallen through to minting an empty conversation under the same id.
+    ///
+    /// False for every runtime whose conversation storage is not checkout-scoped, which is every
+    /// runtime but one — they resume by a provider-owned id no directory can invalidate.
+    func conversationHasLeftOwnedCheckout(
+        sessionID: SessionID,
+        forDestination destinationPath: String
+    ) -> Bool {
+        guard let session = projects.session(withID: sessionID),
+              session.kind.supports(.checkoutScopedConversationStorage),
+              let transcriptID = session.resumeState.transcriptID,
+              let ownedProject = projects.executionProject(forSessionID: sessionID),
+              let account = AgentAccountDiscovery.account(
+                for: session.kind,
+                handle: session.accountHandle
+              ),
+              let owned = ClaudeTranscript.url(
+                sessionID: transcriptID,
+                account: account,
+                in: ownedProject
+              ) else { return false }
+
+        var destinationProject = Project(
+            name: GitInfo.suggestedProjectName(for: URL(fileURLWithPath: destinationPath)),
+            folderURL: URL(fileURLWithPath: destinationPath, isDirectory: true)
+        )
+        destinationProject.folderPath = destinationPath
+        guard let destination = ClaudeTranscript.url(
+            sessionID: transcriptID,
+            account: account,
+            in: destinationProject
+        ) else { return false }
+
+        return Self.conversationHasLeft(
+            owned: owned,
+            destination: destination,
+            fileManager: fileManager
+        )
+    }
+
+    /// The rule itself, separated from finding the two paths.
+    ///
+    /// Both halves are load-bearing and neither alone is the condition. *Gone from the owned
+    /// checkout* on its own is a chat with no conversation yet, or one whose files a user moved;
+    /// *present at the destination* on its own is an unrelated conversation that happens to
+    /// share an id, or a copy left by an earlier move. Only both together mean the thing this
+    /// answers: the conversation is somewhere else and resume is already broken.
+    static func conversationHasLeft(
+        owned: URL,
+        destination: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        !fileManager.fileExists(atPath: owned.path)
+            && fileManager.fileExists(atPath: destination.path)
     }
 
     private func completeStoreMove(
@@ -394,6 +520,11 @@ final class SessionCheckoutCoordinator {
         GitInfo.invalidateCache(for: checkout.path)
         for id in sessionIDs {
             projects.refreshBranch(forSessionID: id)
+            // Every stored observation is stale the instant ownership moves: the directory the
+            // agent reported has not changed, but what it is measured against has. Left alone,
+            // a chat that just arrived where it was already working would go on being marked as
+            // working somewhere else until its next turn produced a fresh report.
+            SessionExecutionLocusTracker.shared.forget(sessionID: id)
         }
         if let projectID = projects.project(forSessionID: sessionIDs[0])?.id {
             let event = SessionCheckoutDidMove(sessionID: sessionIDs[0], projectID: projectID)

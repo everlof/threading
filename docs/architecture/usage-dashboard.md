@@ -189,6 +189,13 @@ Structured load/detail work and explicit pagination work are all cancelled on di
 deterministic `THREADING_MOBILE_DEMO=usage` family covers Overview plus positive, zero and
 unavailable banked-reset inventory.
 
+The session navigation bar's action disc remains the compact projection of one account: provider
+mark, bounded usage rings, and the menu that names the login and exact readings. Its small
+alternate-login badge is a device-local Appearance preference and is off by default, because the
+extra initial or emoji competes with both the provider mark and the rings. This choice changes only
+that visual overlay; Threading retains the account identity, usage truth, action, menu content and
+accessibility value regardless of the preference.
+
 ## Transcript ledger
 
 `UsageLedgerRecord` is the response-level interchange between provider adapters and aggregation.
@@ -300,6 +307,36 @@ only its source-to-record edges, while a separate identity table retains one pay
 warm and cold results have the same exact deduplication. Sources no adapter offered this pass and
 their now-unowned records are removed once at the end of the transaction.
 
+A parser generation is a physical database generation, not another set of rows in the current
+database. The filename is derived from the complete Claude/Codex/OpenCode parser-id set. Changing
+any parser therefore opens a fresh SQLite file and builds it per source; the previous database and
+persisted report remain usable while that work is incomplete, and an interrupted build resumes
+from the completed source revisions in its staging generation. Only after `finishScan` and exact
+report aggregation succeed does the index checkpoint its WAL, atomically publish the generation
+manifest, and unlink prior SQLite/WAL/SHM files. Retirement is file-level rather than millions of
+foreign-key cascades. A measured in-place Codex parser bump had grown one database to 13 GiB and
+its cleanup WAL to 7 GiB while consuming a core for more than twenty-two minutes; that migration
+shape is now structurally impossible. Ordinary removed sources inside one unchanged generation
+still use the end transaction below.
+
+The complete Claude/Codex/OpenCode parser-version set names the **physical** ledger generation.
+Changing any parser opens a fresh SQLite file; it never inserts the new corpus beside the old one.
+Each completed source commits independently, so an interrupted rebuild resumes at the next source
+while the last persisted report and committed generation stay usable. Only after cleanup and
+report aggregation succeed does the index checkpoint its WAL, atomically replace the committed-
+generation manifest, and unlink the prior database plus its WAL/SHM artifacts. A crash before that
+point leaves the old authority and a resumable staging file; a crash after it leaves either both
+complete files or only the new one. Parser migration therefore does no record-by-record copy or
+foreign-key cascade over the obsolete generation.
+
+A changed JSONL source is parsed from its beginning because Codex and Claude records are stateful:
+working directory, model, parent identity and response maxima can be established before the usage
+record that consumes them. That full parse is still linear. `JSONLReader` never re-searches the
+incomplete prefix of a record when another 64 KiB chunk arrives, and finds newlines with `memchr`
+rather than `Data`'s generic collection witness. This distinction is load-bearing for tool-result
+records measured at 22 MiB: revision gating avoids unchanged work, while the reader bounds changed
+work to the bytes that actually exist.
+
 The fallback array aggregation path applies the same component-wise maximum before grouping. The
 lightweight subagent reader calls the same Claude/Codex adapters as the account index, then applies
 the same response-identity maxima before reducing to the scalar live counter. Boundary filtering,
@@ -358,6 +395,13 @@ fell sharply, and the post-clear fraction is plausibly low. A clear near the old
 rolling weekly capacity alone cannot manufacture a reset. Other early provider-proven clears are
 recorded as `provider`. Each event states the observation interval because the exact reset instant
 is not knowable between polls.
+
+`UsageLimitHistoryDidChange` carries only the material reset evidence discovered by that write
+(and the loaded journal's retained events at bootstrap). The live payload may include an early
+uncredited Codex provider clear that the conservative historical ledger does not retain. Ordinary
+sample changes carry an empty list, so the curfew engine can listen without rescanning six months
+of history. A reset-conditioned curfew then applies its own account, exact-window and `armedAt`
+filters; a 5h or Spark reset is not evidence for a rule armed against 7d.
 
 Weekly projection is intentionally narrow. It applies only to measured six-to-eight-day windows,
 after at least thirty minutes have elapsed, and extrapolates average consumption from the

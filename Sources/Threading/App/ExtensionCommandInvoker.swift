@@ -11,6 +11,7 @@ enum ExtensionCommandInvoker {
     static func perform(
         _ command: AppCommand,
         context: ExtensionCommandContext,
+        input: ExtensionCommandInputValue? = nil,
         window: NSWindow?
     ) {
         guard case .extensionCommand(let identifier, _, let localID) = command.origin else {
@@ -27,6 +28,7 @@ enum ExtensionCommandInvoker {
                     extensionIdentifier: identifier,
                     localID: localID,
                     context: context,
+                    input: input,
                     window: window
                 )
             }
@@ -40,12 +42,14 @@ enum ExtensionCommandInvoker {
         extensionIdentifier: String,
         localID: String,
         context: ExtensionCommandContext,
+        input: ExtensionCommandInputValue?,
         window: NSWindow?
     ) {
         ExtensionManager.shared.invokeCommand(
             extensionIdentifier: extensionIdentifier,
             commandID: localID,
-            context: context
+            context: context,
+            input: input
         ) { result in
             switch result {
             case .failure(let error):

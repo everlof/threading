@@ -31,6 +31,15 @@ struct AccountUsageDidChange: AppEvent {
 
 struct UsageLimitHistoryDidChange: AppEvent {
     static let name = Notification.Name.usageLimitHistoryDidChange
+    /// Newly observed material reset evidence for exact-window curfews. This can include an
+    /// uncredited Codex provider clear that the historical dashboard deliberately declines to
+    /// retain. Ordinary samples, seed recovery and deletion publish an empty list so
+    /// high-frequency observers can remain O(changed) rather than rescanning the journal.
+    let resetEvents: [UsageLimitResetEvent]
+
+    init(resetEvents: [UsageLimitResetEvent] = []) {
+        self.resetEvents = resetEvents
+    }
 }
 
 /// A user-authored limit was added, edited or removed, app-wide or on one account — the signal

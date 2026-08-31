@@ -505,7 +505,7 @@ final class ComposerTextViewPasteTests: XCTestCase {
 final class TerminalLineTextLayoutTests: XCTestCase {
 
     func testWrappedLinesRunUnderTheFirstLineAccessories() {
-        let textView = IntrinsicTextView(frame: CGRect(x: 0, y: 0, width: 240, height: 160))
+        let textView = TerminalLineTextView(frame: CGRect(x: 0, y: 0, width: 240, height: 160))
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
@@ -532,6 +532,12 @@ final class TerminalLineTextLayoutTests: XCTestCase {
             MobileDesign.Size.minimumTapTarget,
             accuracy: 0.5,
             "only the first line flows around the paperclip"
+        )
+        XCTAssertEqual(
+            lineRects[0].height,
+            try XCTUnwrap(textView.font).lineHeight,
+            accuracy: 2,
+            "control clearance must not feed back into the first line's typographic height"
         )
         XCTAssertEqual(
             lineRects[1].minX,
@@ -599,6 +605,53 @@ final class TerminalLineTextLayoutTests: XCTestCase {
         )
     }
 
+    /// A capped paragraph used to alternate forever between two TextKit layouts after scrolling
+    /// was enabled: one used the first-line exclusions and the next skipped that line entirely.
+    /// The real composer then changed height on every SwiftUI layout turn, producing the visible
+    /// flicker from an otherwise idle draft.
+    func testCappedTerminalParagraphKeepsOneLayoutAcrossRunLoopTurns() throws {
+        let draft = "Jajsijddb dbkuuyy i miss it for you for you too and thank you for being my "
+            + "friend and friend and always supporting me always and always and always and always "
+            + "and always and always and always and always and a"
+        let host = UIHostingController(rootView: TerminalEditorHarness(
+            initialDraft: draft,
+            editorWidth: 370,
+            editorHeight: nil
+        ))
+        let window = makeWindow(hosting: host, size: CGSize(width: 402, height: 500))
+        defer { window.isHidden = true }
+
+        let textView = try XCTUnwrap(descendants(of: IntrinsicTextView.self, in: window).first)
+        XCTAssertTrue(textView.becomeFirstResponder())
+        var snapshots: [String] = []
+        for _ in 0..<20 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            window.layoutIfNeeded()
+            textView.layoutIfNeeded()
+            textView.layoutManager.ensureLayout(for: textView.textContainer)
+
+            var firstLine = CGRect.null
+            let glyphRange = textView.layoutManager.glyphRange(for: textView.textContainer)
+            textView.layoutManager.enumerateLineFragments(
+                forGlyphRange: glyphRange
+            ) { rect, _, _, _, stop in
+                firstLine = rect
+                stop.pointee = true
+            }
+            snapshots.append(
+                "scroll=\(textView.isScrollEnabled);frame=\(textView.frame);"
+                    + "content=\(textView.contentSize);first=\(firstLine)"
+            )
+        }
+
+        XCTAssertTrue(textView.isScrollEnabled, "the fixture must exercise the capped editor")
+        XCTAssertEqual(
+            Set(snapshots).count,
+            1,
+            "the idle capped composer oscillated between layouts:\n\(snapshots.joined(separator: "\n"))"
+        )
+    }
+
     func testTerminalEditorReturnSubmitsWithoutAddingANewline() throws {
         var submissionCount = 0
         let host = UIHostingController(rootView: TerminalEditorHarness {
@@ -626,13 +679,14 @@ final class TerminalLineTextLayoutTests: XCTestCase {
     }
 
     private func makeWindow<Content: View>(
-        hosting host: UIHostingController<Content>
+        hosting host: UIHostingController<Content>,
+        size: CGSize = CGSize(width: 320, height: 140)
     ) -> UIWindow {
         let scene = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first
         let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
-        window.frame = CGRect(x: 0, y: 0, width: 320, height: 140)
+        window.frame = CGRect(origin: .zero, size: size)
         window.rootViewController = host
         window.makeKeyAndVisible()
         RunLoop.current.run(until: Date().addingTimeInterval(0.1))
@@ -643,10 +697,19 @@ final class TerminalLineTextLayoutTests: XCTestCase {
     private struct TerminalEditorHarness: View {
         @State private var draft: String
         @State private var isFocused = false
+        let editorWidth: CGFloat
+        let editorHeight: CGFloat?
         let onSubmit: () -> Void
 
-        init(initialDraft: String = "", onSubmit: @escaping () -> Void = {}) {
+        init(
+            initialDraft: String = "",
+            editorWidth: CGFloat = 288,
+            editorHeight: CGFloat? = 100,
+            onSubmit: @escaping () -> Void = {}
+        ) {
             _draft = State(initialValue: initialDraft)
+            self.editorWidth = editorWidth
+            self.editorHeight = editorHeight
             self.onSubmit = onSubmit
         }
 
@@ -657,7 +720,8 @@ final class TerminalLineTextLayoutTests: XCTestCase {
                 theme: RemoteThemePalette(nil),
                 onSubmit: onSubmit
             )
-            .frame(width: 288, height: 100)
+            .frame(width: editorWidth)
+            .frame(height: editorHeight)
         }
     }
 }

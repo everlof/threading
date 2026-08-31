@@ -74,6 +74,10 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         MobileTerminalWirePerformanceProbe.terminalViewCreated(connection.session)
 #endif
 
+        // Establish grid ownership before mounting the renderer. Mounting consumes any buffered
+        // PTY bytes immediately; resizing after that cannot repair cursor-addressed output that
+        // was already interpreted against the wrong grid.
+        Self.applyViewportOwnership(to: view, connection: connection)
         context.coordinator.bindRenderer(to: connection)
         if allowsDirectInput, focusesOnCreation {
 #if DEBUG
@@ -111,14 +115,7 @@ struct TerminalViewRepresentable: UIViewRepresentable {
             canPaste: allowsDirectInput
         )
         terminalView.applyPreferredFontSize(MobileTerminalFontSize.resolvedPreference(fontSize))
-        let ownsViewport = connection.capability == .interact
-        terminalView.setUsesLocalViewport(ownsViewport)
-        if !ownsViewport {
-            terminalView.setAuthoritativeGrid(
-                cols: connection.terminalColumns,
-                rows: connection.terminalRows
-            )
-        }
+        Self.applyViewportOwnership(to: terminalView, connection: connection)
         Self.apply(theme, to: terminalView)
         context.coordinator.refreshScrollToEndPresence(animated: false)
     }
@@ -133,6 +130,40 @@ struct TerminalViewRepresentable: UIViewRepresentable {
         // being permanently dismantled, not merely moved between windows, so close that graph
         // through the dependency's explicit lifecycle seam.
         _ = terminalView.updateUiClosed()
+    }
+
+    /// An interactive live terminal belongs to the phone viewport. A recorded PTY is different:
+    /// its absolute cursor moves and precomputed wraps belong to the grid it was captured at,
+    /// even though the DEBUG marketing scene keeps the real interactive keyboard chrome around
+    /// it. The pure form keeps that distinction testable without constructing a SwiftUI context.
+    static func usesLocalViewport(
+        capability: RemoteCapability,
+        replaysRecordedGrid: Bool
+    ) -> Bool {
+        capability == .interact && !replaysRecordedGrid
+    }
+
+    private static func applyViewportOwnership(
+        to terminalView: RemoteTerminalView,
+        connection: RemoteSessionConnection
+    ) {
+#if DEBUG
+        let demoID = ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+        let replaysRecordedGrid = MobileDemoScene.recordedPTYFixtureIDs.contains(demoID ?? "")
+#else
+        let replaysRecordedGrid = false
+#endif
+        let local = usesLocalViewport(
+            capability: connection.capability,
+            replaysRecordedGrid: replaysRecordedGrid
+        )
+        terminalView.setUsesLocalViewport(local)
+        if !local {
+            terminalView.setAuthoritativeGrid(
+                cols: connection.terminalColumns,
+                rows: connection.terminalRows
+            )
+        }
     }
 
     /// Installs the palette only when it changed. `updateUIView` runs for every published

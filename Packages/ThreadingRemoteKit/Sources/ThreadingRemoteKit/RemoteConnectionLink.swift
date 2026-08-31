@@ -37,7 +37,8 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
               baseURL.user == nil,
               baseURL.password == nil,
               !normalizedToken.isEmpty,
-              !normalizedToken.contains(Self.fingerprintSeparator) else {
+              !normalizedToken.contains(Self.fingerprintSeparator)
+        else {
             return nil
         }
         let normalizedCode: String?
@@ -61,7 +62,8 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
                   baseURL: normalized,
                   token: normalizedToken,
                   pinnedFingerprintCode: normalizedCode
-              ) else {
+              )
+        else {
             return nil
         }
         self.baseURL = normalized
@@ -79,7 +81,8 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
               url.password == nil,
               url.query == nil,
               let fragment = url.fragment?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !fragment.isEmpty else {
+              !fragment.isEmpty
+        else {
             return nil
         }
 
@@ -123,7 +126,7 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         self.baseURL = baseURL
         self.token = token
         self.shareURL = shareURL
-        self.pinnedFingerprintCode = fingerprintCode
+        pinnedFingerprintCode = fingerprintCode
     }
 
     public init?(string: String) {

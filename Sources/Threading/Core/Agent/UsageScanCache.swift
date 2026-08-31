@@ -346,17 +346,35 @@ final class UsageLedgerIndex {
         let modifiedAt: TimeInterval
     }
 
+    private struct GenerationManifest: Codable, Equatable {
+        let schemaVersion: Int
+        let parserGenerationID: String
+        let databaseFileName: String
+    }
+
     private let database: SQLiteDatabase
+    private let directory: URL
+    private let databaseURL: URL
+    private let parserGenerationID: String
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private var usedSources = Set<String>()
 
-    init(directory: URL, fileManager: FileManager = .default) throws {
+    init(
+        directory: URL,
+        fileManager: FileManager = .default,
+        parserGenerationID: String = UsageLedgerIndexDefaults.parserGenerationID
+    ) throws {
+        self.directory = directory
+        self.parserGenerationID = parserGenerationID
         self.fileManager = fileManager
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        databaseURL = directory.appendingPathComponent(
+            UsageLedgerIndexDefaults.fileName(forParserGenerationID: parserGenerationID)
+        )
         database = try SQLiteDatabase(
-            path: directory.appendingPathComponent(UsageLedgerIndexDefaults.fileName).path,
+            path: databaseURL.path,
             maximumSchemaVersion: UsageLedgerIndexDefaults.schemaVersion
         )
 
@@ -391,9 +409,15 @@ final class UsageLedgerIndex {
                 );
                 CREATE INDEX usage_source_record_identity
                     ON usage_source_record(identity);
+                CREATE TABLE usage_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 """
             )
         }
+
+        try establishParserGeneration()
     }
 
     func beginScan() {
@@ -465,6 +489,32 @@ final class UsageLedgerIndex {
             )
         }
         return try database.scalar("SELECT COALESCE(SUM(record_count), 0) FROM usage_source") ?? 0
+    }
+
+    /// Makes this complete generation the durable warm authority, then retires prior physical
+    /// generations by unlinking their rebuildable SQLite files. A parser change never shares a
+    /// database with its predecessor, so it cannot create millions of old/new edges and later
+    /// reclaim them through foreign-key cascades.
+    ///
+    /// The manifest write is atomic and happens before retirement. A crash before it leaves the
+    /// previous generation and persisted report untouched while this database remains resumable;
+    /// a crash after it leaves either both files or only the committed one. Both states are safe
+    /// for the next scan.
+    func commitGeneration() throws {
+        try database.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        let manifestURL = directory.appendingPathComponent(
+            UsageLedgerIndexDefaults.manifestFileName
+        )
+        let manifest = GenerationManifest(
+            schemaVersion: UsageLedgerIndexDefaults.schemaVersion,
+            parserGenerationID: parserGenerationID,
+            databaseFileName: databaseURL.lastPathComponent
+        )
+        if !shouldPreserveFutureManifest(at: manifestURL) {
+            let data = try JSONEncoder().encode(manifest)
+            try data.write(to: manifestURL, options: .atomic)
+        }
+        retireObsoleteGenerationFiles()
     }
 
     /// Streams globally distinct records. The callback returns before the next SQLite row is
@@ -627,21 +677,136 @@ final class UsageLedgerIndex {
         // justify a lossy hash. A length prefix makes the pair unambiguous and collision-free.
         "\(parserID.utf8.count):\(parserID)\(path)"
     }
+
+    private func establishParserGeneration() throws {
+        let select = try database.prepare(
+            "SELECT value FROM usage_metadata WHERE key = ?"
+        )
+        defer { select.finalize() }
+        select.bind(1, UsageLedgerIndexDefaults.parserGenerationMetadataKey)
+        if try select.step(), let stored = select.text(0) {
+            guard stored == parserGenerationID else {
+                throw UsageLedgerIndexError.parserGenerationCollision
+            }
+            return
+        }
+
+        let insert = try database.prepare(
+            "INSERT INTO usage_metadata(key, value) VALUES (?, ?)"
+        )
+        defer { insert.finalize() }
+        try insert
+            .bind(1, UsageLedgerIndexDefaults.parserGenerationMetadataKey)
+            .bind(2, parserGenerationID)
+            .run()
+    }
+
+    private func shouldPreserveFutureManifest(at url: URL) -> Bool {
+        guard let data = try? BoundedFileReader.read(
+            url,
+            maximumBytes: UsageLedgerIndexDefaults.maximumManifestBytes
+        ),
+        let manifest = try? JSONDecoder().decode(GenerationManifest.self, from: data) else {
+            return false
+        }
+        return manifest.schemaVersion > UsageLedgerIndexDefaults.schemaVersion
+    }
+
+    private func retireObsoleteGenerationFiles() {
+        let names: [String]
+        do {
+            names = try fileManager.contentsOfDirectory(atPath: directory.path)
+        } catch {
+            ThreadingLogger.usage.warning(
+                "Usage ledger generation cleanup could not enumerate files: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            return
+        }
+
+        let currentNames = Set(
+            [databaseURL.lastPathComponent]
+                + UsageLedgerIndexDefaults.sidecarSuffixes.map {
+                    databaseURL.lastPathComponent + $0
+                }
+        )
+        for name in names {
+            guard UsageLedgerIndexDefaults.isRetirableLedgerDatabaseArtifact(name),
+                  !currentNames.contains(name) else { continue }
+            do {
+                try fileManager.removeItem(at: directory.appendingPathComponent(name))
+            } catch {
+                ThreadingLogger.usage.warning(
+                    "Usage ledger generation cleanup could not remove artifact: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
+    }
 }
 
 private enum UsageLedgerIndexError: LocalizedError {
     case missingRevision(String)
+    case parserGenerationCollision
 
     var errorDescription: String? {
         switch self {
         case .missingRevision: return "A transcript source had no stable filesystem revision"
+        case .parserGenerationCollision:
+            return "A usage ledger filename resolved to a different parser generation"
         }
     }
 }
 
 enum UsageLedgerIndexDefaults {
-    static let fileName = "usage-ledger-index.sqlite"
+    static let legacyFileName = "usage-ledger-index.sqlite"
+    static let fileNamePrefix = "usage-ledger-index-v"
+    static let manifestFileName = "usage-ledger-index-current.json"
+    static let maximumManifestBytes = 64 * 1024
+    static let parserGenerationMetadataKey = "parser_generation_id"
+    static let sidecarSuffixes = ["-wal", "-shm"]
     static let schemaVersion = 1
+
+    /// Every parser whose records can share one report is part of the physical generation.
+    /// Changing any member opens a fresh, resumable database instead of mixing old and new rows.
+    static let parserGenerationID = [
+        UsageScanCacheDefaults.claudeParserID,
+        UsageScanCacheDefaults.codexParserID,
+        UsageScanCacheDefaults.openCodeParserID
+    ].joined(separator: "|")
+
+    static func fileName(forParserGenerationID parserGenerationID: String) -> String {
+        let hash = parserGenerationID.utf8.reduce(UInt64(14_695_981_039_346_656_037)) {
+            ($0 ^ UInt64($1)) &* 1_099_511_628_211
+        }
+        return "\(fileNamePrefix)\(schemaVersion)-\(String(format: "%016llx", hash)).sqlite"
+    }
+
+    /// Returns true only for artifacts this running schema can safely supersede.
+    ///
+    /// A newer app may leave a future-schema ledger behind before the user launches an older
+    /// build. The older build cannot prove that file is rebuildable on its terms, so retirement
+    /// must parse the version rather than accepting every generated ledger prefix.
+    static func isRetirableLedgerDatabaseArtifact(_ name: String) -> Bool {
+        let baseName: String
+        if let suffix = sidecarSuffixes.first(where: { name.hasSuffix($0) }) {
+            baseName = String(name.dropLast(suffix.count))
+        } else {
+            baseName = name
+        }
+        guard baseName.hasSuffix(".sqlite") else { return false }
+        if baseName == legacyFileName { return true }
+        guard baseName.hasPrefix(fileNamePrefix) else { return false }
+
+        let versionAndGeneration = baseName
+            .dropFirst(fileNamePrefix.count)
+            .dropLast(".sqlite".count)
+        guard let separator = versionAndGeneration.firstIndex(of: "-") else { return false }
+        let versionText = versionAndGeneration[..<separator]
+        let generationText = versionAndGeneration[versionAndGeneration.index(after: separator)...]
+        guard !generationText.isEmpty,
+              let artifactSchemaVersion = Int(versionText),
+              artifactSchemaVersion > 0 else { return false }
+        return artifactSchemaVersion <= schemaVersion
+    }
 }
 
 enum UsageScanCacheDefaults {

@@ -89,6 +89,25 @@ final class ScheduledCurfewPlanResolutionTests: XCTestCase {
         XCTAssertEqual(outcome(.at(now), now: now), .skipped(.deadlineAlreadyPassed))
     }
 
+    func testAUsageResetEndArmsOnlyItsNamedWindow() throws {
+        let now = try moment(hour: 22)
+        let expectedAt = try moment(day: 18, hour: 4)
+
+        XCTAssertEqual(
+            outcome(
+                .untilUsageReset(
+                    expectedAt: expectedAt,
+                    windowID: UsageDefaults.weeklyWindowID
+                ),
+                now: now
+            ),
+            .armUsageReset(
+                expectedAt: expectedAt,
+                windowID: UsageDefaults.weeklyWindowID
+            )
+        )
+    }
+
     // MARK: - Whenever Quiet Hours Next Begin
 
     /// The whole reason the choice is stored rather than the moment. The plan was written days

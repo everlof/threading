@@ -34,8 +34,9 @@ struct ScheduledMessageID: Hashable, Sendable, Codable, CustomStringConvertible 
 /// The end a scheduled start is already carrying, chosen while the user was writing the prompt.
 ///
 /// Frozen for `ScheduledSessionPlan`'s reason and resolved for the opposite one. What the user
-/// picked is a decision — *this* moment, or whenever quiet hours next begin — and the decision is
-/// what has to survive the wait. The date behind `atQuietHours` must not: a plan that wrote down
+/// picked is a decision — *this* moment, whenever quiet hours next begin, or one exact usage
+/// window's boundary/earlier reset — and the decision is what has to survive the wait. The date
+/// behind `atQuietHours` must not: a plan that wrote down
 /// Tuesday's 04:00 and fired on Thursday would name a deadline two days before its own session
 /// started. So the choice is stored and the deadline is worked out when the start fires, against
 /// the quiet hours in force then.
@@ -49,6 +50,10 @@ enum ScheduledCurfewPlan: Codable, Sendable, Equatable {
 
     /// End it when quiet hours next begin, as they are configured at fire time.
     case atQuietHours
+
+    /// End at this exact window's scheduled boundary, or at an earlier proven reset of it.
+    /// A 5h or model-scoped Spark reset cannot satisfy a 7d plan.
+    case untilUsageReset(expectedAt: Date, windowID: String)
 }
 
 // MARK: - Scheduled Session Plan

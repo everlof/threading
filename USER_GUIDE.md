@@ -1359,6 +1359,35 @@ agent proposes itself asks first. **Always Ask** asks in both cases; **Same Repo
 either after Threading's same-repository validation. The claimed authority and reason are kept in
 the audit trail.
 
+Asking an agent for a worktree goes through `create_session_worktree(branch, authority_basis,
+reason)`, which makes the checkout **and** moves the chat into it in one call. The branch may
+already exist or be new, and Threading chooses where the worktree lives so a repository's
+worktrees stay together on disk. Use this rather than letting an agent run `git worktree add`
+itself: a worktree Threading did not make is invisible to the sidebar, and the chat goes on being
+filed under the checkout it started in.
+
+### When a chat wanders
+
+An agent can change directory without anything durable moving, so a chat could spend hours
+building in another worktree while its row, its branch heading and its hover card all named the
+checkout it launched from. Threading now reads the working directory each agent reports and
+compares it with the checkout that owns the chat.
+
+The hover card gains a **Working in** line, directly under the branch, whenever the two disagree.
+That line appears for any disagreement, including one that can never be resolved by moving, such
+as an agent working in a different repository altogether.
+
+When the agent is in another checkout of the **same** repository, Threading offers to move the
+chat there, as a band with a **Move Chat** button rather than a dialog that interrupts you. Your
+**Settings ▸ Tools ▸ Project** choice governs it: **Explicit Requests** and **Always Ask** both
+ask, **Same Repository** moves without asking.
+
+There is one exception, and it repairs real damage. Claude files each conversation under the
+folder it is running in, so a chat whose agent moved may have taken its conversation with it. When
+Threading finds the conversation is no longer under the checkout it would launch from, resuming
+that chat there would have started an empty conversation instead of the real one, so it follows
+the conversation without asking and reports what it did. **Always Ask** still asks.
+
 ### Copying identifiers and paths
 Everything about a chat that is needed *elsewhere* sits in the right-click menu's **Copy ▸**
 submenu:
@@ -1671,11 +1700,18 @@ have no clock of their own; the curfew is the clock.
 
 **Setting one.** When writing a new session, the moon beside the clock (**End this session at a
 time**) offers the same kind of choices the clock does — *In an hour*, *In 3 hours*, *Tonight at
-23:00*, **Until the 5h window resets** (exactly at the reset, not a minute past), *At quiet hours*
+23:00*, **Until the 5h window resets**, **Until the 7d window resets**, *At quiet hours*
 when you have them, or a custom time. The choice becomes a chip in the footer ("Until 04:00";
 hover it for the whole plan) and is armed the moment the session starts — never while a scheduled
 start is still waiting. For a session that is already running, the row's menu has a **Curfew**
 fold, and a native chat shows the same chip while a curfew applies.
+
+A usage-window choice follows the **specific row you picked**. Its displayed reset is the latest
+time Threading will stop, but a provider-proven early reset of that same window stops it sooner.
+So choosing **7d** will react to an announced or unannounced 7d reset and will **not** react to the
+5h/Spark reset. An unused rollover does not count as a reset: Threading requires observed used
+capacity to be restored. If an early reset triggers the curfew, Threading does not send a wrap-up
+afterward, because that message would spend the capacity that was just restored.
 
 **What happens.** Three moments, with margins you set once in Settings:
 
@@ -2364,8 +2400,9 @@ edit the selected project, and operations needing more than that fail rather tha
 approved. Use the Terminal surface when a task needs Codex's full interactive approval flow.
 
 When Claude or Codex delegates work, both Chat and Terminal show a **Subagents** summary with live working/done
-counts and, when the provider reports them, the child's current tool, elapsed time, tool count,
-and token count. The display-panel navigator also adds the indexed token total, cost and request
+counts. Each row keeps the delegated task visible and, when the provider reports them, adds the
+child's model and reasoning effort, current tool, elapsed time, tool count, token count, and latest
+activity or result. The display-panel navigator also adds the indexed token total, cost and request
 count for each child when its transcript provides them. Select a child to open its conversation in the display panel; child output
 stays out of the parent's transcript. Both providers show structured child text, thinking, tool
 calls, and results, including nested delegated agents.
@@ -2661,6 +2698,13 @@ Because continuity uses the paired host identity rather than its current URL, mo
 Mac's addresses keeps the same saved state, while two different Macs that happen to expose
 the same provider session id remain separate.
 
+The dashboard's **…** menu stays as six destinations even when every owner capability is
+available: **Organize**, **Sessions**, **Appearance**, **Usage**, **Settings**, and **Macs**.
+Organization order and direction live under Organize; active/snoozed/archived views live under
+Sessions; Pair and Forget live under Macs. Appearance opens the same scrollable Mac-appearance
+page as Settings. Keeping those choices behind their named destination means the menu itself never
+depends on iOS's over-height menu scrolling.
+
 Choose a project heading to open that project. This screen contains only the project's chats;
 its title keeps the connection status visible, and the **+** in the navigation bar starts a chat
 already set to that project. Return to the Mac dashboard to browse another project or the recent
@@ -2711,8 +2755,8 @@ it uses that theme immediately while reconnecting or offline, then adopts and re
 theme from the Mac. Changing Mac appearance from the iPhone updates the same remembered value.
 
 On iPhone, a solo agent-UI terminal starts in **Direct** input: each key goes straight to the real
-TUI. Use the Direct/Compose control at the trailing edge of the terminal key bar when you prefer
-to write in the iOS text area and send the finished line at once. The choice is remembered for
+TUI. Use the Direct/Compose control on the terminal key bar's action row — the row above the
+keys — when you prefer to write in the iOS text area and send the finished line at once. The choice is remembered for
 that terminal on this device. **Settings → On this iPhone → Terminal keys** can make Compose the
 default for terminal sessions this phone has not seen before, without changing existing choices.
 
@@ -2733,10 +2777,12 @@ insert control types the lines at the TUI's cursor without pressing Return, so y
 the prompt first. Either way the lines arrive as one paste when the program supports it, which
 Claude Code shows as a single "[Pasted text]" token. A view-only link can copy but not quote.
 
-The key bar under the terminal is customizable per agent, per device — a Termius-style keyboard
+The key bar under the terminal is two rows: a tight run of key caps against the keyboard, and
+an action row above it carrying the paperclip, the Direct/Compose switch and the `⌨︎…` key
+editor. The caps are customizable per agent, per device — a Termius-style keyboard
 that goes further than Termius's fixed catalogue. Every bar starts from a stock layout for its
 agent (Claude Code's leads with ⇧⇥, the permission-mode cycle its TUI answers to), and the
-`⌨︎…` control at its trailing edge — or **Settings → On this iPhone → Terminal keys** — opens the
+action row's `⌨︎…` control — or **Settings → On this iPhone → Terminal keys** — opens the
 editor: add chord keys such as ⌃→ or ⇧⇥ from the catalogue, add snippet keys that type saved
 text (optionally submitting it with Return; long-press such a key to insert without running),
 relabel any key, drag to reorder with Edit, swipe to delete, and reset to the stock layout. The
@@ -2745,7 +2791,8 @@ keyboard — tap twice to lock, tap again to release. Arrows, Home and End follo
 application-cursor mode, so full-screen programs receive the sequences they asked for. Layouts
 are stored only on the device that authored them; an iPhone and an iPad keep separate bars. This
 bar is the only one over the keyboard: the terminal emulator's own fixed accessory row is
-removed, and the bar carries the control that puts the keyboard away and brings it back.
+removed, and the key row's trailing edge carries the control that puts the keyboard away and
+brings it back.
 
 **Tapping a mirrored terminal clicks it.** A full-screen TUI that draws something to click —
 Claude Code's "click to go to bottom", its option lists — receives a tap as a left click at that
@@ -2823,7 +2870,9 @@ by how much of that login's allowance is used, one ring per limit window: the we
 outside, the five hours inside it, and, for a chat running a model the plan meters separately,
 that model's own window innermost. Open the menu and the account row spells out those exact
 percentages followed by their next reset. A model-specific reset such as Codex Spark appears only
-when that chat runs the model it meters. It is the same disc the New session screen wears, so it
+when that chat runs the model it meters. The compact disc does not add an alternate login's badge
+by default; enable **Settings → Appearance → Account initials** to show it. The menu still names
+the account either way. It is the same disc the New session screen wears, so it
 stays put when a draft becomes a chat. Open it and choose **Workspace** for **Browser**,
 **Review**, **Files**, and **Attachments**; a swipe in from the right edge of the session opens
 the same thing. Workspace is a drawer: it slides in from the right over the chat and follows your finger
@@ -3257,9 +3306,11 @@ it opens paused; press Play and it plays.
 **Movies play here too** — a screen recording, a simulator capture, a clip an agent produced.
 Selecting the row shows the first frame with a timeline under it, plus a speaker button when the
 movie has sound. It opens **paused**, with Play in the middle of the picture: a row you arrived at
-with an arrow key is not a request to make a noise. Press Play and it plays with sound, once
-through; while it is playing the control clears from the picture and hovering the movie brings
-Pause back. Dragging the fold above the preview resizes the whole player; at the tightest height
+with an arrow key is not a request to make a noise. Click Play or anywhere on the movie and it
+plays with sound, once through; clicking the picture again pauses it. The playback click also
+works when it is the click that activates Threading. While it is playing the control clears from
+the picture and hovering the movie brings Pause back. Dragging the fold above the preview resizes
+the whole player; at the tightest height
 the timeline steps out until there is useful room for it again. The same movie plays
 in the lightbox on Space or a double-click, on the rail beside the session's images and PDFs.
 Selecting another row stops it, as does looking away. Movie rows show a frame from the movie with
@@ -3398,8 +3449,10 @@ It has an address bar, history controls, persistent cookies, responsive viewport
 Web Inspector. Its overflow menu includes find in page, print, visible-page screenshots, 50–200%
 zoom, recent downloads, current-site data clearing, and browser settings. The responsive toolbar
 provides editable CSS-pixel dimensions, rotation, and desktop, tablet, foldable, and phone presets;
-hiding it returns the page to the panel's natural size. These are honest viewport presets, not
-claims of touch, device-scale, browser-engine, or complete hardware emulation.
+hiding it returns the page to its host's natural size. When the agent sets an exact responsive
+viewport, the toolbar opens too, keeping the fixed dimensions and the way back to a filling page
+visible above any unused canvas. These are honest viewport presets, not claims of touch,
+device-scale, browser-engine, or complete hardware emulation.
 The current address rests as plain toolbar text. Point at it to reveal the editable field; click it
 to edit. Focus and text selection use the ordinary macOS text editor.
 When the browser tab is visible, Cmd+F opens its native find bar inside that tab.
@@ -3783,7 +3836,8 @@ category or price.
 
 The Subagents row remains brief: working/done counts and their token subtotal. Click it for the
 existing **Subagents** pane, which is the detailed agents sidebar: its navigator lists every child
-with brief tokens, cost and request count where available, above the selected child's transcript.
+with its delegated task, model/reasoning configuration, current progress or latest result, and
+brief tokens, cost and request count where available, above the selected child's transcript.
 
 The card holds more than one destination, so **the pointer says which part goes where**. Every
 interactive hover covers the whole cell: branch, totals and review rows open Git Review; the
@@ -5098,6 +5152,19 @@ Shortcuts are right-aligned in each command row. Click an editable shortcut (inc
 an unbound command), then press the new combination. Delete clears it and Escape cancels. A chord
 already owned by another command is refused inline. The change is the same persistent override
 shown by menus and **Settings ▸ Keyboard**.
+
+**Every setting is in the palette too.** Each Settings page, and each row on it, is a result of its
+own: type "alert sound", "tailnet" or "compact tree" and press Return to open Settings on that page
+with the row scrolled to and briefly marked. A setting row shows where it lives underneath its name
+("General › Notifications"); a page shows the group holding it ("Settings › App"). Rows also answer
+to words they do not print — "beep" finds the terminal bell — and when a command and a setting match
+equally well, the command that *does* the thing is listed first. Settings results carry no shortcut,
+because there is nothing for a key to run.
+
+This covers extensions as well. An extension's own settings page and every field on it are results,
+as are the fields an extension adds to one of Threading's pages — those name their owner in the path
+("Tools › Marketeer — Capture"). Each installed extension is itself a result: type its name to land
+on it under **Settings ▸ Extensions**.
 
 ## Keyboard Shortcuts
 

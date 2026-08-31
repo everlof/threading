@@ -171,6 +171,15 @@ final class CommandPaletteViewController: NSViewController {
         appEvents.observe(KeyboardShortcutsDidChange.self) { [weak self] _ in
             self?.reloadCatalog()
         }
+        // The settings destinations in the same catalog move for reasons a command registry
+        // change does not cover: an extension contributing only settings adds and removes pages
+        // and rows without ever registering a command.
+        appEvents.observe(ExtensionSettingsRegistryDidChange.self) { [weak self] _ in
+            self?.reloadCatalog()
+        }
+        appEvents.observe(ExtensionsDidChange.self) { [weak self] _ in
+            self?.reloadCatalog()
+        }
         reloadCatalog()
     }
 
@@ -467,10 +476,14 @@ final class CommandPaletteViewController: NSViewController {
 
         switch step {
         case .commands:
-            if selectedCommand?.nextInput?.kind == .session {
-                leadingHint.stringValue = L10n.string(
-                    "↑↓ Move   Tab or Return Choose Session   Escape Close"
-                )
+            if let kind = selectedCommand?.nextInput?.kind {
+                leadingHint.stringValue = kind == .session
+                    ? L10n.string("↑↓ Move   Tab or Return Choose Session   Escape Close")
+                    : L10n.string("↑↓ Move   Tab or Return Choose Project   Escape Close")
+            } else if selectedCommand?.origin == .settings {
+                // A settings destination navigates. Saying "Run" over a row that scrolls
+                // Settings to a switch promises an effect the Return will not have.
+                leadingHint.stringValue = L10n.string("↑↓ Move   Return Open   Escape Close")
             } else {
                 leadingHint.stringValue = L10n.string("↑↓ Move   Return Run   Escape Close")
             }
@@ -553,6 +566,7 @@ final class CommandPaletteViewController: NSViewController {
         case .builtIn: return L10n.string("Threading")
         case .extensionCommand(_, let name, _): return name
         case .projectScript: return L10n.string("Project Scripts")
+        case .settings: return L10n.string("Settings")
         }
     }
 
@@ -560,6 +574,7 @@ final class CommandPaletteViewController: NSViewController {
     var isPresentedForTesting: Bool { presentation != nil }
     var paletteSurfaceSizeForTesting: NSSize? { paletteSurface?.frame.size }
     var visibleCommandIDsForTesting: [String] { visibleCommands.map(\.id) }
+    var leadingHintForTesting: String { leadingHint.stringValue }
     var selectedCommandIDForTesting: String? { selectedCommandID }
     var isCollectingInputForTesting: Bool {
         if case .input = step { return true }

@@ -410,6 +410,14 @@ extension TerminalTheme {
     /// brights the classic ramps use. Where `Ocean` is Nord's cool blue-grey, this leans warm.
     /// Rosé Pine has no true green, so `green` is a legible sage so `git`/`ls`/added lines still
     /// read as green rather than teal.
+    ///
+    /// **The heading is warm where the body is cool**, which is this palette's own distinction
+    /// rather than a brighter shade of the same ink. It shipped as `#F4F2FF` — `brightWhite`,
+    /// the classic pairing — and against a body that is *already* pale lavender that is ΔE 8.3,
+    /// half the floor: legible, and invisible as a heading. The warm off-white is 23.2 from the
+    /// body and 21.2 from the nearest coloured slot, so it can be neither mistaken for ordinary
+    /// text nor read as output a program coloured. Terminal.app's Grass does the same thing with
+    /// its amber bold, and for the same reason.
     static let roseMoon = TerminalTheme(
         id: .roseMoon,
         name: "Rosé Moon",

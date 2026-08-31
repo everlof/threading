@@ -287,9 +287,9 @@
       "kind": "component",
       "status": "implemented",
       "priority": "important",
-      "title": "Subagents usage navigator",
-      "description": "The existing Subagents navigator enriched in place with its delegated token subtotal and the selected child's cost and request detail.",
-      "states": ["Delegated subtotal", "Per-child tokens", "Per-child cost", "Per-child requests"],
+      "title": "Subagents work navigator",
+      "description": "The bounded Subagents navigator as a standing work receipt: task, model and reasoning configuration, lifecycle/progress, latest activity, transcript route, delegated subtotal and per-child usage.",
+      "states": ["Delegated task", "Model and reasoning", "Working and done", "Latest activity", "Transcript route", "Delegated subtotal", "Per-child tokens", "Per-child cost", "Per-child requests"],
       "matrix": {
         "themes": ["System"],
         "appearances": ["Dark"],
@@ -561,6 +561,27 @@
       },
       "capture": {
         "glob": "session-menu-*.png"
+      }
+    },
+    {
+      "id": "curfew-menu",
+      "kind": "component",
+      "status": "implemented",
+      "priority": "important",
+      "title": "Curfew menu",
+      "description": "The shared curfew chooser with the exact 7d reset condition selected, proving the 5h row remains a separate unselected condition.",
+      "states": ["7d selected", "5h unselected", "Light", "Dark"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Natural menu size"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/CurfewMenuTests.swift",
+        "test": "ThreadingTests/CurfewMenuTests/testRendersTheOffersToImages"
+      },
+      "capture": {
+        "glob": "curfew-menu-*.png"
       }
     },
     {
@@ -1230,6 +1251,7 @@
         "Grouped destinations, conversations and files",
         "Literal match emphasis",
         "Selected result",
+        "Adjacent hover and selection remain separate",
         "Visible cap and partial coverage"
       ],
       "matrix": {

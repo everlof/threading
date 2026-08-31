@@ -12,9 +12,28 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
     let shareID: String
     let deviceID: String
     let deviceToken: String
+    let hostedRegistrationID: String?
     let environment: RemoteNotificationEnvironment
     let enabledKinds: [RemoteNotificationKind]
     let soundEnabledKinds: [RemoteNotificationKind]
+
+    init(
+        shareID: String,
+        deviceID: String,
+        deviceToken: String,
+        hostedRegistrationID: String? = nil,
+        environment: RemoteNotificationEnvironment,
+        enabledKinds: [RemoteNotificationKind],
+        soundEnabledKinds: [RemoteNotificationKind]
+    ) {
+        self.shareID = shareID
+        self.deviceID = deviceID
+        self.deviceToken = deviceToken
+        self.hostedRegistrationID = hostedRegistrationID
+        self.environment = environment
+        self.enabledKinds = enabledKinds
+        self.soundEnabledKinds = soundEnabledKinds
+    }
 
     var key: RemoteNotificationSubscriptionKey {
         RemoteNotificationSubscriptionKey(shareID: shareID, deviceID: deviceID)
@@ -199,6 +218,7 @@ enum RemoteNotificationSubscriptionDefaults {
                 && RemoteInboundPolicy.normalizedDeviceID(subscription.deviceID)
                     == subscription.deviceID
                 && acceptsDeviceToken(subscription.deviceToken)
+                && acceptsHostedRegistrationID(subscription.hostedRegistrationID)
                 && enabledKinds.count == subscription.enabledKinds.count
                 && soundKinds.count == subscription.soundEnabledKinds.count
                 && soundKinds.isSubset(of: enabledKinds)
@@ -212,6 +232,18 @@ enum RemoteNotificationSubscriptionDefaults {
             && token.unicodeScalars.allSatisfy { scalar in
                 switch scalar.value {
                 case 48...57, 97...102: true
+                default: false
+                }
+            }
+    }
+
+    static func acceptsHostedRegistrationID(_ identifier: String?) -> Bool {
+        guard let identifier else { return true }
+        return identifier.hasPrefix("th_push_")
+            && (40...256).contains(identifier.utf8.count)
+            && identifier.unicodeScalars.allSatisfy { scalar in
+                switch scalar.value {
+                case 45, 48...57, 65...90, 95, 97...122: true
                 default: false
                 }
             }

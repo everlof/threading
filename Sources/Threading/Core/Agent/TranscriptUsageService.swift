@@ -1045,13 +1045,24 @@ final class TranscriptUsageService {
         }
         scan.duration = CFAbsoluteTimeGetCurrent() - started
         do {
-            return try UsageLedgerBuilder.build(
+            let report = try UsageLedgerBuilder.build(
                 forEachRecord: { body in try index.forEachRecord(body) },
                 recordsAreDistinct: true,
                 coverage: Array(coverage.values),
                 projects: projects,
                 scan: scan
             )
+            do {
+                try index.commitGeneration()
+            } catch {
+                // The completed report is still exact and remains publishable. Leaving the prior
+                // generation beside this resumable one is the crash-safe degraded state; a later
+                // successful scan retries the atomic manifest and file-level retirement.
+                ThreadingLogger.usage.warning(
+                    "Usage ledger generation commit deferred: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+            return report
         } catch {
             ThreadingLogger.usage.error(
                 "Usage ledger index read failed: \(error.localizedDescription, privacy: .private(mask: .hash))"

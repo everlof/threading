@@ -75,7 +75,9 @@ is available without turning the row itself into a recorder. When a descriptor c
 session input, Tab or Return advances in place to a searchable session list and Escape returns to
 the preserved command query. Disabled reasons, prompts and selection remain visible and
 accessible. The controller owns this focus and presentation state; command meaning and target
-revalidation stay in the host command plane.
+revalidation stay in the host command plane. Settings pages and rows arrive through that same
+plane as `.settings`-origin descriptors and draw as ordinary rows with no shortcut column — see
+[`control-plane.md`](control-plane.md#settings-are-destinations-not-commands).
 
 Four consequences worth knowing before adding UI:
 
@@ -113,7 +115,7 @@ Components so far:
 | `UsageLimitLegendView` | The one footer key for user-authored lines in a group of usage bars. It draws the same semantic marker colour as `UsageBarView.capMark` beside “Your limit”; hosts place it once rather than repeating a key under every provider window or account card. The exact rule remains the row tooltip and accessibility label. |
 | `CodeContextPreviewView` | The bounded diff-shaped context above a code-comment field. It keeps two neighbouring rendered rows around an ordinary target, preserves additions/removals and line numbers, and marks every target row with the theme's selection surface plus a leading `›` so the distinction survives without colour. The presentation model draws at most ten code rows; a larger selection retains both ends around one counted omission row, while the attachment still carries the complete selected excerpt. **The selection is never what gets omitted**: past ten rows the preview sheds neighbours first (from whichever side has more), and only a selection that alone exceeds the cap is shown as its head and tail around one omission row — cutting from the middle of the candidate range hid the selected lines themselves inside a four-line comment. The sheet it sits in is `.informational`: every `TextPromptAlert` is a question, and the alert's default `.warning` style put a caution triangle beside “Comment on Runner.swift:14” and every rename. |
 | `ConversationContextRailView` | The compact reference/comment receipts shared by the Chat composer and sent-message transcript. It groups a large batch into quiet count chips, then uses the themed menu for inspection, removal, re-reference, and comment actions. |
-| `SubagentSummaryView` | The compact child-agent navigator shared by the overview and transcript pane. Feature code supplies `SubagentSummaryItem.TranscriptAvailability` as one of three states: unavailable, openable from memory/while still running, or on disk with the file URL. A file-backed row is therefore structurally openable and revealable; the chevron and Finder action cannot disagree through independent Boolean/optional inputs. Optional usage arrives as already formatted semantic text, keeping provider accounting out of Design while adding no new rows beyond the navigator's existing cardinality. |
+| `SubagentSummaryView` | The compact child-agent navigator shared by the overview and transcript pane. A navigation row is a standing work receipt rather than a provider role alone: delegated task, optional model/reasoning configuration, progress/usage and the latest distinct activity remain visible while the transcript stays below. Feature code supplies `SubagentSummaryItem.TranscriptAvailability` as one of three states: unavailable, openable from memory/while still running, or on disk with the file URL. A file-backed row is therefore structurally openable and revealable; the chevron and Finder action cannot disagree through independent Boolean/optional inputs. Optional usage arrives as already formatted semantic text, keeping provider accounting out of Design while adding no new rows beyond the navigator's existing 40-row page bound. Quiet themed rules separate the richer rows without turning them into a second card stack. |
 | `RunPlanDisclosureView` | The compact, host-owned current-plan row shared by Terminal's session status card and Chat's status strip. It accepts only provider-neutral `RunProgress`, keeps its anchor as a full-row themed button, and opens a transient `ThemedPopover` whose checklist is a reusable `ThemedTableView`; provider hooks, transcripts, paging, and turn lifetime remain outside Design. |
 | `ThemedSegmentedControl` | Two or three fixed choices with all of them on screen: a track at `controlResting` with the selected segment lifted to `controlHover`. Built as a container of small `ThemedControl`s, the same shape as `ThemedTabStripView`, so each segment inherits hover, focus and its `.radioButton` role rather than one element re-deriving all three for parts of itself that are not views. An unselected segment answers the pointer in *ink* rather than taking a third fill step, because the scale has two control fills and a third invented here is how a scale stops being a scale. Arrow keys walk the run and take the selection with them; the ends hold rather than wrap. A pointer press leaves the segment as first responder so those arrows remain available, but the focus ring is drawn only when focus arrived from the keyboard: the filled plate is the held choice, and outlining it after a click is a second, misleading selection mark. The run publishes its titles' real `TextBaselineProviding` baseline for loose-text siblings. Each title also keeps a whole-point width floor above its fractional text measure at priority 999: fitting cannot turn a half-point rounding error into an ellipsis, while required margins still win in a genuinely narrow run. |
 | `PromptView` | A rounded container holding a growing text view and its submit control, as one input. |
@@ -122,7 +124,7 @@ Components so far:
 | `LimitEscapeStripView` | The limit-recovery specialization of the pane ribbon: full pane width below the header, content pushed beneath it, opaque `background` ground, closing `SeparatorView`, and `PaneNoticeDefaults` height/inset. It stays separate from `PaneNoticeView` because its offer mutates through recovery-specific busy/error states and reports typed intentions to `LimitRecoveryCoordinator`; the host owns those semantics and extensions cannot replace this surface. |
 | `ColorPairSpecimenView` | Two reported colours shown touching, with type-specimen glyphs drawn in the first over the second, under a two-word caption. Nothing is drawn between the halves on purpose — a divider is a seam the eye finds whether or not the colours differ, and a pair that still reads as one field is the finding. The outline is what keeps the swatch legible when that happens, and it is stroked outside the fills' clip. The caption is not decoration: the reported case draws *nothing*, and an unlabelled empty rounded box in a row of controls reads as a text field rather than as a colour sample — which is also why the swatch is a mark's height rather than nearly a button's. The pair is a *reported* colour and never follows the app theme; the outline, caption, glyph typography and size do. |
 | `ThemedControl` | The base for a control that draws itself from the theme. |
-| `MediaPlaybackOverlayView` | The 48-point Play/Pause target centred over a movie canvas. Paused video keeps Play visible; running video clears the picture until hover or keyboard focus reveals Pause. The view tracks the whole canvas but hit-tests only the target it draws, and pointer, keyboard and accessibility activation all raise one host-owned action. It is paired with `MediaTransportView` in timeline-only mode below the picture; see [`media-documents.md`](media-documents.md#movies-video). |
+| `MediaPlaybackOverlayView` | The 48-point Play/Pause affordance centred over a movie canvas. Paused video keeps Play visible; running video clears the picture until hover or keyboard focus reveals Pause. The whole canvas is the primary left-click target and accepts the window-activation click; secondary click keeps the canvas context menu. Pointer, keyboard and accessibility activation all raise one host-owned action. It is paired with `MediaTransportView` in timeline-only mode below the picture; see [`media-documents.md`](media-documents.md#movies-video). |
 | `ThemedToggle` | A drop-in `NSSwitch` whose on-track is the theme's accent. `material.toggle_style` may instead select the compact ON/OFF hardware latch; behavior, target/action, keyboard access, and its checkbox accessibility contract stay identical. |
 | `ThemedCheckbox` / `ThemedRadioButton` | Binary and mutually-exclusive option marks with their own focus, accessibility, disabled, and period geometry. Win98's named family uses a 13px square tick field and the pinned 98.css 12×12 indexed pixel radio sprite with a separate four-pixel dot, while modern materials retain the standard accent marks. |
 | `ThemedPopUp` | A drop-in `NSPopUpButton`, button included and dropdown excepted. `addHeader` files a long list under `ThemedMenuEntry.header` section names without demoting anything into a submenu; because a head is an entry and not an item, the control opens on its first *item* and callers find a row with `indexOfItem(where:)` rather than by an index taken from the model they built it from. |
@@ -3424,3 +3426,29 @@ translucent palette themes and opaque period materials without adding a Pure Bla
 appearances since it became adaptive, alongside the existing System, Cyberpunk and Windows 98
 evidence, and a focused assertion holds the intermediate fill
 strictly between that theme's resting and hover states.
+
+## 2026-08-31 — A table result owns its measure; its row owns every adjacent plate
+
+Universal Search had two independent descriptions of one result. `SearchResultRowView` laid out a
+two-line stack from live semantic fonts, while its host assigned every result a fixed 54-point
+height. The unused height landed asymmetrically around the labels, and the two descriptions could
+drift again whenever a theme typeface, its text scale, or the app text-size preference changed.
+Results without detail also removed the second line entirely, moving their title onto a different
+vertical axis from the results beside them.
+
+The component now publishes the height implied by its two line heights, line spacing and vertical
+insets. The table only asks for that measure and invalidates AppKit's row-height cache on the same
+theme event that changes those metrics. Both line slots stay reserved even when the lower one has
+no text. Equal result frames therefore imply equal internal rhythm by construction; the host no
+longer has a second spacing constant that can disagree.
+
+The apparent overlap had the same split ownership in paint. Selection was a
+`ThemedTableRowView` plate inset from the table, while hover and press were a full-height surface
+drawn by the cell inside it. Adjacent selected and hovered results could consequently meet even
+though the selection plates themselves were disjoint. An interactive result hosted by a table now
+borrows the row's existing plate path. The claim is weak and source-identified so reuse cannot
+retain an old cell or let an earlier cell clear a later cell's state; outside a table, the result
+still draws its own complete plate. The Universal Search evidence fixture deliberately keeps a
+selected result beside a hovered result, and the focused geometry assertion holds their plates
+apart. Presentation remains host-only; selection, activation, virtualization and result limits are
+still owned by Universal Search.

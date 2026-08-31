@@ -8,7 +8,6 @@ import ThreadingRemoteKit
 /// endpoints broker tool permissions and host extensions, and a remote client must never reach
 /// them. A value here is a decision about the one surface a remote client can touch.
 enum RemoteAccessDefaults {
-
     // MARK: - Listener
 
     /// The loopback address. Bound whenever Remote Access is on, because the Hosted Direct
@@ -157,7 +156,7 @@ enum RemoteAccessDefaults {
     static let maximumAttachmentBytes = 24 * 1024 * 1024
     static let maximumPushDeviceTokenBytes = 256
     static let maximumNotificationTitleBytes = 160
-    static let maximumNotificationBodyBytes = 1_500
+    static let maximumNotificationBodyBytes = 1500
     static let attentionRequestCooldown: TimeInterval = 30
     /// A guest can cross a brief network handoff without losing control. After this grace the
     /// Mac owner gets control back, so a dead phone cannot strand a shared terminal.
@@ -271,7 +270,6 @@ enum RemoteAccessDefaults {
 /// actually about. Everything here is a prefix or a range that BSD, Apple or Tailscale defines;
 /// nothing is a preference.
 enum RemoteInterfaceDefaults {
-
     /// Wi-Fi, Ethernet and Thunderbolt bridges all appear as `en*`.
     static let lanInterfacePrefix = "en"
 
@@ -296,5 +294,5 @@ enum RemoteInterfaceDefaults {
     /// `100.64.0.0/10`, the carrier-grade NAT range Tailscale assigns tailnet addresses from.
     /// A `utun` holding one of these is the tailnet; any other `utun` is somebody's VPN.
     static let tailscaleCGNATFirstOctet: UInt8 = 100
-    static let tailscaleCGNATSecondOctets: ClosedRange<UInt8> = 64...127
+    static let tailscaleCGNATSecondOctets: ClosedRange<UInt8> = 64 ... 127
 }

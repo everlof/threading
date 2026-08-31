@@ -11,9 +11,15 @@
     "dev:cloud-config": "wrangler dev --config wrangler.jsonc",
     "infra:plan": "node scripts/infra.mjs plan",
     "infra:apply": "node scripts/infra.mjs apply",
+    "infra:development:plan": "node scripts/infra.mjs plan development",
+    "infra:development:apply": "node scripts/infra.mjs apply development",
     "preflight": "node scripts/preflight.mjs",
+    "preflight:development": "node scripts/preflight-development.mjs",
+    "render:development": "node scripts/render-development-config.mjs",
     "verify:production": "node scripts/verify-production.mjs",
+    "verify:development": "node scripts/verify-development.mjs",
     "deploy": "node scripts/deploy-production.mjs",
+    "deploy:development": "node scripts/deploy-development.mjs",
     "types": "wrangler types"
   },
   "dependencies": {

@@ -278,12 +278,18 @@ The five-shot App Store/website story is the `ios-marketing-flow` entry in that 
 a parallel snapshot target. `scripts/capture_marketing_ios.sh --theme <id>` applies one declared
 theme and its authored light/dark simulator appearance to every checkpoint. Provider screens replay
 privacy-reviewed PTY bytes that were emitted by the installed Claude/Codex TUIs from synthetic
-saved sessions. The keyboard-plus-session-menu checkpoint adds a host interaction handshake: the
+saved sessions. The DEBUG replay installs each recording's declared grid before mounting its
+buffered renderer; interactive keyboard chrome does not grant a locally measured viewport to
+cursor-addressed fixture bytes. The keyboard-plus-session-menu checkpoint adds a host interaction handshake: the
 app first proves the real keyboard is visible, `idb` finds and presses the shipping session-action
 control by accessibility label, and the host releases capture only after the account, Workspace,
-Interface, and Archive labels all exist. The companion video is assembled offline from integer
-frame counts; its timing therefore cannot inherit launch, network, menu-animation, or
-theme-rendering lag.
+Interface, and Archive labels all exist. The companion video is one continuous Simulator recording
+of shipping interactions. Its actions
+are scheduled on integer frames of a fixed 30 fps clock, accessibility postconditions must settle
+before the next declared deadline, and a take is rejected when an action starts more than the
+manifest's permitted lateness. The final normalization fixes the App Store dimensions and exact
+frame count without editorial fades. Marketing-only launch arguments also pin the terminal to the
+manifest's reviewed compact point size; the shipping preference and default remain untouched.
 
 Each run writes a unique static report under `.build/ui-evidence-ios-reports/` using the same
 design-review and regression-approval pages as macOS. Approved iOS references live separately under

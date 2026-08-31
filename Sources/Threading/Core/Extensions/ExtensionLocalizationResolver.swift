@@ -570,7 +570,14 @@ struct ExtensionLocalizationResolver: Sendable {
             scope: command.scope,
             risk: command.risk,
             defaultShortcut: command.defaultShortcut,
-            menuPlacements: command.menuPlacements
+            menuPlacements: command.menuPlacements,
+            input: command.input.map {
+                ExtensionCommandInput(
+                    kind: $0.kind,
+                    prompt: string($0.prompt),
+                    searchPlaceholder: string($0.searchPlaceholder)
+                )
+            }
         )
     }
 

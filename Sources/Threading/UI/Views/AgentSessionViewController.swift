@@ -59,6 +59,9 @@ final class AgentSessionViewController: NSViewController {
     /// Set when the terminal is not yet large enough to start the process, so the launch
     /// can be retried from the size-change callback.
     private var pendingLaunchPlan: AgentLaunchPlan?
+    /// While the off-main process-table preflight decides whether another CLI owns this resume
+    /// identifier. It is also the duplicate-launch guard for clicks arriving before that answer.
+    private var externalResumePreflightID: UUID?
     private var identifierLaunchDate: Date?
 
     /// When this controller's current process started, for every launch rather than only the
@@ -98,7 +101,9 @@ final class AgentSessionViewController: NSViewController {
     private var transcriptRecheckGeneration: [String: Int] = [:]
     private var agentTitleRefreshWorkItem: DispatchWorkItem?
     private var codexTranscriptURL: URL?
-    private var codexInterruptionRefreshWorkItem: DispatchWorkItem?
+    private var codexTurnBoundaryRefreshWorkItem: DispatchWorkItem?
+    private var codexContinuationBoundaryRefreshWorkItem: DispatchWorkItem?
+    private var codexContinuationBoundaryRefreshIsOutputPrompted = false
     private var claudeTranscriptURL: URL?
     private var claudeBoundaryRefreshWorkItem: DispatchWorkItem?
 
@@ -409,6 +414,14 @@ final class AgentSessionViewController: NSViewController {
     /// `initialPrompt` opens the conversation and applies to a first launch only; the
     /// launcher drops it on resume, where the conversation already has an opening.
     func launch(initialPrompt: String? = nil) {
+        guard externalResumePreflightID == nil else { return }
+        continueLaunch(initialPrompt: initialPrompt, checksExternalOwner: true)
+    }
+
+    /// The main-actor half of launch. A successful external-owner check re-enters here with that
+    /// one check suppressed; every store and filesystem preflight is intentionally asked again
+    /// because the process-table read crossed an executor boundary.
+    private func continueLaunch(initialPrompt: String?, checksExternalOwner: Bool) {
         guard !isRunning else { return }
 
         // The last line before a PTY exists, which is where recovery's refusal has to be. The
@@ -430,14 +443,7 @@ final class AgentSessionViewController: NSViewController {
         // shell spends a process on a `cd` that cannot succeed; this also gives an existing row a
         // durable, actionable failure instead of an empty exit-code-1 report.
         if let refusal = ProjectLaunchPreflight.launchFailure(for: project) {
-            EventLog.shared.record(.session, "Refused agent launch", [
-                "session": sessionID.uuidString,
-                "cause": refusal.knownCause ?? "unrecognised"
-            ])
-            ProjectStore.shared.update(sessionID: sessionID) { stored in
-                stored.lastLaunchFailure = refusal
-            }
-            delegate?.agentSession(self, didExitWithCode: nil)
+            recordLaunchRefusal(refusal)
             return
         }
 
@@ -446,14 +452,22 @@ final class AgentSessionViewController: NSViewController {
         // built from here either fails the same way or quietly opens a different conversation.
         // Recording it as a launch failure is what makes the pane say so.
         if let refusal = AgentLauncher.resumeRefusal(for: agentSession, in: project) {
-            EventLog.shared.record(.session, "Refused agent launch", [
-                "session": sessionID.uuidString,
-                "cause": refusal.knownCause ?? "unrecognised"
-            ])
-            ProjectStore.shared.update(sessionID: sessionID) { stored in
-                stored.lastLaunchFailure = refusal
-            }
-            delegate?.agentSession(self, didExitWithCode: nil)
+            recordLaunchRefusal(refusal)
+            return
+        }
+
+        // Reading every process's argv is variable work supplied by the machine, not the row.
+        // The cheap process-table filter and the matching command-line reads therefore stay off
+        // the main actor. Only runtimes with a measured exclusive-resume contract enter here.
+        if checksExternalOwner,
+           agentSession.kind.supports(.detectableExternalResume),
+           let transcriptID = agentSession.resumeState.transcriptID
+        {
+            beginExternalResumePreflight(
+                executableName: agentSession.kind.executableName,
+                transcriptID: transcriptID,
+                initialPrompt: initialPrompt
+            )
             return
         }
 
@@ -475,6 +489,70 @@ final class AgentSessionViewController: NSViewController {
         DispatchQueue.main.async { [weak self] in
             self?.startIfTerminalIsSized()
         }
+    }
+
+    private func beginExternalResumePreflight(
+        executableName: String,
+        transcriptID: TranscriptID,
+        initialPrompt: String?
+    ) {
+        let requestID = UUID()
+        externalResumePreflightID = requestID
+        let rawTranscriptID = transcriptID.rawValue
+
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let owner = ExternalConversationPreflight.runningProcessID(
+                executableName: executableName,
+                transcriptID: rawTranscriptID
+            )
+
+            DispatchQueue.main.async {
+                guard let self, self.externalResumePreflightID == requestID else { return }
+                self.externalResumePreflightID = nil
+                guard !self.isRunning else { return }
+
+                // A migration or provider discovery could replace the id during the queue hop.
+                // The answer belongs only to the exact id it checked; restart every preflight for
+                // a different state rather than applying a stale refusal or skipping its owner.
+                guard ProjectStore.shared.session(withID: self.sessionID)?
+                    .resumeState.transcriptID?.rawValue == rawTranscriptID
+                else {
+                    self.continueLaunch(
+                        initialPrompt: initialPrompt,
+                        checksExternalOwner: true
+                    )
+                    return
+                }
+
+                if owner != nil {
+                    let transcriptPath = ProjectStore.shared.session(withID: self.sessionID)
+                        .flatMap { stored -> URL? in
+                            guard let project = ProjectStore.shared.project(
+                                forSessionID: self.sessionID
+                            ) else { return nil }
+                            return SessionTranscript.existingURL(for: stored, in: project)
+                        }?.path
+                    self.recordLaunchRefusal(ExternalConversationPreflight.launchFailure(
+                        kind: self.agentKind,
+                        transcriptPath: transcriptPath
+                    ))
+                    return
+                }
+
+                self.continueLaunch(initialPrompt: initialPrompt, checksExternalOwner: false)
+            }
+        }
+    }
+
+    private func recordLaunchRefusal(_ refusal: SessionLaunchFailure) {
+        EventLog.shared.record(.session, "Refused agent launch", [
+            "session": sessionID.uuidString,
+            "cause": refusal.knownCause ?? "unrecognised"
+        ])
+        ProjectStore.shared.update(sessionID: sessionID) { stored in
+            stored.lastLaunchFailure = refusal
+        }
+        delegate?.agentSession(self, didExitWithCode: nil)
     }
 
     /// Terminates the agent, leaving the terminal view in place showing its final output.
@@ -508,10 +586,13 @@ final class AgentSessionViewController: NSViewController {
     /// the session is working and — before this — none was coming to end the launch grace either:
     /// `noteUnattendedLaunch` made every burst inert, and a Codex session visibly painting
     /// "Working" sat at idle in the sidebar until its *next* turn ended. So the grace is armed
-    /// for the replay and ended at the replay's own boundary, which the link reports. The two
-    /// transcript readers cannot stand in for it: `ClaudeTranscriptTurnRefusal` and
-    /// `CodexTranscriptInterruption` recover a turn that *ended*, and there is no reader here
-    /// that says one is open.
+    /// for the replay and ended at the replay's own boundary, which the link reports. Claude's
+    /// readers still cannot stand in for it — `ClaudeTranscriptTurnRefusal` and
+    /// `ClaudeTranscriptInterruption` recover a turn that *ended*, and Claude's transcript
+    /// records no open one. Codex's rollout does, and `CodexTranscriptTurnBoundary` now reads
+    /// it, so a reattached Codex session recovers a running turn exactly rather than by
+    /// inference — but only once its rollout path is known, which arrives on its own hooks.
+    /// The grace is what covers everything before that, for every runtime.
     @discardableResult
     func reattachToBackgroundHost(
         socketPath: String,
@@ -973,8 +1054,21 @@ final class AgentSessionViewController: NSViewController {
         }
 
         codexTranscriptURL = url
-        scheduleCodexInterruptionRefresh()
+        scheduleCodexTurnBoundaryRefresh()
         scheduleRunProgressTranscriptRefresh()
+    }
+
+    /// Looks past Codex's `Stop` for the `task_started` record goal mode writes shortly after it.
+    ///
+    /// This is separate from the output-coalesced refresh below. Coalescing is right for normal
+    /// transcript observation, but a continuation can keep painting for longer than the activity
+    /// grace; repeatedly postponing this read would publish the exact false attention edge the
+    /// rollout is authoritative enough to prevent.
+    func noteCodexTurnFinishedForContinuationDetection() {
+        scheduleCodexContinuationBoundaryRefresh(
+            after: CodexTurnBoundaryDefaults.continuationProbeDelay,
+            outputPrompted: false
+        )
     }
 
     /// Coalesces terminal repaint bursts into one resumable, off-main transcript pass.
@@ -1066,34 +1160,97 @@ final class AgentSessionViewController: NSViewController {
 
     /// Revalidates once after an output burst settles. The transcript reader performs the stat
     /// and capped tail scan off-main; this main-queue work is only cancellation and scheduling.
-    private func scheduleCodexInterruptionRefresh() {
+    ///
+    /// Deliberately **not** gated on a turn being in flight, unlike its Claude sibling: the
+    /// boundary this exists for most is a turn that began without anybody being told, so a
+    /// session the tracker believes is idle is exactly the state worth reading.
+    private func scheduleCodexTurnBoundaryRefresh() {
         guard codexTranscriptURL != nil else { return }
 
-        codexInterruptionRefreshWorkItem?.cancel()
+        codexTurnBoundaryRefreshWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self, let url = self.codexTranscriptURL else { return }
-            self.codexInterruptionRefreshWorkItem = nil
+            self.codexTurnBoundaryRefreshWorkItem = nil
 
-            CodexTranscriptInterruption.revalidate(at: url) { [weak self] interruption in
+            CodexTranscriptTurnBoundary.revalidate(at: url) { [weak self] boundary in
                 guard let self, self.isRunning, self.codexTranscriptURL == url,
-                      let interruption,
-                      self.activityTracker.noteTurnInterrupted(turnID: interruption.turnID)
-                else { return }
-
-                ThreadingLogger.agent.info(
-                    "Recovered interrupted Codex turn \(interruption.turnID, privacy: .public) from rollout"
-                )
-                EventLog.shared.record(.hooks, "Codex interruption recovered from transcript", [
-                    "session": self.sessionID.uuidString,
-                    "turn": interruption.turnID
-                ])
+                      let boundary else { return }
+                self.apply(boundary)
             }
         }
-        codexInterruptionRefreshWorkItem = item
+        codexTurnBoundaryRefreshWorkItem = item
         DispatchQueue.main.asyncAfter(
-            deadline: .now() + CodexInterruptionDefaults.quietDelay,
+            deadline: .now() + CodexTurnBoundaryDefaults.quietDelay,
             execute: item
         )
+    }
+
+    /// Schedules one non-postponing continuation read. The first output after `Stop` replaces
+    /// the slower look-ahead with a prompt read; later chunks leave that earlier deadline alone.
+    private func scheduleCodexContinuationBoundaryRefresh(
+        after delay: TimeInterval,
+        outputPrompted: Bool
+    ) {
+        guard codexTranscriptURL != nil,
+              activityTracker.hasPendingReportedTurnFinish else { return }
+
+        if codexContinuationBoundaryRefreshWorkItem != nil {
+            // The first output after `Stop` is later evidence than the fallback timer and earns
+            // the earlier read. Further chunks may not slide that prompt read forward again.
+            guard outputPrompted, !codexContinuationBoundaryRefreshIsOutputPrompted else {
+                return
+            }
+            codexContinuationBoundaryRefreshWorkItem?.cancel()
+            codexContinuationBoundaryRefreshWorkItem = nil
+        }
+
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, let url = self.codexTranscriptURL else { return }
+            self.codexContinuationBoundaryRefreshWorkItem = nil
+            self.codexContinuationBoundaryRefreshIsOutputPrompted = false
+
+            CodexTranscriptTurnBoundary.revalidate(at: url) { [weak self] boundary in
+                guard let self, self.isRunning, self.codexTranscriptURL == url,
+                      let boundary else { return }
+                self.apply(boundary)
+            }
+        }
+        codexContinuationBoundaryRefreshWorkItem = item
+        codexContinuationBoundaryRefreshIsOutputPrompted = outputPrompted
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    }
+
+    /// Crosses the one activity edge a rollout boundary is allowed to cross, and says so.
+    ///
+    /// Each of the three is refused unless it is about the turn the tracker is actually in, so
+    /// the ordinary case — `task_complete` landing a few milliseconds behind the `Stop` that
+    /// already closed the turn — costs one comparison and writes nothing.
+    private func apply(_ boundary: CodexTurnBoundary) {
+        let admitted: Bool
+        switch boundary {
+        case .started(let turnID):
+            admitted = activityTracker.noteTurnStartedFromTranscript(turnID: turnID)
+        case .completed(let turnID):
+            admitted = activityTracker.noteTurnFinishedFromTranscript(
+                turnID: turnID,
+                continuationGrace: CodexTurnBoundaryDefaults.continuationGrace
+            )
+        case .interrupted(let turnID):
+            admitted = activityTracker.noteTurnInterrupted(turnID: turnID)
+        }
+        guard admitted else { return }
+
+        ThreadingLogger.agent.info(
+            """
+            Recovered Codex turn \(boundary.turnID, privacy: .public) \
+            (\(boundary.logName, privacy: .public)) from rollout
+            """
+        )
+        EventLog.shared.record(.hooks, "Codex turn boundary recovered from transcript", [
+            "session": sessionID.uuidString,
+            "turn": boundary.turnID,
+            "boundary": boundary.logName
+        ])
     }
 
     /// Revalidates once after an output burst settles, for the two turn boundaries Claude omits:
@@ -1206,8 +1363,11 @@ final class AgentSessionViewController: NSViewController {
     /// its own hooks, and its transcript is resolved again from whatever the session record says
     /// by then — a resumed conversation and a migrated account both change the answer.
     private func resetTranscriptFallbackObservation() {
-        codexInterruptionRefreshWorkItem?.cancel()
-        codexInterruptionRefreshWorkItem = nil
+        codexTurnBoundaryRefreshWorkItem?.cancel()
+        codexTurnBoundaryRefreshWorkItem = nil
+        codexContinuationBoundaryRefreshWorkItem?.cancel()
+        codexContinuationBoundaryRefreshWorkItem = nil
+        codexContinuationBoundaryRefreshIsOutputPrompted = false
         codexTranscriptURL = nil
         claudeBoundaryRefreshWorkItem?.cancel()
         claudeBoundaryRefreshWorkItem = nil
@@ -1387,7 +1547,11 @@ extension AgentSessionViewController: TerminalSessionDelegate {
         }
         attachmentObserver?.noteOutput()
         scheduleProviderTitleRefresh()
-        scheduleCodexInterruptionRefresh()
+        scheduleCodexTurnBoundaryRefresh()
+        scheduleCodexContinuationBoundaryRefresh(
+            after: CodexTurnBoundaryDefaults.continuationOutputProbeDelay,
+            outputPrompted: true
+        )
         scheduleClaudeBoundaryRefresh()
         scheduleRunProgressTranscriptRefresh()
 

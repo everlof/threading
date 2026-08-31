@@ -9,7 +9,6 @@ import ThreadingRemoteKit
 /// `/api/me` main-queue hop are the server's job, because they need the store and the session
 /// list; the router just says what kind of request this is.
 struct RemoteRouter {
-
     let bundle: Bundle
     private let assetCache: StaticAssetCache
 
@@ -18,7 +17,7 @@ struct RemoteRouter {
         loadAssetData: @escaping (URL) -> Data? = { try? Data(contentsOf: $0) }
     ) {
         self.bundle = bundle
-        self.assetCache = StaticAssetCache(bundle: bundle, loadData: loadAssetData)
+        assetCache = StaticAssetCache(bundle: bundle, loadData: loadAssetData)
     }
 
     // MARK: - Static assets
@@ -101,8 +100,8 @@ struct RemoteRouter {
     /// Strips the query and fragment, leaving just the path for allowlist matching.
     static func normalizedPath(_ raw: String) -> String {
         var path = raw
-        if let hash = path.firstIndex(of: "#") { path = String(path[path.startIndex..<hash]) }
-        if let query = path.firstIndex(of: "?") { path = String(path[path.startIndex..<query]) }
+        if let hash = path.firstIndex(of: "#") { path = String(path[path.startIndex ..< hash]) }
+        if let query = path.firstIndex(of: "?") { path = String(path[path.startIndex ..< query]) }
         return path.isEmpty ? "/" : path
     }
 
@@ -222,14 +221,16 @@ struct RemoteRouter {
         let prefix = RemoteRoute.session.prefix
         let marker = "/\(RemoteSessionRouteAction.gitReview.rawValue)/"
         guard path.hasPrefix(prefix),
-              let markerRange = path.range(of: marker, options: .backwards) else {
+              let markerRange = path.range(of: marker, options: .backwards)
+        else {
             return nil
         }
-        let id = String(path[path.index(path.startIndex, offsetBy: prefix.count)..<markerRange.lowerBound])
+        let id = String(path[path.index(path.startIndex, offsetBy: prefix.count) ..< markerRange.lowerBound])
         let rawMode = String(path[markerRange.upperBound...])
         guard !id.isEmpty, !id.contains("/"),
               !rawMode.isEmpty, !rawMode.contains("/"),
-              let mode = RemoteGitReviewMode(rawValue: rawMode) else {
+              let mode = RemoteGitReviewMode(rawValue: rawMode)
+        else {
             return nil
         }
         return GitReviewRoute(sessionID: id, mode: mode)
@@ -313,7 +314,8 @@ struct RemoteRouter {
     static func bearerToken(from request: HTTPRequest) -> String? {
         guard let header = request.header("authorization"),
               let separator = header.firstIndex(of: " "),
-              String(header[..<separator]).caseInsensitiveCompare("Bearer") == .orderedSame else {
+              String(header[..<separator]).caseInsensitiveCompare("Bearer") == .orderedSame
+        else {
             return nil
         }
         let token = String(header[header.index(after: separator)...])
@@ -433,7 +435,7 @@ struct RemoteRouter {
         case 422: return .unprocessableRequest
         case 429: return .rateLimited
         case 503: return .serviceUnavailable
-        case 500...599: return .serverFailure
+        case 500 ... 599: return .serverFailure
         default: return .serverFailure
         }
     }

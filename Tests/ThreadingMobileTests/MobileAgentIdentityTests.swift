@@ -90,6 +90,25 @@ final class MobileAgentIdentityTests: XCTestCase {
         XCTAssertNotNil(initial.hue)
         XCTAssertEqual(initial.glyph.count, 1, "a chip this small holds one character")
     }
+
+    func testTheSessionUsageDiscAccountBadgeIsOptIn() {
+        let account = RemoteSessionAccountDTO(
+            name: "Vera Keller",
+            glyph: "V",
+            isEmoji: false,
+            hue: 0.72
+        )
+
+        XCTAssertFalse(MobileSessionAccountBadgePreference.defaultValue)
+        XCTAssertNil(MobileSessionAccountBadgePreference.presentedAccount(
+            account,
+            isEnabled: MobileSessionAccountBadgePreference.defaultValue
+        ))
+        XCTAssertEqual(
+            MobileSessionAccountBadgePreference.presentedAccount(account, isEnabled: true)?.name,
+            account.name
+        )
+    }
 }
 
 // MARK: - Usage Reading

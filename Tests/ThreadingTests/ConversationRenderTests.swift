@@ -3089,6 +3089,39 @@ final class SubagentSummaryViewTests: XCTestCase {
         )
     }
 
+    func testSubagentSidePaneShowsTheProviderTaskConfigurationAndLatestActivity() throws {
+        var timeline = SubagentTimeline(sessionID: SessionID())
+        timeline.apply(.discovered(SubagentDescriptor(
+            threadID: "worker-1",
+            role: "worker",
+            prompt: "Make delegated work legible in the Subagents pane.",
+            model: "gpt-5.6-luna",
+            reasoningEffort: "max"
+        )))
+        timeline.apply(.state(
+            threadID: "worker-1",
+            status: .stopped,
+            message: "Added task, configuration, and recent-result receipts."
+        ))
+
+        let controller = SubagentTranscriptViewController()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 420, height: 480)
+        controller.update(timeline, selectedThreadID: "worker-1")
+        controller.view.layoutSubtreeIfNeeded()
+
+        let summary = try XCTUnwrap(
+            descendants(of: controller.view).compactMap { $0 as? SubagentSummaryView }.first
+        )
+        let labels = descendants(of: summary)
+            .compactMap { $0 as? NSTextField }
+            .map(\.stringValue)
+        XCTAssertTrue(labels.contains("worker"))
+        XCTAssertTrue(labels.contains("Make delegated work legible in the Subagents pane."))
+        XCTAssertTrue(labels.contains("gpt-5.6-luna · Reasoning: max"))
+        XCTAssertTrue(labels.contains("Added task, configuration, and recent-result receipts."))
+        XCTAssertTrue(labels.contains("No transcript recorded."))
+    }
+
     func testSubagentSidePaneSwitchesSelectedTranscriptAndReportsSelection() throws {
         var timeline = SubagentTimeline(sessionID: SessionID())
         for (id, name, reply) in [
@@ -3143,8 +3176,9 @@ final class SubagentSummaryViewTests: XCTestCase {
                     id: "child-1",
                     title: "Parser audit",
                     subtitle: "Inspect the app-server event adapter.",
+                    configurationDetail: "gpt-5.6-sol · Reasoning: xhigh",
                     state: .working,
-                    statusDetail: nil,
+                    statusDetail: "18s · 4 tools",
                     detailLines: [
                         "Started",
                         "Read CodexAppServerEvent.swift",
@@ -3165,6 +3199,12 @@ final class SubagentSummaryViewTests: XCTestCase {
 
         XCTAssertEqual(collapsed, selected)
         XCTAssertEqual(selections.compactMap { $0 }, ["child-1", "child-1"])
+        let labels = descendants(of: view)
+            .compactMap { $0 as? NSTextField }
+            .map(\.stringValue)
+        XCTAssertTrue(labels.contains("Inspect the app-server event adapter."))
+        XCTAssertTrue(labels.contains("gpt-5.6-sol · Reasoning: xhigh · 18s · 4 tools"))
+        XCTAssertTrue(labels.contains("Found a missing terminal-state mapping"))
         let selectedButton = try XCTUnwrap(
             descendants(of: view)
                 .compactMap { $0 as? ThemedButton }
@@ -3185,14 +3225,27 @@ final class SubagentSummaryViewTests: XCTestCase {
                 SubagentSummaryItem(
                     id: "child-1",
                     title: "Parser audit",
-                    subtitle: nil,
+                    subtitle: "Inspect the app-server event adapter and verify child state.",
+                    configurationDetail: "gpt-5.6-sol · Reasoning: xhigh",
                     state: .completed,
-                    statusDetail: "24K tokens",
+                    statusDetail: "42s · 7 tools · 24K tokens",
                     usageDetail: "$0.42 est. · 3 requests",
-                    detailLines: []
+                    detailLines: ["Mapped the missing terminal state and added its regression."],
+                    transcriptAvailability: .onDisk(
+                        URL(fileURLWithPath: "/tmp/agent-parser-audit.jsonl")
+                    )
+                ),
+                SubagentSummaryItem(
+                    id: "child-2",
+                    title: "Render check",
+                    subtitle: "Review the subagent navigator in the real display pane.",
+                    configurationDetail: "gpt-5.6-luna · Reasoning: max",
+                    state: .working,
+                    statusDetail: "18s · 4 tools",
+                    detailLines: ["Comparing the System-dark evidence against the product shell."]
                 )
             ],
-            workingCount: 0,
+            workingCount: 1,
             doneCount: 1,
             usageText: "61K tokens"
         )
@@ -3201,12 +3254,16 @@ final class SubagentSummaryViewTests: XCTestCase {
         let labels = descendants(of: view)
             .compactMap { $0 as? NSTextField }
             .map(\.stringValue)
-        XCTAssertTrue(labels.contains("1 done · 61K tokens"))
-        XCTAssertTrue(labels.contains("24K tokens"))
+        XCTAssertTrue(labels.contains("1 working · 1 done · 61K tokens"))
+        XCTAssertTrue(labels.contains(
+            "gpt-5.6-sol · Reasoning: xhigh · 42s · 7 tools · 24K tokens"
+        ))
         XCTAssertTrue(labels.contains("$0.42 est. · 3 requests"))
+        XCTAssertTrue(labels.contains("Inspect the app-server event adapter and verify child state."))
+        XCTAssertTrue(labels.contains("Mapped the missing terminal state and added its regression."))
         XCTAssertEqual(
             descendants(of: view).compactMap { $0 as? ThemedButton }.count,
-            1,
+            2,
             "usage should annotate the existing child navigator, not build a second list"
         )
 

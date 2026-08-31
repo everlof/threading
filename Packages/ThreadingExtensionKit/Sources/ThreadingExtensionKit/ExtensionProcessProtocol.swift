@@ -456,6 +456,27 @@ public struct ExtensionCommandContext: Codable, Equatable, Sendable {
     }
 }
 
+/// The host-collected value for an extension command's declared input.
+///
+/// `id` is an opaque host identity. For `.project`, the same validated identity is also copied to
+/// `ExtensionCommandContext.projectID` so context-only extensions remain source compatible.
+public struct ExtensionCommandInputValue: Codable, Equatable, Sendable {
+    public let kind: ExtensionCommandInputKind
+    public let id: String
+
+    public init(kind: ExtensionCommandInputKind, id: String) {
+        self.kind = kind
+        self.id = id
+    }
+
+    public func validationIssues(path: String) -> [ExtensionValidationIssue] {
+        guard !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return [.init(path: "\(path).id", message: "must not be empty")]
+        }
+        return []
+    }
+}
+
 /// One command selected from Threading's menu or invoked through its resolved keyboard shortcut.
 public struct ExtensionCommandRequest: Codable, Equatable, Sendable {
     public static let currentProtocolVersion = 1
@@ -464,17 +485,20 @@ public struct ExtensionCommandRequest: Codable, Equatable, Sendable {
     public let requestID: String
     public let commandID: String
     public let context: ExtensionCommandContext
+    public let input: ExtensionCommandInputValue?
 
     public init(
         protocolVersion: Int = Self.currentProtocolVersion,
         requestID: String,
         commandID: String,
-        context: ExtensionCommandContext = .init()
+        context: ExtensionCommandContext = .init(),
+        input: ExtensionCommandInputValue? = nil
     ) {
         self.protocolVersion = protocolVersion
         self.requestID = requestID
         self.commandID = commandID
         self.context = context
+        self.input = input
     }
 
     public func validate() throws {
@@ -492,6 +516,9 @@ public struct ExtensionCommandRequest: Codable, Equatable, Sendable {
             issues.append(.init(path: "commandID", message: ExtensionIdentifierRules.contributionMessage))
         }
         issues.append(contentsOf: context.validationIssues(path: "context"))
+        if let input {
+            issues.append(contentsOf: input.validationIssues(path: "input"))
+        }
         if !issues.isEmpty {
             throw ExtensionValidationError(issues: issues)
         }

@@ -354,12 +354,81 @@ struct PreparedRun {
     let attributes: NSDictionary
 }
 
+/// One attributed segment after Core Text has shaped it and the renderer has
+/// extracted the values shared by its background and glyph passes.
+///
+/// Keeping this beside ``CoreGraphicsRenderCache`` lets the Core Graphics path
+/// retain the same row-level work that the Metal renderer already retains.
+/// AppKit can promote a one-row invalidation to a full-surface draw; unchanged
+/// snapshot rows must not be reshaped merely because the exposed rectangle grew.
+struct PreparedSegment {
+    let segment: ViewLineSegment
+    let ctLine: CTLine
+    let runs: [PreparedRun]
+}
+
+struct PreparedCoreGraphicsRow {
+    let lineInfo: ViewLineInfo
+    let segments: [PreparedSegment]
+}
+
 /// Per-view caches for the main-thread Core Graphics renderer.
 ///
 /// A process-global cache lets two terminal views mutate the same dictionaries
 /// at the same time. Keeping the cache with its view gives it the same lifetime
 /// and executor as the Core Graphics draw path.
 final class CoreGraphicsRenderCache {
+    struct Counters {
+        let rowsBuilt: Int
+        let rowsReused: Int
+        let glyphSlotFitLookups: Int
+        let glyphSlotFitHits: Int
+        let glyphSlotFitMisses: Int
+    }
+
+    private struct RowEntry {
+        let sourceIdentity: ObjectIdentifier
+        let sourceGeneration: UInt64
+        let revision: UInt64
+        let contextIdentity: UInt64
+        let customBlockGlyphs: Bool
+        let prepared: PreparedCoreGraphicsRow
+
+        func matches(row: TerminalSnapshot.Row,
+                     context: SnapshotRenderContext) -> Bool {
+            sourceIdentity == row.sourceIdentity &&
+                sourceGeneration == row.sourceGeneration &&
+                revision == row.revision &&
+                contextIdentity == context.identity &&
+                customBlockGlyphs == context.customBlockGlyphs
+        }
+    }
+
+    private struct GlyphSlotFitKey: Hashable {
+        let font: ObjectIdentifier
+        let normalFont: ObjectIdentifier
+        let glyph: CGGlyph
+        let columnWidth: Int
+        let policy: TerminalGlyphPlacementPolicy?
+        let cellWidth: CGFloat
+        let cellHeight: CGFloat
+    }
+
+    /// Retains both font objects so their identities cannot be recycled while
+    /// a key is resident. ObjectIdentifier alone is an address and therefore
+    /// is not an ABA-safe cache identity after a font/theme change.
+    private struct GlyphSlotFitEntry {
+        let font: CTFont
+        let normalFont: TTFont
+        let fit: GlyphSlotFit
+    }
+
+    /// A terminal viewport is normally tens of rows. Keep enough headroom for
+    /// unusually tall windows without letting an embedder-controlled grid turn
+    /// retained attributed strings into unbounded memory.
+    private static let rowCapacity = 256
+    private static let glyphSlotFitCapacity = 4_096
+
     fileprivate let runAttributeKeys = CoreTextRunAttributeKeys(
         names: coreTextRunAttributeNames)
     private var cgColors: [TTColor: CGColor] = [:]
@@ -368,6 +437,25 @@ final class CoreGraphicsRenderCache {
         let fallbackTag: UInt64
     }
     private var ctLines: [CTLineCacheKey: CTLine] = [:]
+    private var rows: [Int: RowEntry] = [:]
+    private var retainedRowRange: Range<Int>?
+    private var glyphSlotFits: [GlyphSlotFitKey: GlyphSlotFitEntry] = [:]
+
+    private(set) var rowsBuilt = 0
+    private(set) var rowsReused = 0
+    private(set) var glyphSlotFitLookups = 0
+    private(set) var glyphSlotFitHits = 0
+    private(set) var glyphSlotFitMisses = 0
+
+    var counters: Counters {
+        Counters(
+            rowsBuilt: rowsBuilt,
+            rowsReused: rowsReused,
+            glyphSlotFitLookups: glyphSlotFitLookups,
+            glyphSlotFitHits: glyphSlotFitHits,
+            glyphSlotFitMisses: glyphSlotFitMisses
+        )
+    }
 
     @inline(__always)
     func cgColor(for color: TTColor) -> CGColor {
@@ -384,6 +472,134 @@ final class CoreGraphicsRenderCache {
 
     func clearColors() {
         cgColors.removeAll(keepingCapacity: true)
+    }
+
+    /// Drops rows that cannot belong to the current immutable viewport.
+    /// Entries inside the range still validate source identity, generation,
+    /// row revision and render context before reuse.
+    func retainRows(in range: Range<Int>) {
+        guard retainedRowRange != range else { return }
+        retainedRowRange = range
+        guard !rows.isEmpty else { return }
+        rows = rows.filter { range.contains($0.key) }
+    }
+
+    func preparedRow(row: TerminalSnapshot.Row, absoluteRow: Int,
+                     context: SnapshotRenderContext,
+                     builder: SnapshotTextBuilder) -> PreparedCoreGraphicsRow {
+        if let entry = rows[absoluteRow], entry.matches(row: row, context: context) {
+            rowsReused += 1
+            return entry.prepared
+        }
+
+        let lineInfo = builder.buildAttributedString(
+            row: row, absoluteRow: absoluteRow, context: context)
+        let prepared = PreparedCoreGraphicsRow(
+            lineInfo: lineInfo,
+            segments: lineInfo.segments.compactMap(prepareSegment))
+        rowsBuilt += 1
+
+        if let sourceIdentity = row.sourceIdentity {
+            if rows.count < Self.rowCapacity || rows[absoluteRow] != nil {
+                rows[absoluteRow] = RowEntry(
+                    sourceIdentity: sourceIdentity,
+                    sourceGeneration: row.sourceGeneration,
+                    revision: row.revision,
+                    contextIdentity: context.identity,
+                    customBlockGlyphs: context.customBlockGlyphs,
+                    prepared: prepared)
+            }
+        }
+        return prepared
+    }
+
+    private func prepareSegment(_ segment: ViewLineSegment) -> PreparedSegment? {
+        guard segment.attributedString.length > 0 else { return nil }
+        let ctLine = line(for: segment.attributedString)
+        guard let ctRuns = CTLineGetGlyphRuns(ctLine) as? [CTRun] else { return nil }
+        let runs = ctRuns.map { run -> PreparedRun in
+            // Toll-free cast: no per-entry bridging.
+            let attrs = CTRunGetAttributes(run) as NSDictionary
+            let selectionBackground = attrs.object(
+                forKey: runAttributeKeys.selectionBackground) as? TTColor
+            return PreparedRun(
+                run: run,
+                font: attrs.object(forKey: runAttributeKeys.font) as? TTFont,
+                foregroundColor: attrs.object(
+                    forKey: runAttributeKeys.foreground) as? TTColor,
+                backgroundColor: selectionBackground
+                    ?? attrs.object(
+                        forKey: runAttributeKeys.background) as? TTColor,
+                hasExplicitBackground: selectionBackground != nil
+                    || attrs.object(
+                        forKey: runAttributeKeys.explicitBackground) != nil,
+                glyphPolicy: attrs.object(
+                    forKey: runAttributeKeys.glyphPolicy)
+                    as? TerminalGlyphPlacementPolicy,
+                hasDecorations: attrs.object(
+                    forKey: runAttributeKeys.underlineStyle) != nil
+                    || attrs.object(
+                        forKey: runAttributeKeys.strikethroughStyle) != nil,
+                attributes: attrs)
+        }
+        return PreparedSegment(segment: segment, ctLine: ctLine, runs: runs)
+    }
+
+    func glyphSlotFit(font: CTFont, glyph: CGGlyph, columnWidth: Int,
+                      policy: TerminalGlyphPlacementPolicy?,
+                      cellDimension: CGSize, normalFont: TTFont) -> GlyphSlotFit {
+        glyphSlotFitLookups += 1
+        let key = GlyphSlotFitKey(
+            font: ObjectIdentifier(font),
+            normalFont: ObjectIdentifier(normalFont),
+            glyph: glyph,
+            columnWidth: columnWidth,
+            policy: policy,
+            cellWidth: cellDimension.width,
+            cellHeight: cellDimension.height)
+        if let cached = glyphSlotFits[key],
+           cached.font === font,
+           cached.normalFont === normalFont {
+            glyphSlotFitHits += 1
+            return cached.fit
+        }
+        glyphSlotFitMisses += 1
+
+        let result: GlyphSlotFit
+        if let policy {
+            let metrics = GlyphMetrics.measure(font: font, glyph: glyph)
+            let baselineFromBottom = ceil(CTFontGetDescent(normalFont) +
+                                          CTFontGetLeading(normalFont))
+            result = GlyphSlotFit.calculate(
+                metrics: metrics,
+                policy: policy,
+                columnWidth: columnWidth,
+                cellDimension: cellDimension,
+                baselineFromBottom: baselineFromBottom,
+                iconHeight: CTFontGetAscent(normalFont),
+                renderingScale: 1)
+        } else {
+            result = GlyphSlotFit.calculate(
+                font: font,
+                glyph: glyph,
+                columnWidth: columnWidth,
+                cellDimension: cellDimension,
+                normalFont: normalFont)
+        }
+        if glyphSlotFits.count >= Self.glyphSlotFitCapacity {
+            glyphSlotFits.removeAll(keepingCapacity: true)
+        }
+        glyphSlotFits[key] = GlyphSlotFitEntry(
+            font: font, normalFont: normalFont, fit: result)
+        return result
+    }
+
+    func resetCounters() {
+        rowsBuilt = 0
+        rowsReused = 0
+        glyphSlotFitLookups = 0
+        glyphSlotFitHits = 0
+        glyphSlotFitMisses = 0
     }
 
     /// Only short segments are cached. They are isolated BiDi cells whose
@@ -1826,10 +2042,13 @@ extension TerminalView {
     {
         let currentCellDimension: CellDimension? = cellDimension
         guard let currentCellDimension else { return .identity }
-        return GlyphSlotFit.calculate(font: font, glyph: glyph,
-                                      columnWidth: columnWidth,
-                                      cellDimension: currentCellDimension,
-                                      normalFont: fontSet.normal)
+        return coreGraphicsRenderCache.glyphSlotFit(
+            font: font,
+            glyph: glyph,
+            columnWidth: columnWidth,
+            policy: nil,
+            cellDimension: currentCellDimension,
+            normalFont: fontSet.normal)
     }
 
     /// Policy-aware variant for host glyph-fallback runs: applies the run's
@@ -1840,17 +2059,13 @@ extension TerminalView {
     {
         let currentCellDimension: CellDimension? = cellDimension
         guard let currentCellDimension else { return .identity }
-        let normalFont = fontSet.normal
-        let metrics = GlyphMetrics.measure(font: font, glyph: glyph)
-        let baselineFromBottom = CellGeometry.baselineOffset(
-            normalFont: normalFont, cellHeight: currentCellDimension.height)
-        return GlyphSlotFit.calculate(metrics: metrics,
-                                      policy: policy,
-                                      columnWidth: columnWidth,
-                                      cellDimension: currentCellDimension,
-                                      baselineFromBottom: baselineFromBottom,
-                                      iconHeight: CTFontGetAscent(normalFont),
-                                      renderingScale: 1)
+        return coreGraphicsRenderCache.glyphSlotFit(
+            font: font,
+            glyph: glyph,
+            columnWidth: columnWidth,
+            policy: policy,
+            cellDimension: currentCellDimension,
+            normalFont: fontSet.normal)
     }
 
     func mapColor (color: Attribute.Color, isFg: Bool, isBold: Bool, useBrightColors: Bool = true) -> TTColor
@@ -2935,6 +3150,19 @@ extension TerminalView {
         let drawInterval = Profiling.begin(.frameDraw)
         defer { drawInterval.end() }
         diagnosticsState.withLock { $0.renders += 1 }
+        defer {
+            // The cache belongs to the main-thread Core Graphics renderer. Publish one copied
+            // counter snapshot after the frame so `diagnostics` remains safe to read from any
+            // thread without putting a lock in every row or glyph lookup.
+            let counters = coreGraphicsRenderCache.counters
+            diagnosticsState.withLock { diagnostics in
+                diagnostics.coreGraphicsRowsBuilt = counters.rowsBuilt
+                diagnostics.coreGraphicsRowsReused = counters.rowsReused
+                diagnostics.coreGraphicsGlyphFitLookups = counters.glyphSlotFitLookups
+                diagnostics.coreGraphicsGlyphFitHits = counters.glyphSlotFitHits
+                diagnostics.coreGraphicsGlyphFitMisses = counters.glyphSlotFitMisses
+            }
+        }
 
         guard let viewState = captureFrameViewState() else { return }
         let kittyCellWidth = cellDimension.width
@@ -3066,6 +3294,8 @@ extension TerminalView {
                 context.restoreGState()
             }
         }
+        coreGraphicsRenderCache.retainRows(
+            in: snapshot.firstRow..<(snapshot.firstRow + snapshot.rowCount))
 
         #if os(macOS)
         // Clear the invalidated region before painting. We fill only cells that carry
@@ -3137,8 +3367,12 @@ extension TerminalView {
                 continue
             } 
             #endif
-            let lineInfo = textBuilder.buildAttributedString(row: snapshotRow, absoluteRow: row,
-                                                             context: renderContext)
+            let preparedRow = coreGraphicsRenderCache.preparedRow(
+                row: snapshotRow,
+                absoluteRow: row,
+                context: renderContext,
+                builder: textBuilder)
+            let lineInfo = preparedRow.lineInfo
             let rowBase = lineOrigin.y + cellDimension.height
             var otherImages: [SnapshotImage] = []
             if let images = lineInfo.images {
@@ -3150,43 +3384,10 @@ extension TerminalView {
                 }
             }
 
-            // Pre-create CTLines and runs once per row to avoid duplicate
-            // creation, and extract the attribute values both draw passes need
-            // once per run: bridging the whole attribute dictionary per pass is
-            // far more expensive than these keyed lookups.
-            let runAttributeKeys = coreGraphicsRenderCache.runAttributeKeys
-            let preparedSegments: [(segment: ViewLineSegment, ctLine: CTLine, runs: [PreparedRun])] =
-                lineInfo.segments.compactMap { segment in
-                    guard segment.attributedString.length > 0 else { return nil }
-                    let ctLine = coreGraphicsRenderCache.line(for: segment.attributedString)
-                    guard let ctRuns = CTLineGetGlyphRuns(ctLine) as? [CTRun] else { return nil }
-                    let runs = ctRuns.map { run -> PreparedRun in
-                        // Toll-free cast: no per-entry bridging.
-                        let attrs = CTRunGetAttributes(run) as NSDictionary
-                        let selectionBackground = attrs.object(
-                            forKey: runAttributeKeys.selectionBackground) as? TTColor
-                        return PreparedRun(
-                            run: run,
-                            font: attrs.object(forKey: runAttributeKeys.font) as? TTFont,
-                            foregroundColor: attrs.object(
-                                forKey: runAttributeKeys.foreground) as? TTColor,
-                            backgroundColor: selectionBackground
-                                ?? attrs.object(
-                                    forKey: runAttributeKeys.background) as? TTColor,
-                            hasExplicitBackground: selectionBackground != nil
-                                || attrs.object(
-                                    forKey: runAttributeKeys.explicitBackground) != nil,
-                            glyphPolicy: attrs.object(
-                                forKey: runAttributeKeys.glyphPolicy)
-                                as? TerminalGlyphPlacementPolicy,
-                            hasDecorations: attrs.object(
-                                forKey: runAttributeKeys.underlineStyle) != nil
-                                || attrs.object(
-                                    forKey: runAttributeKeys.strikethroughStyle) != nil,
-                            attributes: attrs)
-                    }
-                    return (segment, ctLine, runs)
-                }
+            // Attributed strings, CTLines and run attributes are cached per
+            // immutable snapshot-row revision. This is the main-thread answer
+            // to AppKit promoting a narrow invalidation to a full-view draw.
+            let preparedSegments = preparedRow.segments
 
             if hasKittyPlacements {
                 drawKittyPlacements(
@@ -3906,6 +4107,18 @@ extension TerminalView {
         /// completed Core Graphics draws. Compare against `frames`: a large
         /// gap means the driver is ticking without producing anything.
         public var renders: Int = 0
+        /// Core Graphics rows shaped during this measurement window versus
+        /// rows reused from the immutable snapshot-row cache.
+        public var coreGraphicsRowsBuilt: Int = 0
+        public var coreGraphicsRowsReused: Int = 0
+        /// Wide/fallback glyph fitting asks versus answers reused without a
+        /// Core Text bounds query.
+        public var coreGraphicsGlyphFitLookups: Int = 0
+        public var coreGraphicsGlyphFitHits: Int = 0
+        public var coreGraphicsGlyphFitMisses: Int = 0
+        /// Visible rows scanned or reused by low-contrast observation.
+        public var contrastRowsScanned: Int = 0
+        public var contrastRowsReused: Int = 0
         /// Delegate notifications marshalled to the main queue by `onMain`.
         /// Each one is a main-queue block that may take the terminal lock, so a
         /// large value relative to `frames` means callback amplification.
@@ -3970,6 +4183,11 @@ extension TerminalView {
         result.idleTicks = frameCounters.idleTicks
         result.pauses = frameCounters.pauses
         result.immediateTicks = frameCounters.immediateTicks
+#if os(macOS)
+        let contrastCounters = renderOwner.contrastCounters
+        result.contrastRowsScanned = contrastCounters.rowsScanned
+        result.contrastRowsReused = contrastCounters.rowsReused
+#endif
 #if canImport(MetalKit)
         result.renders += renderOwner.completedMetalRenders
         if let counters = renderOwner.metalProfileCounters {
@@ -4026,6 +4244,10 @@ extension TerminalView {
     {
         diagnosticsState.withLock { $0 = Diagnostics() }
         frameDriver?.resetCounters()
+        coreGraphicsRenderCache.resetCounters()
+#if os(macOS)
+        renderOwner.resetContrastCounters()
+#endif
 #if canImport(MetalKit)
         renderOwner.resetMetalCounters()
 #endif

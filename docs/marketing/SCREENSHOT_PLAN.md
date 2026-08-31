@@ -79,6 +79,26 @@ scripts/capture_marketing_ios.sh --theme threading
 scripts/capture_marketing_ios.sh --theme editorial
 ```
 
+The checked-in PTY resources are refreshed independently, only when their synthetic story or the
+installed provider version changes:
+
+```bash
+python3 scripts/record_marketing_terminal_fixtures.py
+```
+
+Claude resumes one temporary synthetic saved session under its built-in ANSI theme, including a
+real `Edit` tool record and structured patch result that its installed TUI renders as the native
+Update diff; the recorder deletes that exact session as soon as the terminal settles. Codex talks only to the recorder's
+loopback Responses server in an ephemeral, MCP-disabled run and applies one patch inside a
+disposable synthetic workspace, which makes its provider-owned Edited-files block and diff part of
+the recording. Both fixtures are rendered at 62 columns. Marketing launches pin the iPhone terminal
+preference to 10 points, close to the density of a real compact phone session, without changing the
+shipping 13-point default. The recorder rejects private home paths, missing diff colours,
+missing native file-change output and provider-startup failures before replacing a fixture.
+The DEBUG marketing terminal installs the fixture's declared grid before it feeds those PTY bytes,
+even though the scene retains interactive keyboard chrome. This prevents a phone-local resize from
+reinterpreting provider cursor addressing and stranding incremental status updates in the prompt.
+
 The script writes five semantically named full-display PNGs, the evidence report, and an MP4. All
 five declare standard Dynamic Type and the Simulator's fixed 9:41 status treatment. Static scenes
 first prove that their app-owned pixels have stabilized, then capture the composed display. The
@@ -86,11 +106,18 @@ menu capture uses accessibility labels to press the shipping toolbar control and
 Usage account, Workspace, Interface, and Archive rows exist before capture. It has no coordinate
 or animation delay in its contract.
 
-The MP4 is assembled after capture from the five reviewed product frames. Its manifest specifies
-30 fps, integer hold/transition frame counts, and 348 total frames, so every theme has identical
-timestamps regardless of simulator or theme rendering speed. This first video contract is a
-deterministic checkpoint story with crossfades; a future continuous gesture/navigation recording
-would need a virtual-clock frame stepper to make the same timing claim.
+The MP4 is a continuous Simulator screen recording of shipping interactions, not an assembly of
+still frames. It starts in New Session, opens the real model-and-effort matrix, selects GPT-5.6 Sol
+at Extra High, types the deterministic prompt and lets that draft become the fixture-backed Codex
+chat. The terminal gesture then moves toward older scrollback instead of pushing past the bottom.
+The flow visits Claude's task plan and finishes by changing Usage from Accounts to Totals and
+scrolling the real daily-provider chart into view; Settings is deliberately absent from the movie.
+
+The manifest fixes the run at 30 fps and 900 frames. Every action is scheduled on that absolute
+frame clock, accessibility postconditions must settle before their next deadline, and a take is
+rejected when any action starts more than 150 ms late. The recorder normalizes the result to the
+App Store portrait size only after the live run has passed that clock, so theme variants keep the
+same gestures and timestamps without adding editorial fades.
 
 ## Capture harness
 

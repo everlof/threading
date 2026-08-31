@@ -426,6 +426,35 @@ fallback. A server-side race can reject the request between selection and launch
 REST refusal names that guard, refreshes the catalogue behind the alert, and leaves the prompt
 intact for the retry.
 
+The draft screen owns its keyboard geometry and its navigation title, because both broke as
+motion. The composer follows the keyboard by hand — `ignoresSafeArea(.keyboard)` plus a bottom
+padding driven by the keyboard's announced end frame and duration; a frame-by-frame read of an
+on-device recording measured the keyboard's top edge on the smooth ~0.25 s deceleration its
+notification announces, and the "accurate keyboard spring" folklore tuple (mass 3, stiffness
+1000, damping 500) tried against it was visibly worse in both directions — since SwiftUI's
+automatic
+avoidance moved it on a schedule of its own: it collapsed the inset the moment Start resigned
+focus, teleporting the composer behind the still-departing keyboard, and raised it mid-push after
+the keyboard was already standing. The ride itself is a render-pass offset, not an animated
+padding: the padding snaps in one layout while an offset carries the picture from where it stood
+to zero, because animating the padding re-measured the editor and re-centred the ground every
+frame and shipped as a ride-down visibly below the keyboard's frame rate on the phone. The same
+frames are protected from the other side too: the prompt editor's measurement is cached against
+its inputs so the folding action row's per-frame layout no longer crosses into TextKit, and a
+Mac that answers Start while the ride is still running has the handoff held until the ride
+settles — mounting the session screen mid-ride put its whole boot on the frames the ride needed,
+and the hold is bounded by the keyboard's own duration. A frame
+announced inside the entrance transition is applied
+without animation, so the pushed screen arrives with the composer already on the keyboard's top
+edge; the prompt is born focused for the same reason — an action row that unfolds after
+appearance crossfades at its final position while the field is still travelling. And Start does
+not swap the title: `SessionDraftView` keeps one principal item mounted through the draft fade
+and tells the same morphing label the chat's name, handing the slot to the terminal surface's
+identical item only once the draft has retired. The conversation surface is handed off
+immediately instead — its title is a UIKit `titleView` installed on appearance, and SwiftUI's
+deferred cleanup of a removed principal item wipes that navigation item, so holding the slot
+through the fade left the chat with no two-line title at all.
+
 That draft uses the same native `IntrinsicTextView` paste contract as an existing conversation,
 not SwiftUI's visually similar `TextField`: text keeps UIKit's insertion-point paste and undo,
 while a file-only paste stages files in the shared attachment tray. Photos and Files are explicit
@@ -508,6 +537,82 @@ controls. `explicit_user_request` is allowed without a second prompt under the d
 and `allowSameRepository` confirms neither after the same canonical validation. This is not an
 extension component: presentation cannot be allowed to contradict durable ownership, the turn
 fence or the audit decision.
+
+### Where a chat runs is not where its agent is
+
+Ownership answers "where will this resume". It does not answer "where is this working", and for
+a long time Threading displayed the first as though it were also the second. An agent that runs
+`cd ../other-worktree && …` per tool call moves the second and nothing else: no record changes,
+no event fires, and the row, its branch heading, the hover card, Git Review and project scope all
+go on naming the checkout the chat launched from. Three chats of one repository were found in that
+state at once, two of them because the user had asked in words for a worktree and the agent had
+made one with `git worktree add` — the only route available to it.
+
+**The provider's own report is the only sound source.** `TerminalSession.effectiveWorkingDirectory()`
+reads OSC 7 or the PTY root process's real cwd, and neither moves for a runtime that prefixes each
+command with `cd`: one drifted chat's root process was still in its launch directory after three
+hours while the chat's own status line named the worktree. Both hook-capable runtimes state it
+outright — Claude CLI 2.1.251 builds every hook payload as `session_id` / `transcript_path` /
+`cwd`, and Codex 0.151.0 was captured sending `cwd` on `sessionStarted`, `turnStarted` and
+`turnFinished` — and Threading read the two neighbouring keys out of that dictionary for a long
+time while stepping over the one in the middle. `AgentCapabilities.lifecycleReportedWorkingDirectory`
+is the declaration; Grok, OpenCode and Cursor register no lifecycle hooks, so the question does not
+arise for them and silence from any runtime means *unknown*, never *unchanged*.
+
+`SessionExecutionLocusTracker` reconciles the two. It is on the highest-frequency callback in the
+app that carries a path, so the hot path is one dictionary read and one string comparison against
+what that session last reported; only a *changed* directory is resolved, that resolution runs off
+the main actor because `GitInfo.repositoryRoot` is a child process, and `GitInfo`'s memo absorbs
+the repeats from the subdirectories one agent walks through. A chat that has only ever worked where
+it belongs stores nothing and announces nothing. The reported directory is routinely several levels
+inside a checkout, so classification resolves it to that checkout's **root** before anything else:
+`validate` refuses any other path as `targetNotCheckoutRoot`. Managed workspaces are excluded
+before the resolution rather than refused after it, since every report one sends is drift by
+construction.
+
+Drift reconciles through `SessionCheckoutCoordinator` like every other move, under a third
+authority basis. `observed_execution` is not a reuse of `agent_initiated`: an agent's move is a
+decision a model made and can be asked to justify, while this one is an inference Threading drew
+from a lifecycle report, and it is the only basis that can be granted with nobody having requested
+anything. Under the default `allowExplicitRequests` it is asked about, **except** when the move is
+a pure repair.
+
+**The repair case is a filesystem question and must not be inferred.** Claude is the one runtime
+whose conversations are checkout-scoped, and it sometimes re-files a conversation under the slug of
+the directory its agent moved to. When it has, the chat is *already* unresumable where Threading
+would launch it: `ClaudeTranscript.exists` stops finding the transcript and `AgentLauncher` falls
+through its `--resume` branch to minting an empty conversation under the same id. Both of the
+drifted chats reported the same kind of drift and only one had re-filed, so only reading both paths
+tells them apart — `conversationHasLeft` needs the transcript *gone from* the owned checkout and
+*present at* the destination, since either half alone means something else. Where it holds, the move
+copies nothing and refusing to act preserves a defect rather than preventing one, so it proceeds
+without asking. `alwaysAsk` still asks, because that is what it means.
+
+Everything that is *not* moved still has to stop lying, since some drift can never move — a chat
+working outside its own repository is refused as `differentRepository`, correctly — and an offer
+may sit unanswered. The hover card names where the agent actually is, directly beneath the branch
+row it contradicts, and the two only ever both appear when they disagree. A committed move drops
+the stored reading (`forget`), because the reported directory has not changed but what it is
+measured against has.
+
+The receipt is a band rather than the modal the agent-initiated path raises. That modal interrupts
+a turn the user started a moment ago and answers a request a model made; this one can fire for any
+of a dozen background chats the moment an agent runs `cd`, and a stack of sheets for something
+nobody asked for is the wrong trade.
+
+**The observer is the safety net, not the route.** The reason both drifted chats existed is that
+an agent asked for a worktree had exactly one way to make one. `New Worktree…` is in the composer,
+where no agent can reach it, and `set_session_checkout` moves only into a checkout that already
+exists — so `git worktree add` was the whole of the available answer, and it leaves ownership
+behind by construction. `create_session_worktree(branch, authority_basis, reason)` closes that:
+one call makes the checkout through `GitWorktree.create` and requests the move through the same
+coordinator, so the ordinary path leaves ownership correct and drift detection is left to catch
+the cases nothing routed. It takes no path — location is `GitWorktree.suggestedLocation`'s, so a
+repository's worktrees group on disk instead of landing wherever an agent thought of — and it
+carries `createsBranch`, because git spells "new branch" and "existing branch" differently and
+the composer's own route only ever needed the first. The worktree is **not** removed when the move
+is then refused: the checkout is work the user asked for, and deleting it because a policy said
+"ask first" would destroy the thing the call was told to make.
 
 The composer hangs from the pane's **bottom** edge — input below, room above, the shape every
 chat product has taught — and the room above holds a **hero**: the Threading mark over a
@@ -837,6 +942,15 @@ encoding it asks with is load-bearing.** Claude's id is minted before anything i
 falls through to a fresh `--session-id` launch. That fallthrough is only safe while the lookup is
 right: relaunching with an id Claude has already used makes it exit 1 in under a second, and what
 the user sees is a Resume button that does nothing, seven times in ninety seconds.
+
+An identifier can also name a conversation that is healthy but already open outside Threading.
+Codex 0.151.0 exposes the exact ownership pair as `resume <id>` in the live process's argv and
+refuses a concurrent owner. That earns `.detectableExternalResume`; it does not follow merely from
+supporting resume, so no other runtime inherits it without the same measurement. Terminal launch
+checks the process table off-main, reads argv only for matching executable names, and revalidates
+the stored id on the main actor before acting. A match becomes the durable
+`identifier-in-use` launch failure rather than a short-lived process and a generic exit-code-1
+message. The process id and command line remain diagnostic inputs only and are never persisted.
 
 `ClaudeTranscript.projectSlug` is that lookup, and it had replaced `/` and nothing else. Claude
 replaces **every character outside `[a-zA-Z0-9]`**, per UTF-16 code unit — measured, not inferred:

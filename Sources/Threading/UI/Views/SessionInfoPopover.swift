@@ -25,6 +25,20 @@ final class SessionInfoPopoverViewController: NSViewController {
         /// The linked worktree's name, or nil for an ordinary checkout.
         let worktree: String?
 
+        /// Where the agent is *actually* working, when that is not where this chat is filed.
+        ///
+        /// Every other location on this card describes the checkout that **owns** the chat:
+        /// where Threading launches it, and what its row is grouped and labelled by. That is
+        /// the right answer to "where will this resume", and it was for a long time the only
+        /// answer offered to "where is this working" — which is a different question an
+        /// ordinary `cd` can change without anything durable moving. A chat spent three hours
+        /// building in a sibling worktree while this card, its row and its branch heading all
+        /// named the checkout it had launched from.
+        ///
+        /// Nil is the ordinary case and says nothing, because there is nothing to say: the two
+        /// questions have the same answer.
+        let elsewhere: String?
+
         /// A sound this chat does not inherit, or nil — the common case. The session row keeps
         /// no tooltip of its own, so this card is the one hover surface where an overridden
         /// chat is identifiable without opening a menu. Same rule as the project row's tooltip:
@@ -116,6 +130,19 @@ final class SessionInfoPopoverViewController: NSViewController {
             // ran on, not whatever the checkout has moved to since.
             branch = session.branch ?? folderPath.flatMap { GitInfo.currentBranch(for: $0) }
             worktree = folderPath.flatMap { GitInfo.worktreeName(for: $0) }
+
+            // Read, never resolved: the tracker did the git work once, off the main actor, when
+            // the drift was classified. A hover card is not a place to start a child process.
+            switch SessionExecutionLocusTracker.shared.drift(forSessionID: session.id) {
+            case .none:
+                elsewhere = nil
+            case .siblingCheckout(let checkout):
+                elsewhere = checkout.branch.map {
+                    SessionPopoverDefaults.elsewhereCheckoutLabel(checkout.displayName, $0)
+                } ?? checkout.displayName
+            case .unrelated(let path):
+                elsewhere = SessionPopoverDefaults.abbreviatingHome(path)
+            }
 
             soundLine = SoundOverrideAudit.toolTipLine(
                 for: .session(session.id),
@@ -264,6 +291,18 @@ final class SessionInfoPopoverViewController: NSViewController {
             ))
         }
 
+        // Directly under the branch, because it is the line it contradicts. The rows above say
+        // where this chat is filed and will resume; this one says where its agent actually is,
+        // and the two only ever both appear when they disagree.
+        if let elsewhere = info.elsewhere {
+            rows.append(row(
+                symbol: SessionPopoverDefaults.elsewhereSymbol,
+                classicGlyph: .branch,
+                text: L10n.format("Working in %@", elsewhere),
+                emphasis: .secondary
+            ))
+        }
+
         // Beside the branch rather than under the state: a sound the chat carries is
         // configuration, like the checkout it runs in, not a condition it is in.
         if let soundLine = info.soundLine {
@@ -397,8 +436,7 @@ final class SessionInfoPopoverViewController: NSViewController {
     }
 
     private func abbreviated(_ path: String) -> String {
-        let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
+        SessionPopoverDefaults.abbreviatingHome(path)
     }
 }
 
@@ -411,6 +449,9 @@ enum SessionPopoverDefaults {
 
     static let folderSymbol = "folder"
     static let branchSymbol = "arrow.triangle.branch"
+    /// The same arrow the checkout-move menu item carries, so "it is over there" and "move it
+    /// over there" are recognisably about the same place.
+    static let elsewhereSymbol = "arrow.right.folder"
     /// The hover card's line for a sound the chat does not inherit — the same speaker the
     /// Sounds submenu wears.
     static let soundSymbol = "speaker.wave.2"
@@ -444,6 +485,21 @@ enum SessionPopoverDefaults {
 
     static func worktreeBranchLabel(_ branch: String, _ worktree: String) -> String {
         "\(branch) · worktree \(worktree)"
+    }
+
+    /// The checkout an agent has been observed working in, named the way the branch row above
+    /// names the one that owns the chat, so the two read as the same kind of fact.
+    static func elsewhereCheckoutLabel(_ checkout: String, _ branch: String) -> String {
+        "\(branch) · worktree \(checkout)"
+    }
+
+    /// A path with the user's home folder written `~`.
+    ///
+    /// On the defaults rather than the controller because the card's `Info` is built before any
+    /// view exists and needs the same shortening for a directory outside the repository.
+    static func abbreviatingHome(_ path: String) -> String {
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        return path.hasPrefix(home) ? "~" + path.dropFirst(home.count) : path
     }
 
     /// Where launch restore is decided, appended to every reason below.

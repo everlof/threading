@@ -71,6 +71,15 @@ final class UniversalSearchRenderTests: XCTestCase {
             guard let root = window.contentView else { return }
             AppThemeRefresh.repaint(root)
             root.layoutSubtreeIfNeeded()
+            // Hold the pointer state on the result immediately below the selected one. This is
+            // the adjacency that regressed: selection belonged to the table row while hover was
+            // a full-height cell fill, so the two plates met and read as overlapping.
+            if let table = firstTable(in: controller.view),
+               let hovered = table.view(atColumn: 0, row: 4, makeIfNecessary: true)
+                    as? SearchResultRowView
+            {
+                hovered.mouseEntered(with: NSEvent())
+            }
             guard let rep = root.bitmapImageRepForCachingDisplay(in: root.bounds) else { return }
             root.cacheDisplay(in: root.bounds, to: rep)
             data = rep.representation(using: .png, properties: [:])
@@ -119,6 +128,77 @@ final class UniversalSearchRenderTests: XCTestCase {
         ])
     }
 
+    /// Height and interaction chrome each have one owner. The table asks the result component
+    /// for its live two-line measure, and a result hosted in a table asks the row for the same
+    /// plate selection already uses. This fixture keeps two results adjacent because a group
+    /// header between them would hide the collision this contract prevents.
+    func testAdjacentResultsUseOneRhythmAndDisjointRowOwnedPlates() throws {
+        defer { AppThemePalette.set(.system) }
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: Render.size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        let root = NSView(frame: NSRect(origin: .zero, size: Render.size))
+        window.contentView = root
+
+        let controller = UniversalSearchOverlayViewController()
+        controller.view.frame = root.bounds
+        controller.view.autoresizingMask = [.width, .height]
+        root.addSubview(controller.view)
+        controller.apply(Self.presentation)
+        root.layoutSubtreeIfNeeded()
+
+        let table = try XCTUnwrap(firstTable(in: controller.view))
+        let resultRows = [1, 3, 4, 6]
+        for row in resultRows {
+            XCTAssertEqual(
+                table.rect(ofRow: row).height,
+                SearchResultRowView.preferredTableRowHeight,
+                accuracy: 0.01,
+                "result row \(row) restated the component's height"
+            )
+        }
+
+        let selectedRow = try XCTUnwrap(
+            table.rowView(atRow: 3, makeIfNecessary: true) as? ThemedTableRowView
+        )
+        let hoveredRow = try XCTUnwrap(
+            table.rowView(atRow: 4, makeIfNecessary: true) as? ThemedTableRowView
+        )
+        let hoveredCell = try XCTUnwrap(
+            table.view(atColumn: 0, row: 4, makeIfNecessary: true) as? SearchResultRowView
+        )
+        hoveredCell.mouseEntered(with: NSEvent())
+
+        XCTAssertTrue(selectedRow.isSelected)
+        XCTAssertTrue(hoveredRow.interactionHighlightIsActiveForTesting)
+        XCTAssertFalse(
+            hoveredCell.drawsOwnInteractionPlateForTesting,
+            "a table cell rebuilt the row's interaction plate inside itself"
+        )
+
+        let selection = selectedRow.convert(selectedRow.plateRectForTesting, to: table)
+        let hover = hoveredRow.convert(hoveredRow.plateRectForTesting, to: table)
+        XCTAssertEqual(selection.minX, hover.minX, accuracy: 0.01)
+        XCTAssertEqual(selection.maxX, hover.maxX, accuracy: 0.01)
+        XCTAssertFalse(
+            selection.intersects(hover),
+            "adjacent selection and hover plates overlap: \(selection), \(hover)"
+        )
+    }
+
+    private func firstTable(in view: NSView) -> NSTableView? {
+        if let table = view as? NSTableView { return table }
+        for child in view.subviews {
+            if let table = firstTable(in: child) { return table }
+        }
+        return nil
+    }
+
     private static let presentation = UniversalSearchOverlayState(
         query: "auth",
         scopes: [
@@ -140,6 +220,11 @@ final class UniversalSearchRenderTests: XCTestCase {
                 title: "OAuth redirect investigation",
                 detail: "Threading › Claude › The auth callback now rejects mismatched state."
             )),
+            .result(UniversalSearchResultRow(
+                id: SearchHitID(rawValue: "conversation-related"),
+                title: "Refresh token follow-up",
+                detail: "Threading › Codex › Verify auth callback state after refresh."
+            )),
             .group(id: "files", title: "Files"),
             .result(UniversalSearchResultRow(
                 id: SearchHitID(rawValue: "file"),
@@ -148,7 +233,7 @@ final class UniversalSearchRenderTests: XCTestCase {
             )),
             .message(id: "cap", text: "More matches are available — refine the query."),
         ],
-        selectedHitID: SearchHitID(rawValue: "session"),
+        selectedHitID: SearchHitID(rawValue: "conversation"),
         status: "Some conversation history is still indexing.",
         queryError: nil
     )

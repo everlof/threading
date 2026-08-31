@@ -1,5 +1,5 @@
-import Foundation
 import CryptoKit
+import Foundation
 import Network
 import os
 import ThreadingExtensionKit
@@ -137,7 +137,6 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
 /// queue. The dependency values have separate locks. This queue ownership is why passing the
 /// server's identity into Network.framework callbacks is safe.
 final class RemoteAccessServer: @unchecked Sendable {
-
     // MARK: - Properties
 
     /// Resolves owner-device and exact-session guest bearer tokens. Read from the server queue,
@@ -146,14 +145,17 @@ final class RemoteAccessServer: @unchecked Sendable {
         get { dependencies.authorizer }
         set { dependencies.authorizer = newValue }
     }
+
     var invitationRedeemer: (any RemoteInvitationRedeeming)? {
         get { dependencies.invitationRedeemer }
         set { dependencies.invitationRedeemer = newValue }
     }
+
     var sessionCommands: (any RemoteSessionCommands)? {
         get { dependencies.sessionCommands }
         set { dependencies.sessionCommands = newValue }
     }
+
     var hostCommands: (any RemoteHostCommanding)? {
         get { dependencies.hostCommands }
         set { dependencies.hostCommands = newValue }
@@ -211,9 +213,9 @@ final class RemoteAccessServer: @unchecked Sendable {
     /// Where a door transition is journalled. Injectable for the same reason
     /// `receiveClientDiagnostics` is: a hosted test would otherwise append to the developer's
     /// own support journal.
-    var recordListenerDiagnostic: (
+    var recordListenerDiagnostic:
         @Sendable (RemoteDiagnosticEvent, RemoteDiagnosticLevel, [RemoteDiagnosticField: String]) -> Void
-    ) {
+    {
         get { listeners.journal }
         set { listeners.journal = newValue }
     }
@@ -255,7 +257,7 @@ final class RemoteAccessServer: @unchecked Sendable {
         hostIDSource: @escaping @Sendable () -> String = { RemoteHostIdentity.current.id }
     ) {
         self.services = services
-        self.listeners = RemoteListenerSet(
+        listeners = RemoteListenerSet(
             queue: queue,
             addressSource: addressSource,
             identityProvider: identityProvider,
@@ -315,7 +317,9 @@ final class RemoteAccessServer: @unchecked Sendable {
             // values view.
             let connections = Array(connectionsByID.values)
             connectionsByID.removeAll()
-            for connection in connections { connection.cancel() }
+            for connection in connections {
+                connection.cancel()
+            }
             authLimiter = RemoteAuthRateLimiter()
             mutationReplayCache.removeAll()
             attachmentUploads.discardAll()
@@ -330,7 +334,8 @@ final class RemoteAccessServer: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self else { return }
             for connection in self.connectionsByID.values
-            where connection.authorization?.shareID == shareID {
+                where connection.authorization?.shareID == shareID
+            {
                 connection.sendClose(code: 4003, reason: "Share revoked")
             }
         }
@@ -352,14 +357,14 @@ final class RemoteAccessServer: @unchecked Sendable {
 // MARK: - RemoteConnection.Delegate
 
 extension RemoteAccessServer: RemoteConnection.Delegate {
-
     func route(
         _ request: HTTPRequest,
         from connection: RemoteConnection,
         respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         guard request.method == "POST",
-              let rawRequestID = request.header(RemoteRouter.requestIDHeader) else {
+              let rawRequestID = request.header(RemoteRouter.requestIDHeader)
+        else {
             routeUncached(request, from: connection, respond: respond)
             return
         }
@@ -374,8 +379,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let bearer = RemoteRouter.bearerToken(from: request),
               RemoteInboundPolicy.acceptsBearerToken(bearer),
               let deviceID = RemoteInboundPolicy.normalizedDeviceID(
-                request.header(RemoteRouter.deviceHeader)
-              ) else {
+                  request.header(RemoteRouter.deviceHeader)
+              )
+        else {
             // Authentication owns the response for missing or malformed credentials. Such a
             // request cannot have performed a mutation, so it does not belong in replay state.
             routeUncached(request, from: connection, respond: respond)
@@ -417,8 +423,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         if mutationReplayCache.count >= RemoteAccessDefaults.maximumMutationReplayEntries,
            let oldestCompleted = mutationReplayCache
-            .filter({ $0.value.response != nil })
-            .min(by: { $0.value.createdAt < $1.value.createdAt })?.key {
+           .filter({ $0.value.response != nil })
+           .min(by: { $0.value.createdAt < $1.value.createdAt })?.key
+        {
             mutationReplayCache.removeValue(forKey: oldestCompleted)
         }
         guard mutationReplayCache.count < RemoteAccessDefaults.maximumMutationReplayEntries else {
@@ -438,7 +445,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         routeUncached(request, from: connection) { [weak self] decision in
             guard let self else { return }
             self.queue.async {
-                guard case .respond(var response) = decision else {
+                guard case var .respond(response) = decision else {
                     self.mutationReplayCache.removeValue(forKey: key)
                     respond(decision)
                     return
@@ -457,7 +464,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func routeUncached(
         _ request: HTTPRequest,
-        from connection: RemoteConnection,
+        from _: RemoteConnection,
         respond: @escaping @Sendable (RemoteRouteDecision) -> Void
     ) {
         let path = RemoteRouter.normalizedPath(request.path)
@@ -478,7 +485,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
         if request.method == "GET",
-           let terminalID = RemoteRouter.webSocketTerminalID(forPath: path) {
+           let terminalID = RemoteRouter.webSocketTerminalID(forPath: path)
+        {
             respond(.upgradeTerminal(terminalID: terminalID))
             return
         }
@@ -543,12 +551,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         // its socket. This is a narrow lifecycle door: it cannot create, delete, or change the
         // operational configuration of sessions, and the dedicated server exposes no MCP route.
         if request.method == "POST",
-           let sessionID = RemoteRouter.resumeSessionID(forPath: path) {
+           let sessionID = RemoteRouter.resumeSessionID(forPath: path)
+        {
             handleResume(request, sessionID: sessionID, respond: respond)
             return
         }
         if request.method == "POST",
-           let terminalID = RemoteRouter.resumeTerminalID(forPath: path) {
+           let terminalID = RemoteRouter.resumeTerminalID(forPath: path)
+        {
             handleResumeTerminal(request, terminalID: terminalID, respond: respond)
             return
         }
@@ -559,7 +569,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         if request.method == "POST",
-           let identity = RemoteRouter.appSettingIdentity(forPath: path) {
+           let identity = RemoteRouter.appSettingIdentity(forPath: path)
+        {
             handleAppSetting(
                 request,
                 identity: identity,
@@ -572,91 +583,106 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         // capability are both required, and the staged bytes are refused unless the host would
         // preview the assembled file — see `RemoteAttachmentUploadStore`.
         if request.method == "POST",
-           let sessionID = RemoteRouter.attachmentUploadSessionID(forPath: path) {
+           let sessionID = RemoteRouter.attachmentUploadSessionID(forPath: path)
+        {
             handleAttachmentUpload(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.themeSessionID(forPath: path) {
+           let sessionID = RemoteRouter.themeSessionID(forPath: path)
+        {
             handleSessionTheme(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.renameSessionID(forPath: path) {
+           let sessionID = RemoteRouter.renameSessionID(forPath: path)
+        {
             handleRenameSession(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.pinnedSessionID(forPath: path) {
+           let sessionID = RemoteRouter.pinnedSessionID(forPath: path)
+        {
             handlePinnedSession(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.archivedSessionID(forPath: path) {
+           let sessionID = RemoteRouter.archivedSessionID(forPath: path)
+        {
             handleArchivedSession(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.snoozedSessionID(forPath: path) {
+           let sessionID = RemoteRouter.snoozedSessionID(forPath: path)
+        {
             handleSnoozedSession(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.surfaceSessionID(forPath: path) {
+           let sessionID = RemoteRouter.surfaceSessionID(forPath: path)
+        {
             handleSessionSurface(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.accountSessionID(forPath: path) {
+           let sessionID = RemoteRouter.accountSessionID(forPath: path)
+        {
             handleSessionAccount(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.limitRecoverySessionID(forPath: path) {
+           let sessionID = RemoteRouter.limitRecoverySessionID(forPath: path)
+        {
             handleSessionLimitRecovery(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.shareSessionID(forPath: path) {
+           let sessionID = RemoteRouter.shareSessionID(forPath: path)
+        {
             handleCreateShare(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.unshareSessionID(forPath: path) {
+           let sessionID = RemoteRouter.unshareSessionID(forPath: path)
+        {
             handleRevokeShares(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let terminalID = RemoteRouter.shareTerminalID(forPath: path) {
+           let terminalID = RemoteRouter.shareTerminalID(forPath: path)
+        {
             handleCreateTerminalShare(request, terminalID: terminalID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let terminalID = RemoteRouter.unshareTerminalID(forPath: path) {
+           let terminalID = RemoteRouter.unshareTerminalID(forPath: path)
+        {
             handleRevokeTerminalShares(request, terminalID: terminalID, respond: respond)
             return
         }
 
         if request.method == "POST",
-           let sessionID = RemoteRouter.extensionPanelSessionID(forPath: path) {
+           let sessionID = RemoteRouter.extensionPanelSessionID(forPath: path)
+        {
             handleExtensionPanelAction(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "GET",
-           let route = RemoteRouter.gitReviewRoute(forPath: path) {
+           let route = RemoteRouter.gitReviewRoute(forPath: path)
+        {
             handleGitReview(
                 request,
                 sessionID: route.sessionID,
@@ -667,55 +693,64 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         if request.method == "GET",
-           let sessionID = RemoteRouter.repositoryFilesSessionID(forPath: path) {
+           let sessionID = RemoteRouter.repositoryFilesSessionID(forPath: path)
+        {
             handleRepositoryFiles(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "GET",
-           let sessionID = RemoteRouter.repositoryFileSessionID(forPath: path) {
+           let sessionID = RemoteRouter.repositoryFileSessionID(forPath: path)
+        {
             handleRepositoryFile(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "GET",
-           let sessionID = RemoteRouter.attachmentsSessionID(forPath: path) {
+           let sessionID = RemoteRouter.attachmentsSessionID(forPath: path)
+        {
             handleAttachments(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "GET",
-           let sessionID = RemoteRouter.workspaceSessionID(forPath: path) {
+           let sessionID = RemoteRouter.workspaceSessionID(forPath: path)
+        {
             handleWorkspace(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "GET",
-           let sessionID = RemoteRouter.browserPreviewSessionID(forPath: path) {
+           let sessionID = RemoteRouter.browserPreviewSessionID(forPath: path)
+        {
             handleBrowserPreview(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "GET",
-           let sessionID = RemoteRouter.extensionPanelSessionID(forPath: path) {
+           let sessionID = RemoteRouter.extensionPanelSessionID(forPath: path)
+        {
             handleExtensionPanel(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "GET",
-           let sessionID = RemoteRouter.extensionPanelResourceSessionID(forPath: path) {
+           let sessionID = RemoteRouter.extensionPanelResourceSessionID(forPath: path)
+        {
             handleExtensionPanelResource(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "GET",
-           let sessionID = RemoteRouter.attachmentThumbnailSessionID(forPath: path) {
+           let sessionID = RemoteRouter.attachmentThumbnailSessionID(forPath: path)
+        {
             handleAttachmentThumbnail(request, sessionID: sessionID, respond: respond)
             return
         }
 
         if request.method == "GET",
-           let sessionID = RemoteRouter.attachmentSessionID(forPath: path) {
+           let sessionID = RemoteRouter.attachmentSessionID(forPath: path)
+        {
             handleAttachment(request, sessionID: sessionID, respond: respond)
             return
         }
@@ -750,20 +785,22 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             .first?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased() == "application/json",
-              let object = try? JSONSerialization.jsonObject(with: request.body),
-              JSONSerialization.isValidJSONObject(object),
-              let canonical = try? JSONSerialization.data(
+            let object = try? JSONSerialization.jsonObject(with: request.body),
+            JSONSerialization.isValidJSONObject(object),
+            let canonical = try? JSONSerialization.data(
                 withJSONObject: object,
                 options: [.sortedKeys]
-              ) else {
+            )
+        else {
             return request.body
         }
         return canonical
     }
 
     func handleMessage(_ message: RemoteWebSocket.Message, from connection: RemoteConnection) {
-        guard case .text(let data) = message,
-              let parsed = try? JSONDecoder().decode(RemoteClientMessage.self, from: data) else {
+        guard case let .text(data) = message,
+              let parsed = try? JSONDecoder().decode(RemoteClientMessage.self, from: data)
+        else {
             return
         }
 
@@ -1008,7 +1045,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             count = RemoteUsageBridge.defaultLimitPageSize
         }
 
-        let loader = usageDashboardLoader ?? self.services.usageDashboard
+        let loader = usageDashboardLoader ?? services.usageDashboard
         Task { @MainActor in
             let payload = await loader(offset, count)
             respond(.respond(RemoteRouter.json(
@@ -1031,12 +1068,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               !seriesID.isEmpty,
               seriesID.utf8.count <= 512,
               let days = RemoteRouter.queryValue(named: "days", in: request.path).flatMap(Int.init),
-              UsageDashboardProjectionDefaults.overviewRanges.contains(days) else {
+              UsageDashboardProjectionDefaults.overviewRanges.contains(days)
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
 
-        let loader = usageLimitLoader ?? self.services.usageLimit
+        let loader = usageLimitLoader ?? services.usageLimit
         Task { @MainActor in
             guard let payload = await loader(seriesID, days) else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
@@ -1060,7 +1098,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
         guard let sessionID = SessionID(uuidString: rawSessionID),
-              authorization.scope.covers(sessionID) else {
+              authorization.scope.covers(sessionID)
+        else {
             respond(.respond(RemoteRouter.error(404, "Not Found")))
             return
         }
@@ -1075,7 +1114,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
             if !self.services.runtimeStatus.isRunning(sessionID: sessionID) {
                 guard let sessionCommands = self.sessionCommands,
-                      sessionCommands.resumeRemoteSession(sessionID) else {
+                      sessionCommands.resumeRemoteSession(sessionID)
+                else {
                     respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                     return
                 }
@@ -1101,7 +1141,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
         guard let terminalID = TerminalID(uuidString: rawTerminalID),
-              authorization.scope.covers(terminalID) else {
+              authorization.scope.covers(terminalID)
+        else {
             respond(.respond(RemoteRouter.error(404, "Not Found")))
             return
         }
@@ -1112,7 +1153,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             if !self.services.mirrors.isTerminalAvailable(terminalID) {
                 guard let sessionCommands = self.sessionCommands,
-                      sessionCommands.resumeRemoteTerminal(terminalID) else {
+                      sessionCommands.resumeRemoteTerminal(terminalID)
+                else {
                     respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
                     return
                 }
@@ -1170,14 +1212,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               creation.model.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
               creation.reasoningEffort.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
               creation.permissionMode.map(RemoteInboundPolicy.acceptsLaunchIdentifier) ?? true,
-              creation.surface.isKnown else {
+              creation.surface.isKnown
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
 
         let openingAttachmentIDs = creation.openingAttachmentUploadIDs ?? []
         guard creation.reportOpening == nil
-                || (creation.openingAttachmentScopeID == nil && openingAttachmentIDs.isEmpty) else {
+            || (creation.openingAttachmentScopeID == nil && openingAttachmentIDs.isEmpty)
+        else {
             // Reports and ordinary new-session drafts are distinct atomic openings. Combining
             // them would evade each surface's attachment bound and give a malicious client nine
             // paths where every composer is capped at eight.
@@ -1245,17 +1289,18 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             let totalOpeningAttachmentCount = openingAttachmentIDs.count
                 + (reportScreenshot == nil ? 0 : 1)
             guard totalOpeningAttachmentCount
-                    <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession,
-                  openingAttachmentIDs.allSatisfy(RemoteInboundPolicy.acceptsAttachmentID),
-                  let rawScopeID = creation.openingAttachmentScopeID,
-                  let scopeID = SessionID(uuidString: rawScopeID),
-                  let deviceID = RemoteInboundPolicy.normalizedDeviceID(
-                      request.header(RemoteRouter.deviceHeader)
-                  ), let claimed = attachmentUploads.claim(
-                      ids: openingAttachmentIDs,
-                      sessionID: scopeID.uuidString,
-                      deviceID: deviceID
-                  ) else {
+                <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession,
+                openingAttachmentIDs.allSatisfy(RemoteInboundPolicy.acceptsAttachmentID),
+                let rawScopeID = creation.openingAttachmentScopeID,
+                let scopeID = SessionID(uuidString: rawScopeID),
+                let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+                    request.header(RemoteRouter.deviceHeader)
+                ), let claimed = attachmentUploads.claim(
+                    ids: openingAttachmentIDs,
+                    sessionID: scopeID.uuidString,
+                    deviceID: deviceID
+                )
+            else {
                 if let uploadID = reportScreenshot?.uploadID {
                     attachmentUploads.discardClaimed(ids: [uploadID])
                 }
@@ -1300,7 +1345,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             guard let projectID = ProjectID(uuidString: creation.projectID),
                   self.services.sessionQueries.project(withID: projectID) != nil,
-                  let kind = AgentKind(rawValue: creation.agentKind) else {
+                  let kind = AgentKind(rawValue: creation.agentKind)
+            else {
                 refuse(422, "Unknown Launch Choice", .unknownLaunchChoice)
                 return
             }
@@ -1321,7 +1367,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             let modelOptions = AgentModels.options(for: kind, account: account)
             if let model = creation.model,
-               !modelOptions.contains(where: { $0.identifier == model }) {
+               !modelOptions.contains(where: { $0.identifier == model })
+            {
                 refuse(422, "Unknown Model", .unknownModel)
                 return
             }
@@ -1339,7 +1386,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             let permissionMode = creation.permissionMode.flatMap(AgentPermissionMode.init(rawValue:))
             guard creation.permissionMode == nil
-                    || (permissionMode != nil && kind.supportsPermissionModes) else {
+                || (permissionMode != nil && kind.supportsPermissionModes)
+            else {
                 refuse(422, "Unknown Permission Mode", .unknownPermissionMode)
                 return
             }
@@ -1383,7 +1431,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                       ManagedWorkspaceEligibility.supportsFinishHandshake(
                           kind: kind,
                           usesNativeUI: usesNativeUI
-                      ) else {
+                      )
+                else {
                     refuse(422, "Unsupported Workspace", .unsupportedWorkspace)
                     return
                 }
@@ -1474,7 +1523,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     "Persistence Unavailable",
                     code: .persistenceUnavailable
                 )))
-            case .registered(let result):
+            case let .registered(result):
                 self.services.eventLog.recordRemoteEvent("Remote notifications registered", [
                     .share: authorization.shareID,
                     .device: deviceID,
@@ -1515,13 +1564,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               ),
               upload.source == expectedSource,
               RemoteDiagnosticUploadPolicy.accepts(upload),
-              receiveClientDiagnostics(upload.records, upload.source, deviceID) else {
+              receiveClientDiagnostics(upload.records, upload.source, deviceID)
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
 
         let peer = MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device")
-        self.services.eventLog.recordRemoteEvent("Remote diagnostics received", [
+        services.eventLog.recordRemoteEvent("Remote diagnostics received", [
             .source: upload.source.rawValue,
             .records: String(upload.records.count),
             .peer: peer,
@@ -1540,13 +1590,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               request.header(RemoteRouter.clientHeader)?.lowercased() == RemoteClientKind.iOS.rawValue,
               request.body.count <= MobileDiagnosticsCaptureStore.maximumEncodedCaptureBytes,
               let deviceID = RemoteInboundPolicy.normalizedDeviceID(
-                request.header(RemoteRouter.deviceHeader)
+                  request.header(RemoteRouter.deviceHeader)
               ),
               let upload = try? JSONDecoder().decode(
-                RemoteMobileDiagnosticsCaptureUploadRequestDTO.self,
-                from: request.body
+                  RemoteMobileDiagnosticsCaptureUploadRequestDTO.self,
+                  from: request.body
               ),
-              upload.capture.requestID == request.header(RemoteRouter.requestIDHeader) else {
+              upload.capture.requestID == request.header(RemoteRouter.requestIDHeader)
+        else {
             respond(.respond(RemoteRouter.error(403, "Forbidden")))
             return
         }
@@ -1625,7 +1676,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               let peer = connection.authenticatedPeer,
               peer.authorization.canManageHost,
               authorizer?.isCurrent(peer.authorization) == true,
-              let deviceID = peer.deviceID else {
+              let deviceID = peer.deviceID
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return nil
         }
@@ -1660,7 +1712,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               ),
               let displayName = RemoteInboundPolicy.normalizedMemberName(
                   acceptance.displayName
-              ) else {
+              )
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -1677,7 +1730,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
 
         if let existing = authorizer?.authorization(forToken: token),
-           existing.isBound(to: deviceID) {
+           existing.isBound(to: deviceID)
+        {
             DispatchQueue.main.async {
                 respond(.respond(RemoteRouter.json(
                     RemoteAcceptInvitationResponseDTO(
@@ -1704,9 +1758,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                       // their exchanged bearer in Keychain and therefore receive a Mac-side
                       // durable record as well.
                       persistsOwnerDevice:
-                        request.header(RemoteRouter.clientHeader)?.lowercased()
+                      request.header(RemoteRouter.clientHeader)?.lowercased()
                           == RemoteClientKind.iOS.rawValue
-                  ) else {
+                  )
+            else {
                 self?.queue.async { [weak self] in
                     self?.recordFailedAuth(reason: "invalid invitation", device: deviceID)
                     respond(.respond(RemoteRouter.error(
@@ -1802,7 +1857,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         DispatchQueue.main.async {
             let appliedThemeID: AppThemeID
             switch self.services.settings.applyAppTheme(id: AppThemeID(choice.themeID)) {
-            case .applied(let themeID):
+            case let .applied(themeID):
                 appliedThemeID = themeID
             case .unknownTheme:
                 respond(.respond(RemoteRouter.error(422, "Unknown Theme", code: .unknownTheme)))
@@ -1878,7 +1933,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
         guard let sessionID = SessionID(uuidString: rawSessionID),
-              authorization.scope.covers(sessionID) else {
+              authorization.scope.covers(sessionID)
+        else {
             respond(.respond(RemoteRouter.error(404, "Not Found")))
             return
         }
@@ -1950,7 +2006,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  self.services.sessionQueries.session(withID: sessionID) != nil else {
+                  self.services.sessionQueries.session(withID: sessionID) != nil
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -2005,7 +2062,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  self.services.sessionQueries.session(withID: sessionID) != nil else {
+                  self.services.sessionQueries.session(withID: sessionID) != nil
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -2060,7 +2118,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  self.services.sessionQueries.session(withID: sessionID) != nil else {
+                  self.services.sessionQueries.session(withID: sessionID) != nil
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -2079,7 +2138,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     respond(.respond(RemoteRouter.json(
                         self.services.mirrors.meResponse(for: authorization)
                     )))
-                case .failure(let failure):
+                case let .failure(failure):
                     if case .persistenceUnavailable = failure {
                         respond(.respond(self.persistenceRefusalResponse()))
                         return
@@ -2138,13 +2197,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
                   let session = self.services.sessionQueries.session(withID: sessionID),
-                  !session.isArchived else {
+                  !session.isArchived
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
             if let rawDeadline = choice.snoozedUntil {
                 let deadline = Date(timeIntervalSince1970: rawDeadline)
-                guard deadline > Date(), deadline < Date().addingTimeInterval(366 * 86_400) else {
+                guard deadline > Date(), deadline < Date().addingTimeInterval(366 * 86400) else {
                     respond(.respond(RemoteRouter.error(
                         422,
                         "Invalid snooze deadline",
@@ -2182,7 +2242,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  let session = self.services.sessionQueries.session(withID: sessionID) else {
+                  let session = self.services.sessionQueries.session(withID: sessionID)
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -2256,7 +2317,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  let session = self.services.sessionQueries.session(withID: sessionID) else {
+                  let session = self.services.sessionQueries.session(withID: sessionID)
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -2296,7 +2358,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 )))
             case .failure(.appUnavailable):
                 respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
-            case .failure(.moveRefused(let refusal)):
+            case let .failure(.moveRefused(refusal)):
                 respond(.respond(RemoteRouter.error(
                     409,
                     "Account move refused",
@@ -2327,7 +2389,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
         DispatchQueue.main.async {
             guard let sessionID = SessionID(uuidString: rawSessionID),
-                  let session = self.services.sessionQueries.session(withID: sessionID) else {
+                  let session = self.services.sessionQueries.session(withID: sessionID)
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -2409,7 +2472,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return .waitForReset
         case .resumeOnBestAccount:
             return session.kind.supportsAccounts ? .resumeOnBestAccount : nil
-        case .resumeVia(let rawAccountID):
+        case let .resumeVia(rawAccountID):
             guard RemoteInboundPolicy.acceptsAccountIdentifier(rawAccountID) else { return nil }
             let handle = AccountHandle(storedName: rawAccountID)
             guard SessionMigration.destinations(for: session).contains(where: {
@@ -2454,7 +2517,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 capability: capability,
                 canApprovePermissions: choice.canApprovePermissions
             ) {
-            case .success(let created):
+            case let .success(created):
                 respond(.respond(RemoteRouter.json(RemoteCreateShareResponseDTO(
                     url: created.url.absoluteString,
                     capability: RemoteAdvertisedCapability(capability),
@@ -2529,12 +2592,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         let capability = choice.capability
         DispatchQueue.main.async {
             guard self.services.sessionQueries.terminal(withID: terminalID) != nil,
-                  let hostCommands = self.hostCommands else {
+                  let hostCommands = self.hostCommands
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
             switch hostCommands.createTerminalShare(for: terminalID, capability: capability) {
-            case .success(let created):
+            case let .success(created):
                 respond(.respond(RemoteRouter.json(RemoteCreateShareResponseDTO(
                     url: created.url.absoluteString,
                     capability: RemoteAdvertisedCapability(capability),
@@ -2575,7 +2639,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         }
         DispatchQueue.main.async {
             guard self.services.sessionQueries.terminal(withID: terminalID) != nil,
-                  let hostCommands = self.hostCommands else {
+                  let hostCommands = self.hostCommands
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -2625,7 +2690,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         DispatchQueue.main.async {
             RemoteGitReviewBridge.repositoryFiles(sessionID: sessionID) { result in
                 switch result {
-                case .success(let files):
+                case let .success(files):
                     respond(.respond(RemoteRouter.json(files)))
                 case .failure:
                     respond(.respond(RemoteRouter.error(404, "Not Found")))
@@ -2645,7 +2710,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond: respond
         ) else { return }
         guard let path = RemoteRouter.queryValue(named: "path", in: request.path),
-              RemoteInboundPolicy.acceptsRepositoryPath(path) else {
+              RemoteInboundPolicy.acceptsRepositoryPath(path)
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -2656,7 +2722,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 path: path
             ) { result in
                 switch result {
-                case .success(let file):
+                case let .success(file):
                     respond(.respond(RemoteRouter.json(file)))
                 case .failure:
                     respond(.respond(RemoteRouter.error(404, "Not Found")))
@@ -2682,12 +2748,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let authorization = authorizeREST(request, respond: respond) else { return }
         guard authorization.principal == .ownerDevice,
               authorization.scope == .allSessions,
-              authorization.capability == .interact else {
+              authorization.capability == .interact
+        else {
             respond(.respond(RemoteRouter.error(403, "Forbidden")))
             return
         }
         guard let sessionID = SessionID(uuidString: rawSessionID),
-              authorization.scope.covers(sessionID) else {
+              authorization.scope.covers(sessionID)
+        else {
             respond(.respond(RemoteRouter.error(404, "Not Found")))
             return
         }
@@ -2737,7 +2805,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 guard let values = try? attachment.url.resourceValues(
                     forKeys: [.fileSizeKey, .contentModificationDateKey]
                 ), let size = values.fileSize,
-                   size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
+                size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
                     return nil
                 }
                 return RemoteAttachmentDTO(
@@ -2791,7 +2859,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond: respond
         ) else { return }
         guard let rawTabID = RemoteRouter.queryValue(named: "tab", in: request.path),
-              let tabID = UUID(uuidString: rawTabID) else {
+              let tabID = UUID(uuidString: rawTabID)
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -2819,7 +2888,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond: respond
         ) else { return }
         guard let attachmentID = RemoteRouter.queryValue(named: "id", in: request.path),
-              RemoteInboundPolicy.acceptsAttachmentID(attachmentID) else {
+              RemoteInboundPolicy.acceptsAttachmentID(attachmentID)
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -2831,8 +2901,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 for: sessionID,
                 id: attachmentID
             ), let values = try? attachment.url.resourceValues(forKeys: [.fileSizeKey]),
-               let size = values.fileSize,
-               size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
+            let size = values.fileSize,
+            size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -2871,7 +2941,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             respond: respond
         ) else { return }
         guard let attachmentID = RemoteRouter.queryValue(named: "id", in: request.path),
-              RemoteInboundPolicy.acceptsAttachmentID(attachmentID) else {
+              RemoteInboundPolicy.acceptsAttachmentID(attachmentID)
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -2883,8 +2954,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 for: sessionID,
                 id: attachmentID
             ), let values = try? attachment.url.resourceValues(forKeys: [.fileSizeKey]),
-               let size = values.fileSize,
-               size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
+            let size = values.fileSize,
+            size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -2952,9 +3023,10 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let sessionID = SessionID(uuidString: rawSessionID),
               let reference = extensionPanelReference(in: request),
               let action = try? JSONDecoder().decode(
-            RemoteExtensionPanelActionRequestDTO.self,
-            from: request.body
-              ), RemoteInboundPolicy.acceptsExtensionIdentifier(action.actionID) else {
+                  RemoteExtensionPanelActionRequestDTO.self,
+                  from: request.body
+              ), RemoteInboundPolicy.acceptsExtensionIdentifier(action.actionID)
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -2991,14 +3063,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             ) { result in
                 let payload: RemoteExtensionPanelActionResponseDTO
                 switch result {
-                case .success(let response):
+                case let .success(response):
                     payload = RemoteExtensionPanelActionResponseDTO(
                         processGeneration: item.processGeneration,
                         panel: response.panel,
                         message: response.message,
                         error: response.error
                     )
-                case .failure(let error):
+                case let .failure(error):
                     payload = RemoteExtensionPanelActionResponseDTO(
                         processGeneration: item.processGeneration,
                         error: error.localizedDescription
@@ -3023,7 +3095,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         ) else { return }
         guard let reference = extensionPanelReference(in: request),
               let path = RemoteRouter.queryValue(named: "path", in: request.path),
-              RemoteInboundPolicy.acceptsExtensionResourcePath(path) else {
+              RemoteInboundPolicy.acceptsExtensionResourcePath(path)
+        else {
             respond(.respond(RemoteRouter.error(400, "Bad Request")))
             return
         }
@@ -3035,10 +3108,11 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 extensionIdentifier: reference.extensionIdentifier,
                 panelID: reference.panelID
             ) != nil,
-            let url = self.services.extensions.extensionImageResourceURL(
-                extensionIdentifier: reference.extensionIdentifier,
-                relativePath: path
-            ) else {
+                let url = self.services.extensions.extensionImageResourceURL(
+                    extensionIdentifier: reference.extensionIdentifier,
+                    relativePath: path
+                )
+            else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
@@ -3111,12 +3185,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     ) -> SessionID? {
         guard let authorization = authorizeREST(request, respond: respond) else { return nil }
         guard authorization.principal == .ownerDevice,
-              authorization.scope == .allSessions else {
+              authorization.scope == .allSessions
+        else {
             respond(.respond(RemoteRouter.error(403, "Forbidden")))
             return nil
         }
         guard let sessionID = SessionID(uuidString: rawSessionID),
-              authorization.scope.covers(sessionID) else {
+              authorization.scope.covers(sessionID)
+        else {
             respond(.respond(RemoteRouter.error(404, "Not Found")))
             return nil
         }
@@ -3134,7 +3210,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return nil
         }
         guard let sessionID = SessionID(uuidString: rawSessionID),
-              authorization.scope.covers(sessionID) else {
+              authorization.scope.covers(sessionID)
+        else {
             respond(.respond(RemoteRouter.error(404, "Not Found")))
             return nil
         }
@@ -3148,7 +3225,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         let rawDevice = request.header(RemoteRouter.deviceHeader)
         let authorization: RemoteAuthorization
         switch resolveAuthorization(for: RemoteRouter.bearerToken(from: request), device: rawDevice) {
-        case .authorized(let resolved):
+        case let .authorized(resolved):
             authorization = resolved
         case .rateLimited:
             respond(.respond(RemoteRouter.error(429, "Too Many Requests")))
@@ -3192,7 +3269,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         let replayBudget = RemoteInboundPolicy.normalizedTerminalReplayBudget(message.replayBudget)
         let authorization: RemoteAuthorization
         switch resolveAuthorization(for: message.token, device: rawDevice) {
-        case .authorized(let resolved):
+        case let .authorized(resolved):
             authorization = resolved
         case .rateLimited:
             connection.sendClose(code: 4008, reason: "Too many authentication attempts")
@@ -3344,7 +3421,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     ) {
         guard let authorization = connection.authorization, authorization.capability == .interact else {
             connection.sendText(#"{"type":"error","code":"forbidden"}"#)
-            self.services.eventLog.recordRemoteEvent("Remote input refused", [.reason: "view-only"])
+            services.eventLog.recordRemoteEvent("Remote input refused", [.reason: "view-only"])
             return
         }
         guard let data else { return }
@@ -3381,7 +3458,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             }
             let accepted: Bool
             if let rawTerminalID = connection.routedTerminalID,
-               let terminalID = TerminalID(uuidString: rawTerminalID) {
+               let terminalID = TerminalID(uuidString: rawTerminalID)
+            {
                 accepted = self.services.mirrors.sendInput(
                     bytes,
                     to: terminalID,
@@ -3389,7 +3467,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     authorization: authorization
                 )
             } else if let routed = connection.routedSessionID,
-                      let sessionID = SessionID(uuidString: routed) {
+                      let sessionID = SessionID(uuidString: routed)
+            {
                 accepted = self.services.mirrors.sendInput(
                     bytes,
                     to: sessionID,
@@ -3485,7 +3564,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             .result: result,
         ]
         if let routed = connection.routedSessionID,
-           let sessionID = SessionID(uuidString: routed) {
+           let sessionID = SessionID(uuidString: routed)
+        {
             fields[.session] = MacRemoteDiagnostics.pseudonym(
                 sessionID.uuidString,
                 prefix: "session"
@@ -3501,16 +3581,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     /// behavior or relying on ambient load. Delaying inside the main-queue admission block has
     /// the same boundary as the stalls that made the reported terminal interaction sluggish.
     private func applyTerminalWireAdmissionDelayIfEnabled() {
-#if DEBUG
-        guard ProcessInfo.processInfo.environment["THREADING_REMOTE_TERMINAL_WIRE_FIXTURE"] == "1",
-              let raw = ProcessInfo.processInfo.environment[
-                "THREADING_REMOTE_TERMINAL_WIRE_ADMISSION_DELAY_MS"
-              ],
-              let milliseconds = UInt64(raw),
-              milliseconds > 0,
-              milliseconds <= 5_000 else { return }
-        Thread.sleep(forTimeInterval: Double(milliseconds) / 1_000)
-#endif
+        #if DEBUG
+            guard ProcessInfo.processInfo.environment["THREADING_REMOTE_TERMINAL_WIRE_FIXTURE"] == "1",
+                  let raw = ProcessInfo.processInfo.environment[
+                      "THREADING_REMOTE_TERMINAL_WIRE_ADMISSION_DELAY_MS"
+                  ],
+                  let milliseconds = UInt64(raw),
+                  milliseconds > 0,
+                  milliseconds <= 5000 else { return }
+            Thread.sleep(forTimeInterval: Double(milliseconds) / 1000)
+        #endif
     }
 
     private func handleViewport(
@@ -3520,12 +3600,14 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         requestID rawRequestID: String?
     ) {
         guard let authorization = connection.authorization,
-              authorization.capability == .interact else {
+              authorization.capability == .interact
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
         if let rawTerminalID = connection.routedTerminalID,
-           let terminalID = TerminalID(uuidString: rawTerminalID) {
+           let terminalID = TerminalID(uuidString: rawTerminalID)
+        {
             guard let cols, let rows else {
                 refuseViewport(
                     connection,
@@ -3569,9 +3651,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             rows: rows,
             routedSessionID: connection.routedSessionID
         ) {
-        case .refused(let refusal):
+        case let .refused(refusal):
             refuseViewport(connection, cols: cols, rows: rows, refusal: refusal)
-        case .accepted(let cols, let rows, let sessionID):
+        case let .accepted(cols, rows, sessionID):
             DispatchQueue.main.async {
                 guard self.authorizer?.isCurrent(authorization) == true else {
                     connection.sendText(self.encode(RemoteErrorDTO(code: "forbidden")))
@@ -3655,19 +3737,22 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
 
     private func handleViewportRelease(_ connection: RemoteConnection) {
         guard let authorization = connection.authorization,
-              authorization.capability == .interact else {
+              authorization.capability == .interact
+        else {
             return
         }
         DispatchQueue.main.async {
             guard self.authorizer?.isCurrent(authorization) == true else { return }
             if let rawTerminalID = connection.routedTerminalID,
-               let terminalID = TerminalID(uuidString: rawTerminalID) {
+               let terminalID = TerminalID(uuidString: rawTerminalID)
+            {
                 self.services.mirrors.releaseViewport(
                     from: connection,
                     terminalID: terminalID
                 )
             } else if let routed = connection.routedSessionID,
-                      let sessionID = SessionID(uuidString: routed) {
+                      let sessionID = SessionID(uuidString: routed)
+            {
                 self.services.mirrors.releaseViewport(
                     from: connection,
                     sessionID: sessionID
@@ -3684,7 +3769,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let authorization = connection.authorization,
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed),
-              authorization.scope.covers(sessionID) else {
+              authorization.scope.covers(sessionID)
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidSessionParking")))
             return
         }
@@ -3706,7 +3792,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         guard let authorization = connection.authorization,
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed),
-              authorization.scope.covers(sessionID) else {
+              authorization.scope.covers(sessionID)
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidSessionParking")))
             return
         }
@@ -3740,8 +3827,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               let routed = connection.routedSessionID,
               let sessionID = SessionID(uuidString: routed),
               beforeRowID.map(RemoteInboundPolicy.acceptsConversationRowID) ?? true,
-              limit.map({ (1...RemoteAccessDefaults.maximumRemoteConversationRows).contains($0) })
-                ?? true else {
+              limit.map({ (1 ... RemoteAccessDefaults.maximumRemoteConversationRows).contains($0) })
+              ?? true
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidConversationPage")))
             return
         }
@@ -3762,7 +3850,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func handleConversationResync(_ connection: RemoteConnection) {
         guard let authorization = connection.authorization,
               let routed = connection.routedSessionID,
-              let sessionID = SessionID(uuidString: routed) else {
+              let sessionID = SessionID(uuidString: routed)
+        else {
             return
         }
         DispatchQueue.main.async {
@@ -3785,8 +3874,9 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               let sessionID = SessionID(uuidString: routed),
               let revision, revision >= 0,
               let offset, offset >= 0,
-              limit.map({ (1...RemoteAccessDefaults.maximumRemoteRunPlanPageSteps).contains($0) })
-                ?? true else {
+              limit.map({ (1 ... RemoteAccessDefaults.maximumRemoteRunPlanPageSteps).contains($0) })
+              ?? true
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidRunPlanPage")))
             return
         }
@@ -3817,11 +3907,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
         guard let text, let routed = connection.routedSessionID,
-              let sessionID = SessionID(uuidString: routed) else {
+              let sessionID = SessionID(uuidString: routed)
+        else {
             return
         }
         guard RemoteInboundPolicy.acceptsPrompt(text),
-              RemoteInboundPolicy.acceptsContextAttachments(contextAttachments) else {
+              RemoteInboundPolicy.acceptsContextAttachments(contextAttachments)
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "promptTooLarge")))
             return
         }
@@ -3854,12 +3946,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             guard let deviceID = device, authorization.principal == .ownerDevice,
                   authorization.scope == .allSessions,
                   attachmentUploadIDs.count
-                      <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession,
+                  <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession,
                   let claimed = attachmentUploads.claim(
                       ids: attachmentUploadIDs,
                       sessionID: sessionID.uuidString,
                       deviceID: deviceID
-                  ) else {
+                  )
+            else {
                 connection.sendText(encode(RemoteErrorDTO(code: "unknownAttachmentUpload")))
                 if let requestID {
                     connection.sendText(encode(RemotePromptSubmissionResultDTO(
@@ -3954,15 +4047,17 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         requestID rawRequestID: String?
     ) {
         guard let authorization = connection.authorization,
-              authorization.capability == .interact else {
+              authorization.capability == .interact
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
         guard let text,
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || attachmentUploadIDs?.isEmpty == false,
+              || attachmentUploadIDs?.isEmpty == false,
               let routed = connection.routedSessionID,
-              let sessionID = SessionID(uuidString: routed) else {
+              let sessionID = SessionID(uuidString: routed)
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidTerminalSubmission")))
             return
         }
@@ -3990,12 +4085,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                   authorization.principal == .ownerDevice,
                   authorization.scope == .allSessions,
                   attachmentUploadIDs.count
-                      <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession,
+                  <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession,
                   let claimed = attachmentUploads.claim(
                       ids: attachmentUploadIDs,
                       sessionID: sessionID.uuidString,
                       deviceID: deviceID
-                  ) else {
+                  )
+            else {
                 connection.sendText(encode(RemoteErrorDTO(code: "unknownAttachmentUpload")))
                 connection.sendText(encode(RemotePromptSubmissionResultDTO(
                     requestID: requestID,
@@ -4061,7 +4157,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         requestID rawRequestID: String?
     ) {
         guard let authorization = connection.authorization,
-              authorization.capability == .interact else {
+              authorization.capability == .interact
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
@@ -4070,7 +4167,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               let attachmentUploadIDs,
               !attachmentUploadIDs.isEmpty,
               attachmentUploadIDs.count
-                <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession else {
+              <= RemoteAttachmentUploadDefaults.maximumStagedUploadsPerSession
+        else {
             connection.sendText(encode(RemoteErrorDTO(
                 code: "invalidTerminalAttachmentInsertion"
             )))
@@ -4095,7 +4193,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                   ids: attachmentUploadIDs,
                   sessionID: sessionID.uuidString,
                   deviceID: deviceID
-              ) else {
+              )
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "unknownAttachmentUpload")))
             connection.sendText(encode(RemotePromptSubmissionResultDTO(
                 requestID: requestID,
@@ -4157,7 +4256,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         decision rawDecision: String?
     ) {
         guard let authorization = connection.authorization,
-              authorization.canApprovePermissions else {
+              authorization.canApprovePermissions
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
@@ -4165,7 +4265,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               let decision = RemotePermissionDecision(rawValue: rawDecision),
               RemoteInboundPolicy.acceptsPermissionID(id),
               let routed = connection.routedSessionID,
-              let sessionID = SessionID(uuidString: routed) else {
+              let sessionID = SessionID(uuidString: routed)
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidPermissionDecision")))
             return
         }
@@ -4216,7 +4317,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         requestID rawRequestID: String?
     ) {
         guard let authorization = connection.authorization,
-              authorization.capability == .interact else {
+              authorization.capability == .interact
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
@@ -4226,7 +4328,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               RemoteInboundPolicy.acceptsAttentionRecipientID(recipientID),
               rawNote.map(RemoteInboundPolicy.acceptsAttentionNote) ?? true,
               let routed = connection.routedSessionID,
-              let sessionID = SessionID(uuidString: routed) else {
+              let sessionID = SessionID(uuidString: routed)
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidAttentionRequest")))
             return
         }
@@ -4257,7 +4360,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         requestID rawRequestID: String?
     ) {
         guard let authorization = connection.authorization,
-              authorization.capability == .interact else {
+              authorization.capability == .interact
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "forbidden")))
             return
         }
@@ -4267,7 +4371,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               let action = RemoteInputControlAction(rawValue: rawAction),
               targetID.map(RemoteInboundPolicy.acceptsAttentionRecipientID) ?? true,
               let routed = connection.routedSessionID,
-              let sessionID = SessionID(uuidString: routed) else {
+              let sessionID = SessionID(uuidString: routed)
+        else {
             connection.sendText(encode(RemoteErrorDTO(code: "invalidInputControl")))
             return
         }
@@ -4296,7 +4401,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
               let rawState,
               let state = RemotePresenceUpdate(rawValue: rawState),
               let routed = connection.routedSessionID,
-              let sessionID = SessionID(uuidString: routed) else {
+              let sessionID = SessionID(uuidString: routed)
+        else {
             return
         }
         DispatchQueue.main.async {
@@ -4312,7 +4418,7 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
     private func recordFailedAuth(reason: String, device: String?) {
         authLimiter.recordFailure(device: device)
         ThreadingLogger.remote.warning("Remote auth denied: \(reason, privacy: .public)")
-        self.services.eventLog.recordRemoteEvent("Remote auth denied", [.reason: reason])
+        services.eventLog.recordRemoteEvent("Remote auth denied", [.reason: reason])
         var fields: [RemoteDiagnosticField: String] = [.reason: reason]
         if let device {
             fields[.peer] = MacRemoteDiagnostics.pseudonym(device, prefix: "device")
@@ -4337,7 +4443,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         if let token,
            RemoteInboundPolicy.acceptsBearerToken(token),
            let authorization = authorizer?.authorization(forToken: token),
-           authorization.isBound(to: device) {
+           authorization.isBound(to: device)
+        {
             return .authorized(authorization)
         }
         guard !authLimiter.shouldReject(device: device) else {
@@ -4368,13 +4475,13 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         ThreadingLogger.remote.warning(
             "Remote protocol mismatch, update needed on: \(update.rawValue, privacy: .public)"
         )
-        self.services.eventLog.recordRemoteEvent("Remote protocol mismatch", [.update: update.rawValue])
+        services.eventLog.recordRemoteEvent("Remote protocol mismatch", [.update: update.rawValue])
         return RemoteUpgradeRequiredDTO(update: update, message: message)
     }
 
     private func encode<Value: Encodable>(_ value: Value) -> String {
         do {
-            return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+            return try String(decoding: JSONEncoder().encode(value), as: UTF8.self)
         } catch {
             ThreadingLogger.remote.fault(
                 "Remote server encoding failed: \(error.localizedDescription, privacy: .private(mask: .hash))"

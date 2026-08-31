@@ -271,24 +271,40 @@ extension ConversationViewController {
     func refreshCurfewChip() {
         guard isViewLoaded else { return }
         let now = Date()
-        guard let curfew = CurfewResolution.answer(forSessionID: sessionID, now: now).curfew else {
+        let answer = CurfewResolution.answer(forSessionID: sessionID, now: now)
+        guard let curfew = answer.curfew else {
             curfewChip.isHidden = true
             return
         }
 
         curfewChip.isHidden = false
+        let title: String
+        if case .usageReset(_, _, _, let windowID)? = answer.condition,
+           now < curfew.deadline {
+            title = L10n.format("Until the %@ window resets", windowID)
+        } else {
+            title = Self.curfewChipTitle(for: curfew, now: now)
+        }
         curfewChip.configure(
             symbolName: CurfewDefaults.symbol,
-            title: Self.curfewChipTitle(for: curfew, now: now)
+            title: title
         )
         // `configure` puts the title on the tooltip, so what the chip does not have room to say
         // has to be said after it.
-        curfewChip.toolTip = CurfewReceiptWords.stripSentence(
-            curfew: curfew,
-            state: SessionCurfewCenter.shared.state(for: sessionID),
-            canTellWorking: SessionCurfewCenter.shared.canTellWorking(sessionID: sessionID),
-            now: now
-        )
+        if case .usageReset(_, _, _, let windowID)? = answer.condition,
+           now < curfew.deadline {
+            curfewChip.toolTip = L10n.format(
+                "Stops at the %@ window’s scheduled reset, or sooner if the provider resets that same window early.",
+                windowID
+            )
+        } else {
+            curfewChip.toolTip = CurfewReceiptWords.stripSentence(
+                curfew: curfew,
+                state: SessionCurfewCenter.shared.state(for: sessionID),
+                canTellWorking: SessionCurfewCenter.shared.canTellWorking(sessionID: sessionID),
+                now: now
+            )
+        }
     }
 
     /// Two tenses, the strip's own rule and its own words: a fence that has not closed yet and one
@@ -341,6 +357,12 @@ extension ConversationViewController {
             // its start may be days away; this conversation is already running, so "when quiet
             // hours next begin" has exactly one answer and it is the one the menu just named.
             SessionCurfewCenter.shared.setCurfew(.until(start), forSessionID: sessionID)
+        case .untilUsageReset(let expectedAt, let windowID):
+            SessionCurfewCenter.shared.setCurfewUntilUsageReset(
+                expectedAt: expectedAt,
+                windowID: windowID,
+                forSessionID: sessionID
+            )
         case .exempt:
             // Nil where nothing would have held this chat anyway: an exemption from a standing
             // window that is switched off is a rule about nothing, and writing it would stop the

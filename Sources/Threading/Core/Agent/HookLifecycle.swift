@@ -250,6 +250,20 @@ struct HookLifecycleReport {
     /// from this file, while a child's path belongs only to its navigator row.
     let transcriptPath: String?
 
+    /// The directory the agent says it is working in, as of this event.
+    ///
+    /// The runtime's own answer, and the only sound one. A session's *owned* checkout is where
+    /// Threading launches it; where it is executing is a different fact, and an agent that runs
+    /// `cd elsewhere && …` per tool call moves the second without moving the first. Neither
+    /// OSC 7 nor the PTY root process's cwd sees that — both were measured still naming the
+    /// launch directory for a chat whose own status line named a sibling worktree — so this
+    /// field is what `SessionExecutionLocus` reconciles against ownership.
+    ///
+    /// Present on every event both hook-capable runtimes emit; nil for a runtime that reports
+    /// no lifecycle at all, and nil while the user has lifecycle reporting turned off. Nil is
+    /// "unknown", never "unchanged" — see `AgentCapabilities.lifecycleReportedWorkingDirectory`.
+    let workingDirectory: String?
+
     /// The agent's own work still in flight as its turn ends, by the identifier it gave each.
     ///
     /// Claude states this on `Stop` as `background_tasks`, and its own description of the field
@@ -290,6 +304,7 @@ struct HookLifecycleReport {
         self.lastAssistantMessage = payload["last_assistant_message"] as? String
         self.turnID = payload["turn_id"] as? String
         self.transcriptPath = Self.text(payload["transcript_path"])
+        self.workingDirectory = Self.text(payload["cwd"])
         // Only the identity and the kind are taken: the rest of each entry describes work this
         // side never renders. An entry whose id is missing falls back to its position, which is
         // stable across boundaries for as long as the entry is — so unreadable work still reads

@@ -25,6 +25,10 @@ final class CommandPaletteRenderTests: XCTestCase {
         case commands
         case sessionTarget = "session-target"
         case recording
+        /// A query answered by both a command and settings rows, which is the whole shape of the
+        /// settings destinations: the command that *does* it on top, then the places it is set,
+        /// each naming its page and section where a shortcut would otherwise be.
+        case settings
     }
 
     private struct Variant {
@@ -94,7 +98,10 @@ final class CommandPaletteRenderTests: XCTestCase {
                 )
             )
             controller.present(in: window)
-            drain(until: { controller.visibleCommandIDsForTesting.count == 8 })
+            drain(until: {
+                controller.visibleCommandIDsForTesting.count
+                    == self.fixtureCommandIDs.count + self.settingsDestinations.count
+            })
 
             switch state {
             case .commands:
@@ -116,6 +123,15 @@ final class CommandPaletteRenderTests: XCTestCase {
                 ) else { return }
                 _ = recorder.performPrimaryAction()
                 drain(until: { recorder.isRecording })
+            case .settings:
+                controller.setSearchQueryForTesting("sound")
+                drain(until: {
+                    controller.visibleCommandIDsForTesting.first == AppCommands.ID.silenceSounds
+                        && controller.visibleCommandIDsForTesting.count > 1
+                })
+                // Selected one row down, so the picture carries both halves: the command that
+                // performs the thing on top, and the footer a settings row changes to "Open".
+                controller.moveSelectionForTesting(by: 1)
             }
 
             guard let root = window.contentView else { return }
@@ -198,18 +214,52 @@ final class CommandPaletteRenderTests: XCTestCase {
         ]
     }
 
+    private let fixtureCommandIDs = [
+        AppCommands.ID.closeSession,
+        AppCommands.ID.renameSession,
+        AppCommands.ID.commandPalette,
+        AppCommands.ID.files,
+        AppCommands.ID.review,
+        AppCommands.ID.find,
+        AppCommands.ID.toggleSidebar,
+        AppCommands.ID.newSession,
+        AppCommands.ID.silenceSounds,
+    ]
+
+    /// Stated here rather than read from `SettingsPages`, so the picture does not change every
+    /// time a settings row is added somewhere else in the app.
+    private let settingsDestinations = [
+        SettingsDestination(
+            pageID: "general",
+            pageTitle: "General",
+            group: "App",
+            section: "Notifications",
+            rowTitle: "Alert sound"
+        ),
+        SettingsDestination(
+            pageID: "general",
+            pageTitle: "General",
+            group: "App",
+            section: "Notifications",
+            rowTitle: "Terminal bell",
+            keywords: ["beep", "sound"]
+        ),
+        SettingsDestination(
+            pageID: "profiles",
+            pageTitle: "Profiles",
+            group: "Appearance",
+            section: "Sound",
+            rowTitle: "Play a sound on output"
+        ),
+        SettingsDestination(
+            pageID: "general",
+            pageTitle: "General",
+            group: "App"
+        ),
+    ]
+
     private func descriptors(shortcuts: [String: KeyboardShortcut]) -> [HostCommandDescriptor] {
-        let ids = [
-            AppCommands.ID.closeSession,
-            AppCommands.ID.renameSession,
-            AppCommands.ID.commandPalette,
-            AppCommands.ID.files,
-            AppCommands.ID.review,
-            AppCommands.ID.find,
-            AppCommands.ID.toggleSidebar,
-            AppCommands.ID.newSession,
-        ]
-        return ids.compactMap(AppCommands.command).map { command in
+        fixtureCommandIDs.compactMap(AppCommands.command).map { command in
             let needsSession = [AppCommands.ID.closeSession, AppCommands.ID.renameSession]
                 .contains(command.id)
             return command.hostDescriptor(
@@ -219,7 +269,7 @@ final class CommandPaletteRenderTests: XCTestCase {
                     : .available,
                 nextInput: needsSession ? sessionInput : nil
             )
-        }
+        } + settingsDestinations.map { $0.hostDescriptor() }
     }
 
     private func drain(until condition: () -> Bool, timeout: TimeInterval = 2) {

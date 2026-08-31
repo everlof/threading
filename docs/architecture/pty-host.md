@@ -1167,10 +1167,12 @@ boundary query suppression already uses, the first coalesced flush — and
 Everything after it is the child working now, and output inference reads it exactly as it reads a
 spawned session's.
 
-**No transcript seeding stands in for that**, and the readers that exist cannot:
-`ClaudeTranscriptTurnRefusal` and `CodexTranscriptInterruption` recover a turn that *ended*, and
-there is no reader here that says one is open. Grok and OpenCode have no boundary reader at all and
-are on output inference either way, which is the same accepted cost R7 already names.
+**No transcript seeding stands in for that.** Claude's readers recover a turn that *ended*, and
+its transcript records no open one. `CodexTranscriptTurnBoundary` does read an open turn — see
+[`session-activity.md`](session-activity.md) — but not in time to matter here: a reattached
+session's rollout path arrives on its own hooks, which is after the replay this grace covers.
+Grok and OpenCode have no boundary reader at all and are on output inference either way, which is
+the same accepted cost R7 already names.
 
 Titles and the working directory come back on their own: the pid arrives in `attached` and becomes
 `shellPid`, and OSC 0/2 and OSC 7 come through the emulator, which is here again.

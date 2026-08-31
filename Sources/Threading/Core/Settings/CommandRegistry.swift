@@ -125,7 +125,8 @@ final class CommandRegistry {
                             ),
                             scope: command.scope,
                             risk: command.risk,
-                            menuPlacements: command.menuPlacements
+                            menuPlacements: command.menuPlacements,
+                            extensionInput: command.input
                         )
                     }
             }

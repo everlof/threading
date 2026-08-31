@@ -108,7 +108,14 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
             popover.backgroundColor = style.fill
             popover.popoverBackgroundViewClass = MobileThemedPopoverBackgroundView.self
             hostingController = hosting
+            // UIKit instantiates the background view itself, during this call, and the first
+            // hook this coordinator has into the created instance is the presentation's
+            // completion — after the animation has run. Styling only there presented the whole
+            // pop-in with a clear body and border: the content arrived, then its box faded in
+            // behind it. The pending style is what the view is born with instead.
+            MobileThemedPopoverBackgroundView.pendingStyle = style
             presenter.present(hosting, animated: true) { [weak self, weak hosting] in
+                MobileThemedPopoverBackgroundView.pendingStyle = nil
                 guard let self, let hosting, let style = self.style else { return }
                 self.apply(style, to: hosting)
             }
@@ -204,6 +211,12 @@ final class MobileThemedPopoverBackgroundView: UIPopoverBackgroundView {
         static let arrowHeight: CGFloat = 12
     }
 
+    /// The style the next UIKit-created instance is born with, staged by the presenter just
+    /// before `present` because UIKit offers no seam between instantiating this class and the
+    /// first frame it draws. Without it the popover animates in around a clear body and the
+    /// theme's box arrives only with the presentation's completion, after its content.
+    static var pendingStyle: Style?
+
     private var style = Style(
         fill: .clear,
         border: .clear,
@@ -237,6 +250,9 @@ final class MobileThemedPopoverBackgroundView: UIPopoverBackgroundView {
         super.init(frame: frame)
         backgroundColor = .clear
         isOpaque = false
+        if let pendingStyle = Self.pendingStyle {
+            style = pendingStyle
+        }
     }
 
     @available(*, unavailable)

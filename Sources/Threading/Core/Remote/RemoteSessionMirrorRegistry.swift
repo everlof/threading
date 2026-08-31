@@ -74,7 +74,6 @@ enum RemoteNewSessionModelCatalog {
 /// native conversations use typed snapshots.
 @MainActor
 final class RemoteSessionMirrorRegistry {
-
     static let shared = RemoteSessionMirrorRegistry()
     private let appEvents = AppEventObservations()
     private var appearanceObservation: NSKeyValueObservation?
@@ -252,7 +251,9 @@ final class RemoteSessionMirrorRegistry {
         }
 
         func cancelExpiries() {
-            for lease in held.values { lease.expiry.cancel() }
+            for lease in held.values {
+                lease.expiry.cancel()
+            }
         }
 
         mutating func dropHeld() {
@@ -392,10 +393,11 @@ final class RemoteSessionMirrorRegistry {
         switch authorization.scope {
         case .allSessions:
             return allSessionsCatalogue(for: authorization)
-        case .session(let sessionID):
+        case let .session(sessionID):
             guard let session = ProjectStore.shared.session(withID: sessionID),
                   let project = ProjectStore.shared.project(forSessionID: sessionID),
-                  RemoteSessionAccess.isVisible(session) else {
+                  RemoteSessionAccess.isVisible(session)
+            else {
                 return makeMeCatalogue(
                     sessions: [],
                     terminals: [],
@@ -417,7 +419,7 @@ final class RemoteSessionMirrorRegistry {
                 newSessionCatalog: nil,
                 authorization: authorization
             )
-        case .projectTerminal(let terminalID):
+        case let .projectTerminal(terminalID):
             guard let terminal = ProjectStore.shared.terminal(withID: terminalID) else {
                 return makeMeCatalogue(
                     sessions: [],
@@ -449,7 +451,8 @@ final class RemoteSessionMirrorRegistry {
         let now = catalogueCacheNow()
         if authorization.principal == .ownerDevice,
            let cached = allSessionsCatalogueCache[managesSessions],
-           cached.expiresAt > now {
+           cached.expiresAt > now
+        {
             return cached.value
         }
 
@@ -502,16 +505,16 @@ final class RemoteSessionMirrorRegistry {
             .sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
         let archived = managesSessions
             ? ProjectStore.shared.archivedSessions()
-                .map {
-                    summary(
-                        for: $0.session,
+            .map {
+                summary(
+                    for: $0.session,
                     projectID: $0.project.id,
-                        projectName: $0.project.name,
-                        projectLimitRecovery: $0.project.limitRecoveryPolicy,
-                        authorization: authorization
-                    )
-                }
-                .sorted(by: summaryOrder)
+                    projectName: $0.project.name,
+                    projectLimitRecovery: $0.project.limitRecoveryPolicy,
+                    authorization: authorization
+                )
+            }
+            .sorted(by: summaryOrder)
             : nil
         return makeMeCatalogue(
             sessions: sessions,
@@ -676,7 +679,7 @@ final class RemoteSessionMirrorRegistry {
             return .waitForReset
         case .resumeOnBestAccount:
             return .resumeOnBestAccount
-        case .resumeVia(let accountID):
+        case let .resumeVia(accountID):
             return .resumeVia(accountID: accountID.handle.name)
         }
     }
@@ -712,7 +715,7 @@ final class RemoteSessionMirrorRegistry {
                         name: AgentAccountDefaults.defaultDisplayName,
                         models: RemoteNewSessionModelCatalog.choices(for: kind, account: nil),
                         defaultModelID: AgentModels.defaultModel(for: kind, account: nil)
-                    )
+                    ),
                 ]
             } else {
                 accounts = discoveredAccounts.map { account in
@@ -895,7 +898,8 @@ final class RemoteSessionMirrorRegistry {
             return .attached
         }
         guard var starting = startingSessions[sessionID],
-              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)) else {
+              RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID))
+        else {
             return .unavailable
         }
         let key = ObjectIdentifier(connection)
@@ -986,7 +990,8 @@ final class RemoteSessionMirrorRegistry {
         )
         if !attached,
            let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
-                  conversation.isRunning {
+           conversation.isRunning
+        {
             attached = attachConversation(
                 connection,
                 to: conversation,
@@ -1058,8 +1063,8 @@ final class RemoteSessionMirrorRegistry {
         let replay = Self.terminalReplay(ring: ringSnapshot, budget: budget)
         switch replay {
         case .nothing: break
-        case .whole(let ring): connection.sendBinary(ring)
-        case .cut(let tail): connection.sendBinary(tail)
+        case let .whole(ring): connection.sendBinary(ring)
+        case let .cut(tail): connection.sendBinary(tail)
         }
 
         guard case .cut = replay, let budget else {
@@ -1074,7 +1079,7 @@ final class RemoteSessionMirrorRegistry {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             var modes = snapshot.modes
-            if case .captured(let fresh) = self.terminalApplication?.currentSnapshot(
+            if case let .captured(fresh) = self.terminalApplication?.currentSnapshot(
                 for: terminalID
             ) {
                 connection.sendBinary(fresh.screenSeed)
@@ -1207,9 +1212,9 @@ final class RemoteSessionMirrorRegistry {
         switch replay {
         case .nothing:
             break
-        case .whole(let ring):
+        case let .whole(ring):
             connection.sendBinary(ring)
-        case .cut(let tail):
+        case let .cut(tail):
             connection.sendBinary(tail)
         }
 
@@ -1243,8 +1248,9 @@ final class RemoteSessionMirrorRegistry {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             var modes = snapshot.modes
-            if case .captured(let fresh) =
-                self.terminalApplication?.currentSnapshot(for: sessionID) {
+            if case let .captured(fresh) =
+                self.terminalApplication?.currentSnapshot(for: sessionID)
+            {
                 connection.sendBinary(fresh.screenSeed)
                 modes = fresh.modes
             }
@@ -1327,7 +1333,8 @@ final class RemoteSessionMirrorRegistry {
     ) {
         guard mirrors[sessionID]?.surface == .conversation,
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
-              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
+              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID)
+        else {
             return
         }
         connection.sendText(encode(RemoteConversationWirePolicy.page(
@@ -1345,7 +1352,8 @@ final class RemoteSessionMirrorRegistry {
         guard let peer = connection.authenticatedPeer,
               mirrors[sessionID]?.surface == .conversation,
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
-              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
+              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID)
+        else {
             return
         }
         let projection = conversation.remoteProjection
@@ -1353,7 +1361,8 @@ final class RemoteSessionMirrorRegistry {
         if mirrors[sessionID]?.conversationRowsRevision != projection.rowsRevision
             || mirrors[sessionID]?.conversationSnapshot.map({
                 !Self.sameConversationMetadata($0, current)
-            }) ?? true {
+            }) ?? true
+        {
             broadcastConversation(sessionID)
         }
         let revision = mirrors[sessionID]?.conversationRevision ?? 0
@@ -1374,7 +1383,8 @@ final class RemoteSessionMirrorRegistry {
     ) {
         let key = ObjectIdentifier(connection)
         if let startupSessionID = startupSessionByConnection.removeValue(forKey: key),
-           var starting = startingSessions[startupSessionID] {
+           var starting = startingSessions[startupSessionID]
+        {
             starting.waiters[key] = nil
             startingSessions[startupSessionID] = starting
         }
@@ -1388,7 +1398,8 @@ final class RemoteSessionMirrorRegistry {
             )
             terminalMirrors[terminalID]?.subscribers.removeValue(forKey: key)
             if terminalMirrors[terminalID]?.subscribers.isEmpty == true,
-               !AppSettings.shared.remoteAccessEnabled {
+               !AppSettings.shared.remoteAccessEnabled
+            {
                 // A mirror that is going cannot hold a grid: nothing would be left to expire it,
                 // and this terminal would stay at phone width with no lease to explain it.
                 terminalMirrors[terminalID]?.viewportLeases.dropHeld()
@@ -1415,7 +1426,7 @@ final class RemoteSessionMirrorRegistry {
             // new socket attached — often an apparently blank TUI.
             let keepsTerminalCapture =
                 mirrors[sessionID]?.surface == .terminal
-                && AppSettings.shared.remoteAccessEnabled
+                    && AppSettings.shared.remoteAccessEnabled
             if !keepsTerminalCapture {
                 if mirrors[sessionID]?.surface == .terminal {
                     // A mirror that is going cannot hold a grid: nothing would be left to expire
@@ -1476,7 +1487,7 @@ final class RemoteSessionMirrorRegistry {
     func beginCapturing(sessionID: SessionID) -> RemoteTerminalState? {
         guard let terminalApplication else { return nil }
         if mirrors[sessionID] != nil {
-            guard case .available(let state) = terminalApplication.state(for: sessionID) else {
+            guard case let .available(state) = terminalApplication.state(for: sessionID) else {
                 return nil
             }
             return state
@@ -1489,7 +1500,7 @@ final class RemoteSessionMirrorRegistry {
                 self?.broadcast(data, sessionID: sessionID)
             }
         }
-        guard case .captured(let snapshot) = result else { return nil }
+        guard case let .captured(snapshot) = result else { return nil }
         var ring = RemoteRingBuffer(capacity: RemoteAccessDefaults.ringBufferBytes)
         // A synthesised repaint, not `getBufferAsData()`: that is plain text joined by bare line
         // feeds with blank cells as NUL, which a client renders as a staircase of run-together
@@ -1504,7 +1515,7 @@ final class RemoteSessionMirrorRegistry {
     func beginCapturing(terminalID: TerminalID) -> RemoteTerminalState? {
         guard let terminalApplication else { return nil }
         if terminalMirrors[terminalID] != nil {
-            guard case .available(let state) = terminalApplication.state(for: terminalID) else {
+            guard case let .available(state) = terminalApplication.state(for: terminalID) else {
                 return nil
             }
             return state
@@ -1514,7 +1525,7 @@ final class RemoteSessionMirrorRegistry {
                 self?.broadcast(data, terminalID: terminalID)
             }
         }
-        guard case .captured(let snapshot) = result else { return nil }
+        guard case let .captured(snapshot) = result else { return nil }
         var ring = RemoteRingBuffer(capacity: RemoteAccessDefaults.ringBufferBytes)
         ring.append(snapshot.screenSeed)
         terminalMirrors[terminalID] = ProjectTerminalMirror(ring: ring)
@@ -1539,7 +1550,8 @@ final class RemoteSessionMirrorRegistry {
             beginCapturing(sessionID: sessionID)
         }
         for terminalID in terminalApplication.terminalIDs
-        where ProjectStore.shared.terminal(withID: terminalID) != nil {
+            where ProjectStore.shared.terminal(withID: terminalID) != nil
+        {
             beginCapturing(terminalID: terminalID)
         }
     }
@@ -1547,13 +1559,19 @@ final class RemoteSessionMirrorRegistry {
     /// Releases idle capture as well as subscribers when the master switch is turned off.
     func remoteAccessStopped() {
         invalidateMeCatalogue()
-        for transaction in terminalHydrations.values { transaction.cancel() }
+        for transaction in terminalHydrations.values {
+            transaction.cancel()
+        }
         terminalHydrations.removeAll()
         // Turning the master switch off is an authorization change, so every held grid ends now
         // rather than at its own expiry. The mirrors are cleared below and each surface is put
         // back to its Mac frame; this cancels the timers that would otherwise outlive them.
-        for mirror in mirrors.values { mirror.viewportLeases.cancelExpiries() }
-        for mirror in terminalMirrors.values { mirror.viewportLeases.cancelExpiries() }
+        for mirror in mirrors.values {
+            mirror.viewportLeases.cancelExpiries()
+        }
+        for mirror in terminalMirrors.values {
+            mirror.viewportLeases.cancelExpiries()
+        }
         for sessionID in mirrors.keys where mirrors[sessionID]?.surface == .terminal {
             _ = terminalApplication?.setViewport(nil, for: sessionID)
             removeTap(sessionID: sessionID)
@@ -1562,9 +1580,13 @@ final class RemoteSessionMirrorRegistry {
             _ = terminalApplication?.setViewport(nil, for: terminalID)
             removeTap(terminalID: terminalID)
         }
-        for work in pendingConversationBroadcasts.values { work.cancel() }
+        for work in pendingConversationBroadcasts.values {
+            work.cancel()
+        }
         pendingConversationBroadcasts.removeAll()
-        for starting in startingSessions.values { starting.expiry?.cancel() }
+        for starting in startingSessions.values {
+            starting.expiry?.cancel()
+        }
         startingSessions.removeAll()
         startupSessionByConnection.removeAll()
         mirrors.removeAll()
@@ -1574,7 +1596,9 @@ final class RemoteSessionMirrorRegistry {
         presenceIDs.removeAll()
         promptReplayCache.removeAll()
         attentionRequestPolicy.removeAll()
-        for task in focusedControllerReleaseTasks.values { task.cancel() }
+        for task in focusedControllerReleaseTasks.values {
+            task.cancel()
+        }
         focusedControllerReleaseTasks.removeAll()
         inputControls.removeAll()
         sessionByConnection.removeAll()
@@ -1593,7 +1617,8 @@ final class RemoteSessionMirrorRegistry {
         guard canWrite(sessionID: sessionID, authorization: authorization) else { return false }
         guard RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
               let terminalApplication,
-              case .available = terminalApplication.state(for: sessionID) else {
+              case .available = terminalApplication.state(for: sessionID)
+        else {
             return false
         }
 
@@ -1620,7 +1645,8 @@ final class RemoteSessionMirrorRegistry {
               let terminalApplication,
               case .available = terminalApplication.state(for: terminalID) else { return false }
         if let device,
-           terminalMirrors[terminalID]?.inputSeenDevices.contains(device) == false {
+           terminalMirrors[terminalID]?.inputSeenDevices.contains(device) == false
+        {
             terminalMirrors[terminalID]?.inputSeenDevices.insert(device)
             EventLog.shared.record(.remote, "First remote terminal input", [
                 "terminal": terminalID.uuidString,
@@ -1641,12 +1667,13 @@ final class RemoteSessionMirrorRegistry {
     ) {
         guard let authorization = connection.authenticatedPeer?.authorization,
               canWrite(sessionID: sessionID, authorization: authorization),
-              (20...240).contains(cols),
-              (4...160).contains(rows),
+              (20 ... 240).contains(cols),
+              (4 ... 160).contains(rows),
               mirrors[sessionID]?.surface == .terminal,
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
               let terminalApplication,
-              case .available(let state) = terminalApplication.state(for: sessionID) else {
+              case let .available(state) = terminalApplication.state(for: sessionID)
+        else {
             return
         }
 
@@ -1773,7 +1800,7 @@ final class RemoteSessionMirrorRegistry {
             switch promptReplayCache.decision(for: replayKey, fingerprint: fingerprint) {
             case .new:
                 break
-            case .replay(let status):
+            case let .replay(status):
                 return status
             case .conflict:
                 return .conflict
@@ -1786,7 +1813,8 @@ final class RemoteSessionMirrorRegistry {
         } else if !RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)) {
             status = .unavailable
         } else if let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
-                  conversation.isRunning {
+                  conversation.isRunning
+        {
             if !conversation.remoteSnapshot.canSend {
                 status = .busy
             } else if let prompt = promptText(
@@ -1874,7 +1902,7 @@ final class RemoteSessionMirrorRegistry {
             switch promptReplayCache.decision(for: replayKey, fingerprint: fingerprint) {
             case .new:
                 break
-            case .replay(let status):
+            case let .replay(status):
                 return status
             case .conflict:
                 return .conflict
@@ -1885,13 +1913,14 @@ final class RemoteSessionMirrorRegistry {
         if !canWrite(sessionID: sessionID, authorization: authorization) {
             status = .rejected
         } else if mirrors[sessionID]?.surface == .terminal,
-           RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
-           let line = promptText(
-               text,
-               stagedAttachmentPaths: stagedAttachmentPaths,
-               for: sessionID
-           ),
-           terminalApplication?.sendInput(Array((line + "\r").utf8), to: sessionID) == .applied {
+                  RemoteSessionAccess.isVisible(ProjectStore.shared.session(withID: sessionID)),
+                  let line = promptText(
+                      text,
+                      stagedAttachmentPaths: stagedAttachmentPaths,
+                      for: sessionID
+                  ),
+                  terminalApplication?.sendInput(Array((line + "\r").utf8), to: sessionID) == .applied
+        {
             recordFirstInput(device: device, sessionID: sessionID)
             RemoteNotificationService.shared.recordInteraction(
                 sessionID: sessionID,
@@ -1931,7 +1960,7 @@ final class RemoteSessionMirrorRegistry {
             ("terminal-attachments\0" + stagedPaths.joined(separator: "\0")).utf8
         )))
         switch promptReplayCache.decision(for: replayKey, fingerprint: fingerprint) {
-        case .replay(let status):
+        case let .replay(status):
             return status
         case .conflict:
             return .conflict
@@ -1953,7 +1982,8 @@ final class RemoteSessionMirrorRegistry {
                   terminalApplication?.sendInput(
                       Array(inserted.utf8),
                       to: sessionID
-                  ) == .applied {
+                  ) == .applied
+        {
             recordFirstInput(device: device, sessionID: sessionID)
             RemoteNotificationService.shared.recordInteraction(
                 sessionID: sessionID,
@@ -2014,7 +2044,8 @@ final class RemoteSessionMirrorRegistry {
     ) -> RemoteInputControlResultStatus {
         guard let peer = connection.authenticatedPeer,
               peer.authorization.capability == .interact,
-              mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil else {
+              mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil
+        else {
             return .forbidden
         }
         let actorID = peer.authorization.collaborationParticipantID
@@ -2233,7 +2264,9 @@ final class RemoteSessionMirrorRegistry {
     ) {
         guard let mirror = mirrors[sessionID] else { return }
         let message = encode(event)
-        for connection in mirror.subscribers.values { connection.sendText(message) }
+        for connection in mirror.subscribers.values {
+            connection.sendText(message)
+        }
     }
 
     private func inputControlChanged(_ sessionID: SessionID) {
@@ -2254,7 +2287,8 @@ final class RemoteSessionMirrorRegistry {
             // would have. That is correct: the moment control returns to the Mac owner, the
             // phone that left is no longer a client whose grid the PTY answers to.
             for (deviceID, lease) in mirror.viewportLeases.held
-            where !canWrite(sessionID: sessionID, authorization: lease.authorization) {
+                where !canWrite(sessionID: sessionID, authorization: lease.authorization)
+            {
                 lease.expiry.cancel()
                 mirror.viewportLeases.held.removeValue(forKey: deviceID)
             }
@@ -2265,7 +2299,8 @@ final class RemoteSessionMirrorRegistry {
         // Provider state did not change, but each viewer's authorised `canSend` may have.
         if mirrors[sessionID]?.surface == .conversation,
            let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID),
-           let mirror = mirrors[sessionID] {
+           let mirror = mirrors[sessionID]
+        {
             let revision = mirror.conversationRevision
             for connection in mirror.subscribers.values {
                 guard let authorization = connection.authenticatedPeer?.authorization else { continue }
@@ -2330,7 +2365,8 @@ final class RemoteSessionMirrorRegistry {
         sessionID: SessionID
     ) {
         guard mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
-              connection.authenticatedPeer?.authorization.capability == .interact else {
+              connection.authenticatedPeer?.authorization.capability == .interact
+        else {
             return
         }
         broadcastPresence(
@@ -2355,9 +2391,10 @@ final class RemoteSessionMirrorRegistry {
               peer.authorization.capability == .interact,
               mirrors[sessionID]?.subscribers[ObjectIdentifier(connection)] != nil,
               let recipient = collaborationParticipants(
-                for: sessionID,
-                authorization: peer.authorization
-              ).first(where: { $0.id == recipientID }) else {
+                  for: sessionID,
+                  authorization: peer.authorization
+              ).first(where: { $0.id == recipientID })
+        else {
             return .rejected
         }
 
@@ -2382,7 +2419,7 @@ final class RemoteSessionMirrorRegistry {
             rateKey: rateKey,
             fingerprint: fingerprint
         ) {
-        case .replay(let status):
+        case let .replay(status):
             return status
         case .conflict:
             return .rejected
@@ -2467,7 +2504,8 @@ final class RemoteSessionMirrorRegistry {
 
     private func broadcastConversation(_ sessionID: SessionID) {
         guard var mirror = mirrors[sessionID], mirror.surface == .conversation,
-              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID) else {
+              let conversation = AgentRuntime.shared.remoteConversationSurface(for: sessionID)
+        else {
             return
         }
         let projection = conversation.remoteProjection
@@ -2571,7 +2609,8 @@ final class RemoteSessionMirrorRegistry {
         guard let mirror = mirrors[sessionID],
               mirror.subscribers[ObjectIdentifier(connection)] != nil,
               mirror.runPlanRevision == revision,
-              let progress = mirror.runPlan else {
+              let progress = mirror.runPlan
+        else {
             connection.sendText(encode(Self.runPlanUpdate(
                 mirrors[sessionID]?.runPlan,
                 revision: mirrors[sessionID]?.runPlanRevision ?? 0
@@ -2588,7 +2627,7 @@ final class RemoteSessionMirrorRegistry {
             revision: revision,
             offset: start,
             total: progress.steps.count,
-            steps: Self.remoteSteps(Array(progress.steps[start..<end]), baseOffset: start)
+            steps: Self.remoteSteps(Array(progress.steps[start ..< end]), baseOffset: start)
         )))
     }
 
@@ -2652,7 +2691,7 @@ final class RemoteSessionMirrorRegistry {
         var bytes = 0
         while end < title.endIndex {
             let next = title.index(after: end)
-            let width = title[end..<next].utf8.count
+            let width = title[end ..< next].utf8.count
             guard bytes + width <= limit - 3 else { break }
             bytes += width
             end = next
@@ -2696,7 +2735,7 @@ final class RemoteSessionMirrorRegistry {
             for connection in themeEventSubscribers.values {
                 connection.sendText(message)
             }
-        case .terminalRow(let terminalID):
+        case let .terminalRow(terminalID):
             let terminal = ProjectStore.shared.terminal(withID: terminalID)
             for connection in themeEventSubscribers.values {
                 guard let authorization = connection.authenticatedPeer?.authorization,
@@ -2723,8 +2762,8 @@ final class RemoteSessionMirrorRegistry {
                       ) else { continue }
                 connection.sendText(encode(delta))
             }
-        case .sessionAdded(_, let sessionID), .sessionOrder(let sessionID),
-             .sessionRow(let sessionID):
+        case let .sessionAdded(_, sessionID), let .sessionOrder(sessionID),
+             let .sessionRow(sessionID):
             let session = ProjectStore.shared.session(withID: sessionID)
             let project = ProjectStore.shared.project(forSessionID: sessionID)
             for connection in themeEventSubscribers.values {
@@ -2779,7 +2818,7 @@ final class RemoteSessionMirrorRegistry {
         for change: ProjectsDidChange,
         authorization: RemoteAuthorization
     ) -> RemoteSessionsChangedDTO? {
-        guard case .sessionRemoved(_, let sessionID) = change.sidebarImpact,
+        guard case let .sessionRemoved(_, sessionID) = change.sidebarImpact,
               authorization.scope.covers(sessionID) else { return nil }
         return RemoteSessionsChangedDTO(
             session: nil,
@@ -2846,7 +2885,8 @@ final class RemoteSessionMirrorRegistry {
                let controllerID = record.controllerID,
                !inputControlParticipants(for: sessionID).contains(where: {
                    $0.id == controllerID
-               }) {
+               })
+            {
                 record.controllerID = RemoteCollaborationParticipantDTO.ownerID
                 record.revision &+= 1
                 inputControls[sessionID] = record
@@ -3060,7 +3100,7 @@ final class RemoteSessionMirrorRegistry {
         terminalHydrations[key] = nil
         transaction.cancel()
 
-        if case .captured(let snapshot) = terminalApplication?.currentSnapshot(
+        if case let .captured(snapshot) = terminalApplication?.currentSnapshot(
             for: transaction.sessionID
         ) {
             transaction.connection.sendBinary(snapshot.screenSeed)
@@ -3103,7 +3143,8 @@ final class RemoteSessionMirrorRegistry {
         var removedHeldLease = false
         if release == .immediate,
            let deviceID = connection.authenticatedPeer?.deviceID,
-           let held = leases.held.removeValue(forKey: deviceID) {
+           let held = leases.held.removeValue(forKey: deviceID)
+        {
             held.expiry.cancel()
             removedHeldLease = true
         }
@@ -3113,8 +3154,9 @@ final class RemoteSessionMirrorRegistry {
             applyViewport(for: target)
         }
         guard release == .reconnectGrace, let request else { return }
-        if case .session(let sessionID) = target,
-           locallyVisibleSessionID == sessionID {
+        if case let .session(sessionID) = target,
+           locallyVisibleSessionID == sessionID
+        {
             // The local renderer is already looking at this chat. There is no unattended
             // interval for a reconnect grace to protect, so its desktop grid wins now.
             return
@@ -3169,22 +3211,22 @@ final class RemoteSessionMirrorRegistry {
 
     private func viewportLeases(for target: ViewportLeaseTarget) -> ViewportLeases? {
         switch target {
-        case .session(let sessionID): return mirrors[sessionID]?.viewportLeases
-        case .terminal(let terminalID): return terminalMirrors[terminalID]?.viewportLeases
+        case let .session(sessionID): return mirrors[sessionID]?.viewportLeases
+        case let .terminal(terminalID): return terminalMirrors[terminalID]?.viewportLeases
         }
     }
 
     private func setViewportLeases(_ leases: ViewportLeases, for target: ViewportLeaseTarget) {
         switch target {
-        case .session(let sessionID): mirrors[sessionID]?.viewportLeases = leases
-        case .terminal(let terminalID): terminalMirrors[terminalID]?.viewportLeases = leases
+        case let .session(sessionID): mirrors[sessionID]?.viewportLeases = leases
+        case let .terminal(terminalID): terminalMirrors[terminalID]?.viewportLeases = leases
         }
     }
 
     private func applyViewport(for target: ViewportLeaseTarget) {
         switch target {
-        case .session(let sessionID): applyViewport(for: sessionID)
-        case .terminal(let terminalID): applyViewport(for: terminalID)
+        case let .session(sessionID): applyViewport(for: sessionID)
+        case let .terminal(terminalID): applyViewport(for: terminalID)
         }
     }
 
@@ -3198,8 +3240,8 @@ final class RemoteSessionMirrorRegistry {
     ) -> [String: String] {
         var fields = extra
         switch target {
-        case .session(let sessionID): fields["session"] = sessionID.uuidString
-        case .terminal(let terminalID): fields["terminal"] = terminalID.uuidString
+        case let .session(sessionID): fields["session"] = sessionID.uuidString
+        case let .terminal(terminalID): fields["terminal"] = terminalID.uuidString
         }
         fields["device"] = MacRemoteDiagnostics.pseudonym(deviceID, prefix: "device")
         return fields
@@ -3207,7 +3249,8 @@ final class RemoteSessionMirrorRegistry {
 
     private func applyViewport(for sessionID: SessionID) {
         guard let terminalApplication,
-              case .available(let state) = terminalApplication.state(for: sessionID) else {
+              case let .available(state) = terminalApplication.state(for: sessionID)
+        else {
             return
         }
         let leases = mirrors[sessionID]?.viewportLeases ?? ViewportLeases()
@@ -3237,7 +3280,8 @@ final class RemoteSessionMirrorRegistry {
 
     private func applyViewport(for terminalID: TerminalID) {
         guard let terminalApplication,
-              case .available(let state) = terminalApplication.state(for: terminalID) else {
+              case let .available(state) = terminalApplication.state(for: terminalID)
+        else {
             return
         }
         let leases = terminalMirrors[terminalID]?.viewportLeases ?? ViewportLeases()
@@ -3403,7 +3447,8 @@ final class RemoteSessionMirrorRegistry {
 
         let currentMemberID = authorization.member?.id
         for member in RemoteAccessCoordinator.shared.access(for: sessionID).members
-            where member.capability == .interact && member.id != currentMemberID {
+            where member.capability == .interact && member.id != currentMemberID
+        {
             participants.append(RemoteCollaborationParticipantDTO(
                 id: member.id,
                 displayName: member.displayName,
@@ -3448,7 +3493,8 @@ final class RemoteSessionMirrorRegistry {
     ) {
         guard let peer = connection.authenticatedPeer,
               canManageSessions(peer.authorization),
-              let event = latestWorkspaceActivity[sessionID] else {
+              let event = latestWorkspaceActivity[sessionID]
+        else {
             return
         }
         connection.sendText(encode(event))
@@ -3464,7 +3510,7 @@ final class RemoteSessionMirrorRegistry {
 
     private func encode<Value: Encodable>(_ value: Value) -> String {
         do {
-            return String(decoding: try JSONEncoder().encode(value), as: UTF8.self)
+            return try String(decoding: JSONEncoder().encode(value), as: UTF8.self)
         } catch {
             ThreadingLogger.remote.error(
                 "Remote mirror encoding failed: \(error.localizedDescription, privacy: .private(mask: .hash))"

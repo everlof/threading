@@ -1288,11 +1288,73 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 }
 
+/// One stable TextKit shape for a line that shares its row with fixed controls. Exclusion paths
+/// describe occupied area, but they do not describe the one jump this layout needs: after one
+/// narrowed line, the next line starts below the controls and regains the whole width.
+private final class FirstLineAccessoryTextContainer: NSTextContainer {
+    var firstLineLeftInset: CGFloat = 0
+    var firstLineRightInset: CGFloat = 0
+    var nextLineMinimumY: CGFloat = 0
+
+    override func lineFragmentRect(
+        forProposedRect proposedRect: CGRect,
+        at characterIndex: Int,
+        writingDirection baseWritingDirection: NSWritingDirection,
+        remaining remainingRect: UnsafeMutablePointer<CGRect>?
+    ) -> CGRect {
+        guard nextLineMinimumY > 0,
+              firstLineLeftInset > 0 || firstLineRightInset > 0 else {
+            return super.lineFragmentRect(
+                forProposedRect: proposedRect,
+                at: characterIndex,
+                writingDirection: baseWritingDirection,
+                remaining: remainingRect
+            )
+        }
+
+        if proposedRect.minY < 0.5 {
+            var firstLine = super.lineFragmentRect(
+                forProposedRect: proposedRect,
+                at: characterIndex,
+                writingDirection: baseWritingDirection,
+                remaining: remainingRect
+            )
+            firstLine.origin.x += firstLineLeftInset
+            firstLine.size.width = max(
+                0,
+                firstLine.width - firstLineLeftInset - firstLineRightInset
+            )
+            // The space beside the centre fragment belongs to controls, not to another text
+            // fragment on the same typographic line.
+            remainingRect?.pointee = .zero
+            return firstLine
+        }
+
+        if proposedRect.minY < nextLineMinimumY {
+            var fullWidthLine = proposedRect
+            fullWidthLine.origin.y = nextLineMinimumY
+            return super.lineFragmentRect(
+                forProposedRect: fullWidthLine,
+                at: characterIndex,
+                writingDirection: baseWritingDirection,
+                remaining: remainingRect
+            )
+        }
+
+        return super.lineFragmentRect(
+            forProposedRect: proposedRect,
+            at: characterIndex,
+            writingDirection: baseWritingDirection,
+            remaining: remainingRect
+        )
+    }
+}
+
 /// The composer's own text view: it measures itself, and it knows that a paste is not always
 /// text. The clipboard itself is deliberately not reachable from here — the composer that owns
 /// the attachment tray answers both questions — so this stays a view with no opinion about
 /// where a file goes.
-final class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
+class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
     /// Whether the clipboard is holding something only the attachment strip could take.
     var offersFiles: () -> Bool = { false }
     /// Takes such a paste, and answers whether it did.
@@ -1434,7 +1496,7 @@ final class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
     }
 
     /// `UIViewRepresentable.sizeThatFits` measures before the view necessarily owns its proposed
-    /// bounds, so the bridge prepares the same exclusion geometry against that proposed width.
+    /// bounds, so the bridge prepares the same first-line geometry against that proposed width.
     func updateFirstLineAccessoryExclusions(for viewWidth: CGFloat) {
         let containerWidth = max(
             0,
@@ -1447,6 +1509,33 @@ final class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
         )
         let lineHeight = font?.lineHeight ?? 0
         let isRightToLeft = effectiveUserInterfaceLayoutDirection == .rightToLeft
+
+        if let accessoryContainer = textContainer as? FirstLineAccessoryTextContainer {
+            let leftWidth = isRightToLeft ? trailingWidth : leadingWidth
+            let rightWidth = isRightToLeft ? leadingWidth : trailingWidth
+            let nextLineMinimumY = max(
+                lineHeight,
+                firstLineAccessoryHeight - textContainerInset.top
+            )
+            let signature = [
+                containerWidth,
+                leftWidth,
+                rightWidth,
+                lineHeight,
+                nextLineMinimumY,
+            ]
+            guard signature != appliedFirstLineAccessoryLayout else { return }
+            appliedFirstLineAccessoryLayout = signature
+            accessoryContainer.firstLineLeftInset = containerWidth > 0 ? leftWidth : 0
+            accessoryContainer.firstLineRightInset = containerWidth > 0 ? rightWidth : 0
+            accessoryContainer.nextLineMinimumY = lineHeight > 0 ? nextLineMinimumY : 0
+            firstLineTextLayoutChanged()
+            return
+        }
+
+        // The compact new-session editor keeps its established exclusion/delegate geometry.
+        // Its controls can move into a separate row at the scrolling threshold; replacing its
+        // TextKit stack during that SwiftUI transition feeds sizing back into the transition.
         let signature = [
             containerWidth,
             leadingWidth,
@@ -1463,12 +1552,10 @@ final class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
             return
         }
 
-        let leadingX = isRightToLeft ? containerWidth - leadingWidth : 0
-        let trailingX = isRightToLeft ? 0 : containerWidth - trailingWidth
         textContainer.exclusionPaths = [
             leadingWidth > 0
                 ? UIBezierPath(rect: CGRect(
-                    x: leadingX,
+                    x: isRightToLeft ? containerWidth - leadingWidth : 0,
                     y: 0,
                     width: leadingWidth,
                     height: lineHeight
@@ -1476,7 +1563,7 @@ final class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
                 : nil,
             trailingWidth > 0
                 ? UIBezierPath(rect: CGRect(
-                    x: trailingX,
+                    x: isRightToLeft ? 0 : containerWidth - trailingWidth,
                     y: 0,
                     width: trailingWidth,
                     height: lineHeight
@@ -1485,18 +1572,16 @@ final class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
         ].compactMap { $0 }
     }
 
-    /// The controls are taller than the body-font line they flank. Adding only the missing
-    /// first-line spacing moves line two below those hit targets without changing its full-width
-    /// fragment. A full-width exclusion below line one makes TextKit skip the inset line itself.
+    /// The shared new-session composer still uses the layout-manager clearance paired with its
+    /// ordinary text container. The terminal composer has a dedicated container instead, so its
+    /// first line's height never depends on the clearance before line two.
     func layoutManager(
         _ layoutManager: NSLayoutManager,
         lineSpacingAfterGlyphAt glyphIndex: Int,
         withProposedLineFragmentRect rect: CGRect
     ) -> CGFloat {
-        // This is clearance *before line two*, not padding after every first line. Applying it to
-        // a one-character document changed the editor's fitted height until that character was
-        // deleted, which made the whole composer jump on every empty/non-empty transition.
-        guard firstLineAccessoryHeight > 0,
+        guard !(textContainer is FirstLineAccessoryTextContainer),
+              firstLineAccessoryHeight > 0,
               rect.minY < 0.5,
               glyphIndex != NSNotFound,
               glyphIndex + 1 < layoutManager.numberOfGlyphs else {
@@ -1510,17 +1595,49 @@ final class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
 
     private func firstLineAccessoryLayoutChanged() {
         appliedFirstLineAccessoryLayout = []
-        if firstLineAccessoryHeight > 0 {
+        if textContainer is FirstLineAccessoryTextContainer {
+            if layoutManager.delegate === self {
+                layoutManager.delegate = nil
+            }
+        } else if firstLineAccessoryHeight > 0 {
             layoutManager.delegate = self
         } else if layoutManager.delegate === self {
             layoutManager.delegate = nil
         }
+        firstLineTextLayoutChanged()
+    }
+
+    private func firstLineTextLayoutChanged() {
         layoutManager.invalidateLayout(
             forCharacterRange: NSRange(location: 0, length: textStorage.length),
             actualCharacterRange: nil
         )
         setNeedsLayout()
         invalidateIntrinsicContentSize()
+    }
+}
+
+/// Only the atomic terminal line needs the non-rectangular deterministic container. Keeping the
+/// shared draft and conversation editors on UIKit's ordinary stack avoids making an unrelated
+/// SwiftUI sizing transition depend on this terminal-only geometry.
+final class TerminalLineTextView: IntrinsicTextView {
+    private let ownedTextStorage: NSTextStorage
+    private let ownedLayoutManager: NSLayoutManager
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        let textStorage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        let accessoryContainer = FirstLineAccessoryTextContainer(size: .zero)
+        textStorage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(accessoryContainer)
+        ownedTextStorage = textStorage
+        ownedLayoutManager = layoutManager
+        super.init(frame: frame, textContainer: accessoryContainer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }
 

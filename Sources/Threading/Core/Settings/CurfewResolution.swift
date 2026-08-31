@@ -88,8 +88,28 @@ enum CurfewResolution {
     /// A resolved curfew and the scope that supplied it. `nil` is a real answer: *this session
     /// has no curfew*, which is what an exemption produces.
     struct Answer: Equatable, Sendable {
+        enum Condition: Equatable, Sendable {
+            case usageReset(
+                expectedAt: Date,
+                armedAt: Date,
+                accountID: AccountID,
+                windowID: String
+            )
+        }
+
         let scope: CurfewScope
         let curfew: ResolvedCurfew?
+        let condition: Condition?
+
+        init(
+            scope: CurfewScope,
+            curfew: ResolvedCurfew?,
+            condition: Condition? = nil
+        ) {
+            self.scope = scope
+            self.curfew = curfew
+            self.condition = condition
+        }
     }
 
     // MARK: - The Chain
@@ -116,15 +136,50 @@ enum CurfewResolution {
                 scope: .session,
                 curfew: curfew(deadline: deadline, origin: .session, preferences: preferences)
             )
+        case .untilUsageReset(let expectedAt, let armedAt, let accountID, let windowID):
+            let condition = Answer.Condition.usageReset(
+                expectedAt: expectedAt,
+                armedAt: armedAt,
+                accountID: accountID,
+                windowID: windowID
+            )
+            if let state,
+               case .usageReset(
+                 let stateArmedAt,
+                 let stateAccountID,
+                 let stateWindowID
+               ) = state.origin,
+               stateArmedAt == armedAt,
+               stateAccountID == accountID,
+               stateWindowID == windowID {
+                return Answer(
+                    scope: .session,
+                    curfew: curfew(
+                        deadline: state.deadline,
+                        origin: state.origin,
+                        preferences: preferences
+                    ),
+                    condition: condition
+                )
+            }
+            return Answer(
+                scope: .session,
+                curfew: curfew(
+                    deadline: expectedAt,
+                    origin: .session,
+                    preferences: preferences
+                ),
+                condition: condition
+            )
         case nil:
             break
         }
 
-        // A checkout may exempt its chats and may not set a deadline for them: `.until` is a
-        // wall-clock moment, and one written on a project would keep ending chats created weeks
-        // later at a time nobody chose. `ProjectStore.setCurfewRule(_:forProjectID:)` refuses
-        // it; a record carrying one anyway — a hand-edited file, a newer build — falls through
-        // to the standing window rather than being honoured.
+        // A checkout may exempt its chats and may not set one-shot ends for them: a fixed or
+        // reset-conditioned rule written on a project would keep ending chats created weeks
+        // later for a choice nobody made. `ProjectStore.setCurfewRule(_:forProjectID:)` refuses
+        // both; a record carrying either anyway — a hand-edited file, a newer build — falls
+        // through to the standing window rather than being honoured.
         if case .exempt = project {
             return Answer(scope: .project, curfew: nil)
         }
@@ -219,10 +274,19 @@ enum CurfewResolution {
         origin: CurfewOrigin,
         preferences: CurfewPreferences
     ) -> ResolvedCurfew {
-        ResolvedCurfew(
+        // A reset is known only after the provider observation lands. Sending a wrap-up then
+        // would spend the capacity that was just restored, which is exactly what this condition
+        // exists to prevent.
+        let windDownMargin: TimeInterval?
+        if case .usageReset = origin {
+            windDownMargin = nil
+        } else {
+            windDownMargin = preferences.windDownMargin
+        }
+        return ResolvedCurfew(
             deadline: deadline,
             origin: origin,
-            windDownMargin: preferences.windDownMargin,
+            windDownMargin: windDownMargin,
             grace: preferences.grace,
             windDownText: preferences.windDownText
         )

@@ -7,9 +7,9 @@ import AppKit
 /// control gets out of the frame and returns when the pointer enters the canvas or keyboard focus
 /// reaches it, showing Pause — the action a press will take, never the state as an inert badge.
 ///
-/// The control spans the canvas only so its one tracking area can answer hover anywhere over the
-/// movie. Hit testing stays bounded to the drawn target; the rest passes through to the canvas and
-/// keeps its context menu. Keyboard and accessibility activation reach the same `onToggle` seam.
+/// The control spans the canvas so the picture and the centred mark are one primary playback
+/// target. Secondary clicks still reach the canvas's context-menu action through this view.
+/// Keyboard and accessibility activation reach the same `onToggle` seam.
 @MainActor
 final class MediaPlaybackOverlayView: ThemedControl {
 
@@ -67,30 +67,33 @@ final class MediaPlaybackOverlayView: ThemedControl {
 
     // MARK: - Hit testing
 
-    /// The canvas remains the canvas outside the one target actually drawn on it.
+    /// The whole picture is the primary playback target. The centred control is the visible
+    /// affordance, not a much smaller interaction island inside the movie.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard isControlVisibleForTesting else { return nil }
+        guard isEnabled else { return nil }
         // AppKit already supplies `point` in the receiver's coordinates. Converting it again
         // would offset the target whenever the movie sits above a transport row.
-        return controlRect.contains(point) ? self : nil
+        return bounds.contains(point) ? self : nil
     }
 
     // MARK: - Pointer
 
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
     override func mouseDown(with event: NSEvent) {
-        guard isEnabled, controlRect.contains(localPoint(for: event)) else { return }
+        guard isEnabled, bounds.contains(localPoint(for: event)) else { return }
         isTrackingPress = true
         isPressed = true
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard isEnabled, isTrackingPress else { return }
-        isPressed = controlRect.contains(localPoint(for: event))
+        isPressed = bounds.contains(localPoint(for: event))
     }
 
     override func mouseUp(with event: NSEvent) {
         guard isEnabled, isTrackingPress else { return }
-        let shouldToggle = controlRect.contains(localPoint(for: event))
+        let shouldToggle = bounds.contains(localPoint(for: event))
         isTrackingPress = false
         isPressed = false
         if shouldToggle { onToggle?() }

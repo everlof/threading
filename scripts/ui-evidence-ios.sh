@@ -10,10 +10,12 @@ derived_data_directory="${repository_directory}/.build/ui-evidence-ios-derived-d
 bundle_identifier="codes.threading.mobile"
 requested_output=""
 requested_simulator="booted"
+requested_app=""
 accept_new_baselines=0
 require_accepted=0
 requested_only=""
 requested_theme=""
+requested_marketing_video=""
 temporary_simulator_udid=""
 simulator_udid=""
 simulator_preferences_backup=""
@@ -29,6 +31,24 @@ cleanup() {
     idb disconnect "${simulator_udid}" >/dev/null 2>&1 || true
   fi
   if [[ -n "${temporary_simulator_udid}" ]]; then
+    # `idb disconnect` removes its client registration but can leave the per-device companion
+    # reparented to launchd. This runner owns both that helper and the temporary simulator; stop
+    # the helper before deleting the device so repeated evidence runs do not accumulate orphaned
+    # companions for UDIDs that no longer exist.
+    local companion_pid companion_tick
+    while read -r companion_pid; do
+      [[ -n "${companion_pid}" ]] || continue
+      kill -TERM "${companion_pid}" >/dev/null 2>&1 || true
+      for ((companion_tick = 0; companion_tick < 20; companion_tick += 1)); do
+        kill -0 "${companion_pid}" >/dev/null 2>&1 || break
+        sleep 0.1
+      done
+      kill -KILL "${companion_pid}" >/dev/null 2>&1 || true
+    done < <(
+      ps -axo pid=,command= | awk -v udid="${temporary_simulator_udid}" '
+        index($0, "idb_companion --udid " udid " ") { print $1 }
+      '
+    )
     xcrun simctl shutdown "${temporary_simulator_udid}" >/dev/null 2>&1 || true
     xcrun simctl delete "${temporary_simulator_udid}" >/dev/null 2>&1 || true
     temporary_simulator_udid=""
@@ -57,8 +77,10 @@ Capture the shipping iOS DEBUG fixtures on a real simulator and build a static H
 Options:
   --output PATH                 Use a new run directory instead of .build/ui-evidence-ios-reports/…
   --simulator UDID              Reuse this booted/bootable iOS simulator instead of an isolated one
+  --app PATH                    Capture an already-built ThreadingMobile.app instead of rebuilding
   --only ID[,ID…]               Capture these image ids or coverage entries (ios- is optional)
   --theme ID                    Override every selected capture with one manifest theme
+  --record-marketing-video PATH Record the declared real-use marketing walkthrough to PATH
   --accept-new-baselines        Copy only captures that do not have an approved baseline yet
   --require-accepted            Fail unless every captured image exactly matches a baseline
   -h, --help                    Show this help
@@ -83,6 +105,14 @@ while (($#)); do
       requested_simulator="$2"
       shift 2
       ;;
+    --app)
+      if (($# < 2)); then
+        printf 'error: --app requires a ThreadingMobile.app path\n' >&2
+        exit 2
+      fi
+      requested_app="$2"
+      shift 2
+      ;;
     --only)
       if (($# < 2)); then
         printf 'error: --only requires one or more comma-separated image ids or coverage entries\n' >&2
@@ -97,6 +127,14 @@ while (($#)); do
         exit 2
       fi
       requested_theme="$2"
+      shift 2
+      ;;
+    --record-marketing-video)
+      if (($# < 2)); then
+        printf 'error: --record-marketing-video requires a path\n' >&2
+        exit 2
+      fi
+      requested_marketing_video="$2"
       shift 2
       ;;
     --accept-new-baselines)
@@ -125,6 +163,24 @@ for command in jq lockf python3 xcodebuild xcrun; do
     exit 1
   }
 done
+
+if [[ -n "${requested_marketing_video}" ]]; then
+  for command in ffmpeg ffprobe idb; do
+    command -v "${command}" >/dev/null || {
+      printf 'error: marketing video requires unavailable command: %s\n' "${command}" >&2
+      exit 1
+    }
+  done
+  case "${requested_marketing_video}" in
+    /*) ;;
+    *) requested_marketing_video="${repository_directory}/${requested_marketing_video}" ;;
+  esac
+  if [[ -e "${requested_marketing_video}" ]]; then
+    printf 'error: marketing video output already exists: %s\n' \
+      "${requested_marketing_video}" >&2
+    exit 2
+  fi
+fi
 
 if [[ -n "${requested_theme}" ]] \
     && ! jq -e --arg theme "${requested_theme}" '.themeIDs | index($theme) != null' \
@@ -254,22 +310,43 @@ if [[ "${requested_simulator}" == "booted" ]]; then
   defaults import com.apple.iphonesimulator "${simulator_preferences_work}" >/dev/null
 
   boot_simulator_if_needed "${simulator_udid}"
+
+  # A cloned device can still consider the software keyboard's first-use lessons unseen. Those
+  # system coachmarks sit above every app window and can cover half of an otherwise valid
+  # keyboard-open capture. Seed only the disposable evidence device; an explicitly supplied
+  # developer simulator keeps its own onboarding state.
+  for tutorial_key in \
+      DidShowContinuousPathIntroduction \
+      KeyboardDidShowProductivityTutorial \
+      DidShowGestureKeyboardIntroduction \
+      UIKeyboardDidShowInternationalInfoIntroduction; do
+    xcrun simctl spawn "${simulator_udid}" defaults write \
+      com.apple.keyboard.preferences "${tutorial_key}" 1
+  done
 else
   simulator_udid="${template_simulator_udid}"
 fi
 
-printf 'Building ThreadingMobile for %s (%s)…\n' "${device_name}" "${simulator_udid}"
-xcodebuild \
-  -project "${repository_directory}/Threading.xcodeproj" \
-  -scheme ThreadingMobile \
-  -configuration Debug \
-  -destination "platform=iOS Simulator,id=${simulator_udid}" \
-  -derivedDataPath "${derived_data_directory}" \
-  -jobs "${THREADING_UI_EVIDENCE_BUILD_JOBS:-2}" \
-  -quiet \
-  build 2>&1 | tee "${log_directory}/build.log"
-
-app="${derived_data_directory}/Build/Products/Debug-iphonesimulator/ThreadingMobile.app"
+if [[ -n "${requested_app}" ]]; then
+  if [[ ! -d "${requested_app}" ]]; then
+    printf 'error: prebuilt iOS app is missing: %s\n' "${requested_app}" >&2
+    exit 1
+  fi
+  app="$(cd "$(dirname "${requested_app}")" 2>/dev/null && pwd)/$(basename "${requested_app}")"
+  printf 'Using prebuilt ThreadingMobile for %s (%s)…\n' "${device_name}" "${simulator_udid}"
+else
+  printf 'Building ThreadingMobile for %s (%s)…\n' "${device_name}" "${simulator_udid}"
+  xcodebuild \
+    -project "${repository_directory}/Threading.xcodeproj" \
+    -scheme ThreadingMobile \
+    -configuration Debug \
+    -destination "platform=iOS Simulator,id=${simulator_udid}" \
+    -derivedDataPath "${derived_data_directory}" \
+    -jobs "${THREADING_UI_EVIDENCE_BUILD_JOBS:-2}" \
+    -quiet \
+    build 2>&1 | tee "${log_directory}/build.log"
+  app="${derived_data_directory}/Build/Products/Debug-iphonesimulator/ThreadingMobile.app"
+fi
 if [[ ! -d "${app}" ]]; then
   printf 'error: built iOS app is missing: %s\n' "${app}" >&2
   exit 1
@@ -296,10 +373,61 @@ xcrun simctl status_bar "${simulator_udid}" override \
 
 run_token="ios-$(basename "${run_directory}" | tr -cd '[:alnum:]-' | cut -c1-80)"
 
+# `simctl launch` normally returns as soon as launchd accepts the process. CoreSimulator can
+# instead leave that client blocked indefinitely while the cloned device remains reported as
+# Booted. Keeping the command bounded lets an isolated evidence device be rebooted and retried;
+# capture readiness is still proved solely by the app-owned marker below.
+bounded_simulator_launch() {
+  local stdout_path="$1"
+  local stderr_path="$2"
+  shift 2
+  local launch_environment=()
+  while (($#)) && [[ "$1" != "--" ]]; do
+    launch_environment+=("$1")
+    shift
+  done
+  if (($#)); then
+    shift
+  fi
+  local launch_arguments=("$@")
+  local launch_pid launch_tick launch_status
+
+  env "${launch_environment[@]}" \
+    xcrun simctl launch \
+      --terminate-running-process \
+      --stdout="${stdout_path}" \
+      --stderr="${stderr_path}" \
+      "${simulator_udid}" \
+      "${bundle_identifier}" \
+      "${launch_arguments[@]}" >/dev/null &
+  launch_pid=$!
+
+  for ((launch_tick = 0; launch_tick < 300; launch_tick += 1)); do
+    if ! kill -0 "${launch_pid}" >/dev/null 2>&1; then
+      if wait "${launch_pid}"; then
+        return 0
+      else
+        launch_status=$?
+        return "${launch_status}"
+      fi
+    fi
+    sleep 0.1
+  done
+
+  kill -TERM "${launch_pid}" >/dev/null 2>&1 || true
+  for ((launch_tick = 0; launch_tick < 20; launch_tick += 1)); do
+    kill -0 "${launch_pid}" >/dev/null 2>&1 || break
+    sleep 0.1
+  done
+  kill -KILL "${launch_pid}" >/dev/null 2>&1 || true
+  wait "${launch_pid}" >/dev/null 2>&1 || true
+  return 124
+}
+
 capture_fixture() {
   local fixture="$1"
   local identifier entry_id demo appearance theme keyboard_state capture_mode keyboard_layout
-  local content_size
+  local content_size terminal_font_size
   local interaction_label interaction_wait_labels
   identifier="$(jq -r '.id' <<<"${fixture}")"
   entry_id="$(jq -r '.entryID' <<<"${fixture}")"
@@ -315,6 +443,7 @@ capture_fixture() {
   capture_mode="$(jq -r '.captureMode // "app"' <<<"${fixture}")"
   keyboard_layout="$(jq -r '.keyboardLayout // "frame"' <<<"${fixture}")"
   content_size="$(jq -r '.contentSize // "large"' <<<"${fixture}")"
+  terminal_font_size="$(jq -r '.terminalFontSize // empty' <<<"${fixture}")"
   interaction_label="$(jq -r '.interaction.tapAccessibilityLabel // empty' <<<"${fixture}")"
   interaction_wait_labels="$(jq -c \
     '.interaction.waitForAccessibilityLabels // []' <<<"${fixture}")"
@@ -367,6 +496,12 @@ capture_fixture() {
       return 1
       ;;
   esac
+  if [[ -n "${terminal_font_size}" ]] \
+      && ! [[ "${terminal_font_size}" =~ ^([9]|1[0-9]|2[0-4])$ ]]; then
+    printf 'error: capture %s has unsupported terminal font size: %s\n' \
+      "${identifier}" "${terminal_font_size}" >&2
+    return 1
+  fi
   if [[ -n "${interaction_label}" ]]; then
     if ! command -v idb >/dev/null; then
       printf 'error: capture %s requires idb for semantic interaction\n' "${identifier}" >&2
@@ -400,6 +535,10 @@ capture_fixture() {
     "SIMCTL_CHILD_THREADING_MOBILE_UI_EVIDENCE_RUN=${run_token}"
     "SIMCTL_CHILD_THREADING_MOBILE_UI_EVIDENCE_ID=${identifier}"
   )
+  local launch_arguments=()
+  if [[ -n "${terminal_font_size}" ]]; then
+    launch_arguments+=("-mobileTerminalFontSize" "${terminal_font_size}")
+  fi
   if [[ "${theme}" == "fallback" ]]; then
     launch_environment+=("SIMCTL_CHILD_THREADING_MOBILE_THEME=fallback")
   elif [[ "${theme}" == "custom-light" ]]; then
@@ -424,23 +563,53 @@ capture_fixture() {
     )
   fi
 
-  env "${launch_environment[@]}" \
-    xcrun simctl launch \
-      --terminate-running-process \
-      --stdout="${stdout_path}" \
-      --stderr="${stderr_path}" \
-      "${simulator_udid}" \
-      "${bundle_identifier}" >/dev/null
+  local launch_status
+  if bounded_simulator_launch \
+      "${stdout_path}" "${stderr_path}" "${launch_environment[@]}" \
+      -- "${launch_arguments[@]}"; then
+    launch_status=0
+  else
+    launch_status=$?
+  fi
+  if ((launch_status == 124)) && [[ -n "${temporary_simulator_udid}" ]]; then
+    printf 'warning: simulator launch for %s stalled; rebooting the isolated device once\n' \
+      "${identifier}" >&2
+    if ((idb_connected)); then
+      idb disconnect "${simulator_udid}" >/dev/null 2>&1 || true
+      idb_connected=0
+    fi
+    xcrun simctl shutdown "${simulator_udid}"
+    boot_simulator_if_needed "${simulator_udid}"
+    xcrun simctl status_bar "${simulator_udid}" override \
+      --time '9:41' --batteryState charged --batteryLevel 100 \
+      --wifiBars 3 --cellularBars 4 >/dev/null
+    if bounded_simulator_launch \
+        "${stdout_path}" "${stderr_path}" "${launch_environment[@]}" \
+        -- "${launch_arguments[@]}"; then
+      launch_status=0
+    else
+      launch_status=$?
+    fi
+  fi
+  if ((launch_status != 0)); then
+    printf 'error: simulator could not launch fixture %s (status %s)\n' \
+      "${identifier}" "${launch_status}" >&2
+    return "${launch_status}"
+  fi
 
   if [[ -n "${interaction_label}" ]]; then
     local interaction_poll accessibility_json tap_point tap_x tap_y
     for ((interaction_poll = 0; interaction_poll < 400; interaction_poll += 1)); do
       [[ -f "${interaction_ready}" ]] && break
+      [[ -f "${failure}" ]] && break
       sleep 0.05
     done
     if [[ ! -f "${interaction_ready}" ]]; then
       printf 'error: fixture %s never requested its semantic interaction\n' \
         "${identifier}" >&2
+      if [[ -f "${failure}" ]]; then
+        sed -n '1,20p' "${failure}" >&2
+      fi
       return 1
     fi
 
@@ -546,6 +715,64 @@ capture_fixture() {
   cp "${marker}" "${log_directory}/${identifier}.json"
 }
 
+record_marketing_walkthrough() {
+  local video="$1"
+  local flow_id="ios-marketing-flow"
+  local movie_demo movie_theme movie_appearance movie_terminal_font_size
+  local movie_stdout movie_stderr
+  local movie_launch_environment=()
+
+  movie_demo="$(jq -r --arg flow "${flow_id}" \
+    '.flows[] | select(.id == $flow) | .movie.demo // empty' "${manifest}")"
+  if [[ -z "${movie_demo}" ]]; then
+    printf 'error: %s has no recorded walkthrough demo\n' "${flow_id}" >&2
+    return 1
+  fi
+  movie_theme="${requested_theme:-threading}"
+  movie_appearance="$(jq -r --arg theme "${movie_theme}" \
+    '.themeAppearances[$theme] // "dark"' "${manifest}")"
+  movie_terminal_font_size="$(jq -r --arg flow "${flow_id}" \
+    '.flows[] | select(.id == $flow) | .movie.terminalFontSize // empty' "${manifest}")"
+  if ! [[ "${movie_terminal_font_size}" =~ ^([9]|1[0-9]|2[0-4])$ ]]; then
+    printf 'error: %s has no valid recorded terminal font size\n' "${flow_id}" >&2
+    return 1
+  fi
+
+  printf 'Recording marketing walkthrough                    %s · %s · %s\n' \
+    "${movie_demo}" "${movie_appearance}" "${movie_theme}"
+  xcrun simctl ui "${simulator_udid}" appearance "${movie_appearance}"
+  xcrun simctl ui "${simulator_udid}" content_size large
+  movie_stdout="${log_directory}/marketing-walkthrough.stdout.log"
+  movie_stderr="${log_directory}/marketing-walkthrough.stderr.log"
+  movie_launch_environment+=("SIMCTL_CHILD_THREADING_MOBILE_DEMO=${movie_demo}")
+  case "${movie_theme}" in
+    custom) ;;
+    custom-light)
+      movie_launch_environment+=("SIMCTL_CHILD_THREADING_MOBILE_THEME=light")
+      ;;
+    *)
+      movie_launch_environment+=("SIMCTL_CHILD_THREADING_MOBILE_THEME=${movie_theme}")
+      ;;
+  esac
+
+  if ! bounded_simulator_launch \
+      "${movie_stdout}" "${movie_stderr}" "${movie_launch_environment[@]}" \
+      -- -mobileTerminalFontSize "${movie_terminal_font_size}"; then
+    printf 'error: simulator could not launch the marketing walkthrough\n' >&2
+    return 1
+  fi
+  if ((!idb_connected)); then
+    idb connect "${simulator_udid}" >"${log_directory}/idb-connect.log" 2>&1
+    idb_connected=1
+  fi
+  python3 "${script_directory}/record_marketing_ios.py" \
+    --udid "${simulator_udid}" \
+    --manifest "${manifest}" \
+    --flow "${flow_id}" \
+    --output "${video}" \
+    --log "${log_directory}/marketing-walkthrough-timeline.json"
+}
+
 requested_only_json='[]'
 if [[ -n "${requested_only}" ]]; then
   requested_only_json="$(jq -Rn --arg value "${requested_only}" '
@@ -578,6 +805,10 @@ while IFS= read -r fixture; do
   capture_fixture "${fixture}"
 done < <(jq --argjson only "${requested_only_json}" -c \
   ".captures[] | ${capture_selection}" "${manifest}")
+
+if [[ -n "${requested_marketing_video}" ]]; then
+  record_marketing_walkthrough "${requested_marketing_video}"
+fi
 
 captured_count="$(find "${current_directory}/ios" -maxdepth 1 -type f -name '*.png' | wc -l | tr -d ' ')"
 if [[ "${captured_count}" -ne "${capture_count}" ]]; then

@@ -4,6 +4,7 @@ import binascii
 import base64
 import hashlib
 import json
+import re
 import struct
 import subprocess
 import sys
@@ -200,7 +201,7 @@ class UIEvidenceToolsTests(unittest.TestCase):
         self.assertIn("changed after review", result.stderr)
         self.assertFalse((self.baseline / "shot.png").exists())
 
-    def test_ios_marketing_flow_has_one_theme_and_exact_timeline_contract(self) -> None:
+    def test_ios_marketing_flow_has_one_theme_and_exact_interaction_clock(self) -> None:
         manifest = json.loads(
             (REPOSITORY / "Tests/UIEvidence/ios-coverage.json").read_text()
         )
@@ -231,10 +232,49 @@ class UIEvidenceToolsTests(unittest.TestCase):
             },
             {"stable-display"},
         )
-        total_frames = sum(shot["holdFrames"] for shot in flow["shots"]) + sum(
-            shot.get("transition", {}).get("frames", 0) for shot in flow["shots"][:-1]
+        terminal_captures = [
+            capture for capture in marketing if "tui" in capture["id"]
+        ]
+        self.assertEqual(
+            {capture["terminalFontSize"] for capture in terminal_captures},
+            {10},
         )
-        self.assertEqual((flow["fps"], total_frames), (30, 348))
+        self.assertTrue(all(set(shot) == {"captureID", "filename"} for shot in flow["shots"]))
+        movie = flow["movie"]
+        self.assertEqual((flow["fps"], movie["durationFrames"]), (30, 900))
+        self.assertEqual(movie["terminalFontSize"], 10)
+        self.assertGreaterEqual(movie["durationFrames"], 15 * flow["fps"])
+        self.assertLessEqual(movie["durationFrames"], 30 * flow["fps"])
+        self.assertEqual(movie["maximumActionLatenessSeconds"], 0.15)
+        self.assertEqual(movie["demo"], "marketing-sessions")
+        self.assertEqual(
+            [action["atFrame"] for action in movie["actions"]],
+            sorted(action["atFrame"] for action in movie["actions"]),
+        )
+        self.assertEqual(
+            [action["kind"] for action in movie["actions"]],
+            [
+                "tap", "tap", "tap", "tapSequence", "tapPoint", "swipe", "swipe",
+                "tap", "tapPoint", "tapPoint", "tapPoint", "tap", "tapPoint", "swipe",
+            ],
+        )
+        self.assertEqual(movie["actions"][0]["label"], "New session in Threading")
+        self.assertEqual(movie["actions"][1]["label"], "Model and effort")
+        self.assertEqual(movie["actions"][2]["label"], "GPT-5.6 Sol, Extra High")
+        self.assertEqual(movie["actions"][3]["text"], "Polish the flow")
+        self.assertEqual(movie["actions"][3]["intervalFrames"], 6)
+        self.assertEqual(len(movie["actions"][3]["points"]), 15)
+        self.assertGreater(
+            movie["actions"][5]["to"][1],
+            movie["actions"][5]["from"][1],
+            "the Codex gesture must reveal older output rather than push past the bottom",
+        )
+        self.assertEqual(movie["actions"][-2]["point"], [300, 159])
+        self.assertEqual(
+            movie["actions"][-1]["waitForAccessibilityLabels"],
+            ["Processed tokens"],
+        )
+        self.assertNotIn("transition", json.dumps(flow))
         menu = captures["marketing-claude-usage-menu"]
         self.assertEqual(menu["captureMode"], "display")
         self.assertEqual(menu["keyboardState"], "open")
@@ -245,16 +285,50 @@ class UIEvidenceToolsTests(unittest.TestCase):
 
     def test_marketing_pty_resources_are_privacy_safe(self) -> None:
         fixture_directory = REPOSITORY / "Sources/ThreadingMobile/TerminalFixtures"
+        expected_rows = {"claude": 49, "codex": 55}
+        expected_transcript_marker = {"claude": b"Completed:", "codex": b"Validation"}
         for provider in ("claude", "codex"):
             fixture = json.loads(
                 (fixture_directory / f"marketing-{provider}-tui.json").read_text()
             )
             payload = base64.b64decode(fixture["payloadBase64"], validate=True)
             self.assertEqual(fixture["provider"], provider)
-            self.assertEqual(fixture["columns"], 48)
+            self.assertEqual(fixture["columns"], 62)
+            self.assertEqual(fixture["rows"], expected_rows[provider])
+            self.assertGreater(len(payload), 1_500)
+            self.assertIn(expected_transcript_marker[provider], payload)
             self.assertIn(b"\x1b", payload)
+            if provider == "claude":
+                self.assertTrue(
+                    any(code in payload for code in (b"\x1b[31m", b"\x1b[91m"))
+                )
+                self.assertTrue(
+                    any(code in payload for code in (b"\x1b[32m", b"\x1b[92m"))
+                )
+                self.assertIn(b"capture-plan.md", payload)
+                self.assertIn(b"Added", payload)
+                self.assertIn(b"removed", payload)
+            else:
+                self.assertIn(b"Edited", payload)
+                self.assertIn(b"capture-notes.md", payload)
+                self.assertGreaterEqual(
+                    len(set(re.findall(rb"\x1b\[38;[^m]+m", payload))),
+                    4,
+                )
+            self.assertNotIn(b"authentication rejected", payload)
+            self.assertNotIn(b"MCP client", payload)
             self.assertNotIn(b"/Users/", payload)
             self.assertNotIn(b"/home/", payload)
+
+    def test_ios_evidence_seeds_system_keyboard_tutorials_on_its_clone(self) -> None:
+        harness = (REPOSITORY / "scripts/ui-evidence-ios.sh").read_text()
+        self.assertIn("DidShowContinuousPathIntroduction", harness)
+        self.assertIn("KeyboardDidShowProductivityTutorial", harness)
+        self.assertIn("DidShowGestureKeyboardIntroduction", harness)
+        self.assertIn("UIKeyboardDidShowInternationalInfoIntroduction", harness)
+        clone_seed = harness.index("DidShowContinuousPathIntroduction")
+        explicit_simulator_branch = harness.index("else\n  simulator_udid=", clone_seed)
+        self.assertLess(clone_seed, explicit_simulator_branch)
 
 
 if __name__ == "__main__":

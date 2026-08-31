@@ -35,7 +35,9 @@ final class UniversalSearchOverlayViewController: NSViewController {
         static let width: CGFloat = 720
         static let preferredListHeight: CGFloat = 470
         static let minimumListHeight: CGFloat = 160
-        static let resultHeight: CGFloat = 54
+        @MainActor static var resultHeight: CGFloat {
+            SearchResultRowView.preferredTableRowHeight
+        }
         static let groupHeight: CGFloat = 30
         static let messageHeight: CGFloat = 36
         static let column = NSUserInterfaceItemIdentifier("universalSearch.column")
@@ -71,6 +73,7 @@ final class UniversalSearchOverlayViewController: NSViewController {
         queryError: nil
     )
     private var isApplyingState = false
+    private let appEvents = AppEventObservations()
 
     override func loadView() {
         let root = NSView()
@@ -115,6 +118,16 @@ final class UniversalSearchOverlayViewController: NSViewController {
         tableView.doubleAction = #selector(activateSelected)
         tableView.setAccessibilityLabel(L10n.string("Search results"))
         tableView.addTableColumn(NSTableColumn(identifier: Layout.column))
+
+        // Result height is the component's live type measure. Re-ask it when a theme, typeface,
+        // or semantic text scale changes instead of leaving the table on the cached height from
+        // the theme under which the overlay opened.
+        appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
+            guard let self, !self.state.rows.isEmpty else { return }
+            self.tableView.noteHeightOfRows(
+                withIndexesChanged: IndexSet(integersIn: 0 ..< self.state.rows.count)
+            )
+        }
 
         let scroll = ThemedScrollView()
         scroll.documentView = tableView

@@ -558,10 +558,11 @@ pushing. The general fix is recorded and deliberately not built:
   changes width), which moves the scrubber under the pointer dragging it. Its length property is
   `documentDuration` rather than `duration` because the boundary lint reserves `.duration`
   assignments for `Design.Motion` — content length is not motion the app chose.
-- **`MediaPlaybackOverlayView`** — the movie's 48-point centred Play/Pause target. It spans the
-  canvas for one hover area but answers hit testing only inside the drawn target, so the canvas
-  keeps its context menu everywhere else. Pointer, Space/Return and VoiceOver all raise the same
-  host-owned toggle; setting `isPlaying` never raises it.
+- **`MediaPlaybackOverlayView`** — the movie's 48-point centred Play/Pause affordance over a
+  full-canvas primary playback target. A left click anywhere on the picture raises the same
+  host-owned toggle, including the activation click when the window was inactive; secondary
+  clicks still open the canvas context menu. Space/Return and VoiceOver reach that same action,
+  and setting `isPlaying` never raises it.
 - **`MediaDocumentCanvasView`** — the bounded surface, with the checkerboard drawn from theme roles
   rather than the conventional two greys, since a system-grey checkerboard is the one thing a fully
   themed page cannot have.

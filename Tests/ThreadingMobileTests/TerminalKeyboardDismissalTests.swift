@@ -125,18 +125,17 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         )
     }
 
-    /// These are composite symbols with different adornments below the shared keyboard motif.
-    /// Centering each whole image in the same frame put those keyboards on different rows. This
-    /// samples the rendered motif itself because equal SwiftUI frames cannot prove optical
+    /// These are composite symbols whose chassis do not share a bounding box: the
+    /// customization badge hangs below its keyboard while the Direct-input glyph is a plain
+    /// chassis. Centering each whole image in the same frame puts the two boxes on different
+    /// rows; baseline alignment rests them on one ground line. The chassis are different
+    /// heights by design, so the ground line — not the tops — is the shared property. This
+    /// samples the rendered chassis itself because equal SwiftUI frames cannot prove optical
     /// alignment.
-    func testTheTrailingKeyboardMotifsShareOneVerticalLine() throws {
-        let controls = TerminalKeyBarTrailingControls(
-            isKeyboardVisible: true,
-            canShowKeyboard: true,
-            dismissKeyboard: {},
-            showKeyboard: {},
+    func testTheActionRowChassisShareOneGroundLine() throws {
+        let controls = TerminalKeyBarActionControls(
             customize: {},
-            showsInputModeControl: false,
+            showsInputModeControl: true,
             inputPreference: .direct,
             effectiveInputMode: .direct,
             canChooseInputPreference: true,
@@ -147,24 +146,19 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
             size: CGSize(width: 88, height: 34),
             scale: 3
         )
-        let dismissalKeyboard = try mainInkRun(
+        let customizationKeyboard = try mainInkRun(
             in: bitmap,
             xRange: 33..<63
         )
-        let customizationKeyboard = try mainInkRun(
+        let directInputChassis = try mainInkRun(
             in: bitmap,
             xRange: 165..<195
         )
 
         XCTAssertLessThanOrEqual(
-            abs(dismissalKeyboard.lowerBound - customizationKeyboard.lowerBound),
-            1,
-            "The keyboard chassis tops no longer share a vertical ink line"
-        )
-        XCTAssertLessThanOrEqual(
-            abs(dismissalKeyboard.upperBound - customizationKeyboard.upperBound),
-            1,
-            "The keyboard chassis bottoms no longer share a vertical ink line"
+            abs(customizationKeyboard.upperBound - directInputChassis.upperBound),
+            2,
+            "The chassis no longer rest on one ground line"
         )
     }
 
@@ -236,9 +230,8 @@ final class TerminalKeyboardDismissalTests: XCTestCase {
         return AlphaBitmap(width: width, height: height, bytes: bytes)
     }
 
-    /// The chassis is the tallest connected run of ink in the left half of each symbol. The
-    /// dismissal chevron is shorter and separated below it; the customization badge is outside
-    /// this sample band.
+    /// The chassis is the tallest connected run of ink in the left half of each symbol; the
+    /// customization badge sits outside this sample band.
     private func mainInkRun(
         in bitmap: AlphaBitmap,
         xRange: Range<Int>

@@ -731,8 +731,9 @@ struct AgentSession: Codable, Identifiable {
   /// and the limit recovery above, and optional for the same reason: a chat inside a checkout
   /// that exempted itself can still ask to be ended at 04:00.
   ///
-  /// `.until` carries a wall-clock moment rather than a duration, because the whole feature
-  /// exists for the hours the user is asleep across. See `CurfewResolution`.
+  /// `.until` carries a wall-clock moment rather than a duration; `.untilUsageReset` carries the
+  /// latest expected moment plus the exact account/window that may move it earlier. The whole
+  /// feature exists for the hours the user is asleep across. See `CurfewResolution`.
   var curfewRule: CurfewRule?
 
   /// What this session's curfew has already done — the wrap-up it sent, the hold it announced,

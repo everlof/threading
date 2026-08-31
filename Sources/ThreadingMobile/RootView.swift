@@ -89,6 +89,16 @@ extension MobileDemoScene {
         "marketing-codex-tui",
     ]
 
+    /// Installed-provider PTY recordings whose cursor addressing is meaningful only at the
+    /// exact grid declared by the fixture. They still expose interactive shipping chrome for
+    /// the keyboard/menu marketing checkpoint; that must not turn their replay into a locally
+    /// resized live terminal.
+    static let recordedPTYFixtureIDs: Set<String> = [
+        "marketing-claude-tui",
+        "marketing-claude-usage-menu",
+        "marketing-codex-tui",
+    ]
+
     private static let attachmentDetailPrefix = "attachment-detail-"
 
     /// The scene this process was launched for.

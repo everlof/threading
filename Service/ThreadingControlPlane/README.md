@@ -3,7 +3,8 @@
 Cloudflare Worker + one hibernating Durable Object per Mac. The service authenticates accounts
 and scoped host/device credentials, introduces iOS to the correct Mac, provisions short-lived
 TURN configuration, brokers bounded APNs alerts, and then leaves ordinary terminal traffic on
-the encrypted WebRTC path. The APNs route stores neither device tokens nor notification content.
+the encrypted WebRTC path. APNs tokens are encrypted at rest under device-bound opaque
+registrations; notification content is never retained.
 
 It does not accept terminal output, transcripts, prompts, attachments, file paths, provider
 credentials, or permission evidence. Rendezvous messages are capped at 384 KiB; one Mac has one
@@ -70,6 +71,7 @@ npx wrangler secret put APPLE_TOKEN_ENCRYPTION_SECRET
 npx wrangler secret put APNS_TEAM_ID
 npx wrangler secret put APNS_KEY_ID
 npx wrangler secret put APNS_PRIVATE_KEY
+npx wrangler secret put PUSH_TOKEN_ENCRYPTION_SECRET
 npx wrangler secret put TURN_KEY_ID
 npx wrangler secret put TURN_KEY_API_TOKEN
 npx wrangler secret put REPORT_PICKUP_TOKEN
@@ -77,11 +79,12 @@ npx wrangler secret put REPORT_ALERT_WEBHOOK_URL
 npx wrangler secret put REPORT_ALERT_WEBHOOK_TOKEN
 ```
 
-`SESSION_SIGNING_SECRET` and `APPLE_TOKEN_ENCRYPTION_SECRET` must be independent random values of
-at least 32 bytes. `APPLE_PRIVATE_KEY` is the Sign in with Apple `.p8` key; its matching team and
-key IDs are separate secrets. The service exchanges Apple's single-use authorization code and
-stores only the resulting refresh token, encrypted with AES-GCM, so in-app account deletion can
-revoke Apple authorization before cascading the D1 account rows.
+`SESSION_SIGNING_SECRET`, `APPLE_TOKEN_ENCRYPTION_SECRET`, and
+`PUSH_TOKEN_ENCRYPTION_SECRET` must be independent random values of at least 32 bytes.
+`APPLE_PRIVATE_KEY` is the Sign in with Apple `.p8` key; its matching team and key IDs are
+separate secrets. The service exchanges Apple's single-use authorization code and stores only the
+resulting refresh token, encrypted with AES-GCM, so in-app account deletion can revoke Apple
+authorization before cascading the D1 account rows.
 
 App refresh credentials rotate transactionally and are idempotent for an exact retry, so a lost
 response cannot strand a signed-in client or mint parallel descendants. Revoking a device, host
@@ -102,9 +105,16 @@ provisioning is temporarily unavailable or malformed, rendezvous continues with 
 so direct paths remain available.
 
 Create a separate APNs token key for `codes.threading.mobile`; its `.p8` exists only as a Worker
-secret. `POST /v1/push` requires the Mac's rotating host credential and validates the device
-token, environment, host/event match, destination vocabulary, text/age bounds, and final 4-KiB
-APNs envelope before contacting Apple's fixed endpoint. Logs contain only pseudonymous metadata.
+secret. A paired phone registers its token through `POST /v1/push/registrations` with its scoped
+device credential. The encrypted record is bound to account, host, device and APNs environment;
+`POST /v1/push` accepts only its opaque id under the matching Mac host credential. It validates
+the host/event match, destination vocabulary, text/age bounds, and final 4-KiB APNs envelope
+before contacting Apple's fixed endpoint. Logs contain only pseudonymous metadata.
+
+Physical-device Debug testing uses the isolated module and deploy flow in
+[`infra/development/`](infra/development/). It creates a separate D1 database and exact-path
+Cloudflare Access application, then `npm run deploy:development` renders and verifies the
+dedicated `dev.remote.threading.codes` Worker. It does not reuse production sessions or D1 data.
 
 Before deployment, keep `APPLE_CLIENT_IDS` aligned with the shipping `codes.threading` macOS and
 `codes.threading.mobile` iOS bundle IDs, attach the custom service domain, verify the checked-in

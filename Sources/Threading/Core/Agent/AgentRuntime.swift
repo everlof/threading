@@ -53,6 +53,7 @@ protocol AgentTerminalRuntimeSurface:
     func noteStateChanged()
     func applyRunProgress(_ report: HookRunProgressReport)
     func noteReportedCodexTranscript(path: String?, providerSessionID: TranscriptID?)
+    func noteCodexTurnFinishedForContinuationDetection()
     func noteTurnFinishedForAttachmentDetection(lastAssistantMessage: String?)
     func terminate()
 
@@ -75,6 +76,10 @@ extension AgentTerminalRuntimeSurface {
     var isHostBacked: Bool { false }
 
     func detachFromBackgroundHost(by deadline: Date) -> Bool { false }
+
+    /// Only Codex terminal surfaces own a rollout reader. Other runtime surfaces and focused
+    /// test doubles have no continuation protocol to reconcile.
+    func noteCodexTurnFinishedForContinuationDetection() {}
 }
 
 /// The application/runtime surface retained for a natively rendered conversation.
@@ -530,6 +535,13 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             resolveTurnStartWaiters(for: report.sessionID)
         }
 
+        // Also before it, and for the same reason the prompt title is: where the agent is
+        // working is a fact about the *conversation*, not about the terminal showing it, and a
+        // natively rendered chat has no controller to fall through to. Every event carries the
+        // directory, so this runs on all of them; the tracker's own comparison is what makes
+        // that cheap.
+        SessionExecutionLocusTracker.shared.observe(report)
+
         guard let controller = controllers[report.sessionID] else {
             // Ordinary for a rendered conversation, which learns its boundaries from the stream
             // and has no terminal controller. Recorded at debug because it is also what a
@@ -595,7 +607,17 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
                     """
                 )
             }
-            tracker.noteTurnFinished(backgroundWork: report.backgroundWork)
+            let continuationGrace = ProjectStore.shared.session(withID: report.sessionID)?.kind
+                == .codex
+                ? CodexTurnBoundaryDefaults.continuationGrace
+                : nil
+            tracker.noteTurnFinished(
+                backgroundWork: report.backgroundWork,
+                continuationGrace: continuationGrace
+            )
+            if continuationGrace != nil {
+                controller.noteCodexTurnFinishedForContinuationDetection()
+            }
             // Usually the activity edge above has already scheduled this scan. Starting the
             // generation again here preserves the hook's intact fast-path message and also
             // covers turns that remain visually `working` because they left background work.

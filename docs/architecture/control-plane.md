@@ -375,17 +375,22 @@ implementing commands beside it. Invocation enumerates again before dispatch, so
 selection, missing surface, or disabled extension becomes an honest refusal with its current
 reason. `CommandRegistryDidChange` causes an open palette to discard removed extension rows.
 
-A session-scoped command whose only missing prerequisite is session identity additionally carries
-a `HostCommandInputRequest`. Menus still see its unavailable state and remain disabled. An
-interactive frontend may ask the plane for bounded, lightweight `HostCommandInputOption` values,
-collect a `HostCommandInputValue`, and invoke a `HostCommandInvocationRequest`. The plane checks
-the target against a fresh option snapshot before the one AppDelegate invoker receives it. Direct
-entity operations such as close and rename act on that explicit id; commands whose implementation
-is inherently a visible surface select the session first and then use their ordinary current-
-session path. Commands requiring more specific state — a visible conversation, browser, terminal
-or Git Review — do not advertise a session input that could not satisfy them.
+A session-scoped command whose only missing prerequisite is session identity, or an extension
+command that declares semantic project input, additionally carries a `HostCommandInputRequest`.
+Menus still see unavailable state and never present a picker; project-row invocation uses the
+row's host-owned context. An interactive frontend may ask the plane for bounded, lightweight
+`HostCommandInputOption` values, collect a `HostCommandInputValue`, and invoke a
+`HostCommandInvocationRequest`. The plane checks the target against a fresh option snapshot before
+the one AppDelegate invoker receives it. A validated extension project value is delivered as an
+opaque `ExtensionCommandInputValue` and copied into `ExtensionCommandContext.projectID`; it never
+becomes a checkout path or file capability. Direct entity operations such as close and rename act
+on their explicit id; commands whose implementation is inherently a visible surface select the
+session first and then use their ordinary current-session path. Commands requiring more specific
+state — a visible conversation, browser, terminal or Git Review — do not advertise an input that
+could not satisfy them.
 
-Entering the session step projects the in-memory store once into strings and ids. Search then runs
+Entering either target step projects the corresponding in-memory store once into strings and ids.
+Search then runs
 off the main thread, checks cancellation every 128 values, and returns at most 100 rows to the
 virtual table. Expected use is tens to hundreds of sessions; the pure search boundary is exercised
 with 25,000 options so view construction remains proportional to the visible cap rather than the
@@ -396,6 +401,41 @@ may synchronously present a sheet, popover or another in-window surface. It reta
 until the invocation returns: success finalizes dismissal, while a dynamic refusal refreshes and
 restores the palette. This ordering keeps two modal surfaces from competing without turning a
 last-moment availability change into a disappearing command UI.
+
+### Settings are destinations, not commands
+
+Every Settings page and every row on it is offered in the palette as a `SettingsDestination`
+projected into the same `HostCommandDescriptor` contract. They are appended to the catalog in
+`AppDelegate.hostCommandCatalog()` rather than registered in `CommandRegistry`, and that split is
+the decision: a row is a *place*, not an action. Registering two hundred of them would put two
+hundred unbindable rows in the menu bar's validation path and in Settings ▸ Keyboard, which lists
+commands precisely so a reader can ask what a key is doing. So destinations carry
+`shortcutEditable: false`, no shortcut, and `origin == .settings`; `SettingsDestinationTests`
+fails if one reaches the registry.
+
+Identity is derived (`settings.page.<id>`, `settings.row.<id>#<row title>`) rather than stored,
+because nothing persists it — there is no override keyed on a destination, so a renamed row or
+another language costs nothing. Invocation re-resolves the id against the current catalogue for
+the same reason command invocation re-enumerates: an extension's page can be gone by the time its
+palette row is confirmed, and navigating to "whatever is first" would be worse than refusing.
+
+The catalogue is one projection read twice. `SettingsPages.destinations` is built from `all` and
+`Page.liveEntries`, which is also what the Settings sidebar's own row-level search and
+`list_settings` read — a row findable in one and not the other is exactly the drift this prevents.
+`liveEntries` is computed rather than stored because extension contributions arrive and leave
+after `builtIn` was constructed; `Page.entries` stays the static half so
+`SettingsAnchorResolutionTests` still has something it can build a page and check.
+
+Two additions to the descriptor contract carry this. `keywords` holds vocabulary that appears in
+neither title nor detail ("beep" for the terminal bell) and scores after both, so it widens what
+is findable without outranking a name. And at equal score a command sorts before a destination:
+both are honest answers to "compact tree", but one performs it and the other only shows where it
+is set.
+
+Reveal is the invocation's second half. `showSettingsPage(id:revealing:)` scrolls to the row's
+anchor and marks it, which fails silently on a page whose rows have not been built — so the
+virtualized pages implement `SettingsRowRevealing`: an extension's own settings list and the
+Extensions page bring the named row into their table before the anchor lookup gives up.
 
 `WorkspaceFileSearchPlane` accepts a session id plus query and returns only bounded
 `WorkspaceFileReference` values. The Mac root resolver uses

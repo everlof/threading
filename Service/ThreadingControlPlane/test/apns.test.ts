@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Env } from "../src/environment";
-import { signAccessToken } from "../src/crypto";
+import { NotificationKind } from "../src/apns";
+import { sha256Hex, signAccessToken } from "../src/crypto";
 import worker from "../src/index";
 
 const testEnv = env as unknown as Env;
@@ -35,16 +36,16 @@ afterEach(() => {
 });
 
 describe("hosted APNs broker", () => {
-  it("authenticates the host and forwards one bounded alert without retaining a device token", async () => {
+  it("binds an encrypted recipient to a device credential and forwards by opaque ID", async () => {
     const hostID = `host-${crypto.randomUUID()}`;
-    const credential = await enrollHost(hostID);
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
     const apnsID = crypto.randomUUID();
     const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, {
       status: 200,
       headers: { "apns-id": apnsID },
     }));
     const eventID = crypto.randomUUID().toLowerCase();
-    const response = await sendPush(credential, pushBody(hostID, eventID));
+    const response = await sendPush(hostCredential, pushBody(hostID, eventID, registrationID));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
@@ -70,15 +71,25 @@ describe("hosted APNs broker", () => {
       },
       event: { id: eventID, hostID },
     });
+    const stored = await testEnv.DB.prepare(
+      "SELECT encrypted_device_token FROM push_registrations WHERE digest = ?",
+    ).bind(await sha256Hex(registrationID))
+      .first<{ encrypted_device_token: string }>();
+    expect(stored?.encrypted_device_token).not.toContain("ab".repeat(32));
   });
 
   it("refuses cross-host delivery before contacting APNs", async () => {
-    const credential = await enrollHost(`host-${crypto.randomUUID()}`);
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
     const upstream = vi.spyOn(globalThis, "fetch");
 
     const response = await sendPush(
-      credential,
-      pushBody(`host-${crypto.randomUUID()}`, crypto.randomUUID().toLowerCase()),
+      hostCredential,
+      pushBody(
+        `host-${crypto.randomUUID()}`,
+        crypto.randomUUID().toLowerCase(),
+        registrationID,
+      ),
     );
 
     expect(response.status).toBe(403);
@@ -87,19 +98,56 @@ describe("hosted APNs broker", () => {
 
   it("routes production registrations to the production APNs endpoint", async () => {
     const hostID = `host-${crypto.randomUUID()}`;
-    const credential = await enrollHost(hostID);
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID, "production");
     const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, {
       status: 200,
     }));
 
     const response = await sendPush(
-      credential,
-      pushBody(hostID, crypto.randomUUID().toLowerCase(), "production"),
+      hostCredential,
+      pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID),
     );
 
     expect(response.status).toBe(200);
     const [url] = upstream.mock.calls[0] ?? [];
     expect(String(url)).toBe(`https://api.push.apple.com/3/device/${"ab".repeat(32)}`);
+  });
+
+  it("accepts a provider-neutral turn completion event", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, {
+      status: 200,
+    }));
+    const body = pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID);
+    const event = body.event as Record<string, unknown>;
+    event.kind = NotificationKind.turnCompleted;
+    event.body = "Finished its turn";
+
+    const response = await sendPush(hostCredential, body);
+
+    expect(response.status).toBe(200);
+    const [, options] = upstream.mock.calls[0] ?? [];
+    const payload = JSON.parse(new TextDecoder().decode(options?.body as Uint8Array));
+    expect(payload).toMatchObject({
+      aps: { alert: { body: "Finished its turn" } },
+      event: { kind: "turnCompleted" },
+    });
+  });
+
+  it("does not accept a raw APNs token from a host credential", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch");
+    const body = pushBody(hostID, crypto.randomUUID().toLowerCase(), "th_push_invalid");
+    delete body.registrationID;
+    body.deviceToken = "ab".repeat(32);
+    body.environment = "sandbox";
+
+    const response = await sendPush(hostCredential, body);
+
+    expect(response.status).toBe(400);
+    expect(upstream).not.toHaveBeenCalled();
   });
 });
 
@@ -115,6 +163,40 @@ async function enrollHost(hostID: string): Promise<string> {
   }), testEnv);
   const value = await response.json<{ credential: string }>();
   return value.credential;
+}
+
+async function enrollPushRecipient(
+  hostID: string,
+  environment = "sandbox",
+): Promise<{ hostCredential: string; registrationID: string }> {
+  const hostCredential = await enrollHost(hostID);
+  const deviceID = `device-${crypto.randomUUID()}`;
+  const deviceResponse = await worker.fetch(new Request(
+    `https://service.test/v1/hosts/${hostID}/devices`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${hostCredential}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ deviceID }),
+    },
+  ), testEnv);
+  const device = await deviceResponse.json<{ credential: string }>();
+  const registrationResponse = await worker.fetch(new Request(
+    "https://service.test/v1/push/registrations",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${device.credential}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ deviceToken: "ab".repeat(32), environment }),
+    },
+  ), testEnv);
+  expect(registrationResponse.status).toBe(201);
+  const registration = await registrationResponse.json<{ registrationID: string }>();
+  return { hostCredential, registrationID: registration.registrationID };
 }
 
 async function sendPush(credential: string, body: Record<string, unknown>): Promise<Response> {
@@ -143,11 +225,10 @@ async function sendPush(credential: string, body: Record<string, unknown>): Prom
 function pushBody(
   hostID: string,
   eventID: string,
-  environment = "sandbox",
+  registrationID: string,
 ): Record<string, unknown> {
   return {
-    deviceToken: "ab".repeat(32),
-    environment,
+    registrationID,
     playsSound: true,
     event: {
       type: "notification",
