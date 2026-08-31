@@ -84,6 +84,12 @@ final class RemoteRouteRoundTripTests: XCTestCase {
             switch route {
             case .me:
                 XCTAssertEqual(try wirePath(link.meURL), RemoteRouter.apiSessionsPath)
+            case .search:
+                XCTAssertEqual(try wirePath(link.searchURL), RemoteRouter.searchPath)
+                XCTAssertEqual(
+                    try wirePath(link.searchResolveURL),
+                    RemoteRouter.searchResolvePath
+                )
             case .usage:
                 XCTAssertEqual(try wirePath(link.usageURL), RemoteRouter.usagePath)
                 // The paged form adds a query; the host matches the path in front of it, which
@@ -511,7 +517,7 @@ final class RemoteRouteRoundTripTests: XCTestCase {
             case .session, .terminal:
                 // Composed from segments rather than spelled whole — pinned by the test below.
                 spelledWhole = false
-            case .usage, .usageLimit, .theme, .notifications, .localDiagnosticsCapture,
+            case .search, .usage, .usageLimit, .theme, .notifications, .localDiagnosticsCapture,
                  .hostedDeviceCredential, .settings:
                 // Native-client surfaces the browser page does not offer. If one of these gains
                 // a browser affordance, move it into the first arm rather than leaving it here.

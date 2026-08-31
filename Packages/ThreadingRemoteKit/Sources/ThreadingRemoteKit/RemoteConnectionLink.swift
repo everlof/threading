@@ -224,6 +224,14 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         routeURL(.me)
     }
 
+    public var searchURL: URL {
+        routeURL(.search)
+    }
+
+    public var searchResolveURL: URL {
+        routeURL(.search).appendingPathComponent("resolve")
+    }
+
     public var usageURL: URL {
         routeURL(.usage)
     }

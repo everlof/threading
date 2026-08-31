@@ -19,6 +19,14 @@ typealias RemoteUsageLimitLoader = @MainActor @Sendable (
     _ seriesID: String,
     _ days: Int
 ) async -> RemoteUsageLimitDTO?
+typealias RemoteUniversalSearchLoader = @MainActor @Sendable (
+    _ request: RemoteSearchRequestDTO,
+    _ deviceID: String
+) async throws -> RemoteSearchResponseDTO
+typealias RemoteUniversalSearchResolver = @MainActor @Sendable (
+    _ token: String,
+    _ deviceID: String
+) async throws -> RemoteSearchResolutionDTO
 
 /// One JSON value destined for a typed app-setting descriptor. The wire remains deliberately
 /// type-erased only until descriptor admission; unsupported JSON shapes fail before mutation.
@@ -64,8 +72,11 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
         records, source, deviceID in
         MacRemoteDiagnostics.receive(records, source: source, deviceID: deviceID)
     }
+
     private var usageDashboardLoaderStorage: RemoteUsageDashboardLoader?
     private var usageLimitLoaderStorage: RemoteUsageLimitLoader?
+    private var universalSearchLoaderStorage: RemoteUniversalSearchLoader?
+    private var universalSearchResolverStorage: RemoteUniversalSearchResolver?
 
     var authorizer: (any RemoteAuthorizing)? {
         get { lock.withLock { authorizerStorage } }
@@ -100,6 +111,16 @@ private final class RemoteAccessServerDependencies: @unchecked Sendable {
     var usageLimitLoader: RemoteUsageLimitLoader? {
         get { lock.withLock { usageLimitLoaderStorage } }
         set { lock.withLock { usageLimitLoaderStorage = newValue } }
+    }
+
+    var universalSearchLoader: RemoteUniversalSearchLoader? {
+        get { lock.withLock { universalSearchLoaderStorage } }
+        set { lock.withLock { universalSearchLoaderStorage = newValue } }
+    }
+
+    var universalSearchResolver: RemoteUniversalSearchResolver? {
+        get { lock.withLock { universalSearchResolverStorage } }
+        set { lock.withLock { universalSearchResolverStorage = newValue } }
     }
 }
 
@@ -150,9 +171,20 @@ final class RemoteAccessServer: @unchecked Sendable {
         get { dependencies.usageDashboardLoader }
         set { dependencies.usageDashboardLoader = newValue }
     }
+
     var usageLimitLoader: RemoteUsageLimitLoader? {
         get { dependencies.usageLimitLoader }
         set { dependencies.usageLimitLoader = newValue }
+    }
+
+    var universalSearchLoader: RemoteUniversalSearchLoader? {
+        get { dependencies.universalSearchLoader }
+        set { dependencies.universalSearchLoader = newValue }
+    }
+
+    var universalSearchResolver: RemoteUniversalSearchResolver? {
+        get { dependencies.universalSearchResolver }
+        set { dependencies.universalSearchResolver = newValue }
     }
 
     var port: UInt16? {
@@ -454,6 +486,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         // The one REST call: the share and its sessions.
         if request.method == "GET", path == RemoteRouter.apiSessionsPath {
             handleMe(request, respond: respond)
+            return
+        }
+
+        if request.method == "POST", path == RemoteRouter.searchPath {
+            handleUniversalSearch(request, respond: respond)
+            return
+        }
+
+        if request.method == "POST", path == RemoteRouter.searchResolvePath {
+            handleUniversalSearchResolution(request, respond: respond)
             return
         }
 
@@ -840,6 +882,96 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         DispatchQueue.main.async {
             let payload = self.services.mirrors.meResponse(for: authorization)
             respond(.respond(RemoteRouter.json(payload)))
+        }
+    }
+
+    private func handleUniversalSearch(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canUseUniversalSearch else {
+            respond(.respond(RemoteRouter.error(404, "Not Found")))
+            return
+        }
+        guard let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+            request.header(RemoteRouter.deviceHeader)
+        ), let loader = universalSearchLoader,
+        let query = try? JSONDecoder().decode(RemoteSearchRequestDTO.self, from: request.body),
+        query.query.utf8.count <= RemoteSearchWireLimits.maximumQueryUTF8Bytes else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                let payload = try await loader(query, deviceID)
+                guard self.authorizer?.isCurrent(authorization) == true else {
+                    respond(.respond(RemoteRouter.error(401, "Unauthorized")))
+                    return
+                }
+                respond(.respond(RemoteRouter.json(
+                    payload,
+                    maximumBytes: RemoteAccessDefaults.maximumSearchResponseBytes
+                )))
+            } catch is CancellationError {
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
+            } catch let error as RemoteUniversalSearchError {
+                switch error {
+                case .invalidRequest:
+                    respond(.respond(RemoteRouter.error(400, "Bad Request")))
+                case .resultNoLongerAvailable:
+                    respond(.respond(RemoteRouter.error(404, "Not Found")))
+                case .unavailable:
+                    respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
+                }
+            } catch {
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
+            }
+        }
+    }
+
+    private func handleUniversalSearchResolution(
+        _ request: HTTPRequest,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeREST(request, respond: respond) else { return }
+        guard authorization.canUseUniversalSearch else {
+            respond(.respond(RemoteRouter.error(404, "Not Found")))
+            return
+        }
+        guard let deviceID = RemoteInboundPolicy.normalizedDeviceID(
+            request.header(RemoteRouter.deviceHeader)
+        ), let resolver = universalSearchResolver,
+        let resolution = try? JSONDecoder().decode(
+            RemoteSearchResolveRequestDTO.self,
+            from: request.body
+        ), RemoteInboundPolicy.acceptsSearchToken(resolution.token) else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        Task { @MainActor in
+            do {
+                let payload = try await resolver(resolution.token, deviceID)
+                guard self.authorizer?.isCurrent(authorization) == true else {
+                    respond(.respond(RemoteRouter.error(401, "Unauthorized")))
+                    return
+                }
+                respond(.respond(RemoteRouter.json(
+                    payload,
+                    maximumBytes: RemoteAccessDefaults.maximumSearchResponseBytes
+                )))
+            } catch let error as RemoteUniversalSearchError {
+                switch error {
+                case .invalidRequest:
+                    respond(.respond(RemoteRouter.error(400, "Bad Request")))
+                case .resultNoLongerAvailable, .unavailable:
+                    respond(.respond(RemoteRouter.error(404, "Not Found")))
+                }
+            } catch {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+            }
         }
     }
 

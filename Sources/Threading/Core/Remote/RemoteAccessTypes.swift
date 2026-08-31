@@ -186,6 +186,12 @@ struct RemoteAuthorization: Equatable, Sendable {
         principal == .ownerDevice && scope == .allSessions
     }
 
+    /// Search crosses project, transcript and source boundaries, so it is an owner read just
+    /// like whole-host usage. View-only owner devices may search; one-session guests may not.
+    var canUseUniversalSearch: Bool {
+        principal == .ownerDevice && scope == .allSessions
+    }
+
     var isExpired: Bool {
         expiresAt.map { $0 <= Date() } ?? false
     }
@@ -376,6 +382,14 @@ enum RemoteInboundPolicy {
 
     static func acceptsBearerToken(_ value: String) -> Bool {
         !value.isEmpty && value.utf8.count <= RemoteAccessDefaults.maximumBearerTokenBytes
+    }
+
+    static func acceptsSearchToken(_ value: String) -> Bool {
+        !value.isEmpty
+            && value.utf8.count <= 128
+            && value.unicodeScalars.allSatisfy { scalar in
+                scalar.value < 128 && !CharacterSet.whitespacesAndNewlines.contains(scalar)
+            }
     }
 
     static func acceptsTerminalInput(_ value: String) -> Bool {

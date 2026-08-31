@@ -180,6 +180,7 @@ enum RemoteAccessDefaults {
     /// A selected image/PDF is served over a closing HTTP response rather than the live socket.
     /// The serialized head is tiny; this margin keeps the explicit response cap easy to audit.
     static let maximumAttachmentResponseBytes = maximumAttachmentBytes + 64 * 1024
+    static let maximumSearchResponseBytes = 1 * 1024 * 1024
 
     /// The initial conversation window and each requested history page stay well below the
     /// connection high-water mark. Live changes travel as row deltas after that first window.

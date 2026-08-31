@@ -355,6 +355,8 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     public let surface: RemoteSessionSurface
     public let state: RemoteSessionActivity
     public let projectName: String
+    /// Stable checkout identity for routes that must not collapse duplicate display names.
+    public let projectID: String?
     /// Whether the session currently has a live surface a client can attach to.
     public let isAvailable: Bool
     /// Unix time for sorting and compact relative dates in mobile clients.
@@ -401,6 +403,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         surface: RemoteSessionSurface,
         state: RemoteSessionActivity,
         projectName: String,
+        projectID: String? = nil,
         isAvailable: Bool = true,
         lastActiveAt: Double? = nil,
         isPinned: Bool = false,
@@ -426,6 +429,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.surface = surface
         self.state = state
         self.projectName = projectName
+        self.projectID = projectID
         self.isAvailable = isAvailable
         self.lastActiveAt = lastActiveAt
         self.isPinned = isPinned
@@ -447,7 +451,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, agentKind, surface, state, projectName, isAvailable, lastActiveAt
+        case id, title, agentKind, surface, state, projectName, projectID, isAvailable, lastActiveAt
         case isPinned, isArchived, archivedAt, isShared
         case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
@@ -462,6 +466,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         surface = try container.decode(RemoteSessionSurface.self, forKey: .surface)
         state = try container.decode(RemoteSessionActivity.self, forKey: .state)
         projectName = try container.decode(String.self, forKey: .projectName)
+        projectID = try container.decodeIfPresent(String.self, forKey: .projectID)
         // The first wire build listed only live sessions, so a missing field means available.
         isAvailable = try container.decodeIfPresent(Bool.self, forKey: .isAvailable) ?? true
         lastActiveAt = try container.decodeIfPresent(Double.self, forKey: .lastActiveAt)
@@ -553,6 +558,7 @@ public struct RemoteProjectTerminalSummaryDTO: Codable, Equatable, Identifiable,
     public let id: String
     public let title: String
     public let projectName: String
+    public let projectID: String?
     public let state: RemoteTerminalActivity
     public let isAvailable: Bool
     public let createdAt: Double?
@@ -566,6 +572,7 @@ public struct RemoteProjectTerminalSummaryDTO: Codable, Equatable, Identifiable,
         id: String,
         title: String,
         projectName: String,
+        projectID: String? = nil,
         state: RemoteTerminalActivity,
         isAvailable: Bool,
         createdAt: Double? = nil,
@@ -578,6 +585,7 @@ public struct RemoteProjectTerminalSummaryDTO: Codable, Equatable, Identifiable,
         self.id = id
         self.title = title
         self.projectName = projectName
+        self.projectID = projectID
         self.state = state
         self.isAvailable = isAvailable
         self.createdAt = createdAt
@@ -1167,6 +1175,9 @@ public struct RemoteHostDTO: Codable, Equatable, Sendable {
 /// Optional REST surfaces advertised by `GET /api/me`. Raw strings keep discovery additive:
 /// older clients ignore the field and newer clients can ignore feature names they do not know.
 public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
+    /// Owner-device search across the Mac's bounded structured and indexed providers. Results
+    /// carry short-lived opaque resolution tokens rather than host-side locator identities.
+    case universalSearch = "universal-search"
     case usageDashboard = "usage-dashboard"
     case hostedPeerTransport = "hosted-peer-transport"
     /// A session socket may authenticate while a create/resume transaction is still installing

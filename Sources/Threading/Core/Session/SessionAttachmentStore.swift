@@ -1133,6 +1133,21 @@ final class SessionAttachmentStore {
         listSnapshot(for: sessionID).attachments
     }
 
+    /// A search projection of state this launch has already paid to load and validate.
+    ///
+    /// Universal Search may span thousands of sessions. Making its presentation path call
+    /// `attachments(for:)` for every one would synchronously hydrate SQLite payloads and stat
+    /// every referenced file on the main actor. A missing value therefore means "not loaded",
+    /// not "empty"; the provider reports that coverage honestly. Activation still passes
+    /// through `attachment(for:id:)`, which revalidates the selected file before opening it.
+    func loadedAttachmentsSnapshot(for sessionID: SessionID) -> [SessionAttachment]? {
+        guard loadedSessions.contains(sessionID) else { return nil }
+        let stored = attachmentsBySession[sessionID] ?? []
+        return allowsFilesOutsideProject()
+            ? stored
+            : stored.filter { !$0.isOutsideProject }
+    }
+
     /// The stored list with every entry re-proven against the filesystem, scope not applied.
     private func validated(_ sessionID: SessionID) -> [SessionAttachment] {
         loadIfNeeded(sessionID)

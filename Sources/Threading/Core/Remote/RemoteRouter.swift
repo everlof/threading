@@ -130,6 +130,8 @@ struct RemoteRouter {
     // Spelled once, in `ThreadingRemoteKit`: the client appends the same `RemoteRoute` raw
     // values onto its base URL, so a rename cannot move one end without the other.
     static let apiSessionsPath = RemoteRoute.me.absolutePath
+    static let searchPath = RemoteRoute.search.absolutePath
+    static let searchResolvePath = RemoteRoute.search.prefix + "resolve"
     static let usagePath = RemoteRoute.usage.absolutePath
     static let usageLimitPath = RemoteRoute.usageLimit.absolutePath
     static let createSessionPath = RemoteRoute.session.absolutePath
