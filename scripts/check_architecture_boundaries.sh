@@ -18,6 +18,14 @@ if ! python3 "${script_directory}/check_logging_boundaries.py" "${repository_dir
   failed=1
 fi
 
+# `Sources/` is one synchronized folder, so a new file under `Sources/ThreadingMobile` joins the
+# Mac target unless the exception list says otherwise. Half the time that stops the Mac build
+# outright; the other half it ships — six Swift files, 58 iPhone app icons and two recorded
+# marketing screens were in the Mac app when this was written. See the script.
+if ! python3 "${script_directory}/check_target_membership.py" "${repository_directory}"; then
+  failed=1
+fi
+
 if ! python3 "${script_directory}/check_navigator_fact_parity.py" "${repository_directory}"; then
   echo "architecture-boundary: native navigator entity reads must map to a published fact" >&2
   echo "  while options and host-owned interaction state use their typed parity lanes" >&2
