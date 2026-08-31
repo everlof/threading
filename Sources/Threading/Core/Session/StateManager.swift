@@ -191,6 +191,14 @@ final class StateManager {
         appSupportDirectory.appendingPathComponent("projects.json.bak")
     }
 
+    /// Rebuildable universal-search state lives beside, never inside, the authoritative project
+    /// database. Hosted tests inherit the same per-process redirect as every other state file.
+    func transcriptSearchIndexURL() -> URL {
+        let directory = appSupportDirectory.appendingPathComponent("Search", isDirectory: true)
+        ensureDirectoryExists(directory)
+        return directory.appendingPathComponent("transcripts.db")
+    }
+
     // MARK: - Projects State Persistence
 
     @discardableResult

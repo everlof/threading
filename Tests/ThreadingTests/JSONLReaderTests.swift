@@ -1,5 +1,5 @@
-import XCTest
 @testable import Threading
+import XCTest
 
 /// Covers the streaming reader every Claude and Codex transcript is read through.
 ///
@@ -8,7 +8,6 @@ import XCTest
 /// boundary, which is where a reader that works on a small fixture stops working on a real
 /// 250 MB rollout — so the fixtures here are deliberately built to straddle one.
 final class JSONLReaderTests: XCTestCase {
-
     private var directory: URL!
 
     override func setUpWithError() throws {
@@ -92,7 +91,7 @@ final class JSONLReaderTests: XCTestCase {
         XCTAssertTrue(records(at: directory).isEmpty)
 
         let binary = directory.appendingPathComponent("noise.jsonl")
-        try Data((0...255).map { UInt8($0) }).write(to: binary)
+        try Data((0 ... 255).map { UInt8($0) }).write(to: binary)
         XCTAssertTrue(records(at: binary).isEmpty)
         XCTAssertNil(JSONLReader.lastRecord(at: binary))
     }
@@ -140,7 +139,7 @@ final class JSONLReaderTests: XCTestCase {
     func testAScanStoppedByTheLimitNeverDeliversAPartialLine() throws {
         let record = #"{"id":"r","pad":"\#(String(repeating: "y", count: 8 * 1024))"}"#
         let url = try write(
-            (0..<12).map { _ in record }.joined(separator: "\n") + "\n"
+            (0 ..< 12).map { _ in record }.joined(separator: "\n") + "\n"
         )
 
         let delivered = lines(at: url, limit: 1)
@@ -159,7 +158,7 @@ final class JSONLReaderTests: XCTestCase {
     func testAReverseScanStoppedByTheLimitNeverDeliversAPartialLine() throws {
         let record = #"{"id":"r","pad":"\#(String(repeating: "y", count: 8 * 1024))"}"#
         let url = try write(
-            (0..<12).map { _ in record }.joined(separator: "\n") + "\n"
+            (0 ..< 12).map { _ in record }.joined(separator: "\n") + "\n"
         )
 
         var seen = 0
@@ -172,7 +171,7 @@ final class JSONLReaderTests: XCTestCase {
     }
 
     func testReturningFalseStopsTheReadImmediately() throws {
-        let url = try write((1...50).map { "{\"n\":\($0)}" }.joined(separator: "\n") + "\n")
+        let url = try write((1 ... 50).map { "{\"n\":\($0)}" }.joined(separator: "\n") + "\n")
 
         var seen: [Int] = []
         JSONLReader.forEachRecord(at: url, limit: .max) { record in
@@ -182,10 +181,95 @@ final class JSONLReaderTests: XCTestCase {
         XCTAssertEqual(seen, [1, 2, 3])
     }
 
+    func testResumableRecordOffsetsAreExactAndDoNotConsumeAnIncompleteTail() throws {
+        let first = #"{"n":1}"# + "\n"
+        let second = #"{"n":2}"# + "\n"
+        let tail = #"{"n":3}"#
+        let url = try write(first + second + tail)
+        var windows: [(Int, UInt64, UInt64)] = []
+
+        let end = JSONLReader.forEachRecordWithOffsets(
+            at: url,
+            from: 0,
+            limit: .max
+        ) { record, start, end in
+            windows.append((record["n"] as? Int ?? -1, start, end))
+            return true
+        }
+
+        XCTAssertEqual(windows.map(\.0), [1, 2])
+        XCTAssertEqual(windows.map(\.1), [0, UInt64(first.utf8.count)])
+        XCTAssertEqual(
+            windows.map(\.2),
+            [UInt64(first.utf8.count), UInt64(first.utf8.count + second.utf8.count)]
+        )
+        XCTAssertEqual(end, UInt64(first.utf8.count + second.utf8.count))
+    }
+
+    func testFiniteResumableScansSkipAnOversizedRecordWithoutStalling() throws {
+        let padding = String(repeating: "z", count: JSONLDefaults.chunkBytes * 3)
+        let oversized = #"{"id":"huge","pad":"\#(padding)"}"#
+        let url = try write(oversized + "\n" + #"{"id":"after"}"# + "\n")
+        var offset: UInt64 = 0
+        var seen: [String] = []
+        var advances: [UInt64] = []
+
+        for _ in 0 ..< 8 {
+            let next = JSONLReader.forEachRecordWithOffsets(
+                at: url,
+                from: offset,
+                limit: JSONLDefaults.chunkBytes
+            ) { record, _, _ in
+                if let id = record["id"] as? String { seen.append(id) }
+                return true
+            }
+            advances.append(next - offset)
+            if next == offset { break }
+            offset = next
+            if seen.contains("after") { break }
+        }
+
+        XCTAssertFalse(seen.contains("huge"))
+        XCTAssertEqual(seen, ["after"])
+        XCTAssertTrue(advances.allSatisfy { $0 <= UInt64(JSONLDefaults.chunkBytes) })
+    }
+
+    func testFiniteResumableScanRetriesANormalRecordThatStraddlesItsBudget() throws {
+        let firstPadding = String(repeating: "a", count: JSONLDefaults.chunkBytes - 256)
+        let secondPadding = String(repeating: "b", count: 1024)
+        let first = #"{"id":"first","pad":"\#(firstPadding)"}"# + "\n"
+        let second = #"{"id":"second","pad":"\#(secondPadding)"}"# + "\n"
+        let url = try write(first + second)
+        var firstPass: [String] = []
+
+        let resume = JSONLReader.forEachRecordWithOffsets(
+            at: url,
+            from: 0,
+            limit: JSONLDefaults.chunkBytes
+        ) { record, _, _ in
+            if let id = record["id"] as? String { firstPass.append(id) }
+            return true
+        }
+
+        var secondPass: [String] = []
+        _ = JSONLReader.forEachRecordWithOffsets(
+            at: url,
+            from: resume,
+            limit: JSONLDefaults.chunkBytes
+        ) { record, _, _ in
+            if let id = record["id"] as? String { secondPass.append(id) }
+            return true
+        }
+
+        XCTAssertEqual(firstPass, ["first"])
+        XCTAssertEqual(resume, UInt64(first.utf8.count))
+        XCTAssertEqual(secondPass, ["second"])
+    }
+
     // MARK: - Reading from the end
 
     func testTheReverseScanYieldsNewestFirst() throws {
-        let url = try write((1...5).map { "{\"n\":\($0)}" }.joined(separator: "\n") + "\n")
+        let url = try write((1 ... 5).map { "{\"n\":\($0)}" }.joined(separator: "\n") + "\n")
 
         var seen: [Int] = []
         JSONLReader.forEachRecordFromEnd(at: url, limit: .max) { record in

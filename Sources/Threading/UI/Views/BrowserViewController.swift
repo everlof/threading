@@ -2742,6 +2742,10 @@ final class BrowserViewController: NSViewController {
         showFindBar()
     }
 
+    func repeatFind(backwards: Bool) {
+        findInPage(findBar.queryField.stringValue, backwards: backwards)
+    }
+
     private func hideFindBar() {
         isFindBarVisible = false
         findBar.isHidden = true

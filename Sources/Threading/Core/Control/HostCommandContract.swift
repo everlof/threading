@@ -12,6 +12,10 @@ struct HostCommandDescriptor: Equatable, Sendable {
         /// own nor an installed extension's, and the palette says so: what runs is decided by
         /// the repository in front of you.
         case projectScript(localID: String)
+        /// A place in Settings rather than a thing to run — see `SettingsDestination`. It
+        /// invokes like any other descriptor and navigates instead of acting, and it is never
+        /// rebindable, because there is nothing for a chord to mean.
+        case settings
     }
 
     enum Scope: String, Equatable, Sendable {
@@ -54,6 +58,14 @@ struct HostCommandDescriptor: Equatable, Sendable {
     /// this input without inventing command semantics of its own.
     let nextInput: HostCommandInputRequest?
     let shortcutEditable: Bool
+    /// Extra words this descriptor answers to that appear in neither its title nor its detail —
+    /// "beep" for the terminal bell. A search matches them after both, so vocabulary widens what
+    /// is findable without ever outranking the thing whose name was typed.
+    let keywords: [String]
+
+    /// The group every settings destination reports, so "settings" finds the set of them.
+    /// Unlocalized like `AppCommand.Group`'s raw values, which this sits beside.
+    static let settingsGroup = "Settings"
 
     init(
         id: String,
@@ -66,7 +78,8 @@ struct HostCommandDescriptor: Equatable, Sendable {
         risk: Risk,
         availability: Availability,
         nextInput: HostCommandInputRequest? = nil,
-        shortcutEditable: Bool = false
+        shortcutEditable: Bool = false,
+        keywords: [String] = []
     ) {
         self.id = id
         self.title = title
@@ -79,12 +92,14 @@ struct HostCommandDescriptor: Equatable, Sendable {
         self.availability = availability
         self.nextInput = nextInput
         self.shortcutEditable = shortcutEditable
+        self.keywords = keywords
     }
 }
 
 struct HostCommandInputRequest: Equatable, Sendable {
     enum Kind: String, Equatable, Sendable {
         case session
+        case project
     }
 
     let kind: Kind
@@ -282,6 +297,9 @@ enum HostCommandSearch {
             // A script's origin is the checkout that declares it, and the group is what the
             // palette shows for it, so searching "project scripts" finds them as a set.
             case .projectScript: origin = command.group.folded
+            // Same reasoning one step over: a settings destination's origin word is its group,
+            // so "settings" answers with the set rather than with nothing.
+            case .settings: origin = command.group.folded
             }
             let score: Int
             if title == query { score = 0 }
@@ -289,16 +307,31 @@ enum HostCommandSearch {
             else if title.split(separator: " ").contains(where: { $0.hasPrefix(query) }) { score = 20 }
             else if title.contains(query) { score = 30 }
             else if detail.contains(query) { score = 40 }
+            else if command.keywords.contains(where: { $0.folded.contains(query) }) { score = 45 }
             else if origin.contains(query) { score = 50 }
             else { continue }
             ranked.append((score, command))
         }
         return ranked.sorted { left, right in
             if left.0 != right.0 { return left.0 < right.0 }
+            // A command that matched as well as a settings destination wins. Both are honest
+            // answers to the query, but one of them *does* the thing and the other only shows
+            // you where it is set — and "Compact Tree" typed into a palette means the toggle.
+            if left.1.navigationRank != right.1.navigationRank {
+                return left.1.navigationRank < right.1.navigationRank
+            }
             return left.1.title.localizedStandardCompare(right.1.title) == .orderedAscending
         }
         .prefix(boundedLimit)
         .map(\.1)
+    }
+}
+
+private extension HostCommandDescriptor {
+    /// 0 for anything that runs, 1 for anything that merely navigates.
+    var navigationRank: Int {
+        if case .settings = origin { return 1 }
+        return 0
     }
 }
 

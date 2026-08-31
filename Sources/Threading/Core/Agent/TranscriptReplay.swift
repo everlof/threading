@@ -57,6 +57,28 @@ struct TranscriptRunProgressScan: Sendable {
     let endOffset: UInt64
 }
 
+/// One bounded, presentation-neutral row admitted to the rebuildable search index. It retains
+/// provider byte offsets, not raw JSON or a filesystem path.
+struct TranscriptSearchNormalizedRecord: Equatable, Sendable {
+    let recordID: String
+    let sourceStartOffset: UInt64
+    let sourceEndOffset: UInt64
+    let ordinal: Int
+    let kind: SearchHitKind
+    let author: SearchAuthor?
+    let title: String
+    let body: String
+    let timestamp: Date?
+    let hasError: Bool
+    let bodyWasTruncated: Bool
+}
+
+struct TranscriptSearchNormalization: Equatable, Sendable {
+    let records: [TranscriptSearchNormalizedRecord]
+    let endOffset: UInt64
+    let containsTruncatedBody: Bool
+}
+
 /// Rebuilds a past conversation from the transcript its agent keeps on disk.
 ///
 /// A resumed session picks up with its full context, but the CLI replays none of it down the
@@ -67,6 +89,8 @@ struct TranscriptRunProgressScan: Sendable {
 /// Output is `[StreamEvent]`, deliberately: replayed and live content then travel the same
 /// rendering path, and there is no second set of views to keep in step with the first.
 enum TranscriptReplay {
+
+    static let maximumSearchBodyUTF8Bytes = 256 * 1_024
 
     /// Reads a session's transcript off the main thread and calls back with what to render.
     ///
@@ -108,6 +132,138 @@ enum TranscriptReplay {
             let (events, isTruncated) = read(at: url, kind: session.kind)
             DispatchQueue.main.async { completion(events, isTruncated) }
         }
+    }
+
+    /// Normalizes searchable dialogue and bounded tool subjects from one resumable source window.
+    /// Reasoning and raw tool output are deliberately absent from this projection.
+    static func searchRecords(
+        at url: URL,
+        kind: AgentKind,
+        from offset: UInt64 = 0,
+        scanLimit: Int = ReplayDefaults.scanLimit
+    ) -> TranscriptSearchNormalization {
+        guard let format = TranscriptReplayFormat(kind: kind) else {
+            return TranscriptSearchNormalization(
+                records: [], endOffset: offset, containsTruncatedBody: false
+            )
+        }
+        var normalized: [TranscriptSearchNormalizedRecord] = []
+        var didTruncate = false
+        let end = JSONLReader.forEachRecordWithOffsets(
+            at: url,
+            from: offset,
+            limit: scanLimit
+        ) { record, start, end in
+            guard let event = event(from: record, format: format) else { return true }
+            let stamp = timestamp(of: record)
+
+            func append(
+                ordinal: Int,
+                kind: SearchHitKind,
+                author: SearchAuthor?,
+                title: String,
+                body rawBody: String,
+                hasError: Bool = false
+            ) {
+                let body = boundedSearchBody(rawBody)
+                guard !body.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    return
+                }
+                didTruncate = didTruncate || body.wasTruncated
+                normalized.append(TranscriptSearchNormalizedRecord(
+                    recordID: "\(start):\(ordinal)",
+                    sourceStartOffset: start,
+                    sourceEndOffset: end,
+                    ordinal: ordinal,
+                    kind: kind,
+                    author: author,
+                    title: title,
+                    body: body.text,
+                    timestamp: stamp,
+                    hasError: hasError,
+                    bodyWasTruncated: body.wasTruncated
+                ))
+            }
+
+            switch event {
+            case .userMessage(let text):
+                append(
+                    ordinal: 0,
+                    kind: .conversationMessage(.you),
+                    author: .you,
+                    title: "",
+                    body: ConversationPrompt.replaying(text).text
+                )
+
+            case .assistantMessage(let blocks):
+                for (ordinal, block) in blocks.enumerated() {
+                    switch block {
+                    case .text(let text):
+                        append(
+                            ordinal: ordinal,
+                            kind: .conversationMessage(.agent),
+                            author: .agent,
+                            title: "",
+                            body: text
+                        )
+                    case .toolUse(_, let tool, let input):
+                        let summary = PermissionRequest(
+                            sessionID: SessionID(), tool: tool, input: input
+                        ).oneLineSummary
+                        append(
+                            ordinal: ordinal,
+                            kind: .toolSummary,
+                            author: nil,
+                            title: tool.rawName,
+                            body: summary.isEmpty ? tool.rawName : "\(tool.rawName) \(summary)"
+                        )
+                    case .thinking:
+                        break
+                    }
+                }
+
+            case .transcriptNotice(let text):
+                append(
+                    ordinal: 0,
+                    kind: .toolSummary,
+                    author: nil,
+                    title: "",
+                    body: text
+                )
+
+            case .toolResults(let results):
+                // Raw results are excluded. Only an error's fixed-size opening line is useful as
+                // a searchable work receipt, and it remains labelled as a tool summary.
+                for (ordinal, result) in results.enumerated() where result.isError {
+                    let firstLine = result.text.split(whereSeparator: \.isNewline).first.map(String.init)
+                    append(
+                        ordinal: ordinal,
+                        kind: .toolSummary,
+                        author: nil,
+                        title: "",
+                        body: firstLine ?? "",
+                        hasError: true
+                    )
+                }
+
+            case .initialised, .textDelta, .thinkingDelta, .runPlanUpdated, .backgroundWork,
+                 .turnFinished, .unknown:
+                break
+            }
+            return true
+        }
+        return TranscriptSearchNormalization(
+            records: normalized,
+            endOffset: end,
+            containsTruncatedBody: didTruncate
+        )
+    }
+
+    private static func boundedSearchBody(_ text: String) -> (text: String, wasTruncated: Bool) {
+        guard text.utf8.count > maximumSearchBodyUTF8Bytes else { return (text, false) }
+        var data = Data(text.utf8.prefix(maximumSearchBodyUTF8Bytes))
+        while !data.isEmpty, String(data: data, encoding: .utf8) == nil { data.removeLast() }
+        return (String(data: data, encoding: .utf8) ?? "", true)
     }
 
     // MARK: - Private Methods
