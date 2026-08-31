@@ -601,7 +601,6 @@ struct SessionDashboard: View {
         SessionOrganization.project.rawValue
     @AppStorage("sessionDashboardTypeDirection") private var typeDirectionRaw =
         SessionTypeDirection.chatsFirst.rawValue
-    @State private var searchText = ""
     @State private var isConfirmingForget = false
     @State private var themeError: String?
     @State private var pendingThemeID: String?
@@ -619,20 +618,24 @@ struct SessionDashboard: View {
     @State private var surfaceChangeRequest: SurfaceChangeRequest?
     @State private var shareRequest: ShareChatRequest?
     @State private var showsUsage = false
+    @State private var showsUniversalSearch = false
     /// Once disclosed, recovery stays put while the next automatic attempt runs. Clearing it on
     /// `.connecting` made the full card and the compact progress card replace each other on every
     /// backoff tick — the page-sized flicker this state deliberately prevents.
     @State private var disclosedConnectionFailure: RemoteConnectionFailure?
     private let projectName: String?
+    private let projectID: String?
     let openSettings: () -> Void
     let reportConnectionIssue: () -> Void
 
     init(
         projectName: String? = nil,
+        projectID: String? = nil,
         openSettings: @escaping () -> Void,
         reportConnectionIssue: @escaping () -> Void
     ) {
         self.projectName = projectName
+        self.projectID = projectID
         self.openSettings = openSettings
         self.reportConnectionIssue = reportConnectionIssue
     }
@@ -665,31 +668,39 @@ struct SessionDashboard: View {
         let scoped = showsArchived ? all : all.filter {
             showsSnoozed ? $0.isSnoozed() : !$0.isSnoozed()
         }
-        let projectScoped = projectName.map { projectName in
-            scoped.filter { $0.projectName == projectName }
-        } ?? scoped
+        let projectScoped: [RemoteSessionSummaryDTO]
+        if let projectID {
+            projectScoped = scoped.filter {
+                $0.projectID == projectID
+                    || ($0.projectID == nil && $0.projectName == projectName)
+            }
+        } else if let projectName {
+            projectScoped = scoped.filter { $0.projectName == projectName }
+        } else {
+            projectScoped = scoped
+        }
         let visible = projectScoped.filter {
             !optimisticallyHiddenSessionIDs.contains($0.id)
                 && !model.archiveMutationSessionIDs.contains($0.id)
         }
-        let filtered = searchText.isEmpty ? visible : visible.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText)
-                || $0.projectName.localizedCaseInsensitiveContains(searchText)
-        }
-        return MobileSessionOrdering.sorted(filtered, archived: showsArchived)
+        return MobileSessionOrdering.sorted(visible, archived: showsArchived)
     }
 
     private var terminals: [RemoteProjectTerminalSummaryDTO] {
         guard !showsArchived, !showsSnoozed else { return [] }
         let all = model.me?.terminals ?? []
-        let scoped = projectName.map { name in
-            all.filter { $0.projectName == name }
-        } ?? all
-        let filtered = searchText.isEmpty ? scoped : scoped.filter {
-            $0.title.localizedCaseInsensitiveContains(searchText)
-                || $0.projectName.localizedCaseInsensitiveContains(searchText)
+        let scoped: [RemoteProjectTerminalSummaryDTO]
+        if let projectID {
+            scoped = all.filter {
+                $0.projectID == projectID
+                    || ($0.projectID == nil && $0.projectName == projectName)
+            }
+        } else if let projectName {
+            scoped = all.filter { $0.projectName == projectName }
+        } else {
+            scoped = all
         }
-        return filtered.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
+        return scoped.sorted { ($0.createdAt ?? 0) > ($1.createdAt ?? 0) }
     }
 
     private var groupedProjects: [DashboardProjectSection] {
@@ -865,12 +876,6 @@ struct SessionDashboard: View {
     private var dashboardNavigation: some View {
         dashboardContent
         .refreshable { await model.refresh() }
-        .searchable(
-            text: $searchText,
-            prompt: MobileL10n.string(
-                showsArchived ? "Search archived sessions" : "Search sessions and terminals"
-            )
-        )
         .navigationTitle(navigationTitle)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { dashboardToolbar }
@@ -912,6 +917,22 @@ struct SessionDashboard: View {
                     .mobileTheme(theme)
             }
         }
+        .sheet(isPresented: $showsUniversalSearch) {
+            NavigationStack {
+                MobileUniversalSearchView(initialScope: universalSearchScope) { route in
+                    model.navigationPath.append(route)
+                }
+            }
+            .mobileTheme(theme)
+        }
+    }
+
+    private var universalSearchScope: MobileUniversalSearchScope {
+        guard let projectName else { return .everywhere }
+        if let projectID { return .project(id: projectID, name: projectName) }
+        let matches = model.me?.newSessionCatalog?.projects.filter { $0.name == projectName } ?? []
+        guard matches.count == 1, let project = matches.first else { return .everywhere }
+        return .project(id: project.id, name: project.name)
     }
 
     private var dashboardDialogs: some View {
@@ -1037,6 +1058,21 @@ struct SessionDashboard: View {
             )
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
+            if model.canUseUniversalSearch {
+                Button {
+                    showsUniversalSearch = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .frame(
+                            width: MobileDesign.Size.compactControl,
+                            height: MobileDesign.Size.compactControl
+                        )
+                        .background(theme.controlResting, in: Circle())
+                }
+                .accessibilityLabel(MobileL10n.string("Search"))
+                .keyboardShortcut("f", modifiers: .command)
+            }
+
             NewSessionButton(
                 accessibilityLabel: projectName.map { MobileL10n.string("New session in %@", $0) }
                     ?? MobileL10n.string("New session")

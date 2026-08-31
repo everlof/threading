@@ -258,6 +258,8 @@ struct SessionDetailView: View {
     @State private var pendingSurface = RemoteSessionSurface.terminal
     @State private var isShowingWorkspace = false
     @State private var isShowingSessionSettings = false
+    @State private var isShowingUniversalSearch = false
+    @State private var isShowingTerminalFind = false
     @State private var initialWorkspaceDestination: RemoteNotificationDestinationDTO?
     @State private var initialWorkspaceEventID: String?
     @Environment(\.dismiss) private var dismiss
@@ -268,13 +270,15 @@ struct SessionDetailView: View {
 
     init(
         session: RemoteSessionSummaryDTO,
-        openingStrategy: MobileSessionOpeningStrategy = .resumeIfNeeded
+        openingStrategy: MobileSessionOpeningStrategy = .resumeIfNeeded,
+        initialWorkspaceDestination: RemoteNotificationDestinationDTO? = nil
     ) {
         self.session = session
         self.openingStrategy = openingStrategy
         _workspaceActivity = StateObject(wrappedValue: MobileWorkspaceActivity(
             sessionID: session.id
         ))
+        _initialWorkspaceDestination = State(initialValue: initialWorkspaceDestination)
     }
 
 #if DEBUG
@@ -296,7 +300,10 @@ struct SessionDetailView: View {
                 if connection.surface == .conversation {
                     ConversationRemoteView(connection: connection)
                 } else {
-                    TerminalRemoteView(connection: connection)
+                    TerminalRemoteView(
+                        connection: connection,
+                        isShowingFind: $isShowingTerminalFind
+                    )
                 }
             } else if let launchError {
                 ContentUnavailableView {
@@ -393,8 +400,20 @@ struct SessionDetailView: View {
                     .mobileTheme(theme)
             }
         }
+        .sheet(isPresented: $isShowingUniversalSearch) {
+            NavigationStack {
+                MobileUniversalSearchView(initialScope: universalSearchScope) { route in
+                    model.navigationPath.append(route)
+                }
+            }
+            .mobileTheme(theme)
+        }
         .task {
             await open()
+            if initialWorkspaceDestination != nil, canOpenWorkspace {
+                initialWorkspaceEventID = "search-result"
+                isShowingWorkspace = true
+            }
             openPendingNotificationDestination()
         }
         .onChange(of: model.notificationOpenRequest?.eventID) { _, _ in
@@ -469,6 +488,23 @@ struct SessionDetailView: View {
         )
     }
 
+    private var universalSearchScope: MobileUniversalSearchScope {
+        let projectID = currentSession.projectID ?? uniqueCatalogProjectID(
+            named: currentSession.projectName
+        )
+        return .session(
+            id: currentSession.id,
+            projectID: projectID,
+            projectName: currentSession.projectName
+        )
+    }
+
+    private func uniqueCatalogProjectID(named name: String) -> String? {
+        let matches = model.me?.newSessionCatalog?.projects.filter { $0.name == name } ?? []
+        guard matches.count == 1 else { return nil }
+        return matches[0].id
+    }
+
     /// Everything the session's own chrome can do, gathered under the one trailing control.
     ///
     /// Workspace and the terminal palette used to sit beside it as separate toolbar buttons.
@@ -476,6 +512,31 @@ struct SessionDetailView: View {
     /// of the two is reached often enough to spend a permanent slot on.
     @ViewBuilder
     private var sessionMenuContent: some View {
+        if connection?.surface == .terminal {
+            Button {
+                isShowingTerminalFind = true
+            } label: {
+                Label("Find in terminal", systemImage: "text.magnifyingglass")
+            }
+            .keyboardShortcut("f", modifiers: .command)
+        }
+        if model.canUseUniversalSearch {
+            Button {
+                isShowingUniversalSearch = true
+            } label: {
+                Label(
+                    MobileL10n.string(
+                        connection?.surface == .terminal ? "Search session" : "Search conversation"
+                    ),
+                    systemImage: "magnifyingglass"
+                )
+            }
+            .keyboardShortcut(
+                "f",
+                modifiers: connection?.surface == .terminal ? [.command, .shift] : .command
+            )
+            Divider()
+        }
         // The disc that opens this menu is ringed by the account's usage; the row leads with
         // that same drawing at glyph size, states its exact values and relevant reset, and takes
         // the reader to the dashboard for the rest.
@@ -618,7 +679,7 @@ struct SessionDetailView: View {
     }
 
     private var showsSessionMenu: Bool {
-        MobileSessionChrome.showsSessionMenu(
+        model.canUseUniversalSearch || MobileSessionChrome.showsSessionMenu(
             canManageSessions: model.canManageSessions,
             canChooseTerminalTheme: canChooseTerminalTheme
         )
@@ -1156,6 +1217,7 @@ private struct RemoteNavigationTitle: View {
 
 struct TerminalRemoteView: View {
     @ObservedObject var connection: RemoteSessionConnection
+    @Binding private var isShowingFind: Bool
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var continuity: MobileSessionContinuityStore
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
@@ -1184,11 +1246,23 @@ struct TerminalRemoteView: View {
     @State private var pendingDirectAttachmentInsertionID: String?
     @State private var selectionQuotes: [RemoteTerminalSelectionQuote] = []
     @State private var selectedInputPreference: MobileTerminalInputPreference?
+    @State private var findQuery = ""
+    @State private var findMatchIndex = 0
+    @State private var findMatchTotal = 0
+    @FocusState private var findFieldFocused: Bool
     @StateObject private var keyBridge = TerminalKeyBridge()
     @AppStorage(MobileTerminalFontSize.preferenceKey)
     private var terminalFontSize = MobileTerminalFontSize.defaultValue
     @AppStorage(MobileTerminalInputPreference.defaultPreferenceKey)
     private var defaultInputPreference = MobileTerminalInputPreference.direct
+
+    init(
+        connection: RemoteSessionConnection,
+        isShowingFind: Binding<Bool> = .constant(false)
+    ) {
+        self.connection = connection
+        _isShowingFind = isShowingFind
+    }
 
     private var theme: RemoteThemePalette {
         connection.theme.map(RemoteThemePalette.init) ?? inheritedTheme
@@ -1281,6 +1355,9 @@ struct TerminalRemoteView: View {
     var body: some View {
         VStack(spacing: 0) {
             MobileRunPlanDisclosure(connection: connection)
+            if isShowingFind {
+                terminalFindBar
+            }
             terminalSurface
             TerminalCollaborationBar(
                 connection: connection,
@@ -1345,6 +1422,14 @@ struct TerminalRemoteView: View {
         .onAppear(perform: configureDirectAttachments)
         .onAppear(perform: seedSelectionQuotesForEvidence)
         .onAppear { keyBridge.seedKeyboardWanted(rememberedTerminalKeyboardUp) }
+        .onChange(of: isShowingFind) { _, isShowing in
+            if isShowing {
+                keyBridge.dismissKeyboardForModeSwitch()
+                findFieldFocused = true
+            } else {
+                clearTerminalFind()
+            }
+        }
         .onDisappear(perform: rememberTerminalKeyboard)
         .onReceive(
             NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
@@ -1396,6 +1481,92 @@ struct TerminalRemoteView: View {
         ) { result in
             importDirectAttachmentFiles(result)
         }
+    }
+
+    private var terminalFindBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(theme.secondaryLabel)
+                .accessibilityHidden(true)
+            TextField(MobileL10n.string("Find in terminal"), text: $findQuery)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($findFieldFocused)
+                .submitLabel(.search)
+                .onSubmit { findNextTerminalMatch() }
+                .onChange(of: findQuery) { _, query in
+                    guard !query.isEmpty else {
+                        clearTerminalSearchSelection()
+                        return
+                    }
+                    findNextTerminalMatch()
+                }
+            Text(findMatchSummary)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(theme.secondaryLabel)
+                .frame(minWidth: 38, alignment: .trailing)
+                .accessibilityLabel(MobileL10n.string("Search matches"))
+            Button(action: findPreviousTerminalMatch) {
+                Image(systemName: "chevron.up")
+            }
+            .disabled(findQuery.isEmpty || findMatchTotal == 0)
+            .accessibilityLabel(MobileL10n.string("Previous match"))
+            Button(action: findNextTerminalMatch) {
+                Image(systemName: "chevron.down")
+            }
+            .disabled(findQuery.isEmpty || findMatchTotal == 0)
+            .accessibilityLabel(MobileL10n.string("Next match"))
+            Button(MobileL10n.string("Done")) {
+                isShowingFind = false
+            }
+        }
+        .font(.body)
+        .buttonStyle(.plain)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
+        .foregroundStyle(theme.label)
+        .background(theme.surface)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
+        }
+    }
+
+    private var findMatchSummary: String {
+        guard !findQuery.isEmpty else { return "" }
+        return "\(findMatchIndex)/\(findMatchTotal)"
+    }
+
+    private func findNextTerminalMatch() {
+        guard !findQuery.isEmpty, let terminal = keyBridge.terminalView else {
+            clearTerminalSearchSelection()
+            return
+        }
+        _ = terminal.findNext(findQuery)
+        updateTerminalFindSummary(terminal)
+    }
+
+    private func findPreviousTerminalMatch() {
+        guard !findQuery.isEmpty, let terminal = keyBridge.terminalView else { return }
+        _ = terminal.findPrevious(findQuery)
+        updateTerminalFindSummary(terminal)
+    }
+
+    private func updateTerminalFindSummary(_ terminal: RemoteTerminalView) {
+        let summary = terminal.searchMatchSummary(findQuery)
+        findMatchIndex = summary.index
+        findMatchTotal = summary.total
+    }
+
+    private func clearTerminalSearchSelection() {
+        keyBridge.terminalView?.clearSearch()
+        findMatchIndex = 0
+        findMatchTotal = 0
+    }
+
+    private func clearTerminalFind() {
+        clearTerminalSearchSelection()
+        findQuery = ""
+        findFieldFocused = false
     }
 
     private var terminalSurface: some View {
