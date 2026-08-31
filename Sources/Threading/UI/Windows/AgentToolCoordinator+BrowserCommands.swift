@@ -1109,19 +1109,19 @@ extension AgentToolCoordinator {
             let message: String
             if let width = arguments.width, let height = arguments.height {
                 message = """
-                    Set the active browser viewport to \(width)×\(height) CSS pixels. The shared \
-                    panel is pannable when that surface is larger than the pane.
+                    Set the active browser viewport to \(width)×\(height) CSS pixels. The browser \
+                    host is pannable when that surface is larger than the pane. The Device \
+                    Toolbar is open; reset the viewport when responsive testing is finished.
                     """
             } else {
-                message = "Reset the active browser viewport to fit its window."
+                message = "Reset the active browser viewport to fill its host and hid the Device Toolbar."
             }
 
             guard browser.currentURL != nil else {
-                if let width = arguments.width, let height = arguments.height {
-                    browser.setResponsiveViewport(width: width, height: height)
-                } else {
-                    browser.resetResponsiveViewportToHost()
-                }
+                browser.presentAgentResponsiveViewport(
+                    width: arguments.width,
+                    height: arguments.height
+                )
                 _ = self.revealBrowserPane(for: sessionID)
                 completion(.success(message))
                 return

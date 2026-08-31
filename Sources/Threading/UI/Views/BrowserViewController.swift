@@ -1270,6 +1270,22 @@ final class BrowserViewController: NSViewController {
         layoutWebViews(resetScrollPosition: true)
     }
 
+    /// Applies the viewport state an agent asked the shared browser to show.
+    ///
+    /// A fixed viewport can be shorter than its host without being wrong: the remaining canvas is
+    /// outside the CSS viewport. Leaving only the counted test-condition glyph visible made that
+    /// exact state look like a failed WebKit fill. Agent-driven resizing therefore owns the device
+    /// toolbar's lifetime as well as the dimensions, so the page says why it is fixed and keeps the
+    /// visible close/reset route beside the numbers that caused it.
+    func presentAgentResponsiveViewport(width: Int?, height: Int?) {
+        if let width, let height {
+            setResponsiveViewport(width: width, height: height)
+            showDeviceToolbar()
+        } else {
+            hideDeviceToolbar(resetViewport: true)
+        }
+    }
+
     /// Stops emulating a viewport, so the page fills whatever is hosting this browser.
     ///
     /// Named for the *host*, not the panel, because the emulated viewport is orthogonal to the
@@ -1396,16 +1412,15 @@ final class BrowserViewController: NSViewController {
     ) async -> BrowserActionOutcome {
         let message: String
         if let width, let height {
-            message = "Set the active browser viewport to \(width)×\(height) CSS pixels."
+            message = """
+                Set the active browser viewport to \(width)×\(height) CSS pixels and opened the \
+                Device Toolbar. Reset the viewport when responsive testing is finished.
+                """
         } else {
-            message = "Reset the active browser viewport to fit the shared panel."
+            message = "Reset the active browser viewport to fill its host and hid the Device Toolbar."
         }
         return await performGuardedAgentBrowserMutation(message: message) {
-            if let width, let height {
-                setResponsiveViewport(width: width, height: height)
-            } else {
-                resetResponsiveViewportToHost()
-            }
+            presentAgentResponsiveViewport(width: width, height: height)
         }
     }
 
@@ -2691,7 +2706,7 @@ final class BrowserViewController: NSViewController {
     }
 
     @objc private func resetResponsiveViewport() {
-        resetResponsiveViewportToHost()
+        hideDeviceToolbar(resetViewport: true)
     }
 
     @objc private func showDeviceToolbar() {
@@ -3356,7 +3371,6 @@ final class BrowserViewController: NSViewController {
     }
 
     private func resetAllTestConditions() {
-        agentViewportSize = nil
         agentColorScheme = .auto
         agentUserAgent = .automatic
         agentMediaType = .auto
@@ -3365,8 +3379,7 @@ final class BrowserViewController: NSViewController {
             $0.customUserAgent = nil
             $0.mediaType = nil
         }
-        updateTestConditionChrome()
-        layoutWebViews(resetScrollPosition: true)
+        hideDeviceToolbar(resetViewport: true)
     }
 
     /// Whether an address sync should stand aside because the user has a destination half-typed.
