@@ -594,6 +594,7 @@ final class SubagentTranscriptViewController: NSViewController {
             id: agent.descriptor.threadID,
             title: agent.descriptor.displayName,
             subtitle: agent.descriptor.prompt,
+            configurationDetail: configurationDetail(for: agent.descriptor),
             state: summaryState(agent.status),
             statusDetail: agent.statusDetail,
             usageDetail: usage.flatMap {
@@ -605,6 +606,20 @@ final class SubagentTranscriptViewController: NSViewController {
             detailLines: Array(detailLines.suffix(SubagentDefaults.activityLimit)),
             transcriptAvailability: transcriptAvailability(for: agent)
         )
+    }
+
+    private func configurationDetail(for descriptor: SubagentDescriptor) -> String? {
+        var parts: [String] = []
+        if let model = descriptor.model?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !model.isEmpty {
+            parts.append(model)
+        }
+        if let effort = descriptor.reasoningEffort?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !effort.isEmpty {
+            parts.append(L10n.format("Reasoning: %@", effort))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private func applyUsage(_ snapshot: SessionUsageSnapshot?) {

@@ -2393,8 +2393,9 @@ edit the selected project, and operations needing more than that fail rather tha
 approved. Use the Terminal surface when a task needs Codex's full interactive approval flow.
 
 When Claude or Codex delegates work, both Chat and Terminal show a **Subagents** summary with live working/done
-counts and, when the provider reports them, the child's current tool, elapsed time, tool count,
-and token count. The display-panel navigator also adds the indexed token total, cost and request
+counts. Each row keeps the delegated task visible and, when the provider reports them, adds the
+child's model and reasoning effort, current tool, elapsed time, tool count, token count, and latest
+activity or result. The display-panel navigator also adds the indexed token total, cost and request
 count for each child when its transcript provides them. Select a child to open its conversation in the display panel; child output
 stays out of the parent's transcript. Both providers show structured child text, thinking, tool
 calls, and results, including nested delegated agents.
@@ -3821,7 +3822,8 @@ category or price.
 
 The Subagents row remains brief: working/done counts and their token subtotal. Click it for the
 existing **Subagents** pane, which is the detailed agents sidebar: its navigator lists every child
-with brief tokens, cost and request count where available, above the selected child's transcript.
+with its delegated task, model/reasoning configuration, current progress or latest result, and
+brief tokens, cost and request count where available, above the selected child's transcript.
 
 The card holds more than one destination, so **the pointer says which part goes where**. Every
 interactive hover covers the whole cell: branch, totals and review rows open Git Review; the

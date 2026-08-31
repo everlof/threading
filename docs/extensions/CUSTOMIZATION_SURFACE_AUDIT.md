@@ -57,6 +57,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Display-pane header | `display.pane-header@1` | protected command/status hook | tab ownership, close/select/order, overflow, persistence, `+` menu | Implemented |
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
 | Session Overview body | — | host-only | Activity attribution and lazy tree, usage/accounting truth, Info polling/process controls/port routing, section lifecycle, persistence and empty-panel fallback | Host-only |
+| Subagents navigator and child transcript | — | host-only | child identity/hierarchy, lifecycle and transcript availability, bounded paging, provider progress and usage truth, selection/reveal routing | Host-only |
 | In-panel iOS Simulator body | — | host-only | CoreSimulator device identity, boot lease and ownership, agent consent/routing, framebuffer/input authority, visibility budget and fallback truth | Host-only |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |
 | Launch failure surface | — | host-only | the runtime's captured words verbatim, exit classification, retry, the report path's review-before-send rule, repair eligibility and the working-copy boundary | Host-only |
@@ -227,6 +228,15 @@ The host also owns the section lifecycle—only the visible reading may poll or 
 synthetic, non-persisted Overview shown when a person opens an empty panel. Extensions can still
 compose into the surrounding `display.pane-header@1` and `display.tab-header@1`; publishing the
 body would require separate typed, brokered data contracts rather than access to these controllers.
+
+The Subagents navigator and child transcript remain host-only for the same operational reason.
+Threading owns which provider identities are the same child, their parent/child relationships,
+whether a transcript is actually openable or revealable, lifecycle settlement across renderer
+switches and relaunch, the 40-row page bound, and the usage provenance attached to a child. The
+richer row may present the task, configuration, progress and latest activity already in that
+host-owned projection; it does not grant an extension authority to replace those facts or the
+selection route. A future public surface starts with a bounded typed child snapshot rather than
+access to the timeline controller.
 
 The in-panel iOS Simulator is host-only because its presentation is also an authority boundary.
 The selected UDID, whether Threading may shut it down, which session and agent may control it,

@@ -38,6 +38,7 @@ struct SubagentSummaryItem: Equatable {
     let id: String
     let title: String
     let subtitle: String?
+    let configurationDetail: String?
     let state: State
     let statusDetail: String?
     let usageDetail: String?
@@ -48,6 +49,7 @@ struct SubagentSummaryItem: Equatable {
         id: String,
         title: String,
         subtitle: String?,
+        configurationDetail: String? = nil,
         state: State,
         statusDetail: String?,
         usageDetail: String? = nil,
@@ -57,6 +59,7 @@ struct SubagentSummaryItem: Equatable {
         self.id = id
         self.title = title
         self.subtitle = subtitle
+        self.configurationDetail = configurationDetail
         self.state = state
         self.statusDetail = statusDetail
         self.usageDetail = usageDetail
@@ -172,7 +175,7 @@ final class SubagentSummaryView: NSView {
 
         rows.orientation = .vertical
         rows.alignment = .leading
-        rows.spacing = Design.Spacing.tight
+        rows.spacing = .zero
         rows.translatesAutoresizingMaskIntoConstraints = false
 
         pageLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -305,13 +308,38 @@ final class SubagentSummaryView: NSView {
         let start = min(pageIndex * Self.maximumRowsPerPage, items.count)
         let end = min(start + Self.maximumRowsPerPage, items.count)
 
+        var previousRow: NSView?
         for item in items[start..<end] {
             let row = makeRow(item)
+            let separator: SeparatorView?
+            if previousRow != nil {
+                let rowSeparator = SeparatorView()
+                separator = rowSeparator
+                rows.addArrangedSubview(rowSeparator)
+                NSLayoutConstraint.activate([
+                    rowSeparator.leadingAnchor.constraint(
+                        equalTo: rows.leadingAnchor,
+                        constant: ThemedButton.plainTitleLeadingInset
+                    ),
+                    rowSeparator.trailingAnchor.constraint(equalTo: rows.trailingAnchor)
+                ])
+            } else {
+                separator = nil
+            }
             rows.addArrangedSubview(row)
             NSLayoutConstraint.activate([
                 row.leadingAnchor.constraint(equalTo: rows.leadingAnchor),
                 row.trailingAnchor.constraint(equalTo: rows.trailingAnchor)
             ])
+            if let previousRow, let separator {
+                separator.applyOpticalSpacing(
+                    in: rows,
+                    precededBy: previousRow,
+                    followedBy: row,
+                    inkGap: Design.Spacing.small
+                )
+            }
+            previousRow = row
         }
 
         if pageCount > 1, pager.superview == nil {
@@ -505,12 +533,53 @@ final class SubagentSummaryView: NSView {
             heading.trailingAnchor.constraint(equalTo: row.trailingAnchor)
         ])
 
-        if let statusDetail = item.statusDetail, !statusDetail.isEmpty {
-            addDetail(statusDetail, to: row, color: Design.Text.tertiary)
+        let showsStandingContext = selectionStyle == .navigation
+        if showsStandingContext,
+           let subtitle = item.subtitle,
+           !subtitle.isEmpty {
+            addDetail(
+                subtitle,
+                to: row,
+                color: Design.Text.secondary,
+                maximumNumberOfLines: 2
+            )
+        }
+
+        let operationalDetails = [item.configurationDetail, item.statusDetail]
+            .compactMap { detail -> String? in
+                guard let detail, !detail.isEmpty else { return nil }
+                return detail
+            }
+            .reduce(into: [String]()) { unique, detail in
+                if !unique.contains(detail) { unique.append(detail) }
+            }
+        let operationalDetail = operationalDetails.joined(separator: " · ")
+        if !operationalDetail.isEmpty {
+            addDetail(
+                operationalDetail,
+                to: row,
+                color: Design.Text.tertiary,
+                maximumNumberOfLines: 2
+            )
         }
         if let usageDetail = item.usageDetail, !usageDetail.isEmpty,
-           usageDetail != item.statusDetail {
-            addDetail(usageDetail, to: row, color: Design.Text.tertiary)
+           !operationalDetails.contains(usageDetail) {
+            addDetail(
+                usageDetail,
+                to: row,
+                color: Design.Text.tertiary,
+                maximumNumberOfLines: 2
+            )
+        }
+
+        if selectionStyle == .navigation,
+           let latestActivity = latestActivity(in: item) {
+            addDetail(
+                latestActivity,
+                to: row,
+                color: Design.Text.secondary,
+                maximumNumberOfLines: 2
+            )
         }
 
         // Removing the chevron answers "why does this not open"; without a line saying so the
@@ -544,12 +613,29 @@ final class SubagentSummaryView: NSView {
         return row
     }
 
-    private func addDetail(_ text: String, to row: NSStackView, color: NSColor) {
+    private func latestActivity(in item: SubagentSummaryItem) -> String? {
+        let alreadyShown = Set([
+            item.subtitle,
+            item.configurationDetail,
+            item.statusDetail,
+            item.usageDetail
+        ].compactMap { $0 }.filter { !$0.isEmpty })
+        return item.detailLines.reversed().first { detail in
+            !detail.isEmpty && !alreadyShown.contains(detail)
+        }
+    }
+
+    private func addDetail(
+        _ text: String,
+        to row: NSStackView,
+        color: NSColor,
+        maximumNumberOfLines: Int = 3
+    ) {
         let label = NSTextField(wrappingLabelWithString: text)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.applyFont(.detail(), in: .conversation)
         label.textColor = color
-        label.maximumNumberOfLines = 3
+        label.maximumNumberOfLines = maximumNumberOfLines
         label.lineBreakMode = .byWordWrapping
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         row.addArrangedSubview(label)
