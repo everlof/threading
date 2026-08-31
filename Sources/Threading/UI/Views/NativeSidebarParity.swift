@@ -65,6 +65,18 @@ enum NativeSidebarHostInputAlias: String, CaseIterable, Sendable {
 /// lets the boundary checker derive accepted fact names from `HostFactCatalog`, with no parallel
 /// Python or JSON field allowlist.
 enum NativeSidebarParity {
+    /// Every native option dependency is the implementation of one public option declaration.
+    /// The parity lint checks both sides are total and one-to-one.
+    static let publicOptionOwnership: [
+        NativeSidebarOptionDependency: NativeSidebarPipelineOptionID
+    ] = [
+        .sessionOrder: .sessionOrder,
+        .sessionOrderDirection: .sessionOrderReversed,
+        .branchGrouping: .branchGrouping,
+        .loneBranchHeadings: .loneBranchHeadings,
+        .compactTree: .compactTree,
+    ]
+
     static let optionSourceOwnership: [
         NativeSidebarOptionSourceAlias: NativeSidebarOptionDependency
     ] = [

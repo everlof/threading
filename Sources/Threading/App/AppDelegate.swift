@@ -2698,16 +2698,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // The arrangement toggles carry state, so their checks are stamped here — validation
         // runs on every menu open, which is the one moment the check has to be true.
         if menuItem.action == #selector(toggleBranchGrouping) {
-            menuItem.state = AppSettings.shared.groupsSessionsByBranch ? .on : .off
+            menuItem.state = NativeSidebarPipelineOptions.branchGrouping ? .on : .off
             return true
         }
         if menuItem.action == #selector(toggleLoneBranchHeadings) {
-            menuItem.state = AppSettings.shared.groupsLoneBranches ? .on : .off
+            menuItem.state = NativeSidebarPipelineOptions.loneBranchHeadings ? .on : .off
             // The refinement has nothing to refine while grouping is off.
-            return AppSettings.shared.groupsSessionsByBranch
+            return NativeSidebarPipelineOptions.branchGrouping
         }
         if menuItem.action == #selector(toggleCompactTree) {
-            menuItem.state = AppSettings.shared.compactsSidebarTree ? .on : .off
+            menuItem.state = NativeSidebarPipelineOptions.compactTree ? .on : .off
             return true
         }
         // The silence gate carries state too, and it is always available: it needs no window,
@@ -2896,7 +2896,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
                 return .unavailable(L10n.string("There is no next location."))
             }
         case AppCommands.ID.loneBranchHeadings:
-            guard AppSettings.shared.groupsSessionsByBranch else {
+            guard NativeSidebarPipelineOptions.branchGrouping else {
                 return .unavailable(L10n.string("Turn on Group Sessions by Branch first."))
             }
         case AppCommands.ID.previousTab, AppCommands.ID.nextTab:

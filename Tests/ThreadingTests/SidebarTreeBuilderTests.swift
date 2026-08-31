@@ -78,6 +78,21 @@ final class SidebarTreeBuilderTests: XCTestCase {
         return terminal
     }
 
+    private func optionValues(
+        order: SidebarSessionOrder = .manual,
+        reversed: Bool = false,
+        branchGrouping: Bool = true,
+        loneBranchHeadings: Bool = true
+    ) -> NativeSidebarPipelineOptionValues {
+        NativeSidebarPipelineOptionValues(
+            sessionOrder: order,
+            sessionOrderReversed: reversed,
+            branchGrouping: branchGrouping,
+            loneBranchHeadings: loneBranchHeadings,
+            compactTree: false
+        )
+    }
+
     /// Sets a defaults key for one test and restores the registered seed afterwards.
     ///
     /// Written straight to `UserDefaults` rather than through `AppSettings.shared`, whose
@@ -96,6 +111,71 @@ final class SidebarTreeBuilderTests: XCTestCase {
         try withDefault(order.rawValue, forKey: "sidebarSessionOrder") {
             try withDefault(true, forKey: "sidebarSessionOrderIsReversed", run: run)
         }
+    }
+
+    func testInjectedOptionSnapshotControlsEveryOrderAndDirection() {
+        let older = session("Bravo", lastActiveAt: Date(timeIntervalSince1970: 10))
+        let newer = session("Alpha", lastActiveAt: Date(timeIntervalSince1970: 20))
+        let source = project("p", sessions: [older, newer])
+        let expected: [SidebarSessionOrder: ([SessionID], [SessionID])] = [
+            .manual: ([older.id, newer.id], [newer.id, older.id]),
+            .recentActivity: ([newer.id, older.id], [older.id, newer.id]),
+            .name: ([newer.id, older.id], [older.id, newer.id]),
+            .type: ([older.id, newer.id], [older.id, newer.id]),
+        ]
+
+        for order in SidebarSessionOrder.allCases {
+            let natural = SidebarTreeBuilder.rootNodes(
+                from: [source],
+                optionValues: optionValues(order: order)
+            )
+            let reversed = SidebarTreeBuilder.rootNodes(
+                from: [source],
+                optionValues: optionValues(order: order, reversed: true)
+            )
+            XCTAssertEqual(allSessionIDs(in: natural), expected[order]?.0, "\(order) natural")
+            XCTAssertEqual(allSessionIDs(in: reversed), expected[order]?.1, "\(order) reversed")
+        }
+    }
+
+    func testInjectedOptionSnapshotControlsBranchAndLoneHeadingShape() throws {
+        let first = session("First", branch: "shared")
+        let second = session("Second", branch: "shared")
+        let lone = session("Lone", branch: "lone")
+        let source = project("p", sessions: [first, second, lone])
+
+        let flatProject = try XCTUnwrap(
+            SidebarTreeBuilder.rootNodes(
+                from: [source],
+                optionValues: optionValues(branchGrouping: false)
+            ).first as? ProjectNode
+        )
+        XCTAssertEqual(flatProject.childNodes.compactMap { $0 as? SessionNode }.count, 3)
+        XCTAssertTrue(flatProject.childNodes.compactMap { $0 as? BranchGroupNode }.isEmpty)
+
+        let sharedOnlyProject = try XCTUnwrap(
+            SidebarTreeBuilder.rootNodes(
+                from: [source],
+                optionValues: optionValues(loneBranchHeadings: false)
+            ).first as? ProjectNode
+        )
+        XCTAssertEqual(
+            sharedOnlyProject.childNodes.compactMap { $0 as? BranchGroupNode }.map(\.branch),
+            ["shared"]
+        )
+        XCTAssertEqual(sharedOnlyProject.childNodes.compactMap { $0 as? SessionNode }.count, 1)
+
+        let allHeadingsProject = try XCTUnwrap(
+            SidebarTreeBuilder.rootNodes(
+                from: [source],
+                optionValues: optionValues(loneBranchHeadings: true)
+            ).first as? ProjectNode
+        )
+        XCTAssertEqual(
+            allHeadingsProject.childNodes.compactMap { $0 as? BranchGroupNode }.map(\.branch),
+            ["shared", "lone"]
+        )
+        XCTAssertTrue(allHeadingsProject.childNodes.compactMap { $0 as? SessionNode }.isEmpty)
     }
 
     /// The main window passes through toolbar and saved-frame layouts before it is shown. A
