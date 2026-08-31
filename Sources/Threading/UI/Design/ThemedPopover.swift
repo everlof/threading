@@ -1,5 +1,13 @@
 import AppKit
 
+/// A view whose presentation changes while a popover opened from it or one of its descendants
+/// is on screen. The observer chain is captured at presentation time so a recycled source can
+/// still release the exact containers that were held when the popover opened.
+@MainActor
+protocol ThemedPopoverPresentationObserving: NSView {
+    func themedPopoverPresentationDidChange(isPresented: Bool)
+}
+
 /// App-owned popover chrome with AppKit-compatible anchoring semantics.
 ///
 /// The content remains an ordinary view controller. This type owns only the presentation:
@@ -8,6 +16,14 @@ import AppKit
 /// use this type; their system behavior is part of their value.
 @MainActor
 final class ThemedPopover {
+
+    private final class WeakPresentationObserver: @unchecked Sendable {
+        weak var view: NSView?
+
+        init(_ view: NSView) {
+            self.view = view
+        }
+    }
 
     enum Behavior {
         /// The owner closes the popover. Escape remains a universal way out.
@@ -60,6 +76,7 @@ final class ThemedPopover {
     private var preferredEdge: NSRectEdge = .maxY
     private weak var presentingWindow: NSWindow?
     private weak var previousFirstResponder: NSResponder?
+    private var presentationObservers: [WeakPresentationObserver] = []
     private let eventMonitor = LocalEventMonitor()
     private let windowEvents = AppEventObservations()
     private var preferredSizeObservation: NSKeyValueObservation?
@@ -70,6 +87,22 @@ final class ThemedPopover {
         // hard-bevel materials remove the modern speech-arrow and spend that space on a square
         // period frame. Reposition while the popover is open so the old silhouette never lingers.
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in self?.reposition() }
+    }
+
+    deinit {
+        guard isShown else { return }
+        let observers = presentationObservers
+        if Thread.isMainThread {
+            MainActor.assumeIsolated {
+                Self.notifyPresentationObservers(observers, isPresented: false)
+            }
+        } else {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    Self.notifyPresentationObservers(observers, isPresented: false)
+                }
+            }
+        }
     }
 
     func show(relativeTo positioningRect: NSRect, of positioningView: NSView, preferredEdge: NSRectEdge) {
@@ -87,6 +120,7 @@ final class ThemedPopover {
         self.preferredEdge = preferredEdge
         presentingWindow = parent
         previousFirstResponder = parent.firstResponder
+        presentationObservers = Self.presentationObservers(from: positioningView)
 
         let panel = ThemedPopoverPanel()
         panel.onCancel = { [weak self] in self?.close() }
@@ -111,6 +145,7 @@ final class ThemedPopover {
 
         isShown = true
         Self.shown.add(self)
+        notifyPresentationObservers(isPresented: true)
         panel.alphaValue = animates && Design.Motion.standard > 0 ? 0 : 1
         panel.orderFront(nil)
         if panel.alphaValue == 0 {
@@ -145,11 +180,17 @@ final class ThemedPopover {
 
     func close() {
         guard isShown || panel != nil else { return }
+        let notifiedPresentation = isShown
         isShown = false
         Self.shown.remove(self)
         removeEventMonitor()
         removeObservation()
         preferredSizeObservation = nil
+
+        if notifiedPresentation {
+            notifyPresentationObservers(isPresented: false)
+        }
+        presentationObservers = []
 
         guard let panel else { return }
         let parent = presentingWindow
@@ -167,6 +208,32 @@ final class ThemedPopover {
             }
         }
         onClose?()
+    }
+
+    private static func presentationObservers(from source: NSView) -> [WeakPresentationObserver] {
+        var observers: [WeakPresentationObserver] = []
+        var candidate: NSView? = source
+        while let view = candidate {
+            if view is any ThemedPopoverPresentationObserving {
+                observers.append(WeakPresentationObserver(view))
+            }
+            candidate = view.superview
+        }
+        return observers
+    }
+
+    private func notifyPresentationObservers(isPresented: Bool) {
+        Self.notifyPresentationObservers(presentationObservers, isPresented: isPresented)
+    }
+
+    private static func notifyPresentationObservers(
+        _ observers: [WeakPresentationObserver],
+        isPresented: Bool
+    ) {
+        for observer in observers {
+            (observer.view as? any ThemedPopoverPresentationObserving)?
+                .themedPopoverPresentationDidChange(isPresented: isPresented)
+        }
     }
 
     /// Re-measures dynamic content and keeps the arrow attached to its anchor.

@@ -154,6 +154,27 @@
       }
     },
     {
+      "id": "sidebar-edge-reveal",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Collapsed sidebar edge reveal",
+      "description": "The real main-window shell with its sidebar fully collapsed and temporarily restored from the invisible leading-edge hover target, proving the trigger adds no chrome and reuses the navigable sidebar.",
+      "states": ["Collapsed edge target", "Hover-revealed navigable sidebar"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["960×620-point main window"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/SidebarEdgeRevealRenderTests.swift",
+        "test": "ThreadingTests/SidebarEdgeRevealRenderTests/testRendersCollapsedAndHoverRevealedSidebarInShippingWindow"
+      },
+      "capture": {
+        "glob": "sidebar-edge-reveal-*.png"
+      }
+    },
+    {
       "id": "workspace-navigator-shell",
       "kind": "surface",
       "status": "implemented",

@@ -347,10 +347,30 @@ reported — the top-right "isn't really rounded, it's cut off and turns black".
 `SidebarSplitViewController.splitView(_:shouldHideDividerAt:)` hides any divider whose neighbour
 is collapsed. *Hidden*, not merely undrawn: a divider that is only unpainted still takes its
 thickness out of the layout, and the window's own background shows through the gap — the same
-bar in the system's colour instead of the theme's. Neither pane loses a way back, because
-neither is opened by dragging. `WindowEdgeTests` asserts it where the bug lived, on the pixels
-of a real unshown window, and was checked against a stubbed-out fix to confirm the seam
-reappears without it.
+bar in the system's colour instead of the theme's. Neither pane loses a way back: the display
+panel has its toggle, and the sidebar has its toggle, View command and collapsed-edge hover
+target. `WindowEdgeTests` asserts it where the bug lived, on the pixels of a real unshown window,
+and was checked against a stubbed-out fix to confirm the seam reappears without it.
+
+**A collapsed sidebar keeps an invisible six-point leading-edge target.** It is installed in the
+window chrome overlay, accepts no hit tests, and tracks only while the window is key, so ordinary
+clicks and inactive windows do not acquire a new action strip. A pointer must dwell there for
+250 ms before the split item opens; after leaving the sidebar it remains open for 350 ms. The
+first delay rejects crossings on the way to the traffic lights, and the second makes the journey
+from the trigger into the moving pane possible without racing its geometry.
+
+The temporary state belongs to the **existing** `WorkspaceSidebarContainerViewController`, not a
+second drawer or snapshot. Its root reports pointer presence in O(1), and themed menus and
+popovers report their nested presentation lifetime, so the sidebar remains navigable while a
+row action is open and closes only after both pointer and presentation have left. No project,
+session or extension row is enumerated on a mouse event. A deliberate toggle, View command or
+page-title reveal cancels temporary ownership and becomes the explicit state; deactivation,
+miniaturization dismiss it, and modal presentation suppresses a new reveal. The open and close
+use the shared pane transition, including Reduce Motion and the immediate terminal-backed path.
+
+This is host-owned window behavior under the customization-surface gate. An extension may own the
+navigator content already mounted in the sidebar, but not the window-edge target, collapse state,
+transition, pointer lifetime or keyboard route that makes that content reachable.
 
 **And the divider that comes back is not painted, because AppKit never asks for it.** The other
 half of the same edge: a pane revealed from collapsed arrives at a strip that has been standing

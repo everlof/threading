@@ -120,6 +120,28 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Retained so the sidebar can be collapsed and restored directly.
     private lazy var sidebarItem = NSSplitViewItem(viewController: workspaceSidebarViewController)
 
+    /// The invisible leading-edge target and the timing state around the real sidebar it opens.
+    /// Keeping the split item as the revealed surface preserves selection, scrolling, extension
+    /// navigator state and every ordinary row interaction.
+    private lazy var sidebarEdgeRevealCoordinator: SidebarEdgeRevealCoordinator = {
+        let coordinator = SidebarEdgeRevealCoordinator()
+        coordinator.onReveal = { [weak self] in self?.revealSidebarTemporarily() }
+        coordinator.onDismiss = { [weak self] in self?.dismissTemporarilyRevealedSidebar() }
+        return coordinator
+    }()
+    private lazy var sidebarEdgeTrackingView: HoverTrackingView = {
+        let tracker = HoverTrackingView()
+        tracker.passesHitTestingThrough = true
+        tracker.tracksOnlyInKeyWindow = true
+        tracker.onHoverChange = { [weak self] hovering in
+            self?.sidebarEdgeHoverChanged(hovering)
+        }
+        return tracker
+    }()
+#if DEBUG
+    private var allowsUnkeyedSidebarEdgeRevealForTesting = false
+#endif
+
     /// Owns session creation, import, worktree targeting, surface switches, and closing.
     lazy var sessionCoordinator = SessionCoordinator(
         sidebar: sidebarViewController,
@@ -637,6 +659,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private func setupSplitViewController() {
         let sidebarStarted = DispatchTime.now().uptimeNanoseconds
         sidebarViewController.delegate = self
+        workspaceSidebarViewController.onHoverChange = { [weak self] hovering in
+            self?.sidebarEdgeRevealCoordinator.sidebarHoverChanged(hovering)
+        }
+        workspaceSidebarViewController.onThemedPresentationChange = { [weak self] presented in
+            self?.sidebarEdgeRevealCoordinator.sidebarPresentationDidChange(
+                isPresented: presented
+            )
+        }
 
         // A **plain** item, not `sidebarWithViewController:`, and that is the whole of the
         // sidebar's new silhouette.
@@ -697,6 +727,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
         let contentInstallStarted = DispatchTime.now().uptimeNanoseconds
         window?.contentViewController = chromeHostViewController
+        installSidebarEdgeTrackingView()
         startupPerformance.splitContentInstallNanoseconds = DispatchTime.now().uptimeNanoseconds
             - contentInstallStarted
 
@@ -753,6 +784,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         splitViewController.paneCollapseStateDidChange = { [weak self] item, collapsed in
             guard let self else { return }
+            if item === self.sidebarItem {
+                self.sidebarEdgeTrackingView.isHidden = !collapsed
+                if collapsed {
+                    self.sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
+                }
+            }
             self.updatePaneToggleSelection()
             // A panel dragged shut leaves by the same door as one closed from its own ✕:
             // the app-wide theme document is put away with the pane that was showing it.
@@ -767,7 +804,33 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             self.updateHeaderInset(sidebarIsCollapsed: collapsed)
             if !collapsed {
                 self.applyPendingWorkspaceNavigatorWidth()
+                if self.sidebarEdgeRevealCoordinator.isTemporarilyRevealed {
+                    self.sidebarEdgeRevealCoordinator.revealDidComplete(
+                        pointerIsInsideSidebar:
+                            self.workspaceSidebarViewController.view.isPointerInside
+                    )
+                }
             }
+        }
+
+        if let window {
+            for name in [
+                NSWindow.didResignKeyNotification,
+                NSWindow.didMiniaturizeNotification,
+            ] {
+                appEvents.observe(name, object: window) {
+                    [weak self] in
+                    guard let self else { return }
+                    if name == NSWindow.didResignKeyNotification {
+                        self.sidebarWindowDidResignKey()
+                    } else {
+                        self.sidebarEdgeRevealCoordinator.dismissImmediately()
+                    }
+                }
+            }
+        }
+        appEvents.observe(NSApplication.didResignActiveNotification, object: NSApp) {
+            [weak self] in self?.sidebarEdgeRevealCoordinator.dismissImmediately()
         }
 
         // The toolbar was installed a moment ago and has not laid its items out yet, so the
@@ -791,6 +854,110 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         startupPerformance.splitFinalizeNanoseconds = DispatchTime.now().uptimeNanoseconds
             - finalizeStarted
     }
+
+    // MARK: - Collapsed Sidebar Edge Reveal
+
+    private func installSidebarEdgeTrackingView() {
+        let tracker = sidebarEdgeTrackingView
+        guard tracker.superview == nil else { return }
+
+        tracker.translatesAutoresizingMaskIntoConstraints = false
+        tracker.isHidden = !sidebarItem.isCollapsed
+        chromeHostViewController.view.addSubview(tracker, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            tracker.leadingAnchor.constraint(
+                equalTo: chromeHostViewController.overlayArea.leadingAnchor
+            ),
+            tracker.topAnchor.constraint(equalTo: chromeHostViewController.overlayArea.topAnchor),
+            tracker.bottomAnchor.constraint(
+                equalTo: chromeHostViewController.overlayArea.bottomAnchor
+            ),
+            tracker.widthAnchor.constraint(
+                equalToConstant: SidebarEdgeRevealCoordinator.triggerWidth
+            )
+        ])
+    }
+
+    private func sidebarEdgeHoverChanged(_ hovering: Bool) {
+        if hovering {
+            guard sidebarEdgeRevealIsEligible else {
+                sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
+                return
+            }
+        }
+        sidebarEdgeRevealCoordinator.edgeHoverChanged(hovering)
+    }
+
+    private var sidebarEdgeRevealIsEligible: Bool {
+#if DEBUG
+        if allowsUnkeyedSidebarEdgeRevealForTesting { return sidebarItem.isCollapsed }
+#endif
+        guard sidebarItem.isCollapsed,
+              let window,
+              window.isKeyWindow,
+              window.attachedSheet == nil,
+              NSApp.modalWindow == nil else { return false }
+        return true
+    }
+
+    private func revealSidebarTemporarily() {
+        // Eligibility is checked again after the dwell: a sheet, command or window switch may
+        // have taken ownership while the timer was pending.
+        guard sidebarEdgeRevealIsEligible else {
+            sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
+            return
+        }
+
+        splitViewController.setCollapsed(false, on: sidebarItem)
+    }
+
+    private func dismissTemporarilyRevealedSidebar() {
+        guard !sidebarItem.isCollapsed else { return }
+        splitViewController.setCollapsed(true, on: sidebarItem)
+        // Match the explicit toggle's start-of-transition fallback. The completion and resize
+        // callbacks still refine it from final geometry.
+        updateHeaderInset(sidebarIsCollapsed: true)
+    }
+
+    private func sidebarWindowDidResignKey() {
+        // A popover with an editor becomes the key child window. Wait until AppKit has installed
+        // the successor, then preserve only a child presentation that originated in the sidebar.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let window = self.window,
+               NSApp.keyWindow?.parent === window,
+               self.sidebarEdgeRevealCoordinator.isHoldingPresentedInteraction {
+                return
+            }
+            self.sidebarEdgeRevealCoordinator.dismissImmediately()
+        }
+    }
+
+#if DEBUG
+    var sidebarEdgeRevealPolicyForTesting: SidebarEdgeRevealCoordinator.Policy {
+        get { sidebarEdgeRevealCoordinator.policy }
+        set { sidebarEdgeRevealCoordinator.policy = newValue }
+    }
+
+    var sidebarIsTemporarilyRevealedForTesting: Bool {
+        sidebarEdgeRevealCoordinator.isTemporarilyRevealed
+    }
+
+    var sidebarEdgeTrackingViewForTesting: HoverTrackingView { sidebarEdgeTrackingView }
+
+    func simulateSidebarEdgeHoverForTesting(_ hovering: Bool) {
+        allowsUnkeyedSidebarEdgeRevealForTesting = true
+        sidebarEdgeHoverChanged(hovering)
+    }
+
+    func simulateSidebarHoverForTesting(_ hovering: Bool) {
+        sidebarEdgeRevealCoordinator.sidebarHoverChanged(hovering)
+    }
+
+    func simulateSidebarPresentationForTesting(_ presented: Bool) {
+        sidebarEdgeRevealCoordinator.sidebarPresentationDidChange(isPresented: presented)
+    }
+#endif
 
     /// Attributes only the delegate work nested inside the initial `NSWindow.setToolbar` call.
     /// Theme reinstalls and later AppKit requests are deliberately excluded from the launch
@@ -2113,6 +2280,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     /// Shows or hides the sidebar. Shared by the View menu and the themed toolbar action.
     func toggleSidebar() {
+        // A command is an explicit visibility decision. If hover opened the pane, the command
+        // acts on the visible sidebar and owns whatever state follows instead of leaving an
+        // exit timer capable of undoing it later.
+        sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
         let targetIsCollapsed = !sidebarItem.isCollapsed
         splitViewController.toggleSidebar(nil)
         // Move clear of the window controls at the start of a collapse. AppKit may withhold both
@@ -3009,6 +3180,10 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             return false
         }
 
+        // The page title is the explicit reveal route and may hand the keyboard to the sidebar.
+        // Promote a hover reveal to ordinary persistent visibility before doing either.
+        sidebarEdgeRevealCoordinator.cancelTemporaryReveal()
+
         // The title names a native sidebar row. An extension navigator may currently occupy the
         // column, so selecting inside the hidden native controller alone reveals nothing. Switch
         // the column first and persist that explicit navigation choice.
@@ -3028,10 +3203,14 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         guard sidebarViewController.selectedRowKey == destination else { return false }
 
         if sidebarItem.isCollapsed {
-            splitViewController.setCollapsed(false, on: sidebarItem) { [weak self] in
-                guard focusingSidebar else { return }
-                _ = self?.sidebarViewController.focusSelection()
-            }
+            splitViewController.setCollapsed(
+                false,
+                on: sidebarItem,
+                completion: { [weak self] in
+                    guard focusingSidebar else { return }
+                    _ = self?.sidebarViewController.focusSelection()
+                }
+            )
         } else if focusingSidebar {
             _ = sidebarViewController.focusSelection()
         }

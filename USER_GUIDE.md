@@ -72,7 +72,9 @@ See [Display Panel](#display-panel).
 There is no title bar — the window controls sit over the top of the sidebar. That is also as
 narrow as the sidebar goes: drag its divider and it stops where those controls end, and pushing
 on past that stop closes the sidebar altogether. **⌘S** brings it back, as does the sidebar
-button beside the traffic lights.
+button beside the traffic lights. You can also pause at the far-left window edge to reveal it
+temporarily; move into the sidebar to navigate normally, including its menus and popovers, and it
+hides shortly after you leave.
 
 Widening has no fixed limit — the sidebar takes whatever the terminal beside it can spare — and
 the width you leave it at is the width it opens at next launch.

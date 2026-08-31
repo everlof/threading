@@ -397,9 +397,35 @@ final class ThemedPresentationTests: XCTestCase {
         XCTAssertEqual(closes, 1)
     }
 
+    func testPopoverNotifiesTheSourceContainerForItsWholePresentation() throws {
+        let window = offscreenWindow()
+        let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+        let root = try XCTUnwrap(window.contentView)
+        let observer = PopoverPresentationObserver(frame: root.bounds)
+        observer.autoresizingMask = [.width, .height]
+        anchor.removeFromSuperview()
+        observer.addSubview(anchor)
+        root.addSubview(observer)
+
+        let popover = ThemedPopover()
+        popover.animates = false
+        popover.contentViewController = popoverContent()
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxY)
+
+        XCTAssertEqual(observer.changes, [true])
+        popover.close()
+        XCTAssertEqual(observer.changes, [true, false])
+    }
+
     func testDroppingPopoverOwnerDetachesAndTearsDownItsPanel() throws {
         let window = offscreenWindow()
         let anchor = try XCTUnwrap(window.contentView?.subviews.first as? ThemedButton)
+        let root = try XCTUnwrap(window.contentView)
+        let observer = PopoverPresentationObserver(frame: root.bounds)
+        observer.autoresizingMask = [.width, .height]
+        anchor.removeFromSuperview()
+        observer.addSubview(anchor)
+        root.addSubview(observer)
         let content = NSViewController()
         content.view = NSView(frame: NSRect(x: 0, y: 0, width: 180, height: 80))
         content.preferredContentSize = content.view.frame.size
@@ -417,6 +443,7 @@ final class ThemedPresentationTests: XCTestCase {
             XCTAssertNil(panel.parent)
             XCTAssertFalse(panel.isVisible)
             XCTAssertNil(panel.contentViewController)
+            XCTAssertEqual(observer.changes, [true, false])
             detached.fulfill()
         }
         wait(for: [detached], timeout: 1)
@@ -1085,5 +1112,15 @@ final class ThemedPresentationTests: XCTestCase {
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
         try data.write(to: url.appendingPathComponent("\(name).png"))
+    }
+}
+
+@MainActor
+private final class PopoverPresentationObserver: NSView,
+    ThemedPopoverPresentationObserving {
+    var changes: [Bool] = []
+
+    func themedPopoverPresentationDidChange(isPresented: Bool) {
+        changes.append(isPresented)
     }
 }
