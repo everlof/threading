@@ -126,6 +126,11 @@ reshuffling it is a line move.
 - [Skin and Chrome Imports](skin-and-chrome-imports.md) — translate established declarative theme
   formats into Threading's existing theme and window-chrome model. Recorded for future
   evaluation; no format support committed.
+- [Native Linux host and UI](linux-host-runtime.md) — finish the structural UI boundary rather
+  than porting AppKit controllers one by one: keep product behavior and extension contracts
+  semantic, retain AppKit as the macOS leaf, and admit a Linux backend only after dual-render,
+  text/IME, accessibility and virtual-list spikes pass. Gated on the application-layer extraction
+  and on Linux becoming a funded product priority rather than a toolkit experiment.
 - [Durable sessions](durable-sessions.md) — stop a restart from killing every running turn, by
   first making a session's bridge outlive one app launch (durable tokens, a unix socket, an MCP
   stdio shim) and then moving PTY ownership into a small always-on host. **Part one shipped
