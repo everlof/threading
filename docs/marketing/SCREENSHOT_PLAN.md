@@ -79,6 +79,19 @@ scripts/capture_marketing_ios.sh --theme threading
 scripts/capture_marketing_ios.sh --theme editorial
 ```
 
+The checked-in PTY resources are refreshed independently, only when their synthetic story or the
+installed provider version changes:
+
+```bash
+python3 scripts/record_marketing_terminal_fixtures.py
+```
+
+Claude resumes one temporary synthetic saved session under its built-in ANSI theme; the recorder
+deletes that exact session as soon as the terminal settles. Codex talks only to the recorder's
+loopback Responses server in an ephemeral, MCP-disabled run. Both stories contain a real rendered
+diff so their provider-owned semantic colours are present in the stored bytes. The recorder rejects
+private home paths, missing diff colours and provider-startup failures before replacing a fixture.
+
 The script writes five semantically named full-display PNGs, the evidence report, and an MP4. All
 five declare standard Dynamic Type and the Simulator's fixed 9:41 status treatment. Static scenes
 first prove that their app-owned pixels have stabilized, then capture the composed display. The

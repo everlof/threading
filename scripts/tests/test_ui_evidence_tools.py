@@ -4,6 +4,7 @@ import binascii
 import base64
 import hashlib
 import json
+import re
 import struct
 import subprocess
 import sys
@@ -245,6 +246,8 @@ class UIEvidenceToolsTests(unittest.TestCase):
 
     def test_marketing_pty_resources_are_privacy_safe(self) -> None:
         fixture_directory = REPOSITORY / "Sources/ThreadingMobile/TerminalFixtures"
+        expected_rows = {"claude": 38, "codex": 42}
+        expected_transcript_marker = {"claude": b"Completed:", "codex": b"Validation"}
         for provider in ("claude", "codex"):
             fixture = json.loads(
                 (fixture_directory / f"marketing-{provider}-tui.json").read_text()
@@ -252,7 +255,20 @@ class UIEvidenceToolsTests(unittest.TestCase):
             payload = base64.b64decode(fixture["payloadBase64"], validate=True)
             self.assertEqual(fixture["provider"], provider)
             self.assertEqual(fixture["columns"], 48)
+            self.assertEqual(fixture["rows"], expected_rows[provider])
+            self.assertGreater(len(payload), 1_500)
+            self.assertIn(expected_transcript_marker[provider], payload)
             self.assertIn(b"\x1b", payload)
+            if provider == "claude":
+                self.assertIn(b"\x1b[31m", payload)
+                self.assertIn(b"\x1b[32m", payload)
+            else:
+                self.assertGreaterEqual(
+                    len(set(re.findall(rb"\x1b\[38;[^m]+m", payload))),
+                    4,
+                )
+            self.assertNotIn(b"authentication rejected", payload)
+            self.assertNotIn(b"MCP client", payload)
             self.assertNotIn(b"/Users/", payload)
             self.assertNotIn(b"/home/", payload)
 
