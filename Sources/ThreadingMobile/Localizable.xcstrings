@@ -2609,6 +2609,17 @@
         }
       }
     },
+    "Connect to your Mac to search projects and conversations." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anslut till din Mac för att söka i projekt och konversationer."
+          }
+        }
+      }
+    },
     "Connected" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2891,6 +2902,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kontrollbegäran har skickats."
+          }
+        }
+      }
+    },
+    "Conversation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konversation"
+          }
+        }
+      }
+    },
+    "Conversations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konversationer"
           }
         }
       }
@@ -3181,6 +3214,17 @@
         }
       }
     },
+    "Current View" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktuell vy"
+          }
+        }
+      }
+    },
     "Current capacity" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3445,6 +3489,17 @@
         }
       }
     },
+    "Destinations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mål"
+          }
+        }
+      }
+    },
     "Destructive action" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3621,6 +3676,28 @@
         }
       }
     },
+    "Earlier conversation history is not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidigare konversationshistorik visas inte"
+          }
+        }
+      }
+    },
+    "Earlier lines are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tidigare rader visas inte"
+          }
+        }
+      }
+    },
     "Edit Key" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3727,6 +3804,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ethernet"
+          }
+        }
+      }
+    },
+    "Everywhere" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Överallt"
           }
         }
       }
@@ -3859,6 +3947,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Hitta en fil"
+          }
+        }
+      }
+    },
+    "Find in terminal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök i terminalen"
           }
         }
       }
@@ -4699,6 +4798,28 @@
         }
       }
     },
+    "Later conversation history is not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senare konversationshistorik visas inte"
+          }
+        }
+      }
+    },
+    "Later lines are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senare rader visas inte"
+          }
+        }
+      }
+    },
     "Left Arrow" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5293,6 +5414,17 @@
         }
       }
     },
+    "More matches are available — refine the query." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fler träffar finns – förfina sökningen."
+          }
+        }
+      }
+    },
     "Most recent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5476,6 +5608,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Nästa utgång %@"
+          }
+        }
+      }
+    },
+    "Next match" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nästa träff"
           }
         }
       }
@@ -5667,6 +5810,17 @@
         }
       }
     },
+    "No matches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga träffar"
+          }
+        }
+      }
+    },
     "No network" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -5696,6 +5850,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ingen förhandsvisning"
+          }
+        }
+      }
+    },
+    "No recent destinations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga senaste mål"
           }
         }
       }
@@ -6807,6 +6972,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Föregående nivåsida"
+          }
+        }
+      }
+    },
+    "Previous match" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Föregående träff"
           }
         }
       }
@@ -7933,6 +8109,17 @@
         }
       }
     },
+    "Search" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök"
+          }
+        }
+      }
+    },
     "Search archived sessions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -7940,6 +8127,61 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sök bland arkiverade sessioner"
+          }
+        }
+      }
+    },
+    "Search conversation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök i konversationen"
+          }
+        }
+      }
+    },
+    "Search conversations, files, and destinations" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök i konversationer, filer och mål"
+          }
+        }
+      }
+    },
+    "Search matches" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökträffar"
+          }
+        }
+      }
+    },
+    "Search scope" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökområde"
+          }
+        }
+      }
+    },
+    "Search session" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sök i sessionen"
           }
         }
       }
@@ -7962,6 +8204,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Sök bland sessioner och terminaler"
+          }
+        }
+      }
+    },
+    "Search unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sökning är inte tillgänglig"
+          }
+        }
+      }
+    },
+    "Searching…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Söker…"
           }
         }
       }
@@ -8890,6 +9154,17 @@
         }
       }
     },
+    "System" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        }
+      }
+    },
     "TCP" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9282,6 +9557,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den påminnelsetiden är inte längre giltig."
+          }
+        }
+      }
+    },
+    "That result is no longer available." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det resultatet är inte längre tillgängligt."
           }
         }
       }
@@ -10184,6 +10470,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här animationen spelas på din Mac."
+          }
+        }
+      }
+    },
+    "This archived conversation is available on the Mac." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Den arkiverade konversationen är tillgänglig på Mac-datorn."
           }
         }
       }
@@ -11200,6 +11497,17 @@
         }
       }
     },
+    "View" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vy"
+          }
+        }
+      }
+    },
     "View only" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11427,6 +11735,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ja"
+          }
+        }
+      }
+    },
+    "You" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du"
           }
         }
       }

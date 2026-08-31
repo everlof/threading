@@ -1219,6 +1219,33 @@
       }
     },
     {
+      "id": "universal-search",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Universal search",
+      "description": "The real in-window search overlay with visible View, Project and Everywhere scope, grouped literal results, selected-row stability, provenance, caps and incomplete-coverage disclosure.",
+      "states": [
+        "Visible scope",
+        "Grouped destinations, conversations and files",
+        "Literal match emphasis",
+        "Selected result",
+        "Visible cap and partial coverage"
+      ],
+      "matrix": {
+        "themes": ["System", "Cyberpunk", "Swiss Minimalist"],
+        "appearances": ["Light", "Dark", "Theme-authored"],
+        "sizes": ["900×650-point native shell"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/UniversalSearchRenderTests.swift",
+        "test": "ThreadingTests/UniversalSearchRenderTests/testRendersGroupedScopedResultsInTheShippingOverlay"
+      },
+      "capture": {
+        "glob": "universal-search-*.png"
+      }
+    },
+    {
       "id": "extension-install-confirmation",
       "kind": "surface",
       "status": "implemented",

@@ -159,7 +159,8 @@ private final class RetainingExtensionSettingRow: NSView {
 /// often retain specific controls. Extension captions and fields are cheap row identities; AppKit
 /// materializes only the visible field controls and releases their action targets on reuse.
 @MainActor
-final class ExtensionSettingsListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
+final class ExtensionSettingsListView: NSView, NSTableViewDataSource, NSTableViewDelegate,
+    SettingsRowRevealing {
     private enum PresentationRow {
         case baseSection(Int)
         case extensionCaption(Int)
@@ -266,6 +267,27 @@ final class ExtensionSettingsListView: NSView, NSTableViewDataSource, NSTableVie
             bottomInset: bottomInset(forRowAt: tableRow)
         )
         return host
+    }
+
+    /// The row a title names, brought into the table so the reveal can find it.
+    ///
+    /// A virtualized list owns rows that do not exist yet, which is the same promise the ways-in
+    /// run on Remote Access breaks and the same answer: try, and say whether anything changed.
+    /// Without this a palette result for an extension's own field opened the page and stopped,
+    /// because a field twenty rows down had never been built.
+    func prepareToReveal(title: String) -> Bool {
+        guard let index = presentationRows.firstIndex(where: { row in
+            guard case .extensionField(let sectionIndex, let fieldIndex) = row,
+                  extensionSections.indices.contains(sectionIndex),
+                  extensionSections[sectionIndex].fields.indices.contains(fieldIndex) else {
+                return false
+            }
+            return extensionSections[sectionIndex].fields[fieldIndex].title == title
+        }), index < tableView.numberOfRows else { return false }
+
+        tableView.scrollRowToVisible(index)
+        tableView.layoutSubtreeIfNeeded()
+        return true
     }
 
     private static func makePresentationRows(

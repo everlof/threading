@@ -154,14 +154,16 @@ final class ExtensionSettingsRegistry {
     }
 
     private static func searchTerms(_ section: ExtensionSettingsSection) -> [String] {
-        (section.title.map { [$0] } ?? []) + section.fields.flatMap(searchTerms)
+        (section.title.map { [$0] } ?? []) + section.fields.flatMap { searchTerms(for: $0) }
     }
 
     private static func searchTerms(_ section: ExtensionHostSettingsSection) -> [String] {
-        (section.title.map { [$0] } ?? []) + section.fields.flatMap(searchTerms)
+        (section.title.map { [$0] } ?? []) + section.fields.flatMap { searchTerms(for: $0) }
     }
 
-    private static func searchTerms(_ field: ExtensionSettingField) -> [String] {
+    /// One field's vocabulary. Not private because the settings catalogue indexes an extension's
+    /// fields as rows of their own, and a row answers to the same words the page already did.
+    static func searchTerms(for field: ExtensionSettingField) -> [String] {
         var terms = [field.title]
         if let description = field.description { terms.append(description) }
         switch field.control {

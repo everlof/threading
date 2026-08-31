@@ -4267,19 +4267,283 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
 
     // MARK: - Find
 
-    func showFind() {
-        guard !displayItem.isCollapsed else { return }
+    @discardableResult
+    func showFind() -> Bool {
+        guard !displayItem.isCollapsed else { return false }
         if let browser = displayPaneController.currentBrowser {
             browser.showFind()
+            return true
         } else if let review = displayPaneController.currentReview, review.canShowFind {
             review.showFind()
+            return true
+        } else if let terminal = containerViewController.activeTerminalSession {
+            terminal.terminalView.showFindInterface()
+            return true
         }
+        return false
+    }
+
+    var currentSearchViewContext: SearchViewContext? {
+        guard let projectID = currentProjectID else { return nil }
+        if containerViewController.isShowingProjectTextSearchPreview,
+           let relativePath = containerViewController.currentSearchFileRelativePath
+        {
+            return .filePreview(
+                projectID: projectID,
+                sessionID: currentSessionID,
+                relativePath: relativePath
+            )
+        }
+        if containerViewController.isShowingConversation, let sessionID = currentSessionID {
+            return .conversation(projectID: projectID, sessionID: sessionID)
+        }
+        if let sessionID = currentSessionID,
+           containerViewController.activeTerminalSession != nil
+        {
+            return .agentTerminal(projectID: projectID, sessionID: sessionID)
+        }
+        if let terminalID = currentTerminalID,
+           containerViewController.activeTerminalSession != nil
+        {
+            return .projectTerminal(projectID: projectID, terminalID: terminalID)
+        }
+        return nil
+    }
+
+    @discardableResult
+    func repeatFind(backwards: Bool) -> Bool {
+        guard !displayItem.isCollapsed else { return false }
+        if let browser = displayPaneController.currentBrowser {
+            browser.repeatFind(backwards: backwards)
+            return true
+        }
+        if let review = displayPaneController.currentReview, review.canShowFind {
+            review.repeatFind(backwards: backwards)
+            return true
+        }
+        if let terminal = containerViewController.activeTerminalSession {
+            terminal.terminalView.repeatFind(backwards: backwards)
+            return true
+        }
+        return false
     }
 
     var canShowFind: Bool {
-        guard !displayItem.isCollapsed else { return false }
-        if displayPaneController.currentBrowser != nil { return true }
-        return displayPaneController.currentReview?.canShowFind == true
+        true
+    }
+
+    func openSearchProject(_ projectID: ProjectID) -> Bool {
+        guard environment.projectStore.project(withID: projectID) != nil else { return false }
+        exitSettingsForNavigation()
+        sidebarViewController.select(projectID: projectID)
+        return true
+    }
+
+    func openSearchSession(_ sessionID: SessionID, projectID: ProjectID) -> Bool {
+        guard let session = environment.projectStore.session(withID: sessionID),
+              !session.isArchived,
+              environment.projectStore.project(forSessionID: sessionID)?.id == projectID
+        else {
+            return false
+        }
+        exitSettingsForNavigation()
+        sidebarViewController.select(sessionID: sessionID)
+        return true
+    }
+
+    func openSearchConversationWindow(_ window: ConversationWindow) -> Bool {
+        guard let session = environment.projectStore.session(withID: window.sessionID),
+              let project = environment.projectStore.project(forSessionID: window.sessionID),
+              project.id == window.projectID else { return false }
+
+        exitSettingsForNavigation()
+        if !session.isArchived {
+            sidebarViewController.reveal(sessionID: session.id)
+        }
+        containerViewController.showSearchConversationWindow(
+            window,
+            projectName: project.name,
+            sessionTitle: session.displayTitle,
+            providerName: session.kind.displayName,
+            onClose: { [weak self] in
+                guard let self else { return }
+                if session.isArchived {
+                    self.showSettingsPage(id: SettingsPages.archivedID)
+                } else {
+                    self.sidebarViewController.select(sessionID: session.id)
+                }
+            }
+        )
+        syncDisplayPane(to: session.id)
+        updateSessionTitleItem()
+        updateWindowTitle()
+        return true
+    }
+
+    func openSearchProjectTextWindow(_ textWindow: ProjectTextWindow) -> Bool {
+        guard let project = environment.projectStore.project(withID: textWindow.projectID) else {
+            return false
+        }
+        let returnSessionID = currentSessionID.flatMap { sessionID in
+            environment.projectStore.project(forSessionID: sessionID)?.id == project.id
+                ? sessionID
+                : nil
+        }
+        exitSettingsForNavigation()
+        sidebarViewController.reveal(projectID: project.id)
+        containerViewController.showProjectTextSearchWindow(
+            textWindow,
+            projectName: project.name,
+            onClose: { [weak self] in
+                guard let self else { return }
+                if let returnSessionID {
+                    self.sidebarViewController.select(sessionID: returnSessionID)
+                } else {
+                    self.sidebarViewController.select(projectID: project.id)
+                }
+            }
+        )
+        syncDisplayPane(to: nil)
+        updateSessionTitleItem()
+        updateWindowTitle()
+        return true
+    }
+
+    func openSearchTerminal(_ terminalID: TerminalID, projectID: ProjectID) -> Bool {
+        guard environment.projectStore.terminal(withID: terminalID) != nil,
+              environment.projectStore.homeProject(forTerminalID: terminalID)?.id == projectID
+        else {
+            return false
+        }
+        exitSettingsForNavigation()
+        sidebarViewController.select(terminalID: terminalID)
+        return true
+    }
+
+    func openArchivedSearchSession(_ sessionID: SessionID, projectID: ProjectID) -> Bool {
+        guard let session = environment.projectStore.session(withID: sessionID),
+              session.isArchived,
+              environment.projectStore.project(forSessionID: sessionID)?.id == projectID
+        else {
+            return false
+        }
+        showSettingsPage(id: SettingsPages.archivedID)
+        return true
+    }
+
+    func openSearchWorkspaceFile(projectID: ProjectID, location: SearchFileLocation) -> Bool {
+        guard let project = environment.projectStore.project(withID: projectID),
+              !location.relativePath.isEmpty,
+              !location.relativePath.hasPrefix("/"),
+              !location.relativePath.split(separator: "/").contains(".."),
+              location.relativePath.unicodeScalars.allSatisfy({
+                  !CharacterSet.controlCharacters.contains($0)
+              })
+        else {
+            return false
+        }
+        let root = project.folderURL.standardizedFileURL.resolvingSymlinksInPath()
+        let file = root.appendingPathComponent(location.relativePath)
+            .standardizedFileURL.resolvingSymlinksInPath()
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard file.path.hasPrefix(rootPrefix),
+              (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+        else {
+            return false
+        }
+        exitSettingsForNavigation()
+        sidebarViewController.select(projectID: projectID)
+        NSWorkspace.shared.open(file)
+        return true
+    }
+
+    func workspaceMetadataSearchRecords() -> [WorkspaceMetadataSearchRecord] {
+        var records: [WorkspaceMetadataSearchRecord] = []
+        for project in environment.projectStore.projects {
+            for session in project.sessions where !session.isArchived {
+                let sessionTitle = session.displayTitle
+                for attachment in SessionAttachmentStore.shared.loadedAttachmentsSnapshot(
+                    for: session.id
+                ) ?? [] {
+                    records.append(WorkspaceMetadataSearchRecord(
+                        destination: .attachment(SearchAttachmentID(rawValue: attachment.id)),
+                        projectID: project.id,
+                        projectName: project.name,
+                        sessionID: session.id,
+                        sessionTitle: sessionTitle,
+                        providerName: session.kind.displayName,
+                        title: attachment.name,
+                        detail: attachment.relativePath,
+                        isArchived: false,
+                        updatedAt: attachment.referencedAt
+                    ))
+                }
+                for tab in displayPaneController.loadedTabs(for: session.id) {
+                    guard let browser = tab.browser,
+                          let url = browser.currentURL?.absoluteString ?? browser.restoredURL
+                    else { continue }
+                    records.append(WorkspaceMetadataSearchRecord(
+                        destination: .browserTab(SearchBrowserTabID(
+                            rawValue: tab.id.uuidString.lowercased()
+                        )),
+                        projectID: project.id,
+                        projectName: project.name,
+                        sessionID: session.id,
+                        sessionTitle: sessionTitle,
+                        providerName: session.kind.displayName,
+                        title: tab.title,
+                        detail: url,
+                        isArchived: false,
+                        updatedAt: session.lastUsedAt
+                    ))
+                }
+            }
+        }
+        return records
+    }
+
+    func openSearchAttachment(
+        projectID: ProjectID,
+        sessionID: SessionID,
+        attachmentID: SearchAttachmentID
+    ) -> Bool {
+        guard let session = environment.projectStore.session(withID: sessionID),
+              !session.isArchived,
+              environment.projectStore.project(forSessionID: sessionID)?.id == projectID,
+              let attachment = SessionAttachmentStore.shared.attachment(
+                  for: sessionID,
+                  id: attachmentID.rawValue
+              ),
+              let attachments = displayPaneController.activateAttachments(for: sessionID)
+        else { return false }
+        exitSettingsForNavigation()
+        sidebarViewController.select(sessionID: sessionID)
+        attachments.showAttachment(at: attachment.url)
+        displayPaneController.showSessionTabs(sessionID)
+        setDisplayPaneVisible(true)
+        return true
+    }
+
+    func openSearchBrowserTab(
+        projectID: ProjectID?,
+        sessionID: SessionID?,
+        tabID: SearchBrowserTabID
+    ) -> Bool {
+        guard let projectID,
+              let sessionID,
+              let tabUUID = UUID(uuidString: tabID.rawValue),
+              let session = environment.projectStore.session(withID: sessionID),
+              !session.isArchived,
+              environment.projectStore.project(forSessionID: sessionID)?.id == projectID,
+              displayPaneController.loadedTabs(for: sessionID).contains(where: {
+                  $0.id == tabUUID && $0.browser != nil
+              }) else { return false }
+        exitSettingsForNavigation()
+        sidebarViewController.select(sessionID: sessionID)
+        guard displayPaneController.activateTab(id: tabUUID, for: sessionID) else { return false }
+        displayPaneController.showSessionTabs(sessionID)
+        setDisplayPaneVisible(true)
+        return true
     }
 
     func showReviewFileJump() {

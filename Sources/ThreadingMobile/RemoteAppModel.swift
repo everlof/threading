@@ -51,9 +51,25 @@ struct MobileStartedDraft: Equatable {
 /// Projects are navigation context only; continuity persists the open chat, never a project
 /// name pretending to be a session identifier. Keeping the cases typed also lets a chat opened
 /// from a project return to that project's list without encoding UI routes into opaque strings.
+enum MobileWorkspaceSearchDestination: Hashable {
+    case attachment(String)
+    case browserTab(String)
+
+    var remoteDestination: RemoteNotificationDestinationDTO {
+        switch self {
+        case let .attachment(id): return .attachment(id: id)
+        case let .browserTab(id): return .browserTab(id: id)
+        }
+    }
+}
+
 enum MobileNavigationRoute: Hashable {
     case project(String)
+    /// Search carries the stable checkout identity so duplicate display names stay distinct.
+    case searchProject(id: String, name: String)
     case session(String)
+    /// Opens the session and then its native Workspace drawer at the exact search result.
+    case sessionWorkspace(String, MobileWorkspaceSearchDestination)
     case terminal(String)
     /// A chat being drafted, and — once Start has been answered — the chat it started.
     case draft(MobileSessionDraft)
@@ -61,8 +77,10 @@ enum MobileNavigationRoute: Hashable {
     /// The session this route names by itself. A draft names one only through the model,
     /// which is where the started session's id is known; ask `RemoteAppModel.sessionID(for:)`.
     var sessionID: String? {
-        guard case .session(let id) = self else { return nil }
-        return id
+        switch self {
+        case let .session(id), let .sessionWorkspace(id, _): return id
+        case .project, .searchProject, .terminal, .draft: return nil
+        }
     }
 }
 
@@ -585,6 +603,10 @@ final class RemoteAppModel: ObservableObject {
 
     var canReadUsage: Bool {
         me?.features?.contains(RemoteRESTFeature.usageDashboard.rawValue) == true
+    }
+
+    var canUseUniversalSearch: Bool {
+        me?.features?.contains(RemoteRESTFeature.universalSearch.rawValue) == true
     }
 
     /// Routes a URL the operating system handed this app.
@@ -1693,9 +1715,9 @@ final class RemoteAppModel: ObservableObject {
     /// The session a route shows, whether it was opened by id or drafted into being.
     func sessionID(for route: MobileNavigationRoute?) -> String? {
         switch route {
-        case .session(let id): return id
-        case .draft(let draft): return startedDrafts[draft.id]?.sessionID
-        case .project, .terminal, .none: return nil
+        case let .session(id), let .sessionWorkspace(id, _): return id
+        case let .draft(draft): return startedDrafts[draft.id]?.sessionID
+        case .project, .searchProject, .terminal, .none: return nil
         }
     }
 

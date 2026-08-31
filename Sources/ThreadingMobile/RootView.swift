@@ -62,6 +62,7 @@ enum MobileDemoScene: Equatable {
     case sessionOpening(MobileSessionOpeningFixture)
     case browserPrivate
     case attachments
+    case universalSearch
     /// One attachment preview. The kind is whatever followed `attachment-detail-`.
     case attachmentDetail(kind: RemoteAttachmentKind)
     case workspace
@@ -136,6 +137,7 @@ extension MobileDemoScene {
             return .review(showsAllFiles: id.contains("files"))
         case "browser-private": return .browserPrivate
         case "attachments": return .attachments
+        case "universal-search": return .universalSearch
         case let id where id.hasPrefix(attachmentDetailPrefix):
             return .attachmentDetail(
                 kind: RemoteAttachmentKind(
@@ -262,6 +264,7 @@ enum MobileDemoFixture: String, CaseIterable {
     case workspace = "workspace"
     case browserPrivate = "browser-private"
     case attachments = "attachments"
+    case universalSearch = "universal-search"
 
     /// One attachment preview; the suffix is a `RemoteAttachmentKind` raw value.
     case attachmentDetailHTML = "attachment-detail-html"
@@ -571,6 +574,15 @@ struct RootView: View {
                     loadsRemotely: false
                 )
             }
+        case .universalSearch:
+            NavigationStack {
+                MobileUniversalSearchView(
+                    initialScope: .project(id: "search-demo-project", name: "Threading"),
+                    initialQuery: "auth callback",
+                    initialResponse: Self.searchDemoResponse,
+                    performsRemoteSearch: false
+                )
+            }
         case .attachmentDetail(let kind):
             NavigationStack {
                 RemoteAttachmentPreviewDemo(kind: kind)
@@ -698,6 +710,84 @@ struct RootView: View {
         token: "workspace-demo"
     )!)
 
+    /// A bounded host response rendered by the shipping search screen. It carries the three
+    /// result anatomies that need visual proof: a destination, historical conversation text and
+    /// an exact source line, with provenance and an honest partial-coverage disclosure.
+    private static let searchDemoResponse = RemoteSearchResponseDTO(
+        generation: 1,
+        groups: [
+            RemoteSearchGroupResultDTO(
+                group: .destinations,
+                hits: [RemoteSearchHitDTO(
+                    id: "result-session",
+                    token: "fixture-session",
+                    group: .destinations,
+                    kind: .session,
+                    title: "Fix auth callback",
+                    snippet: RemoteSearchSnippetDTO(
+                        text: "Active Codex conversation on branch auth",
+                        matches: [RemoteSearchTextRangeDTO(utf16Location: 36, utf16Length: 4)]
+                    ),
+                    provenance: RemoteSearchProvenanceDTO(
+                        projectName: "Threading",
+                        sessionTitle: "Fix auth callback",
+                        provider: "Codex",
+                        branch: "auth"
+                    )
+                )],
+                coverage: [RemoteSearchCoverageDTO(kind: .complete)],
+                isCapped: false
+            ),
+            RemoteSearchGroupResultDTO(
+                group: .conversations,
+                hits: [RemoteSearchHitDTO(
+                    id: "result-message",
+                    token: "fixture-message",
+                    group: .conversations,
+                    kind: .conversationMessage,
+                    title: "OAuth redirect investigation",
+                    snippet: RemoteSearchSnippetDTO(
+                        text: "The auth callback now rejects a mismatched state before redirecting.",
+                        matches: [RemoteSearchTextRangeDTO(utf16Location: 4, utf16Length: 13)]
+                    ),
+                    provenance: RemoteSearchProvenanceDTO(
+                        projectName: "Threading",
+                        sessionTitle: "OAuth redirect investigation",
+                        provider: "Claude",
+                        author: "agent",
+                        timestamp: 1_788_172_340
+                    )
+                )],
+                coverage: [RemoteSearchCoverageDTO(kind: .complete)],
+                isCapped: false
+            ),
+            RemoteSearchGroupResultDTO(
+                group: .files,
+                hits: [RemoteSearchHitDTO(
+                    id: "result-file",
+                    token: "fixture-file",
+                    group: .files,
+                    kind: .projectText,
+                    title: "CallbackHandler.swift:84",
+                    snippet: RemoteSearchSnippetDTO(
+                        text: "guard callback.state == expectedState else { return .rejected }",
+                        matches: [RemoteSearchTextRangeDTO(utf16Location: 6, utf16Length: 8)]
+                    ),
+                    provenance: RemoteSearchProvenanceDTO(
+                        projectName: "Threading",
+                        relativePath: "Sources/Auth/CallbackHandler.swift"
+                    )
+                )],
+                coverage: [RemoteSearchCoverageDTO(
+                    kind: .partial,
+                    detail: "Project text is searched on demand."
+                )],
+                isCapped: false
+            ),
+        ],
+        isComplete: true
+    )
+
     private static let workspaceDemoSnapshot = RemoteWorkspaceDTO(
         browserTabs: [
             RemoteBrowserTabDTO(
@@ -824,9 +914,31 @@ struct RootView: View {
                         openSettings: { showsSettings = true },
                         reportConnectionIssue: openConnectionRecoveryReport
                     )
+                case let .searchProject(projectID, projectName):
+                    SessionDashboard(
+                        projectName: projectName,
+                        projectID: projectID,
+                        openSettings: { showsSettings = true },
+                        reportConnectionIssue: openConnectionRecoveryReport
+                    )
                 case .session(let sessionID):
-                    if let session = model.me?.sessions.first(where: { $0.id == sessionID }) {
+                    if let session = model.me?.sessions.first(where: { $0.id == sessionID })
+                        ?? model.me?.archivedSessions?.first(where: { $0.id == sessionID })
+                    {
                         SessionDetailView(session: session)
+                    } else {
+                        ContentUnavailableView(
+                            "Session unavailable",
+                            systemImage: "bubble.left.and.exclamationmark.bubble.right",
+                            description: Text("The link may have expired or the Mac may be offline.")
+                        )
+                    }
+                case let .sessionWorkspace(sessionID, destination):
+                    if let session = model.me?.sessions.first(where: { $0.id == sessionID }) {
+                        SessionDetailView(
+                            session: session,
+                            initialWorkspaceDestination: destination.remoteDestination
+                        )
                     } else {
                         ContentUnavailableView(
                             "Session unavailable",

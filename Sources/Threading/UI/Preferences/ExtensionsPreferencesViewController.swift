@@ -144,7 +144,11 @@ final class ExtensionsPreferencesViewController: NSViewController {
     }
 
     override func loadView() {
-        view = NSView()
+        let root = ExtensionsPageRootView()
+        root.onPrepareToReveal = { [weak self] title in
+            self?.revealRow(named: title) ?? false
+        }
+        view = root
         render()
         appEvents.observe(ExtensionsDidChange.self) { [weak self] _ in
             self?.render()
@@ -161,6 +165,37 @@ final class ExtensionsPreferencesViewController: NSViewController {
             }) == true else { return }
             self?.render()
         }
+    }
+
+    /// Brings the row `title` names into the table, so a settings destination that points at an
+    /// installed extension — or at a field an extension put on this page — can be revealed.
+    ///
+    /// The page is one virtual list: an extension twenty packages down has never been built, and
+    /// `SettingsRowAnchor` can only find rows that exist. Bounded and rare — it runs once per
+    /// click, over the row identities the page already holds.
+    private func revealRow(named title: String) -> Bool {
+        guard let index = presentationRows.firstIndex(where: { row in
+            switch row {
+            case .packageHeader(let packageIndex):
+                return installedExtensions.indices.contains(packageIndex)
+                    && installedExtensions[packageIndex].name == title
+            case .firstPartyEntry(let entryIndex):
+                return firstPartyExtensions.indices.contains(entryIndex)
+                    && firstPartyExtensions[entryIndex].name == title
+            case .extensionField(let sectionIndex, let fieldIndex):
+                guard extensionSections.indices.contains(sectionIndex),
+                      extensionSections[sectionIndex].fields.indices.contains(fieldIndex) else {
+                    return false
+                }
+                return extensionSections[sectionIndex].fields[fieldIndex].title == title
+            default:
+                return false
+            }
+        }), index < tableView.numberOfRows else { return false }
+
+        tableView.scrollRowToVisible(index)
+        tableView.layoutSubtreeIfNeeded()
+        return true
     }
 
     override func viewDidLayout() {
@@ -1322,4 +1357,21 @@ extension ExtensionsPreferencesViewController: NSTableViewDataSource, NSTableVie
 
 private enum ExtensionsPreferencesDefaults {
     static let estimatedRowHeight: CGFloat = 64
+}
+
+// MARK: - Reveal
+
+/// The Extensions page's root, so a reveal can ask the page for a row its virtual list has not
+/// built yet.
+///
+/// `SettingsRowRevealing` is a view protocol, and this page's list is a themed scroll view with
+/// no class of its own to carry the conformance. The root answers on the controller's behalf; it
+/// is structural and chooses no styling of its own.
+@MainActor
+private final class ExtensionsPageRootView: NSView, SettingsRowRevealing {
+    var onPrepareToReveal: ((String) -> Bool)?
+
+    func prepareToReveal(title: String) -> Bool {
+        onPrepareToReveal?(title) ?? false
+    }
 }

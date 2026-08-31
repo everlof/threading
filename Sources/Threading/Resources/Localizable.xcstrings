@@ -10759,6 +10759,17 @@
         }
       }
     },
+    "Close File Preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stäng filförhandsvisning"
+          }
+        }
+      }
+    },
     "Close Find in Diff" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22100,6 +22111,17 @@
         }
       }
     },
+    "Line %lld: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rad %1$lld: %2$@"
+          }
+        }
+      }
+    },
     "Lines kept" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29624,6 +29646,50 @@
         }
       }
     },
+    "Project text" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekttext"
+          }
+        }
+      }
+    },
+    "Project text match" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Träff i projekttext"
+          }
+        }
+      }
+    },
+    "Project text search covers tracked files." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekttextsökning omfattar spårade filer."
+          }
+        }
+      }
+    },
+    "Project text search is unavailable." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekttextsökning är inte tillgänglig."
+          }
+        }
+      }
+    },
     "Project work map" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36715,6 +36781,94 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Visa “%@” i %@?"
+          }
+        }
+      }
+    },
+    "Showing complete file" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar hela filen"
+          }
+        }
+      }
+    },
+    "Showing complete indexed history" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar hela den indexerade historiken"
+          }
+        }
+      }
+    },
+    "Showing nearby history · Earlier and later messages are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar närliggande historik · Tidigare och senare meddelanden visas inte"
+          }
+        }
+      }
+    },
+    "Showing nearby history · Earlier messages are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar närliggande historik · Tidigare meddelanden visas inte"
+          }
+        }
+      }
+    },
+    "Showing nearby history · Later messages are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar närliggande historik · Senare meddelanden visas inte"
+          }
+        }
+      }
+    },
+    "Showing nearby lines · Earlier and later lines are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar närliggande rader · Tidigare och senare rader visas inte"
+          }
+        }
+      }
+    },
+    "Showing nearby lines · Earlier lines are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar närliggande rader · Tidigare rader visas inte"
+          }
+        }
+      }
+    },
+    "Showing nearby lines · Later lines are not shown" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visar närliggande rader · Senare rader visas inte"
           }
         }
       }
@@ -46615,6 +46769,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skriv ett ord, eller klistra in hela ID:t"
+          }
+        }
+      }
+    },
+    "Type at least 3 characters to search project text." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skriv minst 3 tecken för att söka i projekttext."
           }
         }
       }
