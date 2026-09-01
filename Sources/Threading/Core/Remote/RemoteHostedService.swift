@@ -6,6 +6,18 @@ import Security
 import ThreadingPeerTransport
 import ThreadingRemoteKit
 
+/// Which first-party hosted control plane a development build talks to.
+///
+/// Release builds ignore the persisted choice and always resolve the production endpoint. The
+/// two services have separate credentials and push registrations, so this is a service identity,
+/// not merely a different URL for the same account.
+enum RemoteHostedServiceEnvironment: String, CaseIterable, Sendable {
+    case production
+    case development
+
+    static let developmentServiceURL = URL(string: "https://dev.remote.threading.codes")!
+}
+
 enum RemoteHostedServiceState: Equatable {
     case stopped
     case notConfigured
@@ -165,7 +177,8 @@ final class RemoteHostedServiceController {
 
     init(
         store: (any RemoteHostedServicePersisting)? = nil,
-        endpoint: PeerControlPlaneServiceEndpoint? = RemoteHostedServiceController.configuredEndpoint(),
+        endpoint: PeerControlPlaneServiceEndpoint? = RemoteHostedServiceController
+            .configuredEndpoint(),
         hostID: String = RemoteHostIdentity.current.id,
         hostName: String = RemoteHostIdentity.current.name,
         localDevelopmentAuthentication: Bool = RemoteHostedServiceController
@@ -882,7 +895,8 @@ final class RemoteHostedServiceController {
             : InMemoryRemoteHostedServiceStore()
     }
 
-    private static func configuredEndpoint(
+    static func configuredEndpoint(
+        preferredEnvironment: RemoteHostedServiceEnvironment = .production,
         bundle: Bundle = .main,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> PeerControlPlaneServiceEndpoint? {
@@ -891,10 +905,27 @@ final class RemoteHostedServiceController {
            let url = URL(string: override) {
             return try? PeerControlPlaneServiceEndpoint(url)
         }
+        if preferredEnvironment == .development {
+            return try? PeerControlPlaneServiceEndpoint(
+                RemoteHostedServiceEnvironment.developmentServiceURL
+            )
+        }
 #endif
         guard let value = bundle.object(forInfoDictionaryKey: "ThreadingControlPlaneURL") as? String,
               let url = URL(string: value) else { return nil }
         return try? PeerControlPlaneServiceEndpoint(url)
+    }
+
+    static func hasConfiguredEndpointOverride(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+#if DEBUG
+        guard let override = environment["THREADING_CONTROL_PLANE_URL"],
+              let url = URL(string: override) else { return false }
+        return (try? PeerControlPlaneServiceEndpoint(url)) != nil
+#else
+        return false
+#endif
     }
 
     private static func configuredLocalDevelopmentAuthentication(

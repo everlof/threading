@@ -4,6 +4,9 @@ import ThreadingRemoteKit
 
 @MainActor
 final class RemoteNotificationSubscriptionStoreTests: XCTestCase {
+    private let productionServiceURL = URL(string: "https://remote.threading.codes")!
+    private let developmentServiceURL = URL(string: "https://dev.remote.threading.codes")!
+
     func testRegistrationSurvivesServiceRestartWhenCapabilityIsStillCurrent() throws {
         let store = ControllableNotificationSubscriptionStore()
         let authorization = ownerAuthorization()
@@ -111,7 +114,10 @@ final class RemoteNotificationSubscriptionStoreTests: XCTestCase {
     func testHostedRegistrationPersistsOpaqueRecipientAndAdvertisesPush() {
         let store = ControllableNotificationSubscriptionStore()
         let service = RemoteNotificationService(subscriptionStore: store)
-        service.configureHostedPushSender(isAvailable: { true }) { _, _, _ in
+        service.configureHostedPushSender(
+            serviceURL: { self.developmentServiceURL },
+            isAvailable: { true }
+        ) { _, _, _ in
             RemoteAPNSDeliveryResult(statusCode: 200, reason: "", apnsID: nil)
         }
         let registrationID = "th_push_" + String(repeating: "a", count: 43)
@@ -125,9 +131,16 @@ final class RemoteNotificationSubscriptionStoreTests: XCTestCase {
             .registered(RemoteNotificationRegistrationResponseDTO(delivery: .push))
         )
         XCTAssertEqual(store.subscriptions.first?.hostedRegistrationID, registrationID)
+        XCTAssertEqual(
+            store.subscriptions.first?.hostedServiceURL,
+            developmentServiceURL.absoluteString
+        )
 
         let restarted = RemoteNotificationService(subscriptionStore: store)
-        restarted.configureHostedPushSender(isAvailable: { true }) { _, _, _ in
+        restarted.configureHostedPushSender(
+            serviceURL: { self.developmentServiceURL },
+            isAvailable: { true }
+        ) { _, _, _ in
             RemoteAPNSDeliveryResult(statusCode: 200, reason: "", apnsID: nil)
         }
         XCTAssertEqual(restarted.activate(authorizations: [ownerAuthorization()]), 1)
@@ -136,7 +149,10 @@ final class RemoteNotificationSubscriptionStoreTests: XCTestCase {
     func testHostedBrokerDoesNotClaimPushWithoutValidOpaqueRecipient() {
         let store = ControllableNotificationSubscriptionStore()
         let service = RemoteNotificationService(subscriptionStore: store)
-        service.configureHostedPushSender(isAvailable: { true }) { _, _, _ in
+        service.configureHostedPushSender(
+            serviceURL: { self.developmentServiceURL },
+            isAvailable: { true }
+        ) { _, _, _ in
             RemoteAPNSDeliveryResult(statusCode: 200, reason: "", apnsID: nil)
         }
 
@@ -156,6 +172,46 @@ final class RemoteNotificationSubscriptionStoreTests: XCTestCase {
             ),
             .invalid
         )
+    }
+
+    func testHostedRegistrationIsScopedToTheServiceThatMintedIt() {
+        XCTAssertTrue(RemoteNotificationService.hostedRegistration(
+            serviceURL: developmentServiceURL.absoluteString,
+            belongsTo: developmentServiceURL.absoluteString
+        ))
+        XCTAssertFalse(RemoteNotificationService.hostedRegistration(
+            serviceURL: productionServiceURL.absoluteString,
+            belongsTo: developmentServiceURL.absoluteString
+        ))
+        XCTAssertFalse(RemoteNotificationService.hostedRegistration(
+            serviceURL: nil,
+            belongsTo: developmentServiceURL.absoluteString
+        ), "legacy registrations stay inert until the phone refreshes them")
+    }
+
+    func testLegacyHostedRegistrationDecodesWithoutGuessingAService() throws {
+        let legacyJSON: [String: Any] = [
+            "shareID": "owner-1",
+            "deviceID": "phone-1",
+            "deviceToken": String(repeating: "ab", count: 32),
+            "hostedRegistrationID": "th_push_" + String(repeating: "a", count: 43),
+            "environment": "sandbox",
+            "enabledKinds": ["turnCompleted"],
+            "soundEnabledKinds": ["turnCompleted"],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: legacyJSON)
+
+        let record = try JSONDecoder().decode(
+            RemoteNotificationSubscriptionRecord.self,
+            from: data
+        )
+
+        XCTAssertNil(record.hostedServiceURL)
+        XCTAssertTrue(RemoteNotificationSubscriptionDefaults.isValid([record]))
+        XCTAssertFalse(RemoteNotificationService.hostedRegistration(
+            serviceURL: record.hostedServiceURL,
+            belongsTo: developmentServiceURL.absoluteString
+        ))
     }
 
     func testFailedSaveNeverActivatesCandidateAndCanBeRetried() {

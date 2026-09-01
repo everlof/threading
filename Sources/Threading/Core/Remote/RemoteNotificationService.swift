@@ -61,6 +61,7 @@ final class RemoteNotificationService {
         let deviceID: String
         let deviceToken: String
         let hostedRegistrationID: String?
+        let hostedServiceURL: String?
         let environment: RemoteAPNSPushSender.Environment
         let authorization: RemoteAuthorization
         let enabledKinds: Set<RemoteNotificationKind>
@@ -68,10 +69,31 @@ final class RemoteNotificationService {
     }
 
     private struct DeliverySummary {
+        enum PushBlock: Equatable {
+            case none
+            case providerUnavailable
+            case serviceMismatch
+            case noRegistration
+        }
+
         let liveRecipients: Int
         let pushTargets: Int
+        let pushBlock: PushBlock
 
         var isReachable: Bool { liveRecipients > 0 || pushTargets > 0 }
+
+        var requestedDeliveryFailureReason: String {
+            switch pushBlock {
+            case .providerUnavailable:
+                return "The hosted push provider is unavailable, and no opted-in phone is "
+                    + "connected live."
+            case .serviceMismatch:
+                return "The phone’s push registration belongs to another hosted service. Open "
+                    + "Threading on the phone to refresh it."
+            case .none, .noRegistration:
+                return "No opted-in device is currently reachable."
+            }
+        }
     }
 
     private var subscriptions: [RemoteNotificationSubscriptionKey: Subscription] = [:]
@@ -89,6 +111,7 @@ final class RemoteNotificationService {
     private let recordsPersistenceDiagnostics: Bool
     private var hostedPushSender: HostedPushSender?
     private var hostedPushAvailability: (@MainActor () -> Bool)?
+    private var hostedPushServiceURL: (@MainActor () -> URL?)?
     private let observations = AppEventObservations()
     private var announcedGuestShares: Set<String> = []
     private var currentActorBySession: [SessionID: RemoteNotificationInteractionActor] = [:]
@@ -177,9 +200,11 @@ final class RemoteNotificationService {
     }
 
     func configureHostedPushSender(
+        serviceURL: @escaping @MainActor () -> URL?,
         isAvailable: @escaping @MainActor () -> Bool,
         send: @escaping HostedPushSender
     ) {
+        hostedPushServiceURL = serviceURL
         hostedPushAvailability = isAvailable
         hostedPushSender = send
     }
@@ -248,6 +273,11 @@ final class RemoteNotificationService {
             deviceID: deviceID,
             deviceToken: deviceToken,
             hostedRegistrationID: registration.hostedRegistrationID,
+            hostedServiceURL: registration.hostedRegistrationID == nil
+                ? nil
+                : RemoteNotificationSubscriptionDefaults.normalizedHostedServiceURL(
+                    hostedPushServiceURL?()
+                ),
             environment: registration.environment,
             enabledKinds: enabledKinds.sorted { $0.rawValue < $1.rawValue },
             soundEnabledKinds: soundEnabledKinds.sorted { $0.rawValue < $1.rawValue }
@@ -276,6 +306,7 @@ final class RemoteNotificationService {
             deviceID: record.deviceID,
             deviceToken: record.deviceToken,
             hostedRegistrationID: record.hostedRegistrationID,
+            hostedServiceURL: record.hostedServiceURL,
             environment: environment,
             authorization: authorization,
             enabledKinds: enabledKinds,
@@ -309,6 +340,7 @@ final class RemoteNotificationService {
 
         let registrationSupportsPush = localPushSender != nil
             || (registration.hostedRegistrationID != nil
+                && record.hostedServiceURL != nil
                 && hostedPushAvailability?() == true
                 && hostedPushSender != nil)
         return .registered(RemoteNotificationRegistrationResponseDTO(
@@ -521,7 +553,7 @@ final class RemoteNotificationService {
                 && predicate($0)
         }
         guard delivery.isReachable else {
-            return .unavailable(reason: "No opted-in device is currently reachable.")
+            return .unavailable(reason: delivery.requestedDeliveryFailureReason)
         }
         return .delivered(recipient: label)
     }
@@ -629,9 +661,29 @@ final class RemoteNotificationService {
         let targets = subscriptions.values.filter {
             $0.enabledKinds.contains(event.kind) && predicate($0)
         }
-        let pushTargets = localPushSender == nil
-            ? targets.filter { $0.hostedRegistrationID != nil }
-            : targets
+        let activeHostedServiceURL = RemoteNotificationSubscriptionDefaults
+            .normalizedHostedServiceURL(hostedPushServiceURL?())
+        let pushTargets: [Subscription]
+        let pushBlock: DeliverySummary.PushBlock
+        if localPushSender != nil {
+            pushTargets = targets
+            pushBlock = .none
+        } else {
+            pushTargets = targets.filter {
+                $0.hostedRegistrationID != nil
+                    && Self.hostedRegistration(
+                        serviceURL: $0.hostedServiceURL,
+                        belongsTo: activeHostedServiceURL
+                    )
+            }
+            if !pushTargets.isEmpty {
+                pushBlock = supportsPush ? .none : .providerUnavailable
+            } else if targets.contains(where: { $0.hostedRegistrationID != nil }) {
+                pushBlock = .serviceMismatch
+            } else {
+                pushBlock = .noRegistration
+            }
+        }
         let liveRecipients = RemoteSessionMirrorRegistry.shared.broadcastNotification(event) {
             authorization, deviceID in
             // The authenticated socket proves access, while this exact device registration proves
@@ -664,7 +716,11 @@ final class RemoteNotificationService {
                 "kind": event.kind.rawValue,
                 "reason": "provider configuration",
             ])
-            return DeliverySummary(liveRecipients: liveRecipients, pushTargets: 0)
+            return DeliverySummary(
+                liveRecipients: liveRecipients,
+                pushTargets: 0,
+                pushBlock: pushBlock == .none ? .providerUnavailable : pushBlock
+            )
         }
         for target in pushTargets {
             let device = Self.diagnosticID(target.deviceID, prefix: "device")
@@ -723,7 +779,8 @@ final class RemoteNotificationService {
         }
         return DeliverySummary(
             liveRecipients: liveRecipients,
-            pushTargets: pushTargets.count
+            pushTargets: pushTargets.count,
+            pushBlock: pushBlock
         )
     }
 
@@ -732,6 +789,14 @@ final class RemoteNotificationService {
         predicate: (Subscription) -> Bool
     ) -> [Subscription] {
         subscriptions.values.filter { $0.enabledKinds.contains(kind) && predicate($0) }
+    }
+
+    nonisolated static func hostedRegistration(
+        serviceURL: String?,
+        belongsTo activeServiceURL: String?
+    ) -> Bool {
+        guard let serviceURL, let activeServiceURL else { return false }
+        return serviceURL == activeServiceURL
     }
 
     private func recipientNames(in subscriptions: [Subscription]) -> [String] {
@@ -763,6 +828,7 @@ final class RemoteNotificationService {
             deviceID: record.deviceID,
             deviceToken: record.deviceToken,
             hostedRegistrationID: record.hostedRegistrationID,
+            hostedServiceURL: record.hostedServiceURL,
             environment: environment,
             authorization: authorization,
             enabledKinds: Set(record.enabledKinds),

@@ -2497,6 +2497,11 @@ restart, and whether it works away from home.
     where it is serving, or which admin-console setting is missing, with the button that opens it.
 - **Threading Direct**. Future, and shown only when this Mac is signed in to Threading's service.
 
+In a Debug build, **Service environment** above the ways in selects **Production** or the isolated
+**Development** service. Switching it restarts only Hosted Direct; it does not quit Threading or
+close the local and Tailscale connections. Release builds always use Production. After switching,
+open Threading on the iPhone once so its hosted push registration is refreshed for that service.
+
 A way in that cannot carry traffic says why on its own line, with the fix beside it. If the macOS
 firewall may be blocking the listener, the page says so and where to allow it; because a Mac cannot
 observe whether an incoming connection was allowed, it never claims to be reachable on that basis
@@ -2911,6 +2916,10 @@ there is no token to copy in ordinary use. The Mac keeps that registration with 
 restores it when Remote Access starts, so restarting the Mac does not require opening the iPhone
 app again. Development builds register a sandbox token and TestFlight/App Store builds register a
 production token; the hosted provider routes each to the matching Apple endpoint.
+The opaque hosted registration is bound to the service that issued it, so development and
+production registrations cannot accidentally cross brokers. If the Mac changes service, opening
+the iPhone refreshes that registration; until then an explicit notification request says that the
+registration belongs to another hosted service rather than suggesting that pairing was lost.
 
 The iPhone and browser keep their own bounded, content-free connection history; it is not sent to
 the Mac by default. From **Diagnostics** on iPhone, or beside the Mac on the browser dashboard, a

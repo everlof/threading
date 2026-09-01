@@ -1129,6 +1129,34 @@ final class AppSettings {
         }
     }
 
+    /// The first-party hosted service selected by a development build.
+    ///
+    /// A release installed over a development build shares its defaults domain, so the release
+    /// getter deliberately refuses to inherit a stored development endpoint.
+    var remoteHostedServiceEnvironment: RemoteHostedServiceEnvironment {
+        get {
+#if DEBUG
+            let stored = AppSettingDefinitions.remoteHostedServiceEnvironment.read(from: defaults)
+            return stored.flatMap(RemoteHostedServiceEnvironment.init(rawValue:)) ?? .production
+#else
+            return .production
+#endif
+        }
+        set {
+#if DEBUG
+            AppSettingDefinitions.remoteHostedServiceEnvironment.write(
+                newValue.rawValue,
+                to: defaults
+            )
+#else
+            AppSettingDefinitions.remoteHostedServiceEnvironment.write(
+                RemoteHostedServiceEnvironment.production.rawValue,
+                to: defaults
+            )
+#endif
+        }
+    }
+
     /// Whether this Mac answers on its tailnet.
     ///
     /// The `tailscale` door's switch. The setting says nothing about what the door is made of,

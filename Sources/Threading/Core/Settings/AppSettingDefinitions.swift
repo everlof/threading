@@ -60,6 +60,7 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case defaultPermissionMode
     case localDiagnosticsEnabled
     case remoteAccessEnabled
+    case remoteHostedServiceEnvironment
     case remoteAccessDoorMigration
     case remoteAccessTailscaleEnabled
     case remoteAccessTailscaleServeEnabled
@@ -1115,6 +1116,14 @@ enum AppSettingDefinitions {
         presentations: [row("remote-access", 0, "Connection", "Remote Access",
                             ["iPhone", "remote", "sharing"])]
     )
+    /// Debug builds may select the isolated hosted service without changing their launch
+    /// environment. Release reads production regardless of this persisted development value.
+    static let remoteHostedServiceEnvironment = AppSettingDescriptor<String>(
+        identity: .remoteHostedServiceEnvironment,
+        persistenceKey: "remoteHostedServiceEnvironment",
+        absence: .registered(RemoteHostedServiceEnvironment.production.rawValue),
+        validation: .allowedStrings(Set(RemoteHostedServiceEnvironment.allCases.map(\.rawValue)))
+    )
     /// Written once the retired connection mode has been carried over to the door switches.
     ///
     /// Never seeded, and written last, so an interrupted migration re-runs. Re-running is safe
@@ -1359,6 +1368,7 @@ enum AppSettingDefinitions {
         .init(claudeRemoteControl), .init(claudeStartupSpeed), .init(codexStartupSpeed),
         .init(defaultPermissionMode), .init(localDiagnosticsEnabled),
         .init(remoteAccessEnabled),
+        .init(remoteHostedServiceEnvironment),
         .init(remoteAccessDoorMigration),
         .init(remoteAccessListenerPort),
         .init(remoteViewportLeaseGraceSeconds),

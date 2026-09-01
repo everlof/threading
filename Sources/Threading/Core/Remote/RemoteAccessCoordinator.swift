@@ -140,7 +140,8 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     private let notifications: RemoteNotificationService
     /// The `tailscale` CLI: the facts behind the tailnet door, and the Serve sub-option.
     private let tailscale: any RemoteTailnetTransport
-    private let hostedService: RemoteHostedServiceController
+    private var hostedService: RemoteHostedServiceController
+    private let hostedServiceWasInjected: Bool
     private let appSettings: AppSettings
     /// What the `tailscale` door is made of in this build. One seam, so §8 of the transport plan
     /// swaps a Serve handler for a bound tailnet address without the settings page noticing.
@@ -190,28 +191,13 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         server = RemoteAccessServer(services: services, identityProvider: identity)
         ownerDevices = RemoteOwnerDeviceRegistry(store: ownerDeviceStore)
         self.guestShareStore = guestShareStore ?? Self.defaultGuestShareStore()
-        self.hostedService = hostedService ?? RemoteHostedServiceController()
-        self.processActivity = processActivity ?? RemoteAccessProcessActivity()
-        let hostedPushService = self.hostedService
-        notifications.configureHostedPushSender(
-            isAvailable: { [weak hostedPushService] in
-                hostedPushService?.canSendHostedPush == true
-            },
-            send: { [weak hostedPushService] event, registrationID, playsSound in
-                guard let hostedPushService else {
-                    return RemoteAPNSDeliveryResult(
-                        statusCode: nil,
-                        reason: "Hosted push service is unavailable.",
-                        apnsID: nil
-                    )
-                }
-                return await hostedPushService.sendHostedPush(
-                    event: event,
-                    registrationID: registrationID,
-                    playsSound: playsSound
-                )
-            }
+        hostedServiceWasInjected = hostedService != nil
+        self.hostedService = hostedService ?? RemoteHostedServiceController(
+            endpoint: RemoteHostedServiceController.configuredEndpoint(
+                preferredEnvironment: appSettings.remoteHostedServiceEnvironment
+            )
         )
+        self.processActivity = processActivity ?? RemoteAccessProcessActivity()
         server.authorizer = authority
         server.invitationRedeemer = self
         server.hostCommands = self
@@ -220,10 +206,6 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         server.onListenerStatusChange = { [weak self] status in
             Task { @MainActor in self?.applyListenerStatus(status) }
         }
-        self.hostedService.onStateChange = { [weak self] in
-            self?.refreshHostedPairingLink()
-            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
-        }
         // Readiness steps advance while `tailscaleServeStatus` sits on `.starting`, so without
         // this the settings page renders whichever step was current at the last state change and
         // freezes there until Serve connects or fails. It is also how the CLI facts behind the
@@ -231,6 +213,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         tailscale.onReadinessChange = {
             NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
+        bindHostedService(self.hostedService)
         restoreGuestShares()
     }
 
@@ -378,6 +361,12 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// What `tailscale status` last said about this Mac.
     var tailscaleHostFacts: TailscaleHostFacts { tailscale.hostFacts }
     var hostedServiceState: RemoteHostedServiceState { hostedService.state }
+    var hostedServiceEnvironment: RemoteHostedServiceEnvironment {
+        appSettings.remoteHostedServiceEnvironment
+    }
+    var hostedServiceEnvironmentIsOverridden: Bool {
+        RemoteHostedServiceController.hasConfiguredEndpointOverride()
+    }
 
     /// Whether any way in an owner device could take is switched on.
     ///
@@ -1706,6 +1695,38 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
         if appSettings.remoteAccessEnabled { start() } else { stop() }
     }
 
+    /// Switches only the hosted control-plane plumbing. The listener, active private-network
+    /// connections, and the Threading process stay alive.
+    func setHostedServiceEnvironment(_ environment: RemoteHostedServiceEnvironment) {
+#if DEBUG
+        guard !hostedServiceWasInjected,
+              !RemoteHostedServiceController.hasConfiguredEndpointOverride(),
+              appSettings.remoteHostedServiceEnvironment != environment else { return }
+        appSettings.remoteHostedServiceEnvironment = environment
+        let replacement = RemoteHostedServiceController(
+            endpoint: RemoteHostedServiceController.configuredEndpoint(
+                preferredEnvironment: environment
+            )
+        )
+        let previous = hostedService
+        previous.onStateChange = nil
+        hostedPairingTask?.cancel()
+        hostedPairingTask = nil
+        previous.stop()
+        Task {
+            await previous.revokeDeviceImmediately(deviceID: Self.hostedPairingDeviceID)
+        }
+        hostedPairingLink = nil
+
+        hostedService = replacement
+        bindHostedService(replacement)
+        if case let .listening(port) = status {
+            replacement.start(targetPort: port)
+        }
+        NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
+#endif
+    }
+
     /// Selects the `tailscale` door, and rebuilds the listeners for it.
     ///
     /// The door is a bind now, so this is the same operation `setDoors` performs for the network
@@ -1983,6 +2004,32 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
             startTailscale(port: port, generation: generation)
         } else if appSettings.remoteAccessTailscaleEnabled {
             tailscale.refreshHostFacts()
+        }
+    }
+
+    private func bindHostedService(_ service: RemoteHostedServiceController) {
+        notifications.configureHostedPushSender(
+            serviceURL: { [weak service] in service?.serviceURL },
+            isAvailable: { [weak service] in service?.canSendHostedPush == true },
+            send: { [weak service] event, registrationID, playsSound in
+                guard let service else {
+                    return RemoteAPNSDeliveryResult(
+                        statusCode: nil,
+                        reason: "Hosted push service is unavailable.",
+                        apnsID: nil
+                    )
+                }
+                return await service.sendHostedPush(
+                    event: event,
+                    registrationID: registrationID,
+                    playsSound: playsSound
+                )
+            }
+        )
+        service.onStateChange = { [weak self, weak service] in
+            guard let self, let service, self.hostedService === service else { return }
+            self.refreshHostedPairingLink()
+            NotificationCenter.default.post(name: Self.statusDidChange, object: nil)
         }
     }
 

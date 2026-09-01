@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import ThreadingPeerTransport
 import ThreadingRemoteKit
 
 /// The durable, device-bound half of a notification registration.
@@ -13,6 +14,12 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
     let deviceID: String
     let deviceToken: String
     let hostedRegistrationID: String?
+    /// The control-plane origin that minted `hostedRegistrationID`.
+    ///
+    /// Older records decode this as `nil` and remain valid but inert for hosted delivery until
+    /// the phone registers again. Guessing an origin would let a production identifier cross
+    /// into the isolated development broker.
+    let hostedServiceURL: String?
     let environment: RemoteNotificationEnvironment
     let enabledKinds: [RemoteNotificationKind]
     let soundEnabledKinds: [RemoteNotificationKind]
@@ -22,6 +29,7 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
         deviceID: String,
         deviceToken: String,
         hostedRegistrationID: String? = nil,
+        hostedServiceURL: String? = nil,
         environment: RemoteNotificationEnvironment,
         enabledKinds: [RemoteNotificationKind],
         soundEnabledKinds: [RemoteNotificationKind]
@@ -30,6 +38,7 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
         self.deviceID = deviceID
         self.deviceToken = deviceToken
         self.hostedRegistrationID = hostedRegistrationID
+        self.hostedServiceURL = hostedServiceURL
         self.environment = environment
         self.enabledKinds = enabledKinds
         self.soundEnabledKinds = soundEnabledKinds
@@ -207,6 +216,7 @@ enum RemoteNotificationSubscriptionDefaults {
     /// One device/share pair owns at most one record, so the complete persisted scan is fixed.
     static let maximumSubscriptions = 288
     static let maximumEncodedBytes = 1_048_576
+    static let maximumHostedServiceURLBytes = 2_048
 
     static func isValid(_ subscriptions: [RemoteNotificationSubscriptionRecord]) -> Bool {
         guard subscriptions.count <= maximumSubscriptions,
@@ -219,6 +229,9 @@ enum RemoteNotificationSubscriptionDefaults {
                     == subscription.deviceID
                 && acceptsDeviceToken(subscription.deviceToken)
                 && acceptsHostedRegistrationID(subscription.hostedRegistrationID)
+                && acceptsHostedServiceURL(subscription.hostedServiceURL)
+                && (subscription.hostedServiceURL == nil
+                    || subscription.hostedRegistrationID != nil)
                 && enabledKinds.count == subscription.enabledKinds.count
                 && soundKinds.count == subscription.soundEnabledKinds.count
                 && soundKinds.isSubset(of: enabledKinds)
@@ -247,5 +260,20 @@ enum RemoteNotificationSubscriptionDefaults {
                 default: false
                 }
             }
+    }
+
+    static func normalizedHostedServiceURL(_ url: URL?) -> String? {
+        guard let url,
+              let endpoint = try? PeerControlPlaneServiceEndpoint(url),
+              !endpoint.isLoopback else { return nil }
+        return endpoint.baseURL.absoluteString
+    }
+
+    static func acceptsHostedServiceURL(_ value: String?) -> Bool {
+        guard let value else { return true }
+        guard !value.isEmpty,
+              value.utf8.count <= maximumHostedServiceURLBytes,
+              let url = URL(string: value) else { return false }
+        return normalizedHostedServiceURL(url) == value
     }
 }

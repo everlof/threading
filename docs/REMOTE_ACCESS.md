@@ -1638,8 +1638,14 @@ an authenticated Mac submits one bounded, sanitized event and opaque registratio
 delivery. Presence remains connection-derived rather than a database heartbeat.
 
 Physical-device development uses a separate `dev.remote.threading.codes` Worker and D1 database.
-A Debug Mac pointed at that exact origin starts a five-minute PKCE-style browser transaction and
-opens its Cloudflare Access-protected authorization path. Access allows exact configured email
+A Debug Mac selects it under **Settings > Remote Access > Service environment**; changing the
+selection replaces only Hosted Direct, leaving the local listener, private-network connections
+and app process running. `THREADING_CONTROL_PLANE_URL` remains the higher-priority launch override
+for custom and local service work. Release builds always select production, even if installed over
+a Debug build whose shared defaults domain contains `development`.
+
+A Debug Mac pointed at the development origin starts a five-minute PKCE-style browser transaction
+and opens its Cloudflare Access-protected authorization path. Access allows exact configured email
 addresses—never Everyone, a whole email domain or the one-time-PIN login method as an allow rule—
 and the Worker independently validates the signed Access assertion, issuer, application audience
 and the same email allowlist. Only the initiating Mac holds both the verifier and high-entropy
@@ -1663,6 +1669,12 @@ pairing link, and iOS validates and stores it with that paired Mac. There is int
 app-wide iOS control-plane URL: different paired Macs may use the operated service, a local
 development Worker, or a self-hosted service. The report-intake URL is configured separately
 because an iOS user must be able to send a diagnostic report before pairing a Mac.
+
+Each Mac-side hosted push registration is also stored with the normalized service origin that
+minted it. Delivery uses it only while that exact origin is active; a legacy or other-environment
+registration remains inert until the phone reconnects and refreshes it. This prevents production
+and development opaque recipient IDs from being submitted to one another's broker and lets an
+explicit notification request explain the mismatch instead of misreporting the phone as unpaired.
 
 This also gives a clean product boundary for an open-source app: direct/local and self-hosted
 remote access remains available, while an official paid iOS/hosted service can sell reliable

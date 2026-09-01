@@ -68,6 +68,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Command-line tool installation (Advanced row) | — | host-only | which tools are public, the shim directory and its refresh, what in a user's `~/.local/bin` may be written or removed, the login-shell `PATH` reading, the refusal to edit a shell profile | Host-only |
 | Command-line tools on launched `PATH` (Advanced switch) | — | host-only | the environment composed for every shell and agent, prepend-never-substitute, the absent-`PATH` refusal | Host-only |
 | Update channel picker | — | host-only | which builds the updater accepts, the default a build resolves to, the feed override, the versions Sparkle compares | Host-only |
+| Hosted-service environment picker (Debug) | — | host-only | selected control-plane identity, Release's production lock, credential and push-registration isolation, live Hosted Direct replacement | Host-only |
 
 The background-sessions surfaces remain host-only because each of the three is a **decision about
 somebody's running work**, not a presentation of it. The quit choice ends processes or does not;
@@ -86,6 +87,7 @@ the user's own `~/.local/bin` and reads what their login shell exports; the othe
 surface that can misname the path it is about to write, or say a switch is off while it is on. The
 facts behind them are already published where an extension can reach them honestly — the settings
 catalogue describes both rows, and neither is remotely mutable by construction.
+
 The update channel picker remains host-only because it decides which software this Mac will
 install. Its two levels are exactly the subscriptions Sparkle can honour, its resolved default
 comes from the running build's own channel so a directly downloaded beta is not filtered into
@@ -94,6 +96,14 @@ choosing stable again would strand the user. A replaceable presentation of that 
 level the updater does not accept, show a level other than the one in force, or name nightly as a
 one-click option. An extension that wants to know what somebody receives should ask for a
 published typed subscription value, not for the control that sets it.
+
+The Debug hosted-service environment picker remains host-only because it selects an authentication
+and delivery authority, not a themeable label. Threading owns the production-only Release policy,
+the separate Keychain accounts, the origin attached to every opaque push registration, and the
+live replacement that leaves unrelated listeners alone. A replaceable presentation could claim
+Development while production credentials remained active, which would make a security boundary
+visually false. An extension that eventually needs a custom hosted service needs a typed,
+validated service configuration contract; it must not replace the first-party environment picker.
 
 The launch failure surface remains host-only because its content *is* the evidence. The whole
 surface exists because an agent's account of why it would not start was being destroyed, and a

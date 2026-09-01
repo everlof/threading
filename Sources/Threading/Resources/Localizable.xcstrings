@@ -14499,6 +14499,17 @@
         }
       }
     },
+    "Debug only. Development uses isolated accounts and push registrations; a launch URL override wins." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Endast felsökningsversion. Utveckling använder separata konton och pushregistreringar; en URL-åsidosättning vid start gäller i första hand."
+          }
+        }
+      }
+    },
     "Decides for itself when to ask." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14935,6 +14946,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Identifiering av filer som nämns i %@:s utdata är avstängd i Inställningar › Allmänt. Bilder du bifogar, och de som agenten visar i panelen, visas fortfarande här."
+          }
+        }
+      }
+    },
+    "Development" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utveckling"
           }
         }
       }
@@ -29855,6 +29877,17 @@
         }
       }
     },
+    "Production" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Produktion"
+          }
+        }
+      }
+    },
     "Products" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -35846,6 +35879,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Serverfel (%lld): %@"
+          }
+        }
+      }
+    },
+    "Service environment" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tjänstemiljö"
           }
         }
       }
