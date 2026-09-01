@@ -2000,6 +2000,27 @@ final class TerminalAttachmentObserver {
         let applyNanoseconds: UInt64
         let found: Int
         let recorded: Int
+        /// True when the buffer had not moved since the last scan, so no detection ran at all.
+        var wasUnchanged = false
+    }
+
+    /// Everything a scan's answer depends on.
+    ///
+    /// A terminal running a TUI rewrites its screen in place, so `noteOutput` fires constantly
+    /// while the text under the read window stays exactly what it was — 736 scans in one four
+    /// minute trace, most of them over bytes that had already been resolved. Identical inputs
+    /// cannot produce a different resolution, and the regex pass is the expensive half, so the
+    /// pass is what gets skipped. Nothing about *what* is detected changes.
+    ///
+    /// The row position is part of it deliberately: text can repeat while the buffer advances
+    /// (a spinner, a progress line), and an advance must always be scanned so the read window
+    /// does not stall behind it.
+    private struct ScanFingerprint: Equatable {
+        let textHash: Int
+        let byteCount: Int
+        let readThrough: Int
+        let currentDirectory: String?
+        let projectRoot: String
     }
 
     typealias Recorder = @MainActor (
@@ -2027,6 +2048,7 @@ final class TerminalAttachmentObserver {
     private var recentlySeenPathSet: Set<String> = []
     private var lastScannedAbsoluteRow = 0
     private var scanGeneration = 0
+    private var lastScanFingerprint: ScanFingerprint?
 
     private(set) var isScanInFlight = false
     private(set) var lastScanMetrics: ScanMetrics?
@@ -2131,6 +2153,31 @@ final class TerminalAttachmentObserver {
         let scanned = read.text
         let readThrough = read.nextAbsoluteRow
         let current = currentDirectory()
+
+        // Nothing the answer depends on has moved, so the answer is the one already applied.
+        // Recorded rather than silently returned: a scan that did no work is still a scan, and
+        // the stress fixture measuring the warm repaint needs to see what it now costs.
+        let fingerprint = ScanFingerprint(
+            textHash: scanned.hashValue,
+            byteCount: scanned.utf8.count,
+            readThrough: readThrough,
+            currentDirectory: current?.path,
+            projectRoot: root.path
+        )
+        if fingerprint == lastScanFingerprint {
+            lastScanMetrics = ScanMetrics(
+                bytes: scanned.utf8.count,
+                workerNanoseconds: 0,
+                custodyWorkerNanoseconds: 0,
+                applyNanoseconds: 0,
+                found: 0,
+                recorded: 0,
+                wasUnchanged: true
+            )
+            return
+        }
+        lastScanFingerprint = fingerprint
+
         // Wall time across a worker hop. It begins and ends on the main actor without occupying
         // it, so it must not be read as a main-thread stall.
         let span = PerformanceRecorder.shared.begin(
@@ -2183,6 +2230,9 @@ final class TerminalAttachmentObserver {
         recentlySeenPaths.removeAll()
         recentlySeenPathSet.removeAll()
         lastScannedAbsoluteRow = 0
+        // The next scan must run for real: what was offered has been forgotten, so identical
+        // text is no longer a reason to believe the same answer is already applied.
+        lastScanFingerprint = nil
     }
 
     private func finishScan(

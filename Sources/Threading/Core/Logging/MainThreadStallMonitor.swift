@@ -1,5 +1,22 @@
 import Foundation
 
+/// Posted on the main queue once a stall the watchdog saw has ended.
+///
+/// The incident file and the trace beside it remain the durable record. This exists so a build
+/// can say so on screen while the freeze is still the thing the user was looking at, instead of
+/// the evidence only being discoverable afterwards by someone who already suspected it.
+struct MainThreadStallDidOccur: AppEvent {
+    static let name = Notification.Name("mainThreadStallDidOccur")
+
+    let durationMilliseconds: Double
+
+    /// The recorder's bounded semantic span names that were in flight when the stall was seen.
+    ///
+    /// Empty is the informative case rather than a gap: it means the blocking work is covered by
+    /// no span at all, so the owner is somewhere the recorder does not instrument.
+    let operationNames: [String]
+}
+
 /// Detects long periods in which the main dispatch queue cannot service a trivial ping.
 ///
 /// This deliberately does not sample stacks; MetricKit, `sample` and `xctrace` do that without
@@ -14,6 +31,9 @@ final class MainThreadStallMonitor: @unchecked Sendable {
         let sentAtNanoseconds: UInt64
         var detected = false
         var incidentID: UUID?
+        /// Captured at detection, because by the time the queue answers the spans that were
+        /// blocking it have usually ended.
+        var operationNames: [String] = []
     }
 
     private let recorder: PerformanceRecorder
@@ -84,10 +104,12 @@ final class MainThreadStallMonitor: @unchecked Sendable {
         if var pendingPing {
             if !pendingPing.detected, now &- pendingPing.sentAtNanoseconds >= thresholdNanoseconds {
                 pendingPing.detected = true
+                let activeOperations = recorder.activeSpanSnapshots()
+                pendingPing.operationNames = activeOperations.map(\.name)
                 pendingPing.incidentID = incidentStore.begin(
                     thresholdMilliseconds: thresholdMilliseconds,
                     mainThreadID: mainThreadID,
-                    activeOperations: recorder.activeSpanSnapshots()
+                    activeOperations: activeOperations
                 )
                 self.pendingPing = pendingPing
                 recorder.requestAutomaticExport(reason: "main-thread-stall-detected")
@@ -131,5 +153,18 @@ final class MainThreadStallMonitor: @unchecked Sendable {
             metadata: ["duration_ms": String(format: "%.1f", durationMilliseconds)]
         )
         recorder.requestAutomaticExport(reason: "main-thread-stall-completed")
+
+        // Announced only after the queue answered, so the duration is the real one rather than
+        // the threshold. Posting onto the queue that just unblocked costs one hop and cannot
+        // itself extend the stall it is reporting.
+        let operationNames = ping.operationNames
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(
+                MainThreadStallDidOccur(
+                    durationMilliseconds: durationMilliseconds,
+                    operationNames: operationNames
+                )
+            )
+        }
     }
 }

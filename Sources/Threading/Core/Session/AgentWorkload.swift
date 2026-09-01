@@ -179,6 +179,13 @@ final class AgentWorkloadMonitor {
         appEvents.observe(SessionActivityDidChange.self) { [weak self] _ in
             self?.refresh()
         }
+        // The other half of the aggregate. `anyAtTopEffort` moves when a session's model or
+        // effort is chosen, which is not an activity change and posts no activity event. The
+        // pulse path used to catch that incidentally by re-measuring on every 200 bytes of
+        // output; observing the change itself is what lets it stop.
+        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
+            self?.refresh()
+        }
         refresh()
     }
 
@@ -190,11 +197,31 @@ final class AgentWorkloadMonitor {
     /// Records one meaningful provider-neutral activity pulse. The session must still be in
     /// `.working`; late terminal redraws and completion receipts therefore cannot revive a
     /// settled display.
+    ///
+    /// This deliberately does not re-measure the workload, and the guards come first so a pulse
+    /// that changes nothing costs nothing. `AgentWorkload` states how many sessions are working
+    /// and whether one of them runs at top effort; neither fact can change because a session
+    /// printed another 200 bytes. The first moves on `SessionActivityDidChange` and the second on
+    /// `ProjectsDidChange`, both observed in `start()`, so measuring here could only ever confirm
+    /// what an event had already delivered.
+    ///
+    /// It was measured anyway, once per 200 bytes of agent output, and `measure` reaches per
+    /// account into `AgentModels` — which then read and parsed a ~90 KB `.claude.json` with no
+    /// cache. That single call was 62% of all main-queue work while an agent streamed, and
+    /// produced repeated 1.4-2.0 s main-thread stalls: long enough that typing into the composer
+    /// visibly lagged behind the keyboard.
     func recordActivity(sessionID: SessionID, magnitude: Double) {
-        let now = ProcessInfo.processInfo.systemUptime
-        refresh(at: now)
         guard magnitude > 0,
               AgentRuntime.shared.activity(sessionID: sessionID) == .working else { return }
+
+        // The aggregate should already know about this session — reaching `.working` is what
+        // posts `SessionActivityDidChange`. If the two ever disagree, re-measure once rather
+        // than dropping the pulse: `addingPulse` does nothing while the workload reads zero, and
+        // a beam that never lights would be a worse bug than the one being fixed here. The guard
+        // is on the disagreement, not on the pulse, so the ordinary path still measures nothing.
+        if workload.workingCount == 0 { refresh() }
+
+        let now = ProcessInfo.processInfo.systemUptime
         let measured = intensity.addingPulse(magnitude, at: now)
         guard measured != intensity else { return }
         intensity = measured

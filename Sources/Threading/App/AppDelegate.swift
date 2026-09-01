@@ -608,6 +608,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             presentRecoveryMode(on: mainWindowController)
         }
         MainThreadStallMonitor.shared.start()
+#if DEBUG
+        installMainThreadStallHUD(on: mainWindowController)
+#endif
 
         // A command-line startup capture measures the normal path through the first usable
         // window, then stops before session restoration, extension processes, polling and other
@@ -3627,6 +3630,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     @objc private func decreaseFontSize() {
         _ = hostCommandPlane.invoke(commandID: AppCommands.ID.smallerText)
     }
+
+#if DEBUG
+    /// Puts the main-thread readout in the window's bottom-trailing corner.
+    ///
+    /// Installed from here rather than from inside the window's own view tree, for two reasons:
+    /// no shipping controller then carries a diagnostic child it has to know about, and the
+    /// readout is switched on beside the watchdog whose events it draws, so the pair cannot drift
+    /// apart. Ordered explicitly above its siblings — panes are added to this same content view,
+    /// and a readout the app can cover is a readout that is not telling you anything.
+    private func installMainThreadStallHUD(on controller: MainWindowController) {
+        guard let content = controller.window?.contentView else { return }
+
+        let hud = MainThreadStallHUDView()
+        content.addSubview(hud, positioned: .above, relativeTo: nil)
+        NSLayoutConstraint.activate([
+            hud.trailingAnchor.constraint(
+                equalTo: content.trailingAnchor,
+                constant: -MainThreadStallHUDDefaults.margin
+            ),
+            hud.bottomAnchor.constraint(
+                equalTo: content.bottomAnchor,
+                constant: -MainThreadStallHUDDefaults.margin
+            )
+        ])
+    }
+#endif
 }
 
 #if DEBUG

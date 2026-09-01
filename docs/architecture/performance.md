@@ -85,6 +85,109 @@ share-safe incident summary — counts, longest observed duration and compile-ti
 The bounded metadata and exact timestamps remain owner-local in the incident/trace files; MetricKit
 is still the production source for OS-collected hang stacks.
 
+## The composer typing lag, 2026-09-01
+
+Reported as a feeling — writing in a chat "was very slow, lagging behind". The app had already
+recorded it exactly: 20 stall incidents that day, arriving in bursts of 1.4-2.0 s roughly every
+five seconds. Three of them are worth quoting because of what they do *not* say.
+
+| Incident | Duration | `activeOperations` |
+|---|---|---|
+| 11:02:27 | 1850 ms | none |
+| 11:02:32 | 1793 ms | none |
+| 11:01:06 | 2017 ms | `attachments.scan` (66,795 bytes) |
+
+**An empty `activeOperations` is the informative case, not a gap.** It says the blocking work is
+covered by no span, so the owner is somewhere the recorder does not instrument — which is where
+the search should start rather than stop.
+
+**And the one span that *was* open was a bystander.** `attachments.scan` is declared
+`crossesQueues: true`; its 2175 ms is wall time across a worker hop, and its own
+`custody_worker_ms` arg read `0.000`. The worker did nothing. The entire span was its continuation
+waiting to get back onto a main actor that was already blocked. A span that inflates *because* of
+the stall reads exactly like a span that caused one.
+
+### The owner
+
+A 30-second `sample` of the running app, with the `mach_msg` idle branch discarded, put 8.6% of
+the main thread in `_dispatch_main_queue_drain` and named the tree under it:
+
+| Frame | Share of main-queue work |
+|---|---|
+| `AgentWorkloadMonitor.recordActivity` | 62% |
+| ...of which `AgentModels` file reads | 48% |
+
+`AgentSessionViewController.terminalSession(_:didProduceOutputOf:)` calls `recordActivity` once
+per `ActivityDefaults.workingByteThreshold` — **every 200 bytes an agent prints**. That called
+`refresh(at:)` unconditionally, before its own `guard magnitude > 0`, and `refresh` measures the
+aggregate across *every* working session: `AgentModels.option` plus `effectiveEffort`, each
+independently re-entering `options(for:account:)` and landing in `claudeState`, which read and
+parsed a ~90 KB `.claude.json` **with no cache**. The cost is therefore
+(output chunks/s) x (working sessions) x 2 parses — quadratic in working sessions, since every
+session's output re-measured every other session.
+
+Measured on this machine for a 96 KB `.claude.json`:
+
+| `stat` (mtime + size) | read | `JSONSerialization` | total |
+|---|---|---|---|
+| 0.0017 ms | 0.0125 ms | 0.7024 ms | 0.7315 ms |
+
+The parse is 96% of the cost. A drain runs every queued block before returning to the run loop, so
+a burst of agent output queued many deliveries, they drained as one batch, and keystrokes waited
+behind the whole batch. That is the lag.
+
+### Three repairs, each justified on its own
+
+1. **`ProviderSettingsFileCache`** remembers what a CLI's own file parsed to, keyed by path and
+   validated against the file's modification date and size *on every call*. Identity is checked
+   rather than timed, because the stat is ~430x cheaper than the parse: there is no staleness
+   window to trade for the speed, and an unchanged file is never parsed twice. This is the shape
+   `rememberedCodexCatalogs` already used for `models_cache.json` — the Claude readers simply
+   never got it. It now covers `.claude.json`, `settings.json` and `config.toml`, so
+   `ResolvedPermissionMode`'s three consecutive questions are also one parse rather than three.
+
+2. **`recordActivity` no longer measures the workload**, and its guards come first. Neither
+   `workingCount` nor `anyAtTopEffort` can change because a session printed 200 more bytes: the
+   first moves on `SessionActivityDidChange` and the second on `ProjectsDidChange`, both now
+   observed in `start()`. Measuring per pulse could only ever confirm what an event had already
+   delivered.
+
+3. **The `MainThreadStallHUDView`** (DEBUG only). The evidence for all of the above was on disk
+   the whole time and nobody was told. The pill is quiet when healthy and names the duration and
+   the open spans when not — including "no active span", the reading that actually located this
+   bug.
+
+### Two neighbours found by the same trace
+
+Both are off the main actor, so they cost CPU and battery rather than latency, and both were
+unbounded in the same way — a coalescer that re-ran the instant it was allowed to.
+
+- **`attachments.scan` ran 736 times in one four-minute trace**, mostly over text that had not
+  changed: a TUI rewrites its screen in place, so `noteOutput` fires while the bytes under the read
+  window stay identical. `TerminalAttachmentObserver` now fingerprints (text hash, byte count,
+  row position, current directory, project root) and skips the detection pass when nothing the
+  answer depends on has moved. The row position is in the fingerprint deliberately — text can
+  repeat while the buffer advances, and an advance must always be scanned.
+- **1061 `git` child processes and 46 s of process time** in that same window.
+  `GitChangeMonitor` refused to run two summaries at once but re-read the instant one finished, so
+  an agent writing files continuously held `needsAnotherRead` set and the reads ran back to back.
+  `GitChangeMonitorDefaults.minimumReadInterval` now floors the cadence at 1 s, measured from when
+  the previous read *started*. A burst of writes still ends with a reading taken after the last of
+  them.
+
+### Regression boundary
+
+`ProviderSettingsFileCacheTests` counts decodes, so a removed cache fails rather than merely
+getting slower, and pins the freshness half: a rewritten file is picked up on the next read, a
+same-length rewrite is still noticed, and a file caught mid-truncation reads as absent without
+being remembered. `ProviderSettingsReadingTests` pins the semantics the cache had to preserve
+exactly — first-assignment-wins in `config.toml`, an empty value refusing rather than falling
+through to a later one, a longer key not satisfying a shorter one.
+`TerminalAttachmentScanReuseTests` asserts on `isScanInFlight` rather than on recorded
+attachments, because the recorder is only reached when something was found and so cannot tell
+"scanned and found nothing" from "did not scan".
+
+
 ## MetricKit
 
 `MetricKitDiagnostics` subscribes only in a real app launch, never in the hosted XCTest process.

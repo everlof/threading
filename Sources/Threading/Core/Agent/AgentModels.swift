@@ -117,6 +117,24 @@ enum AgentModels {
     private static let maximumProviderSettingsBytes = 1024 * 1024
     private static let maximumProviderCatalogBytes = 16 * 1024 * 1024
 
+    /// The CLIs' own files, remembered per write rather than per call.
+    ///
+    /// Each of these was read, parsed and re-derived on every single call before. That is
+    /// affordable from a menu and ruinous from the terminal-output path, which is where
+    /// `AgentWorkloadMonitor` put `.claude.json`: see `ProviderSettingsFileCache` for the
+    /// measurements and for why identity is checked rather than timed.
+    private static let claudeStateCache = ProviderSettingsFileCache<ClaudeStateReading>()
+    private static let claudeSettingsCache = ProviderSettingsFileCache<[String: String]>()
+    private static let codexConfigCache = ProviderSettingsFileCache<[String: String]>()
+
+    /// Drops every remembered provider file. Freshness never needs this — identity already
+    /// guarantees it — but a test wants a defined starting point.
+    static func forgetCachedProviderFiles() {
+        claudeStateCache.invalidate()
+        claudeSettingsCache.invalidate()
+        codexConfigCache.invalidate()
+    }
+
     // MARK: - Public Methods
 
     /// Selectable models for an agent on a given account. Empty means "whatever the CLI
@@ -647,9 +665,12 @@ enum AgentModels {
     /// could be observed — so a bare string and the two plausible object shapes are all accepted
     /// and anything else reads as absent. Being wrong here costs a miss, never a wrong name.
     private static func organisationClaudeModel(account: AgentAccount?) -> String? {
-        guard let value = claudeState(account: account)?[
-            AgentDefaults.claudeOrgDefaultModelKey
-        ] else { return nil }
+        claudeStateReading(account: account)?.organisationDefaultModel
+    }
+
+    /// The organisation default as it reads in one parsed state file.
+    private static func organisationModel(inClaudeState state: [String: Any]) -> String? {
+        guard let value = state[AgentDefaults.claudeOrgDefaultModelKey] else { return nil }
 
         if let identifier = value as? String {
             return identifier.isEmpty ? nil : identifier
@@ -675,8 +696,13 @@ enum AgentModels {
     /// refusing the container for one unreadable element emptied the *whole* extra-model menu
     /// instead of shortening it, and a model the login really offers simply became unpickable.
     private static func claudeAdditionalModels(account: AgentAccount?) -> [AgentModelOption] {
+        claudeStateReading(account: account)?.additionalModels ?? []
+    }
+
+    /// The extra models as they read in one parsed state file.
+    private static func additionalModels(inClaudeState state: [String: Any]) -> [AgentModelOption] {
         guard let entries = WireList.objects(
-            claudeState(account: account)?[AgentDefaults.claudeAdditionalModelsKey],
+            state[AgentDefaults.claudeAdditionalModelsKey],
             site: WireListSite.claudeAdditionalModels,
             log: ThreadingLogger.agent
         ) else { return [] }
@@ -712,21 +738,37 @@ enum AgentModels {
         )
     }
 
-    /// The CLI's cached per-account state, or nil when it has never written one.
-    private static func claudeState(account: AgentAccount?) -> [String: Any]? {
+    /// Everything this app reads out of the Claude CLI's own state file.
+    ///
+    /// Both facts are derived together because both come out of one ~90 KB parse, and that parse
+    /// is essentially the entire cost of asking. Deriving them apart would read and parse the
+    /// same write of the same file twice to answer two questions about it.
+    private struct ClaudeStateReading: Sendable {
+        let organisationDefaultModel: String?
+        let additionalModels: [AgentModelOption]
+    }
+
+    /// The CLI's cached per-account state as this app reads it, or nil when it has never written
+    /// one. Re-derived only when the file itself moves.
+    private static func claudeStateReading(account: AgentAccount?) -> ClaudeStateReading? {
         guard let account else { return nil }
 
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.claudeStateFile)
 
-        guard let data = try? BoundedFileReader.read(
-            url,
-            maximumBytes: maximumProviderSettingsBytes
-        ),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
+        return claudeStateCache.value(at: url) { url in
+            guard let data = try? BoundedFileReader.read(
+                url,
+                maximumBytes: maximumProviderSettingsBytes
+            ),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return nil }
 
-        return json
+            return ClaudeStateReading(
+                organisationDefaultModel: organisationModel(inClaudeState: json),
+                additionalModels: additionalModels(inClaudeState: json)
+            )
+        }
     }
 
     private static func configuredClaudeSetting(
@@ -738,15 +780,22 @@ enum AgentModels {
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.claudeSettingsFile)
 
-        guard let data = try? BoundedFileReader.read(
-            url,
-            maximumBytes: maximumProviderSettingsBytes
-        ),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let value = json[key] as? String,
-              !value.isEmpty
-        else { return nil }
+        let settings = claudeSettingsCache.value(at: url) { url in
+            guard let data = try? BoundedFileReader.read(
+                url,
+                maximumBytes: maximumProviderSettingsBytes
+            ),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return nil }
 
+            // Only the top-level strings. Every caller wants one scalar setting, and keeping
+            // just those makes the remembered value `Sendable` instead of a boxed `Any` shared
+            // between threads. A non-string value is simply absent, exactly as `as? String`
+            // failing made it absent before.
+            return json.compactMapValues { $0 as? String }
+        }
+
+        guard let value = settings?[key], !value.isEmpty else { return nil }
         return value
     }
 
@@ -773,50 +822,55 @@ enum AgentModels {
         let configURL = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.codexConfigFile)
 
-        guard let data = try? BoundedFileReader.read(
-            configURL,
-            maximumBytes: maximumProviderSettingsBytes
-        ), let contents = String(data: data, encoding: .utf8) else { return nil }
+        let assignments = codexConfigCache.value(at: configURL) { url in
+            guard let data = try? BoundedFileReader.read(
+                url,
+                maximumBytes: maximumProviderSettingsBytes
+            ), let contents = String(data: data, encoding: .utf8) else { return nil }
 
-        for line in contents.split(separator: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-
-            // Only a top-level assignment counts; keys under a [table] belong to something else.
-            guard trimmed.hasPrefix(key) else { continue }
-
-            let parts = trimmed.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2,
-                  parts[0].trimmingCharacters(in: .whitespaces) == key
-            else { continue }
-
-            let value = parts[1]
-                .trimmingCharacters(in: .whitespaces)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-
-            return value.isEmpty ? nil : value
+            return codexAssignments(in: contents)
         }
 
-        return nil
+        guard let value = assignments?[key], !value.isEmpty else { return nil }
+        return value
+    }
+
+    /// Every `key = value` in one `config.toml`, the first assignment of a key winning.
+    ///
+    /// Reading the whole file into a dictionary rather than scanning it once per key is what
+    /// lets one parse answer every caller: `ResolvedPermissionMode` alone asks it three
+    /// questions in a row, and each used to re-read and re-split the file.
+    ///
+    /// First-wins reproduces the previous per-key scan, which returned at its first match — and
+    /// returned nil when that match was empty rather than looking for a later one. So an empty
+    /// value is kept here and refused at the lookup, not skipped while collecting.
+    private static func codexAssignments(in contents: String) -> [String: String] {
+        var assignments: [String: String] = [:]
+
+        for line in contents.split(separator: "\n") {
+            // A `[table]` header carries no `=` and drops out here. Keys *under* one are still
+            // collected, exactly as the previous scan matched them wherever they appeared.
+            let parts = line.trimmingCharacters(in: .whitespaces).split(
+                separator: "=",
+                maxSplits: 1
+            )
+            guard parts.count == 2 else { continue }
+
+            let key = parts[0].trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty, assignments[key] == nil else { continue }
+
+            assignments[key] = parts[1]
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+        }
+
+        return assignments
     }
 
     /// The catalogue as last decoded for one login, with the file identity it was read from.
     private struct RememberedCodexCatalog: Sendable {
-        var identity: CodexCatalogFileIdentity
+        var identity: ProviderSettingsFileIdentity
         var options: [AgentModelOption]
-    }
-
-    /// What tells one write of `models_cache.json` from the next without reading it.
-    private struct CodexCatalogFileIdentity: Equatable, Sendable {
-        let modified: Date?
-        let size: Int?
-
-        init?(of url: URL) {
-            guard let values = try? url.resourceValues(
-                forKeys: [.contentModificationDateKey, .fileSizeKey]
-            ) else { return nil }
-            modified = values.contentModificationDate
-            size = values.fileSize
-        }
     }
 
     /// Codex rewrites `models_cache.json` in place — truncate, then write — so for about a
@@ -846,7 +900,7 @@ enum AgentModels {
         let url = URL(fileURLWithPath: account.configPath)
             .appendingPathComponent(AgentDefaults.codexModelsCacheFile)
         let key = url.path
-        let identity = CodexCatalogFileIdentity(of: url)
+        let identity = ProviderSettingsFileIdentity(of: url)
         let remembered = rememberedCodexCatalogs.withLock { $0[key] }
         if let remembered, let identity, remembered.identity == identity {
             return remembered.options
