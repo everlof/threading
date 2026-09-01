@@ -2723,7 +2723,9 @@ and 90-day controls. Overview shows measured cost/tokens, provider composition, 
 and pricing provenance. Limit History shows one selected account/window's observations,
 projection, reset evidence and **Banked resets**. A positive number is current inventory, zero
 means none are available, and **Unavailable** means the provider did not report a count. A marker
-in the history is separate evidence that a banked reset was previously used. Usage is owner-only;
+in the history is separate evidence that a banked reset was previously used. Each **Current
+capacity** bar also carries the thin time mark from the Mac: usage before it is under pace and
+usage beyond it is ahead of linearly elapsed window time. Usage is owner-only;
 a one-chat guest never sees the menu item or the whole-Mac data behind it.
 
 For a shared session, choose its live input mode in the Mac's **Sharing** pane (or from the

@@ -135,6 +135,7 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
     let projection: UsageLimitProjection?
     let currentFraction: Double?
     let resetsAt: Date?
+    let windowDuration: TimeInterval?
     let resetCreditCount: Int?
     let nextResetCreditExpiresAt: Date?
 
@@ -156,6 +157,7 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
         projection: UsageLimitProjection?,
         currentFraction: Double?,
         resetsAt: Date?,
+        windowDuration: TimeInterval? = nil,
         resetCreditCount: Int?,
         nextResetCreditExpiresAt: Date?
     ) {
@@ -172,6 +174,7 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
             projection: projection,
             currentFraction: currentFraction,
             resetsAt: resetsAt,
+            windowDuration: windowDuration ?? samples.last?.windowDuration,
             resetCreditCount: resetCreditCount,
             nextResetCreditExpiresAt: nextResetCreditExpiresAt
         )
@@ -186,6 +189,7 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
         projection: UsageLimitProjection?,
         currentFraction: Double?,
         resetsAt: Date?,
+        windowDuration: TimeInterval?,
         resetCreditCount: Int?,
         nextResetCreditExpiresAt: Date?
     ) {
@@ -197,6 +201,7 @@ struct UsageLimitDashboardSeries: Equatable, Sendable, Identifiable {
         self.projection = projection
         self.currentFraction = currentFraction
         self.resetsAt = resetsAt
+        self.windowDuration = windowDuration
         self.resetCreditCount = resetCreditCount
         self.nextResetCreditExpiresAt = nextResetCreditExpiresAt
     }
@@ -217,6 +222,7 @@ struct UsageLimitDashboardSeriesSummaryProjection: Equatable, Sendable, Identifi
     let windowLabel: String
     let currentFraction: Double?
     let resetsAt: Date?
+    let windowDuration: TimeInterval?
     let resetCreditCount: Int?
     let nextResetCreditExpiresAt: Date?
 
@@ -301,6 +307,7 @@ enum UsageDashboardProjector {
                 projection: UsageLimitHistoryAnalysis.weeklyProjection(for: samples),
                 currentFraction: latest.fraction,
                 resetsAt: latest.resetsAt,
+                windowDuration: latest.windowDuration,
                 resetCreditCount: latest.resetCreditCount,
                 nextResetCreditExpiresAt: latest.nextResetCreditExpiresAt
             ))
@@ -343,6 +350,7 @@ enum UsageDashboardProjector {
                 windowLabel: latest.windowLabel ?? windowID,
                 currentFraction: latest.fraction,
                 resetsAt: latest.resetsAt,
+                windowDuration: latest.windowDuration,
                 resetCreditCount: latest.resetCreditCount,
                 nextResetCreditExpiresAt: latest.nextResetCreditExpiresAt
             )
@@ -399,6 +407,7 @@ enum UsageDashboardProjector {
             projection: UsageLimitHistoryAnalysis.weeklyProjection(for: samples),
             currentFraction: latest.fraction,
             resetsAt: latest.resetsAt,
+            windowDuration: latest.windowDuration,
             resetCreditCount: latest.resetCreditCount,
             nextResetCreditExpiresAt: latest.nextResetCreditExpiresAt
         )

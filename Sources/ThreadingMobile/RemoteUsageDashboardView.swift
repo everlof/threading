@@ -139,6 +139,25 @@ enum MobileUsageFleetProjection {
     }
 }
 
+/// Places the clock on a provider window without asking the phone to receive its full history.
+/// `resetsAt - windowDuration` is the start; the normalized distance from there to `referenceTime`
+/// is the same pace comparison the Mac's usage bars draw.
+enum MobileUsageCapacityProjection {
+    static func elapsedFraction(
+        for window: RemoteUsageLimitSeriesSummaryDTO,
+        at referenceTime: Double
+    ) -> Double? {
+        guard let reset = window.resetsAt,
+              let duration = window.windowDuration,
+              reset.isFinite,
+              duration.isFinite,
+              duration > 0,
+              referenceTime.isFinite else { return nil }
+        let elapsed = duration - (reset - referenceTime)
+        return min(max(elapsed / duration, 0), 1)
+    }
+}
+
 enum MobileUsageLimitChartDomain {
     static func range(for detail: RemoteUsageLimitDTO) -> ClosedRange<Date> {
         let projectionEnd = detail.projection.map {
@@ -443,13 +462,21 @@ struct RemoteUsageDashboardView: View {
                 }
             }
         } else {
-            let reference = model.dashboard?.preparedAt ?? Date().timeIntervalSince1970
+            let snapshotTime = model.dashboard?.preparedAt ?? Date().timeIntervalSince1970
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
                 accountRail(accounts)
                 if let account = selectedAccount {
                     VStack(alignment: .leading, spacing: MobileDesign.Spacing.small) {
                         sectionTitle("Current capacity")
-                        capacityCard(account, referenceTime: reference)
+                        TimelineView(.periodic(from: .now, by: 60)) { context in
+                            capacityCard(
+                                account,
+                                snapshotTime: snapshotTime,
+                                clockTime: isDemo
+                                    ? snapshotTime
+                                    : context.date.timeIntervalSince1970
+                            )
+                        }
                     }
                 }
             }
@@ -532,10 +559,11 @@ struct RemoteUsageDashboardView: View {
 
     private func capacityCard(
         _ account: MobileUsageFleetProjection.Account,
-        referenceTime: Double
+        snapshotTime: Double,
+        clockTime: Double
     ) -> some View {
         let activeWindows = account.windows.filter {
-            ($0.resetsAt ?? .greatestFiniteMagnitude) > referenceTime
+            ($0.resetsAt ?? .greatestFiniteMagnitude) > snapshotTime
         }
         return UsageCard {
             VStack(alignment: .leading, spacing: MobileDesign.Spacing.medium) {
@@ -557,13 +585,19 @@ struct RemoteUsageDashboardView: View {
                                 Text(window.windowLabel)
                                     .font(.subheadline.weight(.semibold))
                                 Spacer()
-                                Text(livePercent(window, referenceTime: referenceTime))
+                                Text(livePercent(window, referenceTime: snapshotTime))
                                     .font(.subheadline.weight(.semibold))
                                     .monospacedDigit()
                             }
-                            ProgressView(value: liveFraction(window, referenceTime: referenceTime))
-                                .tint(capacityColor(window, referenceTime: referenceTime))
-                            if let reset = window.resetsAt, reset > referenceTime {
+                            MobileUsageCapacityBar(
+                                fraction: liveFraction(window, referenceTime: snapshotTime),
+                                timeMark: MobileUsageCapacityProjection.elapsedFraction(
+                                    for: window,
+                                    at: clockTime
+                                ),
+                                tint: capacityColor(window, referenceTime: snapshotTime)
+                            )
+                            if let reset = window.resetsAt, reset > snapshotTime {
                                 Text(MobileL10n.string(
                                     "Resets %@ · %@",
                                     relativeDate(reset),
@@ -576,6 +610,11 @@ struct RemoteUsageDashboardView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityValue(capacityAccessibilityValue(
+                        window,
+                        snapshotTime: snapshotTime,
+                        clockTime: clockTime
+                    ))
                     .accessibilityHint(MobileL10n.string("Shows this window's history below"))
                 }
                 if activeWindows.isEmpty {
@@ -633,6 +672,23 @@ struct RemoteUsageDashboardView: View {
         if fraction >= 0.92 { return theme.negative }
         if fraction >= 0.75 { return theme.warning }
         return theme.positive
+    }
+
+    private func capacityAccessibilityValue(
+        _ window: RemoteUsageLimitSeriesSummaryDTO,
+        snapshotTime: Double,
+        clockTime: Double
+    ) -> String {
+        let used = livePercent(window, referenceTime: snapshotTime)
+        guard let elapsed = MobileUsageCapacityProjection.elapsedFraction(
+            for: window,
+            at: clockTime
+        ) else { return used }
+        return MobileL10n.string(
+            "%@ used · current time is %@ through the window",
+            used,
+            percent(elapsed)
+        )
     }
 
     private func sectionTitle(_ title: LocalizedStringKey) -> some View {
@@ -1583,6 +1639,53 @@ private struct UsageCard<Content: View>: View {
     }
 }
 
+/// Native SwiftUI counterpart of the Mac's `UsageBarView`: usage remains the colored length,
+/// while the neutral line is elapsed time. Keeping the two independent makes under/over pace
+/// visible without changing the provider's percentage.
+private struct MobileUsageCapacityBar: View {
+    @Environment(\.remoteTheme) private var theme
+
+    let fraction: Double
+    let timeMark: Double?
+    let tint: Color
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let clampedFraction = min(max(fraction, 0), 1)
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(theme.controlResting)
+                    .frame(height: MobileDesign.Size.usageCapacityBarHeight)
+                Capsule()
+                    .fill(tint)
+                    .frame(
+                        width: width * clampedFraction,
+                        height: MobileDesign.Size.usageCapacityBarHeight
+                    )
+                if let timeMark {
+                    let markWidth = MobileDesign.Size.usageTimeMarkWidth
+                    let markOrigin = min(
+                        max(width * min(max(timeMark, 0), 1) - markWidth / 2, 0),
+                        max(0, width - markWidth)
+                    )
+                    Capsule()
+                        .fill(theme.label.opacity(MobileDesign.Opacity.usageTimeMark))
+                        .frame(
+                            width: markWidth,
+                            height: MobileDesign.Size.usageTimeMarkHeight
+                        )
+                        .offset(x: markOrigin)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .center)
+        }
+        .frame(height: MobileDesign.Size.usageTimeMarkHeight)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct UsageMetricCard: View {
     @Environment(\.remoteTheme) private var theme
     let title: String
@@ -1870,6 +1973,7 @@ enum RemoteUsageDemo {
             windowLabel: "Weekly",
             currentFraction: 0.63,
             resetsAt: now + 3 * 86_400,
+            windowDuration: 7 * 86_400,
             bankedResetCount: 2,
             nextBankedResetExpiresAt: now + 28 * 86_400
         ),
@@ -1880,6 +1984,7 @@ enum RemoteUsageDemo {
             windowLabel: "Weekly",
             currentFraction: 0.28,
             resetsAt: now + 5 * 86_400,
+            windowDuration: 7 * 86_400,
             bankedResetCount: 0,
             nextBankedResetExpiresAt: nil
         ),
@@ -1890,6 +1995,7 @@ enum RemoteUsageDemo {
             windowLabel: "Session",
             currentFraction: 0.31,
             resetsAt: now + 2 * 3_600,
+            windowDuration: 5 * 3_600,
             bankedResetCount: nil,
             nextBankedResetExpiresAt: nil
         ),

@@ -205,6 +205,7 @@ enum RemoteUsageBridge {
             windowLabel: source.windowLabel,
             currentFraction: source.currentFraction,
             resetsAt: source.resetsAt?.timeIntervalSince1970,
+            windowDuration: source.windowDuration,
             bankedResetCount: source.resetCreditCount,
             nextBankedResetExpiresAt: source.nextResetCreditExpiresAt?.timeIntervalSince1970
         )
@@ -220,6 +221,7 @@ enum RemoteUsageBridge {
             windowLabel: source.windowLabel,
             currentFraction: source.currentFraction,
             resetsAt: source.resetsAt?.timeIntervalSince1970,
+            windowDuration: source.windowDuration,
             bankedResetCount: source.resetCreditCount,
             nextBankedResetExpiresAt: source.nextResetCreditExpiresAt?.timeIntervalSince1970
         )

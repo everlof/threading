@@ -309,6 +309,17 @@
         }
       }
     },
+    "%@ used · current time is %@ through the window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ använt · aktuell tid är %2$@ genom fönstret"
+          }
+        }
+      }
+    },
     "%@ will start in %@ on %@." : {
       "extractionState" : "manual",
       "localizations" : {

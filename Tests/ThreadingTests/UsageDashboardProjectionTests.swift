@@ -133,6 +133,13 @@ final class UsageDashboardProjectionTests: XCTestCase {
             projection.series.first { $0.accountName == "Account 2" }?.nextResetCreditExpiresAt,
             expiry
         )
+        XCTAssertTrue(projection.series.allSatisfy { $0.windowDuration == 7 * 86_400 })
+
+        let index = UsageDashboardProjector.limitIndex(
+            from: .init(samples: samples, resets: [], loadedAt: now),
+            now: now
+        )
+        XCTAssertTrue(index.series.allSatisfy { $0.windowDuration == 7 * 86_400 })
     }
 
     /// Deterministic real-path fixture for the scaling contract. Set
@@ -197,6 +204,7 @@ final class UsageDashboardProjectionTests: XCTestCase {
                 remote.limitSeries.count,
                 RemoteUsageBridge.maximumLimitPageSize
             )
+            XCTAssertTrue(remote.limitSeries.allSatisfy { $0.windowDuration == 7 * 86_400 })
             XCTAssertLessThanOrEqual(
                 remoteData.count,
                 RemoteUsageBridge.maximumOverviewResponseBytes

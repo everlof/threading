@@ -17,6 +17,7 @@ final class RemoteUsageDashboardTests: XCTestCase {
         XCTAssertTrue(dashboard.limitSeries.contains { $0.bankedResetCount == nil })
         XCTAssertTrue(dashboard.limitSeries.contains { $0.bankedResetCount == 0 })
         XCTAssertTrue(dashboard.limitSeries.contains { ($0.bankedResetCount ?? 0) > 0 })
+        XCTAssertTrue(dashboard.limitSeries.allSatisfy { ($0.windowDuration ?? 0) > 0 })
         XCTAssertLessThanOrEqual(try JSONEncoder().encode(dashboard).count, 384 * 1_024)
 
         for summary in dashboard.limitSeries {
@@ -139,13 +140,50 @@ final class RemoteUsageDashboardTests: XCTestCase {
         XCTAssertEqual(summary.nextReset, reference + 1_800)
     }
 
+    func testCapacityTimeMarkMeasuresLinearlyElapsedWindowTime() throws {
+        let reference = 1_800_000_000.0
+        let weekly = series(
+            "weekly",
+            resetsAt: reference + 3 * 86_400,
+            windowDuration: 7 * 86_400
+        )
+
+        XCTAssertEqual(
+            try XCTUnwrap(MobileUsageCapacityProjection.elapsedFraction(
+                for: weekly,
+                at: reference
+            )),
+            4.0 / 7.0,
+            accuracy: 0.000_001
+        )
+        XCTAssertEqual(
+            MobileUsageCapacityProjection.elapsedFraction(
+                for: weekly,
+                at: reference - 5 * 86_400
+            ),
+            0
+        )
+        XCTAssertEqual(
+            MobileUsageCapacityProjection.elapsedFraction(
+                for: weekly,
+                at: reference + 4 * 86_400
+            ),
+            1
+        )
+        XCTAssertNil(MobileUsageCapacityProjection.elapsedFraction(
+            for: series("unknown-duration", resetsAt: reference + 3_600),
+            at: reference
+        ))
+    }
+
     private func series(
         _ id: String,
         runtime: String = "Claude",
         account: String = "Default",
         window: String = "5-hour",
         fraction: Double? = 0.20,
-        resetsAt: Double = 1_800_003_600
+        resetsAt: Double = 1_800_003_600,
+        windowDuration: Double? = nil
     ) -> RemoteUsageLimitSeriesSummaryDTO {
         RemoteUsageLimitSeriesSummaryDTO(
             id: id,
@@ -154,6 +192,7 @@ final class RemoteUsageDashboardTests: XCTestCase {
             windowLabel: window,
             currentFraction: fraction,
             resetsAt: resetsAt,
+            windowDuration: windowDuration,
             bankedResetCount: nil,
             nextBankedResetExpiresAt: nil
         )

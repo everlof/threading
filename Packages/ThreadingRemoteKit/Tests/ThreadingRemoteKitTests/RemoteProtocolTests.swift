@@ -533,6 +533,7 @@ final class RemoteProtocolTests: XCTestCase {
             windowLabel: "Weekly",
             currentFraction: 0.42,
             resetsAt: 200,
+            windowDuration: 604_800,
             bankedResetCount: nil,
             nextBankedResetExpiresAt: nil
         )
@@ -564,7 +565,24 @@ final class RemoteProtocolTests: XCTestCase {
         )
         XCTAssertEqual(decoded, dashboard)
         XCTAssertNil(decoded.limitSeries[0].bankedResetCount)
+        XCTAssertEqual(decoded.limitSeries[0].windowDuration, 604_800)
         XCTAssertEqual(decoded.limitSeries[1].bankedResetCount, 0)
+
+        let legacyJSON = """
+            {
+              "id": "legacy",
+              "runtimeName": "Codex",
+              "accountName": "Personal",
+              "windowLabel": "Weekly",
+              "currentFraction": 0.42,
+              "resetsAt": 200
+            }
+            """
+        let legacy = try JSONDecoder().decode(
+            RemoteUsageLimitSeriesSummaryDTO.self,
+            from: Data(legacyJSON.utf8)
+        )
+        XCTAssertNil(legacy.windowDuration)
 
         let me = RemoteMeDTO(
             serverProtocol: RemoteProtocolInfo(),

@@ -165,6 +165,14 @@ then consumption order. Both renderers present banked-reset inventory as three d
 positive, authoritative zero, and unavailable (`nil`). Historical `.bankedCredit` evidence and
 the next current-credit expiry remain separately typed markers.
 
+Current-capacity bars also share one pace vocabulary: colored length is provider usage and the
+neutral vertical mark is elapsed time in that provider window. The bounded remote limit summary
+carries the optional full `windowDuration` beside `resetsAt`, enough for the phone to normalize
+the clock position without transferring history or starting another request. Missing or invalid
+duration keeps the older empty-marker behavior instead of guessing a window from its label. The
+usage reading stays tied to the response's `preparedAt`; the phone advances only the clock mark on
+a one-minute `TimelineView`, a fixed-cost redraw over the selected login's bounded window list.
+
 The Mac advertises the additive `usage-dashboard` feature only to paired owner devices with
 whole-host read access. `/api/me` carries only that small identifier; it does not acquire Usage
 data. The phone fetches data only while the Usage sheet is visible:

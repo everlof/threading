@@ -1469,6 +1469,9 @@ public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Id
     public let windowLabel: String
     public let currentFraction: Double?
     public let resetsAt: Double?
+    /// The full provider window length, when known. Together with `resetsAt`, this lets a
+    /// renderer place the current clock position on the usage bar without receiving history.
+    public let windowDuration: Double?
     /// Nil means the provider did not report inventory; zero is authoritative empty inventory.
     public let bankedResetCount: Int?
     public let nextBankedResetExpiresAt: Double?
@@ -1480,6 +1483,7 @@ public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Id
         windowLabel: String,
         currentFraction: Double?,
         resetsAt: Double?,
+        windowDuration: Double? = nil,
         bankedResetCount: Int?,
         nextBankedResetExpiresAt: Double?
     ) {
@@ -1489,6 +1493,7 @@ public struct RemoteUsageLimitSeriesSummaryDTO: Codable, Equatable, Sendable, Id
         self.windowLabel = windowLabel
         self.currentFraction = currentFraction
         self.resetsAt = resetsAt
+        self.windowDuration = windowDuration
         self.bankedResetCount = bankedResetCount
         self.nextBankedResetExpiresAt = nextBankedResetExpiresAt
     }

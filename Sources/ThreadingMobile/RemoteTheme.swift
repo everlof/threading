@@ -98,6 +98,11 @@ enum MobileDesign {
         /// stroke past the frame. `ImageRenderer` clips to the content it was given; this is the
         /// room that keeps the outer ring whole.
         static let usageMenuGaugeInset: CGFloat = badgeStroke / 2
+        /// The current-capacity gauge uses the Mac's same marker vocabulary: a six-point usage
+        /// track crossed by a narrow clock line, tall enough to remain visible on either side.
+        static let usageCapacityBarHeight: CGFloat = 6
+        static let usageTimeMarkWidth: CGFloat = 2
+        static let usageTimeMarkHeight: CGFloat = 10
         /// Fixed leading column used by the stacked terminal presence/control/activity rows.
         static let terminalStatusIconColumn: CGFloat = 24
 
@@ -168,6 +173,8 @@ enum MobileDesign {
         /// The unfilled part of a usage ring: present enough to read as a ring, faint enough that
         /// the filled arc is what the eye measures.
         static let usageRingTrack: Double = 0.2
+        /// Neutral chronology over both the tinted fill and the quiet track.
+        static let usageTimeMark: Double = 0.85
     }
 
     enum Typography {
