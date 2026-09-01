@@ -1686,14 +1686,12 @@ enum SessionRenameRequest {
 
     /// What submits the line in a terminal. Return, as the user's own keypress arrives — not
     /// `\n`, which several TUI composers insert as a newline instead of sending.
-    static let submitKey = "\r"
+    static let submitKey = TerminalDefaults.submitSequence
 
-    /// How long after the text the return is sent. The two cannot share a write: input
-    /// arriving in one chunk is what a TUI's paste heuristic *is*, so a return bundled with
-    /// the text is "pasted content" and becomes a line break in the composer. The pause only
-    /// needs to clear that heuristic's window — milliseconds — so it is a beat no one waits
-    /// on, far above any burst the PTY could still coalesce.
-    static let submitDelay: TimeInterval = 0.3
+    /// How long after the text the return is sent, in its own write. This request measured the
+    /// rule; `TerminalDefaults` now states it, because every path that types on the user's
+    /// behalf owes the same beat — a phone's composer as much as this one.
+    static let submitDelay = TerminalDefaults.submitSequenceDelay
 }
 
 // MARK: - Session Report-Back Request

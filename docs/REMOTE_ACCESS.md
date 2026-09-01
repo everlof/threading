@@ -1525,9 +1525,20 @@ is advisory, expires with the connection, and never locks a composer or grants a
 iPhone lets people-presence and typing indicators be hidden separately.
 
 Each remote Native composer owns its draft. A shared iPhone terminal uses an independent local
-composer and sends the completed text plus Return as one PTY write. This does not make the
+composer and sends only its completed line, never individual keystrokes. This does not make the
 terminal multi-user: it creates a safe atomic boundary at submission so concurrent devices cannot
 interleave individual characters. The key bar's controls remain immediate terminal controls.
+
+**The line and its Return are two writes, a beat apart.** Bundled into one, as this shipped, the
+Return is part of the chunk a TUI's paste heuristic reads as pasted content — so it is inserted
+as a line break and the message sits unsent in the agent's composer while the phone is told it
+was accepted. A PTY probe against both CLIs pins the behaviour: Codex leaves even a seven-byte
+`/status\r` in its composer, and Claude Code submits that one but leaves a 134-byte line — the
+size of an ordinary phone message — sitting there. `TerminalDefaults.submitSequenceDelay` is the
+beat, and the same rule governs the Mac's own typed deliveries in `SessionMessageDelivery` and
+`SessionCoordinator`'s rename request. Because a PTY takes one message at a time, an owed Return
+is pressed before any later write reaches that session — a second submission, direct-mode typing,
+or remote access stopping — so two messages can never land on one composer line.
 When the terminal is solo, the same bar can switch between that Compose surface and Direct TUI
 input; collaboration temporarily requires Compose and does not overwrite the saved solo choice.
 

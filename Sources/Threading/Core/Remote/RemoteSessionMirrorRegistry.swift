@@ -93,6 +93,9 @@ final class RemoteSessionMirrorRegistry {
     /// The Mac terminal selected in the local pane. It does not displace a phone that is still
     /// actively rendering, but it makes a departed phone's reconnect hold ineligible.
     private var locallyVisibleSessionID: SessionID?
+    /// Sessions whose submitted line has been typed and whose Return has not followed yet.
+    /// Keyed per PTY, because the window it guards is the PTY's, not any one client's.
+    private var owedTerminalReturns: [SessionID: Task<Void, Never>] = [:]
 
     init(
         terminalApplication: (any RemoteTerminalApplicationCapability)? = nil,
@@ -611,6 +614,7 @@ final class RemoteSessionMirrorRegistry {
         if authorization.canManageHost {
             features.append(RemoteRESTFeature.reportSessionOpening.rawValue)
             features.append(RemoteRESTFeature.sessionDraftAttachmentUploads.rawValue)
+            features.append(RemoteRESTFeature.sessionContinuation.rawValue)
         }
         return features.isEmpty ? nil : features
     }
@@ -1584,6 +1588,11 @@ final class RemoteSessionMirrorRegistry {
             work.cancel()
         }
         pendingConversationBroadcasts.removeAll()
+        // Not cancelled: the line was typed and the sender told it was accepted, and the PTY
+        // outlives remote access. A dropped Return would leave that message in the composer.
+        for sessionID in Array(owedTerminalReturns.keys) {
+            pressOwedReturn(in: sessionID)
+        }
         for starting in startingSessions.values {
             starting.expiry?.cancel()
         }
@@ -1607,6 +1616,47 @@ final class RemoteSessionMirrorRegistry {
 
     // MARK: - Input
 
+    /// Every byte this registry writes into a session's PTY goes through here, so a Return
+    /// still owed by an earlier submitted line is pressed before anything can land on top of
+    /// that line — two messages merged into one prompt is the failure this ordering prevents.
+    @discardableResult
+    private func writeTerminalInput(_ bytes: [UInt8], to sessionID: SessionID) -> Bool {
+        pressOwedReturn(in: sessionID)
+        return terminalApplication?.sendInput(bytes, to: sessionID) == .applied
+    }
+
+    /// Submits the line just typed into `sessionID`, in a write of its own a beat later.
+    ///
+    /// The text and its Return cannot share a write. Input arriving in one chunk is what a
+    /// TUI's paste heuristic *is*, so a Return bundled with the text is read as pasted content:
+    /// Claude Code inserts it as a line break and the message sits unsent in its composer,
+    /// which is exactly what a phone's composer produced. `SessionCoordinator` measured the
+    /// same thing for the rename request, and `SessionMessageDelivery` types the Mac's own
+    /// cross-session sends this way for the same reason.
+    private func pressReturnAfterTypedLine(in sessionID: SessionID) {
+        pressOwedReturn(in: sessionID)
+        owedTerminalReturns[sessionID] = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(TerminalDefaults.submitSequenceDelay))
+            guard !Task.isCancelled, let self else { return }
+            self.owedTerminalReturns[sessionID] = nil
+            self.writeSubmitSequence(to: sessionID)
+        }
+    }
+
+    /// Presses a Return a typed line is still waiting for, now rather than on its beat.
+    private func pressOwedReturn(in sessionID: SessionID) {
+        guard let owed = owedTerminalReturns.removeValue(forKey: sessionID) else { return }
+        owed.cancel()
+        writeSubmitSequence(to: sessionID)
+    }
+
+    private func writeSubmitSequence(to sessionID: SessionID) {
+        _ = terminalApplication?.sendInput(
+            Array(TerminalDefaults.submitSequence.utf8),
+            to: sessionID
+        )
+    }
+
     @discardableResult
     func sendInput(
         _ bytes: [UInt8],
@@ -1629,7 +1679,7 @@ final class RemoteSessionMirrorRegistry {
             sessionID: sessionID,
             authorization: authorization
         )
-        return terminalApplication.sendInput(bytes, to: sessionID) == .applied
+        return writeTerminalInput(bytes, to: sessionID)
     }
 
     @discardableResult
@@ -1873,9 +1923,15 @@ final class RemoteSessionMirrorRegistry {
         return ComposerAttachmentHandover.appending(paths: handed, to: text)
     }
 
-    /// Sends one locally composed terminal line as one PTY write. Every device keeps its own
-    /// draft; only the completed line joins the shared byte stream, so two phones cannot splice
-    /// individual keystrokes into one malformed Claude/Codex prompt.
+    /// Sends one locally composed terminal line. Every device keeps its own draft; only the
+    /// completed line joins the shared byte stream, so two phones cannot splice individual
+    /// keystrokes into one malformed Claude/Codex prompt.
+    ///
+    /// The line is one write and its Return is another, a beat later — see
+    /// `pressReturnAfterTypedLine`. Bundled into a single write, as this did, the Return is
+    /// part of what a TUI reads as pasted content, and the message a phone sent was left
+    /// sitting in Claude Code's composer with a stray line break instead of being submitted.
+    /// `.accepted` is answered on the text landing, which is the write that can fail.
     func submitTerminalLine(
         _ text: String,
         stagedAttachmentPaths: [String] = [],
@@ -1919,8 +1975,9 @@ final class RemoteSessionMirrorRegistry {
                       stagedAttachmentPaths: stagedAttachmentPaths,
                       for: sessionID
                   ),
-                  terminalApplication?.sendInput(Array((line + "\r").utf8), to: sessionID) == .applied
+                  writeTerminalInput(Array(line.utf8), to: sessionID)
         {
+            pressReturnAfterTypedLine(in: sessionID)
             recordFirstInput(device: device, sessionID: sessionID)
             RemoteNotificationService.shared.recordInteraction(
                 sessionID: sessionID,
@@ -1979,10 +2036,7 @@ final class RemoteSessionMirrorRegistry {
                       for: sessionID
                   ),
                   !inserted.isEmpty,
-                  terminalApplication?.sendInput(
-                      Array(inserted.utf8),
-                      to: sessionID
-                  ) == .applied
+                  writeTerminalInput(Array(inserted.utf8), to: sessionID)
         {
             recordFirstInput(device: device, sessionID: sessionID)
             RemoteNotificationService.shared.recordInteraction(

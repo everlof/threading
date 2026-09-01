@@ -24,6 +24,22 @@ enum TerminalDefaults {
     /// at a call site reads like a line ending rather than like pressing a key.
     static let submitSequence = "\r"
 
+    /// How long after a typed line the `submitSequence` follows, in a write of its own.
+    ///
+    /// The two cannot share a write. Input arriving in one chunk is what a TUI's paste
+    /// heuristic *is*, so a return bundled with the text is read as pasted content: the CLI
+    /// takes it for a line break and leaves the message sitting unsent in its composer.
+    ///
+    /// **The heuristic is length-sensitive, and differently so per CLI**, which is why this is
+    /// unconditional rather than applied only to long lines. A PTY probe writing `<text>\r` as
+    /// one write and then as two: Codex leaves even a seven-byte `/status` in its composer,
+    /// while Claude Code submits that one and leaves a 134-byte line — the size of an ordinary
+    /// message — sitting there. Split in two, both submit. Do not reintroduce a length test.
+    ///
+    /// The pause only needs to clear that heuristic's window — milliseconds — so it is a beat
+    /// nobody waits on, and far above any burst the PTY could still coalesce.
+    static let submitSequenceDelay: TimeInterval = 0.3
+
     /// What Escape sends to a PTY, which every one of these TUIs reads as "stop this turn".
     ///
     /// Named for `submitSequence`'s reason and typed under a stricter rule, because this is the
