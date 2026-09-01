@@ -344,8 +344,10 @@ final class ComposerTextViewPasteTests: XCTestCase {
     /// stack siblings narrowed every line in the screenshot even after the terminal composer had
     /// adopted TextKit exclusions.
     func testNewSessionDraftWrappedLinesReclaimBothAccessoryColumns() throws {
+        // Wraps at this width, yet stays under the six-line cap: a longer draft overflows and
+        // rightly sends the controls to their fixed row, which is the other placement entirely.
         let host = UIHostingController(rootView: DraftFocusHarness(
-            initialDraft: "We have properly set up push certificates, but what does it take for development notifications to reach the app while we test the complete flow?",
+            initialDraft: "We have properly set up push certificates, but what does it take?",
             editorHeight: 120,
             firstLineAccessoryWidth: 42
         ))
@@ -397,6 +399,73 @@ final class ComposerTextViewPasteTests: XCTestCase {
                 + "content=\(textView?.contentSize.height ?? -1) "
                 + "bounds=\(textView?.bounds.height ?? -1)"
         )
+    }
+
+    /// A draft within a line of the cap overflows with the inline controls in place and fits
+    /// once they leave. Deciding their placement from whichever layout was showing made the two
+    /// answers alternate on every pass — the whole paragraph visibly re-wrapped several times a
+    /// second. The decision is measured against the inline footprints in both placements, so an
+    /// epsilon-length draft settles in its overflow shell and stays there.
+    func testEpsilonLengthDraftSettlesInItsOverflowShellInsteadOfFlickering() {
+        var overflowTransitions: [Bool] = []
+        let host = UIHostingController(rootView: DraftFocusHarness(
+            initialDraft: Array(repeating: "G", count: 6).joined(separator: "\n"),
+            editorHeight: 160,
+            firstLineAccessoryWidth: 42,
+            onOverflowChange: { overflowTransitions.append($0) }
+        ))
+        let window = makeWindow(hosting: host, size: CGSize(width: 240, height: 200))
+        defer { window.isHidden = true }
+
+        RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+        XCTAssertEqual(
+            overflowTransitions,
+            [true],
+            "every transition past the first is one visible jump of the whole paragraph"
+        )
+    }
+
+    /// The unit-level half of the settling guarantee: re-laying the editor out with the
+    /// accessories moved to their fixed row must not change the answer that moved them.
+    func testAccessoryPlacementDecisionIsTheSameInBothPlacements() {
+        let textView = IntrinsicTextView()
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        let inset = max(0, (MobileDesign.Size.compactControl - font.lineHeight) / 2)
+        textView.font = font
+        textView.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
+        textView.textContainer.lineFragmentPadding = 0
+        textView.isScrollEnabled = false
+        textView.minimumIntrinsicHeight = MobileDesign.Size.compactControl
+        textView.maximumIntrinsicHeight = ceil(font.lineHeight * 6 + inset * 2)
+        textView.firstLineLeadingAccessoryWidth = 42
+        textView.firstLineTrailingAccessoryWidth = 42
+        textView.firstLineAccessoryHeight = MobileDesign.Size.compactControl
+        textView.frame = CGRect(x: 0, y: 0, width: 240, height: 160)
+        textView.text = Array(repeating: "G", count: 6).joined(separator: "\n")
+
+        var reports: [Bool] = []
+        textView.onFirstLineAccessoryOverflowChange = { reports.append($0) }
+        textView.setNeedsLayout()
+        textView.layoutIfNeeded()
+        XCTAssertEqual(
+            reports,
+            [true],
+            "six hard lines cannot keep the inline controls under a six-line cap"
+        )
+
+        textView.firstLineAccessoriesInline = false
+        textView.setNeedsLayout()
+        textView.layoutIfNeeded()
+        XCTAssertEqual(
+            reports,
+            [true],
+            "the placement decision followed the placement it decides"
+        )
+
+        textView.text = "G"
+        textView.setNeedsLayout()
+        textView.layoutIfNeeded()
+        XCTAssertEqual(reports, [true, false], "a short draft takes its controls back")
     }
 
     func testAFilePasteIsTakenAsAnAttachmentAndNeverReachesTheText() {
@@ -491,7 +560,10 @@ final class ComposerTextViewPasteTests: XCTestCase {
                 firstLineTrailingAccessoryWidth: firstLineAccessoryWidth,
                 firstLineAccessoryHeight: firstLineAccessoryWidth > 0
                     ? MobileDesign.Size.compactControl
-                    : 0
+                    : 0,
+                // The shipping shell's wiring, verbatim: an overflow report releases the first
+                // line's width. Mirroring it is what lets these tests catch the feedback loop.
+                firstLineAccessoriesInline: !isOverflowing
             )
             .frame(width: 240, height: editorHeight)
             .onChange(of: isOverflowing) { _, value in onOverflowChange(value) }

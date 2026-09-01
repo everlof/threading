@@ -1359,15 +1359,22 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
     var offersFiles: () -> Bool = { false }
     /// Takes such a paste, and answers whether it did.
     var pasteFiles: () -> Bool = { false }
-    /// Reports the one transition between an intrinsic-height editor and its capped scroll
-    /// viewport. The new-session shell uses it to move fixed controls out of the viewport once
-    /// they can no longer stay attached to the document's first line.
-    var onScrollabilityChange: (Bool) -> Void = { _ in } {
+    /// Reports whether the document has outgrown the first-line accessory footprints: laid out
+    /// with them in place, it would exceed the viewport cap. The new-session shell uses it to
+    /// move its fixed controls out of the viewport once they can no longer stay attached to the
+    /// document's first line. The answer is always measured against those footprints — never
+    /// against whichever placement is currently applied — because the placement is this report's
+    /// consequence: deciding from the applied geometry moved the controls out, refitted the
+    /// document to its regained width, brought them back, and flickered forever at any prompt
+    /// within a line of the cap.
+    var onFirstLineAccessoryOverflowChange: ((Bool) -> Void)? {
         didSet {
             // UIKit can lay the view out while its representable is still configuring TextKit.
-            // Replay that first answer when the shell installs its observer afterward.
-            if let reportedScrollability {
-                onScrollabilityChange(reportedScrollability)
+            // Replay the standing answer when the shell installs its observer afterward.
+            if let reportedAccessoryOverflow {
+                onFirstLineAccessoryOverflowChange?(reportedAccessoryOverflow)
+            } else {
+                setNeedsLayout()
             }
         }
     }
@@ -1402,13 +1409,25 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
             firstLineAccessoryLayoutChanged()
         }
     }
+    /// Whether those footprints are currently stationed over the first line. The draft shell
+    /// answers an overflow report by moving its controls into a fixed row; the footprints stay
+    /// stated so the overflow decision keeps its one geometry, and this flag alone releases the
+    /// first line's width to the document.
+    var firstLineAccessoriesInline = true {
+        didSet {
+            guard firstLineAccessoriesInline != oldValue else { return }
+            firstLineAccessoryLayoutChanged()
+        }
+    }
     /// A compact editor may opt into a shorter insertion mark than UIKit's full typographic line
     /// box. Nil preserves the native caret everywhere else that shares this text view.
     var preferredCaretHeight: CGFloat?
 
     private var measuredWidth: CGFloat = 0
     private var appliedFirstLineAccessoryLayout: [CGFloat] = []
-    private var reportedScrollability: Bool?
+    private var reportedAccessoryOverflow: Bool?
+    private var inlineOverflowAnswer: (key: InlineOverflowKey, overflows: Bool)?
+    private let inlineOverflowMeasurement = InlineAccessoryOverflowMeasurement()
 
     /// Offers Paste for a clipboard holding only files.
     ///
@@ -1489,9 +1508,16 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
                 layoutManager.ensureLayout(for: textContainer)
             }
         }
-        if reportedScrollability != shouldScroll {
-            reportedScrollability = shouldScroll
-            onScrollabilityChange(shouldScroll)
+        // The accessory-placement report is a separate question from `isScrollEnabled`, on a
+        // separate geometry: whether the document would exceed the cap with the accessory
+        // footprints in place. Deciding it from `shouldScroll` tied it to the applied geometry
+        // and oscillated; see `onFirstLineAccessoryOverflowChange`.
+        if onFirstLineAccessoryOverflowChange != nil, bounds.width > 0 {
+            let overflows = inlineAccessoryGeometryOverflows(viewWidth: bounds.width)
+            if reportedAccessoryOverflow != overflows {
+                reportedAccessoryOverflow = overflows
+                onFirstLineAccessoryOverflowChange?(overflows)
+            }
         }
     }
 
@@ -1502,9 +1528,12 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
             0,
             viewWidth - textContainerInset.left - textContainerInset.right
         )
-        let leadingWidth = min(max(0, firstLineLeadingAccessoryWidth), containerWidth)
+        let leadingWidth = min(
+            max(0, firstLineAccessoriesInline ? firstLineLeadingAccessoryWidth : 0),
+            containerWidth
+        )
         let trailingWidth = min(
-            max(0, firstLineTrailingAccessoryWidth),
+            max(0, firstLineAccessoriesInline ? firstLineTrailingAccessoryWidth : 0),
             max(0, containerWidth - leadingWidth)
         )
         let lineHeight = font?.lineHeight ?? 0
@@ -1572,6 +1601,108 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
         ].compactMap { $0 }
     }
 
+    /// Everything the accessory-placement measurement reads. The applied placement is
+    /// deliberately absent: the answer must be the same whichever placement is showing.
+    private struct InlineOverflowKey: Equatable {
+        let containerWidth: CGFloat
+        let text: String
+        let fontPointSize: CGFloat
+        let leadingWidth: CGFloat
+        let trailingWidth: CGFloat
+        let accessoryHeight: CGFloat
+        let insetTop: CGFloat
+        let insetBottom: CGFloat
+        let maximumHeight: CGFloat
+        let isRightToLeft: Bool
+    }
+
+    /// Whether the document, laid out with the first-line accessory footprints in place, exceeds
+    /// the editor's cap. This is the placement decision for those accessories, so it is measured
+    /// on a spare TextKit stack that always wears the inline footprints — the live container is
+    /// wearing whichever placement the last answer chose, and an answer read from there feeds on
+    /// its own consequence. The spare stack mirrors the live inline geometry: the same container
+    /// width and zero fragment padding, the same exclusion rects, and the same after-first-line
+    /// clearance the layout-manager delegate applies.
+    private func inlineAccessoryGeometryOverflows(viewWidth: CGFloat) -> Bool {
+        guard let font else { return false }
+        let insets = textContainerInset
+        let containerWidth = max(0, viewWidth - insets.left - insets.right)
+        let lineHeight = font.lineHeight
+        guard containerWidth > 0, lineHeight > 0 else { return false }
+        let key = InlineOverflowKey(
+            containerWidth: containerWidth,
+            text: text ?? "",
+            fontPointSize: font.pointSize,
+            leadingWidth: firstLineLeadingAccessoryWidth,
+            trailingWidth: firstLineTrailingAccessoryWidth,
+            accessoryHeight: firstLineAccessoryHeight,
+            insetTop: insets.top,
+            insetBottom: insets.bottom,
+            maximumHeight: maximumIntrinsicHeight,
+            isRightToLeft: effectiveUserInterfaceLayoutDirection == .rightToLeft
+        )
+        if let inlineOverflowAnswer, inlineOverflowAnswer.key == key {
+            return inlineOverflowAnswer.overflows
+        }
+        let overflows = measureInlineOverflow(key: key, font: font, lineHeight: lineHeight)
+        inlineOverflowAnswer = (key, overflows)
+        return overflows
+    }
+
+    /// Bound the scan, not just the result: a paste can be arbitrarily large, and the only
+    /// question is whether the document exceeds a viewport a handful of lines tall. More hard
+    /// breaks than the viewport has lines settles it without layout, and so does more text than
+    /// the narrowest glyphs could fit in those lines — no positive-advance body glyph is
+    /// narrower than two points — so only a bounded document ever reaches TextKit.
+    private func measureInlineOverflow(
+        key: InlineOverflowKey,
+        font: UIFont,
+        lineHeight: CGFloat
+    ) -> Bool {
+        let capacityLines = max(1, Int(ceil(key.maximumHeight / lineHeight)))
+        let characterCapacity = Int(ceil(key.containerWidth / 2)) * (capacityLines + 1)
+        if key.text.utf16.count > characterCapacity { return true }
+        var hardBreaks = 0
+        for unit in key.text.utf16 where unit == 0x0A {
+            hardBreaks += 1
+            if hardBreaks >= capacityLines { return true }
+        }
+
+        let leadingWidth = min(max(0, key.leadingWidth), key.containerWidth)
+        let trailingWidth = min(
+            max(0, key.trailingWidth),
+            max(0, key.containerWidth - leadingWidth)
+        )
+        let leftWidth = key.isRightToLeft ? trailingWidth : leadingWidth
+        let rightWidth = key.isRightToLeft ? leadingWidth : trailingWidth
+        let measurement = inlineOverflowMeasurement
+        measurement.container.size = CGSize(
+            width: key.containerWidth,
+            height: .greatestFiniteMagnitude
+        )
+        measurement.container.exclusionPaths = [
+            leftWidth > 0
+                ? UIBezierPath(rect: CGRect(x: 0, y: 0, width: leftWidth, height: lineHeight))
+                : nil,
+            rightWidth > 0
+                ? UIBezierPath(rect: CGRect(
+                    x: key.containerWidth - rightWidth,
+                    y: 0,
+                    width: rightWidth,
+                    height: lineHeight
+                ))
+                : nil,
+        ].compactMap { $0 }
+        measurement.firstLineFloor = max(0, key.accessoryHeight - key.insetTop)
+        measurement.storage.setAttributedString(
+            NSAttributedString(string: key.text, attributes: [.font: font])
+        )
+        measurement.layoutManager.ensureLayout(for: measurement.container)
+        let used = measurement.layoutManager.usedRect(for: measurement.container)
+        let height = used.maxY + key.insetTop + key.insetBottom
+        return height > key.maximumHeight + 0.5
+    }
+
     /// The shared new-session composer still uses the layout-manager clearance paired with its
     /// ordinary text container. The terminal composer has a dedicated container instead, so its
     /// first line's height never depends on the clearance before line two.
@@ -1581,6 +1712,7 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
         withProposedLineFragmentRect rect: CGRect
     ) -> CGFloat {
         guard !(textContainer is FirstLineAccessoryTextContainer),
+              firstLineAccessoriesInline,
               firstLineAccessoryHeight > 0,
               rect.minY < 0.5,
               glyphIndex != NSNotFound,
@@ -1599,7 +1731,7 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
             if layoutManager.delegate === self {
                 layoutManager.delegate = nil
             }
-        } else if firstLineAccessoryHeight > 0 {
+        } else if firstLineAccessoryHeight > 0, firstLineAccessoriesInline {
             layoutManager.delegate = self
         } else if layoutManager.delegate === self {
             layoutManager.delegate = nil
@@ -1614,6 +1746,41 @@ class IntrinsicTextView: UITextView, @MainActor NSLayoutManagerDelegate {
         )
         setNeedsLayout()
         invalidateIntrinsicContentSize()
+    }
+}
+
+/// The spare TextKit stack `IntrinsicTextView` measures its accessory-placement decision on:
+/// an ordinary container wearing the inline exclusions, plus the same after-first-line
+/// clearance the live layout-manager delegate applies while the accessories are inline.
+@MainActor
+private final class InlineAccessoryOverflowMeasurement: NSObject, @MainActor NSLayoutManagerDelegate {
+    let storage = NSTextStorage()
+    let layoutManager = NSLayoutManager()
+    let container = NSTextContainer(size: .zero)
+    /// The line-two floor in text-container coordinates: the accessory height less the top
+    /// inset, exactly as the live delegate computes its clearance.
+    var firstLineFloor: CGFloat = 0
+
+    override init() {
+        super.init()
+        container.lineFragmentPadding = 0
+        layoutManager.addTextContainer(container)
+        storage.addLayoutManager(layoutManager)
+        layoutManager.delegate = self
+    }
+
+    func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        lineSpacingAfterGlyphAt glyphIndex: Int,
+        withProposedLineFragmentRect rect: CGRect
+    ) -> CGFloat {
+        guard firstLineFloor > 0,
+              rect.minY < 0.5,
+              glyphIndex != NSNotFound,
+              glyphIndex + 1 < layoutManager.numberOfGlyphs else {
+            return 0
+        }
+        return max(0, firstLineFloor - rect.height)
     }
 }
 

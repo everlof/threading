@@ -197,7 +197,109 @@ final class TranscriptSearchIndexTests: XCTestCase {
         XCTAssertEqual(result.hits.count, 1)
     }
 
-    private func source(isArchived: Bool = false) -> TranscriptSearchSource {
+    /// A refresh that changes nothing must not rewrite the indexed metadata.
+    ///
+    /// The rewrite is `UPDATE transcript_search_fts … WHERE source_id = ?`, and FTS5 has no index
+    /// on `source_id`, so SQLite answers it by scanning every indexed row in the database and
+    /// re-tokenizing each one it matches. It used to run unconditionally, once per source per
+    /// refresh — 40-90 ms each against a real 350-source index, and `ProjectsDidChange` restarts a
+    /// refresh, so renaming one session paid for all of them.
+    func testRepeatedRefreshOfUnchangedMetadataRewritesNothing() async throws {
+        try write([codexUser("stable saffron term")])
+        let index = try TranscriptSearchIndex(databaseURL: databaseURL)
+
+        await index.refresh(sources: [source()])
+        let afterFirst = await index.metadataRewriteCount
+        XCTAssertEqual(afterFirst, 1, "The first pass has no recorded signature to compare against")
+
+        for _ in 0 ..< 5 { await index.refresh(sources: [source()]) }
+        let afterRepeats = await index.metadataRewriteCount
+        XCTAssertEqual(afterRepeats, 1, "An unchanged source must not be rewritten again")
+
+        // The guard must not have cost the index its answer.
+        let found = try await index.search(query("saffron"))
+        XCTAssertEqual(found.hits.count, 1)
+    }
+
+    /// Appending to a transcript indexes the new rows without rewriting the standing ones: the
+    /// appended rows are inserted carrying current metadata, so nothing is stale.
+    func testAppendingToATranscriptDoesNotRewriteMetadata() async throws {
+        try write([codexUser("first sienna term")])
+        let index = try TranscriptSearchIndex(databaseURL: databaseURL)
+        await index.refresh(sources: [source()])
+
+        try append(codexAgent("second sienna term") + "\n")
+        await index.refresh(sources: [source()])
+
+        let rewrites = await index.metadataRewriteCount
+        XCTAssertEqual(rewrites, 1)
+        let found = try await index.search(query("sienna"))
+        XCTAssertEqual(found.hits.count, 2)
+    }
+
+    /// The other half of the contract: when the labels genuinely move, the standing rows are
+    /// rewritten, so they are still found by what they are now called rather than what they were.
+    func testRenamingASessionRewritesStandingRowsExactlyOnce() async throws {
+        try write([codexUser("titled cerise term")])
+        let index = try TranscriptSearchIndex(databaseURL: databaseURL)
+        await index.refresh(sources: [source()])
+
+        await index.refresh(sources: [source(sessionTitle: "Renamed conversation")])
+        let afterRename = await index.metadataRewriteCount
+        XCTAssertEqual(afterRename, 2, "A changed title must reach the standing rows")
+
+        let renamed = try await index.search(query("cerise"))
+        let hit = try XCTUnwrap(renamed.hits.first)
+        XCTAssertEqual(hit.provenance.sessionTitle, "Renamed conversation")
+
+        // Settling again is free.
+        await index.refresh(sources: [source(sessionTitle: "Renamed conversation")])
+        let afterSettle = await index.metadataRewriteCount
+        XCTAssertEqual(afterSettle, 2)
+    }
+
+    /// Archiving is a metadata change like any other, and `is:archived` filters on the column it
+    /// writes — so the guard must not strand a conversation on the wrong side of that filter.
+    func testArchivingRewritesRowsSoTheArchivedFilterFollows() async throws {
+        try write([codexUser("filed puce term")])
+        let index = try TranscriptSearchIndex(databaseURL: databaseURL)
+        await index.refresh(sources: [source(isArchived: false)])
+        let beforeArchiving = try await index.search(query("puce is:archived"))
+        XCTAssertTrue(beforeArchiving.hits.isEmpty)
+
+        await index.refresh(sources: [source(isArchived: true)])
+
+        let afterArchiving = try await index.search(query("puce is:archived"))
+        XCTAssertEqual(afterArchiving.hits.count, 1)
+        XCTAssertTrue(try XCTUnwrap(afterArchiving.hits.first).provenance.isArchived)
+    }
+
+    /// The signature lives in the database, not in the actor, so a relaunch inherits the work the
+    /// previous one did rather than rewriting every source once per launch.
+    func testARecordedSignatureSurvivesReopeningTheIndex() async throws {
+        try write([codexUser("persistent teal term")])
+        let first = try TranscriptSearchIndex(databaseURL: databaseURL)
+        await first.refresh(sources: [source()])
+        let firstRewrites = await first.metadataRewriteCount
+        XCTAssertEqual(firstRewrites, 1)
+
+        let reopened = try TranscriptSearchIndex(databaseURL: databaseURL)
+        await reopened.refresh(sources: [source()])
+
+        let reopenedRewrites = await reopened.metadataRewriteCount
+        XCTAssertEqual(
+            reopenedRewrites,
+            0,
+            "A relaunch must not rewrite metadata the previous run already applied"
+        )
+        let stillFound = try await reopened.search(query("teal"))
+        XCTAssertEqual(stillFound.hits.count, 1)
+    }
+
+    private func source(
+        isArchived: Bool = false,
+        sessionTitle: String = "Search conversation"
+    ) -> TranscriptSearchSource {
         TranscriptSearchSource(
             sourceID: SearchSourceID(rawValue: "codex:test:transcript"),
             url: transcriptURL,
@@ -205,7 +307,7 @@ final class TranscriptSearchIndexTests: XCTestCase {
             projectID: projectID,
             projectName: "Index Project",
             sessionID: sessionID,
-            sessionTitle: "Search conversation",
+            sessionTitle: sessionTitle,
             providerName: "Codex",
             isArchived: isArchived,
             updatedAt: Date(timeIntervalSince1970: 1000)

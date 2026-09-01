@@ -187,6 +187,61 @@ through to a later one, a longer key not satisfying a shorter one.
 attachments, because the recorder is only reached when something was found and so cannot tell
 "scanned and found nothing" from "did not scan".
 
+## The transcript index rewrote itself continuously, 2026-09-01
+
+Found in the same session as the typing lag above and unrelated to it: this one never touches the
+main thread. A `sample` of the running app put a whole core in `sqlite3_step` under
+`TranscriptSearchIndex.updateMetadata`, 2.05 s of CPU in a 6 s window, with the leaf frames in
+`fts5NextMethod` -> `sqlite3BtreeNext` -> `pread`. It is off-main, so it produced no stall
+incident and showed up only as the app feeling heavy while an agent worked.
+
+**`transcript_search_fts` is an FTS5 virtual table, and FTS5 indexes nothing but its text.**
+`source_id` is declared `UNINDEXED`, but so is every other filter column — FTS5 has no b-tree on
+any of them, so a `WHERE source_id = ?` is answered by walking the entire index:
+
+```
+sqlite> EXPLAIN QUERY PLAN SELECT * FROM transcript_search_fts WHERE source_id = 'x';
+`--SCAN transcript_search_fts VIRTUAL TABLE INDEX 0:
+```
+
+Every matched row then has its tokens deleted and reinserted, because that is what updating an
+FTS5 row means. `reconcile` called this **once per source, on every refresh, unconditionally** —
+the comment above the call ("metadata can change without transcript bytes changing") justified
+keeping the rows current but not doing it when nothing had changed. `ProjectsDidChange` restarts a
+refresh and an agent renaming a session posts one, so on a real working set it ran more or less
+continuously.
+
+Measured against the author's real index — **82,688 rows, 351 sources, 138 MB** — with a warm
+cache, an exclusive connection and no other load:
+
+| | per source | full pass (351 sources) |
+|---|---|---|
+| Before: FTS5 scan + re-tokenize | 123 ms | **43.2 s** |
+| After: one primary-key lookup | 0.008 ms | **2.6 ms** |
+
+The repair is to ask a table that *is* indexed. `transcript_search_sources` is an ordinary table
+keyed by `source_id`, so it now carries a `metadata_signature` — the six values the indexed rows
+actually hold, plus the generation they were written under. `updateMetadata` compares against it
+and returns; the scan happens only when a project or session is genuinely renamed, archived or
+rebuilt, which is when the rows are actually wrong.
+
+**The schema version had to stop being the parser version to do this.** They were one constant, and
+the ledger treats a parser change as "re-ingest this transcript from byte zero" — so adding a
+column would have silently re-indexed all 138 MB. `schemaVersion` (now 2) moves independently of
+`parserVersion` (still 1), and the version-2 step is one `ALTER TABLE`. Existing databases keep
+their indexed text and simply carry a null signature, which reads as "never recorded" and costs one
+rewrite per source on the first refresh after upgrading, once.
+
+### Regression boundary
+
+The guard is a performance contract, so `TranscriptSearchIndex` exposes `metadataRewriteCount` and
+`TranscriptSearchIndexTests` asserts on it directly — a removed guard fails the suite rather than
+quietly getting slow again. Five cases pin both halves: repeated identical refreshes rewrite once
+and never again; appending to a transcript does not rewrite standing rows; a renamed session and an
+archived session both do, exactly once, and are then findable by what they are now; and a reopened
+index inherits the recorded signature instead of rewriting every source once per launch. The
+existing seven cases in that file cover the correctness the guard must not cost.
+
 
 ## MetricKit
 

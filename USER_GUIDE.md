@@ -2655,8 +2655,10 @@ bubble for a Native conversation. Rows are two lines tall, so a long chat title 
 and shown in full once the chat is open. When an agent renames a chat, its title morphs to the new
 name in both this list and the open chat's navigation bar.
 
-Starting a chat from the phone opens it. The **+** in the toolbar, or the **+** on a project's
-heading, pushes a **New session** screen — Back returns to the list it was opened from. The
+Starting a chat from the phone opens it. The **New** pill floating at the list's bottom edge
+(beside **Search**, which searches conversations, files and destinations on the connected Mac),
+or the **+** on a project's heading, pushes a **New session** screen — Back returns to the list
+it was opened from. The
 middle of the screen says what will start and where — **Agent in AnotherTerminal**, each word a
 dropdown, with the branch under it; choose **Manager** to start a project manager instead. The
 agent and account are the disc at the top right, the agent's mark ringed by that account's usage,

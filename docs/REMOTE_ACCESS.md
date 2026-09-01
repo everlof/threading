@@ -211,7 +211,7 @@ including dormant sessions. The navigation title names the connected Mac and car
 connection status; the leading Mac button switches paired hosts, so the dashboard does not repeat
 that same device as a card in its content. Project headings are destinations. Opening one replaces
 the mixed dashboard with one plain, project-scoped chat list, names the project above the same
-connection status, and scopes the navigation-bar **+** to that project. Pinned sessions stay at the
+connection status, and scopes the floating **New** pill to that project. Pinned sessions stay at the
 top on both Mac and iPhone. Archived sessions are ordered newest archive first and searchable by
 title or project. Archive/Restore removes a row at the press edge while the Mac finishes the
 durable provider transaction, so several sessions can be filed without serial UI stalls; a
@@ -1058,9 +1058,9 @@ sharing action.
 ## Starting a chat from the phone, and seeing it work
 
 **Start opens the chat it started, on the screen that started it.** The draft is a route on the
-navigation stack (`MobileNavigationRoute.draft`), pushed by **+** — the toolbar's, or the one on a
-project's heading, which seeds that project — from whichever list asked for it, so Back from the
-chat returns there. It was a sheet: Start created the session, the sheet
+navigation stack (`MobileNavigationRoute.draft`), pushed by **New** — the dashboard's floating
+bottom pill, or the **+** on a project's heading, which seeds that project — from whichever list
+asked for it, so Back from the chat returns there. It was a sheet: Start created the session, the sheet
 dismissed, and the dashboard pushed the new chat from `onDismiss` — two motions with the list
 flashing between them, and before that, no push at all. Now the Mac answers the create with the
 new session's id *and* the whole refreshed catalogue, the model records which session the draft

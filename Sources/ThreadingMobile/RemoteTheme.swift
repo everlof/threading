@@ -36,6 +36,10 @@ enum MobileDesign {
         /// The icon-only chrome control: the dashboard's toolbar circles and the plus that
         /// starts a chat in a project. One size keeps them reading as the same kind of thing.
         static let compactControl: CGFloat = 34
+        /// The dashboard's floating bottom pills: the search field and the chat starter riding
+        /// above the home indicator. Taller than the minimum tap target because they are the
+        /// page's primary actions and float over content rather than sitting in a chrome row.
+        static let floatingBarControl: CGFloat = 52
         static let toggleTrackWidth: CGFloat = 52
         static let toggleTrackHeight: CGFloat = 32
         static let toggleThumb: CGFloat = 26

@@ -5601,6 +5601,17 @@
         }
       }
     },
+    "New" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ny"
+          }
+        }
+      }
+    },
     "New session" : {
       "extractionState" : "manual",
       "localizations" : {

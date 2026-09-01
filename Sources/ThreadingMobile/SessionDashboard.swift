@@ -911,6 +911,7 @@ struct SessionDashboard: View {
     private var dashboardNavigation: some View {
         dashboardContent
             .refreshable { await model.refresh() }
+            .safeAreaInset(edge: .bottom, spacing: 0) { dashboardFloatingBar }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { dashboardToolbar }
@@ -1092,30 +1093,8 @@ struct SessionDashboard: View {
                 statusColor: statusColor
             )
         }
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            if model.canUseUniversalSearch {
-                Button {
-                    showsUniversalSearch = true
-                } label: {
-                    Image(systemName: "magnifyingglass")
-                        .frame(
-                            width: MobileDesign.Size.compactControl,
-                            height: MobileDesign.Size.compactControl
-                        )
-                        .background(theme.controlResting, in: Circle())
-                }
-                .accessibilityLabel(MobileL10n.string("Search"))
-                .keyboardShortcut("f", modifiers: .command)
-            }
-
-            NewSessionButton(
-                accessibilityLabel: projectName.map { MobileL10n.string("New session in %@", $0) }
-                    ?? MobileL10n.string("New session")
-            ) {
-                startDraft(in: projectName)
-            }
-
-            if projectName == nil {
+        if projectName == nil {
+            ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     ForEach(dashboardMenuDestinations, id: \.self) { destination in
                         dashboardMenuItem(destination)
@@ -1131,6 +1110,70 @@ struct SessionDashboard: View {
                 .accessibilityLabel(MobileL10n.string("Remote access options"))
             }
         }
+    }
+
+    /// Search and the chat starter, floating at the page's bottom edge.
+    ///
+    /// Both lived in the navigation bar for a while, which crowded the Mac's name out of its
+    /// own title and put the two most-used actions furthest from the thumb. The bar owns no
+    /// plate: each pill stands on the theme's opaque floating surface (the chat starter on the
+    /// accent), so rows scroll under them the way content passes under any floating control.
+    private var dashboardFloatingBar: some View {
+        HStack(spacing: MobileDesign.Spacing.small) {
+            if model.canUseUniversalSearch {
+                Button {
+                    showsUniversalSearch = true
+                } label: {
+                    HStack(spacing: MobileDesign.Spacing.small) {
+                        Image(systemName: "magnifyingglass")
+                        Text(MobileL10n.string("Search"))
+                        Spacer(minLength: 0)
+                    }
+                    .font(.body)
+                    .foregroundStyle(theme.secondaryLabel)
+                    .padding(.horizontal, MobileDesign.Spacing.large)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: MobileDesign.Size.floatingBarControl
+                    )
+                    .background(theme.floatingSurface, in: Capsule())
+                    .overlay(
+                        Capsule().strokeBorder(
+                            theme.border,
+                            lineWidth: max(theme.borderWidth, 1)
+                        )
+                    )
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("f", modifiers: .command)
+            } else {
+                Spacer(minLength: 0)
+            }
+
+            Button {
+                startDraft(in: projectName)
+            } label: {
+                HStack(spacing: MobileDesign.Spacing.small) {
+                    Image(systemName: "plus")
+                    Text(MobileL10n.string("New"))
+                }
+                .font(.headline)
+                .foregroundStyle(theme.accentForeground)
+                .padding(.horizontal, MobileDesign.Spacing.large)
+                .frame(minHeight: MobileDesign.Size.floatingBarControl)
+                .background(theme.accent, in: Capsule())
+                .contentShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(
+                projectName.map { MobileL10n.string("New session in %@", $0) }
+                    ?? MobileL10n.string("New session")
+            )
+        }
+        .padding(.horizontal, MobileDesign.Spacing.large)
+        .padding(.top, MobileDesign.Spacing.small)
+        .padding(.bottom, MobileDesign.Spacing.small)
     }
 
     private var dashboardMenuDestinations: [MobileDashboardMenuDestination] {
@@ -1705,12 +1748,12 @@ private struct MobileConnectionProgressStepTitle: UIViewRepresentable {
     }
 }
 
-/// Starts a chat: the toolbar's plus, and the one on each project heading.
+/// Starts a chat: the plus on each project heading.
 ///
 /// It carries no caption. The word sat next to a plus in a header that already names the
 /// project, which said the same thing twice and pushed the folder name into truncation on a
-/// phone-width row; the glyph alone is the same control the toolbar shows, at the same size and
-/// on the same disc as the toolbar's other circles.
+/// phone-width row; the glyph alone says start, at the same size and on the same disc as the
+/// toolbar's circles.
 struct NewSessionButton: View {
     let accessibilityLabel: String
     let action: () -> Void

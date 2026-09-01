@@ -66,7 +66,15 @@ struct TranscriptSearchIndexResult: Sendable {
 /// Rebuildable, append-resumable conversation index. One actor owns the SQLite connection, so a
 /// query can interleave between bounded ingestion batches without a second mutable owner.
 actor TranscriptSearchIndex {
+    /// How this app reads a transcript. A change here invalidates every ledger row, because the
+    /// normalized text a previous version produced can no longer be trusted to match.
     static let parserVersion = 1
+
+    /// The shape of the database, which moves independently of `parserVersion`. Version 2 adds
+    /// `metadata_signature` to the ledger; the indexed text it stands beside is unchanged, so
+    /// bumping the two together would have re-ingested every transcript to add one column.
+    static let schemaVersion = 2
+
     static let ingestionScanBytes = 4 * 1024 * 1024
     static let maximumQueryRows = UniversalSearchDefaults.maximumHitsPerGroup + 1
     static let maximumWindowRowUTF8Bytes = 1024
@@ -95,12 +103,26 @@ actor TranscriptSearchIndex {
     private var unavailableSourceCount = 0
     private var containsTruncatedBody = false
 
+    /// How many times the metadata rewrite below has actually run.
+    ///
+    /// The guard in `updateMetadata` is a performance contract, and a performance contract that
+    /// nothing asserts is one refactor away from being gone. This is the cheapest honest way to
+    /// see it hold: the rewrite is a full scan of the FTS table, and the count says whether one
+    /// happened, without a test having to time anything.
+    private(set) var metadataRewriteCount = 0
+
     init(databaseURL: URL) throws {
         let database = try SQLiteDatabase(
             path: databaseURL.path,
-            maximumSchemaVersion: Self.parserVersion
+            maximumSchemaVersion: Self.schemaVersion
         )
-        try database.migrate(to: Self.parserVersion) { version in
+        try database.migrate(to: Self.schemaVersion) { version in
+            if version == 2 {
+                try database.execute("""
+                ALTER TABLE transcript_search_sources ADD COLUMN metadata_signature TEXT
+                """)
+                return
+            }
             guard version == 1 else { return }
             try database.execute("""
             CREATE TABLE transcript_search_sources (
@@ -591,10 +613,65 @@ actor TranscriptSearchIndex {
         }
     }
 
+    /// The six metadata values the indexed rows carry, as one comparable string.
+    ///
+    /// The generation belongs in it because the `UPDATE` below is scoped to one, so metadata
+    /// that has already been written into generation 3's rows says nothing about generation 4's.
+    /// Unit separators rather than a plain join: a title may contain anything, and two different
+    /// pairs of fields must never run together into the same string.
+    private func metadataSignature(
+        for source: TranscriptSearchSource,
+        sourceGeneration: UInt64
+    ) -> String {
+        [
+            source.projectID.uuidString,
+            source.projectName,
+            source.sessionID.uuidString,
+            source.sessionTitle,
+            source.providerName,
+            source.isArchived ? "1" : "0",
+            String(sourceGeneration)
+        ].joined(separator: "\u{1f}")
+    }
+
+    /// The metadata last written into this source's indexed rows, or nil when it has never been
+    /// recorded — which is how a row written before this column existed asks to be rewritten once.
+    private func storedMetadataSignature(sourceID: String) throws -> String? {
+        let statement = try database.prepare("""
+        SELECT metadata_signature FROM transcript_search_sources WHERE source_id = ?
+        """)
+        defer { statement.finalize() }
+        statement.bind(1, sourceID)
+        guard try statement.step() else { return nil }
+        return statement.text(0)
+    }
+
+    /// Rewrites this source's rows to carry the project and session labels they are filtered and
+    /// displayed by — but only when those labels have actually moved since they were last written.
+    ///
+    /// The guard is the whole point. `transcript_search_fts` is an FTS5 virtual table, so it has
+    /// no index on `source_id`: SQLite answers the `WHERE` below with
+    /// `SCAN transcript_search_fts VIRTUAL TABLE INDEX 0`, walking every indexed row in the
+    /// database, and each row it matches has its tokens deleted and reinserted. Measured against a
+    /// real 138 MB index of 82,688 rows across 350 sources, that is 40-90 ms **per source** with a
+    /// warm cache and no contention — and `reconcile` used to call it for every source on every
+    /// refresh, so a pass in which nothing had changed still cost 15-30 s of CPU and a `pread`
+    /// storm. `ProjectsDidChange` restarts a refresh, and an agent renaming a session posts one,
+    /// so this ran more or less continuously.
+    ///
+    /// `transcript_search_sources` is an ordinary table keyed by `source_id`, so the comparison
+    /// that avoids all of that is a single primary-key lookup. The scan still happens when a
+    /// project or session is genuinely renamed, archived, or rebuilt, which is rare and is the
+    /// only time the rows are actually wrong.
     private func updateMetadata(
         for source: TranscriptSearchSource,
         sourceGeneration: UInt64
     ) throws {
+        let signature = metadataSignature(for: source, sourceGeneration: sourceGeneration)
+        guard try storedMetadataSignature(sourceID: source.sourceID.rawValue) != signature else {
+            return
+        }
+
         let statement = try database.prepare("""
         UPDATE transcript_search_fts
         SET project_id = ?, project_name = ?, session_id = ?, session_title = ?,
@@ -609,6 +686,23 @@ actor TranscriptSearchIndex {
         statement.bind(6, source.isArchived ? 1 : 0)
         statement.bind(7, source.sourceID.rawValue)
         statement.bind(8, Int64(sourceGeneration))
+        try statement.run()
+        metadataRewriteCount += 1
+
+        try recordMetadataSignature(signature, sourceID: source.sourceID.rawValue)
+    }
+
+    /// Records what the rows now say, so the next refresh can skip them.
+    ///
+    /// Written after the rewrite, never before: a failure between the two leaves the signature
+    /// standing at its old value, and the next pass repeats an idempotent update rather than
+    /// believing labels were applied that were not.
+    private func recordMetadataSignature(_ signature: String, sourceID: String) throws {
+        let statement = try database.prepare("""
+        UPDATE transcript_search_sources SET metadata_signature = ? WHERE source_id = ?
+        """)
+        statement.bind(1, signature)
+        statement.bind(2, sourceID)
         try statement.run()
     }
 

@@ -785,6 +785,9 @@ private struct SessionDraftComposerScreen: View {
                         sendButton
                     }
                     .frame(height: MobileDesign.Size.compactControl)
+                    // The send disc sits over full-width text here; the editor's own top inset
+                    // alone left the disc reading as resting on the first line.
+                    .padding(.bottom, MobileDesign.Spacing.tight)
                 }
                 promptEditor
             }
@@ -860,7 +863,8 @@ private struct SessionDraftComposerScreen: View {
                 pasteFiles: stageClipboardFiles,
                 firstLineLeadingAccessoryWidth: promptFirstLineLeadingAccessoryWidth,
                 firstLineTrailingAccessoryWidth: promptFirstLineTrailingAccessoryWidth,
-                firstLineAccessoryHeight: promptFirstLineAccessoryHeight
+                firstLineAccessoryHeight: MobileDesign.Size.compactControl,
+                firstLineAccessoriesInline: !promptIsOverflowing
             )
             .mobileUIEvidenceKeyboardFocus($promptIsFocused)
             // Drawn here rather than by the editor: the field's own placeholder takes the
@@ -886,20 +890,18 @@ private struct SessionDraftComposerScreen: View {
         .frame(minHeight: MobileDesign.Size.compactControl)
     }
 
-    /// The inline actions own exclusions only while they actually overlap the editor. Once the
-    /// document scrolls, those controls move into the fixed row above it; carrying their old
-    /// footprint into the text container would indent a line whose paperclip is no longer there.
+    /// The inline actions' footprints, stated whether or not the actions are currently inline.
+    /// The editor decides their placement by measuring the document against these footprints,
+    /// so they must not follow the placement they decide: zeroing them on overflow handed the
+    /// decision its own consequence, and a prompt within a line of the cap flickered between
+    /// its two layouts forever. `firstLineAccessoriesInline` is what actually releases the
+    /// first line's width once the controls move to their fixed row.
     private var promptFirstLineLeadingAccessoryWidth: CGFloat {
-        guard !promptIsOverflowing, attachmentTray != nil else { return 0 }
-        return SessionDraftPromptMetrics.accessoryExclusionWidth
+        attachmentTray != nil ? SessionDraftPromptMetrics.accessoryExclusionWidth : 0
     }
 
     private var promptFirstLineTrailingAccessoryWidth: CGFloat {
-        promptIsOverflowing ? 0 : SessionDraftPromptMetrics.accessoryExclusionWidth
-    }
-
-    private var promptFirstLineAccessoryHeight: CGFloat {
-        promptIsOverflowing ? 0 : MobileDesign.Size.compactControl
+        SessionDraftPromptMetrics.trailingAccessoryExclusionWidth
     }
 
     private var attachmentButton: some View {
@@ -1670,6 +1672,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
     let firstLineLeadingAccessoryWidth: CGFloat
     let firstLineTrailingAccessoryWidth: CGFloat
     let firstLineAccessoryHeight: CGFloat
+    let firstLineAccessoriesInline: Bool
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
@@ -1697,8 +1700,9 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         view.firstLineLeadingAccessoryWidth = firstLineLeadingAccessoryWidth
         view.firstLineTrailingAccessoryWidth = firstLineTrailingAccessoryWidth
         view.firstLineAccessoryHeight = firstLineAccessoryHeight
+        view.firstLineAccessoriesInline = firstLineAccessoriesInline
         view.preferredCaretHeight = font.pointSize
-        view.onScrollabilityChange = context.coordinator.reportScrollability
+        view.onFirstLineAccessoryOverflowChange = context.coordinator.reportAccessoryOverflow
         return view
     }
 
@@ -1719,6 +1723,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         view.firstLineLeadingAccessoryWidth = firstLineLeadingAccessoryWidth
         view.firstLineTrailingAccessoryWidth = firstLineTrailingAccessoryWidth
         view.firstLineAccessoryHeight = firstLineAccessoryHeight
+        view.firstLineAccessoriesInline = firstLineAccessoriesInline
         view.preferredCaretHeight = font.pointSize
         view.offersFiles = offersFiles
         view.pasteFiles = pasteFiles
@@ -1750,7 +1755,8 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
             fontPointSize: uiView.font?.pointSize ?? 0,
             leadingAccessoryWidth: firstLineLeadingAccessoryWidth,
             trailingAccessoryWidth: firstLineTrailingAccessoryWidth,
-            accessoryHeight: firstLineAccessoryHeight
+            accessoryHeight: firstLineAccessoryHeight,
+            accessoriesInline: firstLineAccessoriesInline
         )
         if let cached = context.coordinator.cachedMeasurement, cached.key == key {
             return CGSize(width: width, height: cached.height)
@@ -1776,6 +1782,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
             let leadingAccessoryWidth: CGFloat
             let trailingAccessoryWidth: CGFloat
             let accessoryHeight: CGFloat
+            let accessoriesInline: Bool
         }
 
         /// The last measurement and the inputs it was taken under; see `sizeThatFits`.
@@ -1795,14 +1802,14 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
             self.isOverflowing = isOverflowing
         }
 
-        func reportScrollability(_ scrollable: Bool) {
-            guard isOverflowing.wrappedValue != scrollable else { return }
+        func reportAccessoryOverflow(_ overflows: Bool) {
+            guard isOverflowing.wrappedValue != overflows else { return }
             // Layout is in progress when the native view discovers the threshold. Move the
             // SwiftUI state change to the next main-actor turn instead of mutating the shell
             // from inside its representable's layout pass.
             Task { @MainActor [weak self] in
-                guard let self, self.isOverflowing.wrappedValue != scrollable else { return }
-                self.isOverflowing.wrappedValue = scrollable
+                guard let self, self.isOverflowing.wrappedValue != overflows else { return }
+                self.isOverflowing.wrappedValue = overflows
             }
         }
 
@@ -1828,6 +1835,12 @@ private enum SessionDraftPromptMetrics {
     /// preserves that first-line air while allowing every later line to use those points.
     static let accessoryExclusionWidth =
         MobileDesign.Size.compactControl + MobileDesign.Spacing.small
+
+    /// The send control is a filled accent disc, not a bare glyph like the paperclip, and text
+    /// running the standard gap up to a solid plate reads as touching it. Its exclusion holds
+    /// wider air.
+    static let trailingAccessoryExclusionWidth =
+        MobileDesign.Size.compactControl + MobileDesign.Spacing.medium
 
     /// A compact editor shares its first row with two compact controls. `UITextView` otherwise
     /// puts a zero-inset line against the row's top while both glyphs are centred, which is the
