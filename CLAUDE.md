@@ -91,13 +91,14 @@ recording provider traffic.
 
 ## Dependencies
 
-Four local Swift packages are referenced as `XCLocalSwiftPackageReference`s. ThinkingOrbs,
-LabelMorph and BorderBeamKit are git submodules; SwiftTerm is vendored directly in this
-repository. **All four are our forks — modify their source directly** rather than working
-around them.
+Five local Swift packages are referenced as `XCLocalSwiftPackageReference`s. ThinkingOrbs,
+LabelMorph and BorderBeamKit are git submodules; SwiftTerm and TimberLineParser are vendored
+directly in this repository. **All five are ours — modify their source directly** rather than
+working around them.
 
 | | Location / upstream | What it draws |
 |---|---|---|
+| **TimberLineParser** | `./Packages/Vendor/TimberLineParser/` — from `~/mjukis/projects/timber` | Timestamp and level detection for app log files whose format is not known in advance. Used by `DeviceLogsPlugin`. |
 | **SwiftTerm** | `./Packages/Vendor/SwiftTerm/` — [migueldeicaza/SwiftTerm](https://github.com/migueldeicaza/SwiftTerm) | Terminal emulation: VT100/xterm, ANSI parsing, PTY. The iOS folder is excluded on macOS builds. |
 | **ThinkingOrbs** | `./Packages/Vendor/ThinkingOrbs/` — [everlof/thinking-orbs-swift](https://github.com/everlof/thinking-orbs-swift) | The dotted "working" orb beside the conversation status. AppKit `ThinkingOrbView` only; the app stays AppKit-only. |
 | **LabelMorph** | `./Packages/Vendor/LabelMorph/` — [everlof/LabelMorph](https://github.com/everlof/LabelMorph) | The AppKit/UIKit label that morphs a name character by character — every session, project and checkout name. |

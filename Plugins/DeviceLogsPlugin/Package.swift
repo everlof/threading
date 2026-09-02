@@ -15,6 +15,8 @@ let package = Package(
     dependencies: [
         .package(path: "../../Packages/ThreadingPluginKit"),
         .package(path: "../../Packages/ThreadingDesignKit"),
+        // Timestamp and level detection for app log files whose shape we do not know in advance.
+        .package(path: "../../Packages/Vendor/TimberLineParser"),
     ],
     targets: [
         .target(
@@ -22,6 +24,7 @@ let package = Package(
             dependencies: [
                 .product(name: "ThreadingPluginKit", package: "ThreadingPluginKit"),
                 .product(name: "ThreadingDesignKit", package: "ThreadingDesignKit"),
+                .product(name: "TimberLineParser", package: "TimberLineParser"),
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),

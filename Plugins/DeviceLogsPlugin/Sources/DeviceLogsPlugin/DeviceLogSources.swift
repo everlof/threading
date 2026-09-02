@@ -1,5 +1,6 @@
 import Foundation
 import ThreadingDesignKit
+import TimberLineParser
 
 // MARK: - Row
 
@@ -209,6 +210,11 @@ public enum DeviceRelayReclaim {
 }
 
 public enum DeviceLogLimits {
+
+    /// What the time column shows for a line that carries no stamp — a file's opening banner,
+    /// or a continuation. Written once because two decoders and the fallback all compare it.
+    public static let undatedTime = "--:--:--"
+
     /// A single line longer than this is abandoned rather than accumulated.
     public static let maximumLineBytes = 1_048_576
     /// Rows retained by the pane. A firehose must not grow memory without limit.
@@ -444,11 +450,17 @@ public enum DeviceLogDecoding {
         guard !trimmed.isEmpty, !trimmed.hasPrefix("====") else { return nil }
 
         var rest = Substring(trimmed)
-        var time = "--:--:--"
+        var time = DeviceLogLimits.undatedTime
         // The banner lines a log file opens with have no stamp; they are still worth showing.
         if trimmed.count > 24, trimmed.hasPrefix("20"), let space = rest.firstIndex(of: " ") {
-            time = String(rest[rest.startIndex..<space].dropFirst(11).prefix(12))
-            rest = rest[rest.index(after: space)...]
+            let candidate = String(rest[rest.startIndex..<space].dropFirst(11).prefix(12))
+            // `2026-09-02T10:34:33.242Z` carries the clock in one token; `2024-01-15 10:30:45`
+            // does not, and slicing it the same way produced an empty column rather than a stamp.
+            // Consume the token only when what came out is a time.
+            if Self.isClockText(candidate) {
+                time = candidate
+                rest = rest[rest.index(after: space)...]
+            }
         }
         var level = "Default"
         if rest.hasPrefix("["), let close = rest.firstIndex(of: "]") {
@@ -460,6 +472,22 @@ public enum DeviceLogDecoding {
             subsystem = String(rest[rest.index(after: rest.startIndex)..<close])
             rest = rest[rest.index(after: close)...].drop(while: { $0 == " " })
         }
+
+        // The shape above is one app's. Anything else — Android logcat, a bracketed stamp, plain
+        // syslog, Apache — reached this point as an undated `Default` line, which is readable and
+        // useless: no time column and nothing for the level filter to order. `TimberLineParser`
+        // recognises eight stamp formats and a level vocabulary, so a log we have never seen still
+        // arrives with the two columns that make it filterable.
+        if time == DeviceLogLimits.undatedTime || time.isEmpty || level == "Default" {
+            if time == DeviceLogLimits.undatedTime || time.isEmpty,
+               let recovered = Self.clockText(in: trimmed) {
+                time = recovered
+            }
+            if level == "Default" {
+                level = Self.level(from: LevelDetector.detectLevel(bytes: Array(trimmed.utf8)))
+            }
+        }
+
         return DeviceLogRow(
             time: time,
             level: level,
@@ -467,6 +495,61 @@ public enum DeviceLogDecoding {
             subsystem: subsystem,
             message: String(rest)
         )
+    }
+
+    /// Timber's vocabulary mapped onto the one the level filter orders.
+    ///
+    /// One way only. Apple's unified log has `Notice`, `Fault` and `Emergency`, which this
+    /// vocabulary does not, so the rows keep their own level strings and `severity` keeps ordering
+    /// both. Translating in the other direction would collapse a fault into an unknown.
+    private static func level(from detected: LogLevel) -> String {
+        switch detected {
+        case .error: return "Error"
+        case .warning: return "Warning"
+        case .info: return "Info"
+        case .debug, .verbose, .trace: return "Debug"
+        case .unknown: return "Default"
+        }
+    }
+
+    /// Whether a slice is a wall clock, which is what decides that the first token was a stamp.
+    private static func isClockText(_ text: String) -> Bool {
+        let parts = text.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count >= 3, parts[0].count == 2, parts[1].count == 2 else { return false }
+        return parts.allSatisfy { $0.first?.isNumber == true }
+    }
+
+    /// The wall clock a line wrote, taken as characters rather than reconstructed from a `Date`.
+    ///
+    /// `TimestampParser` reads eight formats and hands back a `Date`, which is the right answer for
+    /// a time-range query and the wrong one for this column. A naive stamp carries no zone, so the
+    /// `Date` is an interpretation: rendering `01-15 10:30:45.123` came back as `09:30:45.123`
+    /// formatted locally and `08:30:45.123` formatted as UTC — both measured here, both an hour or
+    /// two from what the file says. A log is where someone goes to check a time, so the column
+    /// shows the file's own characters and leaves interpretation to whoever asks for a range.
+    private static func clockText(in line: String) -> String? {
+        let characters = Array(line)
+        var index = 0
+        while index + 8 <= characters.count {
+            // Not inside a longer number: Apache writes `21/Nov/2024:10:30:45`, where a scan that
+            // starts anywhere finds `24:10:30` in the year before it finds the clock.
+            let startsANumber = index == 0 || !characters[index - 1].isNumber
+            if startsANumber, characters[index].isNumber, characters[index + 1].isNumber,
+               characters[index + 2] == ":", characters[index + 3].isNumber,
+               characters[index + 4].isNumber, characters[index + 5] == ":",
+               characters[index + 6].isNumber, characters[index + 7].isNumber,
+               let hour = Int(String(characters[index...(index + 1)])), hour < 24 {
+                var end = index + 8
+                if end < characters.count, characters[end] == "." {
+                    var fraction = end + 1
+                    while fraction < characters.count, characters[fraction].isNumber { fraction += 1 }
+                    end = min(fraction, end + 4)   // milliseconds, as the other routes show
+                }
+                return String(characters[index..<end])
+            }
+            index += 1
+        }
+        return nil
     }
 
     /// An app's own vocabulary mapped onto the one the level filter orders.
@@ -490,7 +573,7 @@ public enum DeviceLogDecoding {
         else { return nil }
         let process = (object["processImagePath"] as? String)
             .map { ($0 as NSString).lastPathComponent } ?? "?"
-        var time = "--:--:--"
+        var time = DeviceLogLimits.undatedTime
         if let raw = object["timestamp"] as? String, raw.count >= 23 {
             time = String(raw.dropFirst(11).prefix(12))
         }

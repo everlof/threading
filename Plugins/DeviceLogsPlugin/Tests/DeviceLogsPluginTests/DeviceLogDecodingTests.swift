@@ -169,4 +169,56 @@ final class DeviceLogDecodingTests: XCTestCase {
         XCTAssertNil(decodeAppLog("   "))
         XCTAssertNil(decodeAppLog(""))
     }
+
+    // MARK: An app log we have never seen
+
+    /// The app-log route was written against one app's format. Every other shape reached the pane
+    /// as an undated `Default` line: readable, and useless — no time column, and nothing for the
+    /// level filter to order. These are the formats `TimberLineParser` recognises, and the point of
+    /// vendoring it.
+    func testAnUnfamiliarAppLogStillGetsItsClockAndLevel() throws {
+        func decode(_ line: String) throws -> DeviceLogRow {
+            try XCTUnwrap(DeviceLogDecoding.appLogLine(line, appName: "App"))
+        }
+
+        let logcat = try decode("01-15 10:30:45.123 D/MyTag: hello from logcat")
+        XCTAssertEqual(logcat.time, "10:30:45.123")
+
+        let bracketed = try decode("[2024-01-15 10:30:45] ERROR something failed")
+        XCTAssertEqual(bracketed.time, "10:30:45")
+        XCTAssertEqual(bracketed.level, "Error")
+
+        let syslogShaped = try decode("Nov 21 10:30:45 kernel: something happened")
+        XCTAssertEqual(syslogShaped.time, "10:30:45")
+    }
+
+    /// A plain `YYYY-MM-DD HH:MM:SS` line put a ten-character *date* where the one known format
+    /// keeps its clock, and slicing it the same way produced an **empty** time column. Found by
+    /// running the formats through the decoder rather than by reading it.
+    func testADateOnlyFirstTokenNoLongerEmptiesTheTimeColumn() throws {
+        let row = try XCTUnwrap(
+            DeviceLogDecoding.appLogLine("2024-01-15 10:30:45.123 WARN cache miss", appName: "App")
+        )
+        XCTAssertEqual(row.time, "10:30:45.123")
+        XCTAssertEqual(row.level, "Warning")
+        XCTAssertTrue(row.message.contains("cache miss"))
+    }
+
+    /// Apache writes `21/Nov/2024:10:30:45`, where a scan that may start anywhere finds `24:10:30`
+    /// inside the year before it reaches the clock.
+    func testAClockIsNotTakenFromTheMiddleOfALongerNumber() throws {
+        let row = try XCTUnwrap(
+            DeviceLogDecoding.appLogLine("21/Nov/2024:10:30:45 +0000 GET /index.html 200", appName: "App")
+        )
+        XCTAssertEqual(row.time, "10:30:45")
+    }
+
+    /// The recovery must not invent a time. A banner and a bare line have none, and saying so is
+    /// the honest column.
+    func testALineWithNoClockStaysUndated() throws {
+        for line in ["App Version: 1.0.0", "just a bare line with no stamp at all"] {
+            let row = try XCTUnwrap(DeviceLogDecoding.appLogLine(line, appName: "App"))
+            XCTAssertEqual(row.time, DeviceLogLimits.undatedTime, line)
+        }
+    }
 }

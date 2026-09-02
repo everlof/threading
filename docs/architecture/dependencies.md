@@ -43,6 +43,23 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     the package revision, release source commit, SwiftPM/archive checksum, license, privacy
     manifest, OSV result, GitHub advisories, supported deployment slices and both app builds.
 
+- **TimberLineParser** (vendored, ours outright): timestamp and level detection for log lines
+  - Location: `./Packages/Vendor/TimberLineParser/` (vendored source, not a submodule)
+  - Origin: `~/mjukis/projects/timber`, a macOS log viewer that is not released and is not going to
+    be. Taken rather than depended on, for the same reason as SwiftTerm: one build system, and the
+    source is ours to change.
+  - Used by `DeviceLogsPlugin`. Its platform floor was macOS 14 and carried no `@available(macOS 14)`
+    anywhere, so it is 13 here; the package builds and its 68 tests pass there.
+  - **What it is used for, and what it is not.** `LevelDetector` reads a level out of a log line
+    whose format we do not know. `TimestampParser` recognises eight stamp formats and returns a
+    `Date`, which is the right answer for a time-range query and the wrong one for the time column:
+    a naive stamp carries no zone, so the `Date` is an interpretation, and rendering `10:30:45.123`
+    came back an hour out formatted locally and two hours out as UTC. The column takes the file's
+    own characters instead. Keep that in mind before reaching for the `Date` to display anything.
+  - Its `SIMDLineScanner` header claims ~2.5 GB/s. Measured here it is **0.19 GB/s** — ~25 ms for
+    5 MB, holding across three line lengths and three `Data` shapes, median of nine Release runs.
+    Fast enough for a log stream, and not the number in the comment.
+
 - **SwiftTerm** (local fork): Terminal emulation engine handling VT100/xterm, ANSI parsing, PTY communication
   - Location: `./Packages/Vendor/SwiftTerm/` (vendored source in the main repository, not a git submodule)
   - Upstream: https://github.com/migueldeicaza/SwiftTerm
