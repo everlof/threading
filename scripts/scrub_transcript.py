@@ -210,8 +210,10 @@ def scrub(node, key=None):
         )
     if key in ID_KEYS:
         return scrub_id(node)
-    if key in ("model", "version", "cwd", "gitBranch", "timestamp"):
-        return node if key in ("model", "version", "timestamp") else scrub_text(node)
+    if key in ("model", "version", "cli_version", "cwd", "gitBranch", "timestamp"):
+        # `cli_version` stays: `CodexRolloutFormat` documents which releases wrote which
+        # record shapes, and a fixture is evidence of that only while it says who wrote it.
+        return node if key in ("model", "version", "cli_version", "timestamp") else scrub_text(node)
 
     # Codex persists a tool call's arguments as a *string of JSON*, so scrubbing it as prose
     # renamed the keys inside it — `cmd` became `dun` — and the fixture then exercised a
@@ -236,6 +238,19 @@ def claude_records(lines):
             continue
 
 
+def codex_user_turn(payload):
+    """A typed user turn in either Codex shape.
+
+    Up to 0.146 it is a `user_message` event; from 0.147 it is an `item_completed` event whose
+    item is a `UserMessage`. `CodexRolloutFormat` in the app holds the same two names.
+    """
+    if payload.get("type") == "user_message":
+        return True
+    return payload.get("type") == "item_completed" and (
+        (payload.get("item") or {}).get("type") == "UserMessage"
+    )
+
+
 def coverage(window, kind):
     """Score a candidate window by how much of the renderer it exercises.
 
@@ -252,9 +267,13 @@ def coverage(window, kind):
         kind_tag = record.get("type")
 
         if kind_tag == "event_msg":
-            if payload.get("type") == "user_message":
+            if codex_user_turn(payload):
                 users += 1
             elif payload.get("type") == "agent_reasoning":
+                thinking += 1
+            elif payload.get("type") == "item_completed" and (
+                (payload.get("item") or {}).get("type") == "Reasoning"
+            ):
                 thinking += 1
         elif kind_tag == "response_item" and payload.get("type") in (
             "custom_tool_call", "function_call"
@@ -301,7 +320,7 @@ def pick_window(records, kind, limit):
         if kind == "claude":
             return record.get("type") == "user" and not record.get("isMeta")
         payload = record.get("payload") or {}
-        return record.get("type") == "event_msg" and payload.get("type") == "user_message"
+        return record.get("type") == "event_msg" and codex_user_turn(payload)
 
     # Skip the opening turn: for Codex it carries the project's whole instruction block,
     # and for Claude the CLI's own preamble — neither is conversation.
@@ -339,7 +358,25 @@ def pick_window(records, kind, limit):
             return payload.get("call_id") in seen
         return True
 
-    return [r for r in window if keep(r)]
+    kept = [r for r in window if keep(r)]
+
+    if kind == "codex":
+        # A Codex fixture states who wrote it. `session_meta` is the first record of every
+        # rollout and names the `cli_version`, which is what `CodexRolloutFormat` is measured
+        # against, so a window that starts later carries it along.
+        if not any(r.get("type") == "session_meta" for r in kept):
+            meta = next((r for r in records if r.get("type") == "session_meta"), None)
+            if meta is not None:
+                kept.insert(0, meta)
+        # A `compacted` record carries the whole replacement history Codex handed the model —
+        # 314 KB in one measured file. Three entries keep the shape at a fraction of the size.
+        for record in kept:
+            payload = record.get("payload") or {}
+            history = payload.get("replacement_history")
+            if record.get("type") == "compacted" and isinstance(history, list):
+                payload["replacement_history"] = history[:3]
+
+    return kept
 
 
 def main():

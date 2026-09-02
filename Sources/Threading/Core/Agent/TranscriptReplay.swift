@@ -37,6 +37,15 @@ struct TranscriptToolCall: Equatable, Sendable {
     let date: Date
 }
 
+/// One whole-file replay: what to render, whether older events were dropped by the window, and
+/// what the format probe made of the file.
+struct TranscriptReplayResult: Sendable {
+    let events: [StreamEvent]
+    let isTruncated: Bool
+    /// Nil for a format that has no probe yet (Claude).
+    let format: TranscriptFormatVerdict?
+}
+
 /// A resumable pass over a transcript's tool calls: what it read, and where to start next time.
 struct TranscriptToolCallScan: Equatable, Sendable {
     let calls: [TranscriptToolCall]
@@ -273,7 +282,25 @@ enum TranscriptReplay {
     /// layout of an installed CLI, none of which a test should have to fake to check that a
     /// record maps to the right event.
     static func read(at url: URL, kind: AgentKind) -> ([StreamEvent], Bool) {
-        guard let format = TranscriptReplayFormat(kind: kind) else { return ([], false) }
+        let replay = replay(at: url, kind: kind)
+        return (replay.events, replay.isTruncated)
+    }
+
+    /// `read` with the format verdict beside the events, and the rolling window as a parameter.
+    ///
+    /// The window is `ReplayDefaults.maximumEvents` because each event becomes a view; a caller
+    /// that renders nothing — the handoff snapshot — must not inherit a rendering bound as if
+    /// it were a context bound. That is exactly how a continued conversation came to hold the
+    /// last 400 events of a Codex session, all of them tool calls and their output, and none of
+    /// the user's messages.
+    static func replay(
+        at url: URL,
+        kind: AgentKind,
+        maximumEvents: Int = ReplayDefaults.maximumEvents
+    ) -> TranscriptReplayResult {
+        guard let format = TranscriptReplayFormat(kind: kind) else {
+            return TranscriptReplayResult(events: [], isTruncated: false, format: nil)
+        }
         var events: [StreamEvent] = []
         var dropped = 0
 
@@ -308,7 +335,11 @@ enum TranscriptReplay {
             events.append(.turnFinished(text: nil, outcome: .completed, metrics: metrics))
         }
 
-        JSONLReader.forEachRecord(at: url, limit: ReplayDefaults.scanLimit) { record in
+        let verdict = forEachRecordEvent(
+            at: url,
+            format: format,
+            scanLimit: ReplayDefaults.scanLimit
+        ) { record, event in
             // Context facts ride records the event mapping skips — Codex's `token_count`
             // produces no row at all — so they are read before the mapping can bail.
             if let context = contextReading(of: record, format: format) {
@@ -317,7 +348,7 @@ enum TranscriptReplay {
             }
             if let effort = effortReading(of: record, format: format) { lastEffort = effort }
 
-            guard let event = self.event(from: record, format: format) else { return true }
+            guard let event else { return true }
 
             if case .userMessage = event {
                 endOpenTurn()
@@ -330,7 +361,7 @@ enum TranscriptReplay {
 
             // A rolling window rather than a head-first cap: what matters in a conversation
             // being resumed is how it ended, not how it began.
-            if events.count > ReplayDefaults.maximumEvents {
+            if events.count > maximumEvents {
                 events.removeFirst()
                 dropped += 1
             }
@@ -339,7 +370,63 @@ enum TranscriptReplay {
         }
         endOpenTurn()
 
-        return (events, dropped > 0)
+        // Drawn where the conversation should have been, so a format Threading cannot read
+        // looks like what it is rather than like an agent that only ever ran commands.
+        if case .codexDialogueUnreadable(let drift)? = verdict {
+            events.insert(.transcriptNotice(drift.notice), at: 0)
+        }
+
+        return TranscriptReplayResult(events: events, isTruncated: dropped > 0, format: verdict)
+    }
+
+    /// Streams a transcript's records in order with the event each maps to, and returns what the
+    /// format probe made of the whole file — nil for a format that has no probe yet.
+    ///
+    /// Every whole-file reader goes through here so the probe sees exactly what the reader saw:
+    /// a verdict computed on one pass and a reduction made on another could disagree about the
+    /// same file.
+    static func forEachRecordEvent(
+        at url: URL,
+        kind: AgentKind,
+        scanLimit: Int = ReplayDefaults.scanLimit,
+        _ body: (_ record: [String: Any], _ event: StreamEvent?) -> Bool
+    ) -> TranscriptFormatVerdict? {
+        guard let format = TranscriptReplayFormat(kind: kind) else { return nil }
+        return forEachRecordEvent(at: url, format: format, scanLimit: scanLimit, body)
+    }
+
+    private static func forEachRecordEvent(
+        at url: URL,
+        format: TranscriptReplayFormat,
+        scanLimit: Int,
+        _ body: (_ record: [String: Any], _ event: StreamEvent?) -> Bool
+    ) -> TranscriptFormatVerdict? {
+        var probe: CodexRolloutFormatProbe?
+        switch format {
+        case .claude: probe = nil
+        case .codex: probe = CodexRolloutFormatProbe()
+        }
+
+        JSONLReader.forEachRecord(at: url, limit: scanLimit) { record in
+            let event = self.event(from: record, format: format)
+            probe?.observe(record: record, event: event)
+            return body(record, event)
+        }
+
+        guard let probe else { return nil }
+        let verdict = probe.verdict
+        report(verdict, transcript: url)
+        return verdict
+    }
+
+    /// Says so, once per read, when a file's dialogue could not be read: the log for whoever is
+    /// debugging, the journal for a support report. Neither carries conversation content.
+    private static func report(_ verdict: TranscriptFormatVerdict, transcript: URL) {
+        guard case .codexDialogueUnreadable(let drift) = verdict else { return }
+        ThreadingLogger.agent.error(
+            "Codex rollout format unreadable cli_version=\(drift.cliVersion ?? "unknown", privacy: .public) verified_through=\(CodexRolloutFormat.newestVerifiedCLIVersion, privacy: .public) unfamiliar_items=\(drift.unfamiliarItemTypes.joined(separator: ","), privacy: .public) unread_assistant_messages=\(drift.unreadAssistantMessages, privacy: .public) path=\(transcript.path, privacy: .private(mask: .hash))"
+        )
+        EventLog.shared.record(.session, "Codex rollout format unreadable", drift.logFields)
     }
 
     /// The tool calls a transcript records from `offset` onward, each with the time its own
@@ -664,30 +751,80 @@ enum TranscriptReplay {
     /// Codex records dialogue as `event_msg` and tool activity as `response_item`. Response
     /// items also contain copies of messages, so only their tool shapes are accepted here —
     /// otherwise every user and assistant message would be replayed twice.
+    ///
+    /// Dialogue has two shapes, both read: the `user_message`/`agent_message` events of releases
+    /// up to 0.146, and the `item_completed` envelope of 0.147 and later. See
+    /// `CodexRolloutFormat` for the measurement, and `CodexRolloutFormatProbe` for what happens
+    /// when a third shape arrives.
     static func codexEvent(from record: [String: Any]) -> StreamEvent? {
-        guard let recordType = record["type"] as? String,
-              let payload = record["payload"] as? [String: Any] else { return nil }
+        guard let recordType = record[CodexRolloutFormat.Key.type] as? String,
+              let payload = record[CodexRolloutFormat.Key.payload] as? [String: Any]
+        else { return nil }
 
-        if recordType == "response_item" {
+        if recordType == CodexRolloutFormat.RecordType.responseItem {
             return codexToolEvent(from: payload)
         }
 
-        guard recordType == "event_msg",
-              let type = payload["type"] as? String else { return nil }
+        guard recordType == CodexRolloutFormat.RecordType.eventMessage,
+              let type = payload[CodexRolloutFormat.Key.type] as? String else { return nil }
 
         switch type {
-        case CodexDiscoveryDefaults.userMessageType:
+        case CodexRolloutFormat.EventType.legacyUserMessage:
             guard let text = payload["message"] as? String else { return nil }
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : .userMessage(trimmed)
 
-        case "agent_message":
+        case CodexRolloutFormat.EventType.legacyAgentMessage:
             guard let text = payload["message"] as? String, !text.isEmpty else { return nil }
             return .assistantMessage(blocks: [.text(text)])
 
-        case "agent_reasoning":
-            guard let text = payload["text"] as? String, !text.isEmpty else { return nil }
+        case CodexRolloutFormat.EventType.legacyAgentReasoning:
+            guard let text = payload[CodexRolloutFormat.Key.text] as? String, !text.isEmpty
+            else { return nil }
             return .assistantMessage(blocks: [.thinking(text)])
+
+        case CodexRolloutFormat.EventType.itemCompleted:
+            return codexItemEvent(from: payload[CodexRolloutFormat.Key.item])
+
+        default:
+            return nil
+        }
+    }
+
+    /// The 0.147+ dialogue shape: an `item_completed` event carrying one typed item.
+    ///
+    /// Only the conversational items map here. A `CommandExecution`, `FileChange` or
+    /// `McpToolCall` item restates a tool call that the paired `response_item` records already
+    /// replay, and mapping both would draw every tool row twice — the same duplicate rule as the
+    /// `response_item` message copies, from the other side.
+    private static func codexItemEvent(from value: Any?) -> StreamEvent? {
+        guard let item = value as? [String: Any],
+              let type = item[CodexRolloutFormat.Key.type] as? String else { return nil }
+
+        switch type {
+        case CodexRolloutFormat.ItemType.userMessage:
+            guard let text = CodexRolloutFormat.text(of: item[CodexRolloutFormat.Key.content])
+            else { return nil }
+            return .userMessage(text)
+
+        case CodexRolloutFormat.ItemType.agentMessage:
+            guard let text = CodexRolloutFormat.text(of: item[CodexRolloutFormat.Key.content])
+            else { return nil }
+            return .assistantMessage(blocks: [.text(text)])
+
+        case CodexRolloutFormat.ItemType.reasoning:
+            // `summary_text` is the visible summary; `raw_content` is the encrypted chain and
+            // empty in every measured file.
+            guard let summaries = item[CodexRolloutFormat.Key.summaryText] as? [String]
+            else { return nil }
+            let text = summaries.joined(separator: "\n\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return text.isEmpty ? nil : .assistantMessage(blocks: [.thinking(text)])
+
+        case CodexRolloutFormat.ItemType.contextCompaction:
+            // The same line the live stream draws when Codex compacts, so a replayed
+            // conversation reads as the live one did.
+            return .transcriptNotice(L10n.string("Context compacted."))
 
         default:
             return nil

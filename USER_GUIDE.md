@@ -1106,8 +1106,13 @@ delivered, so the folder is a record of everything you filed.
 Right-click a recorded chat and choose **Continue with…** to start a new session with any other
 runtime: Claude Code, Codex, Grok, or OpenCode. The source stays resumable. Threading freezes its
 visible conversation into a provider-neutral snapshot, creates a new provider-native conversation,
-and sends that snapshot through the safest launch path the destination supports. Private reasoning
-is not copied; bounded tool calls and results are copied as untrusted context.
+and sends that snapshot through the safest launch path the destination supports. The snapshot keeps
+the conversation itself — what you wrote and what the agent answered — whole, reduces each tool
+call to a one-line summary, and keeps tool output only from the last two turns, so the new agent
+reads a few pages rather than the whole log. Private reasoning is not copied, and tool content
+crosses as untrusted context. If Threading cannot read the source transcript because its agent
+writes a newer format than this version understands, the continuation is refused with a message
+naming that version instead of handing over an empty conversation.
 
 The new chat remembers the whole provider/model path across repeated continuations. Native Chat
 shows it in a **Context handoff** divider above the conversation; every session, including

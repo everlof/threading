@@ -18,6 +18,8 @@ final class ConversationTimelineTests: XCTestCase {
         case claudeToolsAndThinking = "claude-tools-and-thinking"
         case codexExecAndPatch = "codex-exec-and-patch"
         case codexReasoning = "codex-reasoning"
+        /// The 0.147+ rollout shape: dialogue as `item_completed` items. See `CodexRolloutFormat`.
+        case codexItemCompleted = "codex-item-completed"
 
         var kind: AgentKind {
             rawValue.hasPrefix("claude") ? .claude : .codex

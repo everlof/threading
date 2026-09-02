@@ -3043,9 +3043,10 @@ enum MCPTools {
         Read the frozen conversation snapshot that created this cross-provider \
         continuation. The tool is scoped to this session: it cannot select another \
         session or a file path. Call it first when the opening bootstrap asks you to, \
-        then repeat with each returned next_cursor until it is null. The history \
-        contains visible user and assistant messages plus bounded tool calls and \
-        results; private reasoning is omitted.
+        then repeat with each returned next_cursor until it is null; the whole history \
+        is at most a few pages. It contains the user and assistant messages, one-line \
+        summaries of the tool calls, and bounded tool output from the last turns; \
+        private reasoning is omitted.
         """,
       inputSchema: MCPInputSchema(
         properties: [

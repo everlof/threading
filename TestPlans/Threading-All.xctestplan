@@ -45,6 +45,10 @@
       {
         "key" : "THREADING_UI_EVIDENCE_OUT",
         "value" : "$(THREADING_UI_EVIDENCE_OUT)"
+      },
+      {
+        "key" : "THREADING_CODEX_ROLLOUT_AUDIT",
+        "value" : "$(THREADING_CODEX_ROLLOUT_AUDIT)"
       }
     ],
     "targetForVariableExpansion" : {

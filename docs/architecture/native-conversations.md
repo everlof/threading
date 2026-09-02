@@ -752,10 +752,45 @@ terminal never needed this: its scrollback *was* the record. Drawing the convers
 means rebuilding it.
 
 Replay emits `[StreamEvent]` rather than a parallel model, so replayed and live content share
-one rendering path. Claude reuses its content-block parser; Codex reads the clean `event_msg`
-user/agent records from its rollout and deliberately ignores duplicate `response_item`
-messages. `.userMessage` exists only for replay: a live turn is echoed locally as it is sent,
-so producing it from the stream too would draw it twice.
+one rendering path. Claude reuses its content-block parser; Codex reads the typed dialogue
+records from its rollout and deliberately ignores the duplicate `response_item` message copies.
+`.userMessage` exists only for replay: a live turn is echoed locally as it is sent, so producing
+it from the stream too would draw it twice.
+
+**Codex has written its dialogue two ways, and the reader knows both.** Up to 0.146 a user turn
+was an `event_msg` of type `user_message` and an answer an `agent_message`. 0.147 introduced an
+`item_completed` event whose `item.type` is `UserMessage`, `AgentMessage`, `Reasoning`,
+`ContextCompaction` or one of the tool-shaped items; rollouts of 0.147–0.149 carry either shape,
+and from 0.150.1 the old events are gone (measured over 963 rollouts on one machine). Threading
+read only the old shape, so for a month every newer Codex conversation replayed as tool rows with
+no text — invisible in the terminal surface, and found only when a cross-provider handoff froze
+992k characters of tool output and not one user message. `CodexRolloutFormat` holds the vocabulary
+and the table; `codexItemEvent` maps the items. Tool-shaped items (`CommandExecution`,
+`FileChange`, `McpToolCall`, …) map to nothing because the paired `response_item` records already
+replay them, which is the same duplicate rule as the message copies from the other side.
+
+**A third shape is reported, not swallowed.** `CodexRolloutFormatProbe` rides every whole-file
+read (`TranscriptReplay.forEachRecordEvent`, which `replay`, the handoff capture and the tests all
+go through) and compares the model-visible history against what the reader produced. Every rollout
+format so far has kept one `response_item` `message` per assistant reply, because that list is the
+request history the CLI sends back to the model; a file with assistant replies there and none in
+the reduction is `TranscriptFormatVerdict.codexDialogueUnreadable`. The verdict is behavioural
+rather than a version pin on purpose: Codex releases every few days and most leave the records
+alone, so a notice after each update would teach people to ignore it. User turns do not decide
+the verdict — a spawned sub-agent's rollout carries its brief as a user-role history message and
+has no `UserMessage` item, and 18 measured files were that correct shape. On an unreadable file
+`replay` prepends one `.transcriptNotice` naming the Codex version where the conversation should
+have been, `ThreadingLogger.agent` and the `EventLog` journal record the version and the
+unfamiliar item types (never content), and a handoff capture refuses with
+`transcriptFormatUnreadable` rather than freezing tool output alone.
+`CodexRolloutFormat.newestVerifiedCLIVersion` says which release the reader was last checked
+against; bump it after running the opt-in audit in `CodexRolloutFormatTests`
+(`THREADING_CODEX_ROLLOUT_AUDIT=1 scripts/test.sh fast -only-testing:ThreadingTests/CodexRolloutFormatTests`;
+the variable is whitelisted in both test plans, which is how any variable reaches a hosted test)
+over real rollouts of the new release, and regenerate a fixture
+with `scripts/scrub_transcript.py` when a shape changed. The fixture `codex-item-completed.jsonl`
+under `Tests/Fixtures/Transcripts` is the 0.151 shape; the two older Codex fixtures are the legacy
+one, and `ConversationTimelineTests` holds every fixture to replaying both voices.
 
 Three Claude record kinds are skipped during **parent disk replay**, and each would otherwise
 read as nonsense there: `isMeta` (text the CLI injected on the user's behalf, never typed),

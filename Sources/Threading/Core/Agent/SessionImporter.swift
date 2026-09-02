@@ -337,10 +337,11 @@ enum SessionImporter {
 
     /// Names a rollout after the first thing the user actually typed.
     ///
-    /// Codex records a dedicated `user_message` event per turn, which is the only place the
-    /// user's own words appear unmixed; the conversation also replays them as `user`-role
-    /// messages, but behind the instruction blocks both CLIs prepend. The event is preferred
-    /// and the replayed message kept as a fallback, since older rollouts predate the event.
+    /// Codex records the user's own words unmixed once per turn — as a `user_message` event up
+    /// to 0.146 and as an `item_completed` event carrying a `UserMessage` item since 0.147 (see
+    /// `CodexRolloutFormat`); the conversation also replays them as `user`-role messages, but
+    /// behind the instruction blocks both CLIs prepend. Either typed shape is preferred and the
+    /// replayed message kept as a fallback, since the oldest rollouts predate both.
     static func codexTitle(at url: URL) -> String? {
         var typed: String?
         var replayed: String?
@@ -350,6 +351,15 @@ enum SessionImporter {
 
             if payload["type"] as? String == CodexDiscoveryDefaults.userMessageType,
                let text = userText(from: payload["message"]) {
+                typed = text
+                return false
+            }
+
+            if payload["type"] as? String == CodexRolloutFormat.EventType.itemCompleted,
+               let item = payload[CodexRolloutFormat.Key.item] as? [String: Any],
+               item[CodexRolloutFormat.Key.type] as? String
+                   == CodexRolloutFormat.ItemType.userMessage,
+               let text = userText(from: item[CodexRolloutFormat.Key.content]) {
                 typed = text
                 return false
             }

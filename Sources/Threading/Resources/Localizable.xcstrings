@@ -11210,6 +11210,17 @@
         }
       }
     },
+    "Codex %@ wrote this conversation in a format this version of Threading cannot read, so its messages are missing here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex %@ skrev den här konversationen i ett format som den här versionen av Threading inte kan läsa, så dess meddelanden saknas här."
+          }
+        }
+      }
+    },
     "Codex Hooks" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11338,6 +11349,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Codex kör inte en hook förrän du har godkänt texten en gång. Om du hoppar över kontrollen körs alla hooks i konfigurationsmappen ogranskade, även sådana som en agent lägger till senare. Låt detta vara av och godkänn en gång i Codex."
+          }
+        }
+      }
+    },
+    "Codex wrote this conversation in a format this version of Threading cannot read, so its messages are missing here." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Codex skrev den här konversationen i ett format som den här versionen av Threading inte kan läsa, så dess meddelanden saknas här."
           }
         }
       }

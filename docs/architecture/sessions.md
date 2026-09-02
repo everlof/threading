@@ -1881,14 +1881,36 @@ conversation renders a compact **Context handoff** divider, the sidebar hover ca
 retained full path, and the divider's direct source endpoint navigates when that row still exists.
 Deleting or renaming an ancestor cannot rewrite provenance: each destination owns its frozen copy.
 
-The context snapshot is provider-neutral too. Claude/Codex transcripts are reduced through
-`TranscriptReplay`; Grok uses its documented `grok export`; OpenCode uses its documented
-`opencode export` JSON. Visible dialogue and bounded tool context are retained, private reasoning
-is omitted, and a continuation handed off again prepends the prior normalised snapshot while
-dropping the bootstrap/history-tool exchange that transported it. The result is capped at one
-million characters and stored under the destination id. The snapshot belongs to that destination
-row and is removed with it (or its project), so a future launch can regenerate the same bootstrap
-without depending on a mutable source transcript.
+The context snapshot is provider-neutral too. Claude/Codex transcripts stream through
+`TranscriptReplay.forEachRecordEvent` into `ConversationHandoffReducer`; Grok uses its documented
+`grok export`; OpenCode uses its documented `opencode export` JSON, mapped to the same events and
+the same reducer. Private reasoning is omitted, and a continuation handed off again prepends the
+prior normalised snapshot while dropping the bootstrap/history-tool exchange that transported it.
+The snapshot belongs to the destination row and is removed with it (or its project), so a future
+launch can regenerate the same bootstrap without depending on a mutable source transcript.
+
+**The budget is dialogue-first, and it was set by one handoff that went wrong.** A Codex session
+of 21 user turns and 302 tool calls was continued with Claude. The capture reused the conversation
+view's `TranscriptReplay.read`, whose rolling window keeps the newest 400 events because each
+becomes a view; those 400 were all tool calls and their output, so the 992k-character snapshot
+held not one user message (the Codex format drift in
+[`native-conversations.md`](native-conversations.md) had already emptied the dialogue, and the
+window would have kept only 20k of it anyway). Per-item caps of 16k per result and a 1M total let
+tool output be 92% of it. The bootstrap told the destination to read every page before answering:
+24 pages, 626k tokens of context at the peak, 12.5 million cache-read tokens in five minutes, on a
+1M-context model that was the only reason it finished at all. The conversation's whole dialogue
+was 26k characters. `ConversationHandoffBudget` now keeps user and assistant text whole up to 96k
+characters (newest kept when over, and only that sets `replay_window_truncated`), reduces every
+tool call to the one-line subject the collapsed row shows (200 characters, 20k in all), and keeps
+tool output only for the last two turns (2k per result, 12k in all). The whole snapshot is
+128k characters — about 32k tokens and at most three pages — and the reducer enforces each budget
+as events arrive, so memory stays at the budget however long the transcript is. A rendering
+bound is not a context bound: the reducer takes the whole file, never the view's window.
+
+A page stays at 48k characters because Claude Code refuses an MCP result above 25k tokens rather
+than truncating it, and tool output tokenises at about three characters each. The bootstrap and
+the tool description now say the history is at most a few pages and what it holds, so the
+destination knows to read it all and knows not to expect raw tool output from every turn.
 
 The character budget is not trusted as a byte budget. The durable handoff envelope is encoded and
 refused above 8 MiB, and reopened through the same bounded reader. An oversized current-format file
@@ -1896,6 +1918,13 @@ does not become “no context”; legacy provider snapshots may still take the s
 `TranscriptReplay` compatibility path, which never requires a whole-file allocation. Provider
 exports are likewise read through a 32 MiB result ceiling, with only the final 64 KiB of stderr
 retained for a visible failure.
+
+**A transcript whose format hid its dialogue is refused, not frozen.** When the Codex format probe
+reports `codexDialogueUnreadable`, the capture fails with `transcriptFormatUnreadable` and a
+message naming the Codex version, because a snapshot of tool output with no messages is worse than
+no snapshot: the destination reads all of it before discovering there was no request in it. The
+source stays resumable in its own runtime, and the iPhone words the code with its general refusal
+sentence.
 
 Delivery follows runtime capability. Claude/Codex Terminal and all native Chat surfaces read
 pages from the session-scoped `conversation_history` tool. OpenCode receives the JSON snapshot as
