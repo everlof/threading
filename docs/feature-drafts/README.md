@@ -123,6 +123,17 @@ reshuffling it is a line move.
   isolated rich surface, live companion data plane and crash-safe system leases other ambitious
   extensions need. The largest platform investment here; nothing scheduled and no proxy engine
   adopted.
+- [Native extension tier](native-extension-tier.md) — the rendering tier the traffic inspector
+  and the device logs are both waiting on: an in-process native plugin for first-party fidelity
+  and an ExtensionKit appex for isolated third-party richness, sharing one curated facade over an
+  extracted `ThreadingDesignKit`. A standalone spike under `Probes/NativePluginTier` loads a
+  bundle and hosts its table today; gated on deciding the tier against the web-surface answer in
+  Host gap 2, and on re-measuring library validation on a stock Mac.
+- [Device and simulator logs](device-and-simulator-logs.md) — show what an iOS app under
+  development is actually saying, from the simulator and from a real device, inside Threading.
+  The capture half is measured and works today, including a linked tap that makes `print()`
+  reachable at all; it is gated on the same rendering tier the traffic inspector needs, and should
+  adopt that rather than invent a second one.
 - [Skin and Chrome Imports](skin-and-chrome-imports.md) — translate established declarative theme
   formats into Threading's existing theme and window-chrome model. Recorded for future
   evaluation; no format support committed.
