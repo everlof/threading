@@ -165,13 +165,49 @@ struct SubagentDescriptor: Codable, Equatable, Sendable {
         self.reasoningEffort = reasoningEffort
     }
 
+    /// What the navigator calls this child.
+    ///
+    /// The provider's nickname first — Claude's task description, Codex's `agentNickname` — then
+    /// the delegated task's first line, then the role, then a short id. The role comes *after*
+    /// the task deliberately: Codex reports every spawned child's role as `default`, so in a list
+    /// of three it told them apart from nothing, while what each was asked to do did.
     var displayName: String {
-        for candidate in [nickname, role] {
-            guard let candidate else { continue }
-            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { return trimmed }
-        }
+        if let nickname = Self.trimmed(nickname) { return nickname }
+        if let headline = promptHeadline { return headline }
+        if let role = Self.trimmed(role) { return role }
         return L10n.format("Agent %@", String(threadID.prefix(8)))
+    }
+
+    /// The delegated task's first line, cut to a title's length.
+    var promptHeadline: String? {
+        guard let prompt = Self.trimmed(prompt) else { return nil }
+        let firstLine = prompt
+            .split(omittingEmptySubsequences: true, whereSeparator: \.isNewline)
+            .first
+            .map { $0.trimmingCharacters(in: .whitespaces) } ?? prompt
+        guard !firstLine.isEmpty else { return nil }
+        guard firstLine.count > SubagentDefaults.titleCharacterLimit else { return firstLine }
+        let cut = firstLine.prefix(SubagentDefaults.titleCharacterLimit)
+        return cut.trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    /// The role, when `displayName` did not already say it.
+    var roleLabel: String? {
+        guard let role = Self.trimmed(role), role != displayName else { return nil }
+        return role
+    }
+
+    /// The delegated task as a line of its own, when `displayName` is not already made of it.
+    /// A child named after its task carries the whole prompt in its transcript's first row.
+    var promptDetail: String? {
+        guard Self.trimmed(nickname) != nil else { return nil }
+        return Self.trimmed(prompt)
+    }
+
+    private static func trimmed(_ value: String?) -> String? {
+        guard let value else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Adds newly learned metadata without erasing facts an earlier event already supplied.
@@ -578,6 +614,9 @@ enum SubagentDefaults {
     /// Enough context for a useful drill-in without turning a summary card into a second scroll
     /// view. The complete child transcript remains in `Agent.conversation`.
     static let activityLimit = 12
+
+    /// A row's name is one line. A task longer than this is still a task, not a title.
+    static let titleCharacterLimit = 96
 
     static let snapshotVersion = 1
     static let applicationDirectoryName = "Threading"

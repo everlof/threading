@@ -29,6 +29,7 @@ final class SubagentTranscriptViewController: NSViewController {
     // MARK: - Properties
 
     private let summaryView = SubagentSummaryView()
+    private let transcriptHeadingView = SubagentTranscriptHeadingView()
     private lazy var tableView: ThemedTableView = {
         let table = ThemedTableView()
         let column = NSTableColumn(
@@ -61,6 +62,7 @@ final class SubagentTranscriptViewController: NSViewController {
 
     private enum PresentationID: Hashable {
         case summary
+        case transcriptHeading
         case timeline(Int)
         case markdown(row: Int, block: Int)
         case divider(Int)
@@ -70,6 +72,7 @@ final class SubagentTranscriptViewController: NSViewController {
     private struct PresentationItem {
         enum Content {
             case summary
+            case transcriptHeading
             case timeline(Int)
             case markdown(source: String)
             case divider
@@ -271,6 +274,10 @@ final class SubagentTranscriptViewController: NSViewController {
             }
         )
         summarySpan.end(metadata: ["agents": "\(agents.count)"])
+        transcriptHeadingView.update(
+            title: agent.descriptor.displayName,
+            state: summaryState(agent.status)
+        )
 #if DEBUG
         let summaryEnded = DispatchTime.now().uptimeNanoseconds
 #endif
@@ -313,7 +320,12 @@ final class SubagentTranscriptViewController: NSViewController {
     }
 
     private func rebuildPresentation(for agent: SubagentTimeline.Agent) {
-        presentationItems = [PresentationItem(id: .summary, content: .summary)]
+        // The heading is the seam between the navigator and the rows: it names the child the
+        // rows belong to, which a selected row a screen higher cannot do on its own.
+        presentationItems = [
+            PresentationItem(id: .summary, content: .summary),
+            PresentationItem(id: .transcriptHeading, content: .transcriptHeading)
+        ]
         if agent.conversation.rows.isEmpty {
             // "Not arrived yet" is only true while there is still something to arrive. A child
             // that has finished without leaving a transcript never will, and saying otherwise
@@ -593,7 +605,8 @@ final class SubagentTranscriptViewController: NSViewController {
         return SubagentSummaryItem(
             id: agent.descriptor.threadID,
             title: agent.descriptor.displayName,
-            subtitle: agent.descriptor.prompt,
+            subtitle: agent.descriptor.promptDetail,
+            role: agent.descriptor.roleLabel,
             configurationDetail: configurationDetail(for: agent.descriptor),
             state: summaryState(agent.status),
             statusDetail: agent.statusDetail,
@@ -664,6 +677,8 @@ extension SubagentTranscriptViewController: NSTableViewDataSource, NSTableViewDe
         switch item.content {
         case .summary:
             content = summaryView
+        case .transcriptHeading:
+            content = transcriptHeadingView
         case .timeline(let index):
             content = rowView(at: index)
         case .markdown(let source):

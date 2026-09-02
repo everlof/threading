@@ -3085,9 +3085,13 @@ final class SubagentSummaryViewTests: XCTestCase {
         )
         XCTAssertEqual(summary.selectionStyle, .navigation)
         XCTAssertEqual(
-            descendants(of: summary).compactMap { $0 as? ThemedButton }.count,
+            descendants(of: summary).compactMap { $0 as? SubagentNavigatorRowView }.count,
             12,
             "The scrolling side pane should retain every child rather than clipping the list"
+        )
+        XCTAssertTrue(
+            descendants(of: summary).compactMap { $0 as? ThemedButton }.isEmpty,
+            "A navigation row is a selectable row, not a button wearing a chevron"
         )
     }
 
@@ -3117,9 +3121,10 @@ final class SubagentSummaryViewTests: XCTestCase {
         let labels = descendants(of: summary)
             .compactMap { $0 as? NSTextField }
             .map(\.stringValue)
-        XCTAssertTrue(labels.contains("worker"))
+        // A child with no nickname is named after its task, not after a role every sibling
+        // shares; the role keeps its place on the configuration line.
         XCTAssertTrue(labels.contains("Make delegated work legible in the Subagents pane."))
-        XCTAssertTrue(labels.contains("gpt-5.6-luna · Reasoning: max"))
+        XCTAssertTrue(labels.contains("worker · gpt-5.6-luna · Reasoning: max"))
         XCTAssertTrue(labels.contains("Added task, configuration, and recent-result receipts."))
         XCTAssertTrue(labels.contains("No transcript recorded."))
     }
@@ -3147,18 +3152,35 @@ final class SubagentSummaryViewTests: XCTestCase {
 
         let second = try XCTUnwrap(
             descendants(of: controller.view)
-                .compactMap { $0 as? ThemedButton }
+                .compactMap { $0 as? SubagentNavigatorRowView }
                 .first { $0.title == "Second child" }
         )
-        _ = second.sendAction(second.action, to: second.target)
+        XCTAssertTrue(second.performPrimaryAction())
         controller.view.layoutSubtreeIfNeeded()
 
         XCTAssertEqual(selectedID, "child-two")
         XCTAssertEqual(controller.representedThreadID, "child-two")
-        let transcriptRow = try XCTUnwrap(
+        // The seam between the navigator and the rows names the child the rows belong to.
+        let heading = try XCTUnwrap(
             controller.transcriptTableView.view(
                 atColumn: 0,
                 row: 1,
+                makeIfNecessary: true
+            )
+        )
+        XCTAssertNotNil(
+            descendants(of: heading).first { $0 is SubagentTranscriptHeadingView },
+            "The transcript needs a heading saying whose it is"
+        )
+        XCTAssertTrue(
+            descendants(of: heading)
+                .compactMap { $0 as? NSTextField }
+                .contains { $0.stringValue == "Second child" }
+        )
+        let transcriptRow = try XCTUnwrap(
+            controller.transcriptTableView.view(
+                atColumn: 0,
+                row: 2,
                 makeIfNecessary: true
             )
         )
@@ -3207,13 +3229,14 @@ final class SubagentSummaryViewTests: XCTestCase {
         XCTAssertTrue(labels.contains("Inspect the app-server event adapter."))
         XCTAssertTrue(labels.contains("gpt-5.6-sol · Reasoning: xhigh · 18s · 4 tools"))
         XCTAssertTrue(labels.contains("Found a missing terminal-state mapping"))
-        let selectedButton = try XCTUnwrap(
+        let selectedRow = try XCTUnwrap(
             descendants(of: view)
-                .compactMap { $0 as? ThemedButton }
+                .compactMap { $0 as? SubagentNavigatorRowView }
                 .first { $0.title == "Parser audit" }
         )
+        XCTAssertTrue(selectedRow.isSelected)
         XCTAssertEqual(
-            selectedButton.accessibilityValue() as? Bool,
+            selectedRow.accessibilityValue() as? Bool,
             true,
             "VoiceOver should identify the child whose transcript is on screen"
         )
@@ -3257,14 +3280,14 @@ final class SubagentSummaryViewTests: XCTestCase {
             .compactMap { $0 as? NSTextField }
             .map(\.stringValue)
         XCTAssertTrue(labels.contains("1 working · 1 done · 61K tokens"))
+        // Configuration, progress and usage share one quiet line rather than one each.
         XCTAssertTrue(labels.contains(
-            "gpt-5.6-sol · Reasoning: xhigh · 42s · 7 tools · 24K tokens"
+            "gpt-5.6-sol · Reasoning: xhigh · 42s · 7 tools · 24K tokens · $0.42 est. · 3 requests"
         ))
-        XCTAssertTrue(labels.contains("$0.42 est. · 3 requests"))
         XCTAssertTrue(labels.contains("Inspect the app-server event adapter and verify child state."))
         XCTAssertTrue(labels.contains("Mapped the missing terminal state and added its regression."))
         XCTAssertEqual(
-            descendants(of: view).compactMap { $0 as? ThemedButton }.count,
+            descendants(of: view).compactMap { $0 as? SubagentNavigatorRowView }.count,
             2,
             "usage should annotate the existing child navigator, not build a second list"
         )
@@ -3553,8 +3576,8 @@ final class SubagentSummaryViewTests: XCTestCase {
         )
         XCTAssertEqual(
             controller.renderedPresentationCount,
-            8,
-            "Markdown blocks should be separate virtual rows beside the two tool folds"
+            9,
+            "Markdown blocks should be separate virtual rows beside the heading and two tool folds"
         )
         let summary = try XCTUnwrap(
             transcriptDescendants.compactMap { $0 as? SubagentSummaryView }.first
@@ -3562,7 +3585,7 @@ final class SubagentSummaryViewTests: XCTestCase {
         XCTAssertEqual(summary.selectionStyle, .navigation)
         XCTAssertTrue(
             descendants(of: summary)
-                .compactMap { $0 as? ThemedButton }
+                .compactMap { $0 as? SubagentNavigatorRowView }
                 .contains { $0.title == agent.descriptor.displayName },
             "The side pane no longer exposes the child navigator"
         )
@@ -3590,13 +3613,13 @@ final class SubagentSummaryViewTests: XCTestCase {
         firstFold.setExpanded(true)
         XCTAssertEqual(
             controller.renderedPresentationCount,
-            10,
+            11,
             "Opening a two-tool fold should insert exactly its two virtual rows"
         )
         firstFold.setExpanded(false)
         XCTAssertEqual(
             controller.renderedPresentationCount,
-            8,
+            9,
             "Closing a tool fold should release its virtual rows again"
         )
 
@@ -3928,13 +3951,17 @@ final class SubagentSummaryViewTests: XCTestCase {
         )
         _ = laidOut(view)
 
-        let buttonTitles = descendants(of: view)
-            .compactMap { $0 as? ThemedButton }
-            .map(\.title)
+        let rows = descendants(of: view).compactMap { $0 as? SubagentNavigatorRowView }
         XCTAssertEqual(
-            buttonTitles,
+            rows.filter(\.isEnabled).map(\.title),
             ["Parser audit"],
-            "Only the child with a transcript should be a control"
+            "Only the child with a transcript should be pressable"
+        )
+        let empty = try XCTUnwrap(rows.first { $0.title == "Render check" })
+        XCTAssertFalse(empty.isEnabled)
+        XCTAssertFalse(
+            empty.performPrimaryAction(),
+            "A row that leads nowhere must not answer a press"
         )
 
         let labels = descendants(of: view)
@@ -3962,10 +3989,10 @@ final class SubagentSummaryViewTests: XCTestCase {
         controller.update(timeline, selectedThreadID: "live")
         controller.view.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(
-            descendants(of: controller.view).compactMap { $0 as? ThemedButton }.count,
-            1
-        )
+        let rows = descendants(of: controller.view)
+            .compactMap { $0 as? SubagentNavigatorRowView }
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertTrue(rows.allSatisfy(\.isEnabled))
         XCTAssertTrue(
             descendants(of: controller.view)
                 .compactMap { $0 as? NSTextField }
@@ -3992,8 +4019,8 @@ final class SubagentSummaryViewTests: XCTestCase {
         XCTAssertFalse(labels.contains { $0.contains("has not arrived yet") })
     }
 
-    /// Aligned by ink: dropping the chevron must not drag the row's words left, or a list that
-    /// mixes openable and empty children reads as ragged.
+    /// Aligned by ink: a row that cannot open shares the ink column of the rows that can, and
+    /// both share the card's own header, or a list that mixes the two reads as ragged.
     func testARowThatLeadsNowhereStillLinesUpWithTheRowsThatOpen() throws {
         let view = SubagentSummaryView()
         view.selectionStyle = .navigation
@@ -4025,22 +4052,203 @@ final class SubagentSummaryViewTests: XCTestCase {
         )
         _ = laidOut(view)
 
-        let button = try XCTUnwrap(
-            descendants(of: view).compactMap { $0 as? ThemedButton }
-                .first { $0.title == "Parser audit" }
-        )
-        let label = try XCTUnwrap(
-            descendants(of: view).compactMap { $0 as? NSTextField }
-                .first { $0.stringValue == "Render check" }
-        )
+        let labels = descendants(of: view).compactMap { $0 as? NSTextField }
+        let opens = try XCTUnwrap(labels.first { $0.stringValue == "Parser audit" })
+        let empty = try XCTUnwrap(labels.first { $0.stringValue == "Render check" })
+        let header = try XCTUnwrap(labels.first { $0.stringValue == L10n.string("Subagents") })
         // Measured on alignment rects, not frames — that is what the stack lays out against,
         // and an `NSTextField` carries a 2pt horizontal alignment inset a raw frame would
         // report as a misalignment that is not on screen.
-        let buttonInk = alignedLeadingX(of: button, in: view)
-            + ThemedButton.plainTitleLeadingInset
-        let labelInk = alignedLeadingX(of: label, in: view)
+        let opensInk = alignedLeadingX(of: opens, in: view)
+        let emptyInk = alignedLeadingX(of: empty, in: view)
+        let headerInk = alignedLeadingX(of: header, in: view)
 
-        XCTAssertEqual(labelInk, buttonInk, accuracy: 0.5)
+        XCTAssertEqual(emptyInk, opensInk, accuracy: 0.5)
+        XCTAssertEqual(headerInk, opensInk, accuracy: 0.5)
+    }
+
+    // MARK: - Selection Says Whose Transcript Is On Screen
+
+    /// The row of the child on screen paints the theme's selection; the others paint nothing.
+    /// That plate, not a turned chevron, is how the reader learns which agent the rows below
+    /// belong to.
+    func testTheChildOnScreenIsTheOneRowDrawnSelected() throws {
+        let view = SubagentSummaryView()
+        view.selectionStyle = .navigation
+        view.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "one",
+                    title: "First child",
+                    subtitle: nil,
+                    state: .completed,
+                    statusDetail: nil,
+                    detailLines: ["First reply"]
+                ),
+                SubagentSummaryItem(
+                    id: "two",
+                    title: "Second child",
+                    subtitle: nil,
+                    state: .completed,
+                    statusDetail: nil,
+                    detailLines: ["Second reply"]
+                )
+            ],
+            workingCount: 0,
+            doneCount: 2,
+            selectedID: "two"
+        )
+        _ = laidOut(view)
+
+        let rows = descendants(of: view).compactMap { $0 as? SubagentNavigatorRowView }
+        XCTAssertEqual(rows.map(\.isSelected), [false, true])
+        XCTAssertEqual(rows.map { $0.selectionGround != nil }, [false, true])
+        XCTAssertEqual(rows.map { $0.accessibilityValue() as? Bool }, [false, true])
+        XCTAssertEqual(rows.map { $0.accessibilityTitle() }, ["First child", "Second child"])
+
+        // The selected plate is the theme's own selection, held back until the title reads on
+        // it — so the title must read on it, under every stock theme and both appearances.
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        let outputDirectory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
+            .flatMap { $0.isEmpty ? nil : $0 }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        for theme in [AppTheme.system] + AppThemeStyles.all {
+            AppThemePalette.set(theme)
+            let appearances: [NSAppearance.Name] = theme.isAdaptive ? [.aqua, .darkAqua] : [.darkAqua]
+            for appearanceName in appearances {
+                // Measured again under each theme: a period theme's type is smaller, and a frame
+                // carried over from the previous theme leaves its rows floating in a card sized
+                // for the last one.
+                let margin = Design.Spacing.large
+                let width: CGFloat = 560
+                let host = NSView(frame: NSRect(x: 0, y: 0, width: width + margin * 2, height: 800))
+                host.appearance = NSAppearance(named: appearanceName)
+                host.applySurface(fill: Design.Surface.ground, radius: .fixed(0))
+                view.removeFromSuperview()
+                host.addSubview(view)
+                NSLayoutConstraint.activate([
+                    view.topAnchor.constraint(equalTo: host.topAnchor, constant: margin),
+                    view.leadingAnchor.constraint(equalTo: host.leadingAnchor, constant: margin),
+                    view.trailingAnchor.constraint(equalTo: host.trailingAnchor, constant: -margin)
+                ])
+                AppThemeRefresh.repaint(host)
+                host.layoutSubtreeIfNeeded()
+                host.frame.size.height = view.frame.height + margin * 2
+                host.layoutSubtreeIfNeeded()
+
+                let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+                host.cacheDisplay(in: host.bounds, to: rep)
+
+                let selected = try XCTUnwrap(
+                    descendants(of: view)
+                        .compactMap { $0 as? SubagentNavigatorRowView }
+                        .first(where: \.isSelected)
+                )
+                var ground: NSColor?
+                host.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    ground = selected.selectionGround
+                }
+                let title = try XCTUnwrap(
+                    descendants(of: selected)
+                        .compactMap { $0 as? NSTextField }
+                        .first { $0.stringValue == "Second child" }
+                )
+                var ratio: CGFloat = 0
+                host.effectiveAppearance.performAsCurrentDrawingAppearance {
+                    ratio = ThemeContrast.ratio(title.textColor ?? .clear, ground ?? .clear)
+                }
+                XCTAssertGreaterThanOrEqual(
+                    ratio,
+                    4.5,
+                    "\(theme.name)/\(appearanceName.rawValue): the selected title does not read on its plate"
+                )
+
+                guard let outputDirectory else { continue }
+                let data = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+                try FileManager.default.createDirectory(
+                    at: outputDirectory,
+                    withIntermediateDirectories: true
+                )
+                let slug = theme.name.lowercased().replacingOccurrences(of: " ", with: "-")
+                try data.write(to: outputDirectory.appendingPathComponent(
+                    "subagent-navigator-selected-\(slug)-\(appearanceName == .aqua ? "light" : "dark").png"
+                ))
+            }
+        }
+    }
+
+    /// A theme's button convention is for buttons. Cyberpunk uppercases every control title, and
+    /// a navigator whose names were button titles showed three children as DEFAULT — a heading
+    /// repeated, not three agents. A name is drawn as the provider wrote it.
+    func testChildNamesKeepTheirCaseUnderAThemeThatUppercasesControls() throws {
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        AppThemePalette.set(AppThemeStyles.cyberpunk)
+
+        let view = SubagentSummaryView()
+        view.selectionStyle = .navigation
+        view.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "codex-default",
+                    title: "Harden the AWS scaffold",
+                    subtitle: nil,
+                    role: "default",
+                    state: .completed,
+                    statusDetail: nil,
+                    detailLines: []
+                )
+            ],
+            workingCount: 0,
+            doneCount: 1
+        )
+        _ = laidOut(view)
+
+        let labels = descendants(of: view)
+            .compactMap { $0 as? NSTextField }
+            .map(\.stringValue)
+        XCTAssertTrue(labels.contains("Harden the AWS scaffold"))
+        XCTAssertTrue(labels.contains("default"))
+        XCTAssertFalse(labels.contains("DEFAULT"))
+    }
+
+    /// Codex reports every spawned child's role as `default`; the name has to come from the
+    /// task. Claude names its children after the task already, and keeps the role beside it.
+    func testAChildWithNoNicknameIsNamedAfterItsTaskRatherThanItsSharedRole() {
+        let codex = SubagentDescriptor(
+            threadID: "thr_1",
+            role: "default",
+            prompt: "Harden the AWS scaffold.\nZero-count ECS services must not be created."
+        )
+        XCTAssertEqual(codex.displayName, "Harden the AWS scaffold.")
+        XCTAssertEqual(codex.roleLabel, "default")
+        XCTAssertNil(codex.promptDetail, "The transcript's first row carries the full task")
+
+        let claude = SubagentDescriptor(
+            threadID: "toolu_1",
+            nickname: "Parser audit",
+            role: "Explore",
+            prompt: "Inspect the app-server event adapter."
+        )
+        XCTAssertEqual(claude.displayName, "Parser audit")
+        XCTAssertEqual(claude.roleLabel, "Explore")
+        XCTAssertEqual(claude.promptDetail, "Inspect the app-server event adapter.")
+
+        let roleOnly = SubagentDescriptor(threadID: "thr_2", role: "Explore")
+        XCTAssertEqual(roleOnly.displayName, "Explore")
+        XCTAssertNil(roleOnly.roleLabel, "A role that is the name is not repeated beside it")
+
+        let long = SubagentDescriptor(
+            threadID: "thr_3",
+            prompt: String(repeating: "word ", count: 40)
+        )
+        XCTAssertEqual(
+            long.displayName.count,
+            SubagentDefaults.titleCharacterLimit + 1,
+            "A task longer than a title is cut and marked as cut"
+        )
+        XCTAssertTrue(long.displayName.hasSuffix("…"))
     }
 
     private func makeAgent(

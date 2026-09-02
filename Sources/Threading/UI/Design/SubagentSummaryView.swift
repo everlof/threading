@@ -38,6 +38,10 @@ struct SubagentSummaryItem: Equatable {
     let id: String
     let title: String
     let subtitle: String?
+    /// The provider's role for the child, when `title` does not already say it — Claude's
+    /// `Explore`, Codex's `default`. Drawn beside the configuration rather than as the name,
+    /// because a role shared by every row in the list names none of them.
+    let role: String?
     let configurationDetail: String?
     let state: State
     let statusDetail: String?
@@ -49,6 +53,7 @@ struct SubagentSummaryItem: Equatable {
         id: String,
         title: String,
         subtitle: String?,
+        role: String? = nil,
         configurationDetail: String? = nil,
         state: State,
         statusDetail: String?,
@@ -59,12 +64,69 @@ struct SubagentSummaryItem: Equatable {
         self.id = id
         self.title = title
         self.subtitle = subtitle
+        self.role = role
         self.configurationDetail = configurationDetail
         self.state = state
         self.statusDetail = statusDetail
         self.usageDetail = usageDetail
         self.detailLines = detailLines
         self.transcriptAvailability = transcriptAvailability
+    }
+
+    /// Role, configuration, progress and usage as one quiet line, each fact once.
+    ///
+    /// One line rather than one per source: the pane is narrow, and a row that spent a line on
+    /// "3.1M tokens" alone read as a list of numbers with a name on top. Facts that repeat each
+    /// other — a progress line that already carries the token count — appear once.
+    var metaLine: String? {
+        let facts = [role, configurationDetail, statusDetail, usageDetail]
+            .compactMap { fact -> String? in
+                guard let fact, !fact.isEmpty else { return nil }
+                return fact
+            }
+            .reduce(into: [String]()) { unique, fact in
+                if !unique.contains(fact) { unique.append(fact) }
+            }
+        return facts.isEmpty ? nil : facts.joined(separator: " · ")
+    }
+
+    /// The newest activity line that says something the row's other lines do not.
+    var latestDistinctActivity: String? {
+        let alreadyShown = Set(
+            [title, subtitle, role, configurationDetail, statusDetail, usageDetail]
+                .compactMap { $0 }
+                .filter { !$0.isEmpty }
+        )
+        return detailLines.reversed().first { detail in
+            !detail.isEmpty && !alreadyShown.contains(detail)
+        }
+    }
+}
+
+extension SubagentSummaryItem.State {
+
+    /// The state as the row says it.
+    var displayText: String {
+        switch self {
+        case .pending: return L10n.string("Pending")
+        case .working: return L10n.string("Working")
+        case .completed: return L10n.string("Done")
+        case .interrupted: return L10n.string("Interrupted")
+        case .failed: return L10n.string("Failed")
+        case .stopped: return L10n.string("Stopped")
+        }
+    }
+
+    /// The state's ink. Never the only signal: the word beside it says the same thing.
+    @MainActor
+    var color: NSColor {
+        switch self {
+        case .pending: return Design.Status.warning
+        case .working: return Design.Surface.accent
+        case .completed: return Design.Status.positive
+        case .interrupted, .stopped: return Design.Text.tertiary
+        case .failed: return Design.Status.negative
+        }
     }
 }
 
@@ -73,6 +135,10 @@ struct SubagentSummaryItem: Equatable {
 /// The component owns every interactive and painted surface. Feature code supplies semantic
 /// rows and receives selections; it never constructs an AppKit button or invents status colour,
 /// spacing, type, or panel geometry outside the design boundary.
+///
+/// In the `navigation` style every child is a `SubagentNavigatorRowView`: a selectable row that
+/// paints the theme's selection under the child whose transcript is on screen, rather than a
+/// chevron that only turned. See that type for why.
 final class SubagentSummaryView: NSView {
 
     // MARK: - Properties
@@ -81,8 +147,10 @@ final class SubagentSummaryView: NSView {
         /// The selected child's recent activity opens beneath its row.
         case inline
 
-        /// A row is a navigation action. Selection is handed to the feature, while this
-        /// component remains the compact overview it was before the click.
+        /// A row is a navigation action: pressing it shows that child's transcript beneath this
+        /// component, and the row of the child on screen is drawn selected. Selection is handed
+        /// to the feature, while this component remains the compact overview it was before the
+        /// click.
         case navigation
 
         /// The selected child is already open beneath this component. Draw only a compact
@@ -99,6 +167,7 @@ final class SubagentSummaryView: NSView {
         didSet {
             guard selectionStyle != oldValue else { return }
             revealSelectedPage()
+            applyStyleGeometry()
             rebuildRows()
         }
     }
@@ -220,11 +289,24 @@ final class SubagentSummaryView: NSView {
             rows.trailingAnchor.constraint(equalTo: content.trailingAnchor)
         ])
         holdAtContentInset(padding)
+        applyStyleGeometry()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// Navigation rows paint a plate that reaches `inkInset` past their words on either side.
+    /// The header and pager hold their words in by the same amount, so the card's title, its
+    /// count and every row's name share one ink column while the plates keep their breathing
+    /// room; the rows themselves are separated by their plates rather than by rules.
+    private func applyStyleGeometry() {
+        let inkInset = selectionStyle == .navigation ? SubagentNavigatorRowView.inkInset : 0
+        let insets = NSEdgeInsets(top: 0, left: inkInset, bottom: 0, right: inkInset)
+        header.edgeInsets = insets
+        pager.edgeInsets = insets
+        rows.spacing = selectionStyle == .navigation ? Design.Spacing.tight : .zero
     }
 
     // MARK: - Content
@@ -312,7 +394,7 @@ final class SubagentSummaryView: NSView {
         for item in items[start..<end] {
             let row = makeRow(item)
             let separator: SeparatorView?
-            if previousRow != nil {
+            if previousRow != nil, selectionStyle != .navigation {
                 let rowSeparator = SeparatorView()
                 separator = rowSeparator
                 rows.addArrangedSubview(rowSeparator)
@@ -420,12 +502,12 @@ final class SubagentSummaryView: NSView {
         }
     }
 
-    /// Whether the row's chevron would lead anywhere.
+    /// Whether opening the row would lead anywhere.
     ///
-    /// A disclosure chevron is a promise, and a row that opens onto "nothing arrived yet" is a
-    /// dead control the user has no way to tell from a slow one. Inline rows promise the detail
-    /// this component draws itself; navigation rows promise a transcript, which only the
-    /// feature can vouch for.
+    /// A pressable row is a promise, and a row that opens onto "nothing arrived yet" is a dead
+    /// control the user has no way to tell from a slow one. Inline rows promise the detail this
+    /// component draws itself; navigation rows promise a transcript, which only the feature can
+    /// vouch for, and a navigation row that cannot keep it is disabled rather than removed.
     private func isExpandable(_ item: SubagentSummaryItem) -> Bool {
         switch selectionStyle {
         case .detail:
@@ -438,12 +520,12 @@ final class SubagentSummaryView: NSView {
     }
 
     private func makeRow(_ item: SubagentSummaryItem) -> NSView {
+        if selectionStyle == .navigation {
+            return makeNavigationRow(item)
+        }
         let isExpandable = isExpandable(item)
         let showsInlineDetail = isExpandable
             && selectionStyle == .inline
-            && selectedID == item.id
-        let showsSelection = isExpandable
-            && selectionStyle == .navigation
             && selectedID == item.id
         let title: NSView
         if !isExpandable {
@@ -459,7 +541,7 @@ final class SubagentSummaryView: NSView {
             title = label
         } else {
             let button = ThemedButton(
-                symbol: showsInlineDetail || showsSelection ? "chevron.down" : "chevron.right",
+                symbol: showsInlineDetail ? "chevron.down" : "chevron.right",
                 accessibility: item.title,
                 target: self,
                 action: #selector(selectAgent(_:))
@@ -471,20 +553,15 @@ final class SubagentSummaryView: NSView {
             // secondary tier instead of the quaternary decoration tier a bare symbol defaults to.
             button.contentTintColor = Design.Text.secondary
             button.setAccessibilityTitle(item.title)
-            if selectionStyle == .navigation {
-                // The chevron is only a visual cue. Expose the same selected state as a Boolean
-                // value so VoiceOver can distinguish the transcript currently on screen.
-                button.setAccessibilityValue(showsSelection)
-            }
             button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             identifiersByButton[ObjectIdentifier(button)] = item.id
             title = button
         }
 
-        let status = NSTextField(labelWithString: stateText(item.state))
+        let status = NSTextField(labelWithString: item.state.displayText)
         status.translatesAutoresizingMaskIntoConstraints = false
         status.applyFont(.detail())
-        status.textColor = stateColor(item.state)
+        status.textColor = item.state.color
         status.setContentHuggingPriority(.required, for: .horizontal)
 
         let spacer = NSView()
@@ -533,18 +610,6 @@ final class SubagentSummaryView: NSView {
             heading.trailingAnchor.constraint(equalTo: row.trailingAnchor)
         ])
 
-        let showsStandingContext = selectionStyle == .navigation
-        if showsStandingContext,
-           let subtitle = item.subtitle,
-           !subtitle.isEmpty {
-            addDetail(
-                subtitle,
-                to: row,
-                color: Design.Text.secondary,
-                maximumNumberOfLines: 2
-            )
-        }
-
         let operationalDetails = [item.configurationDetail, item.statusDetail]
             .compactMap { detail -> String? in
                 guard let detail, !detail.isEmpty else { return nil }
@@ -572,26 +637,6 @@ final class SubagentSummaryView: NSView {
             )
         }
 
-        if selectionStyle == .navigation,
-           let latestActivity = latestActivity(in: item) {
-            addDetail(
-                latestActivity,
-                to: row,
-                color: Design.Text.secondary,
-                maximumNumberOfLines: 2
-            )
-        }
-
-        // Removing the chevron answers "why does this not open"; without a line saying so the
-        // row is merely quiet about it, and a missing transcript reads as a missing feature.
-        if !isExpandable, selectionStyle == .navigation {
-            addDetail(
-                L10n.string("No transcript recorded."),
-                to: row,
-                color: Design.Text.tertiary
-            )
-        }
-
         if showsInlineDetail {
             if let subtitle = item.subtitle, !subtitle.isEmpty {
                 addDetail(subtitle, to: row, color: Design.Text.secondary)
@@ -613,16 +658,18 @@ final class SubagentSummaryView: NSView {
         return row
     }
 
-    private func latestActivity(in item: SubagentSummaryItem) -> String? {
-        let alreadyShown = Set([
-            item.subtitle,
-            item.configurationDetail,
-            item.statusDetail,
-            item.usageDetail
-        ].compactMap { $0 }.filter { !$0.isEmpty })
-        return item.detailLines.reversed().first { detail in
-            !detail.isEmpty && !alreadyShown.contains(detail)
-        }
+    /// A navigation row: the child on screen is drawn selected, a child that opens is pressable,
+    /// and a child that leads nowhere is disabled and says why. The row owns its plate and its
+    /// lines; this component only decides which child it is and what selecting it means.
+    private func makeNavigationRow(_ item: SubagentSummaryItem) -> NSView {
+        let row = SubagentNavigatorRowView()
+        row.show(item, isSelected: isExpandable(item) && selectedID == item.id)
+        let id = item.id
+        // Selecting the child already on screen is useful after the detail tab was closed: it
+        // reopens the current snapshot instead of requiring a meaningless deselect click.
+        row.onSelect = { [weak self] in self?.setSelection(id) }
+        row.onRevealTranscript = { [weak self] url in self?.onRevealTranscript?(url) }
+        return row
     }
 
     private func addDetail(
@@ -653,33 +700,8 @@ final class SubagentSummaryView: NSView {
         switch selectionStyle {
         case .inline:
             setSelection(selectedID == id ? nil : id)
-        case .navigation:
-            // Selecting the same child again is useful after the detail tab was closed: it
-            // reopens the current snapshot instead of requiring a meaningless deselect click.
-            setSelection(id)
-        case .detail:
+        case .navigation, .detail:
             break
-        }
-    }
-
-    private func stateText(_ state: SubagentSummaryItem.State) -> String {
-        switch state {
-        case .pending: return L10n.string("Pending")
-        case .working: return L10n.string("Working")
-        case .completed: return L10n.string("Done")
-        case .interrupted: return L10n.string("Interrupted")
-        case .failed: return L10n.string("Failed")
-        case .stopped: return L10n.string("Stopped")
-        }
-    }
-
-    private func stateColor(_ state: SubagentSummaryItem.State) -> NSColor {
-        switch state {
-        case .pending: return Design.Status.warning
-        case .working: return Design.Surface.accent
-        case .completed: return Design.Status.positive
-        case .interrupted, .stopped: return Design.Text.tertiary
-        case .failed: return Design.Status.negative
         }
     }
 }

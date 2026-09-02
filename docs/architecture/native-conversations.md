@@ -497,16 +497,25 @@ identities until expansion. Long assistant answers are also split at Markdown bl
 so revealing a large report near the bottom does not attach one document-sized constraint tree.
 Selection and tool/user disclosure state live in the controller and survive row recycling.
 
-A navigator row only carries a chevron when opening it reaches a transcript — rows already
-replayed, a provider file on disk, or a child still running, which is the one case where "has
-not arrived yet" is the truth rather than a permanent state. `SubagentSummaryItem` carries the
-answer as one `TranscriptAvailability`: unavailable, openable from retained/live rows, or on
-disk with its URL. The component cannot derive that state: a live child streams rows it has no
-file for, and a finished one may name a path the provider never wrote. Because a Finder action
-is available only in the on-disk case, navigation and reveal cannot contradict one another. A
-row that leads nowhere keeps its place in the list and says so, indented to the chevron rows'
-ink via `ThemedButton.plainTitleLeadingInset` so a mixed list is not ragged. The same distinction
-picks the detail pane's notice, so a finished child stops claiming a file is on its way. See
+A navigator row is a **selectable row**, and the row of the child on screen is drawn selected.
+The rows were buttons carrying a chevron, and the chevron lied twice: it promised detail under
+the row when pressing it swapped the transcript further down the pane, and on the row already
+open a second press did nothing at all. Nothing said which of three finished children the rows
+below belonged to, which was reported as every agent writing into one space. Now the selected
+row paints the theme's selection, the way the sidebar paints the open session, and a
+`SubagentTranscriptHeadingView` at the seam between navigator and rows names the child the rows
+belong to (`SubagentNavigatorRowView` in [`design-system.md`](design-system.md)).
+
+A row is pressable only when opening it reaches a transcript — rows already replayed, a
+provider file on disk, or a child still running, which is the one case where "has not arrived
+yet" is the truth rather than a permanent state. `SubagentSummaryItem` carries the answer as one
+`TranscriptAvailability`: unavailable, openable from retained/live rows, or on disk with its
+URL. The component cannot derive that state: a live child streams rows it has no file for, and
+a finished one may name a path the provider never wrote. Because a Finder action is available
+only in the on-disk case, navigation and reveal cannot contradict one another. A row that leads
+nowhere is disabled rather than removed: it keeps its place, its facts and its ink column, and
+says in words why it does not open. The same distinction picks the detail pane's notice, so a
+finished child stops claiming a file is on its way. See
 [`session-activity.md`](session-activity.md) for the hook reports that made empty rows possible.
 
 The navigator is also the standing work receipt, not merely a list of provider role names.
@@ -565,9 +574,14 @@ also rebuild its hierarchy from the provider index. Codex cannot rediscover chil
 from Threading's snapshot because app-server exposes no durable child index, but children observed
 by hooks or app-server are restored from the snapshot and their transcript paths still drill in.
 
-A transcript path is durable routing metadata, never a display-name fallback. Rows prefer the
-provider's nickname or role and otherwise use a short agent id; a folder action exposes a
-verified regular transcript file through Finder without printing its private absolute path.
+A transcript path is durable routing metadata, never a display-name fallback. A row is named by
+the provider's nickname (Claude's task description, Codex's `agentNickname`), then by the
+delegated task's first line, then by the role, then by a short agent id
+(`SubagentDescriptor.displayName`). The role comes after the task deliberately: Codex reports
+every spawned child's role as `default`, so three children named by role were three rows of the
+same word. A role that is not the name stays visible on the row's configuration line; a folder
+action exposes a verified regular transcript file through Finder without printing its private
+absolute path.
 Lifecycle fallback messages also cross a presentation boundary before persistence. One measured
 Claude `last_assistant_message` arrived with a leading `<analysis>` envelope, so that exact
 compatibility spelling becomes a localized **Reasoning** line, complete or truncated. It is not
