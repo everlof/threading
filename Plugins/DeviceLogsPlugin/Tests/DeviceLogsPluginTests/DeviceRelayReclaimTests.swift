@@ -1,5 +1,5 @@
 import XCTest
-@testable import Threading
+@testable import DeviceLogsPlugin
 
 /// Which abandoned log readers may be reclaimed.
 ///

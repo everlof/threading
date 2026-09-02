@@ -26,6 +26,14 @@ final class NativePluginPaneViewController: NSViewController {
     /// than pointing at a path.
     var pluginIdentifier: String? { loaded?.pluginIdentifier }
 
+    /// What the tab calls it. Read from the bundle rather than from the loaded plugin, so a
+    /// refusal is still a named tab instead of an anonymous one.
+    var displayName: String? {
+        guard let bundle = Bundle(url: bundleURL) else { return nil }
+        return (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+    }
+
     init(bundleURL: URL, owningSessionID: SessionID?) {
         self.bundleURL = bundleURL
         self.owningSessionID = owningSessionID

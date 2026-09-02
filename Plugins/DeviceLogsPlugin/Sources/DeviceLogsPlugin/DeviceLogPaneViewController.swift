@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingDesignKit
 
 /// A live log stream from a booted simulator or a paired iPhone.
 ///
@@ -12,7 +13,7 @@ import AppKit
 /// the table owns viewport rows only, and the drain is coalesced onto a timer so one batch of
 /// main-thread work happens per tick regardless of the source's rate.
 @MainActor
-final class DeviceLogPaneViewController: NSViewController {
+public final class DeviceLogPaneViewController: NSViewController {
 
     // MARK: Constants
 
@@ -90,14 +91,14 @@ final class DeviceLogPaneViewController: NSViewController {
     private var startedAt: Date?
 
     /// The session this tab belongs to, kept so a predicate could later be scoped to its project.
-    let owningSessionID: SessionID?
+    public let owningSessionID: String?
 
-    init(owningSessionID: SessionID?) {
+    public init(owningSessionID: String?) {
         self.owningSessionID = owningSessionID
         super.init(nibName: nil, bundle: nil)
     }
 
-    required init?(coder: NSCoder) { nil }
+    public required init?(coder: NSCoder) { nil }
 
     deinit {
         if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
@@ -109,13 +110,13 @@ final class DeviceLogPaneViewController: NSViewController {
 
     // MARK: Lifecycle
 
-    override func loadView() {
+    public override func loadView() {
         view = NSView()
         buildTable()
         buildChrome()
     }
 
-    override func viewDidAppear() {
+    public override func viewDidAppear() {
         super.viewDidAppear()
         guard drainTimer == nil else { return }
         reloadSources()
@@ -138,7 +139,7 @@ final class DeviceLogPaneViewController: NSViewController {
         }
     }
 
-    override func viewWillDisappear() {
+    public override func viewWillDisappear() {
         super.viewWillDisappear()
         // A hidden tab must not keep a child process reading a firehose.
         source?.stop()
@@ -412,7 +413,7 @@ final class DeviceLogPaneViewController: NSViewController {
     ///
     /// `design-system.md` asks for a rendered state on a new component, and this surface earns it:
     /// its header sat *on top of* the first rows for a whole build because nothing drew it.
-    func installRowsForTesting(_ fixture: [DeviceLogRow]) {
+    public func installRowsForTesting(_ fixture: [DeviceLogRow]) {
         rows = fixture
         recomputeVisible()
         table.reloadData()
@@ -522,7 +523,7 @@ final class DeviceLogPaneViewController: NSViewController {
 // MARK: - Filter field
 
 extension DeviceLogPaneViewController: NSTextFieldDelegate {
-    func controlTextDidChange(_ notification: Notification) {
+    public func controlTextDidChange(_ notification: Notification) {
         filter = filterField.stringValue.lowercased()
         recomputeVisible()
         table.reloadData()
@@ -533,13 +534,13 @@ extension DeviceLogPaneViewController: NSTextFieldDelegate {
 // MARK: - Table
 
 extension DeviceLogPaneViewController: NSTableViewDataSource {
-    func numberOfRows(in tableView: NSTableView) -> Int { visibleRows.count }
+    public func numberOfRows(in tableView: NSTableView) -> Int { visibleRows.count }
 }
 
 extension DeviceLogPaneViewController: NSTableViewDelegate {
     /// Only the viewport's rows are ever built, through ordinary reuse. This is the whole reason
     /// the pane is a table rather than a stack of labels.
-    func tableView(
+    public func tableView(
         _ tableView: NSTableView,
         viewFor tableColumn: NSTableColumn?,
         row: Int

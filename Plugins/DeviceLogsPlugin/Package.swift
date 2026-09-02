@@ -25,5 +25,10 @@ let package = Package(
             ],
             swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
         ),
+        .testTarget(
+            name: "DeviceLogsPluginTests",
+            dependencies: ["DeviceLogsPlugin"],
+            swiftSettings: [.unsafeFlags(["-strict-concurrency=complete"])]
+        ),
     ]
 )

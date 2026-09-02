@@ -498,13 +498,37 @@ rounded plate, because a table of `ThemedTextField`s is a table of wells; the ro
 to the table. The message column was also clipped and the filter field had collapsed to its
 magnifier. All three were obvious in a picture and invisible to every assertion that passed.
 
+### Device Logs is the tier's first real tenant
+
+`DeviceLogPaneViewController` and its four sources left the application. `Plugins/DeviceLogsPlugin`
+is a native bundle target in `Threading.xcodeproj`, built with the app and copied into
+`Contents/PlugIns`, and the host loads it through the same `NativePluginCatalog` path a third-party
+bundle takes. The app is 1,400 lines lighter and the tier carries a feature rather than a probe.
+
+A **bundled** plugin is trusted by location rather than by allowlist: code inside the app bundle is
+sealed by the app's signature, so altering it invalidates the app the OS already validated. The
+team allowlist still governs everything installed outside the app, and a test asserts both halves.
+
+Two approaches were tried and rejected before the bundle target, and both are worth recording.
+
+*Linking the package into the app* looked simplest and is wrong: the app compiles the design system
+and the package links its own copy, so `Design` exists twice in one binary and every use is
+ambiguous — app-wide, not only in the files that import it. `@_implementationOnly` silences the
+compiler but leaves two design systems and two `AppThemePalette`s in one process. `dlopen` is what
+keeps the two copies apart, so a first-party plugin has to load like any other.
+
+*A build-script phase* that ran `swift build` cannot work either: the app target sets
+`ENABLE_USER_SCRIPT_SANDBOXING = YES`, and a SwiftPM build writes outside anything a phase can
+declare. Turning the sandbox off for the whole target to gain a build step is a bad trade when a
+native target needs neither.
+
 ### Still open
 
-`DeviceLogPaneViewController` still lives in the app — the plugin is a second, simpler
-implementation rather than a move. Retiring the host-side pane means the plugin needs the paired
-device and app-container routes, the tap consent, and the agent tools that drive them, all of which
-cross the contract rather than the design system. That is the next slice, and it is a question
-about `PluginContext` rather than about components.
+The **third-party** path is proven but has no install flow: a bundle is placed in
+`~/Library/Application Support/Threading/Plugins` by hand and trusted only if signed by an
+allowlisted team, which today means Threading's own. Opening that to other teams needs a review
+surface and a quarantine policy for a plugin that crashes — `pluginIdentifier` exists so that
+policy can name one rather than point at a path.
 
 ## Reopen / revisit triggers
 

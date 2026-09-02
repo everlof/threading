@@ -44,18 +44,56 @@ enum NativePluginCatalog {
             .appendingPathComponent("Plugins", isDirectory: true)
     }
 
-    /// Every bundle in the directory, in a stable order. Enumeration is shallow and bounded: a
-    /// plugins folder is externally sized, and this runs at launch.
-    static func installedBundles(limit: Int = 32) -> [URL] {
+    /// The plugins Threading ships inside itself.
+    ///
+    /// Trusted by *location* rather than by allowlist: code inside the app bundle is sealed by the
+    /// app's own signature, so altering it invalidates the app the operating system already
+    /// checked. That is a stronger guarantee than a team identifier, and it is the reason a
+    /// first-party pane can ship as a plugin without the user installing anything.
+    static func bundledPlugins() -> [URL] {
+        guard let plugIns = Bundle.main.builtInPlugInsURL else { return [] }
         let contents = (try? FileManager.default.contentsOfDirectory(
-            at: directory,
+            at: plugIns,
             includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
         )) ?? []
-        return contents
-            .filter { $0.pathExtension == "bundle" }
+        return contents.filter { $0.pathExtension == "bundle" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
-            .prefix(limit)
+    }
+
+    /// The one Threading's own Device Logs pane lives in.
+    static var deviceLogsBundle: URL? {
+        bundledPlugins().first { $0.deletingPathExtension().lastPathComponent == "DeviceLogsPlugin" }
+    }
+
+    /// Whether a bundle is one of ours, and so already covered by the app's signature.
+    private static func isBundled(_ url: URL) -> Bool {
+        url.resolvingSymlinksInPath().path
+            .hasPrefix(Bundle.main.bundleURL.resolvingSymlinksInPath().path + "/")
+    }
+
+    /// Every bundle in the directory, in a stable order. Both returned bundles and inspected
+    /// directory entries are capped: a plugins folder is externally writable, so `limit` alone
+    /// is not a bound when it is applied after `contentsOfDirectory` has materialized everything.
+    static func installedBundles(limit: Int = 32) -> [URL] {
+        let requestedLimit = min(max(0, limit), 32)
+        guard requestedLimit > 0,
+              let enumerator = FileManager.default.enumerator(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+        ) else { return [] }
+
+        var contents: [URL] = []
+        contents.reserveCapacity(requestedLimit)
+        var inspected = 0
+        while inspected < 256, let entry = enumerator.nextObject() as? URL {
+            inspected += 1
+            if entry.pathExtension == "bundle" { contents.append(entry) }
+        }
+        return contents
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .prefix(requestedLimit)
             .map { $0 }
     }
 
@@ -63,7 +101,12 @@ enum NativePluginCatalog {
     /// because "the plugin did not appear" is not a diagnosis.
     static func load(_ bundle: URL) -> Result<ThreadingNativePlugin, PluginLoadFailure> {
         do {
-            return .success(try PluginLoader(allowedTeams: allowedTeams).load(bundleAt: bundle))
+            // A bundled plugin is part of the app, so the allowlist has nothing to add: it was
+            // validated with the app itself. An installed one faces the full check.
+            let loader = isBundled(bundle)
+                ? PluginLoader.acceptingAnyTeam()
+                : PluginLoader(allowedTeams: allowedTeams)
+            return .success(try loader.load(bundleAt: bundle))
         } catch let failure as PluginLoadFailure {
             return .failure(failure)
         } catch {

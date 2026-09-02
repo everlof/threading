@@ -78,7 +78,6 @@ final class PaneTab {
     case sharing(SessionSharingViewController)
     case supervision(SupervisionListViewController)
     case simulator(SimulatorPaneViewController)
-    case deviceLog(DeviceLogPaneViewController)
     case nativePlugin(NativePluginPaneViewController)
     case extensionPanel(ExtensionPanelViewController)
     case compare(CompareViewController)
@@ -214,7 +213,6 @@ final class PaneTab {
     case .sharing(let sharing): return sharing
     case .supervision(let supervision): return supervision
     case .simulator(let simulator): return simulator
-    case .deviceLog(let logs): return logs
     case .extensionPanel(let panel): return panel
     case .compare(let compare): return compare
     case .browserComparison(let comparison): return comparison
@@ -251,8 +249,6 @@ final class PaneTab {
       return "person.3"
     case .simulator:
       return "iphone"
-    case .deviceLog:
-      return "list.bullet.rectangle"
     case .extensionPanel:
       return "puzzlepiece.extension"
     case .compare:
@@ -298,8 +294,6 @@ final class PaneTab {
       return L10n.string("Chats")
     case .simulator:
       return L10n.string("iOS Simulator")
-    case .deviceLog:
-      return L10n.string("Device logs")
     case .extensionPanel(let panel):
       return panel.panelTitle
     case .compare:
@@ -307,9 +301,9 @@ final class PaneTab {
     case .browserComparison:
       return L10n.string("Visual diff")
     case .nativePlugin(let plugin):
-      // The plugin's own identity, so a refusal is still a named tab rather than an empty one.
-      return plugin.pluginIdentifier.map { String($0.split(separator: ".").last ?? "") }
-        ?? L10n.string("Plugin")
+      // The bundle's own display name, so Threading's Device Logs plugin still reads as
+      // "Device logs" rather than as its identifier. A refusal is still a named tab.
+      return plugin.displayName ?? L10n.string("Plugin")
     }
   }
 }

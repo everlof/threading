@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
-@testable import Threading
+import ThreadingDesignKit
+@testable import DeviceLogsPlugin
 
 /// The log pane, drawn.
 ///
@@ -24,7 +25,7 @@ final class DeviceLogPaneRenderTests: XCTestCase {
     }
 
     private func pane() -> DeviceLogPaneViewController {
-        let controller = DeviceLogPaneViewController(owningSessionID: SessionID())
+        let controller = DeviceLogPaneViewController(owningSessionID: UUID().uuidString)
         controller.loadView()
         controller.installRowsForTesting(fixtureRows())
         return controller

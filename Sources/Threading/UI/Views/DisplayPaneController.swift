@@ -528,7 +528,8 @@ final class DisplayPaneController: NSViewController {
     ]
     // Installed native plugins, listed by name. The enumeration is shallow and capped by the
     // catalogue, and this runs when the menu opens rather than on every render.
-    for bundle in NativePluginCatalog.installedBundles() {
+    for bundle in NativePluginCatalog.installedBundles()
+    where bundle.deletingPathExtension().lastPathComponent != "DeviceLogsPlugin" {
       let name = bundle.deletingPathExtension().lastPathComponent
       choices.append(
         (
@@ -958,33 +959,16 @@ final class DisplayPaneController: NSViewController {
     return controller
   }
 
-  /// Reveals this session's live device log pane, creating it the first time.
+  /// Reveals this session's live device log pane.
   ///
-  /// One per session on purpose: a second tab would be a second child process reading the same
-  /// firehose, and the filter belongs to the pane rather than to the source.
+  /// Device Logs is a plugin now: Threading ships it inside itself and loads it the same way a
+  /// third-party bundle is loaded, so the tier carries a real feature rather than only a probe.
+  /// The pane is still one per session, for the same reason as before — a second tab would be a
+  /// second child process reading the same firehose.
   @discardableResult
-  func activateDeviceLog(for sessionID: SessionID) -> DeviceLogPaneViewController? {
-    restoreIfNeeded(sessionID)
-    var tabs = tabsBySession[sessionID] ?? []
-    if let existing = tabs.first(where: {
-      if case .deviceLog = $0.body { return true }
-      return false
-    }) {
-      activeTabIDBySession[sessionID] = existing.id
-      persist(sessionID)
-      if sessionID == currentSessionID { render() }
-      if case .deviceLog(let logs) = existing.body { return logs }
-      return nil
-    }
-
-    let controller = DeviceLogPaneViewController(owningSessionID: sessionID)
-    let tab = DisplayTab(body: .deviceLog(controller), owningSessionID: sessionID)
-    tabs.append(tab)
-    tabsBySession[sessionID] = tabs
-    activeTabIDBySession[sessionID] = tab.id
-    persist(sessionID)
-    if sessionID == currentSessionID { render() }
-    return controller
+  func activateDeviceLog(for sessionID: SessionID) -> NativePluginPaneViewController? {
+    guard let bundle = NativePluginCatalog.deviceLogsBundle else { return nil }
+    return activateNativePlugin(bundleURL: bundle, for: sessionID)
   }
 
   /// Reveals a native plugin's pane, creating it the first time.
@@ -2422,14 +2406,6 @@ final class DisplayPaneController: NSViewController {
       contentMenuButton.isHidden = true
       installHosted(simulator)
 
-    case .deviceLog(let logs):
-      imageView.image = nil
-      imageView.isHidden = true
-      hideHTML()
-      captionLabel.isHidden = true
-      contentMenuButton.isHidden = true
-      installHosted(logs)
-
     case .nativePlugin(let plugin):
       imageView.image = nil
       imageView.isHidden = true
@@ -2576,7 +2552,6 @@ final class DisplayPaneController: NSViewController {
     case .sharing: return "sharing"
     case .supervision: return "supervision"
     case .simulator: return "simulator"
-    case .deviceLog: return "device-log"
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"
     case .browserComparison: return "browser-comparison"
@@ -2714,9 +2689,14 @@ final class DisplayPaneController: NSViewController {
         tabs.append(DisplayTab(id: id, body: .attachments(controller)))
 
       case .deviceLog:
+        // A kind persisted before Device Logs became a plugin. It restores as the plugin, so an
+        // older row opens the pane the user had rather than disappearing.
+        guard let bundle = NativePluginCatalog.deviceLogsBundle else { continue }
         tabs.append(DisplayTab(
           id: id,
-          body: .deviceLog(DeviceLogPaneViewController(owningSessionID: sessionID)),
+          body: .nativePlugin(
+            NativePluginPaneViewController(bundleURL: bundle, owningSessionID: sessionID)
+          ),
           owningSessionID: sessionID
         ))
 

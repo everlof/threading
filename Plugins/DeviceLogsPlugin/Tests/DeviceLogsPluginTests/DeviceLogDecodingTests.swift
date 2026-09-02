@@ -1,5 +1,5 @@
 import XCTest
-@testable import Threading
+@testable import DeviceLogsPlugin
 
 /// The two log shapes the pane accepts.
 ///

@@ -15,14 +15,14 @@ import ThreadingPluginKit
 @MainActor
 final class NativePluginLoadingTests: XCTestCase {
 
+    /// The plugin Threading ships inside itself. No install step, and no skip: if this is missing
+    /// the app has lost its Device Logs pane, which is a failure rather than an absence.
     private var installed: URL {
         get throws {
-            let bundle = NativePluginCatalog.directory
-                .appendingPathComponent("DeviceLogsPlugin.bundle")
-            guard FileManager.default.fileExists(atPath: bundle.path) else {
-                throw XCTSkip("no plugin installed — run scripts/build_plugin.sh Plugins/DeviceLogsPlugin --install")
-            }
-            return bundle
+            try XCTUnwrap(
+                NativePluginCatalog.deviceLogsBundle,
+                "Threading ships no Device Logs plugin — Contents/PlugIns is empty"
+            )
         }
     }
 
@@ -44,60 +44,48 @@ final class NativePluginLoadingTests: XCTestCase {
         view.frame = NSRect(x: 0, y: 0, width: 640, height: 360)
         view.layoutSubtreeIfNeeded()
 
-        // The pane is drawn by the plugin's own copy of the design system, so what proves the
-        // theme crossed is that its ground matches the host's — not that it drew something.
-        let painted = try XCTUnwrap(view.layer?.backgroundColor)
-        let actual = try XCTUnwrap(NSColor(cgColor: painted)?.usingColorSpace(.sRGB))
-        let expected = try XCTUnwrap(Design.Surface.ground.usingColorSpace(.sRGB))
-        XCTAssertEqual(actual.redComponent, expected.redComponent, accuracy: 1.0 / 255.0)
-        XCTAssertEqual(actual.greenComponent, expected.greenComponent, accuracy: 1.0 / 255.0)
-        XCTAssertEqual(actual.blueComponent, expected.blueComponent, accuracy: 1.0 / 255.0)
+        // The pane is drawn by the plugin's own copy of the design system. What proves that
+        // crossed the boundary is the components: these types exist only in ThreadingDesignKit,
+        // and the app never handed the plugin one — it compiled its own and resolved the theme
+        // Threading sent. Appearance itself is covered by the plugin package's render tests.
+        func descendants(of view: NSView) -> [NSView] {
+            view.subviews + view.subviews.flatMap(descendants(of:))
+        }
+        let kinds = Set(descendants(of: view).map { String(describing: type(of: $0)) })
+        for expected in ["ThemedScrollView", "ThemedTableView", "ThemedPopUp"] {
+            XCTAssertTrue(kinds.contains(expected), "\(expected) is missing; found \(kinds.sorted())")
+        }
     }
 
-    /// Draws the loaded plugin's pane with real rows in it.
-    ///
-    /// A rendered picture is how appearance is reviewed here, and this is the one surface where
-    /// the thing being checked is that a *different binary* drew something that belongs: the pane
-    /// is built by the plugin's own copy of the design system, resolving the theme the host sent.
-    func testRendersTheLoadedPluginsPaneWithLiveRows() throws {
-        let bundle = try installed
-        guard case .success(let plugin) = NativePluginCatalog.load(bundle) else {
-            throw XCTSkip("the plugin was refused")
-        }
-        let view = plugin.makePaneView(context: PluginContext(
-            theme: NativePluginCatalog.theme(),
-            arguments: [:]
-        ))
-        view.frame = NSRect(x: 0, y: 0, width: 900, height: 460)
-
-        // The stream is a real child process, so the rows arrive on their own schedule. Spin the
-        // run loop rather than sleeping: the pane drains on a timer that needs it to turn.
-        let deadline = Date().addingTimeInterval(4)
-        while Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
-        }
-        view.layoutSubtreeIfNeeded()
-
-        let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"]
-            .map { URL(fileURLWithPath: $0) }
-            ?? URL(fileURLWithPath: NSTemporaryDirectory())
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let target = directory.appendingPathComponent("native-plugin-pane.png")
-        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-        view.cacheDisplay(in: view.bounds, to: rep)
-        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: target)
-        print("RENDERED \(target.path)")
-    }
-
-    /// The allowlist is the whole policy, so a run with nothing trusted must refuse the same
-    /// bundle that loads a moment earlier.
-    func testTheSameBundleIsRefusedWhenNoTeamIsTrusted() throws {
+    /// A bundled plugin is trusted by *location*: it is sealed by the app's own signature, so the
+    /// team allowlist has nothing to add. Emptying the allowlist must not take Threading's own
+    /// pane away.
+    func testTheBundledPluginLoadsEvenWithNoTeamTrusted() throws {
         let bundle = try installed
         let trusted = NativePluginCatalog.allowedTeams
         NativePluginCatalog.allowedTeams = []
         defer { NativePluginCatalog.allowedTeams = trusted }
         switch NativePluginCatalog.load(bundle) {
-        case .success: XCTFail("an empty allowlist loaded a plugin")
+        case .success: break
+        case .failure(let failure):
+            XCTFail("the app's own plugin was refused: \(failure)")
+        }
+    }
+
+    /// The allowlist still governs everything *outside* the app bundle, which is the whole policy
+    /// for the third-party tier.
+    func testAnInstalledBundleIsStillRefusedWhenNoTeamIsTrusted() throws {
+        let installedByHand = NativePluginCatalog.directory
+            .appendingPathComponent("DeviceLogsPlugin.bundle")
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: installedByHand.path),
+            "no hand-installed bundle to check the allowlist against"
+        )
+        let trusted = NativePluginCatalog.allowedTeams
+        NativePluginCatalog.allowedTeams = []
+        defer { NativePluginCatalog.allowedTeams = trusted }
+        switch NativePluginCatalog.load(installedByHand) {
+        case .success: XCTFail("an empty allowlist loaded a plugin from outside the app")
         case .failure(let failure):
             XCTAssertTrue(failure.code == "untrusted_team" || failure.code == "signature_invalid",
                           "refused for the wrong reason: \(failure.code)")

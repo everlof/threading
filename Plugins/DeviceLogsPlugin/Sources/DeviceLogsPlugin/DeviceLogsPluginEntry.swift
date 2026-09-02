@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingDesignKit
 import ThreadingPluginKit
 
 /// The bundle's principal class.
@@ -8,7 +9,7 @@ import ThreadingPluginKit
 @objc(DeviceLogsPlugin)
 public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
 
-    private var pane: DeviceLogsPane?
+    private var pane: DeviceLogPaneViewController?
 
     public override required init() { super.init() }
 
@@ -17,13 +18,17 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
     public var pluginIdentifier: String { "codes.threading.plugin.devicelogs" }
 
     public func makePaneView(context: PluginContext) -> NSView {
-        let pane = DeviceLogsPane(frame: .zero)
-        pane.apply(context.theme)
-        self.pane = pane
-        return pane
+        // The host builds panes on the main actor; the contract is `@objc` and so cannot say so.
+        MainActor.assumeIsolated {
+            let pane = DeviceLogPaneViewController(owningSessionID: context.argument("session"))
+            apply(theme: context.theme)
+            self.pane = pane
+            return pane.view
+        }
     }
 
     public func apply(theme: PluginTheme) {
-        pane?.apply(theme)
+        try? HostThemeHandoff.install(encoded: theme.encodedTheme)
+        MainActor.assumeIsolated { pane?.view.needsDisplay = true }
     }
 }

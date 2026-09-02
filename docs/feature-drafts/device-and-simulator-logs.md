@@ -516,3 +516,26 @@ opaque host handle, never through the node tree.
   and change the tap's job.
 - The rendering tier lands for the Traffic Inspector; this feature should adopt it rather than
   invent a second one.
+
+## Where the pane lives
+
+**It is a plugin.** `DeviceLogPaneViewController` and `DeviceLogSources` moved out of the
+application into `Plugins/DeviceLogsPlugin`, which Threading builds as a native bundle target and
+ships in `Contents/PlugIns`. The host loads it through `NativePluginCatalog` — the same path a
+third-party bundle takes — so the plugin tier carries a real feature rather than only a probe, and
+device logs can grow without adding to the app.
+
+Nothing about the user's route changed: **Device logs** is still an entry in the panel's new-tab
+menu, still one pane per session, and `device_log_prepare` still reveals it. What changed is that
+`activateDeviceLog` now opens the bundled plugin, and the persisted `.deviceLog` tab kind restores
+as that plugin so an older row opens the pane it always did.
+
+Two things stayed in the application deliberately. The **tap consent** is a security grant about
+the user's own product, so it belongs to the host and is asked by the agent command rather than by
+the pane. `DeviceLogTap` stays with it, because compiling the tap is the agent's build step, not
+the pane's.
+
+The plugin is trusted by **location**: code inside the app bundle is sealed by the app's own
+signature, so altering it invalidates the app the operating system already checked. That is a
+stronger guarantee than the team allowlist, which continues to govern everything installed outside
+the app. See [`native-extension-tier.md`](native-extension-tier.md).

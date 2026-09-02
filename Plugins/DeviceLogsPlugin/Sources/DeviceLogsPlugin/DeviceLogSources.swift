@@ -1,4 +1,5 @@
 import Foundation
+import ThreadingDesignKit
 
 // MARK: - Row
 
@@ -7,18 +8,18 @@ import Foundation
 /// Externally sized content never becomes a view until the table asks for the row that holds it,
 /// which is the whole reason this is a value and the pane is a table. See
 /// [`device-and-simulator-logs.md`](../../../../docs/feature-drafts/device-and-simulator-logs.md).
-struct DeviceLogRow {
-    let time: String
-    let level: String
-    let process: String
+public struct DeviceLogRow {
+    public let time: String
+    public let level: String
+    public let process: String
     /// Absent on the live device route: the syslog relay flattens the unified log and does not
     /// carry a subsystem. Optional rather than empty so the difference stays visible.
-    let subsystem: String?
-    let message: String
+    public let subsystem: String?
+    public let message: String
 
     /// Ordering for the level filter. `log` and the syslog relay use different vocabularies for
     /// the same idea, so both are mapped here rather than at each call site.
-    var severity: Int {
+    public var severity: Int {
         switch level {
         case "Fault", "Emergency", "Critical": return 4
         case "Error": return 3
@@ -35,7 +36,7 @@ struct DeviceLogRow {
 ///
 /// Sources hand rows over in batches rather than calling back per row: the pane drains on a timer,
 /// so one batch of main-thread work happens per tick no matter how fast the source runs.
-protocol DeviceLogRowSource: AnyObject {
+public protocol DeviceLogRowSource: AnyObject {
     func start()
     func stop()
     /// Everything produced since the last drain.
@@ -47,23 +48,23 @@ protocol DeviceLogRowSource: AnyObject {
 
 /// Shared batching and bounded handoff. Every source is a producer on its own queue and the pane
 /// is a consumer on the main one; this is the only place that boundary is implemented.
-class BufferedDeviceLogSource: DeviceLogRowSource {
-    static let handoffCapacity = 20_000
+public class BufferedDeviceLogSource: DeviceLogRowSource {
+    public static let handoffCapacity = 20_000
 
     private var pending: [DeviceLogRow] = []
     private let lock = NSLock()
     private var droppedCount = 0
 
-    var dropped: Int {
+    public var dropped: Int {
         lock.lock()
         defer { lock.unlock() }
         return droppedCount
     }
 
-    func start() {}
-    func stop() {}
+    public func start() {}
+    public func stop() {}
 
-    func drain() -> [DeviceLogRow] {
+    public func drain() -> [DeviceLogRow] {
         lock.lock()
         defer { lock.unlock() }
         let rows = pending
@@ -71,7 +72,7 @@ class BufferedDeviceLogSource: DeviceLogRowSource {
         return rows
     }
 
-    func enqueue(_ rows: [DeviceLogRow]) {
+    public func enqueue(_ rows: [DeviceLogRow]) {
         guard !rows.isEmpty else { return }
         lock.lock()
         let room = Self.handoffCapacity - pending.count
@@ -84,7 +85,7 @@ class BufferedDeviceLogSource: DeviceLogRowSource {
         lock.unlock()
     }
 
-    func enqueue(_ row: DeviceLogRow) { enqueue([row]) }
+    public func enqueue(_ row: DeviceLogRow) { enqueue([row]) }
 }
 
 // MARK: - Process plumbing
@@ -94,15 +95,15 @@ class BufferedDeviceLogSource: DeviceLogRowSource {
 /// A partial tail waits for the next chunk; an absurdly long line is dropped rather than grown
 /// without limit, because a log source is externally sized and one pathological line must not
 /// become unbounded memory.
-final class DeviceLogLineReader {
+public final class DeviceLogLineReader {
     private let queue: DispatchQueue
     private var process: Process?
 
-    init(label: String) {
+    public init(label: String) {
         queue = DispatchQueue(label: "codes.threading.devicelog.\(label)")
     }
 
-    func run(
+    public func run(
         executable: String,
         arguments: [String],
         onLine: @escaping (ArraySlice<UInt8>) -> Void
@@ -137,7 +138,7 @@ final class DeviceLogLineReader {
         try? task.run()
     }
 
-    func stop() {
+    public func stop() {
         process?.terminate()
         process = nil
     }
@@ -161,10 +162,10 @@ final class DeviceLogLineReader {
 /// Only *orphans* are reclaimed: a process whose parent is `launchd` and whose arguments name this
 /// exact tool and device. A reader the user started in their own terminal has their shell as its
 /// parent and is left alone.
-enum DeviceRelayReclaim {
+public enum DeviceRelayReclaim {
 
     @discardableResult
-    static func reclaimOrphanedReaders(udid: String, toolPath: String) -> Int {
+    public static func reclaimOrphanedReaders(udid: String, toolPath: String) -> Int {
         var reclaimed = 0
         for pid in orphanPIDs(udid: udid, toolPath: toolPath) {
             if kill(pid, SIGTERM) == 0 { reclaimed += 1 }
@@ -176,7 +177,7 @@ enum DeviceRelayReclaim {
     ///
     /// Pure so the rule can be tested without killing anything, because the rule is the whole
     /// safety of this: too loose and it kills a reader the user is running on purpose.
-    static func orphanPIDs(in listing: String, udid: String, toolPath: String) -> [pid_t] {
+    public static func orphanPIDs(in listing: String, udid: String, toolPath: String) -> [pid_t] {
         listing.split(separator: "\n").compactMap { line -> pid_t? in
             let fields = line.split(separator: " ", omittingEmptySubsequences: true)
             guard fields.count >= 3,
@@ -207,22 +208,22 @@ enum DeviceRelayReclaim {
     }
 }
 
-enum DeviceLogLimits {
+public enum DeviceLogLimits {
     /// A single line longer than this is abandoned rather than accumulated.
-    static let maximumLineBytes = 1_048_576
+    public static let maximumLineBytes = 1_048_576
     /// Rows retained by the pane. A firehose must not grow memory without limit.
-    static let ringCapacity = 50_000
+    public static let ringCapacity = 50_000
     /// How long a discovery command may take before its answer is abandoned.
-    static let discoveryDeadline: TimeInterval = 6
+    public static let discoveryDeadline: TimeInterval = 6
     /// Listing a device's apps talks to the device rather than to a local service, so it is given
     /// its own longer deadline. It still has one: a phone that stops answering must not stall a
     /// rescan.
-    static let appListDeadline: TimeInterval = 25
+    public static let appListDeadline: TimeInterval = 25
     /// Apps offered per device. Their own developer builds, so the list is short in practice.
-    static let maximumApps = 40
+    public static let maximumApps = 40
     /// Listing or copying inside an app container talks to the device over its own transport, so
     /// it gets a longer leash than a local `simctl` call — and still a deadline.
-    static let containerDeadline: TimeInterval = 40
+    public static let containerDeadline: TimeInterval = 40
 }
 
 // MARK: - Simulator
@@ -231,17 +232,17 @@ enum DeviceLogLimits {
 ///
 /// The predicate is pushed into the command rather than applied here, so the log daemon bounds the
 /// scan. Filtering in this process would bound only the result.
-final class SimulatorLogRowSource: BufferedDeviceLogSource {
+public final class SimulatorLogRowSource: BufferedDeviceLogSource {
     private let reader = DeviceLogLineReader(label: "simulator")
     private let udid: String
     private let predicate: String?
 
-    init(udid: String, predicate: String?) {
+    public init(udid: String, predicate: String?) {
         self.udid = udid
         self.predicate = predicate
     }
 
-    override func start() {
+    public override func start() {
         var arguments = [
             "simctl", "spawn", udid, "log", "stream", "--style=ndjson", "--level=debug",
         ]
@@ -253,7 +254,7 @@ final class SimulatorLogRowSource: BufferedDeviceLogSource {
         }
     }
 
-    override func stop() { reader.stop() }
+    public override func stop() { reader.stop() }
 }
 
 // MARK: - Real device
@@ -266,19 +267,19 @@ final class SimulatorLogRowSource: BufferedDeviceLogSource {
 /// ordinary `os_log` entries which arrive here like any other line.
 ///
 /// The tool is libimobiledevice's, never bundled, resolved on the user's `PATH`.
-final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
+public final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
     private let reader = DeviceLogLineReader(label: "device")
     private let udid: String
     private let overNetwork: Bool
     private let toolPath: String
 
-    init(udid: String, overNetwork: Bool, toolPath: String) {
+    public init(udid: String, overNetwork: Bool, toolPath: String) {
         self.udid = udid
         self.overNetwork = overNetwork
         self.toolPath = toolPath
     }
 
-    override func start() {
+    public override func start() {
         // A reader we abandoned earlier still holds the relay, and the symptom is silence rather
         // than an error. Reclaim before connecting, or this source starts already broken.
         DeviceRelayReclaim.reclaimOrphanedReaders(udid: udid, toolPath: toolPath)
@@ -289,7 +290,7 @@ final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
         }
     }
 
-    override func stop() { reader.stop() }
+    public override func stop() { reader.stop() }
 }
 
 // MARK: - Device console
@@ -304,7 +305,7 @@ final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
 ///
 /// Its one real constraint is that `devicectl` must *launch* the app, so output starts at that
 /// launch. For watching a build you just made, which is the case, that is what Xcode does too.
-final class DeviceConsoleLogSource: BufferedDeviceLogSource {
+public final class DeviceConsoleLogSource: BufferedDeviceLogSource {
     private let reader = DeviceLogLineReader(label: "console")
     private let deviceID: String
     private let bundleID: String
@@ -323,13 +324,13 @@ final class DeviceConsoleLogSource: BufferedDeviceLogSource {
         return formatter
     }()
 
-    init(deviceID: String, bundleID: String, appName: String) {
+    public init(deviceID: String, bundleID: String, appName: String) {
         self.deviceID = deviceID
         self.bundleID = bundleID
         self.appName = appName
     }
 
-    override func start() {
+    public override func start() {
         reader.run(executable: "/usr/bin/xcrun", arguments: [
             "devicectl", "device", "process", "launch", "--device", deviceID,
             "--console", "--terminate-existing", bundleID,
@@ -339,7 +340,7 @@ final class DeviceConsoleLogSource: BufferedDeviceLogSource {
         }
     }
 
-    override func stop() { reader.stop() }
+    public override func stop() { reader.stop() }
 
     /// Raw console output carries no timestamp, level or subsystem of its own, so the row is
     /// stamped on arrival and attributed to the app. A line the app prefixed itself is left alone.
@@ -370,7 +371,7 @@ final class DeviceConsoleLogSource: BufferedDeviceLogSource {
 ///
 /// Apple's own tooling throughout: no libimobiledevice, no root, no pairing beyond what Xcode
 /// already established.
-final class AppContainerLogSource: BufferedDeviceLogSource {
+public final class AppContainerLogSource: BufferedDeviceLogSource {
     private let queue = DispatchQueue(label: "codes.threading.devicelog.container")
     private let deviceID: String
     private let bundleID: String
@@ -385,13 +386,13 @@ final class AppContainerLogSource: BufferedDeviceLogSource {
     private var lastModified: String?
     private var emittedLines = 0
 
-    init(deviceID: String, bundleID: String, appName: String) {
+    public init(deviceID: String, bundleID: String, appName: String) {
         self.deviceID = deviceID
         self.bundleID = bundleID
         self.appName = appName
     }
 
-    override func start() {
+    public override func start() {
         stopped = false
         queue.async { [weak self] in
             while let self, !self.stopped {
@@ -401,7 +402,7 @@ final class AppContainerLogSource: BufferedDeviceLogSource {
         }
     }
 
-    override func stop() { stopped = true }
+    public override func stop() { stopped = true }
 
     private func pollOnce() {
         guard let newest = DeviceLogSourceCatalog.newestContainerLog(
@@ -435,10 +436,10 @@ final class AppContainerLogSource: BufferedDeviceLogSource {
 
 // MARK: - Decoding
 
-enum DeviceLogDecoding {
+public enum DeviceLogDecoding {
 
     /// `2026-09-02T10:34:33.242Z [DEBUG] [kmp-interface] File.swift:26 fn(_:) - message`
-    static func appLogLine(_ line: String, appName: String) -> DeviceLogRow? {
+    public static func appLogLine(_ line: String, appName: String) -> DeviceLogRow? {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("====") else { return nil }
 
@@ -482,7 +483,7 @@ enum DeviceLogDecoding {
 
     /// `log stream --style=ndjson`, and `log show --archive --style ndjson`, which are the same
     /// schema. One parser therefore serves the simulator and a pulled device archive.
-    static func ndjson(_ line: ArraySlice<UInt8>) -> DeviceLogRow? {
+    public static func ndjson(_ line: ArraySlice<UInt8>) -> DeviceLogRow? {
         let data = Data(line)
         guard data.first == 0x7B,
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -510,7 +511,7 @@ enum DeviceLogDecoding {
     ///
     /// The parenthesised part is the *sender image* (the library that logged), which is the closest
     /// thing the relay offers to a subsystem, so it is shown in that column.
-    static func syslog(_ line: ArraySlice<UInt8>) -> DeviceLogRow? {
+    public static func syslog(_ line: ArraySlice<UInt8>) -> DeviceLogRow? {
         guard let text = String(bytes: line, encoding: .utf8), !text.isEmpty else { return nil }
         guard !text.hasPrefix("[connected"), !text.hasPrefix("[disconnected") else { return nil }
 
@@ -552,8 +553,8 @@ enum DeviceLogDecoding {
 // MARK: - Discovery
 
 /// One thing the pane can be pointed at.
-struct DeviceLogSourceOption: Equatable {
-    enum Kind: Equatable {
+public struct DeviceLogSourceOption: Equatable {
+    public enum Kind: Equatable {
         case simulator(udid: String)
         case device(udid: String, overNetwork: Bool)
         /// One app on a real device. Which of its two logs to read is `DeviceLogRoute`, chosen
@@ -561,16 +562,16 @@ struct DeviceLogSourceOption: Equatable {
         case app(deviceID: String, bundleID: String, appName: String)
     }
 
-    let title: String
-    let kind: Kind
+    public let title: String
+    public let kind: Kind
 
     /// Whether an app entry reads the app's own persisted log or its live console. Two genuinely
     /// different contents, so it is a choice rather than a fallback.
-    enum Route: Int, CaseIterable {
+    public enum Route: Int, CaseIterable {
         case appLog
         case console
 
-        var title: String {
+        public var title: String {
             switch self {
             case .appLog: return L10n.string("App log")
             case .console: return L10n.string("Console")
@@ -578,7 +579,7 @@ struct DeviceLogSourceOption: Equatable {
         }
     }
 
-    func makeSource(predicate: String?, route: Route = .appLog) -> DeviceLogRowSource? {
+    public func makeSource(predicate: String?, route: Route = .appLog) -> DeviceLogRowSource? {
         switch kind {
         case .simulator(let udid):
             return SimulatorLogRowSource(udid: udid, predicate: predicate)
@@ -609,11 +610,11 @@ struct DeviceLogSourceOption: Equatable {
 /// Every call spawns a child process, so discovery never runs on the main actor and every command
 /// has a deadline: a wedged `simctl` or a phone that stops answering must produce an empty list,
 /// not a stalled pane.
-enum DeviceLogSourceCatalog {
+public enum DeviceLogSourceCatalog {
 
     /// `idevicesyslog` is libimobiledevice's, GPL-2.0 over an LGPL library, so it is never bundled.
     /// Its absence is a named state the pane can explain, not a silent empty list.
-    static var syslogToolPath: String? {
+    public static var syslogToolPath: String? {
         ["/opt/homebrew/bin/idevicesyslog", "/usr/local/bin/idevicesyslog"]
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
@@ -628,7 +629,7 @@ enum DeviceLogSourceCatalog {
             .first { FileManager.default.isExecutableFile(atPath: $0) }
     }
 
-    static func discover(completion: @escaping @Sendable ([DeviceLogSourceOption]) -> Void) {
+    public static func discover(completion: @escaping @Sendable ([DeviceLogSourceOption]) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             var options = bootedSimulators().map {
                 DeviceLogSourceOption(title: $0.name, kind: .simulator(udid: $0.udid))
@@ -741,7 +742,7 @@ enum DeviceLogSourceCatalog {
 
     /// The newest `.log` in an app's data container, with the modification date that says whether
     /// it moved since last time.
-    static func newestContainerLog(
+    public static func newestContainerLog(
         deviceID: String,
         bundleID: String
     ) -> (path: String, modified: String)? {
@@ -778,7 +779,7 @@ enum DeviceLogSourceCatalog {
 
     /// Copy one container file off the device and read it. `devicectl` has no ranged read, so this
     /// is the whole file; the caller only asks when the file changed.
-    static func copyContainerFile(deviceID: String, bundleID: String, source: String) -> String? {
+    public static func copyContainerFile(deviceID: String, bundleID: String, source: String) -> String? {
         let destination = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-log-\(UUID().uuidString).log")
         defer { try? FileManager.default.removeItem(at: destination) }
