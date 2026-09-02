@@ -18,97 +18,97 @@ import AppKit
 /// What the block deliberately does *not* carry is behaviour. Dragging, double-click, resize
 /// edges, minimise and zoom are the app's (and where possible still AppKit's, behind the
 /// borderless mask); a theme states how the frame *looks*, never what it does.
-struct WindowChromeStyle: Codable, Equatable {
+public struct WindowChromeStyle: Codable, Equatable {
 
     /// The band across the window's top: gradient, title, and the window's own buttons.
-    var titleBar: TitleBar
+    public var titleBar: TitleBar
 
     /// The border drawn around the window's edges. Absent means a one-point border in the
     /// theme's border role — enough to seat a square window on whatever is behind it.
-    var frame: Frame?
+    public var frame: Frame?
 
-    init(titleBar: TitleBar, frame: Frame? = nil) {
+    public init(titleBar: TitleBar, frame: Frame? = nil) {
         self.titleBar = titleBar
         self.frame = frame
     }
 
     // MARK: - Title Bar
 
-    struct TitleBar: Equatable {
+    public struct TitleBar: Equatable {
 
         /// The band's fill while the window is key. Required — a takeover with no band fill
         /// has no identity, and everything else in the block can derive from this.
-        var activeGradient: SidebarStyle.Gradient
+        public var activeGradient: SidebarStyle.Gradient
 
         /// The band's fill while another window is key. Absent derives each active stop
         /// toward gray (`WindowChromeAppearance`), which is what an inactive title bar has
         /// meant for as long as title bars could be inactive.
-        var inactiveGradient: SidebarStyle.Gradient?
+        public var inactiveGradient: SidebarStyle.Gradient?
 
         /// The title text and button glyphs. Absent means white. Validated to at least the
         /// label's contrast against every active stop, the way sidebar text is validated
         /// against its gradient.
-        var ink: NSColor?
+        public var ink: NSColor?
 
         /// Ink while the window is inactive. Absent dims `ink`. Held to the softer 2:1
         /// "tellable" floor rather than full label contrast — inactive title text reads as
         /// inactive precisely by carrying less ink.
-        var inactiveInk: NSColor?
+        public var inactiveInk: NSColor?
 
-        var titleAlignment: Alignment
+        public var titleAlignment: Alignment
 
         /// The title's slant. Weight remains a semantic design-system choice; period chrome
         /// can state its measured caption size separately below. The slant is enough for
         /// workstation chrome such as IRIX, whose bold italic caption is part of the frame
         /// rather than the application's typography.
-        var titleFontStyle: TitleFontStyle
+        public var titleFontStyle: TitleFontStyle
 
         /// Optional point size for the window title itself. A period frame's caption metrics
         /// are hardware, not ordinary app detail text: 4Dwm and OPENSTEP use visibly larger
         /// titles even when the rest of the theme scales application copy down. Absent keeps
         /// the semantic design-system detail size for authored chromes that do not care.
-        var titleFontSize: Double?
+        public var titleFontSize: Double?
 
         /// Points, bounded by `WindowChromeStyleLimits.bandHeightRange`. Absent means
         /// `WindowChromeStyleLimits.defaultBandHeight`.
-        var height: Double?
+        public var height: Double?
 
         /// How the semantic window-operation glyphs draw. One vocabulary interpreted by one
         /// component — a theme picks a style, it never draws its own buttons.
-        var buttonGlyphStyle: ButtonGlyphStyle
+        public var buttonGlyphStyle: ButtonGlyphStyle
 
         /// Where the three semantic window operations sit. The Windows lineage keeps one
         /// cluster at the trailing edge; classic Macintosh chrome places Close at the leading
         /// edge and its collapse/zoom pair at the trailing edge. This is layout *inside the
         /// title bar*, not application layout, and therefore belongs to the regional block.
-        var buttonPlacement: ButtonPlacement
+        public var buttonPlacement: ButtonPlacement
 
         /// Whether the application icon occupies the band's leading identity slot. Absent on
         /// the wire means true, preserving the first takeover implementation exactly.
-        var showsAppIcon: Bool
+        public var showsAppIcon: Bool
 
         /// Where the window's own commands — the sidebar toggle and the history pair — sit
         /// while this theme owns the frame. Absent on the wire means `ownRow`, which is the
         /// structure every takeover shipped with.
-        var commands: CommandPlacement
+        public var commands: CommandPlacement
 
         /// Optional raster-like treatments over the active and inactive fills. A texture is
         /// data interpreted by the shared band, never a theme-specific drawing branch.
-        var activeTexture: Texture?
-        var inactiveTexture: Texture?
+        public var activeTexture: Texture?
+        public var inactiveTexture: Texture?
 
         /// The outline occupied by the title band. Most systems span the window; BeOS seats a
         /// compact tab on the leading edge and leaves the rest of the window top transparent.
-        var shape: Shape
+        public var shape: Shape
 
         /// Width of a leading tab in points. Meaningful only for `leadingTab`; absent uses the
         /// period-sized default. Kept separate from `shape` so an authored theme can tune the
         /// tab without replacing the outline vocabulary.
-        var tabWidth: Double?
+        public var tabWidth: Double?
 
         /// Which semantic window operations are present. Behaviour is still owned by the app;
         /// this list only lets a system omit furniture it never had (BeOS has no Minimize box).
-        var visibleButtons: [ButtonRole]
+        public var visibleButtons: [ButtonRole]
 
         /// A user-imported classic Winamp skin sheet.
         ///
@@ -117,9 +117,9 @@ struct WindowChromeStyle: Codable, Equatable {
         /// owns the PNG beside the custom theme. Absence is the stock, clean-room Classic
         /// Player drawing. Presence lets the same semantic title-bar component draw the
         /// imported 275x14 skin at native pixels and extend its groove for a resizable window.
-        var classicSkin: ClassicSkin?
+        public var classicSkin: ClassicSkin?
 
-        init(
+        public init(
             activeGradient: SidebarStyle.Gradient,
             inactiveGradient: SidebarStyle.Gradient? = nil,
             ink: NSColor? = nil,
@@ -159,15 +159,15 @@ struct WindowChromeStyle: Codable, Equatable {
             self.classicSkin = classicSkin
         }
 
-        enum Alignment: String, Codable, CaseIterable {
+        public enum Alignment: String, Codable, CaseIterable {
             case leading, center
         }
 
-        enum TitleFontStyle: String, Codable, CaseIterable {
+        public enum TitleFontStyle: String, Codable, CaseIterable {
             case upright, italic
         }
 
-        enum ButtonGlyphStyle: String, Codable, CaseIterable {
+        public enum ButtonGlyphStyle: String, Codable, CaseIterable {
             /// Bare glyphs in the band's ink.
             case plain
             /// Square plates holding the glyphs — the Windows lineage. The plates take the
@@ -202,7 +202,7 @@ struct WindowChromeStyle: Codable, Equatable {
             case classicPlayer = "classic_player"
         }
 
-        enum ButtonPlacement: String, Codable, CaseIterable {
+        public enum ButtonPlacement: String, Codable, CaseIterable {
             case trailing
             /// Keeps every authored operation together at the leading edge — the Aqua
             /// traffic-light cluster.
@@ -214,7 +214,7 @@ struct WindowChromeStyle: Codable, Equatable {
             case bookends
         }
 
-        enum Shape: String, Codable, CaseIterable {
+        public enum Shape: String, Codable, CaseIterable {
             case fullWidth = "full_width"
             case leadingTab = "leading_tab"
         }
@@ -229,14 +229,14 @@ struct WindowChromeStyle: Codable, Equatable {
         /// default. A theme drawing its own frame rather than reproducing one may state
         /// `inTitleBar` instead and get a single row, provided its band is tall enough to hold
         /// a toolbar control (`WindowChromeStyleLimits.commandsInTitleBarMinimumHeight`).
-        enum CommandPlacement: String, Codable, CaseIterable {
+        public enum CommandPlacement: String, Codable, CaseIterable {
             /// A button-face row directly below the caption — `WindowCommandBandView`.
             case ownRow = "own_row"
             /// Beside the title, in the caption row itself, ahead of the window's operations.
             case inTitleBar = "in_title_bar"
         }
 
-        enum ButtonRole: String, Codable, CaseIterable {
+        public enum ButtonRole: String, Codable, CaseIterable {
             /// Opens the window manager's operations menu. It is furniture rather than an
             /// application command, so it belongs beside the other semantic frame roles.
             case windowMenu = "window_menu"
@@ -249,23 +249,23 @@ struct WindowChromeStyle: Codable, Equatable {
 
             /// The operations the original takeover implementation exposed. Kept explicit
             /// so adding a new semantic role does not silently add furniture to old themes.
-            static let standardOperations: [Self] = [.minimize, .zoom, .close]
+            public static let standardOperations: [Self] = [.minimize, .zoom, .close]
         }
 
-        struct Texture: Equatable {
-            var kind: Kind
-            var color: NSColor?
+        public struct Texture: Equatable {
+            public var kind: Kind
+            public var color: NSColor?
             /// Points between repeated one-point lines. Absent means the kind's historical
             /// default; validation bounds it so a line cannot disappear or become a panel.
-            var spacing: Double?
+            public var spacing: Double?
 
-            init(kind: Kind, color: NSColor? = nil, spacing: Double? = nil) {
+            public init(kind: Kind, color: NSColor? = nil, spacing: Double? = nil) {
                 self.kind = kind
                 self.color = color
                 self.spacing = spacing
             }
 
-            enum Kind: String, Codable, CaseIterable {
+            public enum Kind: String, Codable, CaseIterable {
                 /// Horizontal one-pixel rules interrupted by the centred title — Platinum's
                 /// active-window signature.
                 case pinstripes
@@ -291,11 +291,11 @@ struct WindowChromeStyle: Codable, Equatable {
             }
         }
 
-        struct ClassicSkin: Codable, Equatable {
+        public struct ClassicSkin: Codable, Equatable {
             /// A normalized PNG name resolved in the custom theme's `ThemeAssetStore` folder.
-            var titleBarAsset: String
+            public var titleBarAsset: String
 
-            init(titleBarAsset: String) {
+            public init(titleBarAsset: String) {
                 self.titleBarAsset = titleBarAsset
             }
 
@@ -307,21 +307,21 @@ struct WindowChromeStyle: Codable, Equatable {
 
     // MARK: - Frame
 
-    struct Frame: Codable, Equatable {
+    public struct Frame: Codable, Equatable {
         /// Points, bounded by `WindowChromeStyleLimits.frameWidthRange`. Drawn in the theme's
         /// border role by `WindowChromeFrameView`.
-        var width: Double
+        public var width: Double
 
         /// Radius of the outer app-drawn frame. Zero keeps the hard desktop-era rectangle;
         /// early Aqua opts into the small transparent-corner curve AppKit's untitled mask no
         /// longer supplies for a takeover window.
-        var cornerRadius: Double
+        public var cornerRadius: Double
 
         /// Whether AppKit may distribute the rounded turn over partial-coverage pixels. Pixel
         /// grammars turn this off so a curved silhouette is still made from their one-bit pen.
-        var antialiasesCorners: Bool
+        public var antialiasesCorners: Bool
 
-        init(
+        public init(
             width: Double,
             cornerRadius: Double = 0,
             antialiasesCorners: Bool = true
@@ -335,7 +335,7 @@ struct WindowChromeStyle: Codable, Equatable {
             case width, cornerRadius, antialiasesCorners
         }
 
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             width = try container.decodeIfPresent(Double.self, forKey: .width)
                 ?? WindowChromeStyleLimits.defaultFrameWidth
@@ -362,7 +362,7 @@ extension WindowChromeStyle.TitleBar: Codable {
 
     /// Every field but the active gradient is optional on the wire, the `Material` rule: a
     /// document written before a field existed decodes to the value the app used then.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         activeGradient = try container.decode(SidebarStyle.Gradient.self, forKey: .activeGradient)
         inactiveGradient = try container.decodeIfPresent(
@@ -403,7 +403,7 @@ extension WindowChromeStyle.TitleBar: Codable {
         classicSkin = try container.decodeIfPresent(ClassicSkin.self, forKey: .classicSkin)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(activeGradient, forKey: .activeGradient)
         try container.encodeIfPresent(inactiveGradient, forKey: .inactiveGradient)
@@ -449,7 +449,7 @@ extension WindowChromeStyle.TitleBar.Texture: Codable {
         case kind, color, spacing
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         kind = try container.decode(Kind.self, forKey: .kind)
         spacing = try container.decodeIfPresent(Double.self, forKey: .spacing)
@@ -467,7 +467,7 @@ extension WindowChromeStyle.TitleBar.Texture: Codable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(kind, forKey: .kind)
         try container.encodeIfPresent(color?.hexString, forKey: .color)
@@ -479,7 +479,7 @@ extension WindowChromeStyle.TitleBar.Texture: Codable {
 
 /// The bounds `AppThemeEditing.validate` holds a chrome block to, stated beside the model so
 /// a limit and the field it limits travel together — the `SidebarStyleLimits` rule.
-enum WindowChromeStyleLimits {
+public enum WindowChromeStyleLimits {
     /// Points. Below 14 the band cannot hold its compact caption buttons; past 44 it
     /// stops being a title bar and starts being a pane.
     ///
@@ -490,10 +490,10 @@ enum WindowChromeStyleLimits {
     /// Classic Winamp's main title bar is the lower bound: fourteen pixels holding 9x9
     /// controls with three pixels above and two below. It is a source format's fixed hardware,
     /// not a density chosen for ordinary app controls.
-    static let bandHeightRange: ClosedRange<Double> = 14...44
+    public static let bandHeightRange: ClosedRange<Double> = 14...44
     /// What a band measures when the theme does not say — the native pane-tab height's
     /// neighbourhood, so the window's top does not jump between modes more than it must.
-    static let defaultBandHeight: Double = 28
+    public static let defaultBandHeight: Double = 28
 
     /// The shortest band that may state `commands: in_title_bar`.
     ///
@@ -503,31 +503,31 @@ enum WindowChromeStyleLimits {
     /// also why the two rows were separate to begin with: no reconstructed caption in this
     /// vocabulary is this tall. `WindowChromeComponentTests` holds it against
     /// `Design.Size.toolbarButtonHeight` so the two cannot drift apart.
-    static let commandsInTitleBarMinimumHeight: Double = 32
+    public static let commandsInTitleBarMinimumHeight: Double = 32
     /// Points. Smaller loses the period bitmap/screen-font shapes; larger no longer fits the
     /// minimum 18pt caption band with its hardware.
-    static let titleFontSizeRange: ClosedRange<Double> = 8...18
+    public static let titleFontSizeRange: ClosedRange<Double> = 8...18
     /// Points. One is a seam; past six the frame reads as a wall, and resize edges live
     /// under it.
-    static let frameWidthRange: ClosedRange<Double> = 1...6
+    public static let frameWidthRange: ClosedRange<Double> = 1...6
     /// What an absent frame block draws: the thinnest visible seat.
-    static let defaultFrameWidth: Double = 1
+    public static let defaultFrameWidth: Double = 1
     /// Points. Early Aqua used a small circular corner; larger values start consuming title
     /// furniture and no longer read as window chrome.
-    static let frameCornerRadiusRange: ClosedRange<Double> = 0...16
-    static let defaultFrameCornerRadius: Double = 0
+    public static let frameCornerRadiusRange: ClosedRange<Double> = 0...16
+    public static let defaultFrameCornerRadius: Double = 0
     /// The band's gradient carries the same stop budget as the sidebar's.
-    static let maximumGradientStops = SidebarStyleLimits.maximumGradientStops
+    public static let maximumGradientStops = SidebarStyleLimits.maximumGradientStops
     /// The softer contrast floor inactive ink is held to — the status-hue "tellable from the
     /// ground" rule rather than the label's, because inactive text signals inactivity by
     /// carrying less ink (Windows itself set `#D4D0C8` on `#808080`, which is 2.6:1).
-    static let inactiveInkMinimumRatio: CGFloat = 2
+    public static let inactiveInkMinimumRatio: CGFloat = 2
     /// Points between title-band texture strokes. One collapses into a solid fill; past eight
     /// the treatment stops reading as a texture tied to the chrome.
-    static let textureSpacingRange: ClosedRange<Double> = 2...8
-    static let defaultTextureSpacing: Double = 2
+    public static let textureSpacingRange: ClosedRange<Double> = 2...8
+    public static let defaultTextureSpacing: Double = 2
     /// Points. Narrower cannot hold two caption boxes and a useful title; wider stops reading
     /// as a tab. The default follows the compact BeOS application-window proportions.
-    static let tabWidthRange: ClosedRange<Double> = 120...360
-    static let defaultTabWidth: Double = 200
+    public static let tabWidthRange: ClosedRange<Double> = 120...360
+    public static let defaultTabWidth: Double = 200
 }

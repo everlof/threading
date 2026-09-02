@@ -12,6 +12,7 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [
         .library(name: "ThreadingDesignKit", type: .dynamic, targets: ["ThreadingDesignKit"]),
+        .library(name: "ThreadingDesignKitExample", targets: ["ThreadingDesignKitExample"]),
     ],
     dependencies: [
         // TerminalTheme maps a scheme onto SwiftTerm's colour table, so the model the design
@@ -49,6 +50,10 @@ let package = Package(
                 .unsafeFlags(["-strict-concurrency=complete"]),
             ]
         ),
+        // A separate module, so the compiler enforces exactly what a plugin in another package
+        // would face. This is what decides the public surface: a symbol is exported because
+        // something outside the kit needed it, not because it looked important.
+        .target(name: "ThreadingDesignKitExample", dependencies: ["ThreadingDesignKit"]),
         .testTarget(
             name: "ThreadingDesignKitTests",
             dependencies: ["ThreadingDesignKit"],

@@ -79,7 +79,7 @@ private final class FloatingTargetIsolationLayer: CALayer {
 /// should read as a mark. The flags stay because the call sites already say them; a new screen
 /// should say `emphasis` instead, because "which of the three is this" is the question being
 /// answered and `isBordered = false` is not an answer to it.
-final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProviding,
+public final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProviding,
     ThemeDerivedContent {
 
     // MARK: - Geometry
@@ -131,7 +131,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     ///
     /// Composed from the two below rather than from `Layout` again, so the word column and the
     /// mark column cannot drift apart — they are the same three numbers read twice.
-    static var plainTitleLeadingInset: CGFloat {
+    public static var plainTitleLeadingInset: CGFloat {
         Layout.plainInset + markSlotWidth + markTitleGap
     }
 
@@ -144,7 +144,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// - **secondary** — a surface, a hairline, a title. Every other real action.
     /// - **tertiary** — no surface until the pointer is on it. A mark that happens to be
     ///   clickable, which is what an icon in a row should read as.
-    enum Emphasis {
+    public enum Emphasis {
         case primary
         case secondary
         case tertiary
@@ -156,14 +156,14 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// different shape: every hit target fills one shared column, while the icon and words keep
     /// a stable leading edge. Keeping that distinction in the design-system control means a
     /// feature does not have to wrap a button in a second hover-drawing view to get a menu cell.
-    enum ContentAlignment {
+    public enum ContentAlignment {
         case center
         case leading
     }
 
     /// The tier, over the two flags that draw it. Reading it back is exact, since every
     /// combination of the flags maps to one tier and back.
-    var emphasis: Emphasis {
+    public var emphasis: Emphasis {
         get {
             if isProminent { return .primary }
             return isBordered ? .secondary : .tertiary
@@ -174,7 +174,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         }
     }
 
-    var contentAlignment: ContentAlignment = .center {
+    public var contentAlignment: ContentAlignment = .center {
         didSet { needsDisplay = true }
     }
 
@@ -183,7 +183,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// The indicator owns a real trailing column and therefore participates in intrinsic width
     /// and title truncation. Appending a Unicode arrow to `title` cannot do either: it follows a
     /// short title around the row and is the first thing lost when a long title truncates.
-    var showsSubmenuIndicator = false {
+    public var showsSubmenuIndicator = false {
         didSet {
             guard showsSubmenuIndicator != oldValue else { return }
             contentChanged()
@@ -192,18 +192,18 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
 
     // MARK: - Content
 
-    var title: String = "" {
+    public var title: String = "" {
         didSet { contentChanged() }
     }
 
     /// Optional keyboard mnemonic. Its underline is part of the label and Option+character
     /// activates the same action as a click—the behavior behind the underlined B/N in the
     /// imported Win32 action row, not fixture-only decoration.
-    var mnemonicCharacter: Character? {
+    public var mnemonicCharacter: Character? {
         didSet { needsDisplay = true }
     }
 
-    var image: NSImage? {
+    public var image: NSImage? {
         didSet { contentChanged() }
     }
 
@@ -215,7 +215,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// `NSControl.font`, observed. Left nil it takes the scale's control size; a call site sets
     /// it where the title is not really type — the accounts page puts an *emoji* in a button and
     /// sizes it as a mark.
-    override var font: NSFont? {
+    public override var font: NSFont? {
         didSet { contentChanged() }
     }
 
@@ -324,7 +324,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// a text view: `keyEquivalent = "\r"` on the session composer's start button would claim the
     /// Return meant for the prompt, since AppKit offers every key-down to the view tree's key
     /// equivalents before the first responder ever sees it.
-    var shortcut: KeyboardShortcut? {
+    public var shortcut: KeyboardShortcut? {
         didSet { contentChanged() }
     }
 
@@ -341,7 +341,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// Mirrors `NSButton.contentTintColor`: the colour of the title and of a template image.
     /// `nil` follows the style — the label colour on a bordered button, the ground colour on a
     /// prominent one.
-    var contentTintColor: NSColor? {
+    public var contentTintColor: NSColor? {
         didSet { needsDisplay = true }
     }
 
@@ -350,12 +350,12 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// Mirrors `NSButton.isBordered`, and means the same thing: `false` drops the surface and
     /// leaves the content. Kept under AppKit's name because that is what the call sites already
     /// say.
-    var isBordered: Bool = true {
+    public var isBordered: Bool = true {
         didSet { contentChanged() }
     }
 
     /// The accent-filled shape, for the action a sheet or a card is asking about.
-    var isProminent: Bool = false {
+    public var isProminent: Bool = false {
         didSet { contentChanged() }
     }
 
@@ -367,7 +367,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// the tab's own fill — the same colour is the same colour twice and says nothing, so the one
     /// control in the row that closes something looked inert. A call site that puts a plain button
     /// on a fill states the weight that reads there.
-    var hoverFill: NSColor? {
+    public var hoverFill: NSColor? {
         didSet { needsDisplay = true }
     }
 
@@ -380,7 +380,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// none of them is the surface. A hosted half also keeps its face put: the travel a material
     /// states for hover and press belongs to a whole control, and a half that moved alone would
     /// tear the plate it shares.
-    var drawsSurface = true {
+    public var drawsSurface = true {
         didSet {
             guard drawsSurface != oldValue else { return }
             needsDisplay = true
@@ -389,24 +389,24 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
 
     /// Told to the host that draws this button's surface, whenever what it would draw changed —
     /// see `ThemedIconButton.surfaceStateDidChange` for why the host cannot track this itself.
-    var surfaceStateDidChange: (() -> Void)?
+    public var surfaceStateDidChange: (() -> Void)?
 
     /// Whether a host drawing for this button should raise its half — the pointer is on it, or
     /// holding it down.
-    var isRaised: Bool { isHovered || isPressed }
+    public var isRaised: Bool { isHovered || isPressed }
 
     /// Mirrors `NSButton.keyEquivalent`, so a sheet's default and cancel buttons keep answering
     /// Return and Escape. It matches on the character whatever is held with it, which is what a
     /// sheet wants and what a pane holding a text field must not use — `shortcut` above is the
     /// one to reach for there.
-    var keyEquivalent: String = ""
+    public var keyEquivalent: String = ""
 
     /// Whether a bare Return presses this button, however that was stated.
     ///
     /// A sheet asks in order to focus its default, and either spelling is a real answer: the
     /// plain `keyEquivalent`, or the exact-match `shortcut` a sheet switches to once ⌘Return is
     /// also on offer. Reading `keyEquivalent` alone made the alert focus Cancel.
-    var answersReturn: Bool {
+    public var answersReturn: Bool {
         keyEquivalent == "\r"
             || (shortcut?.key == "\r" && shortcut?.modifiers.isEmpty == true)
     }
@@ -431,7 +431,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     }
 
     /// A raised half is drawn by the plate, not by this button, so the plate has to be told.
-    override func hoverDidChange() {
+    public override func hoverDidChange() {
         super.hoverDidChange()
         surfaceStateDidChange?()
     }
@@ -453,23 +453,23 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
 
     // MARK: - Initialization
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    convenience init(title: String, target: AnyObject?, action: Selector?) {
+    public convenience init(title: String, target: AnyObject?, action: Selector?) {
         self.init(frame: .zero)
         self.title = title
         self.target = target
         self.action = action
     }
 
-    convenience init(image: NSImage?, target: AnyObject?, action: Selector?) {
+    public convenience init(image: NSImage?, target: AnyObject?, action: Selector?) {
         self.init(frame: .zero)
         self.image = image
         self.isBordered = false
@@ -479,7 +479,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
 
     /// The common icon-button case, so a call site does not repeat the symbol configuration and
     /// then quietly disagree with the one beside it about how big a glyph is.
-    convenience init(symbol: String, accessibility: String, target: AnyObject?, action: Selector?) {
+    public convenience init(symbol: String, accessibility: String, target: AnyObject?, action: Selector?) {
         self.init(
             image: NSImage(systemSymbolName: symbol, accessibilityDescription: accessibility)?
                 .withSymbolConfiguration(Design.Symbol.configuration(Design.Symbol.control)),
@@ -497,7 +497,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         needsDisplay = true
     }
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         let inset = isBordered ? Layout.titleInset : Layout.plainInset
         // A raised primary adds a one-point default-action frame *outside* the ordinary face.
         // Its drawing therefore insets the face one point on both sides. Reserve that pair here
@@ -569,7 +569,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// frame would be a moving target while the engine is still solving it. The arithmetic is
     /// `drawContent`'s, read in reverse: the line box is centred in the face, and `draw(in:)`
     /// sets the baseline down from the box's top by the layout manager's own offset.
-    override var firstBaselineOffsetFromTop: CGFloat {
+    public override var firstBaselineOffsetFromTop: CGFloat {
         let height = intrinsicContentSize.height
         if usesPixelTitle {
             return (height - PixelTitleArtwork.cellHeight) / 2
@@ -580,13 +580,13 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     }
 
     /// One line of text, so the last baseline is the first, measured from the other edge.
-    override var lastBaselineOffsetFromBottom: CGFloat {
+    public override var lastBaselineOffsetFromBottom: CGFloat {
         intrinsicContentSize.height - firstBaselineOffsetFromTop
     }
 
     // MARK: - Interaction
 
-    override func mouseDown(with event: NSEvent) {
+    public override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         window?.makeFirstResponder(self)
         isPressed = true
@@ -646,7 +646,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
 
     /// A drag out of the button releases the press without firing, which is what AppKit does and
     /// what anyone who has ever changed their mind mid-click expects.
-    override func mouseDragged(with event: NSEvent) {
+    public override func mouseDragged(with event: NSEvent) {
         guard isEnabled else { return }
         isPressed = bounds.contains(convert(event.locationInWindow, from: nil))
     }
@@ -654,18 +654,18 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// The same decision for a view still in its window, and the only one when a press is
     /// delivered straight to the view. A press already completed by the watch above is spent,
     /// so this cannot send it twice.
-    override func mouseUp(with event: NSEvent) {
+    public override func mouseUp(with event: NSEvent) {
         completePress(
             firing: isPressed && bounds.contains(convert(event.locationInWindow, from: nil))
         )
     }
 
-    func performClick() {
+    public func performClick() {
         guard isEnabled else { return }
         sendAction(action, to: target)
     }
 
-    override func performPrimaryAction() -> Bool {
+    public override func performPrimaryAction() -> Bool {
         guard isEnabled else { return false }
         performClick()
         return true
@@ -679,7 +679,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// detour. Without this guard the composer's ⌘Return would start a session from behind a
     /// conversation the user was replying to — the offscreen button hearing a chord meant for
     /// the reply box.
-    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    public override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard isEnabled, !isHiddenOrHasHiddenAncestor else { return false }
 
         if matches(shortcut, event) || (!keyEquivalent.isEmpty
@@ -716,22 +716,22 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
             == shortcut.modifiers.intersection(Self.chordModifiers)
     }
 
-    override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    public override func accessibilityRole() -> NSAccessibility.Role? { .button }
 
     /// A button's words are its *title*; `accessibilityLabel` maps to AXDescription, which is
     /// where an icon-only button's tooltip belongs and where a titled button's text does not —
     /// a screen reader and a UI script both ask for the title first.
-    override func accessibilityTitle() -> String? { title.isEmpty ? nil : title }
-    override func accessibilityLabel() -> String? {
+    public override func accessibilityTitle() -> String? { title.isEmpty ? nil : title }
+    public override func accessibilityLabel() -> String? {
         title.isEmpty ? (iconAccessibilityName ?? toolTip) : nil
     }
-    override func accessibilityPerformPress() -> Bool {
+    public override func accessibilityPerformPress() -> Bool {
         performPrimaryAction()
     }
 
     // MARK: - Drawing
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         // A button handed an applied surface is already wearing that shape — the accounts pane's
         // icon well is a disc — and the layer's corner clips this drawing to it. Taking the
         // radius from the record rather than from the token is what keeps a hover fill, and the
@@ -862,17 +862,17 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
         drawContent(in: faceBounds)
     }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         rederiveThemedContent()
     }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         layoutFloatingIsolation()
     }
 
-    func rederiveThemedContent() {
+    public func rederiveThemedContent() {
         guard let floatingSurfaceRadius else { return }
         ThemedFloatingSurfaceChrome.current(for: effectiveAppearance).apply(
             to: self,
@@ -1136,22 +1136,22 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// This is intentionally not a prose renderer. `canDraw` rejects the whole title when one
     /// character is absent, so a localized action never becomes a mixture of pixels and missing
     /// glyphs. That title takes the ordinary antialiased font path intact.
-    enum PixelTitleArtwork {
-        static let cellWidth: CGFloat = 5
-        static let cellHeight: CGFloat = 6
+    public enum PixelTitleArtwork {
+        public static let cellWidth: CGFloat = 5
+        public static let cellHeight: CGFloat = 6
         /// The rows of ink above the sixth-row baseline/spacing cell — which is also where the
         /// baseline sits, measured from the cell's top. `firstBaselineOffsetFromTop` reads it.
-        static let inkRows = 5
+        public static let inkRows = 5
 
-        static func canDraw(_ title: String) -> Bool {
+        public static func canDraw(_ title: String) -> Bool {
             title.allSatisfy { glyphs[$0] != nil }
         }
 
-        static func width(of title: String) -> CGFloat {
+        public static func width(of title: String) -> CGFloat {
             CGFloat(title.count) * cellWidth
         }
 
-        static func draw(
+        public static func draw(
             _ title: String,
             in rect: NSRect,
             ink: NSColor,
@@ -1381,35 +1381,35 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// (`drawsSurface`) and the plate draws this. Stated here rather than there because a welded
     /// pair that resolved its own faces would drift from the button standing beside it the first
     /// time a theme moved one of them.
-    struct Plate {
+    public struct Plate {
         /// The resting face, drawn to the plate's whole silhouette.
-        let fill: NSColor
-        let border: NSColor?
+        public let fill: NSColor
+        public let border: NSColor?
 
         /// What the half under the pointer fills with, painted **over** `fill` rather than
         /// replacing it. That is the one place a plate cannot copy the button: a filled primary
         /// raises with a wash of its own ink, because raising it with the accent again would
         /// paint the colour it is already wearing and report nothing.
-        let raisedFill: NSColor
+        public let raisedFill: NSColor
 
         /// The extra outer frame a classic default pushbutton wears, filled to the plate's
         /// silhouette with the face inset inside it. Nil for every other treatment.
-        let outerFrame: NSColor?
+        public let outerFrame: NSColor?
 
-        let shadow: AppTheme.Glow?
-        let collapsesShadowOnHover: Bool
+        public let shadow: AppTheme.Glow?
+        public let collapsesShadowOnHover: Bool
 
         /// Whether the face sits inside the plate, leaving `outerFrame` visible around it — the
         /// frame's other half, and false wherever there is no frame.
-        var insetsFace: Bool { outerFrame != nil }
+        public var insetsFace: Bool { outerFrame != nil }
 
         /// How far inside the frame the face sits. One point, because a default pushbutton's
         /// extra frame is a rule rather than a border: the bevel is the face's own.
-        static let faceInset: CGFloat = 1
+        public static let faceInset: CGFloat = 1
     }
 
     /// The plate for a press of this emphasis, under the material drawing it.
-    static func plate(for emphasis: Emphasis, material: AppTheme.Material) -> Plate {
+    public static func plate(for emphasis: Emphasis, material: AppTheme.Material) -> Plate {
         let style = material.buttonStyle
         let secondaryShadow: AppTheme.Glow?
         switch style.secondaryShadow {
@@ -1517,7 +1517,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// The frame's horizontal padding around the title and glyph — the bordered shape's title
     /// inset, or the plain shape's breathing room for its hover surface. What `PaneFooterView`
     /// subtracts to put the *ink* on a stated margin.
-    var opticalHorizontalInset: CGFloat {
+    public var opticalHorizontalInset: CGFloat {
         isBordered ? Layout.titleInset : Layout.plainInset
     }
 
@@ -1526,7 +1526,7 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// at rest; report the air around the tallest thing actually drawn inside it. The caller
     /// supplies the row's height because a host may promote this control above its intrinsic
     /// measure — exactly what the session status card does.
-    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
+    public func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
         guard !isBordered else { return 0 }
         let contentHeight = max(
             displayTitle.isEmpty ? 0 : titleLineHeight,
@@ -1544,8 +1544,8 @@ final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBaselineProv
     /// another, so a stack of readings reads as a list rather than as sentences that happen to
     /// share a left margin. When one of those rows is a titled button, every other row has to
     /// match the geometry it already has — so it is stated here rather than guessed there.
-    static var markSlotWidth: CGFloat { Layout.imageSize }
-    static var markTitleGap: CGFloat { Layout.imageTitleGap }
+    public static var markSlotWidth: CGFloat { Layout.imageSize }
+    public static var markTitleGap: CGFloat { Layout.imageTitleGap }
 
     private var foreground: NSColor {
         if let contentTintColor { return dimmed(contentTintColor) }
@@ -1589,7 +1589,7 @@ extension ThemedButton {
     /// The component owns its target, surface and semantic shape; hosts contribute only the
     /// wording, action and placement. Keeping those together is what makes Git Review and Native
     /// Chat one affordance rather than two buttons that happen to use the same symbol.
-    static func floatingScrollToEnd(
+    public static func floatingScrollToEnd(
         accessibility: String,
         target: AnyObject?,
         action: Selector?
@@ -1619,7 +1619,7 @@ extension ThemedButton {
     /// Read rather than `isHidden`, because a target on its way out is still on screen and is
     /// no longer on offer: the host asks the same question every scroll event, and answering it
     /// from the pixels would restart the departure on every one of them.
-    var isFloatingPresent: Bool { !isHidden && !isFloatingLeaving }
+    public var isFloatingPresent: Bool { !isHidden && !isFloatingLeaving }
 
     /// Offers the floating target, or takes it back — travelling either way.
     ///
@@ -1634,7 +1634,7 @@ extension ThemedButton {
     ///
     /// `animated: false` is for a host replacing everything under the target — a re-render has
     /// no *from* picture to travel out of, so the arrow leaves with the content it belonged to.
-    func setFloatingPresence(_ present: Bool, animated: Bool = true) {
+    public func setFloatingPresence(_ present: Bool, animated: Bool = true) {
         guard present != isFloatingPresent else { return }
 
         // Whatever was in flight is now history: its completion must not hide a target that is
@@ -1755,38 +1755,38 @@ extension ThemedButton {
 // MARK: - Floating Target Motion
 
 /// The picture a floating navigation target arrives from, and leaves into.
-enum FloatingTargetMotion {
+public enum FloatingTargetMotion {
 
     /// How far below its resting place the target starts. `Design.Spacing.large` is the
     /// distance it reads as *rising from the pane's edge*: the arrow rests
     /// `Design.Spacing.inset` above that edge, so a rise of one step more begins just past it
     /// — far enough to be movement, and at the opacity it starts on, never a glyph seen
     /// hanging over whatever is below the pane.
-    static let rise: CGFloat = Design.Spacing.large
+    public static let rise: CGFloat = Design.Spacing.large
 
     /// How far it sinks on the way out. Shorter than the rise, because a departure only has to
     /// read as *going*, and the eye is no longer following it.
-    static let fall: CGFloat = Design.Spacing.medium
+    public static let fall: CGFloat = Design.Spacing.medium
 
     /// How small it starts. Enough that the arrow visibly grows into its resting size; below
     /// about this the arrival stops reading as approach and starts reading as a zoom.
-    static let arriveScale: CGFloat = 0.86
+    public static let arriveScale: CGFloat = 0.86
 
     /// How small it ends. Held closer to full than the arrival, so the exit reads as the same
     /// object leaving rather than as one collapsing.
-    static let leaveScale: CGFloat = 0.92
+    public static let leaveScale: CGFloat = 0.92
 
     /// One key for both directions: adding either animation is what cancels the other.
-    static let animationKey = "threading.floatingTarget.presence"
-    static let transformKeyPath = "transform"
-    static let opacityKeyPath = "opacity"
+    public static let animationKey = "threading.floatingTarget.presence"
+    public static let transformKeyPath = "transform"
+    public static let opacityKeyPath = "opacity"
 }
 
 // MARK: - ControlRowMember
 
 extension ThemedButton: ControlRowMember {
 
-    func adopt(_ metrics: ControlRowMetrics) {
+    public func adopt(_ metrics: ControlRowMetrics) {
         guard rowHeight != metrics.height else { return }
         rowHeight = metrics.height
         contentChanged()

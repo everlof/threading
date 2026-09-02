@@ -34,7 +34,7 @@ enum WorkingOrbStyle: String, CaseIterable {
 ///
 /// Raw values mirror `LabelMorph.MorphPreset`; the adapter at the UI boundary
 /// owns the package mapping and the fixed intensity/timing.
-enum ChatNameMorphStyle: String, CaseIterable {
+public enum ChatNameMorphStyle: String, CaseIterable {
     case shapeMorph
     case crossfade
     case slideUp

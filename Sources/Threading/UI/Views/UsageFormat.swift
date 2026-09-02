@@ -2,7 +2,7 @@ import AppKit
 import ThreadingRemoteKit
 
 /// Display vocabulary shared by the usage pill and its popover.
-enum UsageFormat {
+public enum UsageFormat {
 
     /// Measured spend, exactly: `$531,676.76`.
     ///
@@ -10,18 +10,18 @@ enum UsageFormat {
     /// values and must spell them the same way — and because `.currency(code:)` is
     /// locale-sensitive, so three independent call sites printed `US$…` for every reader
     /// outside `en_US`. See `UsageValueFormat`.
-    static func currency(_ value: Double) -> String {
+    public static func currency(_ value: Double) -> String {
         UsageValueFormat.currency(value)
     }
 
     /// The same amount where the slot's width is fixed by something other than the text —
     /// a chart's value axis, a stat in a band: `$25k`, `$1.2M`.
-    static func compactCurrency(_ value: Double) -> String {
+    public static func compactCurrency(_ value: Double) -> String {
         UsageValueFormat.compactCurrency(value)
     }
 
     /// A share of a total, at one decimal so a column of them stays a column.
-    static func share(_ fraction: Double) -> String {
+    public static func share(_ fraction: Double) -> String {
         UsageValueFormat.share(fraction)
     }
 
@@ -29,7 +29,7 @@ enum UsageFormat {
     ///
     /// Never `0m`: a reset a few seconds away is still one minute's worth of waiting to a reader,
     /// and a countdown that reaches zero and stays there reads as stuck.
-    static func remaining(until date: Date, from now: Date = Date()) -> String {
+    public static func remaining(until date: Date, from now: Date = Date()) -> String {
         let minutes = Int(max(0, date.timeIntervalSince(now)) / 60)
         return span(minutes: max(minutes, 1))
     }
@@ -40,7 +40,7 @@ enum UsageFormat {
     /// the reset" read as the same quantity — but it keeps seconds, because the things measured
     /// this way (how long a poke took) are often shorter than a minute and rounding those up to
     /// `1m` would overstate what they cost.
-    static func duration(_ interval: TimeInterval) -> String {
+    public static func duration(_ interval: TimeInterval) -> String {
         let seconds = max(0, interval)
         guard seconds >= 60 else { return "\(Int(seconds.rounded()))s" }
         return span(minutes: Int(seconds / 60))
@@ -64,13 +64,13 @@ enum UsageFormat {
 
     /// `resets in 2d 4h` — the countdown as a phrase, for the readings that set it beside other
     /// segments rather than in a column of its own.
-    static func resets(until date: Date, from now: Date = Date()) -> String {
+    public static func resets(until date: Date, from now: Date = Date()) -> String {
         "resets in \(remaining(until: date, from: now))"
     }
 
     /// A token count at a glance: 45.5M rather than 45,491,203. The exact figure is never the
     /// point on a page comparing one checkout against another.
-    static func tokens(_ count: Int64) -> String {
+    public static func tokens(_ count: Int64) -> String {
         let value = Double(count)
         if value >= 1_000_000_000 { return String(format: "%.2fB", value / 1_000_000_000) }
         if value >= 1_000_000 { return String(format: "%.1fM", value / 1_000_000) }
@@ -82,11 +82,11 @@ enum UsageFormat {
     ///
     /// Only ever shown when there are some: an account with none should say nothing rather
     /// than announce a zero.
-    static func resetCredits(_ count: Int) -> String {
+    public static func resetCredits(_ count: Int) -> String {
         count == 1 ? "1 limit reset banked" : "\(count) limit resets banked"
     }
 
-    static func age(of date: Date, at now: Date = Date()) -> String {
+    public static func age(of date: Date, at now: Date = Date()) -> String {
         let minutes = Int(max(0, now.timeIntervalSince(date)) / 60)
         if minutes < 1 { return "just now" }
         if minutes < 60 { return "\(minutes)m ago" }
@@ -99,7 +99,7 @@ enum UsageFormat {
     /// The reset as an absolute local moment, to sit beside the countdown so a reset reads as both
     /// "in 3h" and "at 3:45": the time alone when it is today, `tomorrow 3:45 PM`, a weekday within
     /// the week, else a dated form. Respects the user's 12/24-hour locale.
-    static func absolute(_ date: Date, from now: Date = Date()) -> String {
+    public static func absolute(_ date: Date, from now: Date = Date()) -> String {
         let calendar = Calendar.current
         let time = timeFormatter.string(from: date)
 
@@ -149,7 +149,7 @@ extension UsageSeverity {
     /// Tint for the ring, percent text and bars. Normal stays monochrome in glyph contexts
     /// and takes the user's accent in bar fills; pressure escalates through the system's
     /// own warning colours, so light and dark both work.
-    var glyphColor: NSColor {
+    public var glyphColor: NSColor {
         switch self {
         case .normal: return Design.Text.secondary
         case .warning: return Design.Status.warning
@@ -157,7 +157,7 @@ extension UsageSeverity {
         }
     }
 
-    var barColor: NSColor {
+    public var barColor: NSColor {
         switch self {
         case .normal: return Design.Surface.accent
         case .warning: return Design.Status.warning
@@ -175,6 +175,7 @@ extension UsageFormat {
     /// Silent on `.unknown` rather than saying "unknown": a line that appears only when it has
     /// something to say is read when it appears, and one that is always there is not read at
     /// all. Silent on a comfortable window too — being told you will not run out is noise.
+    // Not published: the forecast is computed from a journal only the application has.
     static func forecast(_ outcome: UsageForecast.Outcome, window: AccountUsage.Window) -> String? {
         switch outcome {
         case .unknown, .withinBudget:

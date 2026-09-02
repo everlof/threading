@@ -6,7 +6,7 @@ extension AppThemeStyles {
     /// furniture, bookended controls, and the left-hand stippled scroller visible throughout
     /// its applications. The terminal is the period black-on-white shell rather than a modern
     /// dark console dressed in the same accent.
-    static let openStep = AppTheme(
+    public static let openStep = AppTheme(
         id: AppThemeID("openstep-42"),
         name: "OPENSTEP 4.2",
         mode: .light,

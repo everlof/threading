@@ -36,7 +36,7 @@ extension NSView {
     ///
     /// Keyed to the *key* window because `.activeInKeyWindow` tracking is: a control under the
     /// pointer in a background window is not hovered, which is also how it draws.
-    var isPointerInside: Bool {
+    public var isPointerInside: Bool {
         guard let window, window.isKeyWindow, !isHiddenOrHasHiddenAncestor else { return false }
         let unclipped = bounds.intersection(visibleRect)
         return unclipped.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
@@ -72,7 +72,7 @@ extension NSView {
     /// crossings does so inside that very event; see `CoveredWindowPointer`). The chip a menu is
     /// open *on* keeps its held look through `ThemedMenuPresentationObserving`, not through hover,
     /// so nothing here needs to keep a covered control lit.
-    func isPointerCovered(at pointInWindow: CGPoint) -> Bool {
+    public func isPointerCovered(at pointInWindow: CGPoint) -> Bool {
         // `hitTest` takes its point in the *superview's* coordinates, and the content view's
         // superview is the window's frame view — whose coordinates are the window's.
         guard let hit = window?.contentView?.hitTest(pointInWindow) else { return false }
@@ -94,14 +94,14 @@ extension NSView {
     /// `scripts/check_architecture_boundaries.sh` fails the build on a `mouseMoved` override that
     /// reads `locationInWindow` without asking — the rule was applied by hand to three views
     /// first, and the fourth is the one that would have forgotten.
-    func uncoveredPointerLocation(in event: NSEvent) -> NSPoint? {
+    public func uncoveredPointerLocation(in event: NSEvent) -> NSPoint? {
         guard !isPointerCovered(at: event.locationInWindow) else { return nil }
         return convert(event.locationInWindow, from: nil)
     }
 
     /// The same question wherever the pointer is now, for the moments when there is no event to
     /// read a location off.
-    var isPointerCovered: Bool {
+    public var isPointerCovered: Bool {
         guard let window else { return false }
         return isPointerCovered(at: window.mouseLocationOutsideOfEventStream)
     }
@@ -117,7 +117,7 @@ extension NSView {
     /// It answers for the pointer's *position* alone. A surface rising over a still pointer leaves
     /// this true and is a separate question, because being covered does not mean the same thing to
     /// every view — see `isPointerCovered(at:)`.
-    func hoverIsStale(_ isHovered: Bool) -> Bool {
+    public func hoverIsStale(_ isHovered: Bool) -> Bool {
         isHovered && !isPointerInside
     }
 }

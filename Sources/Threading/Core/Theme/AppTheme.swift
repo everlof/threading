@@ -7,35 +7,35 @@ import AppKit
 /// App and terminal themes both use stable IDs. A *shipped library* cannot rely on display
 /// names: renaming a stock theme in some future release must not silently reset assignments.
 /// The slug is persistence identity; `name` is presentation and may change independently.
-struct AppThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible {
-    let rawValue: String
+public struct AppThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible {
+    public let rawValue: String
 
-    init(rawValue: String) { self.rawValue = rawValue }
-    init(_ rawValue: String) { self.rawValue = rawValue }
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(_ rawValue: String) { self.rawValue = rawValue }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         rawValue = try decoder.singleValueContainer().decode(String.self)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
     }
 
-    var description: String { rawValue }
+    public var description: String { rawValue }
 
     /// Theme ids become Application Support directory names. Keep the wire type lossless so a
     /// corrupt preference can still be diagnosed, but never let that value escape its store.
-    var isSafeAssetDirectoryName: Bool {
+    public var isSafeAssetDirectoryName: Bool {
         StoredPathComponent.isValid(rawValue)
     }
 
-    static func isSafePathComponent(_ value: String) -> Bool {
+    public static func isSafePathComponent(_ value: String) -> Bool {
         StoredPathComponent.isValid(value)
     }
 
     /// The identity theme: every role answers with the system colour it always did.
-    static let system = AppThemeID("system")
+    public static let system = AppThemeID("system")
 }
 
 // MARK: - App Theme
@@ -47,26 +47,26 @@ struct AppThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible 
 /// animations — and Threading's layout is its product rather than its decoration. A theme that
 /// moved the sidebar would not be a theme. So the promise is the one VS Code makes: an app that
 /// *reads as* Cyberpunk, not Cyberpunk recreated.
-struct AppTheme: Codable, Equatable {
+public struct AppTheme: Codable, Equatable {
 
-    let id: AppThemeID
-    let name: String
+    public let id: AppThemeID
+    public let name: String
 
     /// Adaptive, light, or dark. Fixed themes pin the window's `NSAppearance`; an adaptive
     /// theme leaves it unpinned and resolves its matching variant as macOS changes appearance.
-    let mode: Mode
+    public let mode: Mode
 
     /// One line, shown under the name where a theme is chosen.
-    let summary: String?
+    public let summary: String?
 
     /// One or both authored appearances. Existing fixed themes carry one; adaptive themes carry
     /// both. System carries neither because its roles are AppKit's own dynamic colours.
-    let variants: [VariantKind: Variant]
+    public let variants: [VariantKind: Variant]
 
     /// Compatibility projections for the rest of the app. Feature views ask for the material,
     /// palette, or roles that match the appearance currently drawing; they do not need to know
     /// whether the theme stored one variant or two.
-    var roles: [AppThemeRole: NSColor] { activeVariant?.roles ?? [:] }
+    public var roles: [AppThemeRole: NSColor] { activeVariant?.roles ?? [:] }
 
     /// The palette a terminal following this theme draws with right now.
     ///
@@ -77,11 +77,11 @@ struct AppTheme: Codable, Equatable {
     /// wears. Resolving there chose a dark terminal in a light app. A caller resolving for a
     /// specific appearance — a preview, the remote bridge — says so with `terminalPalette(for:)`.
     @MainActor
-    var terminalPalette: TerminalTheme {
+    public var terminalPalette: TerminalTheme {
         terminalPalette(for: NSApplication.shared.effectiveAppearance)
     }
 
-    func terminalPalette(for appearance: NSAppearance) -> TerminalTheme {
+    public func terminalPalette(for appearance: NSAppearance) -> TerminalTheme {
         if let variant = variant(for: appearance) { return variant.terminalPalette }
         // The identity theme pairs a palette per appearance the way its roles resolve per
         // appearance: black-on-white beside a light chrome, near-window dark beside a dark one.
@@ -91,14 +91,14 @@ struct AppTheme: Codable, Equatable {
             VariantKind.current(in: appearance) == .dark ? .systemDark : .systemLight
         return palette.renamed(name)
     }
-    var material: Material { activeVariant?.material ?? .system }
+    public var material: Material { activeVariant?.material ?? .system }
 
     /// The material for a stated appearance, for callers consuming it as data rather than while
     /// drawing — `Design.Typography` resolves fonts through this anchored to the application's
     /// appearance, the same distinction `terminalPalette` draws above. The ambient `material`
     /// stays for radii and glow, which are read at draw time where the ambient appearance is
     /// the right question.
-    func material(for appearance: NSAppearance) -> Material {
+    public func material(for appearance: NSAppearance) -> Material {
         variant(for: appearance)?.material ?? .system
     }
 
@@ -106,33 +106,33 @@ struct AppTheme: Codable, Equatable {
     /// coordinator and the band, so it anchors to the application's appearance the way
     /// `terminalPalette` does, not to whatever `NSAppearance.currentDrawing()` last held.
     @MainActor
-    var windowChrome: WindowChromeStyle? {
+    public var windowChrome: WindowChromeStyle? {
         windowChrome(for: NSApplication.shared.effectiveAppearance)
     }
 
-    func windowChrome(for appearance: NSAppearance) -> WindowChromeStyle? {
+    public func windowChrome(for appearance: NSAppearance) -> WindowChromeStyle? {
         variant(for: appearance)?.chrome
     }
 
     /// Whether this theme opts the main window out of its native frame. Asked of the theme,
     /// not of a variant: validation holds an adaptive theme to chrome-in-both-or-neither, so
     /// any variant answers for all of them.
-    var takesOverWindowChrome: Bool {
+    public var takesOverWindowChrome: Bool {
         variants.values.contains { $0.chrome != nil }
     }
 
-    enum VariantKind: String, Codable, CaseIterable, Hashable {
+    public enum VariantKind: String, Codable, CaseIterable, Hashable {
         case light, dark
 
-        var appearance: NSAppearance? {
+        public var appearance: NSAppearance? {
             NSAppearance(named: self == .dark ? .darkAqua : .aqua)
         }
 
-        init(mode: Mode) {
+        public init(mode: Mode) {
             self = mode == .dark ? .dark : .light
         }
 
-        static func current(in appearance: NSAppearance = NSAppearance.currentDrawing()) -> Self {
+        public static func current(in appearance: NSAppearance = NSAppearance.currentDrawing()) -> Self {
             appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
         }
     }
@@ -142,28 +142,28 @@ struct AppTheme: Codable, Equatable {
     /// Material is variant-owned too: a pale paper style may need a hard ink shadow while its
     /// night counterpart needs a restrained glow. The paired terminal palette must vary because
     /// its foreground, background, selection, and all sixteen ANSI colours are one contrast set.
-    struct Variant: Codable, Equatable {
-        let roles: [AppThemeRole: NSColor]
-        let terminalPalette: TerminalTheme
-        let material: Material
+    public struct Variant: Codable, Equatable {
+        public let roles: [AppThemeRole: NSColor]
+        public let terminalPalette: TerminalTheme
+        public let material: Material
 
         /// The sidebar's dressing — background layers and the brand row. Optional and variant-
         /// owned like the material, because a gradient authored for a dark ground is wrong on a
         /// pale one. Absent means the sidebar as it always was.
-        let sidebar: SidebarStyle?
+        public let sidebar: SidebarStyle?
 
         /// The window frame's dressing — and, by its presence, the opt-in to drawing the whole
         /// frame. Variant-owned like the sidebar, but validation additionally requires an
         /// adaptive theme to state it in both variants or neither: band colours may differ by
         /// appearance, whether the window wears its own frame may not.
-        let chrome: WindowChromeStyle?
+        public let chrome: WindowChromeStyle?
 
         private enum CodingKeys: String, CodingKey {
             case roles, terminalPalette
             case material, sidebar, chrome
         }
 
-        init(
+        public init(
             roles: [AppThemeRole: NSColor],
             terminalPalette: TerminalTheme,
             material: Material,
@@ -177,7 +177,7 @@ struct AppTheme: Codable, Equatable {
             self.chrome = chrome
         }
 
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             let hexes = try container.decodeIfPresent([String: String].self, forKey: .roles) ?? [:]
             var parsed: [AppThemeRole: NSColor] = [:]
@@ -193,7 +193,7 @@ struct AppTheme: Codable, Equatable {
             chrome = try container.decodeIfPresent(WindowChromeStyle.self, forKey: .chrome)
         }
 
-        func encode(to encoder: Encoder) throws {
+        public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(
                 Dictionary(uniqueKeysWithValues: roles.map { ($0.key.rawValue, $0.value.hexString) }),
@@ -217,7 +217,7 @@ struct AppTheme: Codable, Equatable {
         /// field by construction, so a future regional block rides through edit sites that
         /// have never heard of it — `WindowChromeStyleTests` sweeps the stock catalogue to
         /// hold `replacing()` to the identity.
-        func replacing(
+        public func replacing(
             roles: [AppThemeRole: NSColor]? = nil,
             terminalPalette: TerminalTheme? = nil,
             material: Material? = nil
@@ -234,7 +234,7 @@ struct AppTheme: Codable, Equatable {
         /// The regional blocks get their own verbs because "set it to nil" must be sayable —
         /// an optional parameter on `replacing` could not tell "leave it alone" from "take it
         /// away", which is the exact distinction `AppThemeEditing.SidebarChange` exists for.
-        func replacingSidebar(_ sidebar: SidebarStyle?) -> Variant {
+        public func replacingSidebar(_ sidebar: SidebarStyle?) -> Variant {
             Variant(
                 roles: roles,
                 terminalPalette: terminalPalette,
@@ -244,7 +244,7 @@ struct AppTheme: Codable, Equatable {
             )
         }
 
-        func replacingChrome(_ chrome: WindowChromeStyle?) -> Variant {
+        public func replacingChrome(_ chrome: WindowChromeStyle?) -> Variant {
             Variant(
                 roles: roles,
                 terminalPalette: terminalPalette,
@@ -256,20 +256,20 @@ struct AppTheme: Codable, Equatable {
     }
 
     /// Radii, border weight, an optional panel shadow — and the typeface the chrome is set in.
-    struct Material: Codable, Equatable {
+    public struct Material: Codable, Equatable {
         /// Containers holding content — cards, the prompt box.
-        var panelRadius: CGFloat = 12
+        public var panelRadius: CGFloat = 12
         /// Smaller things nested inside them — chips, swatches.
-        var controlRadius: CGFloat = 8
+        public var controlRadius: CGFloat = 8
         /// Structural rules and the borders around content-bearing surfaces.
-        var borderWidth: CGFloat = 1
+        public var borderWidth: CGFloat = 1
 
         /// The border around compact controls. Nil inherits `borderWidth`.
         ///
         /// Some source languages deliberately use two weights: Bauhaus rules cards in four
         /// pixels of ink but frames buttons in two. Keeping this optional preserves every
         /// existing theme document while making that measured distinction authorable.
-        var controlBorderWidth: CGFloat?
+        public var controlBorderWidth: CGFloat?
 
         /// A restrained repeating treatment on the app's broad backdrop surfaces.
         ///
@@ -279,13 +279,13 @@ struct AppTheme: Codable, Equatable {
         /// never applied to cards or controls. A component opts in only when it is the broad
         /// ground behind the product UI, so custom themes can author that language without
         /// turning every nested surface into wallpaper.
-        var backdropPattern: BackdropPattern?
+        public var backdropPattern: BackdropPattern?
 
         /// A theme-level multiplier for semantic app text. One preserves every historical
         /// theme; a deliberately dense visual language can compact the same roles without
         /// components inventing smaller point sizes. This composes with the user's text-size
         /// preference, which remains the final authority.
-        var textScale: CGFloat = 1
+        public var textScale: CGFloat = 1
 
         /// The closed height of a compact value chooser.
         ///
@@ -293,27 +293,27 @@ struct AppTheme: Codable, Equatable {
         /// pop-up is a sixteen-point strip, BeOS uses an eighteen-point menu field, and Win32's
         /// combo box is taller again. Keeping the measure beside the chooser anatomy makes that
         /// distinction authorable without shrinking unrelated buttons, fields, or hit targets.
-        var choiceHeight: CGFloat = 26
+        public var choiceHeight: CGFloat = 26
 
         /// A shadow behind opted-in panels, in one of the theme's own colours. A zero offset
         /// reads as a glow; a non-zero, zero-radius shadow gives Bauhaus and Neo Brutalism
         /// their hard printed lift without teaching feature views about either style. A glow
         /// may pair that shade with an opposing highlight shadow — the two-light construction
         /// used by clay and neumorphic materials.
-        var glow: Glow?
+        public var glow: Glow?
 
         /// The complete visual grammar for app-owned anchored popovers.
         ///
         /// This is data rather than a theme-name branch in `ThemedPopover`: period chromes can
         /// remove the modern stem and ambient shadow, hard/soft materials can opt into their
         /// authored edge and depth, and contributed/custom themes use the same vocabulary.
-        var popoverStyle: PopoverStyle = .system
+        public var popoverStyle: PopoverStyle = .system
 
         /// The same paired-shadow vocabulary at control scale. Kept separate from `glow`
         /// because the source materials do: a white card casts broad neutral depth, while a
         /// button casts a tighter accent-coloured shadow. Nil preserves the flat controls of
         /// every document written before this capability existed.
-        var controlGlow: Glow?
+        public var controlGlow: Glow?
 
         /// The visual and interactive grammar of an action button.
         ///
@@ -322,7 +322,7 @@ struct AppTheme: Codable, Equatable {
         /// accent, and Neo Brutalism moves the face into its hard shadow on hover and press.
         /// Keeping those decisions together makes that grammar authorable by custom themes
         /// without teaching `ThemedButton` the name of any stock style.
-        var buttonStyle: ButtonStyle = .system
+        public var buttonStyle: ButtonStyle = .system
 
         /// A display-face override for semantic headings.
         ///
@@ -330,7 +330,7 @@ struct AppTheme: Codable, Equatable {
         /// display face with sans body copy, while Art Deco keeps its headings substantially
         /// lighter than its controls. `typeface`/`fontFamily` remain the prose default; this
         /// optional recipe changes headings only and inherits every field it does not state.
-        var headingStyle: HeadingStyle?
+        public var headingStyle: HeadingStyle?
 
         /// Which of the platform's typeface designs the chrome is set in.
         ///
@@ -340,7 +340,7 @@ struct AppTheme: Codable, Equatable {
         /// System. The values are macOS's own font designs, so nothing is bundled and every
         /// weight exists; `Design.Typography` is the one interpreter. Code and the terminal
         /// deliberately do not follow it.
-        var typeface: Typeface = .standard
+        public var typeface: Typeface = .standard
 
         /// A raised-and-sunken edge treatment on every applied surface. A hard bevel is the
         /// vocabulary that makes mid-nineties chrome expressible as data; a soft bevel gives
@@ -351,7 +351,7 @@ struct AppTheme: Codable, Equatable {
         /// `bevelHighlight`/`bevelShadow` roles: raised by default and sunken where a component
         /// says so (`SurfaceBevel.sunken` — text wells). Hard bevels require square corners;
         /// soft bevels follow the rounded silhouette instead.
-        var bevel: Bevel?
+        public var bevel: Bevel?
 
         /// A named font family, for a theme whose identity is a *particular* face rather than a
         /// typeface class.
@@ -368,7 +368,7 @@ struct AppTheme: Codable, Equatable {
         /// indistinguishable from never having chosen, and the next scope out answers.
         ///
         /// Nothing bundled still holds. This names a family the machine already has.
-        var fontFamily: String?
+        public var fontFamily: String?
 
         /// Ordered substitutes for `fontFamily`, used only when the preferred historical face is
         /// not installed.
@@ -379,11 +379,11 @@ struct AppTheme: Codable, Equatable {
         /// broad `typeface` loses the nearest period-safe substitute. This ordered chain keeps
         /// both promises. Nothing is bundled or downloaded, and the first family CoreText can
         /// actually resolve wins.
-        var fontFallbacks: [String] = []
+        public var fontFallbacks: [String] = []
 
         /// The named-family resolution order, with empty and duplicate entries removed without
         /// changing authors' preference order.
-        var fontFamilies: [String] {
+        public var fontFamilies: [String] {
             var seen = Set<String>()
             return ([fontFamily].compactMap { $0 } + fontFallbacks).compactMap { family in
                 let clean = family.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -395,32 +395,32 @@ struct AppTheme: Codable, Equatable {
         /// Which edge owns a managed scroll view's vertical scroller. AppKit's native answer
         /// remains the trailing edge; period systems such as OPENSTEP can state the leading
         /// edge without any feature view moving its own content.
-        var scrollerPlacement: ScrollerPlacement = .trailing
+        public var scrollerPlacement: ScrollerPlacement = .trailing
 
         /// The material behind the scroll thumb. Most themes use a solid surface; a stippled
         /// track is the one-bit texture used by workstation-era interfaces.
-        var scrollerTrackStyle: ScrollerTrackStyle = .solid
+        public var scrollerTrackStyle: ScrollerTrackStyle = .solid
 
         /// The period-specific anatomy of a scrollbar: arrow placement, thumb construction,
         /// track relief, and (for Aqua) translucent gel. `automatic` keeps the app's modern
         /// proportional thumb and the user's overlay/legacy preference. Every other value is
         /// an explicitly authored desktop-era control and therefore occupies persistent
         /// legacy scrollbar space.
-        var scrollerAppearance: ScrollerAppearance = .automatic
+        public var scrollerAppearance: ScrollerAppearance = .automatic
 
         /// The complete anatomy of app-owned menus. A menu is not merely the open half of a
         /// chooser: its frame, hard or ambient shadow, row rhythm, separators, selection, and
         /// submenu marks varied independently across the desktop systems the takeover themes
         /// reproduce. Keeping that family explicit lets stock, custom, and contributed themes
         /// select the same production implementation without a theme-name branch.
-        var menuAppearance: MenuAppearance = .automatic
+        public var menuAppearance: MenuAppearance = .automatic
 
         /// How determinate progress is painted. Continuous is the cross-theme default;
         /// segmented is the classic Win32 block control, whose smooth form was opt-in. Amiga
         /// Workbench's horizontal gauge has its own hard trough and title-blue fill; its native
         /// pixels are not preserved by the surviving manual, so that recipe remains explicitly
         /// source-inferred.
-        var progressStyle: ProgressStyle = .continuous
+        public var progressStyle: ProgressStyle = .continuous
 
         /// How retained time-series data is painted inside the shared chart boundary.
         ///
@@ -429,12 +429,12 @@ struct AppTheme: Codable, Equatable {
         /// language used by player chrome. This belongs to the material rather than to a named
         /// theme check, so imported player skins and contributed themes can ask for the same
         /// production renderer.
-        var chartStyle: ChartStyle = .continuous
+        public var chartStyle: ChartStyle = .continuous
 
         /// The silhouette and internal anatomy of compact value choosers. A chip is the app's
         /// quiet modern default; a dropdown is the square, sunken value well with an independent
         /// raised arrow button used by desktop-era systems.
-        var choiceStyle: ChoiceStyle = .chip
+        public var choiceStyle: ChoiceStyle = .chip
 
         /// The anatomy of a binary check gadget, independent of popup/chooser anatomy.
         ///
@@ -442,13 +442,13 @@ struct AppTheme: Codable, Equatable {
         /// gray recessed field and tick, while BeOS uses a white nested well and an X in the
         /// system mark colour. `automatic` preserves the pre-field inference for old theme
         /// documents; authored themes can state the exact family without a stock-theme branch.
-        var checkboxStyle: CheckboxStyle = .automatic
+        public var checkboxStyle: CheckboxStyle = .automatic
 
         /// The anatomy of an immediate binary toggle. Existing documents keep the animated
         /// sliding switch; compact hardware themes may state a labelled latching button.
-        var toggleStyle: ToggleStyle = .automatic
+        public var toggleStyle: ToggleStyle = .automatic
 
-        enum Typeface: String, Codable, CaseIterable {
+        public enum Typeface: String, Codable, CaseIterable {
             /// SF Sans — the platform default, and the System theme's answer.
             case standard = "default"
             /// New York.
@@ -458,7 +458,7 @@ struct AppTheme: Codable, Equatable {
             /// SF Mono.
             case monospaced
 
-            var systemDesign: NSFontDescriptor.SystemDesign {
+            public var systemDesign: NSFontDescriptor.SystemDesign {
                 switch self {
                 case .standard: return .default
                 case .serif: return .serif
@@ -468,17 +468,17 @@ struct AppTheme: Codable, Equatable {
             }
         }
 
-        enum ScrollerPlacement: String, Codable, CaseIterable {
+        public enum ScrollerPlacement: String, Codable, CaseIterable {
             case trailing
             case leading
         }
 
-        enum ScrollerTrackStyle: String, Codable, CaseIterable {
+        public enum ScrollerTrackStyle: String, Codable, CaseIterable {
             case solid
             case stippled
         }
 
-        enum ScrollerAppearance: String, Codable, CaseIterable {
+        public enum ScrollerAppearance: String, Codable, CaseIterable {
             case automatic
             case windows98 = "windows_98"
             case platinum
@@ -491,11 +491,11 @@ struct AppTheme: Codable, Equatable {
             /// thumb while the two neutral arrow buttons sit together at the scrolling end.
             case aquaTiger = "aqua_tiger"
 
-            var usesLegacyPresentation: Bool { self != .automatic }
+            public var usesLegacyPresentation: Bool { self != .automatic }
 
             /// Classic Macintosh, OPENSTEP, and Amiga put both arrows together at the
             /// scrolling end. The others bookend the track.
-            var groupsArrowsAtTrailingEnd: Bool {
+            public var groupsArrowsAtTrailingEnd: Bool {
                 switch self {
                 case .platinum, .openStep, .amiga, .aquaTiger: true
                 default: false
@@ -503,7 +503,7 @@ struct AppTheme: Codable, Equatable {
             }
         }
 
-        enum MenuAppearance: String, Codable, CaseIterable {
+        public enum MenuAppearance: String, Codable, CaseIterable {
             /// The modern rounded app menu grammar.
             case automatic
             case windows98 = "windows_98"
@@ -515,10 +515,10 @@ struct AppTheme: Codable, Equatable {
             case aqua
             case aquaTiger = "aqua_tiger"
 
-            var isHistorical: Bool { self != .automatic }
+            public var isHistorical: Bool { self != .automatic }
         }
 
-        enum ProgressStyle: String, Codable, CaseIterable {
+        public enum ProgressStyle: String, Codable, CaseIterable {
             case continuous
             case segmented
             /// Indigo Magic's measured scale: a square recessed well with a slanted leading
@@ -527,12 +527,12 @@ struct AppTheme: Codable, Equatable {
             case amiga
         }
 
-        enum ChartStyle: String, Codable, CaseIterable {
+        public enum ChartStyle: String, Codable, CaseIterable {
             case continuous
             case spectrum
         }
 
-        enum ChoiceStyle: String, Codable, CaseIterable {
+        public enum ChoiceStyle: String, Codable, CaseIterable {
             case chip
             /// A sunken value well with a separately raised down-arrow button (Win32 combo box).
             case dropdown
@@ -545,10 +545,10 @@ struct AppTheme: Codable, Equatable {
             /// An Amiga cycle gadget: one raised face with a cycling double-arrow mark.
             case cycle
 
-            var isClassic: Bool { self != .chip }
+            public var isClassic: Bool { self != .chip }
         }
 
-        enum CheckboxStyle: String, Codable, CaseIterable {
+        public enum CheckboxStyle: String, Codable, CaseIterable {
             /// Modern for ordinary materials; old square-bevel documents retain the historical
             /// recessed-tick inference in `ThemedCheckbox`.
             case automatic
@@ -557,7 +557,7 @@ struct AppTheme: Codable, Equatable {
             case beOSCross = "beos_cross"
         }
 
-        enum ToggleStyle: String, Codable, CaseIterable {
+        public enum ToggleStyle: String, Codable, CaseIterable {
             /// The modern sliding track and travelling knob used by existing theme documents.
             case automatic
             /// A compact hardware latch whose raised OFF face seats into a black ON well. Both
@@ -566,25 +566,25 @@ struct AppTheme: Codable, Equatable {
             case onOffButton = "on_off_button"
         }
 
-        struct BackdropPattern: Codable, Equatable {
-            enum Kind: String, Codable, CaseIterable {
+        public struct BackdropPattern: Codable, Equatable {
+            public enum Kind: String, Codable, CaseIterable {
                 case dots
                 case grid
                 case diagonalGrid = "diagonal_grid"
                 case perspectiveGrid = "perspective_grid"
             }
 
-            var kind: Kind
+            public var kind: Kind
             /// The semantic ink used for the marks, resolved per appearance.
-            var role: AppThemeRole
+            public var role: AppThemeRole
             /// Opacity of the pattern layer after the role's own alpha is resolved.
-            var opacity: Double
+            public var opacity: Double
             /// Distance between repeated marks, in points.
-            var spacing: CGFloat
+            public var spacing: CGFloat
             /// Grid stroke width or dot diameter, in points.
-            var lineWidth: CGFloat
+            public var lineWidth: CGFloat
 
-            init(
+            public init(
                 kind: Kind,
                 role: AppThemeRole = .border,
                 opacity: Double = 0.08,
@@ -602,7 +602,7 @@ struct AppTheme: Codable, Equatable {
                 case kind, role, opacity, spacing, lineWidth
             }
 
-            init(from decoder: Decoder) throws {
+            public init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 kind = try container.decodeIfPresent(Kind.self, forKey: .kind) ?? .dots
                 role = try container.decodeIfPresent(AppThemeRole.self, forKey: .role) ?? .border
@@ -612,13 +612,13 @@ struct AppTheme: Codable, Equatable {
             }
         }
 
-        struct PopoverStyle: Codable, Equatable {
-            enum Arrow: String, Codable, CaseIterable {
+        public struct PopoverStyle: Codable, Equatable {
+            public enum Arrow: String, Codable, CaseIterable {
                 case triangle
                 case none
             }
 
-            enum Edge: String, Codable, CaseIterable {
+            public enum Edge: String, Codable, CaseIterable {
                 /// A structural border in the theme's border role.
                 case flat
                 /// The material bevel when one exists, otherwise the structural border.
@@ -626,7 +626,7 @@ struct AppTheme: Codable, Equatable {
                 case none
             }
 
-            enum Shadow: String, Codable, CaseIterable {
+            public enum Shadow: String, Codable, CaseIterable {
                 /// Use the authored panel shadow when present, otherwise the native window shadow.
                 case automatic
                 case system
@@ -634,29 +634,29 @@ struct AppTheme: Codable, Equatable {
                 case none
             }
 
-            enum Density: String, Codable, CaseIterable {
+            public enum Density: String, Codable, CaseIterable {
                 case regular
                 case compact
             }
 
-            enum GlyphStyle: String, Codable, CaseIterable {
+            public enum GlyphStyle: String, Codable, CaseIterable {
                 case system
                 case classic
             }
 
-            var arrow: Arrow = .triangle
-            var surfaceRole: AppThemeRole = .floatingSurface
-            var edge: Edge = .flat
-            var shadow: Shadow = .automatic
-            var density: Density = .regular
-            var glyphStyle: GlyphStyle = .system
+            public var arrow: Arrow = .triangle
+            public var surfaceRole: AppThemeRole = .floatingSurface
+            public var edge: Edge = .flat
+            public var shadow: Shadow = .automatic
+            public var density: Density = .regular
+            public var glyphStyle: GlyphStyle = .system
             /// Optional radius for the anchored surface. Nil follows the active panel radius;
             /// period help tags can state their near-square plate without changing every card.
-            var cornerRadius: CGFloat?
+            public var cornerRadius: CGFloat?
 
-            static let system = PopoverStyle()
+            public static let system = PopoverStyle()
 
-            init(
+            public init(
                 arrow: Arrow = .triangle,
                 surfaceRole: AppThemeRole = .floatingSurface,
                 edge: Edge = .flat,
@@ -678,7 +678,7 @@ struct AppTheme: Codable, Equatable {
                 case arrow, surfaceRole, edge, shadow, density, glyphStyle, cornerRadius
             }
 
-            init(from decoder: Decoder) throws {
+            public init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 arrow = try container.decodeIfPresent(Arrow.self, forKey: .arrow) ?? .triangle
                 surfaceRole = try container.decodeIfPresent(
@@ -694,13 +694,13 @@ struct AppTheme: Codable, Equatable {
             }
         }
 
-        struct ButtonStyle: Codable, Equatable {
-            enum TextTransform: String, Codable, CaseIterable {
+        public struct ButtonStyle: Codable, Equatable {
+            public enum TextTransform: String, Codable, CaseIterable {
                 case none
                 case uppercase
             }
 
-            enum TitleRendering: String, Codable, CaseIterable {
+            public enum TitleRendering: String, Codable, CaseIterable {
                 /// Draw the title with the authored scalable font recipe.
                 case font
                 /// Draw supported characters as a clean-room one-bit alphabet in five-by-six
@@ -708,13 +708,13 @@ struct AppTheme: Codable, Equatable {
                 case pixel5x6 = "pixel_5x6"
             }
 
-            enum FontWeight: String, Codable, CaseIterable {
+            public enum FontWeight: String, Codable, CaseIterable {
                 case regular
                 case medium
                 case semibold
                 case bold
 
-                var appKitWeight: NSFont.Weight {
+                public var appKitWeight: NSFont.Weight {
                     switch self {
                     case .regular: return .regular
                     case .medium: return .medium
@@ -724,7 +724,7 @@ struct AppTheme: Codable, Equatable {
                 }
             }
 
-            enum PrimaryTreatment: String, Codable, CaseIterable {
+            public enum PrimaryTreatment: String, Codable, CaseIterable {
                 case filled
                 case outlined
                 /// Keep the primary on the ordinary control face and distinguish it with the
@@ -735,66 +735,66 @@ struct AppTheme: Codable, Equatable {
             /// Selects which authored material shadow an ordinary bordered action casts.
             /// Primary actions always use `material.controlGlow`; a reference can give its
             /// secondary actions the broader neutral panel relief or keep them flat.
-            enum SecondaryShadow: String, Codable, CaseIterable {
+            public enum SecondaryShadow: String, Codable, CaseIterable {
                 case control
                 case panel
                 case none
             }
 
-            var textTransform: TextTransform = .none
-            var titleRendering: TitleRendering = .font
-            var fontWeight: FontWeight = .medium
+            public var textTransform: TextTransform = .none
+            public var titleRendering: TitleRendering = .font
+            public var fontWeight: FontWeight = .medium
             /// Nil inherits the material's prose face. A button may name its own face because
             /// display-led references commonly pair action labels with headings rather than
             /// with their reading copy.
-            var typeface: Typeface?
-            var fontFamily: String?
+            public var typeface: Typeface?
+            public var fontFamily: String?
             /// Additional points between title glyphs. This is a compact-control value, not an
             /// em unit: it follows the app's semantic text scale without compounding it.
-            var tracking: CGFloat = 0
+            public var tracking: CGFloat = 0
             /// Multiplier over the semantic control size. Period web implementations state
             /// device-pixel text at 96 dpi; this preserves that ratio without replacing the
             /// app-wide type scale with a theme-name branch.
-            var fontScale: CGFloat = 1
+            public var fontScale: CGFloat = 1
             /// Optional native pushbutton floors. Nil preserves the app's ordinary semantic
             /// size; a historical implementation may state its period control metrics.
-            var minimumWidth: CGFloat?
-            var minimumHeight: CGFloat?
+            public var minimumWidth: CGFloat?
+            public var minimumHeight: CGFloat?
             /// Classic disabled pushbuttons engrave shadow-coloured ink with a one-pixel lit
             /// echo instead of lowering the whole label's opacity.
-            var embossesDisabledTitle: Bool = false
+            public var embossesDisabledTitle: Bool = false
             /// Whether Core Graphics may soften a scalable-font title's glyph edges. Some
             /// bitmap-era systems used hard font strikes; a sprite-style alphabet should use
             /// `titleRendering` instead of asking an outline font to imitate one.
-            var antialiasesTitle: Bool = true
-            var primaryTreatment: PrimaryTreatment = .filled
+            public var antialiasesTitle: Bool = true
+            public var primaryTreatment: PrimaryTreatment = .filled
             /// The semantic colour supplying a primary button's fill, border, and title.
-            var primaryRole: AppThemeRole = .accent
+            public var primaryRole: AppThemeRole = .accent
             /// The face of an ordinary bordered action. Kept on the button style rather than
             /// the material's global control role because a reference may put raised white
             /// buttons beside recessed lavender fields without making either one lie.
-            var secondaryRole: AppThemeRole = .controlResting
+            public var secondaryRole: AppThemeRole = .controlResting
             /// Optional independent hover face. Defaults to the ordinary control-hover role;
             /// clay keeps its white body and reports hover through lift and shadow instead.
-            var secondaryHoverRole: AppThemeRole = .controlHover
+            public var secondaryHoverRole: AppThemeRole = .controlHover
             /// The shadow vocabulary for an ordinary bordered action. Existing documents keep
             /// the historical compact-control shadow unless they state another source.
-            var secondaryShadow: SecondaryShadow = .control
+            public var secondaryShadow: SecondaryShadow = .control
             /// An optional independent rule around a filled primary. Outlined primaries always
             /// use `primaryRole` for their rule.
-            var primaryBorderRole: AppThemeRole?
+            public var primaryBorderRole: AppThemeRole?
             /// Visual travel in screen coordinates: positive Y moves down, matching CSS and the
             /// reference vocabulary even though AppKit's drawing coordinate is normally up.
-            var hoverOffsetX: CGFloat = 0
-            var hoverOffsetY: CGFloat = 0
-            var pressedOffsetX: CGFloat = 0
-            var pressedOffsetY: CGFloat = 0
+            public var hoverOffsetX: CGFloat = 0
+            public var hoverOffsetY: CGFloat = 0
+            public var pressedOffsetX: CGFloat = 0
+            public var pressedOffsetY: CGFloat = 0
             /// Hard-print controls collapse their offset shadow as the face moves into it.
-            var collapseShadowOnHover: Bool = false
+            public var collapseShadowOnHover: Bool = false
 
-            static let system = ButtonStyle()
+            public static let system = ButtonStyle()
 
-            init(
+            public init(
                 textTransform: TextTransform = .none,
                 titleRendering: TitleRendering = .font,
                 fontWeight: FontWeight = .medium,
@@ -854,7 +854,7 @@ struct AppTheme: Codable, Equatable {
 
             /// A partially written style is still a valid style. This matters for hand-authored
             /// theme documents just as much as the material's outer backwards-compatible decode.
-            init(from decoder: Decoder) throws {
+            public init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 textTransform = try container.decodeIfPresent(
                     TextTransform.self, forKey: .textTransform
@@ -909,18 +909,18 @@ struct AppTheme: Codable, Equatable {
             }
         }
 
-        struct HeadingStyle: Codable, Equatable {
+        public struct HeadingStyle: Codable, Equatable {
             /// Nil inherits the material's prose typeface class.
-            var typeface: Typeface?
+            public var typeface: Typeface?
             /// Nil inherits the material's prose family. An unavailable named family falls
             /// through to `typeface`, then to the material's prose answer.
-            var fontFamily: String?
+            public var fontFamily: String?
             /// Nil keeps the semantic role's ordinary weight.
-            var fontWeight: ButtonStyle.FontWeight?
+            public var fontWeight: ButtonStyle.FontWeight?
             /// Display italics are explicit; old and sparse documents remain upright.
-            var italic: Bool = false
+            public var italic: Bool = false
 
-            init(
+            public init(
                 typeface: Typeface? = nil,
                 fontFamily: String? = nil,
                 fontWeight: ButtonStyle.FontWeight? = nil,
@@ -936,7 +936,7 @@ struct AppTheme: Codable, Equatable {
                 case typeface, fontFamily, fontWeight, italic
             }
 
-            init(from decoder: Decoder) throws {
+            public init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 typeface = try container.decodeIfPresent(Typeface.self, forKey: .typeface)
                 fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
@@ -948,7 +948,7 @@ struct AppTheme: Codable, Equatable {
             }
         }
 
-        static let system = Material()
+        public static let system = Material()
 
         /// The heaviest a *rule* may read, in points of fully-opaque ink.
         ///
@@ -959,7 +959,7 @@ struct AppTheme: Codable, Equatable {
         /// which is why this is a budget rather than a width: a 1pt rule may be fully inked
         /// (Swiss Minimalist's brief is exactly that), while a 3pt rule must hold back to
         /// ~0.43 — which is, to the point, what Industrial already authored by hand.
-        static let ruleInkBudget: CGFloat = 1.3
+        public static let ruleInkBudget: CGFloat = 1.3
 
         /// The strongest ink a rule of this material's weight may carry.
         ///
@@ -967,7 +967,7 @@ struct AppTheme: Codable, Equatable {
         /// only `borderWidth` and can never state its way past the budget. The floor of 1 in
         /// the divisor mirrors `ThemedSplitView.minimumGrab`: a sub-point rule is drawn at a
         /// point, so it is judged at a point.
-        var ruleInkCeiling: CGFloat {
+        public var ruleInkCeiling: CGFloat {
             min(1, Self.ruleInkBudget / max(1, borderWidth))
         }
 
@@ -988,21 +988,21 @@ struct AppTheme: Codable, Equatable {
         /// It is deliberately the loosest cap that fixes the reported bug: of the six stock
         /// themes authoring a pattern, this leaves five untouched at exactly what they state,
         /// including Bauhaus's 4pt dots at 0.20 (0.80, level with the budget).
-        static let backdropInkBudget: CGFloat = 0.8
+        public static let backdropInkBudget: CGFloat = 0.8
 
         /// The strongest ink this material's backdrop marks may carry.
         ///
         /// Unlike `ruleInkCeiling`, Increase Contrast does **not** lift this. A rule is content
         /// beside content and contrast asked for is contrast given; a backdrop pattern is behind
         /// text, where more ink is strictly less legible.
-        var backdropInkCeiling: CGFloat {
+        public var backdropInkCeiling: CGFloat {
             min(1, Self.backdropInkBudget / max(1, backdropPattern?.lineWidth ?? 1))
         }
 
         /// The compact-control border after applying the backwards-compatible inheritance rule.
-        var resolvedControlBorderWidth: CGFloat { controlBorderWidth ?? borderWidth }
+        public var resolvedControlBorderWidth: CGFloat { controlBorderWidth ?? borderWidth }
 
-        init(
+        public init(
             panelRadius: CGFloat = 12,
             controlRadius: CGFloat = 8,
             borderWidth: CGFloat = 1,
@@ -1069,7 +1069,7 @@ struct AppTheme: Codable, Equatable {
         /// decodes to the value the app used then. The synthesized decoder threw on the
         /// missing key instead, and the throw was swallowed upstream by a `?? .system`
         /// fallback — which would have silently discarded the user's whole authored material.
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             panelRadius = try container.decodeIfPresent(CGFloat.self, forKey: .panelRadius) ?? 12
             controlRadius = try container.decodeIfPresent(CGFloat.self, forKey: .controlRadius) ?? 8
@@ -1141,21 +1141,21 @@ struct AppTheme: Codable, Equatable {
 
     /// The measure and construction of a bevel material's edge. A struct rather than a bare
     /// width keeps the classic hard edge and the rounded soft relief in one wire vocabulary.
-    struct Bevel: Codable, Equatable {
+    public struct Bevel: Codable, Equatable {
         /// Points per edge, bounded by validation to 1...3: one point is a whisper, two is
         /// the classic, and past three the edges stop framing a surface and start being one.
-        var width: CGFloat = 2
+        public var width: CGFloat = 2
 
         /// Hard is the crisp rectilinear construction shipped first. Soft is an antialiased,
         /// rounded inset gradient: light at the top-leading edge, shade at bottom-trailing.
-        var style: Style = .hard
+        public var style: Style = .hard
 
-        enum Style: String, Codable, CaseIterable {
+        public enum Style: String, Codable, CaseIterable {
             case hard
             case soft
         }
 
-        init(width: CGFloat = 2, style: Style = .hard) {
+        public init(width: CGFloat = 2, style: Style = .hard) {
             self.width = width
             self.style = style
         }
@@ -1164,32 +1164,32 @@ struct AppTheme: Codable, Equatable {
             case width, style
         }
 
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             width = try container.decodeIfPresent(CGFloat.self, forKey: .width) ?? 2
             style = try container.decodeIfPresent(Style.self, forKey: .style) ?? .hard
         }
     }
 
-    struct Glow: Codable, Equatable {
-        let role: AppThemeRole
-        let radius: CGFloat
-        let opacity: Double
-        let offsetX: CGFloat
-        let offsetY: CGFloat
-        let highlight: Highlight?
+    public struct Glow: Codable, Equatable {
+        public let role: AppThemeRole
+        public let radius: CGFloat
+        public let opacity: Double
+        public let offsetX: CGFloat
+        public let offsetY: CGFloat
+        public let highlight: Highlight?
 
         /// The optional second outer shadow, normally a pale lift travelling opposite the
         /// primary shade. It deliberately has the same bounded vocabulary as the primary
         /// shadow but is nested so every document written before paired shadows still decodes.
-        struct Highlight: Codable, Equatable {
-            let role: AppThemeRole
-            let radius: CGFloat
-            let opacity: Double
-            let offsetX: CGFloat
-            let offsetY: CGFloat
+        public struct Highlight: Codable, Equatable {
+            public let role: AppThemeRole
+            public let radius: CGFloat
+            public let opacity: Double
+            public let offsetX: CGFloat
+            public let offsetY: CGFloat
 
-            init(
+            public init(
                 role: AppThemeRole,
                 radius: CGFloat,
                 opacity: Double,
@@ -1207,7 +1207,7 @@ struct AppTheme: Codable, Equatable {
                 case role, radius, opacity, offsetX, offsetY
             }
 
-            init(from decoder: Decoder) throws {
+            public init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 role = try container.decode(AppThemeRole.self, forKey: .role)
                 radius = try container.decode(CGFloat.self, forKey: .radius)
@@ -1217,7 +1217,7 @@ struct AppTheme: Codable, Equatable {
             }
         }
 
-        init(
+        public init(
             role: AppThemeRole,
             radius: CGFloat,
             opacity: Double,
@@ -1237,7 +1237,7 @@ struct AppTheme: Codable, Equatable {
             case role, radius, opacity, offsetX, offsetY, highlight
         }
 
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             role = try container.decode(AppThemeRole.self, forKey: .role)
             radius = try container.decode(CGFloat.self, forKey: .radius)
@@ -1248,10 +1248,10 @@ struct AppTheme: Codable, Equatable {
         }
     }
 
-    enum Mode: String, Codable {
+    public enum Mode: String, Codable {
         case system, light, dark
 
-        var appearance: NSAppearance? {
+        public var appearance: NSAppearance? {
             switch self {
             case .system: return nil
             case .light: return NSAppearance(named: .aqua)
@@ -1261,14 +1261,14 @@ struct AppTheme: Codable, Equatable {
 
         /// The agent-facing term is “adaptive”; `system` survives in persisted documents for
         /// compatibility with the original System-only implementation.
-        var appearanceName: String { self == .system ? "adaptive" : rawValue }
+        public var appearanceName: String { self == .system ? "adaptive" : rawValue }
     }
 
     // MARK: - The System Theme
 
     /// The app as it was before any of this: every role answers with its system colour, so
     /// light and dark and the user's own accent all keep working.
-    static let system = AppTheme(
+    public static let system = AppTheme(
         id: .system,
         name: "System",
         mode: .system,
@@ -1280,17 +1280,17 @@ struct AppTheme: Codable, Equatable {
         material: .system
     )
 
-    var isSystem: Bool { id == .system }
-    var isAdaptive: Bool { mode == .system }
-    var availableVariants: [VariantKind] {
+    public var isSystem: Bool { id == .system }
+    public var isAdaptive: Bool { mode == .system }
+    public var availableVariants: [VariantKind] {
         VariantKind.allCases.filter { variants[$0] != nil }
     }
 
-    func variant(_ kind: VariantKind) -> Variant? {
+    public func variant(_ kind: VariantKind) -> Variant? {
         variants[kind]
     }
 
-    func variantKind(for appearance: NSAppearance = NSAppearance.currentDrawing()) -> VariantKind {
+    public func variantKind(for appearance: NSAppearance = NSAppearance.currentDrawing()) -> VariantKind {
         switch mode {
         case .light: return .light
         case .dark: return .dark
@@ -1298,7 +1298,7 @@ struct AppTheme: Codable, Equatable {
         }
     }
 
-    func variant(for appearance: NSAppearance = NSAppearance.currentDrawing()) -> Variant? {
+    public func variant(for appearance: NSAppearance = NSAppearance.currentDrawing()) -> Variant? {
         let preferred = variantKind(for: appearance)
         return variants[preferred]
             ?? variants[preferred == .light ? .dark : .light]
@@ -1317,7 +1317,7 @@ struct AppTheme: Codable, Equatable {
     /// it is not optional politeness: a style that stated a fixed dark ground and let the
     /// *labels* fall back to the system's would flip half the window when macOS switched
     /// appearance. A themed role never falls back to a dynamic system colour.
-    func resolved(
+    public func resolved(
         _ role: AppThemeRole,
         appearance: NSAppearance = NSAppearance.currentDrawing()
     ) -> NSColor {
@@ -1390,7 +1390,7 @@ struct AppTheme: Codable, Equatable {
         case roles, material, terminalPalette
     }
 
-    init(
+    public init(
         id: AppThemeID,
         name: String,
         mode: Mode,
@@ -1417,7 +1417,7 @@ struct AppTheme: Codable, Equatable {
         }
     }
 
-    init(
+    public init(
         id: AppThemeID,
         name: String,
         mode: Mode,
@@ -1433,7 +1433,7 @@ struct AppTheme: Codable, Equatable {
 
     /// Roles are written as a hex map keyed by the role's own name, so a theme document is
     /// hand-writable and reviewable in a diff — the same reason `TerminalTheme` stores hex.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(AppThemeID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
@@ -1476,7 +1476,7 @@ struct AppTheme: Codable, Equatable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
@@ -1499,7 +1499,7 @@ extension NSColor {
     ///
     /// This is what lets a translucent line be *measured* against its ground: contrast asked of
     /// the overlay's stored value answers for the colour nobody sees.
-    func composited(under overlay: NSColor) -> NSColor {
+    public func composited(under overlay: NSColor) -> NSColor {
         guard let base = usingColorSpace(.sRGB),
               let top = overlay.usingColorSpace(.sRGB) else { return overlay }
         let alpha = top.alphaComponent
@@ -1516,7 +1516,7 @@ extension NSColor {
     ///
     /// Used only for *derived* roles, where the alternative is making every theme state a panel
     /// fill that is obviously its surface a little lighter.
-    func lightened(by amount: CGFloat) -> NSColor {
+    public func lightened(by amount: CGFloat) -> NSColor {
         guard let srgb = usingColorSpace(.sRGB) else { return self }
         let target: CGFloat = amount >= 0 ? 1 : 0
         let t = abs(amount)

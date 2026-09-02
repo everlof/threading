@@ -23,20 +23,20 @@ import AppKit
 /// `ThemeAssetStore` (disk, one folder per theme); contributed themes resolve the same names
 /// against their package through `ExtensionAppearanceRegistry`. A name that resolves to nothing
 /// degrades to the default treatment — the rule a dangling font family already follows.
-struct SidebarStyle: Codable, Equatable {
+public struct SidebarStyle: Codable, Equatable {
 
     /// Painted between the themed surface and the list. Gradient below, image above.
-    var background: Background?
+    public var background: Background?
 
     /// The brand row at the sidebar's top: logo and wordmark.
-    var brand: Brand?
+    public var brand: Brand?
 
     /// The project tree's own work area. Absent keeps the historical transparent list over the
     /// sidebar background; stated themes can make it a contrasting raised, sunken, or flat
     /// field without feature code knowing which visual language it belongs to.
-    var navigatorWell: NavigatorWell?
+    public var navigatorWell: NavigatorWell?
 
-    init(
+    public init(
         background: Background? = nil,
         brand: Brand? = nil,
         navigatorWell: NavigatorWell? = nil
@@ -48,20 +48,20 @@ struct SidebarStyle: Codable, Equatable {
 
     /// Nothing stated at all — indistinguishable from a document without the block, and what
     /// an update that removes both halves normalises to.
-    var isEmpty: Bool { background == nil && brand == nil && navigatorWell == nil }
+    public var isEmpty: Bool { background == nil && brand == nil && navigatorWell == nil }
 
     // MARK: - Navigator Work Area
 
-    struct NavigatorWell: Equatable {
-        var fill: NSColor
-        var bevel: Bevel
+    public struct NavigatorWell: Equatable {
+        public var fill: NSColor
+        public var bevel: Bevel
 
-        init(fill: NSColor, bevel: Bevel = .sunken) {
+        public init(fill: NSColor, bevel: Bevel = .sunken) {
             self.fill = fill
             self.bevel = bevel
         }
 
-        enum Bevel: String, Codable, CaseIterable {
+        public enum Bevel: String, Codable, CaseIterable {
             case raised
             case sunken
             case none
@@ -70,61 +70,61 @@ struct SidebarStyle: Codable, Equatable {
 
     // MARK: - Background
 
-    struct Background: Codable, Equatable {
+    public struct Background: Codable, Equatable {
         /// Drawn first, over the theme's surface colour.
-        var gradient: Gradient?
+        public var gradient: Gradient?
         /// Drawn over the gradient (or the surface): a tiled pattern or a fitted picture.
-        var image: ImageLayer?
+        public var image: ImageLayer?
 
-        init(gradient: Gradient? = nil, image: ImageLayer? = nil) {
+        public init(gradient: Gradient? = nil, image: ImageLayer? = nil) {
             self.gradient = gradient
             self.image = image
         }
 
-        var isEmpty: Bool { gradient == nil && image == nil }
+        public var isEmpty: Bool { gradient == nil && image == nil }
     }
 
-    struct Gradient: Equatable {
+    public struct Gradient: Equatable {
         /// At least two, positions in 0...1. Order is the author's; rendering sorts.
-        var stops: [Stop]
+        public var stops: [Stop]
         /// CSS convention: the direction the gradient flows toward, in degrees clockwise from
         /// straight up — 0 flows toward the top, 90 toward the trailing edge, 180 toward the
         /// bottom. Chosen because it is the convention every agent already knows.
-        var angleDegrees: Double
+        public var angleDegrees: Double
 
-        init(stops: [Stop], angleDegrees: Double = 180) {
+        public init(stops: [Stop], angleDegrees: Double = 180) {
             self.stops = stops
             self.angleDegrees = angleDegrees
         }
 
-        struct Stop: Equatable {
-            let color: NSColor
+        public struct Stop: Equatable {
+            public let color: NSColor
             /// 0 at the start of the run, 1 at its end.
-            let position: Double
+            public let position: Double
 
-            init(color: NSColor, position: Double) {
+            public init(color: NSColor, position: Double) {
                 self.color = color
                 self.position = position
             }
         }
     }
 
-    struct ImageLayer: Codable, Equatable {
+    public struct ImageLayer: Codable, Equatable {
         /// Resolved through `ThemeAssetStore` for custom themes and the extension registry for
         /// contributed ones. See `SidebarAssetSlot` for the names custom themes use.
-        var asset: String
-        var mode: Mode
+        public var asset: String
+        public var mode: Mode
         /// 0...1 over whatever is beneath. Full strength suits a drawn pattern; a photograph
         /// under white text usually wants far less, and the tool description says so.
-        var opacity: Double
+        public var opacity: Double
 
-        init(asset: String, mode: Mode = .fill, opacity: Double = 1) {
+        public init(asset: String, mode: Mode = .fill, opacity: Double = 1) {
             self.asset = asset
             self.mode = mode
             self.opacity = opacity
         }
 
-        enum Mode: String, Codable, CaseIterable {
+        public enum Mode: String, Codable, CaseIterable {
             /// Repeated at its own pixel size from the top-leading corner.
             case tile
             /// Scaled to cover the column, cropping whatever overflows.
@@ -136,20 +136,20 @@ struct SidebarStyle: Codable, Equatable {
 
     // MARK: - Brand
 
-    struct Brand: Codable, Equatable {
+    public struct Brand: Codable, Equatable {
         /// What sits in the logo slot. Absent means the Threading mark.
-        var logo: Logo
+        public var logo: Logo
         /// The wordmark beside it. Absent means the app's own name in the default style.
-        var title: Title?
+        public var title: Title?
 
-        init(logo: Logo = .mark, title: Title? = nil) {
+        public init(logo: Logo = .mark, title: Title? = nil) {
             self.logo = logo
             self.title = title
         }
 
-        var isEmpty: Bool { logo == .mark && title == nil }
+        public var isEmpty: Bool { logo == .mark && title == nil }
 
-        enum Logo: Equatable {
+        public enum Logo: Equatable {
             /// The Threading mark, drawn live in the theme's ink.
             case mark
             /// No logo; the wordmark stands alone.
@@ -158,20 +158,20 @@ struct SidebarStyle: Codable, Equatable {
             case asset(String)
         }
 
-        struct Title: Codable, Equatable {
+        public struct Title: Codable, Equatable {
             /// Absent means the app's own name (`AppInfo.name`).
-            var text: String?
+            public var text: String?
             /// A family on this machine; a name that resolves to nothing degrades to the
             /// theme's typeface, exactly as `Material.fontFamily` does.
-            var fontFamily: String?
+            public var fontFamily: String?
             /// Points, bounded by validation. Absent means the wordmark's own default.
-            var fontSize: Double?
-            var weight: Weight?
+            public var fontSize: Double?
+            public var weight: Weight?
             /// A brand that is only a logo. The logo cannot also be hidden — validation
             /// refuses a brand with nothing left in it.
-            var hidden: Bool
+            public var hidden: Bool
 
-            init(
+            public init(
                 text: String? = nil,
                 fontFamily: String? = nil,
                 fontSize: Double? = nil,
@@ -185,15 +185,15 @@ struct SidebarStyle: Codable, Equatable {
                 self.hidden = hidden
             }
 
-            var isEmpty: Bool {
+            public var isEmpty: Bool {
                 text == nil && fontFamily == nil && fontSize == nil
                     && weight == nil && !hidden
             }
 
-            enum Weight: String, Codable, CaseIterable {
+            public enum Weight: String, Codable, CaseIterable {
                 case regular, medium, semibold, bold
 
-                var fontWeight: NSFont.Weight {
+                public var fontWeight: NSFont.Weight {
                     switch self {
                     case .regular: return .regular
                     case .medium: return .medium
@@ -207,7 +207,7 @@ struct SidebarStyle: Codable, Equatable {
                 case text, fontFamily, fontSize, weight, hidden
             }
 
-            init(from decoder: Decoder) throws {
+            public init(from decoder: Decoder) throws {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 text = try container.decodeIfPresent(String.self, forKey: .text)
                 fontFamily = try container.decodeIfPresent(String.self, forKey: .fontFamily)
@@ -226,7 +226,7 @@ extension SidebarStyle.NavigatorWell: Codable {
         case fill, bevel
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let hex = try container.decode(String.self, forKey: .fill)
         guard let parsed = NSColor(hex: hex) else {
@@ -240,7 +240,7 @@ extension SidebarStyle.NavigatorWell: Codable {
         bevel = try container.decodeIfPresent(Bevel.self, forKey: .bevel) ?? .sunken
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(fill.hexString, forKey: .fill)
         try container.encode(bevel, forKey: .bevel)
@@ -252,13 +252,13 @@ extension SidebarStyle.Gradient: Codable {
         case stops, angleDegrees
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         stops = try container.decode([Stop].self, forKey: .stops)
         angleDegrees = try container.decodeIfPresent(Double.self, forKey: .angleDegrees) ?? 180
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(stops, forKey: .stops)
         try container.encode(angleDegrees, forKey: .angleDegrees)
@@ -271,7 +271,7 @@ extension SidebarStyle.Gradient.Stop: Codable {
     }
 
     /// Hex on the wire, like every colour in a theme document — hand-writable, diffable.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let hex = try container.decode(String.self, forKey: .color)
         guard let parsed = NSColor(hex: hex) else {
@@ -285,7 +285,7 @@ extension SidebarStyle.Gradient.Stop: Codable {
         position = try container.decode(Double.self, forKey: .position)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(color.hexString, forKey: .color)
         try container.encode(position, forKey: .position)
@@ -299,7 +299,7 @@ extension SidebarStyle.Brand.Logo: Codable {
 
     /// `"mark"` and `"hidden"` are bare strings; an asset is `{"asset": name}` — so the two
     /// reserved words can never collide with a file a theme happens to ship.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         if let single = try? decoder.singleValueContainer(),
            let word = try? single.decode(String.self) {
             switch word {
@@ -317,7 +317,7 @@ extension SidebarStyle.Brand.Logo: Codable {
         self = .asset(try container.decode(String.self, forKey: .asset))
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         switch self {
         case .mark:
             var container = encoder.singleValueContainer()
@@ -337,18 +337,18 @@ extension SidebarStyle.Brand.Logo: Codable {
 /// The bounds `AppThemeEditing.validate` holds a sidebar block to, and the caps the asset
 /// store enforces on the bytes behind it. Stated here beside the model so a limit and the
 /// field it limits travel together.
-enum SidebarStyleLimits {
+public enum SidebarStyleLimits {
     /// Two paints a wash; past eight the stops stop being a design and start being a bitmap.
-    static let maximumGradientStops = 8
+    public static let maximumGradientStops = 8
     /// The sidebar at its default width truncates well before this; the cap only refuses the
     /// pathological.
-    static let maximumTitleLength = 40
+    public static let maximumTitleLength = 40
     /// Points. The band the wordmark sits in is fixed, so a size that cannot fit is refused
     /// rather than clipped.
-    static let titleSizeRange: ClosedRange<Double> = 10...22
+    public static let titleSizeRange: ClosedRange<Double> = 10...22
     /// A sidebar asset is a pattern tile or a logo, not a photograph library. The cap matches
     /// what a 2× column-sized image genuinely needs, with room to spare.
-    static let maximumImageBytes = 4 * 1024 * 1024
+    public static let maximumImageBytes = 4 * 1024 * 1024
 }
 
 // MARK: - Asset Slots
@@ -359,13 +359,13 @@ enum SidebarStyleLimits {
 /// could point back at, so the store needs a name to keep them under — and one logo plus one
 /// background per variant is the whole vocabulary. Contributed themes are free to use their own
 /// package-relative names; these constants only govern what `ThemeAssetStore` writes.
-enum SidebarAssetSlot: String, CaseIterable {
+public enum SidebarAssetSlot: String, CaseIterable {
     case logo
     case background
 
     /// One asset per slot per variant: a light chrome may want the mono logo its dark half
     /// inverts.
-    func fileName(for kind: AppTheme.VariantKind) -> String {
+    public func fileName(for kind: AppTheme.VariantKind) -> String {
         "\(kind.rawValue)-\(rawValue).png"
     }
 }

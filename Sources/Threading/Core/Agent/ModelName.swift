@@ -6,7 +6,7 @@ import Foundation
 /// the one thing a user wants from that chip is which model the session will actually run on,
 /// and "Default" makes them go and look it up. Every identifier here comes from the user's own
 /// config, so this only has to be readable, not exhaustive.
-enum ModelName {
+public enum ModelName {
 
     /// The suffix Claude uses for the long-context variant of a model.
     private static let longContextSuffix = "[1m]"
@@ -39,7 +39,7 @@ enum ModelName {
     /// Deliberately families rather than versions: a menu ordered by dated version would put
     /// last year's Opus above this year's Sonnet, and would need editing on every release. The
     /// alias inside a family already tracks its latest.
-    enum Tier: Int, CaseIterable {
+    public enum Tier: Int, CaseIterable {
         case fable
         case opus
         case sonnet
@@ -47,7 +47,7 @@ enum ModelName {
 
         /// Every spelling that names this tier. Mythos is Fable's tier — the same capabilities at
         /// the same price through a different distribution — so it sorts as one.
-        var tokens: [String] {
+        public var tokens: [String] {
             switch self {
             case .fable: return ["fable", "mythos"]
             case .opus: return ["opus"]
@@ -66,7 +66,7 @@ enum ModelName {
     /// Nil is a real answer and the one an organisation's own grant gets. It sorts *after* every
     /// named tier rather than being guessed into one: putting an unrecognised model above Opus
     /// on a hunch is worse than leaving it where the source listed it.
-    static func tier(of identifier: String) -> Tier? {
+    public static func tier(of identifier: String) -> Tier? {
         let id = identifier.lowercased()
         return Tier.allCases.first { tier in
             tier.tokens.contains { id.contains($0) }
@@ -75,7 +75,7 @@ enum ModelName {
 
     /// `claude-fable-5[1m]` → `Fable 5 · 1M`, `opus[1m]` → `Opus · 1M`, `gpt-5-codex` →
     /// `gpt-5-codex`.
-    static func display(for identifier: String) -> String {
+    public static func display(for identifier: String) -> String {
         var id = identifier.trimmingCharacters(in: .whitespaces)
         guard !id.isEmpty else { return identifier }
 
@@ -105,7 +105,7 @@ enum ModelName {
     ///
     /// Deliberately narrow in one direction: an unrecognised pairing is *not* a match, because a
     /// scoped limit wrongly applied would put a session in the red over a model it is not using.
-    static func scope(_ name: String, meters identifier: String) -> Bool {
+    public static func scope(_ name: String, meters identifier: String) -> Bool {
         let scoped = name.trimmingCharacters(in: .whitespaces).lowercased()
         guard !scoped.isEmpty else { return false }
 

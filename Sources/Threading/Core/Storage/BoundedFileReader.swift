@@ -1,6 +1,6 @@
 import Foundation
 
-enum BoundedFileReadError: Error, Equatable {
+public enum BoundedFileReadError: Error, Equatable {
     case notRegularFile
     case exceedsLimit(maximumBytes: Int)
 }
@@ -11,8 +11,8 @@ enum BoundedFileReadError: Error, Equatable {
 /// between `resourceValues` and `Data(contentsOf:)`, and the latter allocates the new whole size.
 /// Every externally selected or provider-named file which needs bytes should cross this boundary
 /// instead. One byte past the limit distinguishes an exact-limit file from a truncated one.
-enum BoundedFileReader {
-    static func read(_ url: URL, maximumBytes: Int) throws -> Data {
+public enum BoundedFileReader {
+    public static func read(_ url: URL, maximumBytes: Int) throws -> Data {
         precondition(maximumBytes >= 0 && maximumBytes < Int.max)
         let values = try url.resourceValues(forKeys: [.isRegularFileKey])
         guard values.isRegularFile == true else { throw BoundedFileReadError.notRegularFile }
@@ -45,10 +45,10 @@ enum BoundedFileReader {
     }
 }
 
-enum BoundedDirectoryReadError: LocalizedError, Equatable {
+public enum BoundedDirectoryReadError: LocalizedError, Equatable {
     case exceedsLimit(maximumEntries: Int)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .exceedsLimit(let maximumEntries):
             return "The directory contains more than \(maximumEntries) entries."
@@ -61,8 +61,8 @@ enum BoundedDirectoryReadError: LocalizedError, Equatable {
 /// The allowance counts every visible entry before a caller applies its own filename filter. A
 /// directory full of irrelevant names must not make discovery unbounded or hide recognized state
 /// beyond the part a caller happened to inspect.
-enum BoundedDirectoryReader {
-    static func shallowContents(
+public enum BoundedDirectoryReader {
+    public static func shallowContents(
         of directory: URL,
         includingPropertiesForKeys keys: [URLResourceKey] = [],
         maximumEntries: Int,

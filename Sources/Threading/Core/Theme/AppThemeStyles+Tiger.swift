@@ -9,7 +9,7 @@ extension AppThemeStyles {
     /// both scroll arrows together at the trailing end, and reserved saturated blue for the
     /// thumb, selected rows, and compact pop-up segments. Keeping a separate document lets a
     /// custom theme choose either historical moment without an ID-specific branch in a view.
-    static let aquaTiger = AppTheme(
+    public static let aquaTiger = AppTheme(
         id: AppThemeID("aqua-tiger"),
         name: "Mac OS X 10.4 Tiger",
         mode: .light,

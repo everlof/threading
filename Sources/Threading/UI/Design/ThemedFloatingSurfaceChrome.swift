@@ -7,13 +7,13 @@ import AppKit
 /// treatment. Keeping that interpretation here prevents an overlay from rebuilding a second,
 /// almost-the-same version of `Material.PopoverStyle`.
 @MainActor
-struct ThemedFloatingSurfaceChrome {
-    let style: AppTheme.Material.PopoverStyle
-    let material: AppTheme.Material
-    let fill: NSColor
-    let ink: Design.Ink
+public struct ThemedFloatingSurfaceChrome {
+    public let style: AppTheme.Material.PopoverStyle
+    public let material: AppTheme.Material
+    public let fill: NSColor
+    public let ink: Design.Ink
 
-    static func current(for appearance: NSAppearance) -> ThemedFloatingSurfaceChrome {
+    public static func current(for appearance: NSAppearance) -> ThemedFloatingSurfaceChrome {
         let theme = AppThemePalette.current
         let material = theme.material(for: appearance)
         let style = material.popoverStyle
@@ -31,7 +31,7 @@ struct ThemedFloatingSurfaceChrome {
     /// ordinary floating cards use the material's corner, while a compact semantic shape such
     /// as the scroll-to-end target supplies its own. The override changes only geometry: fill,
     /// edge construction and depth remain the one floating-surface contract.
-    func apply(to view: NSView, radius radiusOverride: SurfaceRadius? = nil) {
+    public func apply(to view: NSView, radius radiusOverride: SurfaceRadius? = nil) {
         let materialEdge = style.edge == .material && material.bevel != nil
         let flatEdge = style.edge == .flat || (style.edge == .material && !materialEdge)
         let materialShadow = material.glow != nil

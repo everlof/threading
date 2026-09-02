@@ -13,7 +13,7 @@ extension AppThemeStyles {
     ///
     /// The id is deliberately not the display name (`AppThemeID`'s whole point): the name can
     /// be reconsidered without resetting anyone's standing choice.
-    static let win98 = AppTheme(
+    public static let win98 = AppTheme(
         id: AppThemeID("retro-98"),
         name: "Windows 98",
         mode: .light,

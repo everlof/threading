@@ -2,18 +2,18 @@ import Foundation
 
 /// A notification whose concrete value is also its payload. Callers can no longer pair a name
 /// with the wrong `object` type, and observers receive the value they asked for without casts.
-protocol AppEvent: Sendable {
+public protocol AppEvent: Sendable {
     static var name: Notification.Name { get }
 }
 
 extension NotificationCenter {
-    func post<Event: AppEvent>(_ event: Event) {
+    public func post<Event: AppEvent>(_ event: Event) {
         post(name: Event.name, object: event)
     }
 
     @discardableResult
     @MainActor
-    func observe<Event: AppEvent>(
+    public func observe<Event: AppEvent>(
         _ type: Event.Type,
         using handler: @escaping @MainActor @Sendable (Event) -> Void
     ) -> NSObjectProtocol {
@@ -28,14 +28,14 @@ extension NotificationCenter {
 
 /// Owns block-observer tokens and unregisters them with its own lifetime.
 @MainActor
-final class AppEventObservations {
+public final class AppEventObservations {
     private let storage: AppEventObservationStorage
 
-    init(center: NotificationCenter = .default) {
+    public init(center: NotificationCenter = .default) {
         storage = AppEventObservationStorage(center: center)
     }
 
-    func observe<Event: AppEvent>(
+    public func observe<Event: AppEvent>(
         _ type: Event.Type,
         using handler: @escaping @MainActor @Sendable (Event) -> Void
     ) {
@@ -45,7 +45,7 @@ final class AppEventObservations {
     /// A notification AppKit posts, which carries no `AppEvent` value of ours. Same main-queue
     /// delivery and the same lifetime, so an observer of a platform preference is torn down with
     /// the view that cared about it rather than through a hand-held token.
-    func observe(
+    public func observe(
         _ name: Notification.Name,
         object: Any? = nil,
         using handler: @escaping @MainActor @Sendable () -> Void
@@ -58,7 +58,7 @@ final class AppEventObservations {
 
     /// Ends one presentation generation while leaving the owner reusable for the next. Popovers
     /// and completion panels observe a particular window only while they are open.
-    func removeAll() {
+    public func removeAll() {
         storage.removeAll()
     }
 }

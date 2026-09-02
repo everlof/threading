@@ -151,7 +151,7 @@ extension NSView {
     ///
     /// Registered on the view holding the constraints, since the sweep walks the tree and
     /// re-resolves that view's font in the same pass — which is the value this one is paired to.
-    func holdAtSymbolSize(
+    public func holdAtSymbolSize(
         _ constraints: [NSLayoutConstraint],
         _ role: Design.Symbol.Role,
         plus extra: CGFloat = 0
@@ -163,7 +163,7 @@ extension NSView {
     /// Re-states what `holdAtSymbolSize` and `holdSymbolConfiguration` recorded. Called by the
     /// app-theme sweep for every view it repaints, beside the font these marks are weighed
     /// against.
-    func reapplyRecordedSymbolSize() {
+    public func reapplyRecordedSymbolSize() {
         guard let recorded = objc_getAssociatedObject(
             self,
             &recordedSymbolMetricKey
@@ -205,7 +205,7 @@ extension NSImageView {
     ///
     /// The replacement for a bare `symbolConfiguration = Design.Symbol.configuration(…)`, which
     /// bakes the size the theme happened to be showing when the view was built.
-    func holdSymbolConfiguration(
+    public func holdSymbolConfiguration(
         _ role: Design.Symbol.Role,
         weight: NSFont.Weight = .medium
     ) {
@@ -219,7 +219,7 @@ extension NSImageView {
     /// design system that hold a plain image view. Prefer `GlyphView` in anything new — it
     /// draws on the pixel grid and takes the host's ink — but a stale render is the same bug in
     /// either, so both have the same answer.
-    func holdSymbol(
+    public func holdSymbol(
         _ name: String,
         slot: CGFloat? = nil,
         role: Design.Symbol.Role = .control,

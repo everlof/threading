@@ -6,7 +6,7 @@ import AppKit
 /// become legitimate merely by being named `ThemedSomething`: it opts into the contract and its
 /// tests have to prove that contract.
 @MainActor
-protocol ThemedComponent: AnyObject {}
+public protocol ThemedComponent: AnyObject {}
 
 /// A themed component that intentionally contains window-server or AppKit-owned chrome.
 ///
@@ -14,7 +14,7 @@ protocol ThemedComponent: AnyObject {}
 /// making a raw button beside it legitimate; a scroll view may contain AppKit's overlay scroller
 /// without granting its document view an exemption.
 @MainActor
-protocol SystemChromeBoundary: AnyObject {
+public protocol SystemChromeBoundary: AnyObject {
     func permitsSystemChrome(_ view: NSView) -> Bool
 }
 
@@ -23,16 +23,16 @@ protocol SystemChromeBoundary: AnyObject {
 /// The source checker proves how code constructs UI. This checks what actually appeared after
 /// AppKit finished expanding it. Tests run it over complete component and screen fixtures.
 @MainActor
-enum ThemeBoundaryAudit {
+public enum ThemeBoundaryAudit {
 
-    struct Violation: Equatable, CustomStringConvertible {
-        let className: String
-        let path: String
+    public struct Violation: Equatable, CustomStringConvertible {
+        public let className: String
+        public let path: String
 
-        var description: String { "\(className) at \(path)" }
+        public var description: String { "\(className) at \(path)" }
     }
 
-    static func violations(in root: NSView) -> [Violation] {
+    public static func violations(in root: NSView) -> [Violation] {
         var result: [Violation] = []
         inspect(root, path: String(describing: type(of: root)), boundaries: [], result: &result)
         return result
@@ -43,7 +43,7 @@ enum ThemeBoundaryAudit {
     /// The frame view, title bar and toolbar are AppKit's chrome and intentionally outside the
     /// boundary. Starting at the content controller still includes everything the application
     /// supplied, including split-view wrappers AppKit expanded underneath that root.
-    static func violations(in window: NSWindow) -> [Violation] {
+    public static func violations(in window: NSWindow) -> [Violation] {
         guard let root = window.contentViewController?.view ?? window.contentView else {
             return []
         }
@@ -51,7 +51,7 @@ enum ThemeBoundaryAudit {
         return violations(in: root)
     }
 
-    static func failureDescription(
+    public static func failureDescription(
         for violations: [Violation],
         windowTitle: String
     ) -> String {

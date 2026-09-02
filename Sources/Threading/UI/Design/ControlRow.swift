@@ -2,7 +2,7 @@ import AppKit
 
 /// How tall the controls in a row stand, which is the one measurement a row exists to state.
 @MainActor
-enum ControlRowScale {
+public enum ControlRowScale {
 
     /// Compact controls beside each other — a mode chip, its actions, a caption. The app's row.
     ///
@@ -17,7 +17,7 @@ enum ControlRowScale {
     /// see `Design.Size.fieldHeight`.
     case field
 
-    var height: CGFloat {
+    public var height: CGFloat {
         switch self {
         case .compact: Design.Size.choiceHeight
         case .field: Design.Size.fieldHeight
@@ -31,23 +31,23 @@ enum ControlRowScale {
 /// from the row it sits in and from nowhere else. That is the whole mechanism: a call site
 /// cannot hand a control a size, so it cannot hand it a size that disagrees with its neighbours'.
 @MainActor
-struct ControlRowMetrics {
+public struct ControlRowMetrics {
 
     /// The height every member of the row shares.
-    let height: CGFloat
+    public let height: CGFloat
 
     /// The slot a glyph is drawn in inside a control of that height.
-    let glyphSlot: CGFloat
+    public let glyphSlot: CGFloat
 
     /// The role that mark's optical size comes from.
     ///
     /// The role rather than the size it currently resolves to: a promoted member stores what it
     /// adopted, and a mark's optical size follows the chrome's type scale, so a stored number
     /// would be the size of the theme that promoted it (`Design.Symbol.Role`).
-    let glyphRole: Design.Symbol.Role
+    public let glyphRole: Design.Symbol.Role
 
     /// The optical size that mark is configured at, now.
-    var glyphPointSize: CGFloat { glyphRole.pointSize }
+    public var glyphPointSize: CGFloat { glyphRole.pointSize }
 
     fileprivate init(scale: ControlRowScale) {
         height = scale.height
@@ -63,7 +63,7 @@ struct ControlRowMetrics {
 /// welcome in a row — a caption is the usual one — it simply keeps whatever size it has, which
 /// is right for text and wrong for anything with a surface.
 @MainActor
-protocol ControlRowMember: NSView {
+public protocol ControlRowMember: NSView {
     /// Adopts the row's measurements. Called when the row is built, whenever its membership
     /// changes, and again on every theme change, because the compact height is the theme's.
     func adopt(_ metrics: ControlRowMetrics)
@@ -100,7 +100,7 @@ protocol ControlRowMember: NSView {
 ///
 /// Nothing is drawn here. The row is geometry: the members ink themselves, and the ground under
 /// it is the host's.
-final class ControlRowView: NSView {
+public final class ControlRowView: NSView {
 
     // MARK: - Geometry
 
@@ -117,10 +117,10 @@ final class ControlRowView: NSView {
 
     // MARK: - Properties
 
-    let scale: ControlRowScale
+    public let scale: ControlRowScale
 
     /// The row's own measurements, which is what its members are handed.
-    var metrics: ControlRowMetrics { ControlRowMetrics(scale: scale) }
+    public var metrics: ControlRowMetrics { ControlRowMetrics(scale: scale) }
 
     private(set) var leadingViews: [NSView] = []
     private(set) var trailingViews: [NSView] = []
@@ -177,7 +177,7 @@ final class ControlRowView: NSView {
 
     /// Both arrays run leading to trailing. The first leading view and the last trailing view
     /// touch the row's edges with their full interaction surfaces.
-    init(scale: ControlRowScale = .compact, leading: [NSView] = [], trailing: [NSView] = []) {
+    public init(scale: ControlRowScale = .compact, leading: [NSView] = [], trailing: [NSView] = []) {
         self.scale = scale
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -195,13 +195,13 @@ final class ControlRowView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     // MARK: - Layout
 
-    override func layout() {
+    public override func layout() {
         applyMetrics()
         super.layout()
     }
@@ -215,7 +215,7 @@ final class ControlRowView: NSView {
     /// intermediate state constrained against a run that is on its way out. Hosts whose row
     /// changes shape with its content — the Compare tab swaps a mode chip in for images and out
     /// for a text diff — call this each time.
-    func configure(leading: [NSView], trailing: [NSView]) {
+    public func configure(leading: [NSView], trailing: [NSView]) {
         for view in leadingViews + trailingViews where !leading.contains(view)
             && !trailing.contains(view) {
             view.removeFromSuperview()
@@ -239,7 +239,7 @@ final class ControlRowView: NSView {
 
     /// The height a row at `scale` stands at, for a host sizing itself around one before it has
     /// been laid out.
-    static func height(for scale: ControlRowScale) -> CGFloat { scale.height }
+    public static func height(for scale: ControlRowScale) -> CGFloat { scale.height }
 
     // MARK: - Private Methods
 

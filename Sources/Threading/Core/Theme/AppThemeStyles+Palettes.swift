@@ -36,7 +36,7 @@ extension AppThemeStyles {
     /// slightly muted: fully saturated primaries bloom against true black, and the same hues
     /// wash out against true white, so the day ramp is the night ramp brought down to read on
     /// paper rather than the night ramp inverted.
-    static let pure = AppTheme(
+    public static let pure = AppTheme(
         id: AppThemeID("pure"),
         name: "Pure",
         mode: .system,
@@ -48,7 +48,7 @@ extension AppThemeStyles {
     )
 
     /// The stock id "Pure" shipped under before it learned to follow the system.
-    static let retiredPureBlackID = AppThemeID("pure-black")
+    public static let retiredPureBlackID = AppThemeID("pure-black")
 
     private static let pureDay = AppTheme.Variant(
         roles: [
@@ -172,7 +172,7 @@ extension AppThemeStyles {
     /// Coffee, both ways up: steamed milk with espresso ink by day, espresso with cream ink by
     /// night, caramel as the accent in both. Adaptive like Christmas and for the same reason —
     /// the drink is the identity, not one of its two grounds.
-    static let cappuccino = AppTheme(
+    public static let cappuccino = AppTheme(
         id: AppThemeID("cappuccino"),
         name: "Cappuccino",
         mode: .system,
@@ -280,7 +280,7 @@ extension AppThemeStyles {
     /// base tones, so `brightBlack` *is* the dark ground and sharing is the design, not a
     /// shortcut. Only `panel`/`elevated` are ours, interpolated inside the base ramp because
     /// the scheme states two background tones and the app has four surface roles.
-    static let solarized = AppTheme(
+    public static let solarized = AppTheme(
         id: AppThemeID("solarized"),
         name: "Solarized",
         mode: .system,
@@ -387,7 +387,7 @@ extension AppThemeStyles {
     /// Snow Storm is the ink, and Frost carries the accent and syntax. The published terminal
     /// mapping repeats the aurora hues in the bright slots, so it is kept as published rather
     /// than lightened.
-    static let nord = AppTheme(
+    public static let nord = AppTheme(
         id: AppThemeID("nord"),
         name: "Nord",
         mode: .dark,
@@ -442,7 +442,7 @@ extension AppThemeStyles {
     /// hues. The opaque `selection` is the one deliberate departure from this family's
     /// translucent accent washes — #44475A "current line" *is* how Dracula marks the selected
     /// thing, so a purple wash would be a different theme wearing the name.
-    static let dracula = AppTheme(
+    public static let dracula = AppTheme(
         id: AppThemeID("dracula"),
         name: "Dracula",
         mode: .dark,

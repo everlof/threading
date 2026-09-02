@@ -3,11 +3,11 @@ import AppKit
 // MARK: - Claim
 
 /// One answer a view gives the pointer: this cursor, over this much of itself.
-struct PointerClaim: Equatable {
-    var rect: NSRect
-    var cursor: NSCursor
+public struct PointerClaim: Equatable {
+    public var rect: NSRect
+    public var cursor: NSCursor
 
-    init(_ rect: NSRect, _ cursor: NSCursor) {
+    public init(_ rect: NSRect, _ cursor: NSCursor) {
         self.rect = rect
         self.cursor = cursor
     }
@@ -41,7 +41,7 @@ struct PointerClaim: Equatable {
 /// - **Staleness has one answer**: `refreshPointerClaims()`, called from `layout()` by the base
 ///   classes, so a view whose rows moved inside an unchanged frame re-registers.
 @MainActor
-protocol PointerClaiming: NSView {
+public protocol PointerClaiming: NSView {
 
     /// The cursor over everything this view covers that no claim below names.
     ///
@@ -59,16 +59,16 @@ protocol PointerClaiming: NSView {
 
 extension PointerClaiming {
 
-    var restingPointer: NSCursor? { nil }
+    public var restingPointer: NSCursor? { nil }
 
-    var pointerClaims: [PointerClaim] { [] }
+    public var pointerClaims: [PointerClaim] { [] }
 
     /// The claims exactly as `registerPointerClaims()` will make them: clipped to the view,
     /// carved so no two overlap, and with the remainder of `bounds` taking the resting cursor.
     ///
     /// Public so a test can ask what a view tells the pointer without a window to register into —
     /// which is also how the tiling invariant is checked.
-    func resolvedPointerClaims() -> [PointerClaim] {
+    public func resolvedPointerClaims() -> [PointerClaim] {
         var taken: [NSRect] = []
         var resolved: [PointerClaim] = []
         for claim in pointerClaims {
@@ -89,7 +89,7 @@ extension PointerClaiming {
 
     /// The one call that reaches AppKit. A conformer's `resetCursorRects()` is this line and
     /// nothing else.
-    func registerPointerClaims() {
+    public func registerPointerClaims() {
         for claim in resolvedPointerClaims() {
             addCursorRect(claim.rect, cursor: claim.cursor)
         }
@@ -98,7 +98,7 @@ extension PointerClaiming {
     /// Says the claims have moved. AppKit re-asks a view for its cursor rectangles when the
     /// *view's* geometry changes and at no other time, so a card whose rows changed inside an
     /// unchanged frame, or a field whose trailing controls appeared, has to say so itself.
-    func refreshPointerClaims() {
+    public func refreshPointerClaims() {
         window?.invalidateCursorRects(for: self)
     }
 }
@@ -110,10 +110,10 @@ extension PointerClaiming {
 /// A horizontal-band decomposition rather than the four-rectangles-around-one shape it replaces:
 /// the simple case gives the same four, and a view with many claims — an annotation overlay's
 /// markers — stays bounded instead of splitting each piece against each hole in turn.
-enum PointerRectCarving {
+public enum PointerRectCarving {
 
     /// `rect` with every hole removed, as non-overlapping rectangles.
-    static func subtract(_ holes: [NSRect], from rect: NSRect) -> [NSRect] {
+    public static func subtract(_ holes: [NSRect], from rect: NSRect) -> [NSRect] {
         guard !rect.isEmpty else { return [] }
         let holes = holes.compactMap { hole -> NSRect? in
             let clipped = hole.intersection(rect)

@@ -11,7 +11,7 @@ import AppKit
 /// It is deliberately small. A role earns its place by being asked for somewhere the *answer*
 /// should differ between themes — not by every distinct colour in the app, which is how a
 /// palette becomes a list of two hundred values nobody can author.
-enum AppThemeRole: String, CaseIterable, Codable {
+public enum AppThemeRole: String, CaseIterable, Codable {
 
     // MARK: Surfaces
 
@@ -92,7 +92,7 @@ enum AppThemeRole: String, CaseIterable, Codable {
     /// This is the whole reason the design system's "system colours only" rule survives rather
     /// than being abolished: the System theme *is* these answers, so a user who never picks a
     /// style keeps light/dark and their own accent colour working exactly as before.
-    var systemColor: NSColor {
+    public var systemColor: NSColor {
         switch self {
         case .ground: return .windowBackgroundColor
         case .surface: return .windowBackgroundColor
@@ -149,7 +149,7 @@ enum AppThemeRole: String, CaseIterable, Codable {
 
     /// Roles a style has to state for itself. Everything else is derived from these, so a theme
     /// document is a dozen values rather than twenty-five — see `AppTheme.resolved`.
-    static let authored: [AppThemeRole] = [
+    public static let authored: [AppThemeRole] = [
         .ground, .surface, .panel, .border, .label, .accent,
         .statusPositive, .statusWarning, .statusNegative,
         .syntaxKeyword, .syntaxType, .syntaxString, .syntaxNumber
@@ -158,7 +158,7 @@ enum AppThemeRole: String, CaseIterable, Codable {
     /// Snake case is the agent-facing spelling. The stored document keeps the enum's original
     /// raw values for compatibility, while tools accept both forms so hand-authored documents
     /// and model-authored patches meet at the same role.
-    var wireName: String {
+    public var wireName: String {
         rawValue.reduce(into: "") { result, character in
             if character.isUppercase {
                 result.append("_")
@@ -169,7 +169,7 @@ enum AppThemeRole: String, CaseIterable, Codable {
         }
     }
 
-    static func named(_ name: String) -> AppThemeRole? {
+    public static func named(_ name: String) -> AppThemeRole? {
         allCases.first {
             $0.rawValue.caseInsensitiveCompare(name) == .orderedSame
                 || $0.wireName.caseInsensitiveCompare(name) == .orderedSame

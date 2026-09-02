@@ -16,13 +16,13 @@ import AppKit
 ///
 /// Each states only the roles in `AppThemeRole.authored`; the rest are derived, so a theme is a
 /// dozen decisions rather than twenty-five.
-enum AppThemeStyles {
+public enum AppThemeStyles {
 
     /// The house group, which carries no head: a heading over the two entries the app ships
     /// with would name a group nobody goes looking for, and the composer's identity menu already
     /// learned that a head repeating its single row's own name is furniture. `AppThemeLibrary`
     /// puts System at its front, being the one entry that is not a style at all.
-    static let house = AppThemeSection([threading])
+    public static let house = AppThemeSection([threading])
 
     /// The named families, in the order a picker shows them.
     ///
@@ -30,7 +30,7 @@ enum AppThemeStyles {
     /// nowhere: a design movement, a colour scheme, a reproduction of a shipped desktop, and a
     /// reproduction of a piece of period software are chosen for entirely different reasons.
     /// Filing them is what lets a reader skip the twenty rows they are not looking for.
-    static let styleFamilies: [AppThemeSection] = [
+    public static let styleFamilies: [AppThemeSection] = [
         AppThemeSection(L10n.string("Design styles"), [
             editorial,
             cyberpunk,
@@ -76,7 +76,7 @@ enum AppThemeStyles {
     ]
 
     /// Every stock family, house first.
-    static var families: [AppThemeSection] { [house] + styleFamilies }
+    public static var families: [AppThemeSection] { [house] + styleFamilies }
 
     /// The stock catalogue, derived from the families rather than listed again beside them.
     ///
@@ -84,7 +84,7 @@ enum AppThemeStyles {
     /// picker cannot fall out of step with the catalogue. The hand-maintained copy this replaces
     /// had already drifted once — see `takeovers`, which learned the same lesson one property
     /// along.
-    static let all: [AppTheme] = families.flatMap(\.themes)
+    public static let all: [AppTheme] = families.flatMap(\.themes)
 
     /// Stock ids retired by a rename, each pointing at the theme that replaced it.
     ///
@@ -95,7 +95,7 @@ enum AppThemeStyles {
     /// misses, so a retired id keeps resolving without ever appearing as a catalogue entry of its
     /// own. Restore never writes, so the old id can stay on disk indefinitely; the next
     /// deliberate pick records the successor.
-    static let retiredIDs: [AppThemeID: AppThemeID] = [
+    public static let retiredIDs: [AppThemeID: AppThemeID] = [
         retiredPureBlackID: pure.id
     ]
 
@@ -106,14 +106,14 @@ enum AppThemeStyles {
     /// window-chrome test sweeps iterate this list, so a new takeover theme appears in both
     /// by being added to `all` — the gallery had already drifted once (Aqua and Tiger were
     /// missing) in the short life of the third hand-maintained copy.
-    static var takeovers: [AppTheme] {
+    public static var takeovers: [AppTheme] {
         all.filter(\.takesOverWindowChrome)
     }
 
     /// Shared period transient chrome: a stemless compact card, raised by the material's own
     /// edge and never by a modern ambient window shadow. Individual systems may refine it —
     /// Windows 98 does, because its infotip is a flat dark rule on pale information yellow.
-    static let periodPopoverStyle = AppTheme.Material.PopoverStyle(
+    public static let periodPopoverStyle = AppTheme.Material.PopoverStyle(
         arrow: .none,
         edge: .material,
         shadow: .none,
@@ -124,7 +124,7 @@ enum AppThemeStyles {
     /// Aqua Help Tags are compact, stemless plates rather than modern speech bubbles. The
     /// pale-yellow surface and near-square corner come from the period HIG figures; Cheetah's
     /// figure is later than 10.0.x, so that family remains source-shaped in its ledger.
-    static let aquaHelpTagPopoverStyle = AppTheme.Material.PopoverStyle(
+    public static let aquaHelpTagPopoverStyle = AppTheme.Material.PopoverStyle(
         arrow: .none,
         surfaceRole: .tooltipSurface,
         edge: .flat,
@@ -134,7 +134,7 @@ enum AppThemeStyles {
         cornerRadius: 1
     )
 
-    static let windowsInfotipStyle = AppTheme.Material.PopoverStyle(
+    public static let windowsInfotipStyle = AppTheme.Material.PopoverStyle(
         arrow: .none,
         edge: .flat,
         shadow: .none,
@@ -144,7 +144,7 @@ enum AppThemeStyles {
 
     /// Threading's own adaptive navy, warm paper, and orange dress. Marketing captures use this
     /// theme unless they are demonstrating the theme picker itself.
-    static let threading = AppTheme(
+    public static let threading = AppTheme(
         id: AppThemeID("threading"),
         name: "Threading",
         mode: .system,
@@ -307,7 +307,7 @@ enum AppThemeStyles {
     /// theme is how the first pass ended up looking like the same app in a different tint.
     /// Here they are the accent, held far down — so every hoverable thing glows faintly green
     /// instead of going pale.
-    static let cyberpunk = AppTheme(
+    public static let cyberpunk = AppTheme(
         id: AppThemeID("cyberpunk"),
         name: "Cyberpunk",
         mode: .dark,
@@ -411,7 +411,7 @@ enum AppThemeStyles {
     /// International Typographic Style: paper white, black text, one red accent, nothing else.
     /// The opposite failure mode to Cyberpunk — a style that is mostly *restraint*, where the
     /// risk is that a theme adds colour where the style's whole point is that it does not.
-    static let swissMinimalist = AppTheme(
+    public static let swissMinimalist = AppTheme(
         id: AppThemeID("swiss-minimalist"),
         name: "Swiss Minimalist",
         mode: .light,
@@ -500,7 +500,7 @@ enum AppThemeStyles {
 
     /// The default authoring path for palettes designed here. OKLCH keeps lightness and chroma
     /// perceptual; `NSColor.oklch` reduces only chroma when a request falls outside sRGB.
-    static func oklch(
+    public static func oklch(
         _ lightness: CGFloat,
         _ chroma: CGFloat,
         _ hueDegrees: CGFloat,
@@ -517,7 +517,7 @@ enum AppThemeStyles {
     /// Exact-source palettes remain hexadecimal: historical pixels and published community
     /// schemes are display values to reproduce, not colours Threading is free to redesign.
     /// Force-unwrapped deliberately so a malformed source value fails immediately.
-    static func hex(_ value: String) -> NSColor {
+    public static func hex(_ value: String) -> NSColor {
         guard let color = NSColor(hex: value) else {
             preconditionFailure("Malformed stock theme colour: \(value)")
         }

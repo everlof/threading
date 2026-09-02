@@ -100,7 +100,7 @@ extension NSView {
     /// twice. A settings card stacks rows that pad themselves 10pt vertically: the *card* owes
     /// only what the corner asks beyond that, or the first row would sit 30pt down a card whose
     /// rows are 10pt apart.
-    func holdAtContentInset(
+    public func holdAtContentInset(
         _ constraints: [NSLayoutConstraint],
         inside radius: SurfaceRadius = .panel,
         from base: CGFloat = Design.Spacing.inset,
@@ -127,7 +127,7 @@ extension NSView {
 
     /// Re-fits what `holdAtContentInset` recorded. Called by the app-theme sweep for every view
     /// it repaints, beside the surface whose corner these insets answer to.
-    func reapplyRecordedContentInset() {
+    public func reapplyRecordedContentInset() {
         guard let recorded = objc_getAssociatedObject(
             self,
             &recordedContentInsetKey

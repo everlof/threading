@@ -27,7 +27,7 @@ import AppKit
 /// [`design-system.md`](../../../../docs/architecture/design-system.md) records why it needs a
 /// different answer rather than this one applied more widely.
 @MainActor
-enum CoveredWindowCursor {
+public enum CoveredWindowCursor {
 
     /// One surface holding one window's cursor.
     ///
@@ -61,7 +61,7 @@ enum CoveredWindowCursor {
 
     /// `surface` covers `window`: until it releases, the window's own cursor rectangles stop
     /// answering and the pointer is the arrow.
-    static func claim(_ surface: NSView, covering window: NSWindow) {
+    public static func claim(_ surface: NSView, covering window: NSWindow) {
         guard !claims.contains(where: { $0.surface === surface }) else { return }
         claims.append(Claim(surface: surface, window: window))
         apply()
@@ -69,7 +69,7 @@ enum CoveredWindowCursor {
 
     /// `surface` is done covering. The window gets its cursor back unless something else is still
     /// over it.
-    static func release(_ surface: NSView) {
+    public static func release(_ surface: NSView) {
         claims.removeAll { $0.surface === surface }
         apply()
     }
@@ -79,7 +79,7 @@ enum CoveredWindowCursor {
     /// `NSWindow.areCursorRectsEnabled` answers the platform's half of that question and says
     /// nothing about who turned it off; a test asserts on both, because the count is the part
     /// AppKit does not keep.
-    static func isClaimed(_ window: NSWindow) -> Bool { suppressed.contains(window) }
+    public static func isClaimed(_ window: NSWindow) -> Bool { suppressed.contains(window) }
 
     // MARK: - Private Methods
 

@@ -18,25 +18,25 @@ import CoreText
 /// - **Content leads.** One element per view carries emphasis — usually the thing being
 ///   typed into or read. Everything else is secondary or tertiary label colour.
 @MainActor
-enum Design {
+public enum Design {
 
     // MARK: - Spacing
 
     /// A 2/4/6/10/12/20/32 scale. Anything between these is almost always a mistake.
-    enum Spacing {
+    public enum Spacing {
         /// Between a label and the line directly under it.
-        static let hairline: CGFloat = 2
-        static let tight: CGFloat = 4
+        public static let hairline: CGFloat = 2
+        public static let tight: CGFloat = 4
         /// Between sibling controls in a row, such as chips.
-        static let small: CGFloat = 6
+        public static let small: CGFloat = 6
         /// Between stacked elements inside one group.
-        static let medium: CGFloat = 10
+        public static let medium: CGFloat = 10
         /// Inside a container, between its edge and its content.
-        static let inset: CGFloat = 12
+        public static let inset: CGFloat = 12
         /// Between groups that belong to the same section.
-        static let large: CGFloat = 20
+        public static let large: CGFloat = 20
         /// Between a view's content and the edge of its pane.
-        static let pane: CGFloat = 32
+        public static let pane: CGFloat = 32
 
         /// `inset`, **fitted to the corner it sits inside**.
         ///
@@ -59,14 +59,14 @@ enum Design {
         /// `base` is what the surface pads by when its corner asks for nothing — `inset` for a
         /// card, and a surface that has measured its own tighter padding says so rather than
         /// being widened to a card's. The corner only ever pushes content further in.
-        static func inset(inside radius: CGFloat, from base: CGFloat = inset) -> CGFloat {
+        public static func inset(inside radius: CGFloat, from base: CGFloat = inset) -> CGFloat {
             guard radius > base else { return base }
             return (radius - (radius - base) / 2.0.squareRoot()).rounded()
         }
 
         /// The same, for a surface stated as a role rather than as a measurement.
         @MainActor
-        static func inset(inside radius: SurfaceRadius, from base: CGFloat = inset) -> CGFloat {
+        public static func inset(inside radius: SurfaceRadius, from base: CGFloat = inset) -> CGFloat {
             inset(inside: radius.current, from: base)
         }
     }
@@ -88,25 +88,25 @@ enum Design {
     /// line, so the ordinary no-warning case collapsed to the 4pt base and the caption read as
     /// a stray word glued to the headline. Group the hideable line into a cluster stack and
     /// record the seam after the *cluster*, which is always there.
-    enum Placeholder {
+    public enum Placeholder {
         /// Hero glyph → the surface's name. A badge hangs below a symbol's box, so the caption
         /// needs `inset`, not a control gap.
-        static let afterIcon = Spacing.inset
+        public static let afterIcon = Spacing.inset
         /// Lines within one announcement cluster — the name, the headline, a warning under it.
-        static let line = Spacing.small
+        public static let line = Spacing.small
         /// A caption above the content it names.
-        static let caption = Spacing.tight
+        public static let caption = Spacing.tight
         /// The announcement → the next section, and any other major seam of the surface.
-        static let section = Spacing.pane
+        public static let section = Spacing.pane
         /// Groups within a section, and the step before an action row.
-        static let group = Spacing.large
+        public static let group = Spacing.large
     }
 
     // MARK: - Layout Priority
 
     /// The layout priorities this app names rather than spells, because each of them is a rule
     /// about *meaning* that a bare number hides.
-    enum Priority {
+    public enum Priority {
 
         /// For content that has already said it may be shortened — a truncating label, a strip
         /// that scrolls — so that saying it is enough to make it true.
@@ -120,7 +120,7 @@ enum Design {
         /// each found the same way: a window whose smallest size depends on what is open in it.
         /// Below the fitting-size pass the content shortens instead of pushing, and the tooltip
         /// or the accessibility value carries the rest.
-        static let belowFittingSize = NSLayoutConstraint.Priority(
+        public static let belowFittingSize = NSLayoutConstraint.Priority(
             NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1
         )
     }
@@ -128,26 +128,26 @@ enum Design {
     // MARK: - Radius
 
     @MainActor
-    enum Radius {
+    public enum Radius {
         /// Panels, prompt boxes, anything holding content.
         ///
         /// Read from the current theme rather than fixed, because a style's silhouette carries
         /// as much of its identity as its palette — Swiss Minimalist is hard edges, and two
         /// themes sharing one geometry read as one app in two tints. The System theme returns
         /// exactly the values these were.
-        static var panel: CGFloat { AppThemePalette.current.material.panelRadius }
+        public static var panel: CGFloat { AppThemePalette.current.material.panelRadius }
         /// Smaller containers nested inside a panel.
-        static var control: CGFloat { AppThemePalette.current.material.controlRadius }
+        public static var control: CGFloat { AppThemePalette.current.material.controlRadius }
 
         /// Hairline in most themes; a style may draw heavier rules.
-        static var border: CGFloat {
+        public static var border: CGFloat {
             let themed = AppThemePalette.current.material.borderWidth
             return Accessibility.increasesContrast ? max(themed, 2) : themed
         }
 
         /// The border around compact controls. It inherits the structural rule weight unless
         /// the material states a separate measured control construction.
-        static var controlBorder: CGFloat {
+        public static var controlBorder: CGFloat {
             let themed = AppThemePalette.current.material.resolvedControlBorderWidth
             return Accessibility.increasesContrast ? max(themed, 2) : themed
         }
@@ -169,13 +169,13 @@ enum Design {
         /// the shorter side), while a drawn one was cut to a third. The settings sidebar's
         /// selected row and the theme menu's highlighted row, one window apart, were the two
         /// halves of that disagreement.
-        static func control(fitting size: CGSize) -> CGFloat {
+        public static func control(fitting size: CGSize) -> CGFloat {
             min(control, min(size.width, size.height) * cornerFitFraction(for: size))
         }
 
         /// How much of the shorter side a corner may take before the shape stops reading as a
         /// rounded rect. A third is the point at which a 16pt square still has flat edges.
-        static let cornerFitFraction: CGFloat = 1.0 / 3.0
+        public static let cornerFitFraction: CGFloat = 1.0 / 3.0
 
         /// How far along an edge this corner reaches, for content already held `margin` in from
         /// the side the corner meets.
@@ -191,7 +191,7 @@ enum Design {
         /// standing outside the panel's own edge for the top 19pt.
         ///
         /// Zero once the margin is wider than the corner, which is every stock theme but three.
-        static func edgeReach(of radius: CGFloat, clearing margin: CGFloat) -> CGFloat {
+        public static func edgeReach(of radius: CGFloat, clearing margin: CGFloat) -> CGFloat {
             guard radius > margin, margin >= 0 else { return 0 }
             return radius - (2 * radius * margin - margin * margin).squareRoot()
         }
@@ -199,7 +199,7 @@ enum Design {
         /// The shape twice as long as it is tall, at which the whole half is available — a
         /// capsule. Interpolated rather than switched at the threshold, so two rows of similar
         /// proportion do not come out visibly differently cornered.
-        static let capsuleFitRatio: CGFloat = 2
+        public static let capsuleFitRatio: CGFloat = 2
 
         private static func cornerFitFraction(for size: CGSize) -> CGFloat {
             let shorter = min(size.width, size.height)
@@ -216,33 +216,33 @@ enum Design {
         /// pills floating on it has two conventions on one screen. Swiss Minimalist squares
         /// its chips for the same reason it squares its cards: the grid is the idea. System
         /// keeps `height / 2` exactly.
-        static func pill(height: CGFloat) -> CGFloat {
+        public static func pill(height: CGFloat) -> CGFloat {
             AppThemePalette.current.isSystem ? height / 2 : min(height / 2, control)
         }
     }
 
     // MARK: - Size
 
-    enum Size {
+    public enum Size {
         /// Height of a pill control. Also drives its corner radius.
-        static let chipHeight: CGFloat = 26
+        public static let chipHeight: CGFloat = 26
         /// Closed height of a compact chooser, authored by the active material.
-        static var choiceHeight: CGFloat {
+        public static var choiceHeight: CGFloat {
             AppThemePalette.current.material(
                 for: NSApplication.shared.effectiveAppearance
             ).choiceHeight
         }
         /// A selected destination in a horizontal strip or a sidebar.
-        static let tabHeight: CGFloat = 28
-        static let sidebarTabHeight: CGFloat = 30
-        static let tabIconSlot: CGFloat = 16
+        public static let tabHeight: CGFloat = 28
+        public static let sidebarTabHeight: CGFloat = 30
+        public static let tabIconSlot: CGFloat = 16
 
         /// Semantic image slots shared by ordinary extension nodes and navigator templates.
         /// Keeping the pair on one scale prevents a fact-bound icon from changing size when a
         /// materialized navigator migrates to the host-evaluated pipeline.
-        static let extensionIdentityImage: CGFloat = 18
-        static let extensionIconImage: CGFloat = 14
-        static let extensionDecorationImage: CGFloat = 12
+        public static let extensionIdentityImage: CGFloat = 18
+        public static let extensionIconImage: CGFloat = 14
+        public static let extensionDecorationImage: CGFloat = 12
 
         /// The × on a tab, and anything else that raises a surface around a small mark.
         ///
@@ -252,7 +252,7 @@ enum Design {
         /// the `⋯` in the panel's footer. The `+` and the toggle at the other end of the tab row
         /// are *not* this size: they are `.toolbar` buttons, because the session header across
         /// the split draws the same toggle and the two must land on one point.
-        static let tabCloseTarget: CGFloat = 20
+        public static let tabCloseTarget: CGFloat = 20
 
         /// An icon button nested inside another control — a tab's ×, a sidebar row's ⋯.
         ///
@@ -261,19 +261,19 @@ enum Design {
         /// and were 16 and 20 only because each was sized where it was used. The glyph is stated
         /// beside it so the padding between them — `(target - glyph) / 2` — is a decision taken
         /// once here rather than arithmetic at a call site. See `ThemedIconButton.Target`.
-        static let inlineButtonTarget: CGFloat = tabCloseTarget
-        static let inlineButtonGlyph: CGFloat = 12
+        public static let inlineButtonTarget: CGFloat = tabCloseTarget
+        public static let inlineButtonGlyph: CGFloat = 12
 
         /// Compact controls floating in the transparent window toolbar.
-        static let toolbarButtonWidth: CGFloat = 30
-        static let toolbarButtonHeight: CGFloat = 28
+        public static let toolbarButtonWidth: CGFloat = 30
+        public static let toolbarButtonHeight: CGFloat = 28
 
         /// A single navigation action floating over scrollable content.
         ///
         /// Larger than an inline or toolbar target because it has no row around it to extend
         /// the hit area, and shared by Git Review and Native Chat so the same down-arrow never
         /// arrives at two sizes.
-        static let floatingNavigationTarget: CGFloat = 40
+        public static let floatingNavigationTarget: CGFloat = 40
 
         /// The chevron half of a split control — narrower than the press it is welded to.
         ///
@@ -281,18 +281,18 @@ enum Design {
         /// and a chevron given the same 30 points as the icon reads as a second button that
         /// happens to be touching the first. Still comfortably above the pointer target the rest
         /// of the chrome uses, because it is full toolbar height. See `SplitIconButtonView`.
-        static let splitMenuWidth: CGFloat = 24
+        public static let splitMenuWidth: CGFloat = 24
 
         /// The split-menu half beside a compact composer send glyph. This pair is smaller than
         /// toolbar chrome because it lives inside the prompt footer rather than standing alone.
-        static let compactSubmitHeight: CGFloat = 18
-        static let compactSplitMenuWidth: CGFloat = 12
+        public static let compactSubmitHeight: CGFloat = 18
+        public static let compactSplitMenuWidth: CGFloat = 12
 
         /// A chrome-takeover window's own buttons — close, minimize, zoom — in the app-drawn
         /// title band. Wider than tall, the proportion every windowing system's buttons share,
         /// and sized to sit inside the band's default 28 points with air above and below.
-        static let windowButtonWidth: CGFloat = 18
-        static let windowButtonHeight: CGFloat = 16
+        public static let windowButtonWidth: CGFloat = 18
+        public static let windowButtonHeight: CGFloat = 16
         /// Height of a single-line text field — see `ThemedTextField`.
         ///
         /// Its own step rather than `chipHeight`, which it borrowed for as long as a field was
@@ -301,37 +301,37 @@ enum Design {
         /// points left inside were carrying a thirteen-point face with barely three points of
         /// air above and below it — the text read as wedged against the border rather than set
         /// in a box. 32 leaves the same air a row of the list has.
-        static let fieldHeight: CGFloat = 32
+        public static let fieldHeight: CGFloat = 32
 
         /// Height of the prompt box and anything else that reads as a primary input.
-        static let inputHeight: CGFloat = 44
+        public static let inputHeight: CGFloat = 44
 
         /// How far a growing input climbs before it scrolls instead. Roughly eight lines:
         /// enough for a paragraph, short of taking the pane over.
-        static let inputMaxHeight: CGFloat = 180
+        public static let inputMaxHeight: CGFloat = 180
 
         /// An image waiting in a prompt. Large enough to recognise the screenshot, still small
         /// enough for several to read as attachments rather than as the prompt's main content.
-        static let promptAttachmentThumbnail: CGFloat = 80
+        public static let promptAttachmentThumbnail: CGFloat = 80
 
         /// The title-and-controls band of an app-owned in-window inspector — the media one and
         /// the expanded comparison alike, so the two transient surfaces open at one height.
-        static let inspectorHeaderHeight: CGFloat = 52
+        public static let inspectorHeaderHeight: CGFloat = 52
 
         /// A recognisable member of the inspector's collection rail.
-        static let mediaInspectorThumbnail: CGFloat = 56
+        public static let mediaInspectorThumbnail: CGFloat = 56
 
         /// The rail around those thumbnails, including its vertical breathing room.
-        static let mediaInspectorRailHeight: CGFloat = 72
+        public static let mediaInspectorRailHeight: CGFloat = 72
 
         /// The notes column beside a picture being marked up, in the inspector and in the
         /// report sheet. Wide enough for a sentence about one detail and no wider: the picture
         /// is what the reader is looking at, and a column that competes with it for the window
         /// turns "mark this" into a two-panel editor.
-        static let mediaInspectorAnnotationColumnWidth: CGFloat = 300
+        public static let mediaInspectorAnnotationColumnWidth: CGFloat = 300
 
         /// Widest a column of content grows before it becomes hard to scan.
-        static let readableWidth: CGFloat = 620
+        public static let readableWidth: CGFloat = 620
 
         /// The content measure every Settings page keeps.
         ///
@@ -345,7 +345,7 @@ enum Design {
         /// gutters sit beside it, and the summary column sits beyond those with a pane's air
         /// between. The richest page therefore states the common canvas without inventing a
         /// second arbitrary width.
-        static let settingsContentWidth: CGFloat = UsageDashboard.consumptionSummaryWidth
+        public static let settingsContentWidth: CGFloat = UsageDashboard.consumptionSummaryWidth
             + Spacing.pane
             + Chart.axisLeading + readableWidth + Chart.axisTrailing
 
@@ -356,7 +356,7 @@ enum Design {
         /// Flush to the window, that margin is the band's to provide — 32 put the row a few
         /// points off the window's rounded bottom corner, which reads as content about to
         /// fall out of the pane.
-        static let footerHeight: CGFloat = 48
+        public static let footerHeight: CGFloat = 48
 
         /// The room a panel's halo needs inside any clipping ancestor.
         ///
@@ -369,7 +369,7 @@ enum Design {
         /// radius, the visible extent of the blur, plus its travel), pinned to that by
         /// `AppThemeTests`. Forty-eight is the measured Clay card shadow: a 16-point travel
         /// followed by a 16-point Core Animation radius (the 32px CSS blur it mirrors).
-        static let glowGutter: CGFloat = 48
+        public static let glowGutter: CGFloat = 48
     }
 
     // MARK: - Typography
@@ -379,7 +379,7 @@ enum Design {
     /// App text size and a theme's text scale still apply first. This is the smaller, scoped
     /// adjustment a dense code reader such as Git Review may expose beside the document itself;
     /// cases rather than an arbitrary multiplier keep that control on the design-system scale.
-    enum CodeTextScale: String, CaseIterable, Sendable {
+    public enum CodeTextScale: String, CaseIterable, Sendable {
         case compact
         case standard
         case large
@@ -402,7 +402,7 @@ enum Design {
     /// screen assembled from individually reasonable but mutually inconsistent 10/11/12/13pt
     /// decisions.
     @MainActor
-    enum Typography {
+    public enum Typography {
 
         /// Which surface a font is being asked for, since two of them may be set differently.
         ///
@@ -411,7 +411,7 @@ enum Design {
         /// say. Everything else is chrome. This is a *parameter on the one transform*, not a
         /// second `Typography`: a parallel namespace would be two copies of twenty factories
         /// that have to keep agreeing.
-        enum FontSurface {
+        public enum FontSurface {
             case chrome
             case conversation
         }
@@ -424,7 +424,7 @@ enum Design {
         /// it — that is what its 11pt `.medium` was measured for — so a scale that moved the
         /// words and not the marks is a scale that breaks the pair it was measured as. See
         /// `Symbol.optical(_:)`.
-        static var scale: CGFloat {
+        public static var scale: CGFloat {
             let material = AppThemePalette.current.material(
                 for: NSApplication.shared.effectiveAppearance
             )
@@ -622,27 +622,27 @@ enum Design {
         }
 
         /// The one emphasised string in a view — a project name, a pane title.
-        static func heading(surface: FontSurface = .chrome) -> NSFont {
+        public static func heading(surface: FontSurface = .chrome) -> NSFont {
             heading(pointSize: scaled(20), defaultWeight: .semibold, surface: surface)
         }
         /// A compact title inside an otherwise empty content pane.
-        static func placeholderTitle(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(15), weight: .medium), surface: surface) }
+        public static func placeholderTitle(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(15), weight: .medium), surface: surface) }
         /// Supporting detail directly beneath a heading, such as a path.
-        static func subheading(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(12), weight: .regular), surface: surface) }
+        public static func subheading(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(12), weight: .regular), surface: surface) }
         /// Editable and readable content.
-        static func body(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .regular), surface: surface) }
+        public static func body(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .regular), surface: surface) }
         /// A project, pane, or toolbar title at body scale.
-        static func emphasizedBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .semibold), surface: surface) }
+        public static func emphasizedBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .semibold), surface: surface) }
         /// Strong body copy used only by legacy form section labels.
-        static func strongBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .bold), surface: surface) }
+        public static func strongBody(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(13), weight: .bold), surface: surface) }
         /// The one-bit question mark drawn into a period requester's fixed-size indexed artwork.
         /// This is generated chrome rather than prose, so its source-matched face does not scale.
-        static func classicRequesterMark() -> NSFont {
+        public static func classicRequesterMark() -> NSFont {
             .systemFont(ofSize: 22, weight: .bold)
         }
         /// Labels on controls. Buttons may ask for the weight their material authors; other
         /// controls keep the historical medium default.
-        static func control(
+        public static func control(
             weight: NSFont.Weight = .medium,
             surface: FontSurface = .chrome
         ) -> NSFont {
@@ -650,7 +650,7 @@ enum Design {
         }
         /// Action-label typography may follow a display face without changing other controls.
         /// The user's chrome-family preference is still resolved first by `prose`.
-        static func button(
+        public static func button(
             style: AppTheme.Material.ButtonStyle,
             surface: FontSurface = .chrome
         ) -> NSFont {
@@ -664,11 +664,11 @@ enum Design {
             )
         }
         /// A quieter control label, such as a sidebar session.
-        static func controlRegular(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(12), weight: .regular), surface: surface) }
+        public static func controlRegular(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(12), weight: .regular), surface: surface) }
         /// Section headings and other quiet, small type.
-        static func caption(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(11), weight: .semibold), surface: surface) }
+        public static func caption(surface: FontSurface = .chrome) -> NSFont { prose(.systemFont(ofSize: scaled(11), weight: .semibold), surface: surface) }
         /// Metadata and secondary copy that should not carry caption emphasis.
-        static func detail(
+        public static func detail(
             weight: NSFont.Weight = .regular,
             surface: FontSurface = .chrome
         ) -> NSFont {
@@ -683,7 +683,7 @@ enum Design {
         /// its own face should not read in Iowan because the user set body text there. It
         /// still degrades like every family — absent from this machine means the recipe falls
         /// through to `prose`, whose layers answer as they always do.
-        static func wordmark(
+        public static func wordmark(
             family: String? = nil,
             size: CGFloat? = nil,
             weight: NSFont.Weight = .semibold
@@ -697,7 +697,7 @@ enum Design {
 
         /// Tool subjects, paths, diffs, and other code-shaped content. A dense code reader may
         /// choose one bounded, reader-controlled step without inventing a point size of its own.
-        static func code(
+        public static func code(
             weight: NSFont.Weight = .regular,
             size: Design.CodeTextScale = .standard
         ) -> NSFont {
@@ -705,52 +705,52 @@ enum Design {
         }
 
         /// Inline code that must share the body's line box.
-        static func inlineCode() -> NSFont {
+        public static func inlineCode() -> NSFont {
             .monospacedSystemFont(ofSize: scaled(12), weight: .regular)
         }
 
         /// A code sample inside the compact theme-preview card.
-        static func previewCode() -> NSFont {
+        public static func previewCode() -> NSFont {
             .monospacedSystemFont(ofSize: scaled(11.5), weight: .regular)
         }
 
         /// Dense process metadata and compact hexadecimal values.
-        static func compactCode() -> NSFont {
+        public static func compactCode() -> NSFont {
             .monospacedSystemFont(ofSize: scaled(10), weight: .regular)
         }
 
         /// A compact tool identifier; deliberately halfway between code and metadata.
-        static func compactToolName() -> NSFont {
+        public static func compactToolName() -> NSFont {
             .monospacedSystemFont(ofSize: scaled(10.5), weight: .regular)
         }
 
         /// Numeric labels use fixed-width digits without making the surrounding prose code.
-        static func numericDisplay() -> NSFont {
+        public static func numericDisplay() -> NSFont {
             .monospacedDigitSystemFont(ofSize: scaled(30), weight: .semibold)
         }
 
-        static func numericBody() -> NSFont {
+        public static func numericBody() -> NSFont {
             .monospacedDigitSystemFont(ofSize: scaled(13), weight: .regular)
         }
 
-        static func numericControl(weight: NSFont.Weight = .regular) -> NSFont {
+        public static func numericControl(weight: NSFont.Weight = .regular) -> NSFont {
             .monospacedDigitSystemFont(ofSize: scaled(12), weight: weight)
         }
 
-        static func numericDetail(weight: NSFont.Weight = .regular) -> NSFont {
+        public static func numericDetail(weight: NSFont.Weight = .regular) -> NSFont {
             .monospacedDigitSystemFont(ofSize: scaled(11), weight: weight)
         }
 
         /// Markdown headings scale from the caller's semantic body font while font construction
         /// remains inside the typography boundary.
-        static func markdownHeading(from base: NSFont, surface: FontSurface = .chrome) -> NSFont {
+        public static func markdownHeading(from base: NSFont, surface: FontSurface = .chrome) -> NSFont {
             markdownHeading(fromPointSize: base.pointSize, surface: surface)
         }
 
         /// The same scaling from a size alone, which is what a recorded `FontRole` can carry: a
         /// role is re-resolved after the theme moved, so holding the old *font* would scale the
         /// new heading from the previous typeface's metrics.
-        static func markdownHeading(
+        public static func markdownHeading(
             fromPointSize base: CGFloat,
             surface: FontSurface = .chrome
         ) -> NSFont {
@@ -776,13 +776,13 @@ enum Design {
         /// `ThemedButton.shortcutRectTop` asks it for the baseline: the offsets drawing uses
         /// are not always `ascender - descender + leading`. Geneva's is 16 where that
         /// arithmetic says 17, and half a point of that lands back in the same place.
-        static func lineHeight(of font: NSFont) -> CGFloat {
+        public static func lineHeight(of font: NSFont) -> CGFloat {
             ceil(NSLayoutManager().defaultLineHeight(for: font))
         }
 
         /// Emoji rendered as an application control mark, not prose.
-        static func accountEmoji() -> NSFont { .systemFont(ofSize: scaled(16)) }
-        static func emojiPickerCell() -> NSFont { .systemFont(ofSize: scaled(19)) }
+        public static func accountEmoji() -> NSFont { .systemFont(ofSize: scaled(16)) }
+        public static func emojiPickerCell() -> NSFont { .systemFont(ofSize: scaled(19)) }
 
         /// Every family the process can currently resolve — the list the font pickers and the
         /// MCP authoring gate offer.
@@ -794,7 +794,7 @@ enum Design {
         /// appears on enable and leaves on disable, which is exactly what the pickers must
         /// show. Dot-prefixed families are the system's hidden faces and are filtered the way
         /// `NSFontManager` already filters them.
-        static var availableFamilies: [String] {
+        public static var availableFamilies: [String] {
             ((CTFontManagerCopyAvailableFontFamilyNames() as? [String]) ?? [])
                 .filter { !$0.hasPrefix(".") }
                 .sorted()
@@ -803,7 +803,7 @@ enum Design {
 
     // MARK: - Symbols
 
-    enum Symbol {
+    public enum Symbol {
 
         /// **A mark's optical size is type, not layout, so it moves with the type.**
         ///
@@ -827,7 +827,7 @@ enum Design {
         ///
         /// The role, not the number it currently resolves to, is what a view that *stores* a
         /// render has to hold on to — see `Design.Symbol.Role` and `SymbolMetric`.
-        enum Role: CaseIterable {
+        public enum Role: CaseIterable {
 
             /// Beside a control's label.
             case control
@@ -841,7 +841,7 @@ enum Design {
 
             /// The size this pairing was **measured** at, with the chrome's type at its
             /// authored size. Not for drawing: it is the constant the rule is stated in.
-            var measured: CGFloat {
+            public var measured: CGFloat {
                 switch self {
                 case .control: 11
                 case .toolbar: 13
@@ -851,19 +851,19 @@ enum Design {
 
             /// What it resolves to against the type currently on screen.
             @MainActor
-            var pointSize: CGFloat { measured * Typography.scale }
+            public var pointSize: CGFloat { measured * Typography.scale }
         }
 
         /// Beside a control's label.
         @MainActor
-        static var control: CGFloat { Role.control.pointSize }
+        public static var control: CGFloat { Role.control.pointSize }
         /// A top-level toolbar action, whose 16pt slot an 11pt glyph underfilled — the toolbar
         /// read as a row of marks smaller and lighter than every control below it.
         @MainActor
-        static var toolbar: CGFloat { Role.toolbar.pointSize }
+        public static var toolbar: CGFloat { Role.toolbar.pointSize }
         /// Disclosure chevrons, which should read as a hint rather than a control.
         @MainActor
-        static var chevron: CGFloat { Role.chevron.pointSize }
+        public static var chevron: CGFloat { Role.chevron.pointSize }
 
         /// `.medium`, because glyphs are weighed against the text beside them and the anchor
         /// is its stem: SF 13 regular's is ~1.25pt, which is what an 11pt `.medium` symbol
@@ -871,7 +871,7 @@ enum Design {
         /// 1.0pt, so every icon in the chrome sat *below* the weight of its own label; on a 1×
         /// display that is a single antialiased pixel. Callers with a reason still state their
         /// own weight — the chevron is `.semibold` because at 8pt even medium reads faint.
-        static func configuration(_ pointSize: CGFloat, weight: NSFont.Weight = .medium)
+        public static func configuration(_ pointSize: CGFloat, weight: NSFont.Weight = .medium)
             -> NSImage.SymbolConfiguration {
             .init(pointSize: pointSize, weight: weight)
         }
@@ -884,10 +884,10 @@ enum Design {
         /// `Design.Size.choiceHeight` is authored by the theme and editable from 14 to 44 — and
         /// a glyph that keeps a fixed slot inside a control that does not reads as a mark
         /// floating in a box at one end of that range and as one wedged into it at the other.
-        static let glyphFraction: CGFloat = 0.6
+        public static let glyphFraction: CGFloat = 0.6
 
         /// The glyph slot inside a control `height` points tall, on the pixel grid.
-        static func slot(inControlOfHeight height: CGFloat) -> CGFloat {
+        public static func slot(inControlOfHeight height: CGFloat) -> CGFloat {
             (height * glyphFraction).rounded()
         }
 
@@ -900,13 +900,13 @@ enum Design {
         /// slot half again as wide, which is a lighter stroke in a larger control — the
         /// opposite of what growing it was for.
         @MainActor
-        static func pointSize(forSlot slot: CGFloat) -> CGFloat {
+        public static func pointSize(forSlot slot: CGFloat) -> CGFloat {
             role(forSlot: slot).pointSize
         }
 
         /// The same answer as a role, for a view that stores its render and has to make it
         /// again when the theme moves the type (`Design.Symbol.Role`).
-        static func role(forSlot slot: CGFloat) -> Role {
+        public static func role(forSlot slot: CGFloat) -> Role {
             slot >= Size.tabIconSlot ? .toolbar : .control
         }
 
@@ -919,7 +919,7 @@ enum Design {
         /// drops it off the pixel grid. Re-configuring at the fitted point size keeps the
         /// weight compensation SF's optical sizes exist to provide. Symbols already inside the
         /// slot keep their nominal size; nothing is ever configured *up*.
-        static func image(
+        public static func image(
             _ symbolName: String,
             slot: CGFloat,
             pointSize: CGFloat,
@@ -941,43 +941,43 @@ enum Design {
     /// Shared geometry for dense time-series surfaces. These belong here rather than in the
     /// Usage feature because the chart is a reusable design-system component and every future
     /// dashboard should inherit the same plot rhythm, hit target, and bounded render budget.
-    enum Chart {
-        static let preferredHeight: CGFloat = 260
-        static let axisLeading: CGFloat = 64
-        static let axisTrailing: CGFloat = Spacing.inset
-        static let axisTop: CGFloat = Spacing.large
-        static let axisBottom: CGFloat = 28
-        static let gridLineCount = 5
-        static let xLabelCount = 4
+    public enum Chart {
+        public static let preferredHeight: CGFloat = 260
+        public static let axisLeading: CGFloat = 64
+        public static let axisTrailing: CGFloat = Spacing.inset
+        public static let axisTop: CGFloat = Spacing.large
+        public static let axisBottom: CGFloat = 28
+        public static let gridLineCount = 5
+        public static let xLabelCount = 4
         /// The least room between two time-axis labels before one stands down: the chart drops
         /// to fewer, evenly re-spaced labels rather than letting neighbours collide. Sized to a
         /// short-date pair with air between.
-        static let minimumXLabelSpacing: CGFloat = 96
-        static let lineWidth: CGFloat = 2
-        static let systemLineWidth: CGFloat = 1.6
-        static let projectionLineWidth: CGFloat = 1.5
-        static let markerLineWidth: CGFloat = 1
-        static let systemAreaOpacity: CGFloat = 0.12
-        static let themedAreaOpacity: CGFloat = 0.08
-        static let systemStackedBandOpacity: CGFloat = 0.58
-        static let themedStackedBandOpacity: CGFloat = 0.50
-        static let spectrumBandOpacity: CGFloat = 0.92
-        static let spectrumColumnWidth: CGFloat = 6
-        static let spectrumColumnGap: CGFloat = 2
-        static let spectrumCellHeight: CGFloat = 4
-        static let spectrumCellGap: CGFloat = 2
-        static let spectrumPeakHeight: CGFloat = 2
-        static let pointRadius: CGFloat = 3
-        static let selectedPointRadius: CGFloat = 5
+        public static let minimumXLabelSpacing: CGFloat = 96
+        public static let lineWidth: CGFloat = 2
+        public static let systemLineWidth: CGFloat = 1.6
+        public static let projectionLineWidth: CGFloat = 1.5
+        public static let markerLineWidth: CGFloat = 1
+        public static let systemAreaOpacity: CGFloat = 0.12
+        public static let themedAreaOpacity: CGFloat = 0.08
+        public static let systemStackedBandOpacity: CGFloat = 0.58
+        public static let themedStackedBandOpacity: CGFloat = 0.50
+        public static let spectrumBandOpacity: CGFloat = 0.92
+        public static let spectrumColumnWidth: CGFloat = 6
+        public static let spectrumColumnGap: CGFloat = 2
+        public static let spectrumCellHeight: CGFloat = 4
+        public static let spectrumCellGap: CGFloat = 2
+        public static let spectrumPeakHeight: CGFloat = 2
+        public static let pointRadius: CGFloat = 3
+        public static let selectedPointRadius: CGFloat = 5
 
         /// A ranking chart's leading gutter holds words rather than formatted numbers, so it is
         /// wider than the value axis it replaces.
-        static let categoryAxisLeading: CGFloat = 108
+        public static let categoryAxisLeading: CGFloat = 108
         /// The floor a chart is still readable at, and the ceiling a ranking may grow to before
         /// its bands compress instead. Sixty categories at a comfortable row height would be a
         /// two-thousand-point row in a conversation, which is a scroll, not a chart.
-        static let minimumCardHeight: CGFloat = 160
-        static let maximumCardHeight: CGFloat = 720
+        public static let minimumCardHeight: CGFloat = 160
+        public static let maximumCardHeight: CGFloat = 720
         /// The tallest a plot may stand for its own width before the height stops being
         /// resolution and starts being stretch.
         ///
@@ -987,54 +987,54 @@ enum Design {
         /// points of column over 120 points of plot, bars reduced to threads with no room under
         /// them for the names of the categories they measure. At two-to-one the extra height has
         /// stopped adding anything a reader gets to use, so the chart leaves it to the pane.
-        static let maximumPlotAspect: CGFloat = 2
-        static let rankingRowHeight: CGFloat = 32
-        static let legendHeight: CGFloat = 16
-        static let legendSwatch: CGFloat = 8
+        public static let maximumPlotAspect: CGFloat = 2
+        public static let rankingRowHeight: CGFloat = 32
+        public static let legendHeight: CGFloat = 16
+        public static let legendSwatch: CGFloat = 8
         /// The share of a category band a bar group occupies. The remainder is the gap that says
         /// the bands are separate categories rather than one continuous run.
-        static let barBandFraction: CGFloat = 0.72
-        static let barGap: CGFloat = 2
+        public static let barBandFraction: CGFloat = 0.72
+        public static let barGap: CGFloat = 2
         /// Past this a bar has stopped being a length and become a panel. A bar's thickness
         /// carries no reading — only its length does — so it must not grow with the container:
         /// a two-category comparison across a wide pane drew a pair of 300-point slabs, and the
         /// same chart in a narrow one drew bars. Sized generously, since a chart of three
         /// categories with hairline bars reads as a sparse lollipop plot rather than a
         /// comparison.
-        static let maximumBarThickness: CGFloat = 56
+        public static let maximumBarThickness: CGFloat = 56
         /// Enough tint that a bar reads as a measured quantity rather than as an outline. Below
         /// roughly a quarter it washes out on a light ground, where the fill is competing with
         /// white rather than sitting on black.
-        static let barFillOpacity: CGFloat = 0.3
+        public static let barFillOpacity: CGFloat = 0.3
         /// Bars round at the growing end only, and barely. A fully rounded bar reads as a pill
         /// floating above the axis rather than as a quantity measured from it, and the control
         /// radius — sized for a button — is far too generous at a bar's width.
-        static let barRadius: CGFloat = 3
+        public static let barRadius: CGFloat = 3
         /// A bar thinner than this has no room for its own number, and printing one anyway
         /// overlaps the bar beside it.
-        static let barValueLabelThickness: CGFloat = 26
+        public static let barValueLabelThickness: CGFloat = 26
         /// How much of one category band `members` bars drawn side by side may occupy.
         ///
         /// The band is the room a category *owns*; the group is only obliged to be legible in it.
         /// Below the cap the group keeps its share of the band and the rest is the gap between
         /// categories; above it the group stays put and the band keeps the slack, which is what
         /// stops a chart of two categories in a full-height pane drawing two slabs.
-        static func barGroupExtent(band: CGFloat, members: Int) -> CGFloat {
+        public static func barGroupExtent(band: CGFloat, members: Int) -> CGFloat {
             let count = CGFloat(max(1, members))
             return min(band * barBandFraction, maximumBarThickness * count)
         }
 
         /// Axis labels are thinned in whole steps below these widths, so a resize drops whole
         /// categories rather than shuffling which names happen to fit.
-        static let minimumCategoryLabelWidth: CGFloat = 48
-        static let minimumCategoryBand: CGFloat = 16
-        static let tooltipInset = Spacing.medium
-        static let tooltipOffset = Spacing.inset
-        static let tooltipMaxWidth: CGFloat = 180
-        static let maximumRenderedPoints = 240
-        static let maximumRenderedMarkers = 120
+        public static let minimumCategoryLabelWidth: CGFloat = 48
+        public static let minimumCategoryBand: CGFloat = 16
+        public static let tooltipInset = Spacing.medium
+        public static let tooltipOffset = Spacing.inset
+        public static let tooltipMaxWidth: CGFloat = 180
+        public static let maximumRenderedPoints = 240
+        public static let maximumRenderedMarkers = 120
 
-        static var style: AppTheme.Material.ChartStyle {
+        public static var style: AppTheme.Material.ChartStyle {
             AppThemePalette.current.material.chartStyle
         }
 
@@ -1042,7 +1042,7 @@ enum Design {
         /// material instead uses its own authored neon/status vocabulary, keeping the analyzer
         /// coherent with player chrome without a feature view naming that theme.
         @MainActor
-        static func color(for style: ThemedChartSeriesStyle) -> NSColor {
+        public static func color(for style: ThemedChartSeriesStyle) -> NSColor {
             switch style {
             case .primary, .projection:
                 return Design.Surface.accent
@@ -1073,105 +1073,105 @@ enum Design {
     /// The compact spectrum display that may replace the sidebar identity under a player
     /// material. Its geometry is fixed and bounded independently of session count: the exact
     /// count is printed beside seven visual bands rather than materializing one view per agent.
-    enum WorkloadAnalyzer {
-        static let size = NSSize(width: 86, height: 24)
-        static let contentInset = Spacing.tight
-        static let bandCount = 7
-        static let cellCount = 6
-        static let bandWidth: CGFloat = 5
-        static let bandGap: CGFloat = 2
-        static let cellHeight: CGFloat = 2
-        static let cellGap: CGFloat = 1
-        static let readingGap = Spacing.small
-        static let readingWidth: CGFloat = 15
-        static let peakHeight: CGFloat = 1
+    public enum WorkloadAnalyzer {
+        public static let size = NSSize(width: 86, height: 24)
+        public static let contentInset = Spacing.tight
+        public static let bandCount = 7
+        public static let cellCount = 6
+        public static let bandWidth: CGFloat = 5
+        public static let bandGap: CGFloat = 2
+        public static let cellHeight: CGFloat = 2
+        public static let cellGap: CGFloat = 1
+        public static let readingGap = Spacing.small
+        public static let readingWidth: CGFloat = 15
+        public static let peakHeight: CGFloat = 1
     }
 
-    enum UsageDashboard {
-        static let metricCardHeight: CGFloat = 76
+    public enum UsageDashboard {
+        public static let metricCardHeight: CGFloat = 76
 
         /// One row of the stats band: a caption, a numeric value and the line explaining it,
         /// with a container's inset above and below. Taller than the bordered tile it replaces
         /// because the band draws no plate — the air is what separates it from the chart.
-        static let statBandHeight: CGFloat = 88
+        public static let statBandHeight: CGFloat = 88
 
         /// The Overview chart is the page's anchor rather than a strip beside the total, so it
         /// states its own height instead of inheriting the shared card measure. The hero column
         /// is pinned to it, so this is the height of that whole row.
-        static let chartHeight: CGFloat = 300
+        public static let chartHeight: CGFloat = 300
 
         /// Rules across the Overview chart. Fewer than the shared default because this chart is
         /// read for its shape — where the spend went — while the numbers it would be measured
         /// against are already printed beside it, in full, in the hero. Four rules through a
         /// stack of filled bands were the loudest ink on the page. See
         /// `ThemedChartModel.valueGridLineCount`.
-        static let chartGridLineCount = 3
+        public static let chartGridLineCount = 3
 
-        static let breakdownRowHeight: CGFloat = 32
-        static let breakdownHeaderHeight: CGFloat = 26
+        public static let breakdownRowHeight: CGFloat = 32
+        public static let breakdownHeaderHeight: CGFloat = 26
 
         /// How many breakdown rows stand before the table starts scrolling. The table is still
         /// virtualized above this — the cap is about how much of the page one section may take,
         /// not about how many rows may exist.
-        static let breakdownVisibleRows = 12
+        public static let breakdownVisibleRows = 12
 
         /// The provider mark before a breakdown row's name, and the gap after it. Fixed, so
         /// every name in the column starts on one line whether or not its row has a mark.
-        static let breakdownIconSlot: CGFloat = 16
+        public static let breakdownIconSlot: CGFloat = 16
 
         /// The named numeric columns. Sized for their widest realistic value — `$531,676.76`,
         /// `100%`, `1000.44B`, `7,411,502` — at `numericBody`, so nothing truncates on the
         /// wide page and the ranking stays readable when the pane is squeezed to the floor.
-        static let breakdownCostColumnWidth: CGFloat = 124
-        static let breakdownShareColumnWidth: CGFloat = 76
-        static let breakdownTokensColumnWidth: CGFloat = 104
-        static let breakdownRequestsColumnWidth: CGFloat = 112
-        static let breakdownNameMinimumWidth: CGFloat = 168
+        public static let breakdownCostColumnWidth: CGFloat = 124
+        public static let breakdownShareColumnWidth: CGFloat = 76
+        public static let breakdownTokensColumnWidth: CGFloat = 104
+        public static let breakdownRequestsColumnWidth: CGFloat = 112
+        public static let breakdownNameMinimumWidth: CGFloat = 168
 
-        static let coverageRowHeight: CGFloat = 54
-        static let minimumContentWidth: CGFloat = 560
-        static let consumptionSummaryWidth: CGFloat = 300
-        static let sectionControlWidth: CGFloat = 272
-        static let rangeControlWidth: CGFloat = 148
-        static let metricControlWidth: CGFloat = 144
+        public static let coverageRowHeight: CGFloat = 54
+        public static let minimumContentWidth: CGFloat = 560
+        public static let consumptionSummaryWidth: CGFloat = 300
+        public static let sectionControlWidth: CGFloat = 272
+        public static let rangeControlWidth: CGFloat = 148
+        public static let metricControlWidth: CGFloat = 144
         /// The rescan strip's bar, beside the tabs. Short on purpose: a page already showing its
         /// last complete report is being refreshed, not built, and a full-width bar over it would
         /// claim the page is unusable while it runs.
-        static let scanProgressWidth: CGFloat = 88
+        public static let scanProgressWidth: CGFloat = 88
     }
 
     /// The live, all-account capacity run shared by Usage settings and the toolbar's expanded
     /// fleet popover. Account count comes from provider discovery, so both hosts keep a virtual
     /// table rather than a retained stack. Settings lets its outer page own scrolling; the
     /// popover uses the bounded viewport these values define.
-    enum AccountUsageFleet {
-        static let settingsMaximumHeight: CGFloat = 430
-        static let popoverMaximumHeight: CGFloat = 520
-        static let popoverWidth: CGFloat = 380
-        static let estimatedBaseRowHeight: CGFloat = 86
-        static let estimatedWindowRowHeight: CGFloat = 50
-        static let estimatedActionHeight: CGFloat = Size.chipHeight + Spacing.small
-        static let maximumWindowsPerAccount = 6
+    public enum AccountUsageFleet {
+        public static let settingsMaximumHeight: CGFloat = 430
+        public static let popoverMaximumHeight: CGFloat = 520
+        public static let popoverWidth: CGFloat = 380
+        public static let estimatedBaseRowHeight: CGFloat = 86
+        public static let estimatedWindowRowHeight: CGFloat = 50
+        public static let estimatedActionHeight: CGFloat = Size.chipHeight + Spacing.small
+        public static let maximumWindowsPerAccount = 6
         /// A detached embedded table may bind this many cheap rows before an enclosing page clip
         /// exists. Larger fleets wait for the real Settings viewport, or AppKit would correctly
         /// consider their complete logical height visible and eagerly ask for every cell.
-        static let embeddedEagerRowCap = 12
-        static let minimumViewportHeight: CGFloat = 112
-        static let providerIconSize: CGFloat = 18
-        static let accountCardInset = Spacing.inset
-        static let accountGap = Spacing.small
+        public static let embeddedEagerRowCap = 12
+        public static let minimumViewportHeight: CGFloat = 112
+        public static let providerIconSize: CGFloat = 18
+        public static let accountCardInset = Spacing.inset
+        public static let accountGap = Spacing.small
     }
 
     /// The two lines drawn across a provider usage gauge. Time is neutral chronology; a custom
     /// limit is user-authored policy and keeps one semantic colour in the gauge and its legend.
-    enum UsageBar {
-        static let height: CGFloat = 6
-        static let timeMarkWidth: CGFloat = 2
-        static let limitMarkWidth: CGFloat = 2
-        static let legendMarkHeight: CGFloat = 10
-        static let legendGap = Spacing.small
+    public enum UsageBar {
+        public static let height: CGFloat = 6
+        public static let timeMarkWidth: CGFloat = 2
+        public static let limitMarkWidth: CGFloat = 2
+        public static let legendMarkHeight: CGFloat = 10
+        public static let legendGap = Spacing.small
 
-        static var limitMarkColor: NSColor { Status.warning }
+        public static var limitMarkColor: NSColor { Status.warning }
     }
 
     // MARK: - Surface
@@ -1179,39 +1179,39 @@ enum Design {
     /// Fills and borders, all derived from system colours so light and dark both work and
     /// the accent colour is the user's own.
     @MainActor
-    enum Surface {
+    public enum Surface {
         /// A control at rest. Below full opacity so a row of them stays quiet.
-        static var controlResting: NSColor {
+        public static var controlResting: NSColor {
             Accessibility.color(.controlResting, increasedContrastAlphaFloor: 0.16)
         }
 
         /// The same control under the pointer.
-        static var controlHover: NSColor {
+        public static var controlHover: NSColor {
             Accessibility.color(.controlHover, increasedContrastAlphaFloor: 0.24)
         }
 
         /// A container holding content, such as the prompt box.
-        static var panel: NSColor { AppThemePalette.color(.panel) }
+        public static var panel: NSColor { AppThemePalette.color(.panel) }
 
         /// A writable/value well. Modern themes derive this from their panel; period themes may
         /// state the native field colour independently from the surrounding chrome.
-        static var field: NSColor { AppThemePalette.color(.fieldSurface) }
+        public static var field: NSColor { AppThemePalette.color(.fieldSurface) }
 
         /// A container above a panel — a popover, a floating card.
-        static var elevated: NSColor { AppThemePalette.color(.elevated) }
+        public static var elevated: NSColor { AppThemePalette.color(.elevated) }
 
         /// An anchored floating surface. Usually the elevated colour, but independently
         /// authorable for period components such as a pale Windows infotip.
-        static var floating: NSColor { AppThemePalette.color(.floatingSurface) }
+        public static var floating: NSColor { AppThemePalette.color(.floatingSurface) }
 
-        static var border: NSColor {
+        public static var border: NSColor {
             Accessibility.color(.border, increasedContrastAlphaFloor: 0.70)
         }
 
         /// The lit and shaded edges of a bevelled surface. Only ever drawn under a material
         /// that states a bevel — see `SurfaceBevel`.
-        static var bevelHighlight: NSColor { AppThemePalette.color(.bevelHighlight) }
-        static var bevelShadow: NSColor { AppThemePalette.color(.bevelShadow) }
+        public static var bevelHighlight: NSColor { AppThemePalette.color(.bevelHighlight) }
+        public static var bevelShadow: NSColor { AppThemePalette.color(.bevelShadow) }
 
         /// A rule between rows, quieter than a border around them — and *held* quieter.
         ///
@@ -1224,7 +1224,7 @@ enum Design {
         /// Resolved inside a dynamic colour so a live theme switch, an appearance flip and
         /// Increase Contrast each take the decision again; under Increase Contrast the
         /// ceiling yields to the floor, because contrast asked for is contrast given.
-        static var divider: NSColor {
+        public static var divider: NSColor {
             NSColor(name: NSColor.Name("threading.surface.divider")) { appearance in
                 let authored = AppThemePalette.current.resolved(.divider, appearance: appearance)
                 guard let resolved = authored.usingColorSpace(.sRGB) else { return authored }
@@ -1237,17 +1237,17 @@ enum Design {
         }
 
         /// The window's own backdrop.
-        static var ground: NSColor { AppThemePalette.color(.ground) }
+        public static var ground: NSColor { AppThemePalette.color(.ground) }
 
         /// Large structural areas — the sidebar.
-        static var background: NSColor { AppThemePalette.color(.surface) }
+        public static var background: NSColor { AppThemePalette.color(.surface) }
 
         /// Draws attention to the one control that is ready to act.
-        static var accent: NSColor { AppThemePalette.color(.accent) }
+        public static var accent: NSColor { AppThemePalette.color(.accent) }
 
         /// A quiet accent ground: tracks and washes that belong to the accent but must sit
         /// behind full-strength accent ink.
-        static var accentMuted: NSColor { AppThemePalette.color(.accentMuted) }
+        public static var accentMuted: NSColor { AppThemePalette.color(.accentMuted) }
 
         // A selected row inside app-owned chrome is deliberately **not** a token here.
         //
@@ -1264,7 +1264,7 @@ enum Design {
         /// `SidebarHoverRowView` paints the accent while its window is in front, and under
         /// **System** the system's own selection colour. Stated once here so a control sitting
         /// in the row need know neither fact. See `Design.Ink.selection`.
-        static var selectionFill: NSColor {
+        public static var selectionFill: NSColor {
             AppThemePalette.current.isSystem ? .selectedContentBackgroundColor : accent
         }
 
@@ -1274,7 +1274,7 @@ enum Design {
         /// Its pair, and here for the reason the pair exists: the sidebar draws its own selection
         /// under every theme now, System included, so both strengths have to be sayable without
         /// a view reaching for a raw `NSColor` to cover the case the palette does not author.
-        static var selectionFillUnemphasized: NSColor {
+        public static var selectionFillUnemphasized: NSColor {
             AppThemePalette.current.isSystem
                 ? .unemphasizedSelectedContentBackgroundColor
                 : AppThemePalette.color(.accentMuted)
@@ -1289,7 +1289,7 @@ enum Design {
         ///
         /// Stated here rather than inside the button because a **plate** may paint it for a
         /// control that is not the button — see `Design.Ink.primaryAction`.
-        static var primaryActionFace: NSColor {
+        public static var primaryActionFace: NSColor {
             let style = AppThemePalette.current.material.buttonStyle
             switch style.primaryTreatment {
             case .filled: return AppThemePalette.color(style.primaryRole)
@@ -1306,7 +1306,7 @@ enum Design {
         /// rather than as a find — and resolved *inside* a dynamic colour so a live theme
         /// switch, an appearance flip and Increase Contrast each take the decision again. The
         /// alpha is replaced rather than scaled, matching every other derived role here.
-        static var searchMatch: NSColor {
+        public static var searchMatch: NSColor {
             NSColor(name: NSColor.Name("threading.surface.searchMatch")) { _ in
                 let accent = AppThemePalette.current.resolved(.accent)
                 let alpha = Accessibility.increasesContrast
@@ -1323,7 +1323,7 @@ enum Design {
         /// annotation target is that sentence said over a web page. Resolved inside a dynamic
         /// colour so a live theme switch, an appearance flip and Increase Contrast each get to
         /// answer again.
-        static var annotationTarget: NSColor {
+        public static var annotationTarget: NSColor {
             NSColor(name: NSColor.Name("threading.surface.annotationTarget")) { _ in
                 let accent = AppThemePalette.current.resolved(.accent)
                 let alpha = Accessibility.increasesContrast
@@ -1342,7 +1342,7 @@ enum Design {
         /// affordance answers. An opaque plate answers it by hiding it, which is how the first
         /// version of the attachments drop came to draw a saturated slab over the row it was
         /// naming, louder than the window's own selection two rows above.
-        static var dropTarget: NSColor {
+        public static var dropTarget: NSColor {
             NSColor(name: NSColor.Name("threading.surface.dropTarget")) { _ in
                 let accent = AppThemePalette.current.resolved(.accent)
                 let alpha = Accessibility.increasesContrast
@@ -1361,7 +1361,7 @@ enum Design {
         /// frozen outside the record. Held to the same quiet alpha as the row wash: a draft may
         /// be under the pointer, and the tint has to answer *where this lands* without covering
         /// what is already written.
-        static var fieldDropTarget: NSColor {
+        public static var fieldDropTarget: NSColor {
             NSColor(name: NSColor.Name("threading.surface.fieldDropTarget")) { _ in
                 let palette = AppThemePalette.current
                 let field = palette.resolved(.fieldSurface)
@@ -1388,7 +1388,7 @@ enum Design {
         /// So the hue stays the theme's and the alpha becomes ours, stated rather than inherited.
         /// Resolved inside a dynamic colour so a live theme switch, an appearance flip and
         /// Increase Contrast each get to answer again.
-        static var imageHoverWash: NSColor {
+        public static var imageHoverWash: NSColor {
             NSColor(name: NSColor.Name("threading.surface.imageHoverWash")) { _ in
                 let hover = AppThemePalette.current.resolved(.controlHover)
                 let alpha = Accessibility.increasesContrast
@@ -1404,7 +1404,7 @@ enum Design {
         /// lies over syntax ink and semantic added/removed washes, so using that role directly
         /// would erase the information the row exists to show. Keep its authored hue and make
         /// it a wash, just as image hover does for content that must remain readable beneath it.
-        static var diffLineHoverWash: NSColor {
+        public static var diffLineHoverWash: NSColor {
             NSColor(name: NSColor.Name("threading.surface.diffLineHoverWash")) { _ in
                 let hover = AppThemePalette.current.resolved(.controlHover)
                 let alpha = Accessibility.increasesContrast
@@ -1427,7 +1427,7 @@ enum Design {
         ///
         /// Resolved inside a dynamic colour so a live theme switch, an appearance flip and
         /// Increase Contrast each get to answer again.
-        static var overlayScrim: NSColor {
+        public static var overlayScrim: NSColor {
             NSColor(name: NSColor.Name("threading.surface.overlayScrim")) { _ in
                 NSColor(
                     white: 0,
@@ -1455,7 +1455,7 @@ enum Design {
     /// `LabelLegibility` for the floors, why four other contrast gates all missed this, and what
     /// the rule costs.
     @MainActor
-    enum Text {
+    public enum Text {
 
         /// The theme's own ink on the theme's own ground — the one tier that is not held to a
         /// floor here.
@@ -1465,25 +1465,25 @@ enum Design {
         /// (`AppThemeTests.testAThemeWhoseSyntaxVanishesAgainstItsGroundIsRefused`). Holding it
         /// here would let the design system quietly overrule a theme's primary decision, and it
         /// would move the ceiling every other tier is measured up to.
-        static var label: NSColor { AppThemePalette.color(.label) }
+        public static var label: NSColor { AppThemePalette.color(.label) }
 
         /// Supporting sentences. Read, so held at `readingRatio`.
-        static var secondary: NSColor { LabelLegibility.tier(.secondary) }
+        public static var secondary: NSColor { LabelLegibility.tier(.secondary) }
 
         /// Metadata read for its content — a path, a subtitle, a name under a name. Also read,
         /// so also `readingRatio`.
-        static var tertiary: NSColor { LabelLegibility.tier(.tertiary) }
+        public static var tertiary: NSColor { LabelLegibility.tier(.tertiary) }
 
         /// Stamps, counts and marks — the tier whose job is to sit back. Glanced at, so
         /// `glanceRatio`: low enough to stay quiet, high enough to stay words.
-        static var quaternary: NSColor { LabelLegibility.tier(.quaternary) }
+        public static var quaternary: NSColor { LabelLegibility.tier(.quaternary) }
 
         /// Text over an emphasized selection.
         ///
         /// System keeps AppKit's own answer because its source-list fill is also AppKit's. A
         /// styled theme draws its own accent selection, so the foreground is measured against
         /// that accent rather than inherited from the user's unrelated system accent.
-        static var selected: NSColor {
+        public static var selected: NSColor {
             guard !AppThemePalette.current.isSystem else {
                 return .alternateSelectedControlTextColor
             }
@@ -1517,7 +1517,7 @@ enum Design {
         /// `label` is held here even though the themed `label` is not, and the difference is
         /// authorship: there the colour is the theme's own decision about its own ground, here it
         /// is a constant this file picked.
-        static func on(_ background: NSColor) -> Design.Ink {
+        public static func on(_ background: NSColor) -> Design.Ink {
             let light = ThemeContrast.ratio(.white, background) >= ThemeContrast.ratio(.black, background)
             let base: NSColor = light ? .white : .black
             // The tiers are further apart on a dark ground than a light one: black fades to
@@ -1565,18 +1565,18 @@ enum Design {
     /// differ in *where their colours come from* and in nothing else, so that is the only thing
     /// they state; see `InkSource`.
     @MainActor
-    struct Ink {
+    public struct Ink {
 
         /// The tone every derived value here is cut from: white over a dark ground, black over a
         /// light one. Held so each tier and surface is *the base at an opacity* rather than a
         /// dimming of the tier above it — `withAlphaComponent` replaces alpha rather than scaling
         /// it, and chaining it reads as a scale that it is not.
-        let base: NSColor
+        public let base: NSColor
 
-        let label: NSColor
-        let secondary: NSColor
-        let tertiary: NSColor
-        let quaternary: NSColor
+        public let label: NSColor
+        public let secondary: NSColor
+        public let tertiary: NSColor
+        public let quaternary: NSColor
 
         /// A control surface that reads on the same ground — the pill behind the usage summary,
         /// the card floating at the pane's corner, a tab.
@@ -1587,9 +1587,9 @@ enum Design {
         /// either invisible or a bright smear. But on the chrome itself the theme already states
         /// these three roles, and a component deriving its own would sit at a weight no other
         /// control in the window uses.
-        let surface: NSColor
-        let surfaceHover: NSColor
-        let border: NSColor
+        public let surface: NSColor
+        public let surfaceHover: NSColor
+        public let border: NSColor
 
         /// A rule *between* things, as against the border *around* one.
         ///
@@ -1599,10 +1599,10 @@ enum Design {
         /// the derived border already sits inside the budget at any weight the gates allow —
         /// so it is the same value under a second name, and the name is what a call site
         /// drawing a rule states.
-        let rule: NSColor
+        public let rule: NSColor
 
         /// Surfaces cut from `base`, for a ground the theme does not own.
-        init(
+        public init(
             base: NSColor,
             label: NSColor,
             secondary: NSColor,
@@ -1625,7 +1625,7 @@ enum Design {
         }
 
         /// Surfaces stated outright, for a ground that already has roles of its own.
-        init(
+        public init(
             base: NSColor,
             label: NSColor,
             secondary: NSColor,
@@ -1659,7 +1659,7 @@ enum Design {
         /// Mirrors `Design.Text.selected`, and for its reason: under **System** the fill is
         /// AppKit's own, so the ink is measured against AppKit's; a styled theme paints its own
         /// accent, so the ink is measured against that.
-        static var selection: Ink { Text.on(Design.Surface.selectionFill) }
+        public static var selection: Ink { Text.on(Design.Surface.selectionFill) }
 
         /// The face of a **primary action**, as an `Ink` — what a control welded onto one draws
         /// from.
@@ -1672,7 +1672,7 @@ enum Design {
         /// Treatment-aware, because a primary is not always a block of accent: on `.raised` the
         /// face is the ordinary control's and on `.outlined` there is no face at all, so on both
         /// the chrome's ink is still the measured answer and only the glyph's tone moves.
-        static var primaryAction: Ink {
+        public static var primaryAction: Ink {
             let style = AppThemePalette.current.material.buttonStyle
             switch style.primaryTreatment {
             case .raised:
@@ -1706,7 +1706,7 @@ enum Design {
         /// Computed on every access rather than stored, for the reason `ThemedControl` draws in
         /// `draw(_:)` at all: a role resolves to a different colour after a theme switch, and a
         /// value captured once would keep the old one.
-        static var chrome: Ink {
+        public static var chrome: Ink {
             Ink(
                 base: Design.Text.label,
                 label: Design.Text.label,
@@ -1724,10 +1724,10 @@ enum Design {
     // MARK: - Status
 
     /// What a session's state is drawn in, and what a result that went wrong is drawn in.
-    enum Status {
-        static var positive: NSColor { readable(.statusPositive) }
-        static var warning: NSColor { readable(.statusWarning) }
-        static var negative: NSColor { readable(.statusNegative) }
+    public enum Status {
+        public static var positive: NSColor { readable(.statusPositive) }
+        public static var warning: NSColor { readable(.statusWarning) }
+        public static var negative: NSColor { readable(.statusNegative) }
 
         /// Status roles are frequently words, not decoration. Preserve the authored hue, but
         /// move it only as far as needed to read on both bare and structural app surfaces.
@@ -1755,7 +1755,7 @@ enum Design {
     /// is that a role answers "what is this", which is exactly what a lane does not have. They
     /// adapt to light and dark on their own, and are ordered so neighbouring entries are never
     /// near-hues. A theme may want its own ramp one day; this is where it would go.
-    enum Categorical {
+    public enum Categorical {
 
         /// A hue and the word for it.
         ///
@@ -1763,12 +1763,12 @@ enum Design {
         /// legend, a tooltip or a report pasted into a chat, and "the third one" is not a
         /// thing anyone can point at. The name lives *beside* the colour so the two cannot
         /// drift — a ramp reordered without its words is a legend that lies.
-        struct Hue: Equatable {
-            let name: String
-            let color: NSColor
+        public struct Hue: Equatable {
+            public let name: String
+            public let color: NSColor
         }
 
-        static let hues: [Hue] = [
+        public static let hues: [Hue] = [
             Hue(name: "Blue", color: .systemBlue),
             Hue(name: "Orange", color: .systemOrange),
             Hue(name: "Purple", color: .systemPurple),
@@ -1777,41 +1777,41 @@ enum Design {
             Hue(name: "Indigo", color: .systemIndigo)
         ]
 
-        static let ramp: [NSColor] = hues.map(\.color)
+        public static let ramp: [NSColor] = hues.map(\.color)
 
         /// The hue for an index that may run past the ramp, cycling. Every caller that
         /// colours an unbounded sequence — graph lanes, hierarchy depths — needs this, and
         /// each wrote its own `% count` before.
-        static func hue(at index: Int) -> Hue {
+        public static func hue(at index: Int) -> Hue {
             hues[((index % hues.count) + hues.count) % hues.count]
         }
     }
 
     // MARK: - Diff
 
-    enum Diff {
-        static var added: NSColor { AppThemePalette.color(.diffAdded) }
-        static var removed: NSColor { AppThemePalette.color(.diffRemoved) }
+    public enum Diff {
+        public static var added: NSColor { AppThemePalette.color(.diffAdded) }
+        public static var removed: NSColor { AppThemePalette.color(.diffRemoved) }
     }
 
     // MARK: - Chat
 
     /// The conversation surface: the user's turns as bubbles, the agent's as flowing text.
-    enum Chat {
+    public enum Chat {
         /// A user bubble never spans the pane — a short reply in a full-width box reads as
         /// shouting, and a wide box makes the eye travel for nothing.
-        static let bubbleMaxWidthFraction: CGFloat = 0.78
+        public static let bubbleMaxWidthFraction: CGFloat = 0.78
 
         /// The bubble fill: the user's accent, dropped well below full so its own text stays
         /// legible and it does not compete with the agent's reply for attention.
-        static var bubbleFill: NSColor { AppThemePalette.color(.accentMuted) }
+        public static var bubbleFill: NSColor { AppThemePalette.color(.accentMuted) }
 
         /// Vertical gap between one turn and the next. The divider now carries the boundary, so
         /// this only needs to be one large step rather than a second oversized separator.
-        static let turnSpacing: CGFloat = Design.Spacing.large
+        public static let turnSpacing: CGFloat = Design.Spacing.large
 
         /// The fixed-width column a tool row's glyph sits in, so rows align down the edge.
-        static let toolIconWidth: CGFloat = 16
+        public static let toolIconWidth: CGFloat = 16
 
         /// A tool row at rest: **nothing**.
         ///
@@ -1820,19 +1820,19 @@ enum Design {
         /// scaffolding, burying the sentences between them. They are the record of what was
         /// done, not what was said. This is the design system's own "quiet until relevant" rule
         /// applied to the row that needed it most.
-        static var toolRowResting: NSColor { .clear }
+        public static var toolRowResting: NSColor { .clear }
 
         /// Under the pointer, or opened: now it is the thing being looked at.
-        static var toolRowActive: NSColor { AppThemePalette.color(.controlResting) }
+        public static var toolRowActive: NSColor { AppThemePalette.color(.controlResting) }
 
         /// The rule above a user's turn.
         ///
         /// Spacing alone still left the eye hunting, because the rows above and below it are
         /// themselves separated by space. A line is unambiguous, and at this weight it reads as
         /// a fold in the page rather than as a border drawn around something.
-        static var turnDivider: NSColor { AppThemePalette.color(.divider) }
+        public static var turnDivider: NSColor { AppThemePalette.color(.divider) }
 
-        static let turnDividerHeight: CGFloat = 1
+        public static let turnDividerHeight: CGFloat = 1
     }
 
     // MARK: - Syntax
@@ -1847,23 +1847,23 @@ enum Design {
     /// throughout this app, and a red string literal inside a green added line says two
     /// contradictory things at once. Comments take no hue at all — a dimmed label is the
     /// design system's "quiet until relevant" applied to the code that was already annotation.
-    enum Syntax {
-        static var keyword: NSColor { AppThemePalette.color(.syntaxKeyword) }
-        static var type: NSColor { AppThemePalette.color(.syntaxType) }
-        static var string: NSColor { AppThemePalette.color(.syntaxString) }
-        static var number: NSColor { AppThemePalette.color(.syntaxNumber) }
-        static var comment: NSColor { AppThemePalette.color(.syntaxComment) }
+    public enum Syntax {
+        public static var keyword: NSColor { AppThemePalette.color(.syntaxKeyword) }
+        public static var type: NSColor { AppThemePalette.color(.syntaxType) }
+        public static var string: NSColor { AppThemePalette.color(.syntaxString) }
+        public static var number: NSColor { AppThemePalette.color(.syntaxNumber) }
+        public static var comment: NSColor { AppThemePalette.color(.syntaxComment) }
     }
 
     // MARK: - Motion
 
     @MainActor
-    enum Motion {
+    public enum Motion {
         /// A deterministic seam for behavior and render tests. Production always follows the
         /// user's macOS accessibility preference.
-        static var reduceMotionOverrideForTesting: Bool?
+        public static var reduceMotionOverrideForTesting: Bool?
 
-        static var reducesMotion: Bool {
+        public static var reducesMotion: Bool {
             reduceMotionOverrideForTesting
                 ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         }
@@ -1873,21 +1873,21 @@ enum Design {
         /// Callers keep one path and one final state. Under Reduce Motion the transition is
         /// immediate rather than requiring every feature to remember a separate accessibility
         /// branch.
-        static var quick: TimeInterval { reducesMotion ? 0 : 0.15 }
-        static var standard: TimeInterval { reducesMotion ? 0 : 0.2 }
+        public static var quick: TimeInterval { reducesMotion ? 0 : 0.15 }
+        public static var standard: TimeInterval { reducesMotion ? 0 : 0.2 }
 
         /// No motion at all — a state applied rather than transitioned. For routes that
         /// resolve "should this move?" themselves (an off-screen window, a caller that said
         /// not to) and still run their animation group so `animator()` proxies apply the
         /// change immediately instead of reaching for AppKit's default quarter second.
-        static let immediate: TimeInterval = 0
+        public static let immediate: TimeInterval = 0
 
         /// A surface materialising over content — the dropdown unfolding from its chip.
-        static var appear: TimeInterval { reducesMotion ? 0 : 0.16 }
+        public static var appear: TimeInterval { reducesMotion ? 0 : 0.16 }
 
         /// The same surface leaving. Quicker than `appear`: arriving is information the eye
         /// follows, leaving is a decision already made.
-        static var vanish: TimeInterval { reducesMotion ? 0 : 0.12 }
+        public static var vanish: TimeInterval { reducesMotion ? 0 : 0.12 }
 
         /// A card travelling into or out of a pane's corner — the toast rising over the
         /// pane's lower edge, the deck behind it stepping forward when the front card goes.
@@ -1897,7 +1897,7 @@ enum Design {
         /// rather than an arrival. Well short of `handoff`, which carries an object across
         /// a whole pane and must stay readable as the same object for the length of it; a
         /// card entering at a corner only has to read as *coming from somewhere*.
-        static var travel: TimeInterval { reducesMotion ? 0 : 0.3 }
+        public static var travel: TimeInterval { reducesMotion ? 0 : 0.3 }
 
         /// A floating target rising into its place over the surface it steers — the
         /// scroll-to-end arrow arriving once the reader has left the live end.
@@ -1906,11 +1906,11 @@ enum Design {
         /// A dropdown materialises where it already is, and at `appear`'s length this arrival
         /// reads as a pop; a toast carries a whole card up over the pane's edge and needs
         /// `travel`'s length to stay readable, which on a single 40pt button reads as slow.
-        static var floatingTargetArrive: TimeInterval { reducesMotion ? 0 : 0.22 }
+        public static var floatingTargetArrive: TimeInterval { reducesMotion ? 0 : 0.22 }
 
         /// One beat of a menu's confirmation blink — the chosen row flickering once before
         /// the panel fades, the acknowledgement every platform menu gives.
-        static var confirmBeat: TimeInterval { reducesMotion ? 0 : 0.05 }
+        public static var confirmBeat: TimeInterval { reducesMotion ? 0 : 0.05 }
 
         /// Where a loading ghost's breath bottoms out, and one half of its cycle.
         ///
@@ -1924,8 +1924,8 @@ enum Design {
         /// Not collapsed to zero here, unlike the transitions above: the callers install the
         /// animation only when `reducesMotion` is false and remove it outright otherwise, since
         /// what the preference asks for is no perpetual movement rather than a fast one.
-        static let skeletonPulseFloor: Float = 0.55
-        static let skeletonPulsePeriod: CFTimeInterval = 0.9
+        public static let skeletonPulseFloor: Float = 0.55
+        public static let skeletonPulsePeriod: CFTimeInterval = 0.9
 
         /// One surface handing an element over to the next — the composer's box travelling to
         /// where the conversation replies from.
@@ -1935,7 +1935,7 @@ enum Design {
         /// pane and has to stay readable as *the same box* for the length of the trip. Below
         /// about a third of a second the move reads as a jump cut, which is the swap it
         /// replaced; much beyond it the pane feels held while nothing is being decided.
-        static var handoff: TimeInterval { reducesMotion ? 0 : 0.35 }
+        public static var handoff: TimeInterval { reducesMotion ? 0 : 0.35 }
 
         /// How long a scrollbar that fades itself stays up after the scrolling that revealed
         /// it — macOS's own beat, long enough to reach the thumb that just appeared.
@@ -1943,14 +1943,14 @@ enum Design {
         /// Not collapsed under Reduce Motion, unlike the fade either side of it: a hold is not
         /// movement, and a scrollbar that vanishes the instant a gesture ends is harder to
         /// use, not calmer.
-        static let scrollerHold: TimeInterval = 1.1
+        public static let scrollerHold: TimeInterval = 1.1
 
         /// How long the reveal wash stands on the row a settings search jumped to, between its
         /// fade in and fade out — long enough to move the eye from the sidebar to the row it
         /// marks, short enough that the page is back to normal before the next thing is read.
         /// A hold rather than a transition, so like `scrollerHold` it survives Reduce Motion;
         /// the fades either side of it collapse there on their own.
-        static let revealHold: TimeInterval = 1.4
+        public static let revealHold: TimeInterval = 1.4
 
         /// The pause a repeating demonstration holds a finished state before starting the next
         /// — long enough to read the name that just arrived, short enough that a hovered row
@@ -1960,7 +1960,7 @@ enum Design {
         /// as a cadence: a demonstration whose animation has already been collapsed is not a
         /// faster demonstration, it is a flicker, and the honest reduced form is to hold the
         /// name still.
-        static var demonstrationHold: TimeInterval { reducesMotion ? 0 : 0.9 }
+        public static var demonstrationHold: TimeInterval { reducesMotion ? 0 : 0.9 }
 
         // MARK: Curves
 
@@ -1970,7 +1970,7 @@ enum Design {
         /// ease-out over that distance reads as floated, and linear as conveyor-belted.
         /// Curves carry no theme or accessibility state — they are the shape of a movement,
         /// not a reading of one — so they stay off the main actor and any caller may name them.
-        nonisolated static var glide: CAMediaTimingFunction {
+        public nonisolated static var glide: CAMediaTimingFunction {
             CAMediaTimingFunction(controlPoints: 0.19, 1, 0.22, 1)
         }
 
@@ -1984,7 +1984,7 @@ enum Design {
         /// trip across the whole duration, roughly a fifth of it per frame, which is the
         /// movement being asked for. Distance decides between the two: what has a card's height
         /// to cover can afford to spend it early, what has 20pt cannot.
-        nonisolated static var lift: CAMediaTimingFunction {
+        public nonisolated static var lift: CAMediaTimingFunction {
             CAMediaTimingFunction(controlPoints: 0, 0, 0.58, 1)
         }
 
@@ -2002,15 +2002,15 @@ enum Design {
         /// interpolates, so a 4.5% overshoot authored that way reaches the screen as a 0.0%
         /// overshoot. Sampled off the presentation layer, the card stopped dead on its slot every
         /// time. A spring is the only route to the movement, so a spring is what this is.
-        nonisolated struct Spring {
-            let mass: CGFloat
-            let stiffness: CGFloat
-            let damping: CGFloat
+        public nonisolated struct Spring {
+            public let mass: CGFloat
+            public let stiffness: CGFloat
+            public let damping: CGFloat
 
             /// How far past its destination the movement goes, as a fraction of the trip — the
             /// standard second-order result, `exp(-πζ/√(1-ζ²))`, so a caller can state the
             /// overshoot it wants in a comment and have the number check it.
-            var overshoot: CGFloat {
+            public var overshoot: CGFloat {
                 let ratio = damping / (2 * (stiffness * mass).squareRoot())
                 guard ratio < 1 else { return 0 }
                 return exp(-.pi * ratio / (1 - ratio * ratio).squareRoot())
@@ -2027,7 +2027,7 @@ enum Design {
             /// On the main actor alone, unlike the curves beside it: the Reduce Motion reading it
             /// takes belongs to the running app, where a curve is only a shape.
             @MainActor
-            func animation(keyPath: String, from: CGPoint, to: CGPoint) -> CASpringAnimation {
+            public func animation(keyPath: String, from: CGPoint, to: CGPoint) -> CASpringAnimation {
                 let animation = CASpringAnimation(keyPath: keyPath)
                 animation.mass = mass
                 animation.stiffness = stiffness
@@ -2054,12 +2054,12 @@ enum Design {
         /// The deck shipped on `glide` first and read as a snap, for `lift`'s measured reason:
         /// at a step's distance `glide` is 84% finished within three frames, so the movement paid
         /// for is never seen.
-        nonisolated static let settle = Spring(mass: 1, stiffness: 320, damping: 25)
+        public nonisolated static let settle = Spring(mass: 1, stiffness: 320, damping: 25)
 
         /// The curve the same thing leaves on: acceleration, because something let go of falls
         /// rather than lowering itself out. The mirror of the two above — what arrives
         /// decelerates into the hand, what leaves accelerates out of it.
-        nonisolated static var drop: CAMediaTimingFunction {
+        public nonisolated static var drop: CAMediaTimingFunction {
             CAMediaTimingFunction(controlPoints: 0.55, 0, 1, 0.45)
         }
 
@@ -2072,7 +2072,7 @@ enum Design {
         /// play on a sidebar row while an agent works, where the morph acknowledges a rename
         /// rather than being the thing you came to look at, and every other transition in the
         /// app lands in 0.15–0.2s. At the preset's full length a rename read as a wait.
-        static let nameMorphTempo: Double = 0.65
+        public static let nameMorphTempo: Double = 0.65
 
         /// The whole cascade a name transition is allowed, however long the name.
         ///
@@ -2081,7 +2081,7 @@ enum Design {
         /// merely longer — and sidebar names are sentences. Budgeting the cascade rather than
         /// the step holds a transition near half a second at any length, and leaves the step as
         /// the preset asked for it whenever the name is short enough to fit inside the budget.
-        static let nameMorphCascade: TimeInterval = 0.3
+        public static let nameMorphCascade: TimeInterval = 0.3
 
         // MARK: Brand mark
 
@@ -2089,40 +2089,40 @@ enum Design {
         /// the six strands follow, the core lands last. One-shot — a launch flourish is not a
         /// perpetual animation — and all four collapse to the finished mark under Reduce
         /// Motion, so the reduced launch is simply the logo being there.
-        static var brandOutlineDraw: TimeInterval { reducesMotion ? 0 : 0.5 }
-        static var brandStrandDraw: TimeInterval { reducesMotion ? 0 : 0.38 }
+        public static var brandOutlineDraw: TimeInterval { reducesMotion ? 0 : 0.5 }
+        public static var brandStrandDraw: TimeInterval { reducesMotion ? 0 : 0.38 }
         /// The beat between one strand starting and the next; six strands land inside the
         /// outline's own draw.
-        static var brandStrandStagger: TimeInterval { reducesMotion ? 0 : 0.06 }
-        static var brandCorePop: TimeInterval { reducesMotion ? 0 : 0.18 }
+        public static var brandStrandStagger: TimeInterval { reducesMotion ? 0 : 0.06 }
+        public static var brandCorePop: TimeInterval { reducesMotion ? 0 : 0.18 }
 
         /// Hover turns the mark from continuous ink into particles travelling on the same
         /// canonical paths. These are cadences rather than transition durations: they repeat
         /// only while the pointer is over the brand row, and no animation is constructed at
         /// rest or under Reduce Motion.
-        static var brandParticleWeaveCycle: TimeInterval { reducesMotion ? 0 : 1.45 }
-        static var brandParticleBreathCycle: TimeInterval { reducesMotion ? 0 : 1.8 }
+        public static var brandParticleWeaveCycle: TimeInterval { reducesMotion ? 0 : 1.45 }
+        public static var brandParticleBreathCycle: TimeInterval { reducesMotion ? 0 : 1.8 }
         /// Weave answers an ordinary pass immediately. A tumble is earned by a deliberate
         /// dwell, late enough that crossing the sidebar never turns the brand into ambient
         /// motion, but soon enough to reward someone inspecting the implied box.
-        static var brandParticleHoverHold: TimeInterval { reducesMotion ? 0 : 0.9 }
+        public static var brandParticleHoverHold: TimeInterval { reducesMotion ? 0 : 0.9 }
         /// Once that dwell is earned, the complete particle box follows a long, irregular closed
         /// tumble. It is distinct from Orbit's planar strand-step: the dots keep weaving locally
         /// while their shared parent changes direction across all three axes in depth.
-        static var brandParticleBoxTumbleCycle: TimeInterval { reducesMotion ? 0 : 7.6 }
+        public static var brandParticleBoxTumbleCycle: TimeInterval { reducesMotion ? 0 : 7.6 }
         /// Exactly one strand-step per cycle keeps the rotating particle mark seamless: its
         /// six-fold silhouette at the end is the silhouette it had at the beginning.
-        static var brandParticleOrbitCycle: TimeInterval { reducesMotion ? 0 : 2.4 }
+        public static var brandParticleOrbitCycle: TimeInterval { reducesMotion ? 0 : 2.4 }
         /// The outer dots answer a press first; this is the whole outer-to-core cascade.
-        static var brandParticlePressCascade: TimeInterval { reducesMotion ? 0 : 0.1 }
+        public static var brandParticlePressCascade: TimeInterval { reducesMotion ? 0 : 0.1 }
         /// The player workload analyzer advances in deliberately stepped display frames. It is
         /// zero under Reduce Motion, which removes the driver instead of drawing identical frames.
-        static var workloadAnalyzerFrameInterval: TimeInterval { reducesMotion ? 0 : 0.1 }
+        public static var workloadAnalyzerFrameInterval: TimeInterval { reducesMotion ? 0 : 0.1 }
     }
 
     // MARK: - Opacity
 
-    enum Opacity {
+    public enum Opacity {
         /// The emphasis retained by a control that cannot currently be operated.
         ///
         /// This is deliberately one recipe for the whole control, not a dim title beside a
@@ -2130,19 +2130,19 @@ enum Design {
         /// which is how disabled switches, checked boxes and submit buttons drifted apart.
         /// Components with historically authored disabled gadgets may keep those explicit
         /// materials; modern drawn controls multiply every surface and mark by this amount.
-        static let disabledControl: CGFloat = 0.42
+        public static let disabledControl: CGFloat = 0.42
 
         /// A dragged tab while the pointer is over another pane that will take it: still
         /// visible where it came from, clearly on its way out.
-        static let dragAway: CGFloat = 0.5
+        public static let dragAway: CGFloat = 0.5
 
         /// How much accent sits behind a matched run. Measured against the panel a settings
         /// result and an import row both stand on: below this the find is easy to read past,
         /// and above it a row of matches reads as a row of filled controls.
-        static let searchMatchGround: CGFloat = 0.28
+        public static let searchMatchGround: CGFloat = 0.28
 
         /// The same ground under Increase Contrast, where a faint tint is the first thing to go.
-        static let searchMatchGroundIncreasedContrast: CGFloat = 0.5
+        public static let searchMatchGroundIncreasedContrast: CGFloat = 0.5
 
         /// How much accent covers the page component an annotation is about to land on.
         ///
@@ -2150,29 +2150,29 @@ enum Design {
         /// than a run of text and it lies over a page the app did not draw: the point is to say
         /// *which* element is under the pointer while leaving it legible enough to aim at. The
         /// outline carries the weight; the wash only says where the outline's edges belong.
-        static let annotationTargetGround: CGFloat = 0.16
+        public static let annotationTargetGround: CGFloat = 0.16
 
         /// The same wash under Increase Contrast, where the outline alone would be doing all
         /// the work over an arbitrary page.
-        static let annotationTargetGroundIncreasedContrast: CGFloat = 0.34
+        public static let annotationTargetGroundIncreasedContrast: CGFloat = 0.34
 
         /// How much of the theme's hover colour lies over a picture the pointer is on.
         ///
         /// Near the annotation ground, and for the same reason: this covers content the app did
         /// not draw and whose whole purpose is to be looked at. The pointer cursor and the accent
         /// outline say the picture is a control; the wash only warms what they surround.
-        static let imageHoverWash: CGFloat = 0.16
+        public static let imageHoverWash: CGFloat = 0.16
 
         /// The same wash under Increase Contrast, where a faint tint is the first thing to go.
-        static let imageHoverWashIncreasedContrast: CGFloat = 0.34
+        public static let imageHoverWashIncreasedContrast: CGFloat = 0.34
 
         /// A diff line is still source content while it is actionable. This is strong enough
         /// to read as a row rather than the old one-pixel rule, without flattening its change
         /// wash or syntax colours.
-        static let diffLineHoverWash: CGFloat = 0.18
+        public static let diffLineHoverWash: CGFloat = 0.18
 
         /// The same row cue under Increase Contrast.
-        static let diffLineHoverWashIncreasedContrast: CGFloat = 0.36
+        public static let diffLineHoverWashIncreasedContrast: CGFloat = 0.36
 
         /// How much of its diff hue a loading skeleton's bar keeps.
         ///
@@ -2181,7 +2181,7 @@ enum Design {
         /// pulse over it then reads as failure rather than loading.
         /// Quieter than the diff wash it stands in for: at 0.45 the ghost was louder than the
         /// content that replaced it, so the pane got dimmer as it loaded.
-        static let skeletonDiffTint: CGFloat = 0.3
+        public static let skeletonDiffTint: CGFloat = 0.3
 
         /// How much ink a chart's loading ghost keeps, and how much the band behind it keeps.
         ///
@@ -2191,8 +2191,8 @@ enum Design {
         /// looked like it had loaded and then said it was still loading. A run of ink is a much
         /// larger claim than a bar. The rear band is held further back again so the two read as
         /// depth rather than as two series with a legend missing.
-        static let skeletonChartBand: CGFloat = 0.12
-        static let skeletonChartBandBehind: CGFloat = 0.07
+        public static let skeletonChartBand: CGFloat = 0.12
+        public static let skeletonChartBandBehind: CGFloat = 0.07
 
         /// How much of the window a covering surface takes away behind it.
         ///
@@ -2201,11 +2201,11 @@ enum Design {
         /// not cover. Below this the band and the inspector's own header still read as two rows
         /// of one window's chrome, which is the bug the scrim exists for; far above it the strip
         /// goes to a black bar and the window reads as broken rather than as busy behind a modal.
-        static let overlayScrim: CGFloat = 0.4
+        public static let overlayScrim: CGFloat = 0.4
 
         /// The same wash under Increase Contrast, where the separation it draws is exactly what
         /// was asked for.
-        static let overlayScrimIncreasedContrast: CGFloat = 0.6
+        public static let overlayScrimIncreasedContrast: CGFloat = 0.6
     }
 
     // MARK: - Accessibility
@@ -2216,28 +2216,28 @@ enum Design {
     /// chrome, so these preferences are design inputs just like the active theme. Test
     /// overrides keep the behavior deterministic without changing the user's Mac settings.
     @MainActor
-    enum Accessibility {
-        static var increaseContrastOverrideForTesting: Bool?
-        static var differentiateWithoutColorOverrideForTesting: Bool?
+    public enum Accessibility {
+        public static var increaseContrastOverrideForTesting: Bool?
+        public static var differentiateWithoutColorOverrideForTesting: Bool?
 
-        static var increasesContrast: Bool {
+        public static var increasesContrast: Bool {
             increaseContrastOverrideForTesting
                 ?? NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast
         }
 
-        static var differentiatesWithoutColor: Bool {
+        public static var differentiatesWithoutColor: Bool {
             differentiateWithoutColorOverrideForTesting
                 ?? NSWorkspace.shared.accessibilityDisplayShouldDifferentiateWithoutColor
         }
 
         /// Focus is an interaction state, not decoration. Increase Contrast makes its outline
         /// heavier even when a theme deliberately keeps ordinary borders fine.
-        static var focusRingWidth: CGFloat { increasesContrast ? 3 : 2 }
+        public static var focusRingWidth: CGFloat { increasesContrast ? 3 : 2 }
 
         /// Resolves an app-theme role at draw time and optionally strengthens translucent
         /// affordances under Increase Contrast. Opaque authored colours keep their hue; only a
         /// faint role's alpha is raised.
-        static func color(
+        public static func color(
             _ role: AppThemeRole,
             increasedContrastRole: AppThemeRole? = nil,
             increasedContrastAlphaFloor: CGFloat? = nil
@@ -2268,7 +2268,7 @@ extension NSTextField {
     /// afterwards changes what is drawn without changing what was measured, so the label lays
     /// out four points wide and draws nothing at all. Every review-pane counter did exactly
     /// that until this existed.
-    static func label(attributed text: NSAttributedString) -> NSTextField {
+    public static func label(attributed text: NSAttributedString) -> NSTextField {
         let label = NSTextField(labelWithString: text.string)
         // The field draws its single line on the *field's* baseline, not the string's. Left on
         // the 13pt default a field of 11pt runs put its glyphs a little over two points below
@@ -2292,7 +2292,7 @@ extension NSAttributedString {
     /// The font that needs the most room, which is the one a single line has to be laid out for:
     /// a mixed string — a heading followed by its count, code inside prose — is only fully
     /// visible if the line box fits its tallest run.
-    var tallestFont: NSFont? {
+    public var tallestFont: NSFont? {
         var tallest: NSFont?
         enumerateAttribute(.font, in: NSRange(location: 0, length: length)) { value, _, _ in
             guard let font = value as? NSFont else { return }
@@ -2314,13 +2314,13 @@ extension NSAttributedString {
 /// comparing numbers loses information. Keeping the role lets a later theme resolve each one
 /// independently.
 @MainActor
-enum SurfaceRadius {
+public enum SurfaceRadius {
     case panel
     case control
     case pill(height: CGFloat)
     case fixed(CGFloat)
 
-    var current: CGFloat {
+    public var current: CGFloat {
         switch self {
         case .panel: return Design.Radius.panel
         case .control: return Design.Radius.control
@@ -2331,7 +2331,7 @@ enum SurfaceRadius {
 
     /// The default edge weight follows the surface's semantic scale, not its numeric radius.
     /// A zero-radius Bauhaus panel is still structural; a fixed-radius swatch is still a control.
-    var defaultBorderWidth: CGFloat {
+    public var defaultBorderWidth: CGFloat {
         if case .panel = self { return Design.Radius.border }
         return Design.Radius.controlBorder
     }
@@ -2344,7 +2344,7 @@ enum SurfaceRadius {
 /// Keeping that distinction in the surface API also keeps feature code from spelling Core
 /// Animation's coordinate-dependent corner masks itself.
 @MainActor
-enum SurfaceCorners {
+public enum SurfaceCorners {
     case all
     case top
     case bottom
@@ -2374,7 +2374,7 @@ enum SurfaceCorners {
 /// square; a rectilinear edge treatment has no honest answer for a rounded offset curve, so a
 /// disc or pill under a bevel material simply keeps its flat border.
 @MainActor
-enum SurfaceBevel: Equatable {
+public enum SurfaceBevel: Equatable {
     /// What nearly every call site means without saying so: raised under a bevel material,
     /// exactly today's flat surface otherwise.
     case automatic
@@ -2391,7 +2391,7 @@ enum SurfaceBevel: Equatable {
 /// compact find bar. Only the former is the page-like field measured in the reference styles;
 /// inferring from colour or radius would eventually wallpaper a nested control.
 @MainActor
-enum SurfacePattern: Equatable {
+public enum SurfacePattern: Equatable {
     case none
     case backdrop
 }
@@ -2746,7 +2746,7 @@ extension NSView {
     /// `glow: true` marks a surface as a *panel* — the theme's halo, if it has one, is drawn
     /// behind it. Off by default, because a glow on twenty colour swatches is a mistake and on
     /// a settings card is the point.
-    func applySurface(
+    public func applySurface(
         fill: NSColor,
         radius: SurfaceRadius,
         border: NSColor? = nil,
@@ -2974,7 +2974,7 @@ extension NSView {
     /// Gives a drawn control the tighter shadow its material states. Drawn controls cannot use
     /// `applySurface` without freezing their live state, so they call this from `draw(_:)`; the
     /// explicit path keeps the title and glyph from becoming shadow casters themselves.
-    func applyThemeControlGlow(_ wantsGlow: Bool, radius: CGFloat) {
+    public func applyThemeControlGlow(_ wantsGlow: Bool, radius: CGFloat) {
         applyThemeControlGlow(
             wantsGlow ? AppThemePalette.current.material.controlGlow : nil,
             radius: radius
@@ -2984,7 +2984,7 @@ extension NSView {
     /// Applies an explicit authored shadow while retaining the compact-control layer names.
     /// Buttons use this to select between CTA depth and neutral panel relief without changing
     /// the shadow renderer or making the face's title and glyph into casters.
-    func applyThemeControlGlow(_ glow: AppTheme.Glow?, radius: CGFloat) {
+    public func applyThemeControlGlow(_ glow: AppTheme.Glow?, radius: CGFloat) {
         applyThemeShadow(
             glow,
             radius: radius,
@@ -3211,32 +3211,32 @@ private final class ThemeHardBevelLayer: CALayer {
 /// distinct values: sheen and highlight on the lit side, frame-dark and shadow on the shaded
 /// one, inverted exactly for sunken.
 @MainActor
-enum BevelArtwork {
+public enum BevelArtwork {
 
     /// Rendered at retina scale whatever the display: a bevel is a hard-edged figure, and one
     /// backing scale keeps its rings identical across screens.
-    static let scale: CGFloat = 2
+    public static let scale: CGFloat = 2
 
     /// The stretchable middle's size in points — the smallest square `contentsCenter` can
     /// scale from without sampling the ring.
-    static let stretchableCore: CGFloat = 2
+    public static let stretchableCore: CGFloat = 2
 
     /// The four edge colours, derived from the theme's two roles: the sheen is the highlight
     /// pulled slightly toward the surface, the frame is the shadow pulled nearly to black —
     /// the classic `3DLIGHT`/`WINDOWFRAME` pair, stated as derivations so a theme authors
     /// two colours and gets four.
-    struct EdgeColors {
-        let topLeftOuter: NSColor
-        let topLeftInner: NSColor
-        let bottomRightOuter: NSColor
-        let bottomRightInner: NSColor
+    public struct EdgeColors {
+        public let topLeftOuter: NSColor
+        public let topLeftInner: NSColor
+        public let bottomRightOuter: NSColor
+        public let bottomRightInner: NSColor
     }
 
     /// `soft` is the panel variant: one point of highlight against one point of plain
     /// shadow, no near-black frame line. The period reserves the heavy two-ring build for
     /// *controls*; a large surface wearing it draws its edges as long dark bars across the
     /// window — which is exactly how it read here before the distinction existed.
-    static func edgeColors(
+    public static func edgeColors(
         highlight: NSColor,
         shadow: NSColor,
         sunken: Bool,
@@ -3268,16 +3268,16 @@ enum BevelArtwork {
 
     /// A panel's edge width is the soft build's own: one point, whatever the material says
     /// buttons wear.
-    static let softEdgeWidth: CGFloat = 1
+    public static let softEdgeWidth: CGFloat = 1
 
     /// How a total edge width splits into the two rings: the outer takes the first point,
     /// the inner whatever remains (a one-point bevel is outer ring only).
-    static func ringWidths(for edgeWidth: CGFloat) -> (outer: CGFloat, inner: CGFloat) {
+    public static func ringWidths(for edgeWidth: CGFloat) -> (outer: CGFloat, inner: CGFloat) {
         let outer = max(1, (edgeWidth / 2).rounded(.down))
         return (outer, max(0, edgeWidth - outer))
     }
 
-    static func ninePatch(
+    public static func ninePatch(
         edgeWidth: CGFloat,
         highlight: NSColor,
         shadow: NSColor,
@@ -3334,9 +3334,9 @@ enum BevelArtwork {
 /// as a lavender outline, especially around a large corner. The middle stays transparent so
 /// layer-backed panels and live-drawn controls keep their own fill and content untouched.
 @MainActor
-enum SoftBevelArtwork {
+public enum SoftBevelArtwork {
 
-    static let scale: CGFloat = 2
+    public static let scale: CGFloat = 2
     private static let stretchableCore: CGFloat = 2
 
     private static func metrics(edgeWidth: CGFloat, broad: Bool) -> (travel: CGFloat, blur: CGFloat) {
@@ -3359,7 +3359,7 @@ enum SoftBevelArtwork {
         return (fixed, fixed * 2 + stretchableCore)
     }
 
-    static func contentsCenter(radius: CGFloat, edgeWidth: CGFloat, broad: Bool) -> CGRect {
+    public static func contentsCenter(radius: CGFloat, edgeWidth: CGFloat, broad: Bool) -> CGRect {
         let geometry = geometry(radius: radius, edgeWidth: edgeWidth, broad: broad)
         return CGRect(
             x: geometry.fixed / geometry.side,
@@ -3369,7 +3369,7 @@ enum SoftBevelArtwork {
         )
     }
 
-    static func ninePatch(
+    public static func ninePatch(
         radius: CGFloat,
         edgeWidth: CGFloat,
         highlight: NSColor,
@@ -3408,7 +3408,7 @@ enum SoftBevelArtwork {
         return context.makeImage()
     }
 
-    static func draw(
+    public static func draw(
         shape: ThemedSurface.Shape,
         edgeWidth: CGFloat,
         highlight: NSColor,

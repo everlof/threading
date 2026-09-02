@@ -8,7 +8,7 @@ import AppKit
 /// pairing rather than an ANSI approximation generated after the fact.
 extension AppThemeStyles {
 
-    static let bauhaus = AppTheme(
+    public static let bauhaus = AppTheme(
         id: AppThemeID("bauhaus"),
         name: "Bauhaus",
         mode: .light,
@@ -82,7 +82,7 @@ extension AppThemeStyles {
         )
     )
 
-    static let artDeco = AppTheme(
+    public static let artDeco = AppTheme(
         id: AppThemeID("art-deco"),
         name: "Art Deco",
         mode: .dark,
@@ -149,7 +149,7 @@ extension AppThemeStyles {
         )
     )
 
-    static let neoBrutalism = AppTheme(
+    public static let neoBrutalism = AppTheme(
         id: AppThemeID("neo-brutalism"),
         name: "Neo Brutalism",
         mode: .light,
@@ -226,7 +226,7 @@ extension AppThemeStyles {
         )
     )
 
-    static let claymorphism = AppTheme(
+    public static let claymorphism = AppTheme(
         id: AppThemeID("claymorphism"),
         name: "Claymorphism",
         mode: .light,
@@ -334,7 +334,7 @@ extension AppThemeStyles {
         )
     )
 
-    static let vaporwave = AppTheme(
+    public static let vaporwave = AppTheme(
         id: AppThemeID("vaporwave"),
         name: "Vaporwave",
         mode: .dark,
@@ -406,7 +406,7 @@ extension AppThemeStyles {
         )
     )
 
-    static let newsprint = AppTheme(
+    public static let newsprint = AppTheme(
         id: AppThemeID("newsprint"),
         name: "Newsprint",
         mode: .light,
@@ -467,7 +467,7 @@ extension AppThemeStyles {
         )
     )
 
-    static let botanical = AppTheme(
+    public static let botanical = AppTheme(
         id: AppThemeID("botanical"),
         name: "Botanical",
         mode: .light,
@@ -537,7 +537,7 @@ extension AppThemeStyles {
     /// Fashion-editorial colour blocking translated into a low-light work surface: warm ink,
     /// cognac, powder blue, deep teal, and cream. The source is a colour relationship rather
     /// than an image asset, so the theme remains original and works across every app surface.
-    static let editorial = AppTheme(
+    public static let editorial = AppTheme(
         id: AppThemeID("editorial"),
         name: "Editorial",
         mode: .dark,
@@ -591,7 +591,7 @@ extension AppThemeStyles {
         )
     )
 
-    static let industrial = AppTheme(
+    public static let industrial = AppTheme(
         id: AppThemeID("industrial"),
         name: "Industrial",
         mode: .light,
@@ -686,7 +686,7 @@ extension AppThemeStyles {
 
     /// Shared with the seasonal style in `AppThemeStyles+Christmas.swift`, which is why this is
     /// internal rather than private to this file.
-    static func terminal(
+    public static func terminal(
         id: String,
         name: String,
         foreground: String,

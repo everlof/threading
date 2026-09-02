@@ -5,4 +5,4 @@ import ThreadingDomain
 /// The application declares these beside its own models; the kit takes them from the package that
 /// already owns the rule. A module-scope alias is what lets a symlinked file keep saying
 /// `StoredPathComponent` without an import line the application does not need.
-typealias StoredPathComponent = ThreadingDomain.StoredPathComponent
+public typealias StoredPathComponent = ThreadingDomain.StoredPathComponent

@@ -1645,7 +1645,7 @@ enum LegacyAppPreferenceDefaults {
 /// Font roles keep their hierarchy at every step, layout can be exercised at a bounded largest
 /// size, and the user can still move from compact to accessibility-sized chrome without
 /// knowing what point size each role started at.
-enum AppTextSize: String, CaseIterable {
+public enum AppTextSize: String, CaseIterable {
     case compact
     case standard
     case large
@@ -1815,7 +1815,7 @@ enum ClaudeRemoteControl: String, CaseIterable {
 /// copying — Shift-Return is a newline whatever the setting says.
 ///
 /// Raw values are stored in defaults, so a case rename is a silent reset to `matchesComposer`.
-enum PromptReturnKey: String, CaseIterable {
+public enum PromptReturnKey: String, CaseIterable {
 
     /// Each composer keeps the meaning that suits what it holds. The default.
     case matchesComposer

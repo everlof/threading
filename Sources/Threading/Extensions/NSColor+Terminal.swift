@@ -7,7 +7,7 @@ extension NSColor {
     /// Terminal palettes are opaque, but app themes deliberately use translucent semantic
     /// roles. Accepting and preserving the alpha byte keeps a custom app theme identical after
     /// it has crossed its JSON persistence boundary.
-    convenience init?(hex: String) {
+    public convenience init?(hex: String) {
         var hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
         hexSanitized = hexSanitized.replacingOccurrences(of: "#", with: "")
 
@@ -37,7 +37,7 @@ extension NSColor {
     /// than it is and its bold ink not-quite-white, in the theme documents the MCP tools hand
     /// out and in every export. Rounding is the nearest representable channel, which is what a
     /// hex string is claiming to be.
-    var hexString: String {
+    public var hexString: String {
         guard let color = usingColorSpace(.sRGB) else {
             return "#000000"
         }
@@ -62,7 +62,7 @@ extension NSColor {
     ///
     /// Both sides are resolved in sRGB, and a dynamic colour resolves against whatever drawing
     /// appearance is current — so call this where that appearance is in force.
-    func composited(over ground: NSColor) -> NSColor {
+    public func composited(over ground: NSColor) -> NSColor {
         guard let over = usingColorSpace(.sRGB),
               let under = ground.usingColorSpace(.sRGB) else { return self }
 

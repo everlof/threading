@@ -17,32 +17,32 @@ import AppKit
 ///
 /// HSB would have been the reachable answer — `NSColor` hands it over — and it is the wrong one:
 /// its "brightness" is the largest sRGB channel, so pure yellow and pure blue are both 1.0.
-struct Oklab: Equatable {
+public struct Oklab: Equatable {
 
     /// Perceptual lightness, 0 (black) to 1 (white).
-    var lightness: CGFloat
+    public var lightness: CGFloat
 
     /// Green ↔ red.
-    var a: CGFloat
+    public var a: CGFloat
 
     /// Blue ↔ yellow.
-    var b: CGFloat
+    public var b: CGFloat
 
     /// How colourful, as the distance from the neutral axis. Around 0.03 for a wash, 0.2 for a
     /// vivid system colour, past 0.3 only for neon.
-    var chroma: CGFloat { sqrt(a * a + b * b) }
+    public var chroma: CGFloat { sqrt(a * a + b * b) }
 
     /// Which colour, as an angle in radians. Red sits near 0.5 rad, green near 2.5.
-    var hue: CGFloat { atan2(b, a) }
+    public var hue: CGFloat { atan2(b, a) }
 
-    init(lightness: CGFloat, a: CGFloat, b: CGFloat) {
+    public init(lightness: CGFloat, a: CGFloat, b: CGFloat) {
         self.lightness = lightness
         self.a = a
         self.b = b
     }
 
     /// The polar form: a lightness, how colourful, and which colour.
-    init(lightness: CGFloat, chroma: CGFloat, hue: CGFloat) {
+    public init(lightness: CGFloat, chroma: CGFloat, hue: CGFloat) {
         self.init(lightness: lightness, a: chroma * cos(hue), b: chroma * sin(hue))
     }
 }
@@ -52,21 +52,21 @@ struct Oklab: Equatable {
 /// Oklab remains the Cartesian form used by colour math. OKLCH is the authoring form: lightness
 /// and colourfulness can be adjusted independently, and degrees make palette relationships
 /// reviewable without translating a pair of abstract axes or a radian angle by hand.
-struct OKLCH: Equatable {
+public struct OKLCH: Equatable {
 
     /// Perceptual lightness, 0 (black) to 1 (white).
-    var lightness: CGFloat
+    public var lightness: CGFloat
 
     /// Distance from the neutral axis. Zero is grey; values around 0.2 are vivid in sRGB.
-    var chroma: CGFloat
+    public var chroma: CGFloat
 
     /// Hue angle in degrees. Values outside 0..<360 are accepted and normalised when measured.
-    var hueDegrees: CGFloat
+    public var hueDegrees: CGFloat
 
     /// Opacity, kept separate from the perceptual coordinates.
-    var alpha: CGFloat
+    public var alpha: CGFloat
 
-    init(
+    public init(
         lightness: CGFloat,
         chroma: CGFloat,
         hueDegrees: CGFloat,
@@ -99,7 +99,7 @@ extension NSColor {
     /// Resolves through sRGB, so a **dynamic** colour answers for whatever drawing appearance is
     /// current — measure inside `performAsCurrentDrawingAppearance` where the answer must match
     /// what a particular view draws, exactly as `applySurface` freezes its `CGColor` there.
-    var oklab: Oklab {
+    public var oklab: Oklab {
         guard let srgb = usingColorSpace(.sRGB) else { return Oklab(lightness: 0, a: 0, b: 0) }
 
         func linear(_ component: CGFloat) -> CGFloat {
@@ -122,7 +122,7 @@ extension NSColor {
     }
 
     /// This colour measured in the OKLCH coordinates used for palette authoring.
-    var oklch: OKLCH {
+    public var oklch: OKLCH {
         let value = oklab
         let degrees = value.hue * 180 / .pi
         let remainder = degrees.truncatingRemainder(dividingBy: 360)
@@ -143,7 +143,7 @@ extension NSColor {
     /// derivation built on equal lightness steps cannot afford to lose. Holding lightness and
     /// hue and giving up only chroma keeps the wash at the strength it was asked for and merely
     /// makes it less colourful than requested.
-    static func oklab(_ value: Oklab) -> NSColor {
+    public static func oklab(_ value: Oklab) -> NSColor {
         func components(_ value: Oklab) -> (red: CGFloat, green: CGFloat, blue: CGFloat) {
             let long = pow(value.lightness + 0.3963377774 * value.a + 0.2158037573 * value.b, 3)
             let medium = pow(value.lightness - 0.1055613458 * value.a - 0.0638541728 * value.b, 3)
@@ -198,7 +198,7 @@ extension NSColor {
     ///
     /// The Oklab converter owns gamut mapping, so lightness and hue stay fixed while an
     /// out-of-gamut request gives up only as much chroma as the display space requires.
-    static func oklch(_ value: OKLCH) -> NSColor {
+    public static func oklch(_ value: OKLCH) -> NSColor {
         oklab(value.oklab).withAlphaComponent(value.alpha)
     }
 }
@@ -224,7 +224,7 @@ extension NSColor {
     /// for a hair more than the floor: the colour goes through an 8-bit channel and a colour
     /// space on its way to a raster, and either can spend a margin this thin. `GeneratedAppIcon`
     /// states its own — see the note there.
-    func legible(
+    public func legible(
         on ground: NSColor,
         ratio minimum: CGFloat = ThemeContrast.minimumRatio
     ) -> NSColor {
@@ -263,11 +263,11 @@ extension NSColor {
 
 // MARK: - Constants
 
-enum PerceptualColor {
+public enum PerceptualColor {
 
     /// Bisections used to find the largest in-gamut chroma. Twenty-four is far past the point
     /// where the answer moves an 8-bit channel; the loop is cheap and runs on colour changes.
-    static let gamutSearchSteps = 24
+    public static let gamutSearchSteps = 24
 
-    static let legibilitySearchSteps = 18
+    public static let legibilitySearchSteps = 18
 }

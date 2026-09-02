@@ -35,22 +35,22 @@ import AppKit
 /// ground should. Telling all of them would be a second set of inks in every list in the app,
 /// which is exactly the work `ThemedTableRowView`'s own documentation says a themed list does not
 /// have to do. So the row takes the strength that keeps that promise true.
-struct SelectionSurface {
+public struct SelectionSurface {
 
     /// What to paint.
     ///
     /// The theme's `selection` role at whatever strength this surface is entitled to — translucent
     /// as authored, so it composites over whatever it lands on rather than replacing it.
-    let fill: NSColor
+    public let fill: NSColor
 
     /// The opaque colour painting `fill` actually produces.
     ///
     /// What `ink` was measured against, and what anything else drawn inside the selection must
     /// measure against too — a glyph, a badge, a second fill.
-    let ground: NSColor
+    public let ground: NSColor
 
     /// The label tiers that read on `ground`.
-    let ink: Design.Ink
+    public let ink: Design.Ink
 }
 
 // MARK: - Strengths
@@ -64,7 +64,7 @@ extension SelectionSurface {
     /// of selected text, a row that draws its own title. Under Windows 98 this is the authentic
     /// navy with white ink on it; under Christmas it is the pale wash with the ordinary near-black.
     /// Neither is a constant, and neither call site has to know which it got.
-    static func stated(over hostGround: NSColor) -> SelectionSurface {
+    public static func stated(over hostGround: NSColor) -> SelectionSurface {
         let fill = authored
         let ground = fill.composited(over: hostGround)
         return SelectionSurface(fill: fill, ground: ground, ink: Design.Text.on(ground))
@@ -83,7 +83,7 @@ extension SelectionSurface {
     /// that says *this row, not that one*, and the honest way to say less is to say it more
     /// quietly. Moving its lightness instead would keep the strength and lose the hue, which under
     /// Windows 98 turns navy into a pale blue nobody chose.
-    static func quiet(over hostGround: NSColor) -> SelectionSurface {
+    public static func quiet(over hostGround: NSColor) -> SelectionSurface {
         let full = stated(over: hostGround)
         guard !readsLabel(on: full.ground) else { return full }
 
@@ -119,7 +119,7 @@ extension SelectionSurface {
     ///
     /// `hostGround` is a closure for the same reason: the ground under a text view moves when the
     /// theme does, and a ground captured once would pin the ink to the theme the view was built in.
-    static func dynamic(
+    public static func dynamic(
         over hostGround: @escaping @MainActor () -> NSColor
     ) -> SelectionSurface {
         func resolving(
@@ -166,7 +166,7 @@ extension SelectionSurface {
         ThemeContrast.ratio(Design.Text.label, ground) >= Defaults.minimumLabelRatio
     }
 
-    enum Defaults {
+    public enum Defaults {
 
         /// WCAG AA for body text.
         ///
@@ -175,11 +175,11 @@ extension SelectionSurface {
         /// where holding a deliberate aesthetic to body-text contrast would reject Solarized. A
         /// row's title is body text in the app's own chrome, and the app is not entitled to the
         /// latitude it extends to somebody else's palette.
-        static let minimumLabelRatio: CGFloat = 4.5
+        public static let minimumLabelRatio: CGFloat = 4.5
 
         /// How finely the hold-back walks down from the authored strength. Twenty-four steps put
         /// the granularity below a percentage point of alpha, which is finer than any theme's
         /// authored value is meaningful to.
-        static let holdBackSteps = 24
+        public static let holdBackSteps = 24
     }
 }

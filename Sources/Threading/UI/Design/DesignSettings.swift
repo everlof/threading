@@ -12,7 +12,7 @@ import Foundation
 /// framework could not take with it; see
 /// [`native-extension-tier.md`](../../../../docs/feature-drafts/native-extension-tier.md).
 @MainActor
-protocol DesignSettingsReading {
+public protocol DesignSettingsReading {
     var appTextSize: AppTextSize { get }
     var chromeFontFamily: String? { get }
     var conversationFontFamily: String? { get }
@@ -22,7 +22,7 @@ protocol DesignSettingsReading {
 
 /// Where `UI/Design/` reads its preferences from.
 @MainActor
-enum DesignSettings {
+public enum DesignSettings {
 
     /// Replaceable so a gallery story, a render test or a plugin host can state its own
     /// preferences instead of inheriting the developer's. Feature code never writes this.
@@ -30,10 +30,10 @@ enum DesignSettings {
     /// A hosted test writes to the real application's `UserDefaults`, so a test that needs a
     /// particular text size or font should install a value here rather than record a choice the
     /// developer's next launch would inherit. See [`themes.md`](../../../../docs/architecture/themes.md).
-    static var current: DesignSettingsReading = ApplicationDesignSettings()
+    public static var current: DesignSettingsReading = ApplicationDesignSettings()
 
     /// Run `body` with `settings` in force, restoring the previous provider afterwards.
-    static func withSettings<T>(_ settings: DesignSettingsReading, perform body: () throws -> T) rethrows -> T {
+    public static func withSettings<T>(_ settings: DesignSettingsReading, perform body: () throws -> T) rethrows -> T {
         let previous = current
         current = settings
         defer { current = previous }
@@ -48,10 +48,10 @@ enum DesignSettings {
 /// hosted test redirects. `themes.md` draws that line between a behavioural setting and a recorded
 /// user choice, and this change is a decoupling rather than a behaviour change.
 @MainActor
-struct ApplicationDesignSettings: DesignSettingsReading {
-    var appTextSize: AppTextSize { AppSettings.appTextSize }
-    var chromeFontFamily: String? { AppSettings.chromeFontFamily }
-    var conversationFontFamily: String? { AppSettings.conversationFontFamily }
-    var promptReturnKey: PromptReturnKey { AppSettings.promptReturnKey }
-    var chatNameMorphStyle: ChatNameMorphStyle { AppSettings.shared.chatNameMorphStyle }
+public struct ApplicationDesignSettings: DesignSettingsReading {
+    public var appTextSize: AppTextSize { AppSettings.appTextSize }
+    public var chromeFontFamily: String? { AppSettings.chromeFontFamily }
+    public var conversationFontFamily: String? { AppSettings.conversationFontFamily }
+    public var promptReturnKey: PromptReturnKey { AppSettings.promptReturnKey }
+    public var chatNameMorphStyle: ChatNameMorphStyle { AppSettings.shared.chatNameMorphStyle }
 }

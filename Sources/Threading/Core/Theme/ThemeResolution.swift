@@ -6,12 +6,12 @@ import AppKit
 ///
 /// The three are a *chain*, not three independent settings: a session follows its project,
 /// and a project follows the app. See `ThemeResolution.resolve`.
-enum ThemeScope: String, Codable, CaseIterable {
+public enum ThemeScope: String, Codable, CaseIterable {
     case session
     case project
     case global
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .session: return L10n.string("Session")
         case .project: return L10n.string("Project")
@@ -27,12 +27,12 @@ enum ThemeScope: String, Codable, CaseIterable {
 /// Pure on purpose, and separate from every store that feeds it: the two rules below are
 /// invisible in a screenshot and were reachable only by standing up AppKit and three
 /// singletons, which is how they would have gone untested.
-enum ThemeResolution {
+public enum ThemeResolution {
 
     /// A resolved theme: its durable ID, and the scope that supplied it.
-    struct Assignment: Equatable {
-        let scope: ThemeScope
-        let themeID: TerminalThemeID
+    public struct Assignment: Equatable {
+        public let scope: ThemeScope
+        public let themeID: TerminalThemeID
     }
 
     /// Resolves narrowest-first, skipping IDs that answer to no theme.
@@ -49,7 +49,7 @@ enum ThemeResolution {
     ///
     /// Returns nil when no scope names a theme that exists, which the caller answers with the
     /// profile's own embedded theme.
-    static func resolve(
+    public static func resolve(
         session: TerminalThemeID?,
         project: TerminalThemeID?,
         global: TerminalThemeID?,
@@ -81,15 +81,15 @@ enum ThemeResolution {
 /// Only text-against-ground is checked. An ANSI colour close to the background is ordinary
 /// (a dark `black` on a dark ground is how most themes are built, and rejecting it would
 /// reject nearly every theme in circulation); text the colour of what it is drawn on is not.
-enum ThemeContrast {
+public enum ThemeContrast {
 
     /// WCAG's floor for large text. Terminal type is smaller than that, but a theme is a
     /// deliberate aesthetic choice and holding it to body-text contrast would reject palettes
     /// people genuinely use — Solarized Dark included. This rejects the unreadable, not the
     /// low-contrast.
-    static let minimumRatio: CGFloat = 3.0
+    public static let minimumRatio: CGFloat = 3.0
 
-    static func isLegible(foreground: NSColor, background: NSColor) -> Bool {
+    public static func isLegible(foreground: NSColor, background: NSColor) -> Bool {
         ratio(foreground, background) >= minimumRatio
     }
 
@@ -100,7 +100,7 @@ enum ThemeContrast {
     /// is perfectly legible and still invisible *as a heading*. 15 is the floor the stock
     /// palettes are held to: `#F7EFE6` against `#FFFFFF` is 7.5 and reads as one colour,
     /// `#D9D1C8` against `#FFFFFF` is 16.7 and reads as two.
-    static func perceptualDistance(_ first: NSColor, _ second: NSColor) -> CGFloat {
+    public static func perceptualDistance(_ first: NSColor, _ second: NSColor) -> CGFloat {
         let a = lab(first)
         let b = lab(second)
         return ((a.l - b.l) * (a.l - b.l)
@@ -137,10 +137,10 @@ enum ThemeContrast {
 
     /// The floor a palette's bold text is held apart from its body text by. Below this the two
     /// are one ink with two names, which is the whole defect the role exists to fix.
-    static let minimumBoldDistance: CGFloat = 15
+    public static let minimumBoldDistance: CGFloat = 15
 
     /// WCAG relative-luminance contrast, in the sRGB space these colours are stored in.
-    static func ratio(_ first: NSColor, _ second: NSColor) -> CGFloat {
+    public static func ratio(_ first: NSColor, _ second: NSColor) -> CGFloat {
         let a = relativeLuminance(first)
         let b = relativeLuminance(second)
         return (max(a, b) + 0.05) / (min(a, b) + 0.05)

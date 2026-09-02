@@ -6,7 +6,7 @@ import AppKit
 /// the panel or control already drawn under the image. The fill then paints the image's entire
 /// bounding box as a solid square. An isolated transparency layer limits the destination alpha
 /// to the glyph itself, so every design-system component gets the same clean symbol silhouette.
-enum TemplateImageDrawing {
+public enum TemplateImageDrawing {
 
     /// The rect an image actually draws into when it is handed `slot`: the largest rect with the
     /// image's own proportions that fits, centred.
@@ -22,7 +22,7 @@ enum TemplateImageDrawing {
     /// Fitted rather than capped: the slot stays the size the caller measured its layout around,
     /// so correcting the aspect ratio never also shrinks a mark. Only the axis that was being
     /// over-stretched moves.
-    static func fitted(_ image: NSImage, in slot: NSRect) -> NSRect {
+    public static func fitted(_ image: NSImage, in slot: NSRect) -> NSRect {
         let size = image.size
         guard size.width > 0, size.height > 0 else { return slot }
 
@@ -38,7 +38,7 @@ enum TemplateImageDrawing {
         )
     }
 
-    static func draw(_ image: NSImage, in slot: NSRect, tint: NSColor) {
+    public static func draw(_ image: NSImage, in slot: NSRect, tint: NSColor) {
         let rect = fitted(image, in: slot)
         guard image.isTemplate, let context = NSGraphicsContext.current?.cgContext else {
             image.draw(in: rect)

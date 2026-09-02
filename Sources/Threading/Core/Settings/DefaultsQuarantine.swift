@@ -14,14 +14,14 @@ import Foundation
 /// The distinction that matters is **missing** versus **unreadable**. Missing is the first run
 /// and needs no ceremony. Unreadable is data that meant something to whoever wrote it, and the
 /// only honest options are to keep it or to say out loud that it could not be kept.
-enum DefaultsQuarantine {
+public enum DefaultsQuarantine {
 
     /// Where the unreadable copy of a key is kept.
     ///
     /// One slot per key rather than a timestamped series: a second failure means the first
     /// quarantine has already been superseded by whatever the user did next, and an unbounded
     /// pile of dead blobs in `UserDefaults` is its own small bug.
-    static func quarantineKey(for key: String) -> String { "\(key).unreadable" }
+    public static func quarantineKey(for key: String) -> String { "\(key).unreadable" }
 
     /// Copies the unreadable value aside and confirms the copy landed.
     ///
@@ -29,7 +29,7 @@ enum DefaultsQuarantine {
     /// assumed, because "we saved a backup" is the one claim that must not be taken on trust
     /// immediately before overwriting the original.
     @discardableResult
-    static func quarantine(
+    public static func quarantine(
         _ data: Data,
         forKey key: String,
         in defaults: UserDefaults
@@ -64,7 +64,7 @@ enum DefaultsQuarantine {
 /// The declaration is part of constructing a store so a new blob cannot accidentally inherit
 /// cache semantics. Only a rebuildable cache may discard an unreadable value without first
 /// preserving it.
-enum PersistenceCriticality: String {
+public enum PersistenceCriticality: String {
     case primary
     case userAuthored
     case preference
@@ -77,12 +77,12 @@ enum PersistenceCriticality: String {
 /// must be preserved; size policy answers how much work one damaged or externally replaced file
 /// may make the process perform. Conflating them would make every rebuildable cache either tiny
 /// or unbounded.
-enum RecoverableFileSizePolicy {
+public enum RecoverableFileSizePolicy {
     case compactMetadata
     case userDocument
     case derivedCache
 
-    var maximumBytes: Int {
+    public var maximumBytes: Int {
         switch self {
         case .compactMetadata:
             return 1 * 1_024 * 1_024
@@ -99,24 +99,24 @@ enum RecoverableFileSizePolicy {
 /// `UserDefaults` hands the blob to us as one `Data`, so this cannot make the daemon's read
 /// streaming. It still prevents a damaged preference from driving an unbounded JSON object graph,
 /// and prevents a normal write from manufacturing a value the next launch should refuse.
-enum RecoverableDefaultsSizePolicy {
+public enum RecoverableDefaultsSizePolicy {
     case compactMetadata
 
-    var maximumBytes: Int { 1 * 1_024 * 1_024 }
+    public var maximumBytes: Int { 1 * 1_024 * 1_024 }
 }
 
-enum PersistenceRecoveryLocation: Equatable {
+public enum PersistenceRecoveryLocation: Equatable {
     case defaultsKey(String)
     case file(URL)
 }
 
 /// Missing, readable and unreadable are deliberately three different states.
-enum RecoverableStoreLoadOutcome<Value> {
+public enum RecoverableStoreLoadOutcome<Value> {
     case missing(defaultValue: Value)
     case loaded(Value)
     case unreadable(fallback: Value, recovery: PersistenceRecoveryLocation?)
 
-    var value: Value {
+    public var value: Value {
         switch self {
         case .missing(let value), .loaded(let value), .unreadable(let value, _):
             return value
@@ -167,7 +167,7 @@ private enum RecoverableStoreError: LocalizedError {
 }
 
 /// A versioned `Codable` blob in `UserDefaults` with a verified recovery copy.
-final class RecoverableDefaultsStore<Value: Codable> {
+public final class RecoverableDefaultsStore<Value: Codable> {
 
     private let defaults: UserDefaults
     private let key: String
@@ -175,7 +175,7 @@ final class RecoverableDefaultsStore<Value: Codable> {
     private let sizePolicy: RecoverableDefaultsSizePolicy
     private(set) var writesAllowed = true
 
-    init(
+    public init(
         defaults: UserDefaults,
         key: String,
         criticality: PersistenceCriticality,
@@ -187,7 +187,7 @@ final class RecoverableDefaultsStore<Value: Codable> {
         self.sizePolicy = sizePolicy
     }
 
-    func load(
+    public func load(
         defaultValue: @autoclosure () -> Value,
         validate: (Value) throws -> Void = { _ in }
     ) -> RecoverableStoreLoadOutcome<Value> {
@@ -233,7 +233,7 @@ final class RecoverableDefaultsStore<Value: Codable> {
     }
 
     @discardableResult
-    func save(_ value: Value) -> Bool {
+    public func save(_ value: Value) -> Bool {
         guard writesAllowed else {
             ThreadingLogger.storage.error(
                 "Refusing to save \(self.key, privacy: .public): recovery copy was not verified"
@@ -289,7 +289,7 @@ final class RecoverableDefaultsStore<Value: Codable> {
 }
 
 /// A versioned `Codable` file whose unreadable predecessor is moved aside before replacement.
-final class RecoverableFileStore<Value: Codable> {
+public final class RecoverableFileStore<Value: Codable> {
 
     private let url: URL
     private let fileManager: FileManager
@@ -299,7 +299,7 @@ final class RecoverableFileStore<Value: Codable> {
     private let dateDecodingStrategy: JSONDecoder.DateDecodingStrategy
     private(set) var writesAllowed = true
 
-    init(
+    public init(
         url: URL,
         fileManager: FileManager,
         criticality: PersistenceCriticality,
@@ -315,7 +315,7 @@ final class RecoverableFileStore<Value: Codable> {
         self.dateDecodingStrategy = dateDecodingStrategy
     }
 
-    func load(
+    public func load(
         defaultValue: @autoclosure () -> Value,
         validate: (Value) throws -> Void = { _ in }
     ) -> RecoverableStoreLoadOutcome<Value> {
@@ -364,7 +364,7 @@ final class RecoverableFileStore<Value: Codable> {
     }
 
     @discardableResult
-    func save(_ value: Value) -> Bool {
+    public func save(_ value: Value) -> Bool {
         guard writesAllowed else {
             ThreadingLogger.storage.error(
                 "Refusing to save \(self.url.lastPathComponent, privacy: .private(mask: .hash)): recovery copy was not verified"

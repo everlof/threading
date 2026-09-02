@@ -5,7 +5,7 @@ extension AppThemeStyles {
     /// BeOS R5: warm-gray application furniture, hard two-pixel lighting, and the unmistakable
     /// yellow title tab attached to (rather than stretched across) each window. The shell palette
     /// follows the black Terminal window shipped on the BeOS desktop.
-    static let beOS = AppTheme(
+    public static let beOS = AppTheme(
         id: AppThemeID("beos-r5"),
         name: "BeOS R5",
         mode: .light,

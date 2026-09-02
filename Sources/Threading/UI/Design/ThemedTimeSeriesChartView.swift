@@ -4,14 +4,14 @@ import AppKit
 
 /// Data-only chart contracts. Colour is semantic rather than an `NSColor`, so a live theme
 /// switch can repaint a retained chart and a provider never smuggles fixed chrome into it.
-struct ThemedChartPoint: Equatable, Sendable {
-    let at: Date
-    let value: Double
-    let label: String?
-    let detail: String?
-    let segment: Int
+public struct ThemedChartPoint: Equatable, Sendable {
+    public let at: Date
+    public let value: Double
+    public let label: String?
+    public let detail: String?
+    public let segment: Int
 
-    init(
+    public init(
         at: Date,
         value: Double,
         label: String? = nil,
@@ -26,7 +26,7 @@ struct ThemedChartPoint: Equatable, Sendable {
     }
 }
 
-enum ThemedChartSeriesStyle: Equatable, Sendable {
+public enum ThemedChartSeriesStyle: Equatable, Sendable {
     case primary
     case positive
     case warning
@@ -37,7 +37,7 @@ enum ThemedChartSeriesStyle: Equatable, Sendable {
 
 /// The line grammar is explicit data, so a forecast can stay geometrically honest while an
 /// observed daily series uses the softer interpolation expected of a modern dashboard.
-enum ThemedChartCurve: Equatable, Sendable {
+public enum ThemedChartCurve: Equatable, Sendable {
     case smooth
     case linear
 }
@@ -45,7 +45,7 @@ enum ThemedChartCurve: Equatable, Sendable {
 /// Independent series keep their own height above zero. Stacked bands instead accumulate aligned,
 /// non-negative values so each band's thickness is its contribution and the final upper edge is
 /// the total. The separate stacked chart view selects the latter; existing callers keep the former.
-enum ThemedChartComposition: Equatable, Sendable {
+public enum ThemedChartComposition: Equatable, Sendable {
     case independent
     case stackedBands
 }
@@ -56,7 +56,7 @@ enum ThemedChartComposition: Equatable, Sendable {
 /// from `baselineY` to `y`. That is why grouped and stacked bars need no geometry of their
 /// own — `.independent` puts every bar's foot on zero, `.stackedBands` puts it on the running
 /// total, and both were already computed for the curve grammar.
-enum ThemedChartMark: Equatable, Sendable {
+public enum ThemedChartMark: Equatable, Sendable {
     case line
     case bar
 }
@@ -67,11 +67,11 @@ enum ThemedChartMark: Equatable, Sendable {
 /// that same slot — category *i* is second *i* — and this enum supplies the words. Encoding
 /// the ordinal as a time keeps one downsampler, one stacking rule and one interpolator for
 /// both domains; a parallel scale type would have duplicated all three and let them drift.
-enum ThemedChartXAxis: Equatable, Sendable {
+public enum ThemedChartXAxis: Equatable, Sendable {
     case time
     case categories([String])
 
-    var categories: [String]? {
+    public var categories: [String]? {
         if case .categories(let names) = self { return names }
         return nil
     }
@@ -80,21 +80,21 @@ enum ThemedChartXAxis: Equatable, Sendable {
 /// Which way the value axis runs. Horizontal is for ranking, where the category names read
 /// down the leading edge and have room to be words rather than truncated stubs. It applies to
 /// bars only: a line's x is time, and time does not read down a page.
-enum ThemedChartOrientation: Equatable, Sendable {
+public enum ThemedChartOrientation: Equatable, Sendable {
     case vertical
     case horizontal
 }
 
-struct ThemedChartSeries: Equatable, Sendable, Identifiable {
-    let id: String
-    let title: String
-    let points: [ThemedChartPoint]
-    let style: ThemedChartSeriesStyle
-    let fillsArea: Bool
-    let curve: ThemedChartCurve
-    let mark: ThemedChartMark
+public struct ThemedChartSeries: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let title: String
+    public let points: [ThemedChartPoint]
+    public let style: ThemedChartSeriesStyle
+    public let fillsArea: Bool
+    public let curve: ThemedChartCurve
+    public let mark: ThemedChartMark
 
-    init(
+    public init(
         id: String,
         title: String,
         points: [ThemedChartPoint],
@@ -117,7 +117,7 @@ struct ThemedChartSeries: Equatable, Sendable, Identifiable {
     /// The category name becomes the point's label, which is what the tooltip and the
     /// accessibility description already read — so a bar announces "Cold start, 42 ms" without
     /// either surface learning that categories exist.
-    init(
+    public init(
         id: String,
         title: String,
         values: [Double],
@@ -142,19 +142,19 @@ struct ThemedChartSeries: Equatable, Sendable, Identifiable {
     }
 }
 
-enum ThemedChartMarkerKind: Equatable, Sendable {
+public enum ThemedChartMarkerKind: Equatable, Sendable {
     case reset
     case expiry
     case projection
     case now
 }
 
-struct ThemedChartMarker: Equatable, Sendable, Identifiable {
-    let id: String
-    let at: Date
-    let title: String
-    let detail: String?
-    let kind: ThemedChartMarkerKind
+public struct ThemedChartMarker: Equatable, Sendable, Identifiable {
+    public let id: String
+    public let at: Date
+    public let title: String
+    public let detail: String?
+    public let kind: ThemedChartMarkerKind
 }
 
 // MARK: - Value Rule
@@ -166,27 +166,27 @@ struct ThemedChartMarker: Equatable, Sendable, Identifiable {
 /// limit the user drew is not an event: it is a level the series is read against, and it is
 /// horizontal for the same reason a pace mark is vertical. Making it a marker kind would have
 /// given the enum one case whose geometry contradicted the other four.
-struct ThemedChartValueRule: Equatable, Sendable, Identifiable {
+public struct ThemedChartValueRule: Equatable, Sendable, Identifiable {
 
-    enum Kind: Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
         /// A line the reader set themselves — drawn in the warning role, since crossing it is a
         /// thing they asked to be told about rather than a thing the chart is reporting.
         case cap
     }
 
-    let id: String
+    public let id: String
 
     /// Where the line sits, in the series' own units.
-    let value: Double
+    public let value: Double
 
     /// What the line is called, drawn at its leading end. Kept short: it shares the plot with the
     /// series it is measuring.
-    let title: String
+    public let title: String
 
-    let kind: Kind
+    public let kind: Kind
 }
 
-enum ThemedChartValueFormat: Equatable, Sendable {
+public enum ThemedChartValueFormat: Equatable, Sendable {
     case percent
     case currency
     case tokens
@@ -197,27 +197,27 @@ enum ThemedChartValueFormat: Equatable, Sendable {
     case unit(String)
 }
 
-struct ThemedChartModel: Equatable, Sendable {
-    let title: String
-    let accessibilitySummary: String
-    let series: [ThemedChartSeries]
-    let markers: [ThemedChartMarker]
+public struct ThemedChartModel: Equatable, Sendable {
+    public let title: String
+    public let accessibilitySummary: String
+    public let series: [ThemedChartSeries]
+    public let markers: [ThemedChartMarker]
 
     /// Horizontal lines at named values — see `ThemedChartValueRule`.
-    let valueRules: [ThemedChartValueRule]
+    public let valueRules: [ThemedChartValueRule]
 
-    let xRange: ClosedRange<Date>?
-    let yRange: ClosedRange<Double>?
-    let valueFormat: ThemedChartValueFormat
-    let emptyMessage: String
+    public let xRange: ClosedRange<Date>?
+    public let yRange: ClosedRange<Double>?
+    public let valueFormat: ThemedChartValueFormat
+    public let emptyMessage: String
     /// The second line under `emptyMessage`: what would put marks here, or what is being read
     /// right now. A chart that says only "no data" has told the reader nothing they could act on.
-    let emptyDetail: String?
+    public let emptyDetail: String?
     /// Whether the absence is final or still being resolved. See `ThemedChartPlaceholder`.
-    let placeholder: ThemedChartPlaceholder
-    let xAxis: ThemedChartXAxis
-    let orientation: ThemedChartOrientation
-    let showsLegend: Bool
+    public let placeholder: ThemedChartPlaceholder
+    public let xAxis: ThemedChartXAxis
+    public let orientation: ThemedChartOrientation
+    public let showsLegend: Bool
     /// How many rules the value axis draws, when this chart wants fewer than the shared default.
     ///
     /// The default (`Design.Chart.gridLineCount`) is right for a chart read for a *value*: five
@@ -229,9 +229,9 @@ struct ThemedChartModel: Equatable, Sendable {
     /// Only the rules and their labels thin. The domain still resolves on the shared interval
     /// count, so the numbers stay the round ones `niceAutomaticY` chose: halving or quartering a
     /// scale that ends on 1/2/2.5/5 × 10ⁿ lands on another of them.
-    let valueGridLineCount: Int?
+    public let valueGridLineCount: Int?
 
-    init(
+    public init(
         title: String,
         accessibilitySummary: String,
         series: [ThemedChartSeries],
@@ -265,10 +265,10 @@ struct ThemedChartModel: Equatable, Sendable {
         self.placeholder = placeholder
     }
 
-    static let empty = Self(title: "", accessibilitySummary: "", series: [])
+    public static let empty = Self(title: "", accessibilitySummary: "", series: [])
 
     /// Where category *i* sits in the domain geometry normalizes.
-    static func categoryPosition(_ index: Int) -> Date {
+    public static func categoryPosition(_ index: Int) -> Date {
         Date(timeIntervalSinceReferenceDate: Double(index))
     }
 
@@ -279,7 +279,7 @@ struct ThemedChartModel: Equatable, Sendable {
     /// edges. Widening it to `-0.5...n-0.5` makes every band the same width and centres each
     /// bar in its own — a band scale, expressed entirely as the range the existing geometry
     /// already accepts.
-    static func categorical(
+    public static func categorical(
         title: String,
         accessibilitySummary: String,
         categories: [String],
@@ -316,27 +316,27 @@ struct ThemedChartModel: Equatable, Sendable {
 
 // MARK: - Geometry and transition
 
-struct ThemedChartRenderedPoint: Equatable, Sendable {
-    let x: Double
+public struct ThemedChartRenderedPoint: Equatable, Sendable {
+    public let x: Double
     /// Upper edge of the rendered series or band, normalized into the resolved Y domain.
-    let y: Double
+    public let y: Double
     /// Lower edge. Zero for independent series; the preceding cumulative total for a band.
-    let baselineY: Double
-    let sourceIndex: Int
-    let segment: Int
+    public let baselineY: Double
+    public let sourceIndex: Int
+    public let segment: Int
 }
 
-struct ThemedChartRenderedSeries: Equatable, Sendable {
-    let id: String
-    let points: [ThemedChartRenderedPoint]
+public struct ThemedChartRenderedSeries: Equatable, Sendable {
+    public let id: String
+    public let points: [ThemedChartRenderedPoint]
 }
 
 @MainActor
-enum ThemedChartGeometry {
-    struct Layout {
-        let series: [ThemedChartRenderedSeries]
-        let xRange: ClosedRange<Date>?
-        let yRange: ClosedRange<Double>
+public enum ThemedChartGeometry {
+    public struct Layout {
+        public let series: [ThemedChartRenderedSeries]
+        public let xRange: ClosedRange<Date>?
+        public let yRange: ClosedRange<Double>
     }
 
     private struct IndexedPoint {
@@ -344,7 +344,7 @@ enum ThemedChartGeometry {
         let point: ThemedChartPoint
     }
 
-    static func render(
+    public static func render(
         _ model: ThemedChartModel,
         composition: ThemedChartComposition = .independent,
         maximumPoints: Int = Design.Chart.maximumRenderedPoints
@@ -352,7 +352,7 @@ enum ThemedChartGeometry {
         layout(model, composition: composition, maximumPoints: maximumPoints).series
     }
 
-    static func layout(
+    public static func layout(
         _ model: ThemedChartModel,
         composition: ThemedChartComposition = .independent,
         maximumPoints: Int = Design.Chart.maximumRenderedPoints
@@ -446,7 +446,7 @@ enum ThemedChartGeometry {
         return Layout(series: rendered, xRange: xRange, yRange: y)
     }
 
-    static func interpolate(
+    public static func interpolate(
         from: [ThemedChartRenderedSeries],
         to: [ThemedChartRenderedSeries],
         composition: ThemedChartComposition = .independent,
@@ -481,14 +481,14 @@ enum ThemedChartGeometry {
         }
     }
 
-    static func downsample(
+    public static func downsample(
         _ points: [ThemedChartPoint],
         maximumCount: Int
     ) -> [ThemedChartPoint] {
         downsampleIndexed(points, maximumCount: maximumCount).map(\.point)
     }
 
-    static func downsample(
+    public static func downsample(
         _ markers: [ThemedChartMarker],
         maximumCount: Int = Design.Chart.maximumRenderedMarkers
     ) -> [ThemedChartMarker] {
@@ -683,18 +683,18 @@ enum ThemedChartGeometry {
 /// A retained, bounded time-series chart shared by every chrome. A model switch morphs from the
 /// pixels currently on screen, including when another switch interrupts it; Reduce Motion lands
 /// synchronously. Axes, marker glyphs, focus and hover are drawn from semantic design roles.
-class ThemedTimeSeriesChartView: ThemedControl {
+public class ThemedTimeSeriesChartView: ThemedControl {
     private(set) var model: ThemedChartModel = .empty
     private(set) var composition: ThemedChartComposition
     private(set) var animationProgress: Double = 1
     private(set) var renderedPointCount = 0
     private(set) var renderedMarkerCount = 0
-    var displayedGeometryForTesting: [ThemedChartRenderedSeries] { displayedGeometry }
-    var resolvedXRangeForTesting: ClosedRange<Date>? { resolvedXRange }
-    var resolvedYRangeForTesting: ClosedRange<Double> { resolvedYRange }
+    public var displayedGeometryForTesting: [ThemedChartRenderedSeries] { displayedGeometry }
+    public var resolvedXRangeForTesting: ClosedRange<Date>? { resolvedXRange }
+    public var resolvedYRangeForTesting: ClosedRange<Double> { resolvedYRange }
     /// The marks' own rectangle, so a test can point at a band rather than restate the gutter
     /// widths this view derives from the model's orientation.
-    var plotRectForTesting: NSRect { plotRect }
+    public var plotRectForTesting: NSRect { plotRect }
 
     private var transitionFrom: [ThemedChartRenderedSeries] = []
     private var targetGeometry: [ThemedChartRenderedSeries] = []
@@ -719,11 +719,11 @@ class ThemedTimeSeriesChartView: ThemedControl {
         return formatter
     }()
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: Design.Chart.preferredHeight)
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         composition = .independent
         super.init(frame: frameRect)
         configureAccessibility()
@@ -741,11 +741,11 @@ class ThemedTimeSeriesChartView: ThemedControl {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func setModel(_ newModel: ThemedChartModel, animated: Bool) {
+    public func setModel(_ newModel: ThemedChartModel, animated: Bool) {
         let current = displayedGeometry
         let layout = ThemedChartGeometry.layout(newModel, composition: composition)
         let target = layout.series
@@ -791,13 +791,13 @@ class ThemedTimeSeriesChartView: ThemedControl {
 
     /// Whether the chart has anything to plot. A series present but empty is still nothing to
     /// read, which is the state a range change with no records lands in.
-    var showsPlaceholder: Bool {
+    public var showsPlaceholder: Bool {
         !model.series.contains(where: { !$0.points.isEmpty })
     }
 
     /// The status block, once one has been needed. Tests read it; production only ever sees it
     /// through the view tree.
-    var placeholderViewForTesting: ThemedChartPlaceholderView? { placeholderView }
+    public var placeholderViewForTesting: ThemedChartPlaceholderView? { placeholderView }
 
     private func updatePlaceholder() {
         guard showsPlaceholder else {
@@ -821,7 +821,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
 
     /// The block sits over the plot rectangle rather than the whole control, so the message lands
     /// where the marks would be and the axes keep their gutters.
-    override func layout() {
+    public override func layout() {
         super.layout()
         guard let placeholderView, !placeholderView.isHidden else { return }
         placeholderView.frame = plotRect
@@ -830,14 +830,14 @@ class ThemedTimeSeriesChartView: ThemedControl {
     /// The plot rectangle is derived from the control's own size, and a frame-positioned subview
     /// is not moved by the constraint system when that size changes. A chart in a split pane is
     /// resized constantly, so the pass is asked for here rather than hoped for.
-    override func setFrameSize(_ newSize: NSSize) {
+    public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         if placeholderView != nil { needsLayout = true }
     }
 
     /// Split from the display link so interruption, Reduce Motion, and performance tests can
     /// advance deterministically without sleeping a run loop.
-    func advanceAnimation(now: CFTimeInterval) {
+    public func advanceAnimation(now: CFTimeInterval) {
         guard animationProgress < 1 else { return }
         let phase = min(max((now - animationStart) / animationDuration, 0), 1)
         let eased = 1 - pow(1 - phase, 3)
@@ -852,7 +852,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
         needsDisplay = true
     }
 
-    override func updateTrackingAreas() {
+    public override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let movementTrackingArea { removeTrackingArea(movementTrackingArea) }
         let area = NSTrackingArea(
@@ -864,25 +864,25 @@ class ThemedTimeSeriesChartView: ThemedControl {
         movementTrackingArea = area
     }
 
-    override func mouseMoved(with event: NSEvent) {
+    public override func mouseMoved(with event: NSEvent) {
         // A position under an open dropdown is the menu's, not the chart's — see
         // `NSView.uncoveredPointerLocation(in:)`.
         guard let point = uncoveredPointerLocation(in: event) else { return }
         selectNearest(to: point)
     }
 
-    override func mouseExited(with event: NSEvent) {
+    public override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         selected = nil
         needsDisplay = true
     }
 
-    override func mouseDown(with event: NSEvent) {
+    public override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         selectNearest(to: convert(event.locationInWindow, from: nil))
     }
 
-    override func keyDown(with event: NSEvent) {
+    public override func keyDown(with event: NSEvent) {
         switch event.charactersIgnoringModifiers {
         case String(UnicodeScalar(NSLeftArrowFunctionKey)!): moveSelection(by: -1)
         case String(UnicodeScalar(NSRightArrowFunctionKey)!): moveSelection(by: 1)
@@ -890,7 +890,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
         }
     }
 
-    override func performPrimaryAction() -> Bool {
+    public override func performPrimaryAction() -> Bool {
         guard let lastSeries = model.series.indices.last,
               let lastPoint = model.series[lastSeries].points.indices.last else { return false }
         selected = (lastSeries, lastPoint)
@@ -899,15 +899,15 @@ class ThemedTimeSeriesChartView: ThemedControl {
         return true
     }
 
-    override func accessibilityRole() -> NSAccessibility.Role? { .group }
-    override func accessibilityTitle() -> String? { model.title }
-    override func accessibilityValue() -> Any? {
+    public override func accessibilityRole() -> NSAccessibility.Role? { .group }
+    public override func accessibilityTitle() -> String? { model.title }
+    public override func accessibilityValue() -> Any? {
         guard let selected else { return model.accessibilitySummary }
         return accessibilityDescription(for: selected.series, point: selected.point)
     }
-    override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
+    public override func accessibilityPerformPress() -> Bool { performPrimaryAction() }
 
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
+    public override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
         if newWindow == nil, animationProgress < 1 {
             displayedGeometry = targetGeometry
@@ -916,7 +916,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
         }
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         let isSystem = AppThemePalette.current.isSystem
         let isSpectrum = Design.Chart.style == .spectrum
@@ -1019,7 +1019,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
     /// An empty chart used to print 0/0.2/0.5/0.8/1 beside its rules: that is the automatic domain
     /// describing itself, a scale nobody measured anything in. The rules stay, because they are
     /// the chart's own frame and the ghost stands against them; the numbers go.
-    var valueAxisLabels: [String] {
+    public var valueAxisLabels: [String] {
         guard !showsPlaceholder else { return [] }
         return (0..<gridLineCount).map { index in
             valueString(yValue(at: Double(index) / Double(gridLineCount - 1)))
@@ -1931,9 +1931,9 @@ class ThemedTimeSeriesChartView: ThemedControl {
     /// Without the option both passes use the same line height in either context, so the measure
     /// and the draw agree by construction rather than by coincidence — which is the only property
     /// worth having here. A tooltip line is a point airier as a result.
-    static let tooltipDrawingOptions: NSString.DrawingOptions = [.usesLineFragmentOrigin]
+    public static let tooltipDrawingOptions: NSString.DrawingOptions = [.usesLineFragmentOrigin]
 
-    static var tooltipAttributes: [NSAttributedString.Key: Any] {
+    public static var tooltipAttributes: [NSAttributedString.Key: Any] {
         [.font: Design.Typography.detail(), .foregroundColor: Design.Text.label]
     }
 
@@ -1949,7 +1949,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
     /// `tooltipRect`, which is where that one went wrong. The second was not: see
     /// `tooltipDrawingOptions`, which is what the box is measured with and what the text is
     /// drawn with, and had to be an options set the two passes could not read differently.
-    static func tooltipSize(for string: NSAttributedString) -> NSSize {
+    public static func tooltipSize(for string: NSAttributedString) -> NSSize {
         let measured = string.boundingRect(
             with: NSSize(
                 width: Design.Chart.tooltipMaxWidth,
@@ -1965,7 +1965,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
     }
 
     /// Convenience for the tests and for callers holding plain text.
-    static func tooltipSize(for text: String) -> NSSize {
+    public static func tooltipSize(for text: String) -> NSSize {
         tooltipSize(for: NSAttributedString(string: text, attributes: tooltipAttributes))
     }
 
@@ -1981,7 +1981,7 @@ class ThemedTimeSeriesChartView: ThemedControl {
     /// So the flip is followed by a clamp, and the clamp is last. A box larger than the view
     /// then starts at the near inset and overflows the far edge, which is at least legible from
     /// its first line, rather than being centred on nothing.
-    static func tooltipRect(size: NSSize, near location: NSPoint, in bounds: NSRect) -> NSRect {
+    public static func tooltipRect(size: NSSize, near location: NSPoint, in bounds: NSRect) -> NSRect {
         let margin = Design.Spacing.inset
         var origin = NSPoint(
             x: location.x + Design.Chart.tooltipOffset,
@@ -2128,12 +2128,12 @@ class ThemedTimeSeriesChartView: ThemedControl {
 
     /// Hover, without a window or a synthesized event: a test drives the same entry point the
     /// tracking area does, and reads the answer back through `inspectionForTesting`.
-    func hoverForTesting(at location: NSPoint) {
+    public func hoverForTesting(at location: NSPoint) {
         selectNearest(to: location)
     }
 
     /// What the tooltip and VoiceOver currently state, or nothing when no point is selected.
-    var inspectionForTesting: [String] {
+    public var inspectionForTesting: [String] {
         guard let selected,
               model.series.indices.contains(selected.series),
               model.series[selected.series].points.indices.contains(selected.point)
@@ -2259,13 +2259,13 @@ class ThemedTimeSeriesChartView: ThemedControl {
 /// A separate reusable chart surface for additive composition. It shares the retained geometry,
 /// interaction, animation and theme machinery with `ThemedTimeSeriesChartView`, but its bands are
 /// semantically cumulative: the final upper edge is the total at that timestamp.
-final class ThemedStackedBandChartView: ThemedTimeSeriesChartView {
-    override init(frame frameRect: NSRect) {
+public final class ThemedStackedBandChartView: ThemedTimeSeriesChartView {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect, composition: .stackedBands)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 }

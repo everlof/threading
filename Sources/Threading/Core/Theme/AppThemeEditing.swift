@@ -1,9 +1,9 @@
 import AppKit
 
-enum AppThemeEditingError: LocalizedError {
+public enum AppThemeEditingError: LocalizedError {
     case invalid(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .invalid(let message): return message
         }
@@ -17,9 +17,9 @@ enum AppThemeEditingError: LocalizedError {
 /// independent of a later stock-theme change and prevents a fixed dark ground from falling
 /// through to a dynamic light system label.
 @MainActor
-enum AppThemeEditing {
+public enum AppThemeEditing {
 
-    static func make(
+    public static func make(
         id: AppThemeID,
         name: String,
         base: AppTheme,
@@ -71,12 +71,12 @@ enum AppThemeEditing {
     /// How a caller states what should happen to the sidebar block, distinctly from saying
     /// nothing. A plain optional cannot tell "leave it alone" from "take it away", and losing
     /// that distinction is how an update that changed one colour would strip a theme's brand.
-    enum SidebarChange {
+    public enum SidebarChange {
         case inherit
         case remove
         case set(SidebarStyle)
 
-        func applied(to source: SidebarStyle?) -> SidebarStyle? {
+        public func applied(to source: SidebarStyle?) -> SidebarStyle? {
             switch self {
             case .inherit: return source
             case .remove: return nil
@@ -89,12 +89,12 @@ enum AppThemeEditing {
     /// cannot tell "leave it alone" from "take it away", and an update that changed one colour
     /// must not silently hand the window frame back to AppKit. No empty-normalisation arm —
     /// a chrome block's title bar is required, so there is no empty style to normalise.
-    enum ChromeChange {
+    public enum ChromeChange {
         case inherit
         case remove
         case set(WindowChromeStyle)
 
-        func applied(to source: WindowChromeStyle?) -> WindowChromeStyle? {
+        public func applied(to source: WindowChromeStyle?) -> WindowChromeStyle? {
             switch self {
             case .inherit: return source
             case .remove: return nil
@@ -103,7 +103,7 @@ enum AppThemeEditing {
         }
     }
 
-    static func makeVariant(
+    public static func makeVariant(
         named name: String,
         from base: AppTheme,
         kind: AppTheme.VariantKind,
@@ -137,7 +137,7 @@ enum AppThemeEditing {
         )
     }
 
-    static func assemble(
+    public static func assemble(
         id: AppThemeID,
         name: String,
         mode: AppTheme.Mode,
@@ -169,7 +169,7 @@ enum AppThemeEditing {
 
     /// Duplicating is a value copy of the entire style, including an optional opposite
     /// appearance. It never snapshots an adaptive theme down to whichever variant is visible.
-    static func duplicate(
+    public static func duplicate(
         _ source: AppTheme,
         id: AppThemeID,
         name: String
@@ -194,7 +194,7 @@ enum AppThemeEditing {
         )
     }
 
-    nonisolated static func validate(_ theme: AppTheme) throws {
+    public nonisolated static func validate(_ theme: AppTheme) throws {
         if theme.isSystem {
             guard theme.mode == .system, theme.variants.isEmpty else {
                 throw AppThemeEditingError.invalid(

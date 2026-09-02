@@ -9,7 +9,7 @@ extension AppThemeStyles {
     /// The palette is authored from period screenshots rather than from current macOS system
     /// roles. Charcoal is named because it is the face Platinum used; on machines without it,
     /// the ordinary theme-family fallback deliberately returns to the platform face.
-    static let platinum = AppTheme(
+    public static let platinum = AppTheme(
         id: AppThemeID("platinum-9"),
         name: "Mac OS 9 Platinum",
         mode: .light,
@@ -128,7 +128,7 @@ extension AppThemeStyles {
     /// chrome from classic Platinum: Lucida Grande, a pale pinstriped title band, leading
     /// traffic-light gems, rounded translucent controls, and the saturated ribbed blue
     /// scrollbar that made the original interface look like coloured glass.
-    static let aqua = AppTheme(
+    public static let aqua = AppTheme(
         id: AppThemeID("aqua-cheetah"),
         name: "Mac OS X Aqua",
         mode: .light,

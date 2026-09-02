@@ -4,48 +4,48 @@ import SwiftTerm
 // MARK: - Identity
 
 /// A terminal theme's durable identity, separate from its editable display name.
-struct TerminalThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible {
-    let rawValue: String
+public struct TerminalThemeID: Hashable, Codable, RawRepresentable, CustomStringConvertible {
+    public let rawValue: String
 
-    init(rawValue: String) { self.rawValue = rawValue }
-    init(_ rawValue: String) { self.rawValue = rawValue }
+    public init(rawValue: String) { self.rawValue = rawValue }
+    public init(_ rawValue: String) { self.rawValue = rawValue }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         rawValue = try decoder.singleValueContainer().decode(String.self)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
     }
 
-    var description: String { rawValue }
+    public var description: String { rawValue }
 
-    static let basic = TerminalThemeID("basic")
-    static let pro = TerminalThemeID("pro")
-    static let homebrew = TerminalThemeID("homebrew")
-    static let ocean = TerminalThemeID("ocean")
-    static let roseMoon = TerminalThemeID("rose-moon")
-    static let followsAppTheme = TerminalThemeID("follow-app-theme")
+    public static let basic = TerminalThemeID("basic")
+    public static let pro = TerminalThemeID("pro")
+    public static let homebrew = TerminalThemeID("homebrew")
+    public static let ocean = TerminalThemeID("ocean")
+    public static let roseMoon = TerminalThemeID("rose-moon")
+    public static let followsAppTheme = TerminalThemeID("follow-app-theme")
 
-    static func makeCustom() -> TerminalThemeID {
+    public static func makeCustom() -> TerminalThemeID {
         TerminalThemeID("custom-\(UUID().uuidString.lowercased())")
     }
 
     /// State written before IDs existed is tagged with its old name. The tag cannot collide
     /// with a real ID and lets the assignment layer resolve it once against the theme library.
-    static func legacyName(_ name: String) -> TerminalThemeID {
+    public static func legacyName(_ name: String) -> TerminalThemeID {
         TerminalThemeID("legacy-name-\(encodedComponent(name))")
     }
 
     /// A deterministic replacement for a persisted custom theme that claims an ID already in
     /// use. Migration used a fresh UUID here; if its best-effort rewrite failed, the in-memory ID
     /// changed again on every launch and any project assignment saved meanwhile became dangling.
-    static func recoveredFromCollision(name: String, ordinal: Int) -> TerminalThemeID {
+    public static func recoveredFromCollision(name: String, ordinal: Int) -> TerminalThemeID {
         TerminalThemeID("recovered-custom-\(encodedComponent(name))-\(ordinal)")
     }
 
-    var legacyName: String? {
+    public var legacyName: String? {
         let prefix = "legacy-name-"
         guard rawValue.hasPrefix(prefix) else { return nil }
         var encoded = String(rawValue.dropFirst(prefix.count))
@@ -56,7 +56,7 @@ struct TerminalThemeID: Hashable, Codable, RawRepresentable, CustomStringConvert
         return String(data: data, encoding: .utf8)
     }
 
-    static func migratedFromName(_ name: String) -> TerminalThemeID {
+    public static func migratedFromName(_ name: String) -> TerminalThemeID {
         switch name {
         case "Basic": return .basic
         case "Pro": return .pro
@@ -77,62 +77,62 @@ struct TerminalThemeID: Hashable, Codable, RawRepresentable, CustomStringConvert
 
 // MARK: - Reserved Entry
 
-enum TerminalThemeNames {
+public enum TerminalThemeNames {
     /// The terminal-theme list's first entry: draw with the palette the *app* theme states.
     ///
     /// The ID is the identity; this name is only the label shown to people and older clients.
-    static let followsAppTheme = "Follow App Theme"
+    public static let followsAppTheme = "Follow App Theme"
 }
 
 /// Color scheme for terminal rendering.
-struct TerminalTheme: Codable, Equatable {
+public struct TerminalTheme: Codable, Equatable {
 
     // MARK: - Properties
 
-    var id: TerminalThemeID
-    var name: String
-    var foreground: NSColor
+    public var id: TerminalThemeID
+    public var name: String
+    public var foreground: NSColor
     /// Terminal.app's "Bold Text": what SGR 1 drawn with the *default* foreground uses.
     ///
     /// A palette states it because weight alone cannot carry a heading. Claude Code writes body
     /// copy in the default foreground and headings as bold in the same colour, so on a palette
     /// whose foreground is already its brightest tone the two rendered identically. Bold with an
     /// *explicit* ANSI colour keeps its bright shift and never comes here.
-    var boldForeground: NSColor
-    var background: NSColor
-    var cursor: NSColor
-    var selection: NSColor
+    public var boldForeground: NSColor
+    public var background: NSColor
+    public var cursor: NSColor
+    public var selection: NSColor
 
     // ANSI Colors (0-15)
-    var black: NSColor
-    var red: NSColor
-    var green: NSColor
-    var yellow: NSColor
-    var blue: NSColor
-    var magenta: NSColor
-    var cyan: NSColor
-    var white: NSColor
+    public var black: NSColor
+    public var red: NSColor
+    public var green: NSColor
+    public var yellow: NSColor
+    public var blue: NSColor
+    public var magenta: NSColor
+    public var cyan: NSColor
+    public var white: NSColor
 
     // Bright variants
-    var brightBlack: NSColor
-    var brightRed: NSColor
-    var brightGreen: NSColor
-    var brightYellow: NSColor
-    var brightBlue: NSColor
-    var brightMagenta: NSColor
-    var brightCyan: NSColor
-    var brightWhite: NSColor
+    public var brightBlack: NSColor
+    public var brightRed: NSColor
+    public var brightGreen: NSColor
+    public var brightYellow: NSColor
+    public var brightBlue: NSColor
+    public var brightMagenta: NSColor
+    public var brightCyan: NSColor
+    public var brightWhite: NSColor
 
     // MARK: - Codable
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case id, name, foreground, boldForeground, background, cursor, selection
         case black, red, green, yellow, blue, magenta, cyan, white
         case brightBlack, brightRed, brightGreen, brightYellow
         case brightBlue, brightMagenta, brightCyan, brightWhite
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
         name = try container.decode(String.self, forKey: .name)
@@ -169,7 +169,7 @@ struct TerminalTheme: Codable, Equatable {
         brightWhite = try Self.decodeColor(from: container, forKey: .brightWhite)
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
         try container.encode(id, forKey: .id)
@@ -237,7 +237,7 @@ struct TerminalTheme: Codable, Equatable {
 
     // MARK: - Initializer
 
-    init(
+    public init(
         id: TerminalThemeID = .makeCustom(),
         name: String,
         foreground: NSColor,
@@ -295,7 +295,7 @@ struct TerminalTheme: Codable, Equatable {
 
 extension TerminalTheme {
 
-    static let basic = TerminalTheme(
+    public static let basic = TerminalTheme(
         id: .basic,
         name: "Basic",
         // Body text is the ramp's own `white` (index 7) so the heading can have pure white.
@@ -325,7 +325,7 @@ extension TerminalTheme {
     )
 
     /// Pro theme - matches Terminal.app's Pro profile colors
-    static let pro = TerminalTheme(
+    public static let pro = TerminalTheme(
         id: .pro,
         name: "Pro",
         foreground: NSColor(hex: "#5ADB57")!,  // Green text like Terminal Pro_DUP
@@ -351,7 +351,7 @@ extension TerminalTheme {
         brightWhite: NSColor(hex: "#FFFFFF")!
     )
 
-    static let homebrew = TerminalTheme(
+    public static let homebrew = TerminalTheme(
         id: .homebrew,
         name: "Homebrew",
         foreground: NSColor(hex: "#00FF00")!,
@@ -379,7 +379,7 @@ extension TerminalTheme {
         brightWhite: NSColor(hex: "#E5E5E5")!
     )
 
-    static let ocean = TerminalTheme(
+    public static let ocean = TerminalTheme(
         id: .ocean,
         name: "Ocean",
         foreground: NSColor(hex: "#C0C5CE")!,
@@ -418,7 +418,7 @@ extension TerminalTheme {
     /// body and 21.2 from the nearest coloured slot, so it can be neither mistaken for ordinary
     /// text nor read as output a program coloured. Terminal.app's Grass does the same thing with
     /// its amber bold, and for the same reason.
-    static let roseMoon = TerminalTheme(
+    public static let roseMoon = TerminalTheme(
         id: .roseMoon,
         name: "Rosé Moon",
         foreground: NSColor(hex: "#E0DEF4")!,
@@ -445,7 +445,7 @@ extension TerminalTheme {
     )
 
     /// All available themes (use ThemeManager.shared.allThemes for the full list including custom themes)
-    static let builtInThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean, .roseMoon]
+    public static let builtInThemes: [TerminalTheme] = [.basic, .pro, .homebrew, .ocean, .roseMoon]
 
     // MARK: - The System App Theme's Pair
 
@@ -462,7 +462,7 @@ extension TerminalTheme {
     /// pure black next to the chrome's near-black was a hole in the window, and in light mode it
     /// painted the whole backdrop black behind a light app. That seam is the System theme's own
     /// idea applied to the terminal: the palette follows the appearance, like every role does.
-    static let systemLight = TerminalTheme(
+    public static let systemLight = TerminalTheme(
         id: TerminalThemeID("system-light"),
         name: "System",
         // A step back from the ramp's `black`, which the heading keeps. The step sits above the
@@ -499,12 +499,12 @@ extension TerminalTheme {
     /// `systemDark`'s so that anything reading a raw profile without resolving it still gets the
     /// palette the System theme pairs with rather than a blank one. A static snapshot cannot be
     /// appearance-aware; the resolved answer is, which is the whole reason the ID is stored.
-    static let followsAppTheme = systemDark.identified(
+    public static let followsAppTheme = systemDark.identified(
         .followsAppTheme,
         named: TerminalThemeNames.followsAppTheme
     )
 
-    static let systemDark = TerminalTheme(
+    public static let systemDark = TerminalTheme(
         id: TerminalThemeID("system-dark"),
         name: "System",
         foreground: NSColor(hex: "#C7C7C7")!,  // The ramp's own `white`, as in Basic
@@ -533,14 +533,14 @@ extension TerminalTheme {
     /// The same palette under another name. An app theme's palette is named after the *theme*,
     /// so anything that reports which colours a terminal drew with names the thing the user
     /// chose rather than the built-in it happens to equal.
-    func renamed(_ newName: String) -> TerminalTheme {
+    public func renamed(_ newName: String) -> TerminalTheme {
         var copy = self
         copy.name = newName
         return copy
     }
 
     /// A new editable theme copied from this palette. Unlike `renamed`, this is a new identity.
-    func duplicated(named newName: String) -> TerminalTheme {
+    public func duplicated(named newName: String) -> TerminalTheme {
         var copy = self
         copy.id = .makeCustom()
         copy.name = newName
@@ -548,7 +548,7 @@ extension TerminalTheme {
     }
 
     /// Gives a virtual palette, such as Follow App Theme, its reserved identity.
-    func identified(_ id: TerminalThemeID, named newName: String? = nil) -> TerminalTheme {
+    public func identified(_ id: TerminalThemeID, named newName: String? = nil) -> TerminalTheme {
         var copy = self
         copy.id = id
         if let newName { copy.name = newName }
@@ -557,12 +557,12 @@ extension TerminalTheme {
 
     /// Convenience accessor - prefer ThemeManager.shared.allThemes
     @MainActor
-    static var allThemes: [TerminalTheme] {
+    public static var allThemes: [TerminalTheme] {
         ThemeManager.shared.allThemes
     }
 
     /// Convert theme to SwiftTerm Color array (16 ANSI colors)
-    func asSwiftTermColors() -> [Color] {
+    public func asSwiftTermColors() -> [Color] {
         return [
             black.asSwiftTermColor(),
             red.asSwiftTermColor(),
@@ -588,7 +588,7 @@ extension TerminalTheme {
     /// The same test `Design.Diff.on(_:)` uses, and for the same reason: measuring the contrast
     /// against both extremes answers for a mid-tone background, where a luminance threshold has
     /// to guess.
-    var hasDarkBackground: Bool {
+    public var hasDarkBackground: Bool {
         ThemeContrast.ratio(.white, background) >= ThemeContrast.ratio(.black, background)
     }
 
@@ -616,7 +616,7 @@ extension TerminalTheme {
     /// is a dark grey-brown, so a warm-paper theme would have described itself with a colour
     /// nothing on screen is. `0;15` and `15;0` are what a terminal with default colours reports,
     /// and they carry exactly the one bit anybody asks for.
-    var colorFGBG: String {
+    public var colorFGBG: String {
         hasDarkBackground ? "15;0" : "0;15"
     }
 }
@@ -624,7 +624,7 @@ extension TerminalTheme {
 // MARK: - NSColor to SwiftTerm Color
 
 extension NSColor {
-    func asSwiftTermColor() -> Color {
+    public func asSwiftTermColor() -> Color {
         guard let rgb = usingColorSpace(.sRGB) else {
             return Color(red: 0, green: 0, blue: 0)
         }

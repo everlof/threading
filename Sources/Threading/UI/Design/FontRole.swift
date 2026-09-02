@@ -30,7 +30,7 @@ extension Design {
     /// It is a recipe rather than a category because re-deriving needs the whole call: a
     /// `detail(weight: .medium)` has to come back medium.
     @MainActor
-    enum FontRole: Equatable {
+    public enum FontRole: Equatable {
 
         // Prose — follows the theme's typeface.
         case heading
@@ -71,7 +71,7 @@ extension Design {
         /// factory — this enum names calls, it does not make fonts. The surface is passed to the
         /// prose factories only: code, numerics and marks do not vary by surface any more than
         /// they vary by theme.
-        func resolved(in surface: Typography.FontSurface = .chrome) -> NSFont {
+        public func resolved(in surface: Typography.FontSurface = .chrome) -> NSFont {
             switch self {
             case .heading: return Typography.heading(surface: surface)
             case .placeholderTitle: return Typography.placeholderTitle(surface: surface)
@@ -113,7 +113,7 @@ extension Design {
         /// A role that is already emphasis, or that is a mark rather than prose, answers with
         /// itself. Weight is not the only signal a match carries — see `SearchMatchLabel` —
         /// so a role with nowhere heavier to go loses nothing by staying put.
-        var emphasized: FontRole {
+        public var emphasized: FontRole {
             switch self {
             case .body: return .emphasizedBody
             case .subheading, .controlRegular: return .control
@@ -137,7 +137,7 @@ extension Design {
         /// Only prose moves today. The sweep re-resolves every recorded role regardless and
         /// compares before assigning, so this is documentation and a cheap skip rather than a
         /// correctness gate — and it stays correct if Tier 3's override later reaches code.
-        var followsTheme: Bool {
+        public var followsTheme: Bool {
             switch self {
             case .heading, .placeholderTitle, .subheading, .body, .emphasizedBody, .strongBody,
                  .control, .controlRegular, .caption, .detail, .markdownHeading, .wordmark:
@@ -162,30 +162,30 @@ extension Design {
 /// AppKit view state is main-actor state. Keeping that in the protocol means a new conformer
 /// cannot accidentally make font application callable from a worker task.
 @MainActor
-protocol FontRoleApplying: NSView {
+public protocol FontRoleApplying: NSView {
     /// The font currently in force, so the sweep can skip an assignment that changes nothing.
     var appliedRoleFont: NSFont? { get }
     func applyRoleFont(_ font: NSFont)
 }
 
 extension NSTextField: FontRoleApplying {
-    var appliedRoleFont: NSFont? { font }
-    func applyRoleFont(_ font: NSFont) { self.font = font }
+    public var appliedRoleFont: NSFont? { font }
+    public func applyRoleFont(_ font: NSFont) { self.font = font }
 }
 
 extension NSTextView: FontRoleApplying {
-    var appliedRoleFont: NSFont? { font }
+    public var appliedRoleFont: NSFont? { font }
 
     /// Assigning `font` sets it across the whole text, which is right for the plain-text views
     /// this app records a role on (the composer, the report pane) and would flatten an
     /// attributed one. A view holding built attributed content is rebuilt on a theme change
     /// instead — see `AppThemeRefresh`.
-    func applyRoleFont(_ font: NSFont) { self.font = font }
+    public func applyRoleFont(_ font: NSFont) { self.font = font }
 }
 
 extension MorphingTitleLabel: FontRoleApplying {
-    var appliedRoleFont: NSFont? { font }
-    func applyRoleFont(_ font: NSFont) { self.font = font }
+    public var appliedRoleFont: NSFont? { font }
+    public func applyRoleFont(_ font: NSFont) { self.font = font }
 }
 
 /// A drawn control still needs this when a call site *overrides* its font.
@@ -195,8 +195,8 @@ extension MorphingTitleLabel: FontRoleApplying {
 /// mark, a caption-scale action) freeze it exactly like a label does, which is the same bug in
 /// the one place the drawn-controls-are-free rule looks like it does not apply.
 extension ThemedButton: FontRoleApplying {
-    var appliedRoleFont: NSFont? { font }
-    func applyRoleFont(_ font: NSFont) { self.font = font }
+    public var appliedRoleFont: NSFont? { font }
+    public func applyRoleFont(_ font: NSFont) { self.font = font }
 }
 
 @MainActor private var recordedFontRoleKey: UInt8 = 0
@@ -212,7 +212,7 @@ extension NSView {
     ///
     /// Called by the app-theme sweep for every view in the tree. A view with no recorded role —
     /// a stock font someone set, the terminal's own font, an image view — is left alone.
-    func reapplyRecordedFont() {
+    public func reapplyRecordedFont() {
         guard let recorded = recordedFont, let target = self as? FontRoleApplying else { return }
         let updated = recorded.role.resolved(in: recorded.surface)
         guard target.appliedRoleFont != updated else { return }
@@ -225,13 +225,13 @@ extension NSView {
 
     /// The re-apply on its own, for the test that pins the freeze this exists to fix. The sweep
     /// itself walks a window, which a unit test has no business standing up.
-    func reapplyRecordedFontForTesting() {
+    public func reapplyRecordedFontForTesting() {
         reapplyRecordedFont()
     }
 
     /// The role this view was last given, for tests and for the sweep's own diagnostics.
-    var recordedFontRoleForTesting: Design.FontRole? { recordedFont?.role }
-    var recordedFontSurfaceForTesting: Design.Typography.FontSurface? { recordedFont?.surface }
+    public var recordedFontRoleForTesting: Design.FontRole? { recordedFont?.role }
+    public var recordedFontSurfaceForTesting: Design.Typography.FontSurface? { recordedFont?.surface }
 }
 
 extension FontRoleApplying {
@@ -246,7 +246,7 @@ extension FontRoleApplying {
     /// `surface` is `.chrome` for everything the app draws about itself. The conversation passes
     /// `.conversation`, so the thread can be set in the reader's own font the way the terminal
     /// beside it already can.
-    func applyFont(_ role: Design.FontRole, in surface: Design.Typography.FontSurface = .chrome) {
+    public func applyFont(_ role: Design.FontRole, in surface: Design.Typography.FontSurface = .chrome) {
         recordedFont = FontRoleBox(role, surface)
         let font = role.resolved(in: surface)
         guard appliedRoleFont != font else { return }

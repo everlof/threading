@@ -7,7 +7,7 @@ extension AppThemeStyles {
     /// monospaced system face, and the active window's blue title strip. This deliberately
     /// avoids MagicWB and later AmigaOS themes, whose extra colours are often mislabelled as
     /// the 3.1 default.
-    static let amiga = AppTheme(
+    public static let amiga = AppTheme(
         id: AppThemeID("amiga-workbench-31"),
         name: "Amiga Workbench 3.1",
         mode: .light,

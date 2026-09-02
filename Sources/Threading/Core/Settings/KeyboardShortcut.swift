@@ -11,19 +11,19 @@ import AppKit
 /// `NSEvent.ModifierFlags` is an `OptionSet` over `UInt` and not `Codable`, so the raw value is
 /// what persists. Only the device-independent bits are kept: the flags an event carries also
 /// describe *which* shift key was pressed, which is not part of the shortcut.
-struct KeyboardShortcut: Codable, Equatable, Hashable {
+public struct KeyboardShortcut: Codable, Equatable, Hashable {
 
     /// The key equivalent character, as `NSMenuItem` wants it — lowercase for letters, since
     /// an uppercase one implies Shift and would double up with the modifier mask.
-    let key: String
+    public let key: String
 
     private let modifierRawValue: UInt
 
-    var modifiers: NSEvent.ModifierFlags {
+    public var modifiers: NSEvent.ModifierFlags {
         NSEvent.ModifierFlags(rawValue: modifierRawValue)
     }
 
-    init(key: String, modifiers: NSEvent.ModifierFlags) {
+    public init(key: String, modifiers: NSEvent.ModifierFlags) {
         self.key = key
         self.modifierRawValue = modifiers
             .intersection(.deviceIndependentFlagsMask)
@@ -36,7 +36,7 @@ struct KeyboardShortcut: Codable, Equatable, Hashable {
     ///
     /// The order is Apple's and is not alphabetical or arbitrary — ⌃⌥⇧⌘ is what every menu in
     /// the system draws, so any other order reads as a different shortcut at a glance.
-    var displayString: String {
+    public var displayString: String {
         var text = ""
         if modifiers.contains(.control) { text += "⌃" }
         if modifiers.contains(.option) { text += "⌥" }
@@ -47,7 +47,7 @@ struct KeyboardShortcut: Codable, Equatable, Hashable {
 
     /// A key's printed form. The named keys carry no glyph of their own, so they are spelled
     /// out — a bare space or an unprintable character would draw as nothing at all.
-    static func keyDisplay(_ key: String) -> String {
+    public static func keyDisplay(_ key: String) -> String {
         if let named = namedKeys[key] { return named }
         return key.uppercased()
     }
@@ -72,7 +72,7 @@ struct KeyboardShortcut: Codable, Equatable, Hashable {
     /// A key equivalent with no modifier is refused, and that is the whole rule worth having: a
     /// bare letter would fire while the user is typing into the composer or the terminal, which
     /// is most of what this app is. Shift alone does not count — `⇧A` is just `A`.
-    var isValid: Bool {
+    public var isValid: Bool {
         guard !key.isEmpty else { return false }
         return modifiers.contains(.command)
             || modifiers.contains(.control)

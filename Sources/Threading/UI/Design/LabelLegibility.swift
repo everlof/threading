@@ -70,39 +70,39 @@ import AppKit
 /// louder one would have stopped being a tier, which is the one way this rule could have made the
 /// vocabulary worse rather than only flatter.
 @MainActor
-enum LabelLegibility {
+public enum LabelLegibility {
 
     // MARK: - Floors
 
-    enum Defaults {
+    public enum Defaults {
 
         /// WCAG AA for body text.
         ///
         /// The same value, and for the same reason, as
         /// `SelectionSurface.Defaults.minimumLabelRatio`: this is the app's own chrome, and the
         /// app is not entitled to the latitude it extends to a palette somebody else authored.
-        static let readingRatio: CGFloat = SelectionSurface.Defaults.minimumLabelRatio
+        public static let readingRatio: CGFloat = SelectionSurface.Defaults.minimumLabelRatio
 
         /// WCAG AA for large text — the floor below which text stops being text.
         ///
         /// `ThemeContrast.minimumRatio`, borrowed rather than restated: it already carries the
         /// argument for why 3.0 is the number that "rejects the unreadable, not the
         /// low-contrast", which is precisely what the quietest tier needs and all it needs.
-        static let glanceRatio: CGFloat = ThemeContrast.minimumRatio
+        public static let glanceRatio: CGFloat = ThemeContrast.minimumRatio
 
         /// How finely the walk gives transparency back.
         ///
         /// Twenty-four, matching `SelectionSurface.Defaults.holdBackSteps`, and for the same
         /// reason: it puts the granularity under a percentage point of alpha across the widest
         /// range a tier can travel, which is finer than any authored value is meaningful to.
-        static let strengthSteps = 24
+        public static let strengthSteps = 24
 
         /// Entries kept before the table is dropped and rebuilt.
         ///
         /// Every stock theme, in both appearances, at both contrast settings, for four tiers is
         /// well under this; the cap is for the case nobody predicted rather than one that is
         /// expected. See `cached`.
-        static let cacheLimit = 512
+        public static let cacheLimit = 512
     }
 
     // MARK: - Holding a tier
@@ -113,7 +113,7 @@ enum LabelLegibility {
     /// back would stop this being the quieter of the two.
     ///
     /// Returns `tier` **unchanged** when it already reads on all of them.
-    static func held(
+    public static func held(
         _ tier: NSColor,
         at floor: CGFloat,
         over grounds: [NSColor],
@@ -165,7 +165,7 @@ enum LabelLegibility {
     /// `field` and `floating` are left out deliberately — both are derived from `panel` and
     /// `elevated` unless a period theme separates them, and a fifth near-identical ground buys
     /// nothing but arithmetic.
-    static var chromeGrounds: [NSColor] {
+    public static var chromeGrounds: [NSColor] {
         let backdrop = Design.Surface.ground
         return [
             backdrop,
@@ -178,13 +178,13 @@ enum LabelLegibility {
     // MARK: - Tiers
 
     /// Which rung of the ladder a caller wants.
-    enum Rung: CaseIterable {
+    public enum Rung: CaseIterable {
         case secondary
         case tertiary
         case quaternary
 
         /// The theme role this rung reads.
-        var role: AppThemeRole {
+        public var role: AppThemeRole {
             switch self {
             case .secondary: return .secondaryLabel
             case .tertiary: return .tertiaryLabel
@@ -197,7 +197,7 @@ enum LabelLegibility {
         /// the theme actually authored in play instead of synthesising one.
         ///
         /// `secondary` has nowhere louder to go that is not `label` itself.
-        var increasedContrastRole: AppThemeRole? {
+        public var increasedContrastRole: AppThemeRole? {
             switch self {
             case .secondary: return nil
             case .tertiary: return .secondaryLabel
@@ -213,7 +213,7 @@ enum LabelLegibility {
     /// `performAsCurrentDrawingAppearance` for the reason `SelectionSurface.dynamic` gives: the
     /// grounds underneath are themselves dynamic, and resolving them under the ambient appearance
     /// instead is how a light variant's ink ends up measured against a dark variant's ground.
-    static func tier(_ rung: Rung) -> NSColor {
+    public static func tier(_ rung: Rung) -> NSColor {
         NSColor(name: NSColor.Name("threading.legible.\(rung)")) { appearance in
             // Seeded with the rung exactly as the theme states it, so a body that somehow does
             // not run leaves the palette's own answer rather than a hole. `SelectionSurface`
@@ -243,7 +243,7 @@ enum LabelLegibility {
     /// with the `secondaryLabel` role and `quaternary` with `tertiaryLabel` — and the quiet rung's
     /// floor rises to `readingRatio`, because a user who asked for contrast has asked for that
     /// rung to be read rather than glanced at.
-    static func ladder(under appearance: NSAppearance) -> Ladder {
+    public static func ladder(under appearance: NSAppearance) -> Ladder {
         let increased = Design.Accessibility.increasesContrast
         let palette = AppThemePalette.current
 
@@ -294,12 +294,12 @@ enum LabelLegibility {
     private static var stamps: [Stamp: Ladder] = [:]
 
     /// The three held rungs, by name.
-    struct Ladder {
-        let secondary: NSColor
-        let tertiary: NSColor
-        let quaternary: NSColor
+    public struct Ladder {
+        public let secondary: NSColor
+        public let tertiary: NSColor
+        public let quaternary: NSColor
 
-        subscript(rung: Rung) -> NSColor {
+        public subscript(rung: Rung) -> NSColor {
             switch rung {
             case .secondary: return secondary
             case .tertiary: return tertiary
@@ -389,7 +389,7 @@ enum LabelLegibility {
 
     /// Empties the table, for a test that changes a theme's contents without changing its
     /// identity. Production never needs this — see `cached` for why.
-    static func forgetCachedTiersForTesting() {
+    public static func forgetCachedTiersForTesting() {
         cache.removeAll()
         stamps.removeAll()
     }

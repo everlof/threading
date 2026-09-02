@@ -6,7 +6,7 @@ import LabelMorph
 /// The package owns glyph layout and animation. This wrapper owns Threading's
 /// semantic colour, Reduce Motion behavior, clipping, accessibility, and the
 /// user-selected preset. Timing and intensity stay deliberately internal.
-final class MorphingTitleLabel: NSView, ThemedComponent {
+public final class MorphingTitleLabel: NSView, ThemedComponent {
 
     private enum Defaults {
         static let intensity = 0.72
@@ -37,13 +37,13 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
 
     /// `nil` follows the app setting. Previews can pin a style without changing
     /// the global preference before their selector action has committed it.
-    var morphStyleOverride: ChatNameMorphStyle? {
+    public var morphStyleOverride: ChatNameMorphStyle? {
         didSet { applyEffect(morphingTo: stringValue) }
     }
 
-    var stringValue: String { label.text }
+    public var stringValue: String { label.text }
 
-    var font: NSFont {
+    public var font: NSFont {
         get { label.font }
         set {
             // Guarded like the package's own setters: a sidebar of these restates the font on
@@ -59,23 +59,23 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
         }
     }
 
-    var textColor: NSColor {
+    public var textColor: NSColor {
         get { label.textColor }
         set { setTextColor { newValue } }
     }
 
-    var alignment: NSTextAlignment {
+    public var alignment: NSTextAlignment {
         get { label.alignment }
         set { label.alignment = newValue }
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setup()
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -132,7 +132,7 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
         }
     }
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         label.intrinsicContentSize
     }
 
@@ -143,7 +143,7 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
     /// that grows to fit one. A host with a *cap* needs this one instead: truncation lands on a
     /// character boundary, so the line that arrives is up to a character narrower than the slot,
     /// and a host that sizes to the slot holds that difference as space it never chose.
-    func width(fitting available: CGFloat) -> CGFloat {
+    public func width(fitting available: CGFloat) -> CGFloat {
         label.width(fitting: available)
     }
 
@@ -152,22 +152,22 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
     /// `intrinsicContentSize` answers for the title it holds. A host that has to settle its
     /// geometry before starting a morph — `MorphingMultilineTitleLabel`, whose lines share one
     /// width and must not resize under their own glyphs — asks about the title to come.
-    func naturalWidth(of candidate: String) -> CGFloat {
+    public func naturalWidth(of candidate: String) -> CGFloat {
         label.naturalWidth(of: candidate)
     }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         refreshTextColor()
     }
 
-    override func accessibilityValue() -> Any? {
+    public override func accessibilityValue() -> Any? {
         stringValue
     }
 
     /// Updates the title. Callers decide whether this is a rename worth
     /// animating or merely a reused/configured view that should land directly.
-    func setStringValue(_ value: String, animated: Bool) {
+    public func setStringValue(_ value: String, animated: Bool) {
         let shouldAnimate = animated
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
 
@@ -189,7 +189,7 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
     /// second and cascade per character, so one fixed guess either cuts the last characters off
     /// mid-flight or leaves the row looking finished. Zero under Reduce Motion, where
     /// `setStringValue` does not animate at all.
-    func morphSettleDuration(to value: String) -> TimeInterval {
+    public func morphSettleDuration(to value: String) -> TimeInterval {
         guard !Design.Motion.reducesMotion, let preset = currentPreset else { return 0 }
         let characters = max(stringValue.count, value.count)
         let timing = Self.timing(for: preset, characters: characters)
@@ -201,26 +201,26 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
     /// Use this wherever the answer depends on something that moves — the row's selection
     /// or dormancy, the app theme — so a change re-resolves rather than leaving the glyphs
     /// holding the colour they were built with.
-    func setTextColor(_ provider: @escaping () -> NSColor) {
+    public func setTextColor(_ provider: @escaping () -> NSColor) {
         inkProvider = provider
         refreshTextColor()
     }
 
     /// Returns to the design-system label colour after a caller-specific ink
     /// (such as the toolbar backdrop's contrast colour) is no longer needed.
-    func useAutomaticTextColor() {
+    public func useAutomaticTextColor() {
         setTextColor { Design.Text.label }
     }
 
     /// States the surface behind the glyphs, for a caller whose ground is not the
     /// app's structural one — a label over a filled banner or a coloured chip.
-    func setRasterizationGround(_ provider: @escaping () -> NSColor) {
+    public func setRasterizationGround(_ provider: @escaping () -> NSColor) {
         groundProvider = provider
         refreshTextColor()
     }
 
     /// Re-asks both providers, for a caller whose own state has just moved.
-    func refreshTextColor() {
+    public func refreshTextColor() {
         effectiveAppearance.performAsCurrentDrawingAppearance {
             label.textColor = inkProvider()
             label.rasterizationBackground = groundProvider()

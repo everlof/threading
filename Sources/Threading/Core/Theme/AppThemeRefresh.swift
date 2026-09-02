@@ -116,7 +116,7 @@ extension NSView {
     /// A layer corner clips what `draw(_:)` lays down, so a control drawing over its own applied
     /// surface has to draw the same silhouette — a rounded rect drawn inside a disc is cut to
     /// pieces by it. Nil when no surface was applied, where the view's own drawing is the shape.
-    var appliedSurfaceRadius: CGFloat? {
+    public var appliedSurfaceRadius: CGFloat? {
         recordedSurface?.radius.current
     }
 
@@ -164,7 +164,7 @@ extension NSView {
     /// ambient appearance is whatever AppKit last had in hand — which is how a pane came to
     /// freeze dark in a light window. The view's answer is right even before it joins a window,
     /// where it inherits the application's.
-    func applyLayerBackground(_ color: NSColor) {
+    public func applyLayerBackground(_ color: NSColor) {
         wantsLayer = true
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = color.cgColor
@@ -172,7 +172,7 @@ extension NSView {
         recordedLayerColors.background = color
     }
 
-    func applyLayerBorder(_ color: NSColor) {
+    public func applyLayerBorder(_ color: NSColor) {
         wantsLayer = true
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.borderColor = color.cgColor
@@ -180,7 +180,7 @@ extension NSView {
         recordedLayerColors.border = color
     }
 
-    func applyLayerShadow(_ color: NSColor) {
+    public func applyLayerShadow(_ color: NSColor) {
         wantsLayer = true
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.shadowColor = color.cgColor
@@ -192,7 +192,7 @@ extension NSView {
     /// second cast (for example Clay's pale upper-left lift). The layer is held weakly so
     /// replacing a material cannot strand detached artwork, while the colour remains available
     /// to the ordinary theme/appearance refresh sweep.
-    func applyLayerShadow(_ color: NSColor, to companion: CALayer) {
+    public func applyLayerShadow(_ color: NSColor, to companion: CALayer) {
         wantsLayer = true
         effectiveAppearance.performAsCurrentDrawingAppearance {
             companion.shadowColor = color.cgColor
@@ -203,7 +203,7 @@ extension NSView {
 
     /// Remembers the colours a surface was drawn with. Called by `applySurface`, so its
     /// eighteen call sites need no change of their own.
-    func recordSurface(
+    public func recordSurface(
         fill: NSColor,
         border: NSColor?,
         borderWidth: CGFloat?,
@@ -246,7 +246,7 @@ extension NSView {
     ///
     /// Call inside `performAsCurrentDrawingAppearance`, as the drawing itself does: the records
     /// are dynamic colours, and a dynamic colour answers for whichever appearance is asking.
-    func resolvedGround() -> NSColor {
+    public func resolvedGround() -> NSColor {
         var fills: [NSColor] = []
         var node: NSView? = self
 
@@ -277,11 +277,11 @@ extension NSView {
 
     /// The re-apply on its own, for the test that pins the `CGColor` freeze this exists to fix.
     /// The sweep itself needs a window, which a unit test has no business standing up.
-    func reapplyRecordedSurfaceForTesting() {
+    public func reapplyRecordedSurfaceForTesting() {
         reapplyRecordedSurface()
     }
 
-    func reapplyRecordedLayerColorsForTesting() {
+    public func reapplyRecordedLayerColorsForTesting() {
         reapplyRecordedLayerColors()
     }
 }
@@ -307,7 +307,7 @@ extension NSView {
 /// reason the sweep gives for existing at all: the failure mode of a subscription is one view in
 /// the corner keeping the old theme, and that is precisely the bug this is.
 @MainActor
-protocol ThemeDerivedContent: AnyObject {
+public protocol ThemeDerivedContent: AnyObject {
 
     /// Bake again against the theme now in force. Called by the app-theme sweep, and by the
     /// view's own `viewDidChangeEffectiveAppearance` for a system light/dark flip.
@@ -330,7 +330,7 @@ protocol ThemeDerivedContent: AnyObject {
 /// one view in the corner keeping the old theme, which is exactly the kind of bug nobody
 /// notices until a screenshot.
 @MainActor
-enum AppThemeRefresh {
+public enum AppThemeRefresh {
 
     private static let accessibilityObserver = AccessibilityDisplayOptionsObserver()
     private static let interfaceThemeObserver = InterfaceThemeObserver()
@@ -349,7 +349,7 @@ enum AppThemeRefresh {
     /// AppKit refreshes stock controls when these preferences move; app-owned chrome needs the
     /// same signal. Installed once at launch, after the palette is restored and before windows
     /// are built.
-    static func startObservingAccessibilityDisplayOptions() {
+    public static func startObservingAccessibilityDisplayOptions() {
         guard !observesAccessibilityDisplayOptions else { return }
         observesAccessibilityDisplayOptions = true
         NSWorkspace.shared.notificationCenter.addObserver(
@@ -381,7 +381,7 @@ enum AppThemeRefresh {
     /// The distributed interface-theme notification is the signal the system itself posts for a
     /// light/dark switch, so both routes converge on `systemAppearanceDidChange`, which waits
     /// for the windows to actually wear the new appearance before resolving anything against it.
-    static func startObservingSystemAppearance() {
+    public static func startObservingSystemAppearance() {
         guard appearanceObservation == nil else { return }
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { _, _ in
             DispatchQueue.main.async { systemAppearanceDidChange() }
@@ -401,7 +401,7 @@ enum AppThemeRefresh {
     /// the bug it exists to fix. So this checks that every unpinned window already resolves to
     /// the application's appearance and gives AppKit another run-loop turn when one does not,
     /// bounded so a hidden window that never catches up cannot park the sweep forever.
-    static func systemAppearanceDidChange(retriesLeft: Int = 8) {
+    public static func systemAppearanceDidChange(retriesLeft: Int = 8) {
         let target = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
         let lagging = NSApp.windows.contains { window in
             window.appearance == nil
@@ -437,7 +437,7 @@ enum AppThemeRefresh {
     /// It is **guarded on the values**, because `AppSettingsDidChange` fires for every setting
     /// in the app: without the comparison, toggling branch grouping would repaint every window
     /// and re-read git in every open review pane.
-    static func startObservingFontOverrides() {
+    public static func startObservingFontOverrides() {
         guard fontOverrideObservation == nil else { return }
         lastFontOverrides = currentFontOverrides
         fontOverrideObservation = NotificationCenter.default.addObserver(
@@ -468,12 +468,12 @@ enum AppThemeRefresh {
         ]
     }
 
-    static func accessibilityDisplayOptionsChanged() {
+    public static func accessibilityDisplayOptionsChanged() {
         repaintEverything()
         NotificationCenter.default.post(AccessibilityDisplayOptionsDidChange())
     }
 
-    static func repaintEverything() {
+    public static func repaintEverything() {
         generation &+= 1
         for window in NSApp.windows {
             window.appearance = NSApp.appearance
@@ -490,7 +490,7 @@ enum AppThemeRefresh {
     /// view's appearance without this pass leaves dark surfaces behind light text (or vice
     /// versa). Keeping the scoped repaint here gives local previews the same complete refresh
     /// as an app-wide theme change without mutating any other window.
-    static func repaint(_ view: NSView) {
+    public static func repaint(_ view: NSView) {
         view.effectiveAppearance.performAsCurrentDrawingAppearance {
             view.reapplyRecordedSurface()
             // A state-specific layer colour is applied after the base surface, because it
@@ -533,7 +533,7 @@ enum AppThemeRefresh {
     /// attaches are O(1), while `repaintEverything` advances `generation` before walking visible
     /// windows, leaving only genuinely detached trees stale.
     @discardableResult
-    static func repaintIfNeeded(_ view: NSView) -> Bool {
+    public static func repaintIfNeeded(_ view: NSView) -> Bool {
         guard view.appliedAppThemeRefreshGeneration != generation else { return false }
         repaint(view)
         return true
@@ -542,7 +542,7 @@ enum AppThemeRefresh {
 
 @MainActor
 private final class AccessibilityDisplayOptionsObserver: NSObject {
-    @objc func displayOptionsChanged() {
+    @objc public func displayOptionsChanged() {
         AppThemeRefresh.accessibilityDisplayOptionsChanged()
     }
 }
@@ -551,13 +551,13 @@ private final class AccessibilityDisplayOptionsObserver: NSObject {
 /// actor and before `NSApp.effectiveAppearance` has moved — both are the convergence routine's
 /// problem, not the observer's.
 private final class InterfaceThemeObserver: NSObject {
-    @objc func interfaceThemeChanged() {
+    @objc public func interfaceThemeChanged() {
         DispatchQueue.main.async {
             AppThemeRefresh.systemAppearanceDidChange()
         }
     }
 }
 
-struct AccessibilityDisplayOptionsDidChange: AppEvent {
-    static let name = Notification.Name("accessibilityDisplayOptionsDidChange")
+public struct AccessibilityDisplayOptionsDidChange: AppEvent {
+    public static let name = Notification.Name("accessibilityDisplayOptionsDidChange")
 }

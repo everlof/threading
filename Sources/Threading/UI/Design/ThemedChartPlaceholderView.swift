@@ -8,7 +8,7 @@ import AppKit
 /// the chart should stand still under it; "the sources are being read" is a promise, and a chart
 /// that keeps a bare frame while it waits reads as the pane having failed to draw rather than as
 /// the app working — the bug `DiffSkeletonView` exists for, one subsystem over.
-enum ThemedChartPlaceholder: Equatable, Sendable {
+public enum ThemedChartPlaceholder: Equatable, Sendable {
 
     /// Nothing was measured, and nothing is on its way.
     case empty
@@ -17,7 +17,7 @@ enum ThemedChartPlaceholder: Equatable, Sendable {
     /// `nil` while the work is still being counted.
     case loading(progress: Double?)
 
-    var isLoading: Bool {
+    public var isLoading: Bool {
         switch self {
         case .empty: return false
         case .loading: return true
@@ -38,7 +38,7 @@ enum ThemedChartPlaceholder: Equatable, Sendable {
 /// by VoiceOver, cannot truncate against a narrow pane, and cannot carry a determinate bar beside
 /// it. Real labels and a real `ThemedProgressBar` give all three, and the bar answers each
 /// material's own progress anatomy for free.
-final class ThemedChartPlaceholderView: NSView, ThemedComponent {
+public final class ThemedChartPlaceholderView: NSView, ThemedComponent {
 
     // MARK: - Layout
 
@@ -65,13 +65,13 @@ final class ThemedChartPlaceholderView: NSView, ThemedComponent {
     private(set) var placeholder: ThemedChartPlaceholder = .empty
 
     /// A seam for tests, which cannot watch a compositor.
-    var isBreathing: Bool { band.isPulsing }
-    var progressBarForTesting: ThemedProgressBar? { progressBar }
-    var bandForTesting: NSView { band }
+    public var isBreathing: Bool { band.isPulsing }
+    public var progressBarForTesting: ThemedProgressBar? { progressBar }
+    public var bandForTesting: NSView { band }
 
     // MARK: - Initialization
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         // Positioned by frame, from the chart's own plot rectangle, which moves with the model
         // (a legend takes a band off the top, a ranking widens the leading gutter). Its children
@@ -154,13 +154,13 @@ final class ThemedChartPlaceholderView: NSView, ThemedComponent {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     // MARK: - Public Methods
 
-    func show(_ placeholder: ThemedChartPlaceholder, title: String, detail: String?) {
+    public func show(_ placeholder: ThemedChartPlaceholder, title: String, detail: String?) {
         self.placeholder = placeholder
         titleField.stringValue = title
         detailField.stringValue = detail ?? ""
@@ -190,7 +190,7 @@ final class ThemedChartPlaceholderView: NSView, ThemedComponent {
 
     /// The chart underneath keeps its hover, selection and tooltip behaviour: this block is a
     /// status, not a target.
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    public override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 // MARK: - Ghost band

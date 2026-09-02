@@ -59,10 +59,10 @@ import AppKit
 /// [`design-system.md`](../../../../docs/architecture/design-system.md) for why it needs a
 /// different answer rather than the arrow policy applied more widely.
 @MainActor
-enum CoveredWindowPointer {
+public enum CoveredWindowPointer {
 
     /// What the pointer looks like over a claiming surface.
-    enum CursorPolicy: Equatable {
+    public enum CursorPolicy: Equatable {
         /// The surface shows nothing but the arrow — a dropdown. The window's cursor rectangles
         /// stop answering for as long as the claim holds, and the arrow is put back after every
         /// pointer event dispatched to the window while the pointer is over the surface.
@@ -121,11 +121,11 @@ enum CoveredWindowPointer {
 
     /// The kind of arrival a tracking area reported — the two AppKit generates for a rectangle
     /// the pointer entered.
-    enum ArrivalKind: Equatable {
+    public enum ArrivalKind: Equatable {
         case entered
         case cursorUpdate
 
-        init?(_ type: NSEvent.EventType) {
+        public init?(_ type: NSEvent.EventType) {
             switch type {
             case .mouseEntered: self = .entered
             case .cursorUpdate: self = .cursorUpdate
@@ -142,10 +142,10 @@ enum CoveredWindowPointer {
     /// AppKit built, kept whole: it is the object the owner would have received, tracking area
     /// and all, and no public initializer can build another like it.
     @MainActor
-    struct OwedArrival {
-        weak var area: NSTrackingArea?
-        let kind: ArrivalKind
-        let event: NSEvent
+    public struct OwedArrival {
+        public weak var area: NSTrackingArea?
+        public let kind: ArrivalKind
+        public let event: NSEvent
     }
 
     private static var claims: [Claim] = []
@@ -155,7 +155,7 @@ enum CoveredWindowPointer {
 
     /// `surface` covers `window`: until it releases, arrivals beneath the surface are withheld,
     /// and the pointer over the surface is whatever `cursor` says.
-    static func claim(_ surface: NSView, covering window: NSWindow, cursor: CursorPolicy) {
+    public static func claim(_ surface: NSView, covering window: NSWindow, cursor: CursorPolicy) {
         if cursor == .arrow {
             CoveredWindowCursor.claim(surface, covering: window)
         }
@@ -171,7 +171,7 @@ enum CoveredWindowPointer {
     ///
     /// Call this once the surface has stopped answering hit tests: an owed `mouseEntered` reaches
     /// views that ask `NSView.isPointerCovered(at:)` on arrival, and they must see the truth.
-    static func release(_ surface: NSView) {
+    public static func release(_ surface: NSView) {
         CoveredWindowCursor.release(surface)
         let released = claims.filter { $0.surface === surface }
         claims.removeAll { $0.surface === surface }
@@ -183,7 +183,7 @@ enum CoveredWindowPointer {
     }
 
     /// Whether a live claim is holding `window`'s pointer.
-    static func isClaimed(_ window: NSWindow) -> Bool {
+    public static func isClaimed(_ window: NSWindow) -> Bool {
         prune()
         return claims.contains { $0.window === window }
     }
@@ -194,7 +194,7 @@ enum CoveredWindowPointer {
     /// spoke — see the type comment for why the mouse-moved path cannot be withheld up front. It
     /// only speaks for a pointer that is actually over the surface: a mouse-moved event can reach
     /// the key window while the pointer is over another one, and that window's cursor is its own.
-    static func applicationDidDispatch(_ event: NSEvent) {
+    public static func applicationDidDispatch(_ event: NSEvent) {
         guard !claims.isEmpty else { return }
         switch event.type {
         case .mouseMoved, .mouseEntered, .mouseExited, .cursorUpdate:
@@ -216,7 +216,7 @@ enum CoveredWindowPointer {
     // MARK: - Interception
 
     /// The monitor's body: the event to let through, or nil for one withheld.
-    static func intercept(_ event: NSEvent) -> NSEvent? {
+    public static func intercept(_ event: NSEvent) -> NSEvent? {
         switch event.type {
         case .mouseEntered, .mouseExited, .cursorUpdate:
             // `trackingArea` raises for any other event type, which is why the switch guards
@@ -237,7 +237,7 @@ enum CoveredWindowPointer {
     /// has to work as much as anything else's. Ownership by an *ancestor* of the surface passes
     /// too: that is a view being reached through, not something standing under the surface, the
     /// same reading `NSView.isPointerCovered(at:)` gives it.
-    static func intercept(
+    public static func intercept(
         _ event: NSEvent,
         type: NSEvent.EventType,
         area: NSTrackingArea?,
@@ -266,7 +266,7 @@ enum CoveredWindowPointer {
 
     /// How many arrivals the surface over `window` is holding back — the count a test asserts
     /// on, since the events themselves are AppKit's.
-    static func owedArrivalCount(in window: NSWindow) -> Int {
+    public static func owedArrivalCount(in window: NSWindow) -> Int {
         topClaim(for: window)?.owed.count ?? 0
     }
 

@@ -4,7 +4,7 @@ import AppKit
 /// overlays and interactive controls. The toolbar item factory accepts this contract instead of
 /// `NSView`, so backdrop-incorrect chrome cannot be inserted accidentally.
 @MainActor
-protocol BackdropOverlayContent where Self: NSView {}
+public protocol BackdropOverlayContent where Self: NSView {}
 
 /// Which of the window's two grounds a drawn component sits on.
 ///
@@ -19,7 +19,7 @@ protocol BackdropOverlayContent where Self: NSView {}
 /// state, the close button, the pressed fill and the accessibility role, none of which a shared
 /// constant reaches.
 @MainActor
-enum InkSource: Equatable {
+public enum InkSource: Equatable {
 
     /// The chrome's ground, whose roles the app theme states.
     case chrome
@@ -52,7 +52,7 @@ enum InkSource: Equatable {
     /// controls the band itself hosts sit on it (`WindowTitleBandView`).
     case titleBand
 
-    var ink: Design.Ink {
+    public var ink: Design.Ink {
         switch self {
         case .chrome: Design.Ink.chrome
         case .backdrop: WindowBackdrop.ink
@@ -65,7 +65,7 @@ enum InkSource: Equatable {
     /// The colour of that ground itself — what a component composites its translucent fill
     /// against when it must briefly be opaque (a tab lifted over its neighbours). Not for
     /// painting: panes own their grounds; this only answers what is already beneath.
-    var ground: NSColor {
+    public var ground: NSColor {
         switch self {
         case .chrome: Design.Surface.ground
         case .backdrop: WindowBackdrop.color
@@ -79,7 +79,7 @@ enum InkSource: Equatable {
 /// A view that draws from an `InkSource`, so the ground it is on can be asserted rather than
 /// assumed. `BackdropOverlayContent` says a view *can* be inked; this says which ink it took.
 @MainActor
-protocol InkSourced {
+public protocol InkSourced {
     var inkSource: InkSource { get }
 }
 
@@ -124,7 +124,7 @@ protocol InkSourced {
 /// opaque app-chrome card above the backdrop instead resolves the whole card through
 /// `ThemedFloatingSurfaceChrome`; it must not mix chrome ink with a terminal-derived fill.
 @MainActor
-class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced, PointerClaiming {
+public class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced, PointerClaiming {
 
     private let appEvents = AppEventObservations()
 
@@ -135,30 +135,30 @@ class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced, PointerClaimi
     /// that covers part of it says what it is: opaque chrome, and the arrow. A subclass drawn as
     /// a grip says `.resizeUpDown` instead, and one that is genuinely see-through says `nil`.
     /// See `PointerClaiming`.
-    var restingPointer: NSCursor? { .arrow }
+    public var restingPointer: NSCursor? { .arrow }
 
     /// Declared on the class for `ThemedControl`'s reason: a protocol-extension default is the
     /// witness for the whole hierarchy, and a subclass's own claims would go unread.
-    var pointerClaims: [PointerClaim] { [] }
+    public var pointerClaims: [PointerClaim] { [] }
 
-    override func resetCursorRects() {
+    public override func resetCursorRects() {
         registerPointerClaims()
     }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         refreshPointerClaims()
     }
 
     /// Always the backdrop: a passive overlay exists only to sit on it.
-    let inkSource: InkSource = .backdrop
+    public let inkSource: InkSource = .backdrop
 
     /// The ink that reads on the backdrop right now. Held here so a subclass rebuilding its own
     /// content between backdrop changes — a label whose text changed — re-reads the same source
     /// rather than reaching for a `Design` role out of habit.
-    final var ink: Design.Ink { WindowBackdrop.ink }
+    public final var ink: Design.Ink { WindowBackdrop.ink }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         appEvents.observe(WindowBackdropDidChange.self) { [weak self] _ in self?.inkDidChange() }
         // The backdrop can stay the same colour while the *theme* moves — a session on a fixed
@@ -170,20 +170,20 @@ class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced, PointerClaimi
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     /// Colour everything this view draws, from `ink`.
     ///
     /// Traps by default; see the type's documentation for why silence would be worse.
-    func applyInk(_ ink: Design.Ink) {
+    public func applyInk(_ ink: Design.Ink) {
         fatalError("\(type(of: self)) is a BackdropOverlay and must override applyInk(_:)")
     }
 
     /// Applied here rather than in `init`, so a subclass's own `setupViews` has already run and
     /// there is nothing to order by hand.
-    override func viewDidMoveToWindow() {
+    public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil else { return }
         inkDidChange()
@@ -195,7 +195,7 @@ class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced, PointerClaimi
     /// light and dark at sunset changes what that colour resolves to while the app theme and the
     /// backdrop object both stay exactly as they were. Without this the toolbar would keep the
     /// previous appearance's ink until something else happened to move it.
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         inkDidChange()
     }
@@ -217,7 +217,7 @@ class BackdropOverlay: NSView, BackdropOverlayContent, InkSourced, PointerClaimi
 ///
 /// It keeps `ThemedControl`'s keyboard, enabled-state, and accessibility contract while replacing
 /// chrome-palette colours with ink measured against the active terminal backdrop.
-class BackdropThemedControl: ThemedControl, BackdropOverlayContent, InkSourced {
+public class BackdropThemedControl: ThemedControl, BackdropOverlayContent, InkSourced {
 
     private let appEvents = AppEventObservations()
 
@@ -227,7 +227,7 @@ class BackdropThemedControl: ThemedControl, BackdropOverlayContent, InkSourced {
     /// toolbar control needs. A component that also appears inside the chrome — the tab, the icon
     /// button — passes `.chrome` there rather than being a second class that draws the same thing
     /// from different roles.
-    let inkSource: InkSource
+    public let inkSource: InkSource
 
     /// A ground this control's **host** paints over its source, when there is one.
     ///
@@ -240,22 +240,22 @@ class BackdropThemedControl: ThemedControl, BackdropOverlayContent, InkSourced {
     /// rather than handing over an ink, so a live theme switch is answered again at the next draw
     /// instead of keeping the ink the selection happened to start under. Cleared, the control
     /// goes back to reading its source.
-    var hostGround: InkSource? {
+    public var hostGround: InkSource? {
         didSet {
             guard hostGround != oldValue else { return }
             inkDidChange()
         }
     }
 
-    final var ink: Design.Ink { (hostGround ?? inkSource).ink }
+    public final var ink: Design.Ink { (hostGround ?? inkSource).ink }
 
-    init(frame frameRect: NSRect, inkSource: InkSource) {
+    public init(frame frameRect: NSRect, inkSource: InkSource) {
         self.inkSource = inkSource
         super.init(frame: frameRect)
         observeInk()
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         self.inkSource = .backdrop
         super.init(frame: frameRect)
         observeInk()
@@ -273,29 +273,29 @@ class BackdropThemedControl: ThemedControl, BackdropOverlayContent, InkSourced {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func accessibilityRole() -> NSAccessibility.Role? {
+    public override func accessibilityRole() -> NSAccessibility.Role? {
         .button
     }
 
-    override func accessibilityPerformPress() -> Bool {
+    public override func accessibilityPerformPress() -> Bool {
         performPrimaryAction()
     }
 
-    func applyInk(_ ink: Design.Ink) {
+    public func applyInk(_ ink: Design.Ink) {
         fatalError("\(type(of: self)) is a BackdropThemedControl and must override applyInk(_:)")
     }
 
-    override func viewDidMoveToWindow() {
+    public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         guard window != nil else { return }
         inkDidChange()
     }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         inkDidChange()
     }

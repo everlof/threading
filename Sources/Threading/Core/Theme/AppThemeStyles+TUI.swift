@@ -17,7 +17,7 @@ extension AppThemeStyles {
     /// "terminal-forward and loud": this one is quiet, and the accent is the only saturated
     /// thing in the window — a box-drawing interface reads by *structure*, and a second hue
     /// competing with the rules is what makes one look like a toy.
-    static let tui = AppTheme(
+    public static let tui = AppTheme(
         id: AppThemeID("tui"),
         name: "TUI",
         mode: .dark,
@@ -185,7 +185,7 @@ extension AppThemeStyles {
     /// period family's stemless compact shape for the same reason — a pointer that has to
     /// find an arrow is a pointer looking at a drawn callout rather than at a panel — but
     /// takes the flat edge, because this theme's material states no bevel to raise one with.
-    static let textModePopoverStyle = AppTheme.Material.PopoverStyle(
+    public static let textModePopoverStyle = AppTheme.Material.PopoverStyle(
         arrow: .none,
         edge: .flat,
         shadow: .none,

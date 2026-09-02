@@ -13,72 +13,72 @@ import AppKit
 /// the stated one, and absent measures take the limits' defaults. Views therefore never carry
 /// a fallback of their own — the one place that knows what absence means is this one.
 @MainActor
-enum WindowChromeAppearance {
+public enum WindowChromeAppearance {
 
-    struct Gradient: Equatable {
-        let colors: [NSColor]
-        let locations: [CGFloat]
+    public struct Gradient: Equatable {
+        public let colors: [NSColor]
+        public let locations: [CGFloat]
         /// CSS convention, as authored: degrees clockwise from "toward the top".
-        let angleDegrees: CGFloat
+        public let angleDegrees: CGFloat
     }
 
-    struct Resolved: Equatable {
-        struct Texture: Equatable {
-            let kind: WindowChromeStyle.TitleBar.Texture.Kind
-            let color: NSColor
-            let spacing: CGFloat
+    public struct Resolved: Equatable {
+        public struct Texture: Equatable {
+            public let kind: WindowChromeStyle.TitleBar.Texture.Kind
+            public let color: NSColor
+            public let spacing: CGFloat
         }
 
-        struct ClassicSkin: Equatable {
-            let assetName: String
-            let titleBarImage: NSImage
+        public struct ClassicSkin: Equatable {
+            public let assetName: String
+            public let titleBarImage: NSImage
 
-            static func == (lhs: Self, rhs: Self) -> Bool {
+            public static func == (lhs: Self, rhs: Self) -> Bool {
                 lhs.assetName == rhs.assetName
                     && lhs.titleBarImage.size == rhs.titleBarImage.size
                     && lhs.titleBarImage.isEqual(rhs.titleBarImage)
             }
         }
 
-        let activeGradient: Gradient
-        let inactiveGradient: Gradient
-        let ink: NSColor
-        let inactiveInk: NSColor
-        let bandHeight: CGFloat
-        let titleAlignment: WindowChromeStyle.TitleBar.Alignment
-        let titleFontStyle: WindowChromeStyle.TitleBar.TitleFontStyle
-        let titleFontSize: CGFloat?
-        let glyphStyle: WindowChromeStyle.TitleBar.ButtonGlyphStyle
-        let buttonPlacement: WindowChromeStyle.TitleBar.ButtonPlacement
-        let showsAppIcon: Bool
-        let commands: WindowChromeStyle.TitleBar.CommandPlacement
-        let activeTexture: Texture?
-        let inactiveTexture: Texture?
-        let shape: WindowChromeStyle.TitleBar.Shape
-        let tabWidth: CGFloat
-        let visibleButtons: [WindowChromeStyle.TitleBar.ButtonRole]
-        let classicSkin: ClassicSkin?
-        let frameWidth: CGFloat
-        let frameCornerRadius: CGFloat
-        let frameAntialiasesCorners: Bool
+        public let activeGradient: Gradient
+        public let inactiveGradient: Gradient
+        public let ink: NSColor
+        public let inactiveInk: NSColor
+        public let bandHeight: CGFloat
+        public let titleAlignment: WindowChromeStyle.TitleBar.Alignment
+        public let titleFontStyle: WindowChromeStyle.TitleBar.TitleFontStyle
+        public let titleFontSize: CGFloat?
+        public let glyphStyle: WindowChromeStyle.TitleBar.ButtonGlyphStyle
+        public let buttonPlacement: WindowChromeStyle.TitleBar.ButtonPlacement
+        public let showsAppIcon: Bool
+        public let commands: WindowChromeStyle.TitleBar.CommandPlacement
+        public let activeTexture: Texture?
+        public let inactiveTexture: Texture?
+        public let shape: WindowChromeStyle.TitleBar.Shape
+        public let tabWidth: CGFloat
+        public let visibleButtons: [WindowChromeStyle.TitleBar.ButtonRole]
+        public let classicSkin: ClassicSkin?
+        public let frameWidth: CGFloat
+        public let frameCornerRadius: CGFloat
+        public let frameAntialiasesCorners: Bool
 
         /// The radius the frame's silhouette actually turns through: the stated corner radius
         /// under a full-width band, and none under a leading tab, whose application body is
         /// rectangular below the tab. The host's clip, the well's inner clip and the frame's own
         /// drawing all take this one answer, so a shape can never round the content and square
         /// the outline — or the reverse.
-        var frameSilhouetteCornerRadius: CGFloat {
+        public var frameSilhouetteCornerRadius: CGFloat {
             shape == .fullWidth ? frameCornerRadius : 0
         }
     }
 
     /// What the current theme asks the frame to draw, or nil while the window is native —
     /// which is every theme that states no chrome.
-    static func resolve() -> Resolved? {
+    public static func resolve() -> Resolved? {
         resolve(for: NSApplication.shared.effectiveAppearance)
     }
 
-    static func resolve(for appearance: NSAppearance) -> Resolved? {
+    public static func resolve(for appearance: NSAppearance) -> Resolved? {
         let theme = AppThemePalette.current
         return theme.windowChrome(for: appearance).map {
             resolved(from: $0, themeID: theme.id)
@@ -89,7 +89,7 @@ enum WindowChromeAppearance {
     /// render test — that shows the chrome without a takeover theme being in force. The
     /// chrome views take the result as a per-instance override, never through global state:
     /// a preview must not dress the real window.
-    static func resolved(
+    public static func resolved(
         from chrome: WindowChromeStyle,
         themeID: AppThemeID? = nil
     ) -> Resolved {
@@ -152,7 +152,7 @@ enum WindowChromeAppearance {
     /// Derived from the band's stated ink the way the backdrop's ink is derived from its
     /// ground: the band is a third ground in the window (the theme authors its gradient, not
     /// its roles), so components on it cut their tiers and surfaces from one base.
-    static var bandInk: Design.Ink {
+    public static var bandInk: Design.Ink {
         let resolved = resolve()
         let base = resolved?.ink ?? .white
         return Design.Ink(
@@ -166,7 +166,7 @@ enum WindowChromeAppearance {
 
     /// The single colour that stands in for the band when a component must composite against
     /// it — the blend of the active stops, which is what the eye averages the band to.
-    static var bandGround: NSColor {
+    public static var bandGround: NSColor {
         guard let resolved = resolve(), !resolved.activeGradient.colors.isEmpty else {
             return Design.Surface.ground
         }

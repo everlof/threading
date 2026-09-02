@@ -6,7 +6,7 @@ extension AppThemeStyles {
     /// caption hardware, neutral Helvetica application furniture, and the cool blue-green work
     /// areas visible in the system tools and File Manager. This follows the default Interactive
     /// Desktop scheme rather than later purple fan themes often mistaken for stock IRIX.
-    static let irix = AppTheme(
+    public static let irix = AppTheme(
         id: AppThemeID("irix-indigo-magic"),
         name: "IRIX Indigo Magic",
         mode: .light,

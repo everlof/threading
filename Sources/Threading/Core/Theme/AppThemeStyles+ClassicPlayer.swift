@@ -7,7 +7,7 @@ extension AppThemeStyles {
     /// The stock form borrows the format's measured 14-point geometry and broad material idiom
     /// but no Winamp artwork, logo, or palette asset. A user-imported skin replaces the
     /// title-band pixels while all window actions remain Threading's own semantic controls.
-    static let classicPlayer = AppTheme(
+    public static let classicPlayer = AppTheme(
         id: AppThemeID("classic-player"),
         name: "Classic Player",
         mode: .dark,

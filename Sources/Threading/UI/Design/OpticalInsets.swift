@@ -11,7 +11,7 @@ import AppKit
 /// only the edge case its first caller happened to need, leaving the same geometry bug for the
 /// first vertical stack that reuses it.
 @MainActor
-protocol OpticalInsetProviding {
+public protocol OpticalInsetProviding {
     /// Horizontal distance from the frame's edge to the visible content inside it.
     var opticalHorizontalInset: CGFloat { get }
 
@@ -27,7 +27,7 @@ protocol OpticalInsetProviding {
 /// frame edge. Conforming without overriding `firstBaselineOffsetFromTop` hands Auto Layout a
 /// lie the compiler cannot see; the conformance and the override travel together.
 @MainActor
-protocol TextBaselineProviding: NSView {}
+public protocol TextBaselineProviding: NSView {}
 
 /// The rule a pane band answers text alignment with, stated once for the header and the
 /// footer.
@@ -41,16 +41,16 @@ protocol TextBaselineProviding: NSView {}
 /// and every bare label sits on that line instead of on its own centre. A band with no such
 /// control centres everything, as before.
 @MainActor
-enum PaneBandTextAlignment {
+public enum PaneBandTextAlignment {
     /// The view whose title line the band's loose text sits on, if the band has one.
-    static func anchor(among views: [NSView]) -> NSView? {
+    public static func anchor(among views: [NSView]) -> NSView? {
         views.first { $0 is TextBaselineProviding }
     }
 
     /// Whether `view` is loose text that joins the anchor's line rather than centring itself.
     /// A single-line label is text by construction; composite views and controls keep the
     /// band's centre.
-    static func joins(_ view: NSView, anchoredBy anchor: NSView) -> Bool {
+    public static func joins(_ view: NSView, anchoredBy anchor: NSView) -> Bool {
         view !== anchor && view is NSTextField
     }
 }

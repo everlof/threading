@@ -405,14 +405,38 @@ One setting is load-bearing and non-obvious: the package builds with
 isolation from its AppKit superclass only under complete checking, and without it the shared
 sources fail on default arguments the application compiles happily.
 
+### The public surface
+
+The kit's symbols were `internal` at first, which compiles and tests but does not let a plugin in
+another package link them. They are now `public`, decided by the compiler rather than by taste:
+`Sources/ThreadingDesignKitExample` is a **separate module** in the same package that writes what a
+plugin writes — a header, a control row, a button, a spinner, on the themed ground — and a symbol
+was exported because that module could not be written without it.
+
+Publishing is mechanical and the diff is exactly one keyword per line: 71 files, verified by
+stripping `public` back out and diffing against `HEAD`, which reproduces the original byte for byte
+in 70 of them. The 71st is `TerminalProfile`, whose initializer is deliberately *not* published
+because its default argument names the application's own `PreferenceStore`. `UsageFormat.forecast`
+is unpublished for the same kind of reason: it takes a forecast only the application can compute.
+
+Three of the application's own enums — `AppTextSize`, `PromptReturnKey`, `ChatNameMorphStyle` —
+became public too, because a published component's signature names them and the seam supplies the
+same three to a plugin.
+
+`public` on an application target is otherwise a no-op, which is what makes this safe: the app
+builds unchanged, and nothing about its own layering moved. Two things are worth knowing before
+running the publisher again. Members of a `private` type must not be published — harmless, but it
+reads as API that isn't. And a type whose declaration wraps onto a second line (`public final class
+ThemedButton: ThemedControl,` … `{`) hides its opening brace from a line-oriented scope tracker, so
+everything inside it looks like a function body and silently goes unpublished; that one cost a full
+round of override errors.
+
 ### Still open
 
-The kit's symbols are `internal`, which is enough to compile and test it but not for a plugin in a
-*different* package to link. Choosing that public surface is the next decision, and it is now a
-small one: it applies to the components actually exported rather than to 323 declarations. The
-69 files also do not yet include the components a log pane wants most — `ThemedTables`,
+The 69 shared files do not yet include the components a log pane wants most — `ThemedTables`,
 `ThemedScrollView`, `ThemedPopUp`, `ThemedTextField`, `ThemedMenu` — each held back by one or two
-support types on the same pattern as those already resolved.
+support types, on the same pattern as those already resolved. Moving Device logs into a plugin is
+what should drive the next additions, so the set keeps growing against a real consumer.
 
 ## Reopen / revisit triggers
 

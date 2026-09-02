@@ -8,12 +8,12 @@ import Foundation
 /// main-actor confined during use; its private Sendable storage is uniquely owned at teardown and
 /// hands an opaque token back to the main queue if destruction ever arrives elsewhere.
 @MainActor
-final class LocalEventMonitor {
+public final class LocalEventMonitor {
     private let storage = LocalEventMonitorStorage()
 
-    var isInstalled: Bool { storage.token != nil }
+    public var isInstalled: Bool { storage.token != nil }
 
-    func install(
+    public func install(
         matching mask: NSEvent.EventTypeMask,
         handler: @escaping (NSEvent) -> NSEvent?
     ) {
@@ -24,7 +24,7 @@ final class LocalEventMonitor {
         storage.token = LocalEventMonitorToken(token)
     }
 
-    func remove() {
+    public func remove() {
         guard let token = storage.token else { return }
         storage.token = nil
         NSEvent.removeMonitor(token.value)
@@ -63,17 +63,17 @@ private final class LocalEventMonitorToken: @unchecked Sendable {
 /// installing a replacement invalidates the old generation, explicit shutdown is idempotent, and
 /// an owner dropped without shutdown hands its last timer back to the main queue for invalidation.
 @MainActor
-final class MainRunLoopTimer {
+public final class MainRunLoopTimer {
     private let storage = MainRunLoopTimerStorage()
 
-    var isInstalled: Bool { storage.timer != nil }
+    public var isInstalled: Bool { storage.timer != nil }
 
-    func install(_ timer: Timer) {
+    public func install(_ timer: Timer) {
         invalidate()
         storage.timer = MainRunLoopTimerToken(timer)
     }
 
-    func invalidate() {
+    public func invalidate() {
         guard let timer = storage.timer else { return }
         storage.timer = nil
         timer.value.invalidate()

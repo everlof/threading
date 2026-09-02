@@ -2,28 +2,28 @@ import Foundation
 import AppKit
 
 /// User preferences for a terminal session.
-struct TerminalProfile: Codable, Equatable {
+public struct TerminalProfile: Codable, Equatable {
 
     // MARK: - Properties
 
-    var name: String
-    var fontName: String
-    var fontSize: CGFloat
-    var theme: TerminalTheme
-    var shellPath: String
-    var shellArguments: [String]
-    var cursorStyle: CursorStyle
-    var cursorBlink: Bool
-    var scrollbackLines: Int
+    public var name: String
+    public var fontName: String
+    public var fontSize: CGFloat
+    public var theme: TerminalTheme
+    public var shellPath: String
+    public var shellArguments: [String]
+    public var cursorStyle: CursorStyle
+    public var cursorBlink: Bool
+    public var scrollbackLines: Int
 
     // MARK: - Cursor Style
 
-    enum CursorStyle: String, Codable, CaseIterable {
+    public enum CursorStyle: String, Codable, CaseIterable {
         case block
         case underline
         case bar
 
-        var displayName: String {
+        public var displayName: String {
             switch self {
             case .block: return "Block"
             case .underline: return "Underline"
@@ -47,7 +47,7 @@ struct TerminalProfile: Codable, Equatable {
     ///
     /// Nothing is taken away: naming a palette at any scope still wins over this, and the
     /// narrowest scope still decides.
-    static let `default` = TerminalProfile(
+    public static let `default` = TerminalProfile(
         name: "Default",
         fontName: TerminalDefaults.defaultFont,
         fontSize: TerminalDefaults.defaultFontSize,
@@ -61,7 +61,7 @@ struct TerminalProfile: Codable, Equatable {
 
     // MARK: - Font
 
-    var font: NSFont {
+    public var font: NSFont {
         if let font = NSFont(name: fontName, size: fontSize) {
             return font
         }
@@ -72,7 +72,7 @@ struct TerminalProfile: Codable, Equatable {
 // MARK: - Profile Storage
 
 @MainActor
-final class ProfileStorage {
+public final class ProfileStorage {
 
     // MARK: - Keys
 
@@ -83,7 +83,7 @@ final class ProfileStorage {
 
     // MARK: - Singleton
 
-    static let shared = ProfileStorage()
+    public static let shared = ProfileStorage()
 
     // MARK: - Storage
 
@@ -94,6 +94,7 @@ final class ProfileStorage {
     private let persistence: RecoverableDefaultsStore<[TerminalProfile]>
     private var storedProfiles: [TerminalProfile]
 
+    // Not published: the default argument names the application's own preference store.
     init(defaults: UserDefaults = PreferenceStore.shared) {
         self.defaults = defaults
         self.persistence = RecoverableDefaultsStore(
@@ -105,7 +106,7 @@ final class ProfileStorage {
         self.storedProfiles = persistence.load(defaultValue: [.default]).value
     }
 
-    var profiles: [TerminalProfile] {
+    public var profiles: [TerminalProfile] {
         get { storedProfiles }
         set {
             if persistence.save(newValue) {
@@ -114,7 +115,7 @@ final class ProfileStorage {
         }
     }
 
-    var defaultProfile: TerminalProfile {
+    public var defaultProfile: TerminalProfile {
         get {
             let name = defaults.string(forKey: Keys.defaultProfileName) ?? TerminalProfile.default.name
             return profiles.first { $0.name == name } ?? .default
@@ -138,7 +139,7 @@ final class ProfileStorage {
         return true
     }
 
-    func save(_ profile: TerminalProfile) {
+    public func save(_ profile: TerminalProfile) {
         var candidate = storedProfiles
         if let index = candidate.firstIndex(where: { $0.name == profile.name }) {
             candidate[index] = profile
@@ -150,12 +151,12 @@ final class ProfileStorage {
         }
     }
 
-    func delete(_ profile: TerminalProfile) {
+    public func delete(_ profile: TerminalProfile) {
         persist(storedProfiles.filter { $0.name != profile.name })
     }
 
     /// Update the theme for the default profile and notify terminals
-    func setTheme(_ theme: TerminalTheme) {
+    public func setTheme(_ theme: TerminalTheme) {
         var profile = defaultProfile
         profile.theme = theme
         save(profile)

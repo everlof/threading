@@ -13,25 +13,25 @@ import AppKit
 /// dangling-reference rule every theme lookup here follows. The registry is consulted first
 /// only because contributed ids are namespaced; the two stores cannot actually collide.
 @MainActor
-enum SidebarAppearance {
+public enum SidebarAppearance {
 
     // MARK: - Navigator Work Area
 
-    struct NavigatorWell: Equatable {
-        let fill: NSColor
-        let bevel: SurfaceBevel
+    public struct NavigatorWell: Equatable {
+        public let fill: NSColor
+        public let bevel: SurfaceBevel
         /// Content starts inside the authored edge so the document view cannot paint over it.
-        let edgeWidth: CGFloat
+        public let edgeWidth: CGFloat
     }
 
     /// Nil preserves the original transparent navigator. A stated well is a region-level
     /// decision, not a new global surface role: a theme may want white Explorer work areas
     /// while keeping every ordinary panel silver.
-    static func navigatorWell() -> NavigatorWell? {
+    public static func navigatorWell() -> NavigatorWell? {
         navigatorWell(for: NSApplication.shared.effectiveAppearance)
     }
 
-    static func navigatorWell(for appearance: NSAppearance) -> NavigatorWell? {
+    public static func navigatorWell(for appearance: NSAppearance) -> NavigatorWell? {
         let theme = AppThemePalette.current
         guard let stated = theme.variant(for: appearance)?.sidebar?.navigatorWell else {
             return nil
@@ -48,31 +48,31 @@ enum SidebarAppearance {
 
     // MARK: - Background
 
-    struct Background: Equatable {
-        var gradient: Gradient?
-        var image: ImageLayer?
+    public struct Background: Equatable {
+        public var gradient: Gradient?
+        public var image: ImageLayer?
 
-        struct Gradient: Equatable {
-            let colors: [NSColor]
-            let locations: [CGFloat]
+        public struct Gradient: Equatable {
+            public let colors: [NSColor]
+            public let locations: [CGFloat]
             /// CSS convention, as authored: degrees clockwise from "toward the top".
-            let angleDegrees: CGFloat
+            public let angleDegrees: CGFloat
         }
 
-        struct ImageLayer: Equatable {
-            let image: NSImage
-            let mode: SidebarStyle.ImageLayer.Mode
-            let opacity: CGFloat
+        public struct ImageLayer: Equatable {
+            public let image: NSImage
+            public let mode: SidebarStyle.ImageLayer.Mode
+            public let opacity: CGFloat
         }
     }
 
     /// What the current theme asks the sidebar's ground to draw, or nil for the plain surface
     /// every theme drew before this existed.
-    static func background() -> Background? {
+    public static func background() -> Background? {
         background(for: NSApplication.shared.effectiveAppearance)
     }
 
-    static func background(for appearance: NSAppearance) -> Background? {
+    public static func background(for appearance: NSAppearance) -> Background? {
         let theme = AppThemePalette.current
         guard let stated = theme.variant(for: appearance)?.sidebar?.background,
               !stated.isEmpty else { return nil }
@@ -102,27 +102,27 @@ enum SidebarAppearance {
 
     // MARK: - Brand
 
-    struct Brand: Equatable {
-        enum Logo: Equatable {
+    public struct Brand: Equatable {
+        public enum Logo: Equatable {
             /// The Threading mark, drawn live.
             case mark
             case image(NSImage)
             case hidden
         }
 
-        let logo: Logo
+        public let logo: Logo
         /// Nil when the theme hides the wordmark.
-        let title: String?
+        public let title: String?
         /// The recipe the wordmark label records, so the theme sweep re-resolves it.
-        let titleRole: Design.FontRole
+        public let titleRole: Design.FontRole
     }
 
     /// Always answers: absence at every level means the Threading mark beside the app's name.
-    static func brand() -> Brand {
+    public static func brand() -> Brand {
         brand(for: NSApplication.shared.effectiveAppearance)
     }
 
-    static func brand(for appearance: NSAppearance) -> Brand {
+    public static func brand(for appearance: NSAppearance) -> Brand {
         let theme = AppThemePalette.current
         let stated = theme.variant(for: appearance)?.sidebar?.brand
 

@@ -12,7 +12,7 @@ import AppKit
 ///
 /// The header draws nothing itself — the hairline is a `SeparatorView`, and the ground beneath
 /// is the pane's own. Hosts pin leading, trailing and top; the band supplies its height.
-final class PaneHeaderView: NSView {
+public final class PaneHeaderView: NSView {
 
     // MARK: - Geometry
 
@@ -20,7 +20,7 @@ final class PaneHeaderView: NSView {
     /// by the rule that ends the band. The rule is outside that air: counting it inside the old
     /// fixed height made a one-point separator almost invisible to the geometry and let
     /// Bauhaus's four-point rule consume most of the lower margin.
-    static var bandHeight: CGFloat {
+    public static var bandHeight: CGFloat {
         Design.Size.tabHeight + Design.Spacing.small * 2 + Design.Radius.border
     }
 
@@ -30,10 +30,10 @@ final class PaneHeaderView: NSView {
     /// re-derived it got it subtly wrong. A band this component does not itself lay out — the
     /// window's caption row, when a theme seats the window's commands in it — reads these two
     /// rather than repeating the numbers.
-    static let contentInset: CGFloat = Design.Spacing.inset
+    public static let contentInset: CGFloat = Design.Spacing.inset
 
     /// Between sibling controls on the same side.
-    static let itemSpacing: CGFloat = Design.Spacing.small
+    public static let itemSpacing: CGFloat = Design.Spacing.small
 
     // MARK: - Properties
 
@@ -47,7 +47,7 @@ final class PaneHeaderView: NSView {
     /// composite pane headers can align their host-owned controls to the same row without
     /// re-deriving the separator's theme-dependent thickness.
     private let contentAreaGuide = NSLayoutGuide()
-    var contentCenterYAnchor: NSLayoutYAxisAnchor { contentAreaGuide.centerYAnchor }
+    public var contentCenterYAnchor: NSLayoutYAxisAnchor { contentAreaGuide.centerYAnchor }
 
     private let separator = SeparatorView()
     private lazy var bandHeightConstraint = heightAnchor.constraint(
@@ -60,7 +60,7 @@ final class PaneHeaderView: NSView {
 
     /// Both arrays run leading-to-trailing; the first leading view and the last trailing view
     /// touch their margins and are the ones aligned by ink.
-    init(
+    public init(
         leading: [NSView] = [],
         trailing: [NSView] = [],
         margin: PaneBandMargin = .cornerAdapted
@@ -81,11 +81,11 @@ final class PaneHeaderView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func layout() {
+    public override func layout() {
         applyMetrics()
         super.layout()
     }

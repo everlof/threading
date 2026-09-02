@@ -6,9 +6,9 @@ import AppKit
 /// *system* grey — which on a themed page is the one grey the theme has already replaced.
 /// Swiss Minimalist is the case that makes this obvious: the style is black rules on white, and
 /// a pale system hairline is the single thing it cannot have.
-final class SeparatorView: NSView, ThemedComponent {
+public final class SeparatorView: NSView, ThemedComponent {
 
-    enum Orientation {
+    public enum Orientation {
         case horizontal
         case vertical
     }
@@ -18,7 +18,7 @@ final class SeparatorView: NSView, ThemedComponent {
     /// Most separators divide rows inside one surface and deliberately stay quiet. A boundary
     /// between sibling panes has to remain legible when both panes resolve to nearly the same
     /// ground, so it takes the theme's structural border ink instead.
-    enum Role {
+    public enum Role {
         case content
         case paneBoundary
     }
@@ -27,7 +27,7 @@ final class SeparatorView: NSView, ThemedComponent {
     private let role: Role
     private var themeRedraw: ThemeRedraw?
 
-    init(_ orientation: Orientation = .horizontal, role: Role = .content) {
+    public init(_ orientation: Orientation = .horizontal, role: Role = .content) {
         self.orientation = orientation
         self.role = role
         super.init(frame: .zero)
@@ -37,13 +37,13 @@ final class SeparatorView: NSView, ThemedComponent {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     /// The rule's thickness is the theme's border width, so a style that draws heavy rules draws
     /// them here too rather than only around its cards.
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         switch orientation {
         case .horizontal: NSSize(width: NSView.noIntrinsicMetric, height: Design.Radius.border)
         case .vertical: NSSize(width: Design.Radius.border, height: NSView.noIntrinsicMetric)
@@ -54,7 +54,7 @@ final class SeparatorView: NSView, ThemedComponent {
     /// draws. A padded control owns the correction; the separator merely applies it on the axis
     /// it divides. Bare labels and structural containers have no correction and keep the full
     /// gap.
-    func frameGap(to adjacentView: NSView, forInkGap inkGap: CGFloat) -> CGFloat {
+    public func frameGap(to adjacentView: NSView, forInkGap inkGap: CGFloat) -> CGFloat {
         guard let provider = adjacentView as? OpticalInsetProviding else {
             return max(0, inkGap)
         }
@@ -73,7 +73,7 @@ final class SeparatorView: NSView, ThemedComponent {
     /// Applies one visible-ink gap on both sides of a rule arranged in a stack. The views are
     /// the actual neighbours whose frames the stack places; hidden or nested content remains the
     /// host's decision rather than something this component walks and guesses at.
-    func applyOpticalSpacing(
+    public func applyOpticalSpacing(
         in stack: NSStackView,
         precededBy precedingView: NSView?,
         followedBy followingView: NSView?,
@@ -133,7 +133,7 @@ final class SeparatorView: NSView, ThemedComponent {
         return max(0, axis == .horizontal ? fitting.width : fitting.height)
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         switch role {
         case .content: Design.Surface.divider.setFill()
         case .paneBoundary: Design.Surface.border.setFill()
@@ -150,13 +150,13 @@ final class SeparatorView: NSView, ThemedComponent {
 /// Non-blocking outcomes remain the neutral base track while adjacent text keeps every provider
 /// state distinct, so neither the outcome nor its reason depends on hue.
 @MainActor
-enum ThemedStatusProgressRing {
+public enum ThemedStatusProgressRing {
 
-    struct Fractions: Equatable {
-        let positive: CGFloat
-        let nonBlocking: CGFloat
-        let active: CGFloat
-        let negative: CGFloat
+    public struct Fractions: Equatable {
+        public let positive: CGFloat
+        public let nonBlocking: CGFloat
+        public let active: CGFloat
+        public let negative: CGFloat
     }
 
     private enum Layout {
@@ -169,7 +169,7 @@ enum ThemedStatusProgressRing {
         static let maximumCount = 10_000
     }
 
-    static func fractions(
+    public static func fractions(
         positive: Int,
         nonBlocking: Int,
         active: Int,
@@ -190,7 +190,7 @@ enum ThemedStatusProgressRing {
         )
     }
 
-    static func image(
+    public static func image(
         positive: Int,
         nonBlocking: Int,
         active: Int,
@@ -270,7 +270,7 @@ enum ThemedStatusProgressRing {
 /// It animates with a `CABasicAnimation` on a sublayer rather than by redrawing on a timer: a
 /// spinner runs for as long as an agent is working, which is minutes, and a timer-driven redraw
 /// of a 12pt view is main-thread work for the whole of it.
-final class ThemedSpinner: NSView, ThemedComponent {
+public final class ThemedSpinner: NSView, ThemedComponent {
 
     private enum Layout {
         static let size: CGFloat = 14
@@ -292,7 +292,7 @@ final class ThemedSpinner: NSView, ThemedComponent {
     /// the ground itself, so the host names the new ground and the spinner takes its legible ink.
     /// The ground is retained rather than a resolved colour so live theme changes are answered
     /// again on the next draw.
-    var hostGround: InkSource? {
+    public var hostGround: InkSource? {
         didSet {
             guard hostGround != oldValue else { return }
             needsDisplay = true
@@ -301,11 +301,11 @@ final class ThemedSpinner: NSView, ThemedComponent {
 
     /// Mirrors `NSProgressIndicator.isDisplayedWhenStopped`, and defaults the same way this app
     /// used it: a stopped spinner is not a small grey ring, it is nothing.
-    var isAnimating: Bool = false {
+    public var isAnimating: Bool = false {
         didSet { applyAnimation() }
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         arc.fillColor = nil
@@ -333,21 +333,21 @@ final class ThemedSpinner: NSView, ThemedComponent {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         NSSize(width: Layout.size, height: Layout.size)
     }
 
-    override func isAccessibilityElement() -> Bool { true }
-    override func accessibilityRole() -> NSAccessibility.Role? { .progressIndicator }
-    override func accessibilityLabel() -> String? {
+    public override func isAccessibilityElement() -> Bool { true }
+    public override func accessibilityRole() -> NSAccessibility.Role? { .progressIndicator }
+    public override func accessibilityLabel() -> String? {
         super.accessibilityLabel() ?? "Working"
     }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         let inset = Layout.lineWidth
         let box = bounds.insetBy(dx: inset, dy: inset)
@@ -364,11 +364,11 @@ final class ThemedSpinner: NSView, ThemedComponent {
     /// bug themed controls draw to avoid. A spinner cannot be drawn without a layer if it is to
     /// animate off the main thread, so the colour is re-applied on every redraw instead, and
     /// `ThemeRedraw` is what asks for one.
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         arc.strokeColor = (hostGround?.ink.label ?? Design.Surface.accent).cgColor
     }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
     }
@@ -377,7 +377,7 @@ final class ThemedSpinner: NSView, ThemedComponent {
     /// the view's `contentsScale`, so the arc rasterised its path at 1× and the compositor
     /// scaled it up — a 1.5pt ring that was two pixels of grey smear on every Retina display,
     /// for every minute an agent worked. Re-asked when the window moves between displays.
-    override func viewDidChangeBackingProperties() {
+    public override func viewDidChangeBackingProperties() {
         super.viewDidChangeBackingProperties()
         applyContentsScale()
     }
@@ -427,7 +427,7 @@ final class ThemedSpinner: NSView, ThemedComponent {
 ///
 /// One page load's worth of feedback in the browser pane, in the accent rather than in the system
 /// blue a themed window has already moved away from.
-final class ThemedProgressBar: NSView, ThemedComponent {
+public final class ThemedProgressBar: NSView, ThemedComponent {
 
     private enum Layout {
         static let height: CGFloat = 3
@@ -437,7 +437,7 @@ final class ThemedProgressBar: NSView, ThemedComponent {
 
     /// 0…1. Clamped, because a caller reading a fraction off a web view is reading someone
     /// else's number.
-    var progress: Double = 0 {
+    public var progress: Double = 0 {
         didSet {
             needsDisplay = true
             if progress != oldValue {
@@ -446,22 +446,22 @@ final class ThemedProgressBar: NSView, ThemedComponent {
         }
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         themeRedraw = ThemeRedraw(self)
     }
 
-    override func setNeedsDisplay(_ invalidRect: NSRect) {
+    public override func setNeedsDisplay(_ invalidRect: NSRect) {
         super.setNeedsDisplay(invalidRect)
         invalidateIntrinsicContentSize()
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         NSSize(
             width: NSView.noIntrinsicMetric,
             height: usesWorkbenchProgress
@@ -472,14 +472,14 @@ final class ThemedProgressBar: NSView, ThemedComponent {
         )
     }
 
-    override func isAccessibilityElement() -> Bool { true }
-    override func accessibilityRole() -> NSAccessibility.Role? { .progressIndicator }
-    override func accessibilityLabel() -> String? {
+    public override func isAccessibilityElement() -> Bool { true }
+    public override func accessibilityRole() -> NSAccessibility.Role? { .progressIndicator }
+    public override func accessibilityLabel() -> String? {
         super.accessibilityLabel() ?? "Progress"
     }
-    override func accessibilityValue() -> Any? { min(max(progress, 0), 1) }
+    public override func accessibilityValue() -> Any? { min(max(progress, 0), 1) }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         if usesWorkbenchProgress {
             ThemedProgressDrawing.drawWorkbench(
                 in: bounds,
@@ -542,19 +542,19 @@ final class ThemedProgressBar: NSView, ThemedComponent {
 /// kept drawing a modern navy pill under Windows 98 even after the theme had explicitly chosen
 /// segmented progress. Geometry lives here so every determinate gauge answers the same material.
 @MainActor
-enum ThemedProgressDrawing {
-    static let classicHeight: CGFloat = 14
+public enum ThemedProgressDrawing {
+    public static let classicHeight: CGFloat = 14
     /// Workbench's manual names a horizontal percentage gauge but preserves no native pixels.
     /// This compact height follows its 18px requester/control rhythm and remains source-inferred.
-    static let workbenchHeight: CGFloat = 12
+    public static let workbenchHeight: CGFloat = 12
     /// The Indigo Magic scale's measured native figure is a compact fourteen-pixel well,
     /// matching the source crop's outer frame rather than the modern three-pixel rail.
-    static let irixHeight: CGFloat = 14
+    public static let irixHeight: CGFloat = 14
     private static let edge: CGFloat = 2
     private static let segmentWidth: CGFloat = 7
     private static let segmentGap: CGFloat = 2
 
-    static func drawSegmented(in bounds: NSRect, fraction: Double, tint: NSColor) {
+    public static func drawSegmented(in bounds: NSRect, fraction: Double, tint: NSColor) {
         _ = ThemedSurface.draw(
             bounds,
             fill: Design.Surface.controlResting,
@@ -572,7 +572,7 @@ enum ThemedProgressDrawing {
     /// Workbench's source-backed *grammar* is a horizontal percentage gauge, not Win32's
     /// separated blocks. Keep the four-colour trough and the active title blue while leaving
     /// the unresolved native thickness documented at the material level.
-    static func drawWorkbench(in bounds: NSRect, fraction: Double, tint: NSColor) {
+    public static func drawWorkbench(in bounds: NSRect, fraction: Double, tint: NSColor) {
         _ = ThemedSurface.draw(
             bounds,
             fill: Design.Surface.field,
@@ -598,7 +598,7 @@ enum ThemedProgressDrawing {
     /// The source figure shows the diagonal as eight pixels across the inset track; keeping it
     /// as a path (rather than a rectangle followed by a decorative slash) makes the fill and
     /// the empty well share one silhouette at every fraction.
-    static func drawIRIX(in bounds: NSRect, fraction: Double, tint: NSColor) {
+    public static func drawIRIX(in bounds: NSRect, fraction: Double, tint: NSColor) {
         _ = ThemedSurface.draw(
             bounds,
             fill: Design.Surface.controlResting,
@@ -654,7 +654,7 @@ enum ThemedProgressDrawing {
     ///
     /// `upTo` exists for `drawSegmented`, whose last chunk may straddle the fraction and is then
     /// clipped by the *track*, not by the fraction. Left at nil the chunks fill `track`.
-    static func drawSegments(in track: NSRect, tint: NSColor, upTo limit: CGFloat? = nil) {
+    public static func drawSegments(in track: NSRect, tint: NSColor, upTo limit: CGFloat? = nil) {
         guard track.width > 0, track.height > 0 else { return }
 
         let limit = limit ?? track.maxX
@@ -691,20 +691,20 @@ enum ThemedProgressDrawing {
 /// edge it interrupts, and `Design.Radius.control` is 8 under System, which on an 11pt triangle
 /// would round the whole shape into a blob. A theme that squares its panels draws this sharp, the
 /// same way `Design.Radius.pill` stops being a pill under Swiss Minimalist.
-final class ThemedWarningMark: NSView, ThemedComponent {
+public final class ThemedWarningMark: NSView, ThemedComponent {
 
     // MARK: - Types
 
     /// Which status role the mark is filled with. Two rather than one because the fill is the
     /// only thing separating "this went wrong" from "this needs a look", and a caller that had
     /// to reach for `Design.Status` itself would be choosing a colour rather than a meaning.
-    enum Severity {
+    public enum Severity {
         /// Something is stopped or failed — the red role.
         case negative
         /// Something wants attention but is still running — the warning role.
         case warning
 
-        var fill: NSColor {
+        public var fill: NSColor {
             switch self {
             case .negative: return Design.Status.negative
             case .warning: return Design.Status.warning
@@ -727,7 +727,7 @@ final class ThemedWarningMark: NSView, ThemedComponent {
 
     // MARK: - Properties
 
-    var severity: Severity = .negative {
+    public var severity: Severity = .negative {
         didSet {
             guard severity != oldValue else { return }
             needsDisplay = true
@@ -737,7 +737,7 @@ final class ThemedWarningMark: NSView, ThemedComponent {
     /// A ground the host painted over the mark's ordinary surface. The triangle already carries
     /// the warning without colour, so on an emphasized selection it takes the selection's ink
     /// instead of risking a status hue that disappears into the fill.
-    var hostGround: InkSource? {
+    public var hostGround: InkSource? {
         didSet {
             guard hostGround != oldValue else { return }
             needsDisplay = true
@@ -748,19 +748,19 @@ final class ThemedWarningMark: NSView, ThemedComponent {
 
     // MARK: - Initialization
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         themeRedraw = ThemeRedraw(self)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     // MARK: - Layout
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         NSSize(width: Layout.size, height: Layout.size)
     }
 
@@ -769,14 +769,14 @@ final class ThemedWarningMark: NSView, ThemedComponent {
     /// A mark states what it means or it is decoration. The label is the host's to set — the
     /// same shape can say "stopped at its usage limit" on a row and something else in a
     /// gallery — so only the role and the element flag are answered here.
-    override func isAccessibilityElement() -> Bool { true }
-    override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
+    public override func isAccessibilityElement() -> Bool { true }
+    public override func accessibilityRole() -> NSAccessibility.Role? { .staticText }
 
     // MARK: - Drawing
 
     /// Drawn rather than laid into a layer: a resolved `CGColor` keeps the palette it was made
     /// under, and this mark can sit on a row for hours across a theme switch.
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         (hostGround?.ink.label ?? severity.fill).setFill()
         Self.trianglePath(in: bounds).fill()
     }
@@ -796,7 +796,7 @@ final class ThemedWarningMark: NSView, ThemedComponent {
     /// `centringInk` also weighs the shape, so the lift a triangle needs over a dot is measured
     /// from this path rather than claimed here. Nothing about the mark states that it is
     /// bottom-heavy; it simply is, and `OpticalCentring` reads it.
-    static func trianglePath(in bounds: NSRect) -> NSBezierPath {
+    public static func trianglePath(in bounds: NSRect) -> NSBezierPath {
         let width = min(Layout.width, bounds.width)
         let height = min(Layout.height, bounds.height)
         let originX = bounds.midX - width / 2

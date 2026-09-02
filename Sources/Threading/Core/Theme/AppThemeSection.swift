@@ -10,24 +10,24 @@ import Foundation
 ///
 /// Grouping here costs no navigation. A `ThemedMenuEntry.header` is not a submenu, so a theme is
 /// still one press away — see [`docs/architecture/themes.md`](../../../../docs/architecture/themes.md).
-struct AppThemeSection {
+public struct AppThemeSection {
 
     /// The head drawn over the section's rows, or nil for a group that carries none.
     ///
     /// Presentation-ready, not a key: a section may be named after the extension that ships its
     /// themes, and an extension called "Custom" must not come out of a string table as
     /// something else. The stock families localize their own titles where they are stated.
-    let title: String?
+    public let title: String?
 
-    let themes: [AppTheme]
+    public let themes: [AppTheme]
 
-    init(_ title: String, _ themes: [AppTheme]) {
+    public init(_ title: String, _ themes: [AppTheme]) {
         self.title = title
         self.themes = themes
     }
 
     /// A group that carries no head.
-    init(_ themes: [AppTheme]) {
+    public init(_ themes: [AppTheme]) {
         self.title = nil
         self.themes = themes
     }

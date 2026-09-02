@@ -15,7 +15,7 @@ import AppKit
 /// gold. A control that rests green and lifts red is the whole style in one hover.
 extension AppThemeStyles {
 
-    static let christmas = AppTheme(
+    public static let christmas = AppTheme(
         id: AppThemeID("christmas"),
         name: "Christmas",
         mode: .system,

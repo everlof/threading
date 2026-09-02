@@ -36,7 +36,7 @@ import AppKit
 ///
 /// The single judgement left is `balance`: *how far* towards the centre of mass to move. Half,
 /// picked from a zoomed render beside the dots the mark shares a column with.
-enum OpticalCentring {
+public enum OpticalCentring {
 
     // MARK: - Types
 
@@ -47,7 +47,7 @@ enum OpticalCentring {
     /// itself, which is always better than an author's claim about it. Named for the *shape*
     /// rather than for a number, so the one case that must be declared still says what it is
     /// drawing instead of carrying a literal.
-    enum InkMass {
+    public enum InkMass {
         /// Spread evenly enough that the bounding box is the answer — a disc, a ring, a bar, a
         /// letterform, most SF Symbols.
         case even
@@ -61,7 +61,7 @@ enum OpticalCentring {
         /// The correction as a fraction of the ink's height — `balance` applied to a triangle's
         /// own geometry, which is where these numbers come from: its centroid sits `height / 6`
         /// off the box's middle, halved is `height / 12`.
-        var rise: CGFloat {
+        public var rise: CGFloat {
             switch self {
             case .even: return 0
             case .baseHeavy: return balance / 6
@@ -80,7 +80,7 @@ enum OpticalCentring {
     /// is under the middle; a centroid-centred one throws the apex half again as far above the
     /// line as the base falls below it. Half was picked from a zoomed render of the sidebar's
     /// marks beside the dots they share a column with.
-    static let balance: CGFloat = 0.5
+    public static let balance: CGFloat = 0.5
 
     // MARK: - Public Methods
 
@@ -89,7 +89,7 @@ enum OpticalCentring {
     /// For a component drawing something that is not an `NSBezierPath` — a template image, a
     /// glyph run, a layer's contents. It cannot measure the distribution, so the caller states
     /// it; prefer the path overload, which does not have to be told.
-    static func offset(
+    public static func offset(
         centring ink: NSRect,
         in bounds: NSRect,
         mass: InkMass = .even
@@ -110,7 +110,7 @@ enum OpticalCentring {
     /// therefore moves not at all, while a triangle measures `height / 6` below it and rises by
     /// half of that — the same numbers `InkMass` states for the callers that cannot be measured,
     /// arrived at rather than asserted.
-    static func offset(
+    public static func offset(
         centring path: NSBezierPath,
         in bounds: NSRect,
         balance: CGFloat = balance
@@ -145,7 +145,7 @@ enum OpticalCentring {
     ///
     /// Subpaths are summed with signed areas, so a hole subtracts itself and a shape drawn as
     /// several pieces answers for all of them.
-    static func centreOfMass(of path: NSBezierPath) -> NSPoint? {
+    public static func centreOfMass(of path: NSBezierPath) -> NSPoint? {
         let flattened = path.flattened
         guard flattened.elementCount > 1 else { return nil }
 
@@ -210,7 +210,7 @@ extension NSBezierPath {
     /// `draw(_:)` reads as one expression, which is what keeps the rule from being the line
     /// somebody forgets to add after building a shape.
     @discardableResult
-    func centringInk(in bounds: NSRect, balance: CGFloat = OpticalCentring.balance) -> NSBezierPath {
+    public func centringInk(in bounds: NSRect, balance: CGFloat = OpticalCentring.balance) -> NSBezierPath {
         // `bounds` raises `NSGenericException: No current point` on a path with nothing in it —
         // an ObjC exception, so it cannot be caught in Swift and takes the app with it. A
         // component that draws nothing under some state (a zero-size slot, a shape whose radius

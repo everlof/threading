@@ -22,7 +22,7 @@ import AppKit
 /// No explicit `@MainActor`: `NSControl` already carries it from the SDK, and adding it again
 /// over-isolates the control's own properties relative to the plain `SettingsUI` helpers that
 /// build these.
-class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
+public class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
 
     private var themeRedraw: ThemeRedraw?
 
@@ -34,52 +34,52 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
     /// control is covering. A subclass that means something else says so: `.pointingHand` where
     /// the thing pressed reads as text, `nil` where it is genuinely transparent. See
     /// `PointerClaiming`.
-    var restingPointer: NSCursor? { .arrow }
+    public var restingPointer: NSCursor? { .arrow }
 
     /// Declared here rather than left to `PointerClaiming`'s default, and that is load-bearing:
     /// a protocol-extension default becomes the witness for every subclass at once, so a
     /// subclass's own `pointerClaims` would never be asked for. Stated on the class, the
     /// override is an ordinary one.
-    var pointerClaims: [PointerClaim] { [] }
+    public var pointerClaims: [PointerClaim] { [] }
 
-    override func resetCursorRects() {
+    public override func resetCursorRects() {
         registerPointerClaims()
     }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         refreshPointerClaims()
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         themeRedraw = ThemeRedraw(self)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     /// Themed controls draw their own appearance top to bottom, so the layer-backed view never
     /// needs the extra pass AppKit would otherwise take.
-    override var wantsUpdateLayer: Bool { false }
+    public override var wantsUpdateLayer: Bool { false }
 
     /// Keyboard access is part of the base contract, not something each drawn control may
     /// remember independently. A disabled control leaves the key-view loop just like AppKit's.
-    override var acceptsFirstResponder: Bool { isEnabled }
+    public override var acceptsFirstResponder: Bool { isEnabled }
 
-    var hasKeyboardFocus: Bool {
+    public var hasKeyboardFocus: Bool {
         window?.firstResponder === self
     }
 
     /// Reports focus without asking a feature to subclass or observe AppKit responders. A host
     /// uses this when a control's surrounding presentation must stay visible while the keyboard
     /// is on it, just as `onHoverChange` exposes the shared pointer state below.
-    var onKeyboardFocusChange: ((Bool) -> Void)?
+    public var onKeyboardFocusChange: ((Bool) -> Void)?
 
-    override var isEnabled: Bool {
+    public override var isEnabled: Bool {
         didSet {
             if !isEnabled, hasKeyboardFocus {
                 window?.makeFirstResponder(nil)
@@ -88,7 +88,7 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
         }
     }
 
-    override func becomeFirstResponder() -> Bool {
+    public override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted {
             needsDisplay = true
@@ -97,7 +97,7 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
         return accepted
     }
 
-    override func resignFirstResponder() -> Bool {
+    public override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
         if resigned {
             needsDisplay = true
@@ -132,18 +132,18 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
     /// arrival presents. Before this seam, every such caller either wrapped the control in a
     /// tracking view or installed a competing area, and both versions could disagree with the
     /// fill already on screen after scrolling or reuse moved the control under a still pointer.
-    var onHoverChange: ((Bool) -> Void)?
+    public var onHoverChange: ((Bool) -> Void)?
 
     /// Answered when the pointer arrives or leaves. The default redraw is what a control drawing
     /// its own hover fill needs; a control that hovers by moving a layer or a constraint overrides
     /// this instead of watching the flag itself.
-    func hoverDidChange() {
+    public func hoverDidChange() {
         needsDisplay = true
     }
 
     private var hoverTrackingArea: NSTrackingArea?
 
-    override func updateTrackingAreas() {
+    public override func updateTrackingAreas() {
         super.updateTrackingAreas()
 
         if let hoverTrackingArea {
@@ -165,17 +165,17 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
         }
     }
 
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false }
+    public override func mouseEntered(with event: NSEvent) { isHovered = true }
+    public override func mouseExited(with event: NSEvent) { isHovered = false }
 
     /// Detachment produces no pointer-exit event. Clear the shared answer here so a retained
     /// control cannot keep either its wash or hover-presented detail alive after its row left.
-    override func viewDidMoveToWindow() {
+    public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil { isHovered = false }
     }
 
-    override func keyDown(with event: NSEvent) {
+    public override func keyDown(with event: NSEvent) {
         guard isEnabled else {
             super.keyDown(with: event)
             return
@@ -193,7 +193,7 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
 
     /// Subclasses route keyboard activation through the same semantic action as pointer and
     /// accessibility activation. Returning false lets AppKit continue handling the key.
-    func performPrimaryAction() -> Bool {
+    public func performPrimaryAction() -> Bool {
         guard action != nil else { return false }
         sendAction(action, to: target)
         return true
@@ -218,7 +218,7 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
     /// reported as two buttons of different sizes rather than as a focus ring at all. A bordered
     /// control needs nothing here: its edge is a hairline the ring can stand in for, so the
     /// silhouette still ends where it always did.
-    func drawKeyboardFocus(
+    public func drawKeyboardFocus(
         around shape: ThemedSurface.Shape,
         color: NSColor = Design.Surface.accent,
         keepingEdge edge: CGFloat = 0
@@ -241,7 +241,7 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
     /// outside `shape`, because drawing is clipped there: a ring stroked into room that was not
     /// reserved comes back at partial weight or not at all. `clippingSilhouette` is deliberately
     /// not consulted — an applied surface *is* the clip, so there is no outside to draw in.
-    func drawKeyboardFocus(
+    public func drawKeyboardFocus(
         around shape: ThemedSurface.Shape,
         color: NSColor = Design.Surface.accent,
         outsideBy gap: CGFloat
@@ -266,7 +266,7 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
     ///
     /// - Parameter plate: the host drawing the surface — a welded half's superview. Nil is
     ///   answered with this control's own silhouette, which is all an unwelded half has.
-    func drawKeyboardFocus(
+    public func drawKeyboardFocus(
         weldedInto plate: NSView?,
         color: NSColor = Design.Surface.accent,
         keepingEdge edge: CGFloat = 0
@@ -304,8 +304,8 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
     /// itself has no cell, so it has to say so. Without this a themed control is invisible to
     /// VoiceOver and to UI scripting alike — which is also how this was noticed, a settings page
     /// reporting no pop-up buttons on a page that visibly has one.
-    override func isAccessibilityElement() -> Bool { true }
-    override func isAccessibilityEnabled() -> Bool { isEnabled }
+    public override func isAccessibilityElement() -> Bool { true }
+    public override func isAccessibilityEnabled() -> Bool { isEnabled }
 }
 
 /// Applies the design system's disabled recipe before any part of a modern control is drawn.
@@ -313,8 +313,8 @@ class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
 /// control inventing a different replacement colour. Callers whose material has a historically
 /// authored disabled gadget do not use this wrapper.
 @MainActor
-enum DisabledControlDrawing {
-    static func draw(isEnabled: Bool, _ body: () -> Void) {
+public enum DisabledControlDrawing {
+    public static func draw(isEnabled: Bool, _ body: () -> Void) {
         guard !isEnabled, let context = NSGraphicsContext.current?.cgContext else {
             body()
             return
@@ -343,15 +343,15 @@ enum DisabledControlDrawing {
 /// `makeFirstResponder` inside it, so a key press means the user traversed here and a click — or
 /// nothing at all, which is a surface placing focus itself — means they did not. Deliberately not
 /// in `ThemedControl`: every ordinary control should keep answering focus the way it does.
-struct KeyboardFocusOrigin {
+public struct KeyboardFocusOrigin {
 
     private(set) var isFromKeyboard = false
 
-    mutating func arrived(from event: NSEvent?) {
+    public mutating func arrived(from event: NSEvent?) {
         isFromKeyboard = event?.type == .keyDown
     }
 
-    mutating func resigned() {
+    public mutating func resigned() {
         isFromKeyboard = false
     }
 }
@@ -364,17 +364,17 @@ struct KeyboardFocusOrigin {
 /// `cgColor` on a layer, which resolves once and freezes — fine for a container rebuilt on a
 /// theme change, wrong for a control that must survive a live switch.
 @MainActor
-enum ThemedSurface {
+public enum ThemedSurface {
 
     /// The silhouette a surface was drawn as: a rect and the corner it was given.
     ///
     /// Returned instead of the `NSBezierPath` itself because the ring that follows a surface has
     /// to be *inset* from it, and a path cannot be inset — only rebuilt, which is the caller
     /// re-deriving the same three tokens and drifting by half a point.
-    struct Shape {
-        let rect: NSRect
+    public struct Shape {
+        public let rect: NSRect
         /// Never larger than half the shorter side — see `init(rect:radius:)`.
-        let radius: CGFloat
+        public let radius: CGFloat
 
         /// A corner is **fitted to the rect it turns**, because the two ways this app draws one
         /// rounded surface disagree about what an oversized radius means.
@@ -389,20 +389,20 @@ enum ThemedSurface {
         /// Fitted here rather than at the call sites: a radius token is a theme's to state and a
         /// rect is the caller's, and neither of them is in a position to notice that this
         /// particular pairing has no round corner left to draw.
-        init(rect: NSRect, radius: CGFloat) {
+        public init(rect: NSRect, radius: CGFloat) {
             self.rect = rect
             let shorterSide = max(0, min(rect.width, rect.height))
             self.radius = min(max(0, radius), shorterSide / 2)
         }
 
-        var path: NSBezierPath {
+        public var path: NSBezierPath {
             NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
         }
 
         /// The same silhouette pulled inwards, corners kept concentric: a disc stays a disc and
         /// a squared theme's rect stays square, where holding the radius would leave a ring
         /// bulging out of the shape it belongs to.
-        func inset(by amount: CGFloat) -> Shape {
+        public func inset(by amount: CGFloat) -> Shape {
             Shape(
                 rect: rect.insetBy(dx: amount, dy: amount),
                 radius: max(0, radius - amount)
@@ -414,7 +414,7 @@ enum ThemedSurface {
         /// A squared theme's rect stays square for the same reason it does on the way in: the
         /// true offset curve of a sharp corner is a round one, but a hard-cornered theme wants a
         /// hard-cornered ring, and the ring exists to restate the shape it surrounds.
-        func outset(by amount: CGFloat) -> Shape {
+        public func outset(by amount: CGFloat) -> Shape {
             Shape(
                 rect: rect.insetBy(dx: -amount, dy: -amount),
                 radius: radius > 0 ? radius + amount : 0
@@ -431,7 +431,7 @@ enum ThemedSurface {
         ///
         /// A rect that contains the whole silhouette gets the whole silhouette back, so a caller
         /// that turns out not to be welded into anything draws exactly what `path` would.
-        func portion(in region: NSRect) -> NSBezierPath {
+        public func portion(in region: NSRect) -> NSBezierPath {
             let clipped = region.intersection(rect)
             guard !clipped.isNull, clipped.width > 0, clipped.height > 0 else {
                 return NSBezierPath()
@@ -480,7 +480,7 @@ enum ThemedSurface {
     /// Returns the shape it drew, so a caller can stroke a focus ring on the same shape rather
     /// than rebuilding it from the same three tokens and drifting by half a point.
     @discardableResult
-    static func draw(
+    public static func draw(
         _ bounds: NSRect,
         fill: NSColor,
         border: NSColor? = nil,
@@ -629,11 +629,11 @@ enum ThemedSurface {
 /// `ThemedTextField` has to subclass `NSTextField` for the field editor, the formatter and the
 /// whole of text editing. One description of what "follows the theme" means, two bases.
 @MainActor
-final class ThemeRedraw {
+public final class ThemeRedraw {
 
     private let appEvents = AppEventObservations()
 
-    init(_ view: NSView) {
+    public init(_ view: NSView) {
         for observe in [
             { self.appEvents.observe(AppThemeDidChange.self) { [weak view] _ in view?.restyle() } },
             { self.appEvents.observe(ProfileDidChange.self) { [weak view] _ in view?.restyle() } },

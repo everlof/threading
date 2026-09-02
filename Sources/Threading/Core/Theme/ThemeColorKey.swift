@@ -7,7 +7,7 @@ import AppKit
 /// property it sets. Both are a key path, so this is that key path with its two names attached
 /// — `displayName` for a label, `wireName` for the tool schema, where snake case is what a
 /// model reaches for unprompted.
-enum ThemeColorKey: String, CaseIterable {
+public enum ThemeColorKey: String, CaseIterable {
     case foreground, boldForeground, background, cursor, selection
     case black, red, green, yellow, blue, magenta, cyan, white
     case brightBlack, brightRed, brightGreen, brightYellow
@@ -17,24 +17,24 @@ enum ThemeColorKey: String, CaseIterable {
 
     /// The five that are not ANSI indices: what text, bold text, ground, caret and selection
     /// are drawn in.
-    static let main: [ThemeColorKey] = [
+    public static let main: [ThemeColorKey] = [
         .foreground, .boldForeground, .background, .cursor, .selection
     ]
 
     /// ANSI 0–7, in index order — the order every terminal palette is written in.
-    static let normal: [ThemeColorKey] = [
+    public static let normal: [ThemeColorKey] = [
         .black, .red, .green, .yellow, .blue, .magenta, .cyan, .white
     ]
 
     /// ANSI 8–15, index-aligned with `normal` so the two rows read as a grid.
-    static let bright: [ThemeColorKey] = [
+    public static let bright: [ThemeColorKey] = [
         .brightBlack, .brightRed, .brightGreen, .brightYellow,
         .brightBlue, .brightMagenta, .brightCyan, .brightWhite
     ]
 
     // MARK: - Naming
 
-    var keyPath: WritableKeyPath<TerminalTheme, NSColor> {
+    public var keyPath: WritableKeyPath<TerminalTheme, NSColor> {
         switch self {
         case .foreground: return \.foreground
         case .boldForeground: return \.boldForeground
@@ -61,7 +61,7 @@ enum ThemeColorKey: String, CaseIterable {
     }
 
     /// Title case, splitting the `bright` prefix out: "Bright Magenta".
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .foreground: return L10n.string("Text")
         case .boldForeground: return L10n.string("Bold Text")
@@ -92,7 +92,7 @@ enum ThemeColorKey: String, CaseIterable {
     /// Only the `bright` prefix is decomposed automatically; anything else that is two words in
     /// Swift states its wire spelling here, because a raw value's camel case is not snake case
     /// and `named(_:)` has to round-trip.
-    var wireName: String {
+    public var wireName: String {
         if self == .boldForeground { return "bold_foreground" }
         guard let bright = brightBase else { return rawValue }
         return "bright_\(bright)"
@@ -103,7 +103,7 @@ enum ThemeColorKey: String, CaseIterable {
         return rawValue.dropFirst("bright".count).lowercased()
     }
 
-    static func named(_ wireName: String) -> ThemeColorKey? {
+    public static func named(_ wireName: String) -> ThemeColorKey? {
         allCases.first { $0.wireName == wireName.lowercased() }
     }
 
@@ -133,7 +133,7 @@ extension TerminalTheme {
     /// text colour and says nothing about bold would otherwise keep the *base's* heading ink,
     /// chosen for a palette this one has just stopped being. A caller that states neither keeps
     /// both, which is what makes a theme derived from a stock one inherit the stock pairing.
-    func adoptingBoldForeground(from values: [String: String]) -> TerminalTheme {
+    public func adoptingBoldForeground(from values: [String: String]) -> TerminalTheme {
         guard let foreground = ThemeColorKey.foreground.statedColour(in: values),
               !ThemeColorKey.boldForeground.isStated(in: values)
         else { return self }
@@ -148,7 +148,7 @@ extension TerminalTheme {
 
 extension TerminalTheme {
 
-    subscript(key: ThemeColorKey) -> NSColor {
+    public subscript(key: ThemeColorKey) -> NSColor {
         get { self[keyPath: key.keyPath] }
         set { self[keyPath: key.keyPath] = newValue }
     }

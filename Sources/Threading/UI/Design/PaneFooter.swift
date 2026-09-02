@@ -9,7 +9,7 @@ import AppKit
 /// two bands it is not: both sit a clear ten points inboard of the traffic lights above and the
 /// curve below, and taking the clearance anyway indented the brand and Settings some eighty
 /// points past the list they head and foot, so the column read as three columns.
-enum PaneBandMargin {
+public enum PaneBandMargin {
     /// The corner-adapted safe area. The default, and right wherever the band's ink can meet
     /// the window's curve or its floating controls.
     case cornerAdapted
@@ -22,7 +22,7 @@ enum PaneBandMargin {
 /// What the footer's outer margin aligns when its first or last control carries internal
 /// padding. Textual chrome normally aligns the visible title or glyph; a filled call-to-action
 /// aligns its plate so the coloured surface itself keeps clear of the pane edge.
-enum PaneFooterOuterEdgeAlignment: Equatable {
+public enum PaneFooterOuterEdgeAlignment: Equatable {
     case visibleContent
     case controlFrame
 }
@@ -50,7 +50,7 @@ enum PaneFooterOuterEdgeAlignment: Equatable {
 ///
 /// The footer draws nothing itself — the hairline is a `SeparatorView`, and the ground beneath
 /// is the pane's own. Hosts pin leading, trailing and bottom; the band supplies its height.
-final class PaneFooterView: NSView {
+public final class PaneFooterView: NSView {
 
     // MARK: - Geometry
 
@@ -76,7 +76,7 @@ final class PaneFooterView: NSView {
 
     /// Both arrays run leading-to-trailing; the first leading view and the last trailing view
     /// touch their margins and are the ones aligned by ink.
-    init(
+    public init(
         leading: [NSView] = [],
         trailing: [NSView] = [],
         margin: PaneBandMargin = .cornerAdapted,
@@ -93,7 +93,7 @@ final class PaneFooterView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 

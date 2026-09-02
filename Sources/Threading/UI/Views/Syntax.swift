@@ -1,6 +1,6 @@
 import NativeDiffCore
 
-typealias SyntaxRole = DiffSyntaxRole
-typealias SyntaxToken = DiffSyntaxToken
-typealias SyntaxLanguage = DiffSyntaxLanguage
-typealias Syntax = DiffSyntax
+public typealias SyntaxRole = DiffSyntaxRole
+public typealias SyntaxToken = DiffSyntaxToken
+public typealias SyntaxLanguage = DiffSyntaxLanguage
+public typealias Syntax = DiffSyntax
