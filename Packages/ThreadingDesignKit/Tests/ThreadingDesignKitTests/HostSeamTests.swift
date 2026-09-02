@@ -75,3 +75,78 @@ final class HostSeamTests: XCTestCase {
         XCTAssertNil(ThemeAssetStore.image(named: "titlebar", for: .system))
     }
 }
+
+/// The handoff is the claim that a plugin gets the host's theme *exactly*, rather than a handful
+/// of sampled tokens. That is worth proving rather than asserting, because the two sides compile
+/// their own `AppTheme` and only the encoding is shared.
+final class HostThemeHandoffTests: XCTestCase {
+
+    override func tearDown() {
+        AppThemePalette.install(AppThemeStyles.threading)
+        super.tearDown()
+    }
+
+    /// A theme crosses as a colour hex per role, so it arrives quantised to 8 bits and without
+    /// the wide-gamut marker the catalogue colour carried — measured at 0.878433 → 0.878431, which
+    /// is a difference no display resolves. Identity and material cross exactly; colour crosses to
+    /// the precision a hex can carry, and this says so rather than asserting a struct equality that
+    /// would fail on the seventh decimal.
+    @MainActor
+    func testEveryStockThemeCrossesWithItsIdentityMaterialAndColoursIntact() throws {
+        let hexStep = 1.0 / 255.0
+        for theme in AppThemeStyles.all {
+            AppThemePalette.install(theme)
+            let encoded = try HostThemeHandoff.encodeCurrent()
+            AppThemePalette.install(AppThemeStyles.threading)   // a plugin starts on the stock one
+            let arrived = try HostThemeHandoff.install(encoded: encoded)
+
+            XCTAssertEqual(arrived.id, theme.id)
+            XCTAssertEqual(arrived.name, theme.name)
+            XCTAssertEqual(arrived.mode, theme.mode)
+            XCTAssertEqual(Set(arrived.variants.keys), Set(theme.variants.keys), "\(theme.id)")
+            for (kind, variant) in theme.variants {
+                let crossed = try XCTUnwrap(arrived.variants[kind], "\(theme.id) lost its \(kind)")
+                XCTAssertEqual(crossed.material, variant.material, "\(theme.id) \(kind) material")
+                XCTAssertEqual(Set(crossed.roles.keys), Set(variant.roles.keys), "\(theme.id) \(kind)")
+                for (role, colour) in variant.roles {
+                    let a = try XCTUnwrap(crossed.roles[role]?.usingColorSpace(.sRGB))
+                    let b = try XCTUnwrap(colour.usingColorSpace(.sRGB))
+                    XCTAssertEqual(a.redComponent, b.redComponent, accuracy: hexStep, "\(theme.id) \(role)")
+                    XCTAssertEqual(a.greenComponent, b.greenComponent, accuracy: hexStep, "\(theme.id) \(role)")
+                    XCTAssertEqual(a.blueComponent, b.blueComponent, accuracy: hexStep, "\(theme.id) \(role)")
+                    XCTAssertEqual(a.alphaComponent, b.alphaComponent, accuracy: hexStep, "\(theme.id) \(role)")
+                }
+            }
+            XCTAssertEqual(AppThemePalette.current.id, theme.id, "the arrived theme is the one in force")
+        }
+    }
+
+    /// Every role, not just the ones a token payload happens to name — that difference is the
+    /// whole reason the handoff carries an encoded theme.
+    @MainActor
+    func testEveryRoleResolvesTheSameOnBothSides() throws {
+        let source = try XCTUnwrap(AppThemeStyles.all.first { $0.id != AppThemeStyles.threading.id })
+        AppThemePalette.install(source)
+        let expected = AppThemeRole.allCases.map { role in
+            AppThemePalette.color(role).usingColorSpace(.sRGB)!.brightnessComponent
+        }
+        let encoded = try HostThemeHandoff.encodeCurrent()
+        AppThemePalette.install(AppThemeStyles.threading)
+        try HostThemeHandoff.install(encoded: encoded)
+        let actual = AppThemeRole.allCases.map { role in
+            AppThemePalette.color(role).usingColorSpace(.sRGB)!.brightnessComponent
+        }
+        for (index, role) in AppThemeRole.allCases.enumerated() {
+            XCTAssertEqual(actual[index], expected[index], accuracy: 1.0 / 255.0,
+                           "\(role) resolved differently after the handoff")
+        }
+    }
+
+    /// A host that could not encode its theme is not a reason to stop drawing.
+    func testAnAbsentThemeIsRefusedWithoutDisturbingTheOneInForce() {
+        AppThemePalette.install(AppThemeStyles.threading)
+        XCTAssertThrowsError(try HostThemeHandoff.install(encoded: nil))
+        XCTAssertThrowsError(try HostThemeHandoff.install(encoded: Data("not a theme".utf8)))
+        XCTAssertEqual(AppThemePalette.current, AppThemeStyles.threading)
+    }
+}

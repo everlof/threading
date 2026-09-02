@@ -123,12 +123,22 @@ final class PluginContractTests: XCTestCase {
     /// The version is what the loader compares against. If it changes, every installed plugin
     /// stops loading until it is rebuilt, so it should never move by accident.
     func testTheAPIVersionIsTheOneTheLoaderEnforces() {
-        XCTAssertEqual(ThreadingPluginAPI.version, 1)
+        XCTAssertEqual(ThreadingPluginAPI.version, 2)
+    }
+
+    /// Version 2 added `encodedTheme`, which is how a plugin linking `ThreadingDesignKit` gets the
+    /// host's whole theme instead of the seven tokens beside it. It is optional on both ends: a
+    /// host that cannot encode still sends the tokens, and a plugin that does not link the design
+    /// system ignores the field.
+    func testTheThemeCanCarryTheHostsWholeThemeAndIsUsableWithoutIt() {
+        XCTAssertNil(PluginTheme.fixture().encodedTheme, "the tokens alone remain a valid payload")
+        let payload = Data("a theme, encoded".utf8)
+        XCTAssertEqual(PluginTheme.fixture(encodedTheme: payload).encodedTheme, payload)
     }
 }
 
 private extension PluginTheme {
-    static func fixture() -> PluginTheme {
+    static func fixture(encodedTheme: Data? = nil) -> PluginTheme {
         PluginTheme(
             background: .black,
             surface: .darkGray,
@@ -137,7 +147,8 @@ private extension PluginTheme {
             accent: .orange,
             monospacedFont: .monospacedSystemFont(ofSize: 11, weight: .regular),
             rowHeight: 16,
-            isDark: true
+            isDark: true,
+            encodedTheme: encodedTheme
         )
     }
 }

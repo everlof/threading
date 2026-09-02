@@ -446,13 +446,31 @@ separate module, so it stops compiling the moment any of them stops being reacha
 the kit. `PluginViewThemingTests` then asserts the part a compile cannot: that the view a plugin
 built paints the *host's* ground.
 
+### Handing the theme across
+
+The host and a plugin each compile their own `AppTheme` — same source, two types in two binaries —
+so the value cannot simply be passed. It travels **encoded**: `PluginTheme.encodedTheme` carries
+the host's whole theme as opaque `Data`, and a plugin linking the design system hands it to
+`HostThemeHandoff.install(encoded:)`. `ThreadingPluginKit` stays free of any dependency on the
+design system, which is the reason the field is opaque rather than typed. The seven tokens beside
+it remain the floor for a plugin that links nothing.
+
+That took the contract to version 2, which the loader enforces — an installed plugin must be
+rebuilt. The version test is a deliberate tripwire and was updated deliberately.
+
+**The crossing is exact to 8 bits, not to the bit.** A role travels as a colour hex, so a
+catalogue colour of `0.878433` arrives as `0.878431`, and the wide-gamut marker on the original is
+not carried. No display resolves that difference and every role resolves to the same colour, but a
+struct-equality assertion on `AppTheme` fails on the seventh decimal — so `HostThemeHandoffTests`
+asserts identity and material exactly, and colour to `1/255`, which is the precision the format
+actually promises.
+
 ### Still open
 
-Moving Device logs itself into a plugin bundle. The components are in place; what is not yet built
-is the host side of loading one — `NativePluginCatalog` opens the door and
-`NativePluginPaneViewController` hosts a view, but `ThreadingPluginKit.framework` still has to be
-embedded in `Contents/Frameworks` before a shipped plugin can resolve its `@rpath`, and the host
-has to install its theme into the plugin's copy of the palette on load and on every change.
+Moving Device logs itself into a plugin bundle. `NativePluginCatalog` opens the door,
+`NativePluginPaneViewController` hosts a view, and the theme now crosses; what remains is embedding
+`ThreadingPluginKit.framework` in `Contents/Frameworks` so a shipped plugin can resolve its
+`@rpath`, and calling `apply(theme:)` from the host's own theme-change observation.
 
 ## Reopen / revisit triggers
 

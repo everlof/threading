@@ -8,7 +8,7 @@ public enum ThreadingPluginAPI {
     /// A plugin records the value it was compiled against in `pluginAPIVersion`; the host refuses
     /// a mismatch rather than calling into a differently-shaped protocol. Bump this whenever a
     /// member is added, removed or re-typed.
-    public static let version = 1
+    public static let version = 2
 }
 
 // MARK: - Theme
@@ -20,9 +20,10 @@ public enum ThreadingPluginAPI {
 /// a Swift struct. Making the payloads classes is what buys a *typed* contract without giving up
 /// the Objective-C runtime matching the loader depends on.
 ///
-/// This is deliberately tokens only. The intended end state is that a plugin links
-/// `ThreadingDesignKit` and uses the real themed components, at which point this type shrinks to
-/// whatever the components cannot resolve themselves. See
+/// The tokens are the floor: enough to draw something that belongs, with no dependency beyond
+/// this framework. A plugin that links `ThreadingDesignKit` should prefer `encodedTheme`, which
+/// carries the host's whole theme rather than seven values sampled from it — the components then
+/// resolve every colour, radius, bevel and font themselves, exactly as the application's do. See
 /// `docs/feature-drafts/native-extension-tier.md`.
 @objc(ThreadingPluginTheme)
 public final class PluginTheme: NSObject {
@@ -37,6 +38,15 @@ public final class PluginTheme: NSObject {
     /// colours above; this exists for the cases where a system control has to be told.
     public let isDark: Bool
 
+    /// The host's complete theme, encoded.
+    ///
+    /// Opaque here on purpose: this framework is the narrow contract both sides link, and it must
+    /// not gain a dependency on the design system to describe a theme. A plugin linking
+    /// `ThreadingDesignKit` hands this to `HostThemeHandoff` and gets the real palette; one that
+    /// does not link it ignores the field and uses the tokens above. `nil` when the host could not
+    /// encode its theme, which is not a reason to refuse to draw.
+    public let encodedTheme: Data?
+
     public init(
         background: NSColor,
         surface: NSColor,
@@ -45,7 +55,8 @@ public final class PluginTheme: NSObject {
         accent: NSColor,
         monospacedFont: NSFont,
         rowHeight: CGFloat,
-        isDark: Bool
+        isDark: Bool,
+        encodedTheme: Data? = nil
     ) {
         self.background = background
         self.surface = surface
@@ -55,6 +66,7 @@ public final class PluginTheme: NSObject {
         self.monospacedFont = monospacedFont
         self.rowHeight = rowHeight
         self.isDark = isDark
+        self.encodedTheme = encodedTheme
         super.init()
     }
 }

@@ -89,7 +89,11 @@ enum NativePluginCatalog {
             accent: Design.Status.warning,
             monospacedFont: Design.Typography.compactCode(),
             rowHeight: Design.Spacing.large,
-            isDark: isDarkGround()
+            isDark: isDarkGround(),
+            // A plugin linking ThreadingDesignKit resolves every value itself from this, rather
+            // than from the seven tokens above. `try?` because a theme that will not encode is a
+            // reason to fall back to the tokens, not a reason to refuse to show the pane.
+            encodedTheme: try? JSONEncoder().encode(AppThemePalette.current)
         )
     }
 }
