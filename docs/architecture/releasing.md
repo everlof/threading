@@ -130,6 +130,19 @@ builder passes that commit as `THREADING_SOURCE_REVISION`, reads `ThreadingSourc
 from the finished app, and refuses the product if the two differ. The stamp is empty in ordinary
 and shipping builds; it proves only the local convergence loop's source, never a public version.
 
+**Its submodules come from this tree, not from GitHub.** `prepare_checkout` points every
+submodule of the clone at the corresponding `.git/modules/<name>` of the repository that ran
+the script, so a pin bumped to a commit that exists only here still builds; the outer repository
+has no push in this loop and the forks need none either. Two details keep that working. The
+superproject `fetch` and `reset` are run with `submodule.recurse=false`: the developer's global
+`submodule.recurse` is true, and a recursing fetch would use whatever remote the *previous*
+round left in the module store — when that round was triggered from a linked worktree, the
+remote is that worktree's own module directory, gone with the worktree, which is how the first
+build of 8c3f9787 failed on 2026-09-02 before the re-pointing step ran. And the `submodule
+update` passes `protocol.file.allow=always`, because git refuses the `file` transport for a
+submodule fetch by default; the clone had never needed to fetch a submodule commit until that
+same round, so the refusal surfaced only then.
+
 **A build action *can* be Developer ID signed** — this is the "switch every target to manual
 signing" alternative the section above names, taken from the command line where it applies to
 every target at once:

@@ -233,14 +233,26 @@ point_submodules_at_source() {
 # there yet, and the round would build the wrong tree while reporting nothing.
 prepare_checkout() {
     local sha="$1"
-    git -C "$CHECKOUT" fetch --quiet origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" || return 1
-    git -C "$CHECKOUT" reset --hard --quiet "$sha" || return 1
+    # The superproject steps must not recurse into the submodules. `submodule.recurse` is true in
+    # the developer's configuration, so a bare fetch or reset would fetch every submodule through
+    # whatever remote the *previous* round left in `.git/modules/<name>/config` — and when that
+    # round was triggered from a linked worktree, the remote is that worktree's own module store,
+    # which disappears with the worktree. The 2026-09-02 build of 8c3f9787 failed exactly there,
+    # before `sync` and `point_submodules_at_source` below had a chance to repair the remotes.
+    # Only the explicit `submodule update` at the end touches the submodules, after both.
+    git -C "$CHECKOUT" -c submodule.recurse=false fetch --quiet --recurse-submodules=no origin \
+        "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" || return 1
+    git -C "$CHECKOUT" -c submodule.recurse=false reset --hard --quiet "$sha" || return 1
     # -fd, deliberately not -fdx: it clears files a previous commit left behind, while leaving the
     # ignored build products that make the next compile incremental.
     git -C "$CHECKOUT" clean -fdq || return 1
     git -C "$CHECKOUT" submodule sync --recursive --quiet || return 1
     point_submodules_at_source || return 1
-    git -C "$CHECKOUT" submodule update --init --recursive --quiet || return 1
+    # The remotes above are local paths, and git refuses the `file` transport for a submodule
+    # fetch unless told otherwise — `fatal: transport 'file' not allowed`. The clone had never
+    # had to fetch a submodule commit before the round above, so this surfaced only then.
+    git -C "$CHECKOUT" -c protocol.file.allow=always \
+        submodule update --init --recursive --quiet || return 1
 }
 
 # Checkout and entitlements together, so the loop can treat "could not get ready to build" the
