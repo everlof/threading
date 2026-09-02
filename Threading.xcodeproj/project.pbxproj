@@ -43,6 +43,8 @@
 		7C000007000000000000A005 /* SimulatorPrivateBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B005 /* SimulatorPrivateBridge.m */; };
 		7C000007000000000000A009 /* threading-simulator-helper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B011 /* threading-simulator-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C000007000000000000A010 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C010 /* ThreadingSimulatorKit */; };
+		7C000007000000000000A0F0 /* ThreadingPluginKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F0 /* ThreadingPluginKit */; };
+		7C000007000000000000A0F1 /* ThreadingPluginKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F1 /* ThreadingPluginKit */; };
 		7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C011 /* ThreadingSimulatorKit */; };
 		7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C000006000000000000B001 /* codes.threading.ptyd.plist */; };
 		89DB8D32FAE049571D22D568 /* threading-extension-helper-network in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 543E83291094AE2E9DCA09FB /* threading-extension-helper-network */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -430,6 +432,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7C000007000000000000A0F1 /* ThreadingPluginKit in Frameworks */,
 				B3428F33752A23B8DF9DA8F8 /* Cocoa.framework in Frameworks */,
 				F1000001000000000000040 /* ThreadingExtensionKit in Frameworks */,
 			);
@@ -512,6 +515,7 @@
 				D0A100010000000000000001 /* ThreadingDomain in Frameworks */,
 				7C000004000000000000000A /* ThreadingPTYHostKit in Frameworks */,
 				7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */,
+				7C000007000000000000A0F0 /* ThreadingPluginKit in Frameworks */,
 				D3EE00010000000000000001 /* ThreadingPeerTransport in Frameworks */,
 				D1FF00010000000000000011 /* NativeDiffCore in Frameworks */,
 				D1FF00010000000000000012 /* NativeDiffAppKit in Frameworks */,
@@ -765,6 +769,7 @@
 			);
 			name = ThreadingTests;
 			packageProductDependencies = (
+				7C000007000000000000C0F1 /* ThreadingPluginKit */,
 				F4000001000000000000007 /* ThreadingExtensionKit */,
 			);
 			productName = ThreadingTests;
@@ -993,6 +998,7 @@
 				D0A100010000000000000003 /* ThreadingDomain */,
 				7C000004000000000000000C /* ThreadingPTYHostKit */,
 				7C000007000000000000C011 /* ThreadingSimulatorKit */,
+				7C000007000000000000C0F0 /* ThreadingPluginKit */,
 				D3EE00010000000000000004 /* ThreadingPeerTransport */,
 				D1FF00010000000000000001 /* NativeDiffCore */,
 				D1FF00010000000000000002 /* NativeDiffAppKit */,
@@ -1056,6 +1062,7 @@
 				D0A100010000000000000002 /* XCLocalSwiftPackageReference "Packages/ThreadingDomain" */,
 				7C000004000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingPTYHostKit" */,
 				7C000007000000000000000B /* XCLocalSwiftPackageReference "Packages/ThreadingSimulatorKit" */,
+				7C00000700000000000000F0 /* XCLocalSwiftPackageReference "Packages/ThreadingPluginKit" */,
 				D3EE00010000000000000003 /* XCLocalSwiftPackageReference "Packages/ThreadingPeerTransport" */,
 				D1FF00010000000000000020 /* XCRemoteSwiftPackageReference "NativeDiffKit" */,
 				5AAA00010000000000000020 /* XCRemoteSwiftPackageReference "Sparkle" */,
@@ -2353,6 +2360,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingSimulatorKit;
 		};
+		7C00000700000000000000F0 /* XCLocalSwiftPackageReference "Packages/ThreadingPluginKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/ThreadingPluginKit;
+		};
 		D3EE00010000000000000003 /* XCLocalSwiftPackageReference "Packages/ThreadingPeerTransport" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/ThreadingPeerTransport;
@@ -2435,6 +2446,14 @@
 		7C000007000000000000C010 /* ThreadingSimulatorKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ThreadingSimulatorKit;
+		};
+		7C000007000000000000C0F0 /* ThreadingPluginKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPluginKit;
+		};
+		7C000007000000000000C0F1 /* ThreadingPluginKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ThreadingPluginKit;
 		};
 		7C000007000000000000C011 /* ThreadingSimulatorKit */ = {
 			isa = XCSwiftPackageProductDependency;

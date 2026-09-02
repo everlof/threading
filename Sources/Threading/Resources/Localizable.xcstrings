@@ -45816,6 +45816,17 @@
         }
       }
     },
+    "This plugin was not loaded: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detta tillägg lästes inte in: %@"
+          }
+        }
+      }
+    },
     "This project already has a baseline named “%@”." : {
       "extractionState" : "manual",
       "localizations" : {

@@ -235,6 +235,69 @@ Two findings from it that change this draft:
   showing. Every plugin author would hit this. It is a concrete argument for the facade carrying
   real components rather than only tokens.
 
+## Extraction is one move, not a queue of requests
+
+The tempting plan is to move whatever the first plugin needs. Device logs needs 8 themed components
+and about 8 tokens, which is small and looks like a cheap start. **It is the wrong shape**, and it
+fails on the second plugin: whatever somebody asks for next is not in the facade, so their request
+blocks on us migrating more code. A tier whose capability is defined by what previous plugins
+happened to use is not a platform.
+
+So separate two things that are easy to conflate:
+
+- **What has moved** is the expensive, blocking, one-time decision. Do it once, wholesale.
+- **What is public** is a cheap, reviewable, per-symbol decision. Widening it later is an access
+  modifier and a review, not a migration.
+
+Move everything; publish deliberately. Then the answer to "my plugin needs `ThemedScrubber`" is a
+review, not a project.
+
+### What moves
+
+`UI/Design/` is 148 files. Only **9** touch an application type at all, and most of those are not
+design primitives:
+
+| | files | disposition |
+|---|---|---|
+| import only AppKit and the vendored packages | 139 | **move as-is** |
+| gallery stories (`AgentWorkSummary`, `ConversationHandoff`, `ExecutionAuditEvent`) | 3 | stay: fixtures for app types |
+| composite feature views (`UsageDashboardView`, `ConversationHandoffView`) | 2 | stay: features that happen to live here |
+| name an app type in a doc comment only (`PaneTransition`, `SidebarBackdropView`) | 2 | move; fix the comment |
+| `DesignSettings` | 1 | move: it *is* the seam, and naming `AppSettings` is its job |
+
+The composite views are the useful discovery. `UsageDashboardView` and `ConversationHandoffView` are
+features filed under `Design/`, and they are the only remaining users of `AgentKind` there. The
+extraction is the moment to put them back with the features, which shrinks the framework and removes
+the coupling in the same move.
+
+### What is public, initially
+
+Not "what Device logs needs". A principled core that a pane of any kind can be built from:
+
+- **tokens** — `Spacing`, `Text`, `Status`, `Surface`, `Typography`
+- **containers** — scroll view, table view, header, virtual cell, row view
+- **controls** — button, icon button, popup, text field, checkbox, menu item
+- **presentation** — alert, popover, toast
+- **text** — labels, the localisation entry point
+
+Everything else moves but stays `internal`. Device logs' 8 components are a *lower bound and a
+sanity check* on that list, never its definition.
+
+### When something genuinely is not there
+
+Same rule the semantic node vocabulary already has, in `AGENT_AUTHORING.md`: report the missing
+component as an SDK requirement rather than working around it. A plugin that reimplements a themed
+control in raw AppKit is the failure this tier exists to prevent — it is how the probe's plugin
+ended up rediscovering that `tableView.backgroundColor` alone leaves the clip view's ground showing.
+
+### Order
+
+1. Wire `ThreadingPluginKit` into the app and prove a plugin loads and hosts a view. **In progress.**
+2. Move the 2 composite views and 3 gallery stories out of `Design/`.
+3. Extract the remaining ~141 files as `ThreadingDesignKit`, everything `internal` by default.
+4. Publish the core list above; `ThreadingPluginKit` re-exports it.
+5. Move Device logs into a plugin bundle. It is the first consumer, not the specification.
+
 ## Smallest shippable slice
 
 Deliberately not the Design extraction, so the mechanism is proven before the refactor is
