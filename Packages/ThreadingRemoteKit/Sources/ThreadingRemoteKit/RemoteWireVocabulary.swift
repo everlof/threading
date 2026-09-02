@@ -585,6 +585,10 @@ public enum RemoteSessionRouteAction: String, CaseIterable, Codable, Equatable, 
     case snoozed
     case surface
     case account
+    /// Cross-provider continuation: `GET` lists where this conversation could continue, `POST`
+    /// creates the destination. A different verb from `account`, which moves one native
+    /// transcript between logins of the same runtime.
+    case continuation
     case limitRecovery = "limit-recovery"
     case share
     case unshare

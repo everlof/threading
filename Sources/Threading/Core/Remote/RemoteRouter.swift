@@ -200,6 +200,10 @@ struct RemoteRouter {
         sessionID(forPath: path, action: .account)
     }
 
+    static func continuationSessionID(forPath path: String) -> String? {
+        sessionID(forPath: path, action: .continuation)
+    }
+
     static func limitRecoverySessionID(forPath path: String) -> String? {
         sessionID(forPath: path, action: .limitRecovery)
     }

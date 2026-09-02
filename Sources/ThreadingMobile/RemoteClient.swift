@@ -224,6 +224,8 @@ enum RemoteClientError: LocalizedError {
             return MobileL10n.string("That reminder time is no longer valid.")
         case .accountMoveRefused:
             return accountMoveMessage(detail: detail)
+        case .continuationRefused:
+            return continuationMessage(detail: detail)
         case .sharingNotAvailable, .hostedServiceUnavailable:
             return MobileL10n.string("That service isn’t available on the Mac right now. Try again.")
         case .ownerAccessRequired:
@@ -240,6 +242,28 @@ enum RemoteClientError: LocalizedError {
             return MobileL10n.string("The Mac received too many requests. Wait a moment and try again.")
         default:
             return MobileL10n.string("The Mac returned HTTP %lld.", status)
+        }
+    }
+
+    /// The Mac's bounded refusal reasons, worded for a phone. An unrecognised or absent detail
+    /// is the honest general sentence rather than a guessed cause — a capture failure sends no
+    /// code, and a newer Mac may name one this build has never heard of.
+    private static func continuationMessage(detail: String?) -> String {
+        switch detail {
+        case "missingSource":
+            return MobileL10n.string("This chat no longer exists.")
+        case "sameProvider":
+            return MobileL10n.string("A chat can only continue on a different agent.")
+        case "nothingRecorded":
+            return MobileL10n.string("This chat has nothing recorded to continue from yet.")
+        case "persistenceUnavailable", "sessionCreateFailed":
+            return MobileL10n.string("The Mac couldn’t save the new chat.")
+        case "handoffUnavailable":
+            return MobileL10n.string("The Mac couldn’t prepare this chat for another agent.")
+        case "snapshotWriteFailed":
+            return MobileL10n.string("The Mac couldn’t snapshot this conversation.")
+        default:
+            return MobileL10n.string("The Mac couldn’t continue this chat on that agent.")
         }
     }
 
@@ -1032,6 +1056,30 @@ struct RemoteClient {
         try await post(
             RemoteMoveSessionAccountRequestDTO(accountID: accountID),
             to: link.sessionAccountURL(sessionID: sessionID),
+            requestID: requestID
+        )
+    }
+
+    /// Where this conversation could continue, asked when the screen offering the choice opens.
+    /// The Mac owns eligibility, so an empty list means the control is not offered at all.
+    func sessionContinuationOptions(
+        sessionID: String
+    ) async throws -> RemoteSessionContinuationOptionsDTO {
+        try await get(
+            RemoteSessionContinuationOptionsDTO.self,
+            from: link.sessionContinuationURL(sessionID: sessionID)
+        )
+    }
+
+    func continueSession(
+        sessionID: String,
+        agentID: String,
+        accountID: String?,
+        requestID: String = UUID().uuidString.lowercased()
+    ) async throws -> RemoteContinueSessionResponseDTO {
+        try await postResponse(
+            RemoteContinueSessionRequestDTO(agentID: agentID, accountID: accountID),
+            to: link.sessionContinuationURL(sessionID: sessionID),
             requestID: requestID
         )
     }

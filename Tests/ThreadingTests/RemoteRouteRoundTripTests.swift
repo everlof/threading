@@ -194,6 +194,9 @@ final class RemoteRouteRoundTripTests: XCTestCase {
             case .account:
                 built = try wirePath(link.sessionAccountURL(sessionID: sessionID))
                 matched = RemoteRouter.accountSessionID(forPath: built)
+            case .continuation:
+                built = try wirePath(link.sessionContinuationURL(sessionID: sessionID))
+                matched = RemoteRouter.continuationSessionID(forPath: built)
             case .limitRecovery:
                 built = try wirePath(link.sessionLimitRecoveryURL(sessionID: sessionID))
                 matched = RemoteRouter.limitRecoverySessionID(forPath: built)

@@ -1194,6 +1194,11 @@ public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     /// The new-session draft may stage files before the Mac has minted the session, then name
     /// those uploads in the atomic create request that takes them into the opening prompt.
     case sessionDraftAttachmentUploads = "session-draft-attachment-uploads"
+    /// `session/<id>/continuation` answers where a chat could continue on another agent, and
+    /// creates that chat. A phone paired with a Mac that does not say so offers no such control
+    /// and asks nothing — the alternative was one 404 per Chat Settings screen, reported as a
+    /// degraded action for a Mac that is simply older.
+    case sessionContinuation = "session-continuation"
 }
 
 /// The size a thumbnail is asked at, and the most a Mac will answer with.
@@ -2015,6 +2020,76 @@ public struct RemoteMoveSessionAccountRequestDTO: Codable, Equatable, Sendable {
 
     public init(accountID: String) {
         self.accountID = accountID
+    }
+}
+
+/// One place a conversation could continue when the destination is another provider.
+///
+/// The Mac owns eligibility — whether the source has anything recorded to hand over, whether the
+/// destination runtime can receive it, whether the scoped history tool is enabled — so a phone
+/// never reproduces that rule from a catalogue it happens to hold. Owner-only, like the account
+/// catalogue these names come from.
+public struct RemoteContinuationDestinationDTO: Codable, Equatable, Identifiable, Sendable {
+    public let agentID: String
+    public let agentName: String
+    /// Nil for a runtime whose logins Threading does not route, which then has exactly one.
+    public let accountID: String?
+    /// The login's display name, absent for the same reason `accountID` is.
+    public let accountName: String?
+    public let emoji: String?
+
+    /// Stable within one options response, which is the only place these are listed.
+    public var id: String {
+        [agentID, accountID].compactMap { $0 }.joined(separator: "/")
+    }
+
+    public init(
+        agentID: String,
+        agentName: String,
+        accountID: String? = nil,
+        accountName: String? = nil,
+        emoji: String? = nil
+    ) {
+        self.agentID = agentID
+        self.agentName = agentName
+        self.accountID = accountID
+        self.accountName = accountName
+        self.emoji = emoji
+    }
+}
+
+/// The answer to "where could this conversation continue". An empty list is the whole answer a
+/// client needs: the control is absent, exactly as the Mac's own menu item is.
+public struct RemoteSessionContinuationOptionsDTO: Codable, Equatable, Sendable {
+    public let destinations: [RemoteContinuationDestinationDTO]
+
+    public init(destinations: [RemoteContinuationDestinationDTO]) {
+        self.destinations = destinations
+    }
+}
+
+/// Continues a conversation on another provider. Deliberately not the account move: the source
+/// session and its transcript stay where they are, and the destination is a new conversation
+/// whose first turn reads a frozen, provider-neutral snapshot of this one.
+public struct RemoteContinueSessionRequestDTO: Codable, Equatable, Sendable {
+    public let agentID: String
+    /// Omitted for a runtime without account routing.
+    public let accountID: String?
+
+    public init(agentID: String, accountID: String? = nil) {
+        self.agentID = agentID
+        self.accountID = accountID
+    }
+}
+
+/// The destination the Mac created, plus the snapshot that now contains it.
+public struct RemoteContinueSessionResponseDTO: Codable, Equatable, Sendable {
+    public let sessionID: String
+    public let me: RemoteMeDTO
+
+    public init(sessionID: String, me: RemoteMeDTO) {
+        self.sessionID = sessionID
+        self.me = me
     }
 }
 
@@ -3352,6 +3427,7 @@ public enum RemoteRESTErrorCode: String, Codable, CaseIterable, Sendable {
     case unsupportedRuntime
     case unsupportedAccount
     case accountMoveRefused
+    case continuationRefused
     case unsupportedRecovery
     case sharingNotAvailable
 }

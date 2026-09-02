@@ -1352,6 +1352,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         }
     }
 
+    /// Continues a conversation on another provider on behalf of a paired iPhone.
+    ///
+    /// Unlike the Mac's own menu path this never selects the destination: a phone asking for a
+    /// new chat must not move the selection of whoever is using the Mac. The source's pane is
+    /// reopened either way, because freezing its transcript stopped its process — the same
+    /// reconciliation the account move performs, and for the same reason.
+    ///
+    /// Nothing seeds the destination's opening turn here. That bootstrap is regenerated from the
+    /// session's own lineage when it first launches, so a chat created from a phone and opened
+    /// hours later on either device still reads its snapshot.
+    @MainActor
+    func continueRemoteSession(
+        _ sessionID: SessionID,
+        with destination: RemoteContinuationTarget,
+        completion: @escaping @MainActor @Sendable (
+            Result<SessionID, RemoteSessionContinuationFailure>
+        ) -> Void
+    ) {
+        guard ownsSingleInstanceLock, mainWindowController != nil else {
+            completion(.failure(.appUnavailable))
+            return
+        }
+        guard let session = ProjectStore.shared.session(withID: sessionID) else {
+            completion(.failure(.sessionNotFound))
+            return
+        }
+        guard let account = RemoteContinuationBridge.account(
+            for: destination,
+            continuing: session
+        ) else {
+            completion(.failure(.destinationNotFound))
+            return
+        }
+
+        ConversationContinuation.create(from: sessionID, to: account) { [weak self] result in
+            self?.mainWindowController?.refreshAfterRemoteSurfaceMutation(sessionID: sessionID)
+            switch result {
+            case let .success(created):
+                completion(.success(created.id))
+            case let .failure(error):
+                completion(.failure(.continuationRefused(error.code)))
+            }
+        }
+    }
+
     @MainActor
     func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID? {
         guard ownsSingleInstanceLock, let mainWindowController else { return nil }

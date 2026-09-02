@@ -610,6 +610,13 @@ final class RemoteAppModel: ObservableObject {
         me?.features?.contains(RemoteRESTFeature.usageDashboard.rawValue) == true
     }
 
+    /// Whether the Mac answers the continuation route at all. An older one does not, and the
+    /// phone then offers no such control rather than asking and reporting the 404 as a failure.
+    var canContinueChatsElsewhere: Bool {
+        canManageSessions
+            && me?.features?.contains(RemoteRESTFeature.sessionContinuation.rawValue) == true
+    }
+
     var canUseUniversalSearch: Bool {
         me?.features?.contains(RemoteRESTFeature.universalSearch.rawValue) == true
     }
@@ -1605,6 +1612,85 @@ final class RemoteAppModel: ObservableObject {
         }
         guard activeHostID == hostID else { throw CancellationError() }
         me = response
+    }
+
+    /// Where this chat could continue on another agent.
+    ///
+    /// Read-only and asked once, when the screen offering the choice opens: the Mac resolves it
+    /// from a transcript on disk, which is not something a session row can carry for every chat
+    /// in every snapshot. An empty list means the control is not offered.
+    func continuationOptions(
+        for session: RemoteSessionSummaryDTO
+    ) async throws -> RemoteSessionContinuationOptionsDTO {
+        guard canManageSessions else { throw RemoteClientError.unauthorized }
+        if isDemo { return demoContinuationOptions(for: session) }
+        guard canContinueChatsElsewhere else {
+            return RemoteSessionContinuationOptionsDTO(destinations: [])
+        }
+        guard let client else { throw RemoteClientError.unauthorized }
+        return try await client.sessionContinuationOptions(sessionID: session.id)
+    }
+
+    /// Continues this chat on another agent, returning the new chat's identity.
+    ///
+    /// The source chat is left resumable; the Mac freezes its transcript and creates a sibling
+    /// whose first turn reads that snapshot. The caller navigates to what comes back.
+    func continueSession(
+        _ destination: RemoteContinuationDestinationDTO,
+        from session: RemoteSessionSummaryDTO
+    ) async throws -> String {
+        guard canManageSessions, let host = activeHost else {
+            throw RemoteClientError.unauthorized
+        }
+        let hostID = host.id
+        // The demo Mac creates nothing. Answer with the canned chat that already runs the agent
+        // that was chosen, so the screen after the choice is one this agent could really be in.
+        if isDemo {
+            let sessions = me?.sessions ?? Self.demoResponse.sessions
+            guard let landing = sessions.first(where: { $0.agentKind == destination.agentID })
+                ?? sessions.first(where: { $0.id != session.id })
+            else { throw RemoteClientError.invalidResponse }
+            return landing.id
+        }
+        let response = try await performMutation(for: hostID) { client, requestID in
+            try await client.continueSession(
+                sessionID: session.id,
+                agentID: destination.agentID,
+                accountID: destination.accountID,
+                requestID: requestID
+            )
+        }
+        guard activeHostID == hostID else { throw CancellationError() }
+        me = response.me
+        return response.sessionID
+    }
+
+    /// The demo's own answer, derived from its catalogue rather than a second fixture: every
+    /// agent that is not the one this chat already runs.
+    private func demoContinuationOptions(
+        for session: RemoteSessionSummaryDTO
+    ) -> RemoteSessionContinuationOptionsDTO {
+        let agents = me?.newSessionCatalog?.agents
+            ?? Self.demoResponse.newSessionCatalog?.agents
+            ?? []
+        return RemoteSessionContinuationOptionsDTO(
+            destinations: agents
+                .filter { $0.id != session.agentKind }
+                .flatMap { agent -> [RemoteContinuationDestinationDTO] in
+                    guard let accounts = agent.accounts, !accounts.isEmpty else {
+                        return [.init(agentID: agent.id, agentName: agent.name)]
+                    }
+                    return accounts.map { account in
+                        .init(
+                            agentID: agent.id,
+                            agentName: agent.name,
+                            accountID: account.id,
+                            accountName: account.name,
+                            emoji: account.emoji
+                        )
+                    }
+                }
+        )
     }
 
     func setLimitRecovery(
@@ -3913,7 +3999,10 @@ final class RemoteAppModel: ObservableObject {
                 ],
                 supportsManagerRole: true
             ),
-            features: [RemoteRESTFeature.usageDashboard.rawValue]
+            features: [
+                RemoteRESTFeature.usageDashboard.rawValue,
+                RemoteRESTFeature.sessionContinuation.rawValue,
+            ]
         )
     }
 }

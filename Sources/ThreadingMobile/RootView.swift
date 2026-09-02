@@ -530,7 +530,11 @@ struct RootView: View {
             // The chain reached this branch only with a session in hand and fell through to the
             // shipping root without one, because `me` arrives after the first render.
             if let session = model.me?.sessions.first {
-                MobileSessionSettingsView(sessionID: session.id, onAccountMoved: {})
+                MobileSessionSettingsView(
+                    sessionID: session.id,
+                    onAccountMoved: {},
+                    onContinued: { _ in }
+                )
                     .environmentObject(model)
             } else {
                 standardRoot
@@ -590,7 +594,8 @@ struct RootView: View {
                     initialScope: .project(id: "search-demo-project", name: "Threading"),
                     initialQuery: "auth callback",
                     initialResponse: Self.searchDemoResponse,
-                    performsRemoteSearch: false
+                    performsRemoteSearch: false,
+                    initiallyPresentsSearch: false
                 )
             }
         case .attachmentDetail(let kind):

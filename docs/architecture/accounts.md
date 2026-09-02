@@ -158,6 +158,32 @@ receive that handle or reach the route. The remote session row carries only the 
 account names and normalized usage stay in the one top-level owner catalogue rather than being
 repeated for every session.
 
+**The phone reaches `ConversationContinuation` the same way, and asks before it offers.**
+`session/<id>/continuation` is one owner-only route with two verbs: `GET` answers where this chat
+could continue, `POST` creates the destination and returns its id beside the refreshed snapshot.
+Both are `RemoteContinuationBridge`, which is a projection of `ConversationContinuation` and never
+a second copy of its rules — the phone holds a catalogue of agents and logins, and could compute a
+plausible list from it, but eligibility depends on a transcript on disk and on the continuation
+tool being enabled, which are facts only the Mac has.
+
+Eligibility is asked **once, when the screen offering the choice opens** — never carried on the
+session row. `canContinue` resolves a transcript path, and a `me` response carries every visible
+session, so a `canContinueElsewhere` field would have put a filesystem probe per row on the
+mirror's hot path for a control most rows never show. The Mac's own menu pays exactly the same
+cost at exactly the same moment.
+
+The transport validates only what it can see: a token that names a runtime, and an account
+identifier that is not a path. Whether that runtime and login were actually offered is answered by
+`RemoteContinuationBridge.account`, in the composition root, against `destinations(for:)` — the
+same list the Mac's menu is built from. A refusal crosses as `ContinuationError.Code`, a bounded
+token in the error's `detail`, because the transaction's own sentence is written for a Mac alert;
+the phone words each cause itself and says so plainly when a capture failure sends no code at all.
+
+Unlike the Mac's menu path the remote continuation never selects the destination — a phone must
+not move the selection of whoever is using the Mac — and nothing seeds the new chat's opening
+turn. That bootstrap is regenerated from the session's own lineage at first launch, so a chat
+continued from a phone and opened hours later on either device still reads its snapshot.
+
 The copied tail is not new provider output at the destination. Transcript readers normally key
 their changed-only cache by path, so a migration also records the installed copy's exact byte
 boundary through

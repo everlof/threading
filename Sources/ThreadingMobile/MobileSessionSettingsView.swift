@@ -34,6 +34,25 @@ enum MobileSessionSettingsPresentation {
         return agent?.accounts?.filter { $0.id != currentAccountID } ?? []
     }
 
+    /// How one continuation destination is named.
+    ///
+    /// The agent alone where it contributes a single login, matching the Mac, whose menu names
+    /// a login only when there is a choice between them. The list itself decides that: a runtime
+    /// that routes no logins and a runtime with exactly one both read as just the agent.
+    static func continuationTitle(
+        for destination: RemoteContinuationDestinationDTO,
+        in destinations: [RemoteContinuationDestinationDTO]
+    ) -> String {
+        let siblings = destinations.filter { $0.agentID == destination.agentID }
+        guard siblings.count > 1, let accountName = destination.accountName else {
+            return destination.agentName
+        }
+        guard let emoji = destination.emoji else {
+            return "\(destination.agentName) · \(accountName)"
+        }
+        return "\(destination.agentName) · \(emoji)  \(accountName)"
+    }
+
     static func limitRecoveryChoices(
         for session: RemoteSessionSummaryDTO,
         in agent: RemoteAgentChoiceDTO?
@@ -103,9 +122,15 @@ struct MobileSessionSettingsView: View {
 
     let sessionID: String
     let onAccountMoved: () -> Void
+    /// The chat the Mac created, for the caller to open. Continuing leaves this chat where it
+    /// is, so this is a navigation, not a replacement.
+    let onContinued: (String) -> Void
 
     @State private var pendingAccount: RemoteAccountChoiceDTO?
     @State private var isConfirmingAccountMove = false
+    @State private var continuationDestinations: [RemoteContinuationDestinationDTO] = []
+    @State private var pendingContinuation: RemoteContinuationDestinationDTO?
+    @State private var isConfirmingContinuation = false
     @State private var isMutating = false
     @State private var errorMessage: String?
     @State private var showsUsage = false
@@ -136,9 +161,22 @@ struct MobileSessionSettingsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MobileDesign.Spacing.pane) {
                     if let session {
-                        if session.accountID != nil {
-                            settingsSection("Chat") {
-                                accountRow(session)
+                        if session.accountID != nil || !continuationDestinations.isEmpty {
+                            settingsSection(
+                                "Chat",
+                                footer: continuationDestinations.isEmpty
+                                    ? nil
+                                    : MobileL10n.string(
+                                        "Continuing starts a new chat on another agent from a "
+                                            + "summary of this one. This chat stays where it is."
+                                    )
+                            ) {
+                                if session.accountID != nil {
+                                    accountRow(session)
+                                }
+                                if !continuationDestinations.isEmpty {
+                                    continuationRow()
+                                }
                             }
                         }
 
@@ -196,7 +234,30 @@ struct MobileSessionSettingsView: View {
                     .mobileTheme(theme)
             }
         }
+        .task { await loadContinuationOptions() }
         .presentationDetents([.large])
+        .themedConfirmationDialog(
+            MobileL10n.string(
+                "Continue “%@” with %@?",
+                session?.title ?? MobileL10n.string("this chat"),
+                pendingContinuation.map {
+                    MobileSessionSettingsPresentation.continuationTitle(
+                        for: $0,
+                        in: continuationDestinations
+                    )
+                } ?? MobileL10n.string("another agent")
+            ),
+            message:
+                "The agent stops so this conversation can be frozen, then a new chat starts on "
+                + "the other agent and reads a summary of it. This chat stays where it is.",
+            isPresented: $isConfirmingContinuation,
+            actions: [
+                ThemedDialogAction("Continue Chat", systemImage: "arrow.triangle.branch") {
+                    continueWithPendingDestination()
+                },
+                ThemedDialogAction("Cancel", role: .cancel),
+            ]
+        )
         .themedConfirmationDialog(
             MobileL10n.string(
                 "Move “%@” to %@?",
@@ -246,6 +307,29 @@ struct MobileSessionSettingsView: View {
                 symbol: "person.crop.circle",
                 title: MobileL10n.string("Account"),
                 detail: accountDetail(session),
+                showsChevron: true
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isMutating)
+    }
+
+    private func continuationRow() -> some View {
+        Menu {
+            ForEach(continuationDestinations) { destination in
+                Button(MobileSessionSettingsPresentation.continuationTitle(
+                    for: destination,
+                    in: continuationDestinations
+                )) {
+                    pendingContinuation = destination
+                    isConfirmingContinuation = true
+                }
+            }
+        } label: {
+            settingsRow(
+                symbol: "arrow.triangle.branch",
+                title: MobileL10n.string("Continue with…"),
+                detail: MobileL10n.string("Carry this conversation to another agent"),
                 showsChevron: true
             )
         }
@@ -303,6 +387,41 @@ struct MobileSessionSettingsView: View {
             do {
                 try await model.moveSessionAccount(account.id, for: session)
                 onAccountMoved()
+                dismiss()
+            } catch is CancellationError {
+                return
+            } catch {
+                MobileDiagnostics.logDegraded(.sessionAction, error: error)
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    /// A refused or unreachable lookup leaves the control absent rather than offering a choice
+    /// the Mac would refuse. The screen's other settings do not depend on this answer.
+    private func loadContinuationOptions() async {
+        guard let session, model.canManageSessions else { return }
+        guard model.canContinueChatsElsewhere else { return }
+        do {
+            continuationDestinations = try await model
+                .continuationOptions(for: session)
+                .destinations
+        } catch is CancellationError {
+            return
+        } catch {
+            MobileDiagnostics.logDegraded(.sessionAction, error: error)
+            continuationDestinations = []
+        }
+    }
+
+    private func continueWithPendingDestination() {
+        guard !isMutating, let destination = pendingContinuation, let session else { return }
+        isMutating = true
+        Task {
+            defer { isMutating = false }
+            do {
+                let created = try await model.continueSession(destination, from: session)
+                onContinued(created)
                 dismiss()
             } catch is CancellationError {
                 return

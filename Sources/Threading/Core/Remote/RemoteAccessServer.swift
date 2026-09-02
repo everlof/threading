@@ -638,6 +638,20 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
             return
         }
 
+        if request.method == "GET",
+           let sessionID = RemoteRouter.continuationSessionID(forPath: path)
+        {
+            handleSessionContinuationOptions(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
+        if request.method == "POST",
+           let sessionID = RemoteRouter.continuationSessionID(forPath: path)
+        {
+            handleSessionContinuation(request, sessionID: sessionID, respond: respond)
+            return
+        }
+
         if request.method == "POST",
            let sessionID = RemoteRouter.limitRecoverySessionID(forPath: path)
         {
@@ -2365,6 +2379,129 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                     code: .accountMoveRefused,
                     detail: refusal.rawValue
                 )))
+            }
+        }
+    }
+
+    /// Where this conversation could continue, asked once by the screen that offers the choice.
+    ///
+    /// An empty list is a complete answer: a source with nothing recorded yet, a runtime that
+    /// cannot be a source, and a Mac with no other provider configured all reach it, and in each
+    /// the client hides the control rather than offering something that would be refused.
+    private func handleSessionContinuationOptions(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard authorizeSessionManagement(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) != nil else { return }
+
+        DispatchQueue.main.async {
+            guard let sessionID = SessionID(uuidString: rawSessionID),
+                  let session = self.services.sessionQueries.session(withID: sessionID),
+                  let project = self.services.sessionQueries.project(forSessionID: sessionID)
+            else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            respond(.respond(RemoteRouter.json(
+                RemoteContinuationBridge.options(for: session, in: project)
+            )))
+        }
+    }
+
+    /// Continues this conversation on another provider.
+    ///
+    /// Deliberately a different route from the account move above, because it is a different
+    /// operation: the source session and its transcript stay resumable, and the destination is a
+    /// new conversation whose first turn reads a frozen snapshot of this one. The phone owns the
+    /// confirmation; the Mac owns the capture, the snapshot and the new record.
+    private func handleSessionContinuation(
+        _ request: HTTPRequest,
+        sessionID rawSessionID: String,
+        respond: @escaping @Sendable (RemoteRouteDecision) -> Void
+    ) {
+        guard let authorization = authorizeSessionManagement(
+            request,
+            rawSessionID: rawSessionID,
+            respond: respond
+        ) else { return }
+        guard let choice = try? JSONDecoder().decode(
+            RemoteContinueSessionRequestDTO.self,
+            from: request.body
+        ), RemoteInboundPolicy.acceptsLaunchIdentifier(choice.agentID),
+            choice.accountID.map(RemoteInboundPolicy.acceptsAccountIdentifier) ?? true else {
+            respond(.respond(RemoteRouter.error(400, "Bad Request")))
+            return
+        }
+
+        let device = request.header(RemoteRouter.deviceHeader) ?? "unknown"
+        DispatchQueue.main.async {
+            guard let sessionID = SessionID(uuidString: rawSessionID),
+                  self.services.sessionQueries.session(withID: sessionID) != nil
+            else {
+                respond(.respond(RemoteRouter.error(404, "Not Found")))
+                return
+            }
+            guard let kind = AgentKind(rawValue: choice.agentID) else {
+                respond(.respond(RemoteRouter.error(
+                    422,
+                    "Unsupported Runtime",
+                    code: .unsupportedRuntime
+                )))
+                return
+            }
+            // Whether this runtime and login were actually offered is the command's answer, not
+            // the transport's: the same resolution admits the Mac's own menu, and a second copy
+            // here would be a rule that can drift from the one that runs. The transport checks
+            // only what it can see — a token that names no runtime at all.
+            let target = RemoteContinuationTarget(
+                kind: kind,
+                accountHandle: choice.accountID.map { AccountHandle(storedName: $0) }
+            )
+            guard let commands = self.sessionCommands else {
+                respond(.respond(RemoteRouter.error(503, "Mac Not Ready", code: .hostNotReady)))
+                return
+            }
+
+            commands.continueRemoteSession(sessionID, with: target) { result in
+                switch result {
+                case let .success(createdID):
+                    self.services.eventLog.recordRemoteEvent("Session continued remotely", [
+                        .session: sessionID.uuidString,
+                        .agent: choice.agentID,
+                        .account: choice.accountID ?? "default",
+                        .device: device,
+                    ])
+                    respond(.respond(RemoteRouter.json(RemoteContinueSessionResponseDTO(
+                        sessionID: createdID.uuidString,
+                        me: self.services.mirrors.meResponse(for: authorization)
+                    ))))
+                case .failure(.sessionNotFound):
+                    respond(.respond(RemoteRouter.error(404, "Not Found")))
+                case .failure(.destinationNotFound):
+                    respond(.respond(RemoteRouter.error(
+                        422,
+                        "Unsupported Account",
+                        code: .unsupportedAccount
+                    )))
+                case .failure(.appUnavailable):
+                    respond(.respond(RemoteRouter.error(
+                        503,
+                        "Mac Not Ready",
+                        code: .hostNotReady
+                    )))
+                case let .failure(.continuationRefused(refusal)):
+                    respond(.respond(RemoteRouter.error(
+                        409,
+                        "Continuation refused",
+                        code: .continuationRefused,
+                        detail: refusal?.rawValue
+                    )))
+                }
             }
         }
     }

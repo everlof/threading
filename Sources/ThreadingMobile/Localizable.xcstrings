@@ -1003,6 +1003,17 @@
         }
       }
     },
+    "A chat can only continue on a different agent." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "En chatt kan bara fortsätta på en annan agent."
+          }
+        }
+      }
+    },
     "A deterministic debug surface for visual review and future UI tests." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2103,6 +2114,17 @@
         }
       }
     },
+    "Carry this conversation to another agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ta med samtalet till en annan agent"
+          }
+        }
+      }
+    },
     "Cellular" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2884,6 +2906,17 @@
         }
       }
     },
+    "Continue Chat" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fortsätt chatten"
+          }
+        }
+      }
+    },
     "Continue as %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2924,6 +2957,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fortsätt utan skärmbild"
+          }
+        }
+      }
+    },
+    "Continue with…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fortsätt med…"
+          }
+        }
+      }
+    },
+    "Continue “%@” with %@?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fortsätta “%@” med %@?"
+          }
+        }
+      }
+    },
+    "Continuing starts a new chat on another agent from a summary of this one. This chat stays where it is." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Att fortsätta startar en ny chatt på en annan agent utifrån en sammanfattning av den här. Den här chatten ligger kvar."
           }
         }
       }
@@ -4501,17 +4567,6 @@
         }
       }
     },
-    "Include current screen" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Inkludera aktuell skärm"
-          }
-        }
-      }
-    },
     "Included" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -6026,17 +6081,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inte ansluten till någon Mac"
-          }
-        }
-      }
-    },
-    "Not included" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Ingår inte"
           }
         }
       }
@@ -8131,17 +8175,6 @@
         }
       }
     },
-    "Screenshot" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Skärmbild"
-          }
-        }
-      }
-    },
     "Screenshot that will be shared" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9737,6 +9770,17 @@
         }
       }
     },
+    "The Mac couldn’t continue this chat on that agent." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macen kunde inte fortsätta chatten på den agenten."
+          }
+        }
+      }
+    },
     "The Mac couldn’t copy the conversation." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9792,6 +9836,17 @@
         }
       }
     },
+    "The Mac couldn’t prepare this chat for another agent." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macen kunde inte förbereda chatten för en annan agent."
+          }
+        }
+      }
+    },
     "The Mac couldn’t register this iPhone for notifications." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -9843,6 +9898,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Macen kunde inte spara den flyttade konversationen."
+          }
+        }
+      }
+    },
+    "The Mac couldn’t save the new chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macen kunde inte spara den nya chatten."
+          }
+        }
+      }
+    },
+    "The Mac couldn’t snapshot this conversation." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Macen kunde inte ta en ögonblicksbild av samtalet."
           }
         }
       }
@@ -10074,6 +10151,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Agenten stoppas och startas under det nya kontot och återupptar sedan samma konversation. Pågående arbete avbryts."
+          }
+        }
+      }
+    },
+    "The agent stops so this conversation can be frozen, then a new chat starts on the other agent and reads a summary of it. This chat stays where it is." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten stoppas så att samtalet kan frysas, sedan startar en ny chatt på den andra agenten och läser en sammanfattning av det. Den här chatten ligger kvar."
           }
         }
       }
@@ -10591,6 +10679,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Den här sparade bilagan är inte längre tillgänglig på Mac-datorn."
+          }
+        }
+      }
+    },
+    "This chat has nothing recorded to continue from yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatten har ännu inget sparat att fortsätta från."
+          }
+        }
+      }
+    },
+    "This chat no longer exists." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatten finns inte längre."
           }
         }
       }
@@ -11900,6 +12010,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Din beskrivning delas exakt som den är skriven i en separat textfil."
+          }
+        }
+      }
+    },
+    "another agent" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "en annan agent"
           }
         }
       }

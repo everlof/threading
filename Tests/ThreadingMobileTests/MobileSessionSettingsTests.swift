@@ -89,6 +89,85 @@ final class MobileSessionSettingsTests: XCTestCase {
         )
     }
 
+    // MARK: - Continuation
+
+    /// The Mac names a login only where there is a choice between them, and the list is what
+    /// says so: one row for a runtime reads as just that runtime, however it got there.
+    func testContinuationNamesALoginOnlyWhereTheRuntimeOffersMoreThanOne() {
+        let destinations = [
+            RemoteContinuationDestinationDTO(
+                agentID: "claude",
+                agentName: "Claude Code",
+                accountID: "default",
+                accountName: "David"
+            ),
+            RemoteContinuationDestinationDTO(
+                agentID: "codex",
+                agentName: "Codex",
+                accountID: "personal",
+                accountName: "David",
+                emoji: "🧑‍💻"
+            ),
+            RemoteContinuationDestinationDTO(
+                agentID: "codex",
+                agentName: "Codex",
+                accountID: "work",
+                accountName: "Work"
+            ),
+        ]
+
+        XCTAssertEqual(
+            destinations.map {
+                MobileSessionSettingsPresentation.continuationTitle(for: $0, in: destinations)
+            },
+            ["Claude Code", "Codex · 🧑‍💻  David", "Codex · Work"]
+        )
+    }
+
+    /// A runtime that routes no logins sends none, and must not be drawn as though it had one.
+    func testContinuationToARuntimeWithoutLoginsNamesOnlyTheRuntime() {
+        let destination = RemoteContinuationDestinationDTO(
+            agentID: "opencode",
+            agentName: "OpenCode"
+        )
+
+        XCTAssertEqual(
+            MobileSessionSettingsPresentation.continuationTitle(
+                for: destination,
+                in: [destination]
+            ),
+            "OpenCode"
+        )
+    }
+
+    /// Two logins of two runtimes are four distinct rows; a `ForEach` over colliding ids would
+    /// draw one of each.
+    func testContinuationDestinationsAreDistinctPerRuntimeAndLogin() {
+        let destinations = [
+            RemoteContinuationDestinationDTO(
+                agentID: "claude",
+                agentName: "Claude Code",
+                accountID: "default",
+                accountName: "David"
+            ),
+            RemoteContinuationDestinationDTO(
+                agentID: "claude",
+                agentName: "Claude Code",
+                accountID: "work",
+                accountName: "Work"
+            ),
+            RemoteContinuationDestinationDTO(
+                agentID: "codex",
+                agentName: "Codex",
+                accountID: "default",
+                accountName: "David"
+            ),
+            RemoteContinuationDestinationDTO(agentID: "opencode", agentName: "OpenCode"),
+        ]
+
+        XCTAssertEqual(Set(destinations.map(\.id)).count, destinations.count)
+    }
+
     private func makeAgent(accounts: [RemoteAccountChoiceDTO]?) -> RemoteAgentChoiceDTO {
         RemoteAgentChoiceDTO(
             id: "codex",

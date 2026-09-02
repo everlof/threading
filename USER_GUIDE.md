@@ -1115,6 +1115,13 @@ terminal-only OpenCode, shows the retained path in its sidebar hover card. Click
 source endpoint to return to the previous chat. If an older row was deleted, its frozen provider
 and model label remains but it is no longer navigable.
 
+On iPhone, open the chat and choose **… ▸ Chat Settings ▸ Continue with…**. The phone asks the
+Mac where this chat could continue rather than guessing, so the row is absent when there is
+nowhere to go — a chat with nothing recorded yet, or a Mac with only one agent configured. A
+login is named beside its agent only where that agent has more than one. Confirming leaves this
+chat where it is and opens the new one on top of it, so Back returns to the conversation it was
+continued from.
+
 Claude/Codex Terminal and native Chat use Threading's private paginated history tool. OpenCode
 receives the snapshot with its `--file` launch option. Grok Terminal receives a bounded inline
 copy because Grok's TUI has no per-launch MCP or file-attachment flag; Grok Chat uses the private
@@ -1544,7 +1551,8 @@ way. A running session is stopped first, then moved.
 
 Same agent only: a Claude conversation moves between Claude accounts, a Codex one between Codex
 accounts. Moving *across* agents (Codex ↔ Claude) is a different thing entirely — their
-histories aren't interchangeable — and isn't offered here.
+histories aren't interchangeable — and isn't offered here. That is what
+[Continue with…](#continuing-with-another-provider) does instead, on the Mac and on iPhone.
 
 One thing to keep in mind: moving to another account to keep working past a limit is fine when
 the accounts are genuinely separate (your personal and your work login, say). Rotating through

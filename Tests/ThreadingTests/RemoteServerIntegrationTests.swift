@@ -1669,6 +1669,152 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertNil(guestSummary.limitRecovery)
     }
 
+    /// The continuation route is the account move's sibling, and the differences are the point:
+    /// it answers with the chat it created rather than only the snapshot, it names a runtime as
+    /// well as a login, and its eligibility is asked before the choice is offered rather than
+    /// carried on every session row.
+    func testOwnerCanContinueAChatOnAnotherProvider() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-continuation-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: true,
+            title: "Continue me"
+        ))
+
+        // A chat that has recorded nothing offers nowhere to continue, which is the whole
+        // answer a client needs: it draws no control rather than one the Mac would refuse.
+        let ownerMe = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "goodtoken")).body
+        )
+        XCTAssertEqual(
+            ownerMe.features?.contains(RemoteRESTFeature.sessionContinuation.rawValue),
+            true,
+            "a phone offers the control only where the Mac says the route exists"
+        )
+
+        let options = try XCTUnwrap(get(
+            "/api/session/\(session.id.uuidString)/continuation",
+            bearer: "goodtoken"
+        ))
+        XCTAssertEqual(options.status, 200)
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteSessionContinuationOptionsDTO.self,
+                from: options.body
+            ).destinations,
+            []
+        )
+
+        let created = SessionID()
+        sessionCommands.continuationResult = .success(created)
+        let accepted = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/continuation",
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(
+                RemoteContinueSessionRequestDTO(agentID: "claude", accountID: "work")
+            )
+        ))
+        XCTAssertEqual(accepted.status, 200)
+        let response = try JSONDecoder().decode(
+            RemoteContinueSessionResponseDTO.self,
+            from: accepted.body
+        )
+        XCTAssertEqual(response.sessionID, created.uuidString)
+        XCTAssertEqual(sessionCommands.continuations.last?.sessionID, session.id)
+        XCTAssertEqual(sessionCommands.continuations.last?.destination.kind, .claude)
+        XCTAssertEqual(
+            sessionCommands.continuations.last?.destination.accountHandle?.name,
+            "work"
+        )
+
+        // The Mac's own bounded reason crosses the wire as a detail, so the phone words the
+        // cause instead of showing an alert sentence written for a Mac.
+        sessionCommands.continuationResult = .failure(.continuationRefused(.nothingRecorded))
+        let refused = try XCTUnwrap(post(
+            "/api/session/\(session.id.uuidString)/continuation",
+            bearer: "goodtoken",
+            body: try JSONEncoder().encode(
+                RemoteContinueSessionRequestDTO(agentID: "claude")
+            )
+        ))
+        XCTAssertEqual(refused.status, 409)
+        XCTAssertEqual(
+            try JSONDecoder().decode(RemoteErrorDTO.self, from: refused.body),
+            RemoteErrorDTO(code: .continuationRefused, detail: "nothingRecorded")
+        )
+
+        sessionCommands.continuationResult = .failure(.destinationNotFound)
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/continuation",
+                bearer: "goodtoken",
+                body: try JSONEncoder().encode(
+                    RemoteContinueSessionRequestDTO(agentID: "claude", accountID: "gone")
+                )
+            )).status,
+            422,
+            "a login this Mac never offered is refused by the command that owns that list"
+        )
+    }
+
+    /// The continuation catalogue is owner-only for the same reason the account catalogue is:
+    /// it names the user's logins.
+    func testGuestsCannotReadOrRequestAContinuation() throws {
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-session-continuation-guest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .codex,
+            usesNativeUI: true
+        ))
+        authority.set(RemoteAuthorization(
+            shareID: "continuation-guest",
+            capability: .interact,
+            scope: .session(session.id),
+            principal: .guest
+        ), forToken: "continuationguest")
+
+        let guestMe = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "continuationguest")).body
+        )
+        XCTAssertFalse(
+            guestMe.features?.contains(RemoteRESTFeature.sessionContinuation.rawValue) ?? false,
+            "a guest is never told the route exists, let alone allowed through it"
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(get(
+                "/api/session/\(session.id.uuidString)/continuation",
+                bearer: "continuationguest"
+            )).status,
+            403
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/continuation",
+                bearer: "continuationguest",
+                body: try JSONEncoder().encode(
+                    RemoteContinueSessionRequestDTO(agentID: "claude")
+                )
+            )).status,
+            403
+        )
+        XCTAssertTrue(sessionCommands.continuations.isEmpty)
+    }
+
     func testSessionSettingsRoutesRejectMalformedOrUnsupportedChoices() throws {
         let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
             "remote-session-control-validation-\(UUID().uuidString)",
@@ -1704,7 +1850,25 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
             )).status,
             400
         )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/continuation",
+                bearer: "goodtoken",
+                body: Data(#"{"agentID":"claude","accountID":"../credentials"}"#.utf8)
+            )).status,
+            400
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(post(
+                "/api/session/\(session.id.uuidString)/continuation",
+                bearer: "goodtoken",
+                body: Data(#"{"agentID":"gemini"}"#.utf8)
+            )).status,
+            422,
+            "a token naming no runtime this Mac has is refused at the boundary"
+        )
         XCTAssertTrue(sessionCommands.accountMoves.isEmpty)
+        XCTAssertTrue(sessionCommands.continuations.isEmpty)
         XCTAssertTrue(sessionAccess.limitRecoveryMutations.isEmpty)
     }
 
@@ -4449,6 +4613,10 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
     private(set) var resumedSessionIDs: [SessionID] = []
     private(set) var resumedTerminalIDs: [TerminalID] = []
     private(set) var accountMoves: [(sessionID: SessionID, accountHandle: AccountHandle)] = []
+    var continuationResult: Result<SessionID, RemoteSessionContinuationFailure> = .success(SessionID())
+    private(set) var continuations: [
+        (sessionID: SessionID, destination: RemoteContinuationTarget)
+    ] = []
     private(set) var sessionRefreshes: [SessionRefresh] = []
     private(set) var surfaceRefreshes: [SessionID] = []
 
@@ -4468,6 +4636,17 @@ private final class RecordingRemoteSessionCommands: RemoteSessionCommands {
     ) -> Result<Void, RemoteSessionAccountMoveFailure> {
         accountMoves.append((sessionID: sessionID, accountHandle: accountHandle))
         return accountMoveResult
+    }
+
+    func continueRemoteSession(
+        _ sessionID: SessionID,
+        with destination: RemoteContinuationTarget,
+        completion: @escaping @MainActor @Sendable (
+            Result<SessionID, RemoteSessionContinuationFailure>
+        ) -> Void
+    ) {
+        continuations.append((sessionID: sessionID, destination: destination))
+        completion(continuationResult)
     }
 
     func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID? {

@@ -598,6 +598,24 @@ enum SessionMigration {
 enum ConversationContinuation {
 
     struct ContinuationError: LocalizedError {
+        /// The bounded reason a continuation was refused, where the refusal is one the person
+        /// who asked for it can act on — `SessionMigration.MoveError.Code`'s counterpart, and
+        /// the only part of a refusal a paired iPhone is given to word for itself.
+        ///
+        /// Optional because a capture failure carries the reading error's own description and
+        /// nothing truthful to classify it with; a client without a code says so plainly rather
+        /// than naming a cause it guessed.
+        enum Code: String, Sendable {
+            case missingSource
+            case sameProvider
+            case nothingRecorded
+            case persistenceUnavailable
+            case handoffUnavailable
+            case snapshotWriteFailed
+            case sessionCreateFailed
+        }
+
+        var code: Code?
         let message: String
         var errorDescription: String? { message }
     }
@@ -652,7 +670,10 @@ enum ConversationContinuation {
             ThreadingLogger.agent.notice(
                 "Conversation continuation refused source=\(sourceID.uuidString, privacy: .public) reason=missing_source"
             )
-            completion(.failure(ContinuationError(message: "The source session no longer exists.")))
+            completion(.failure(ContinuationError(
+                code: .missingSource,
+                message: "The source session no longer exists."
+            )))
             return
         }
         guard source.kind != account.provider else {
@@ -660,6 +681,7 @@ enum ConversationContinuation {
                 "Conversation continuation refused source=\(sourceID.uuidString, privacy: .public) reason=same_provider"
             )
             completion(.failure(ContinuationError(
+                code: .sameProvider,
                 message: "Choose an account from a different provider for this continuation."
             )))
             return
@@ -669,6 +691,7 @@ enum ConversationContinuation {
                 "Conversation continuation refused source=\(sourceID.uuidString, privacy: .public) reason=missing_transcript"
             )
             completion(.failure(ContinuationError(
+                code: .nothingRecorded,
                 message: "This conversation has nothing recorded to continue from yet."
             )))
             return
@@ -678,6 +701,7 @@ enum ConversationContinuation {
                 "Conversation continuation refused source=\(sourceID.uuidString, privacy: .public) reason=persistence_refused"
             )
             completion(.failure(ContinuationError(
+                code: .persistenceUnavailable,
                 message: "The destination conversation could not be saved."
             )))
             return
@@ -707,6 +731,7 @@ enum ConversationContinuation {
                 "Conversation continuation failed source=\(sourceID.uuidString, privacy: .public) reason=handoff_unavailable"
             )
             completion(.failure(ContinuationError(
+                code: .handoffUnavailable,
                 message: "Could not build the continuation path."
             )))
             return
@@ -728,6 +753,7 @@ enum ConversationContinuation {
                         "Conversation continuation failed source=\(sourceID.uuidString, privacy: .public) target=\(targetID.uuidString, privacy: .public) reason=snapshot_write_failed error=\(error.localizedDescription, privacy: .private(mask: .hash))"
                     )
                     completion(.failure(ContinuationError(
+                        code: .snapshotWriteFailed,
                         message: "Could not snapshot the conversation: \(error.localizedDescription)"
                     )))
                     return
@@ -750,6 +776,7 @@ enum ConversationContinuation {
                         "Conversation continuation failed source=\(sourceID.uuidString, privacy: .public) target=\(targetID.uuidString, privacy: .public) reason=session_create_failed"
                     )
                     completion(.failure(ContinuationError(
+                        code: .sessionCreateFailed,
                         message: "Could not create the destination session."
                     )))
                     return

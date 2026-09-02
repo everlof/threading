@@ -330,6 +330,10 @@ public struct RemoteConnectionLink: Codable, Equatable, Hashable, Sendable {
         sessionActionURL(sessionID: sessionID, action: .account)
     }
 
+    public func sessionContinuationURL(sessionID: String) -> URL {
+        sessionActionURL(sessionID: sessionID, action: .continuation)
+    }
+
     public func sessionLimitRecoveryURL(sessionID: String) -> URL {
         sessionActionURL(sessionID: sessionID, action: .limitRecovery)
     }

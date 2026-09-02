@@ -397,7 +397,8 @@ struct SessionDetailView: View {
         .sheet(isPresented: $isShowingSessionSettings) {
             MobileSessionSettingsView(
                 sessionID: session.id,
-                onAccountMoved: reopenAfterAccountMove
+                onAccountMoved: reopenAfterAccountMove,
+                onContinued: openContinuedChat
             )
             .environmentObject(model)
             .mobileTheme(theme)
@@ -957,6 +958,14 @@ struct SessionDetailView: View {
                 await open()
             }
         }
+    }
+
+    /// A continuation is a new chat *beside* this one, so it is pushed rather than swapped in:
+    /// Back returns to the conversation it was continued from, which is still resumable. This
+    /// chat's own connection is left alone — the Mac stopped its agent to freeze the transcript,
+    /// and the existing dormant path already reports that.
+    private func openContinuedChat(_ continuedSessionID: String) {
+        model.navigationPath.append(.session(continuedSessionID))
     }
 
     private func reopenAfterAccountMove() {

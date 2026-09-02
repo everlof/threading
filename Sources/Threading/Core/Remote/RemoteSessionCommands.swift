@@ -36,6 +36,26 @@ enum RemoteSessionAccountMoveFailure: Error {
     case moveRefused(SessionMigration.MoveError.Code)
 }
 
+/// Why a cross-provider continuation could not be created.
+///
+/// `continuationRefused` carries the transaction's own bounded code, not its sentence: the
+/// refusal's prose is written for a Mac alert, and a phone words the same cause for itself. A
+/// nil code is a capture failure, which has no cause to name beyond the read error.
+enum RemoteSessionContinuationFailure: Error {
+    case appUnavailable
+    case sessionNotFound
+    case destinationNotFound
+    case continuationRefused(ConversationContinuation.ContinuationError.Code?)
+}
+
+/// A validated continuation destination: a runtime, and the login to run it under when that
+/// runtime routes logins at all.
+struct RemoteContinuationTarget {
+    let kind: AgentKind
+    /// Nil means the runtime's single login, which is what a runtime without account routing has.
+    let accountHandle: AccountHandle?
+}
+
 /// The application operations the remote transport is allowed to request.
 ///
 /// `RemoteAccessServer` is Core transport code: it must not know which window or controller
@@ -55,6 +75,17 @@ protocol RemoteSessionCommands: AnyObject {
         _ sessionID: SessionID,
         to accountHandle: AccountHandle
     ) -> Result<Void, RemoteSessionAccountMoveFailure>
+
+    /// Freezes this conversation and creates a new one on another provider, leaving the source
+    /// session and its transcript intact. Asynchronous because capturing the snapshot reads the
+    /// source transcript; the phone owns the confirmation, this owns the transaction.
+    func continueRemoteSession(
+        _ sessionID: SessionID,
+        with destination: RemoteContinuationTarget,
+        completion: @escaping @MainActor @Sendable (
+            Result<SessionID, RemoteSessionContinuationFailure>
+        ) -> Void
+    )
 
     /// Returns the durable identity only after the application has accepted the launch.
     func startRemoteSession(_ launch: RemoteSessionLaunch) -> SessionID?
