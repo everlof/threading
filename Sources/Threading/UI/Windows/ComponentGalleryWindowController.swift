@@ -154,7 +154,9 @@ final class ComponentGalleryViewController: NSViewController {
         "SplitButtonView",
         "SplitIconButtonView",
         "StorageProposalOutlineView",
+        "SubagentNavigatorRowView",
         "SubagentSummaryView",
+        "SubagentTranscriptHeadingView",
         "SupervisionRowView",
         "SubmissionStatusView",
         "ThreadingMarkView",
@@ -1495,6 +1497,7 @@ final class ComponentGalleryViewController: NSViewController {
 
         let prompt = PromptView()
         prompt.showsImageAttachments = true
+        prompt.showsMovieAttachments = true
         prompt.placeholder = L10n.string("Write a multi-line prompt; Return submits")
         prompt.minimumHeight = 72
         let previewPaths = [
@@ -1526,6 +1529,7 @@ final class ComponentGalleryViewController: NSViewController {
         let replyPrompt = PromptView()
         replyPrompt.fontSurface = .conversation
         replyPrompt.showsImageAttachments = true
+        replyPrompt.showsMovieAttachments = true
         replyPrompt.submitPlacement = .footer
         replyPrompt.placeholder = L10n.string("Reply to the agent")
 
@@ -3527,6 +3531,11 @@ final class ComponentGalleryViewController: NSViewController {
                     makeSubagentSummarySample()
                 ),
                 story(
+                    "SubagentNavigatorRowView",
+                    "The Subagents pane's navigator: selectable rows, the child on screen drawn selected, a row that leads nowhere disabled, and the heading that names whose transcript follows.",
+                    makeSubagentNavigatorSample()
+                ),
+                story(
                     "PanelListView",
                     "The display panel's list vocabulary — sections, notes and full-width rows "
                         + "on one ink column, the geometry the Info and Sharing panes share "
@@ -4486,6 +4495,75 @@ final class ComponentGalleryViewController: NSViewController {
         }
         summary.widthAnchor.constraint(equalToConstant: 520).isActive = true
         return summary
+    }
+
+    private func makeSubagentNavigatorSample() -> NSView {
+        let navigator = SubagentSummaryView()
+        navigator.selectionStyle = .navigation
+        navigator.update(
+            items: [
+                SubagentSummaryItem(
+                    id: "storybook",
+                    title: "Storybook foundation for the design system",
+                    subtitle: nil,
+                    role: "default",
+                    configurationDetail: "gpt-5.6-sol · Reasoning: xhigh",
+                    state: .completed,
+                    statusDetail: "4m 12s · 31 tools",
+                    usageDetail: "3.1M tokens",
+                    detailLines: ["Implemented the Storybook foundation with autodocs and browser tests."],
+                    transcriptAvailability: .onDisk(
+                        URL(fileURLWithPath: "/component-gallery/agent-storybook.jsonl")
+                    )
+                ),
+                SubagentSummaryItem(
+                    id: "docs",
+                    title: "Documentation and governance slice",
+                    subtitle: nil,
+                    role: "default",
+                    configurationDetail: "gpt-5.6-sol · Reasoning: xhigh",
+                    state: .working,
+                    statusDetail: "48s · 6 tools",
+                    detailLines: ["Reading docs/ui-implementation-guidance.md"]
+                ),
+                SubagentSummaryItem(
+                    id: "aws",
+                    title: "Harden the AWS scaffold",
+                    subtitle: nil,
+                    role: "default",
+                    state: .stopped,
+                    statusDetail: nil,
+                    detailLines: [],
+                    transcriptAvailability: .unavailable
+                )
+            ],
+            workingCount: 1,
+            doneCount: 2,
+            selectedID: "storybook",
+            usageText: "3.8M tokens"
+        )
+        navigator.onSelect = { [weak self] threadID in
+            self?.showReceipt(
+                threadID.map { "Selected subagent \($0)." } ?? "Collapsed subagent activity."
+            )
+        }
+
+        let heading = SubagentTranscriptHeadingView()
+        heading.update(title: "Storybook foundation for the design system", state: .completed)
+
+        let stack = NSStackView(views: [navigator, heading])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = Design.Spacing.medium
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            stack.widthAnchor.constraint(equalToConstant: 520),
+            navigator.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            navigator.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
+            heading.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            heading.trailingAnchor.constraint(equalTo: stack.trailingAnchor)
+        ])
+        return stack
     }
 
     /// The header at sidebar width, above the footer it mirrors: a titled action at the leading

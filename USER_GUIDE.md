@@ -628,6 +628,14 @@ you type and is added only when the prompt is submitted. An image with no file o
 screenshot straight from the clipboard, a picture dragged out of a browser — is written to a
 temporary file first, so the session can still open it.
 
+**A movie joins the same strip.** Drop a `.mov`, `.mp4` or `.m4v` — a screen recording, a
+simulator capture — and it appears as its first frame under a play mark, beside any images.
+Click it and the media inspector opens it in a player, paused, with the same controls the
+Attachments pane's movies have; arrows still walk every attachment in the prompt, movies
+included. The agent is handed the file's path exactly as it is for an image, and Threading's
+`video_frames` tool is how it reads one. A file that only *calls* itself a movie, or one whose
+format the Mac cannot play, stays a path in the text as before.
+
 **The terminal takes a drop too**, and answers it the same way: dropping a file on a running
 session puts its path where the cursor is, escaped so a name with spaces stays one path, with
 a space after it so a second file lands beside the first rather than glued to it. An image with
@@ -1889,7 +1897,9 @@ mean different faces. Only a hash of the email (Gravatar) or the email as a sear
 (GitHub) ever leaves the machine, and **Settings > General > Discover account avatars**
 turns the whole thing off. Rename an account
 if the discovered name is not what you call it; clearing a name restores the one from your
-shell alias, and **Restore Name & Icon** clears both custom choices.
+shell alias, and **Restore Name & Icon** clears both custom choices. A name you type is saved
+when you leave the field or close Settings—Return is not required—and it replaces the automatic
+email-derived name beside the account image and in account choosers.
 
 **Add Login** creates a bounded isolated home for Claude Code or Codex, launches that provider's
 official browser sign-in, and registers the location only after the provider verifies it. Threading
@@ -3874,8 +3884,11 @@ category or price.
 
 The Subagents row remains brief: working/done counts and their token subtotal. Click it for the
 existing **Subagents** pane, which is the detailed agents sidebar: its navigator lists every child
-with its delegated task, model/reasoning configuration, current progress or latest result, and
-brief tokens, cost and request count where available, above the selected child's transcript.
+as a selectable row — its name, then role, model/reasoning, progress and tokens/cost on one quiet
+line, the delegated task and the latest result — and paints the row whose transcript is open
+below. A **Transcript** heading between the list and the rows names that child. A child that
+recorded no transcript stays listed but cannot be opened, and says so. A child with no provider
+nickname is named after its task rather than after a role every sibling shares.
 
 The card holds more than one destination, so **the pointer says which part goes where**. Every
 interactive hover covers the whole cell: branch, totals and review rows open Git Review; the
