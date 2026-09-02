@@ -93,6 +93,9 @@ final class SidebarTitleMorphTests: XCTestCase {
         window.layoutIfNeeded()
 
         header.update(title: "Land the other fix", symbolName: "folder", identity: identity)
+        // The morph is built in the label's layout pass, the way the window's next display
+        // cycle would run it.
+        window.layoutIfNeeded()
 
         let title = try XCTUnwrap(
             walkForMorphingTitle(in: header),
@@ -123,6 +126,7 @@ final class SidebarTitleMorphTests: XCTestCase {
 
         session.customTitle = "Land the other fix"
         row.configure(with: session, activity: .idle)
+        row.layoutSubtreeIfNeeded()
 
         let title = try label("sidebar.session.title", in: row)
         XCTAssertFalse(

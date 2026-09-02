@@ -130,6 +130,56 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
         window.layoutIfNeeded()
     }
 
+    /// Everything the process writes to `stdout` and `stderr` while `body` runs.
+    ///
+    /// AttributeGraph's cycle report goes to the process's standard streams and nowhere else —
+    /// not to the unified log, not to an assertion, not to a crash — so a test about it has to
+    /// read the descriptors. Both are taken, because the first version of this read `stdout`
+    /// alone and passed straight through a run that printed 36 reports. Both ends of the pipe
+    /// are non-blocking: a body that says more than the pipe holds loses output rather than
+    /// hanging the test, and the report this exists for is a few kilobytes. The streams are
+    /// restored before this returns, whatever `body` does.
+    private func capturingStandardStreams(_ body: () throws -> Void) throws -> String {
+        var ends: [Int32] = [0, 0]
+        guard pipe(&ends) == 0 else { throw StandardStreamCaptureError.pipe }
+        let originals = [dup(STDOUT_FILENO), dup(STDERR_FILENO)]
+        guard originals.allSatisfy({ $0 >= 0 }) else {
+            (ends + originals.filter { $0 >= 0 }).forEach { close($0) }
+            throw StandardStreamCaptureError.duplicate
+        }
+        for end in ends {
+            _ = fcntl(end, F_SETFL, fcntl(end, F_GETFL) | O_NONBLOCK)
+        }
+        fflush(stdout)
+        fflush(stderr)
+        dup2(ends[1], STDOUT_FILENO)
+        dup2(ends[1], STDERR_FILENO)
+        close(ends[1])
+
+        let outcome = Result(catching: body)
+
+        fflush(stdout)
+        fflush(stderr)
+        dup2(originals[0], STDOUT_FILENO)
+        dup2(originals[1], STDERR_FILENO)
+        originals.forEach { close($0) }
+        var captured: [UInt8] = []
+        var chunk = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = read(ends[0], &chunk, chunk.count)
+            guard count > 0 else { break }
+            captured.append(contentsOf: chunk[0..<Int(count)])
+        }
+        close(ends[0])
+        try outcome.get()
+        return String(decoding: captured, as: UTF8.self)
+    }
+
+    private enum StandardStreamCaptureError: Error {
+        case pipe
+        case duplicate
+    }
+
     // MARK: - Geometry
 
     /// The recording this came from: the phone opens a mirrored Claude terminal, the Mac's
@@ -213,6 +263,41 @@ final class MobileNavigationTitleMorphTests: XCTestCase {
         settle(fixture.window)
         XCTAssertTrue(line.label.isAnimatingLineScrollForTesting)
         XCTAssertNotNil(line.departingIndicatorForTesting)
+    }
+
+    // MARK: - SwiftUI re-entrancy
+
+    /// A status change and a rename both reach their UIKit label through `updateUIView`, which
+    /// runs inside SwiftUI's own graph update. Anything on that path that lays the window out
+    /// synchronously — a morph resolving its final geometry up front, the line placing its mark
+    /// — lays the hosting view out too, and that renders the SwiftUI graph while it is still
+    /// updating. AttributeGraph reports the re-entry as a dependency cycle for every attribute
+    /// it meets on the way round, on the process's standard streams and nowhere else. A paired
+    /// phone did this on every scene activation and after every keychain write, 46 lines at a
+    /// time, unseen because nothing reads an app's streams on a device; this fixture did it too,
+    /// 36 lines under the status change above and 14 under each rename, while every assertion
+    /// passed. The report is the only witness there is, so the test reads it.
+    func testAStatusChangeAndARenameReenterNothingInSwiftUI() throws {
+        let fixture = hosted(title: Fixture.storedName, status: "Opening chat…")
+        let line = try statusLine(in: fixture.window)
+
+        let report = try capturingStandardStreams {
+            fixture.model.status = "David's MacBook Pro"
+            settle(fixture.window)
+            XCTAssertTrue(
+                line.label.isAnimatingLineScrollForTesting,
+                "the phrase landed without its morph"
+            )
+            fixture.model.title = Fixture.liveName
+            settle(fixture.window)
+        }
+
+        XCTAssertEqual(line.label.stringValue, "David's MacBook Pro")
+        XCTAssertNoThrow(try morphingLabel(with: Fixture.liveName, in: fixture.window))
+        XCTAssertFalse(
+            report.contains("AttributeGraph: cycle detected"),
+            "a change in the bar re-entered SwiftUI's graph:\n\(report)"
+        )
     }
 
     private func statusLine(in view: UIView) throws -> MobileConnectionStatusLineView {

@@ -445,12 +445,34 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     `MobileGlyphPresentation`, which asks for VS15 on emoji-capable symbols whose own default
     presentation is text, so an agent's mark is the same glyph on both screens.
   - **A morph is built against the geometry it starts in, so the host owes it stable bounds.**
-    `morph(to:)` resolves the label's final layout up front — `invalidateIntrinsicContentSize`
-    then `layoutIfNeeded` — and animates every character to a slot computed there. A host whose
-    layout settles *later* defeats that, and SwiftUI is such a host: a `UIViewRepresentable`'s
-    frame is decided in SwiftUI's own pass, not by `layoutIfNeeded`. The morph is then laid out
-    in the old width, the real width lands a frame or two later, and `relayoutCurrent()` snaps
-    every glyph to its final slot — on screen, an animation that stops half way. This shipped in
+    `setText` records the change — the new text, `invalidateIntrinsicContentSize`, where the
+    line stood in its window — and asks for a layout pass; `layout()` / `layoutSubviews()` then
+    builds the morph, animating every character to a slot computed in the bounds that pass
+    settled. It used to resolve that geometry eagerly, with `window?.layoutIfNeeded()` inside
+    the setter, and that is the one thing a label must not do: a setter runs wherever the host
+    calls it, and `MobileMorphingTitle` and `MobileConnectionStatusLine` call it from
+    `updateUIView`, inside SwiftUI's own graph update. Laying the window out there lays the
+    hosting view out, which renders the SwiftUI graph while that graph is still updating, and
+    AttributeGraph reported the re-entry as a dependency cycle for every attribute it met on the
+    way round: 46 `=== AttributeGraph: cycle detected ===` lines on every scene activation and
+    25 after every keychain write on a paired phone, unseen because they go to the process's
+    `stderr` and nothing reads a device's `stderr`. `MobileConnectionStatusLineView.update` made the same
+    shape of call one line later, a `layoutIfNeeded()` on itself to place its mark beside the new
+    phrase; scoped to its own subtree it was not seen to re-enter, but it asks for layout now and
+    lets the pass place it. Source inspection failed to find this twice;
+    what found it was relaunching the installed build with `AG_TRAP_CYCLES=1`
+    (`xcrun devicectl device process launch -e '{"AG_TRAP_CYCLES":"1"}' …`), which aborts at
+    the first cycle and leaves a symbolicated crash report with the whole chain in it.
+    `MobileNavigationTitleMorphTests` reproduces the same report in the simulator and now reads
+    the standard streams for it. Deferring costs nothing visible — the layout pass and the animation's first
+    frame commit in the same transaction — and the whole-window layout every sidebar rename used
+    to force on the Mac went with it. **Nothing reached from `updateUIView` calls
+    `layoutIfNeeded`**; a representable's UIKit view sets what it knows and marks itself for
+    layout. A host whose layout settles *later* than the label's pass still defeats the morph,
+    and SwiftUI is such a host: a `UIViewRepresentable`'s frame is decided in SwiftUI's own
+    pass. The morph is then laid out in the old width, the real width lands a frame or two
+    later, and `relayoutCurrent()` snaps every glyph to its final slot — on screen, an animation
+    that stops half way. This shipped in
     the phone's terminal navigation title, whose principal toolbar item was sized to what it
     said: Claude renaming a chat to `✳ <name>` moved it 27 points mid-morph. `MobileMorphingTitle`
     now fills the width it is offered rather than reporting the width its text wants, and the

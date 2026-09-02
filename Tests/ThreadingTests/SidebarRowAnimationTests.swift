@@ -228,6 +228,8 @@ final class SidebarRowAnimationTests: XCTestCase {
             fixture.store.renameSession(id: renamed.id, to: "A thoroughly different name")
                 .succeeded
         )
+        // A layout pass, not a redraw: the morph is built when the label lays out.
+        fixture.controller.view.layoutSubtreeIfNeeded()
 
         let title = try XCTUnwrap(
             titleLabel(of: key, in: fixture.controller),
@@ -331,6 +333,7 @@ final class SidebarRowAnimationTests: XCTestCase {
                 .succeeded
         )
         fixture.controller.reload()
+        fixture.controller.view.layoutSubtreeIfNeeded()
 
         let title = try XCTUnwrap(
             titleLabel(of: key, in: fixture.controller),
@@ -360,6 +363,8 @@ final class SidebarRowAnimationTests: XCTestCase {
             fixture.store.renameSession(id: renamed.id, to: "A thoroughly different name")
                 .succeeded
         )
+        // A layout pass, not a redraw: the morph is built when the label lays out.
+        fixture.controller.view.layoutSubtreeIfNeeded()
 
         let title = try XCTUnwrap(
             titleLabel(of: key, in: fixture.controller),

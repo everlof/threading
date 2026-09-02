@@ -431,9 +431,14 @@ final class MobileConnectionStatusLineView: UIView {
             role: .connectionStatus
         )
         invalidateIntrinsicContentSize()
-        // The mark takes its place beside the new phrase now, invisible until the copy is gone.
+        // The mark takes its place beside the new phrase in the next layout pass, invisible
+        // until the copy is gone. Only `setNeedsLayout`, deliberately: this runs from a
+        // `UIViewRepresentable`'s `updateUIView`, which is SwiftUI's own graph update, and a
+        // synchronous layout from there is the shape that put the morph label's forced window
+        // layout into an AttributeGraph cycle on every status change (LabelMorph in
+        // `dependencies.md`). Nothing below needs the new geometry: the departing copy stands
+        // where the mark *was*, read above before anything moved.
         setNeedsLayout()
-        layoutIfNeeded()
 
         guard let departure else { return }
         let departing = UIView(frame: departure.frame)
