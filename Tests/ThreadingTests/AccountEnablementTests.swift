@@ -85,6 +85,65 @@ final class AccountEnablementTests: XCTestCase {
         )
     }
 
+    /// A field action fires on Return. Closing Settings is a different exit path, and used to
+    /// remove the virtual row before that action ran, leaving the discovered name to return when
+    /// the page reopened.
+    func testClosingSettingsSettlesTheAccountNameBeingEdited() throws {
+        let account = AgentAccount(
+            provider: .codex,
+            handle: .named("codex-rinda"),
+            configPath: "/tmp/codex-rinda",
+            displayName: "openai-01@rinda.ventures"
+        )
+        let controller = AccountsPreferencesViewController(
+            accountsProvider: { [account] in [account] },
+            limitSettings: CustomLimitSettings(defaults: defaults),
+            accountStore: store
+        )
+        let page = controller.view
+        controller.viewWillAppear()
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 700),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        let host = try XCTUnwrap(window.contentView)
+        page.translatesAutoresizingMaskIntoConstraints = false
+        host.addSubview(page)
+        NSLayoutConstraint.activate([
+            page.topAnchor.constraint(equalTo: host.topAnchor),
+            page.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            page.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            page.trailingAnchor.constraint(equalTo: host.trailingAnchor)
+        ])
+        host.layoutSubtreeIfNeeded()
+
+        let field = try XCTUnwrap(
+            descendants(in: page)
+                .compactMap { $0 as? ThemedTextField }
+                .first { $0.stringValue == account.displayName },
+            "the virtualized account row did not materialize its name field"
+        )
+        controller.controlTextDidBeginEditing(Notification(
+            name: NSControl.textDidBeginEditingNotification,
+            object: field
+        ))
+        field.stringValue = "Rinda Work"
+
+        controller.viewWillDisappear()
+
+        let reopened = AccountPreferencesStore(defaults: defaults)
+        XCTAssertEqual(
+            reopened.displayNameOverride(for: account.id),
+            "Rinda Work",
+            "closing Settings discarded the active account-name edit"
+        )
+        withExtendedLifetime(window) {}
+    }
+
     func testHiddenModelsPersistAndStayScopedToOneLogin() {
         let work = AccountID(provider: .codex, handle: .named("codex-work"))
         let personal = AccountID(provider: .codex, handle: .standard)
@@ -274,6 +333,10 @@ final class AccountEnablementTests: XCTestCase {
             configPath: "/tmp/\(handle.name)",
             isEnabled: isEnabled
         )
+    }
+
+    private func descendants(in view: NSView) -> [NSView] {
+        view.subviews + view.subviews.flatMap { descendants(in: $0) }
     }
 
     private static func milliseconds(_ nanoseconds: UInt64) -> String {

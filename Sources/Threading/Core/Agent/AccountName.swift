@@ -48,8 +48,14 @@ enum AccountName {
     static func names(for accounts: [AgentAccount]) -> [AccountID: String] {
         var emails: [AccountID: String] = [:]
         var derivedNames: [AccountID: String] = [:]
+        var explicitNames: [AccountID: String] = [:]
 
         for account in accounts {
+            if let displayNameOverride = account.displayNameOverride {
+                explicitNames[account.id] = displayNameOverride
+                continue
+            }
+
             // What the CLI wrote down, else what it told us when asked. The default Claude
             // login is the second case: it records only a hashed id on disk.
             guard let email = AccountAvatarStore.cachedEmail(for: account)
@@ -62,10 +68,15 @@ enum AccountName {
 
         var counts: [String: Int] = [:]
         for name in derivedNames.values { counts[name, default: 0] += 1 }
+        // A derived answer that collides with an explicit one falls back to the address. The
+        // explicit name still wins unchanged: it is the answer the user deliberately chose.
+        for name in explicitNames.values { counts[name, default: 0] += 1 }
 
         var resolved: [AccountID: String] = [:]
         for account in accounts {
-            if let name = derivedNames[account.id], counts[name] == 1 {
+            if let explicitName = explicitNames[account.id] {
+                resolved[account.id] = explicitName
+            } else if let name = derivedNames[account.id], counts[name] == 1 {
                 resolved[account.id] = name
             } else if let email = emails[account.id] {
                 resolved[account.id] = email

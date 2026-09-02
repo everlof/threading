@@ -39,6 +39,12 @@ belonging to one person derive the same name, and a menu offering it twice is wo
 offering two aliases, so a collision falls back to the address. The alias still names sessions
 and still appears in the accounts settings page, which is where it is edited.
 
+An explicit name typed in Settings outranks that email-derived answer everywhere, including the
+identity chooser beside the account image. `AgentAccount` carries the override's provenance as
+well as its resolved display name so `AccountName` cannot mistake the automatic email name for a
+higher-priority answer. The field commits when editing ends and again when the Settings page
+closes; pressing Return is not required to preserve an edit.
+
 `AccountEmailProbe` exists because the **default** Claude login is the one account that cannot
 be named from disk: alternates record `oauthAccount.emailAddress` in their own `.claude.json`,
 while `~/.claude/.claude.json` carries a hashed `userID` and nothing else — its identity is in

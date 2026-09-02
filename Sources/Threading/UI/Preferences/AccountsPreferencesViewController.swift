@@ -24,10 +24,15 @@ final class AccountsPreferencesViewController: NSViewController {
 
     private let accountsProvider: () -> [AgentAccount]
     private let setupController: AccountSetupCardViewController
+    private let accountStore: AccountPreferencesStore
 
     private var accounts: [AgentAccount] = []
     private var extensionSections: [ExtensionSettingsSectionModel] = []
     private var presentationRows: [PresentationRow] = []
+
+    /// The name field currently holding AppKit's shared field editor. Retained weakly so closing
+    /// Settings can settle its text before the virtual row and controller disappear.
+    private weak var editingNameField: ThemedTextField?
 
     /// The open icon picker, retained so it survives until dismissed.
     private var iconPopover: ThemedPopover?
@@ -76,8 +81,10 @@ final class AccountsPreferencesViewController: NSViewController {
         limitSettings: CustomLimitSettings? = nil,
         accountStore: AccountPreferencesStore? = nil
     ) {
+        let accountStore = accountStore ?? AccountPreferencesStore.shared
         self.accountsProvider = accountsProvider
         self.setupController = AccountSetupCardViewController(coordinator: setupCoordinator)
+        self.accountStore = accountStore
         self.limits = AccountLimitsSectionController(
             settings: limitSettings,
             accountStore: accountStore
@@ -119,6 +126,18 @@ final class AccountsPreferencesViewController: NSViewController {
     override func viewWillAppear() {
         super.viewWillAppear()
         reload()
+    }
+
+    override func viewWillDisappear() {
+        // Ending editing is normally delivered by the field delegate. Closing the Settings
+        // window can remove this page first, so settle the active field explicitly as the final
+        // path out. The later delegate callback is harmless because the durable value now
+        // matches.
+        if let editingNameField {
+            self.editingNameField = nil
+            commitNameEdit(in: editingNameField, reloadAfterCommit: false)
+        }
+        super.viewWillDisappear()
     }
 
     override func viewDidLayout() {
@@ -286,8 +305,7 @@ final class AccountsPreferencesViewController: NSViewController {
         field.focusRingType = .none
         field.lineBreakMode = .byTruncatingTail
         field.tag = index
-        field.target = self
-        field.action = #selector(nameChanged(_:))
+        field.delegate = self
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -337,11 +355,12 @@ final class AccountsPreferencesViewController: NSViewController {
 
         let picker = EmojiPickerViewController(showsRemove: account.emoji != nil)
         picker.onPick = { [weak self] emoji in
-            AccountPreferencesStore.shared.setEmoji(emoji, for: account.id)
-            self?.iconPopover?.close()
-            self?.iconPopover = nil
-            self?.reload()
-            self?.notifyAccountsChanged()
+            guard let self else { return }
+            self.accountStore.setEmoji(emoji, for: account.id)
+            self.iconPopover?.close()
+            self.iconPopover = nil
+            self.reload()
+            self.notifyAccountsChanged()
         }
 
         let popover = HostPopoverFactory.make(.settingsAccountIconPicker)
@@ -355,18 +374,10 @@ final class AccountsPreferencesViewController: NSViewController {
         iconPopover = popover
     }
 
-    @objc private func nameChanged(_ sender: NSTextField) {
-        guard let account = account(at: sender.tag) else { return }
-
-        AccountPreferencesStore.shared.setDisplayNameOverride(sender.stringValue, for: account.id)
-        reload()
-        notifyAccountsChanged()
-    }
-
     @objc private func restorePresentationClicked(_ sender: ThemedButton) {
         guard let account = account(at: sender.tag) else { return }
 
-        AccountPreferencesStore.shared.clearPresentation(for: account.id)
+        accountStore.clearPresentation(for: account.id)
         reload()
         notifyAccountsChanged()
     }
@@ -388,7 +399,7 @@ final class AccountsPreferencesViewController: NSViewController {
     @objc private func enabledChanged(_ sender: ThemedToggle) {
         guard let account = account(at: sender.tag) else { return }
 
-        AccountPreferencesStore.shared.setEnabled(sender.state == .on, for: account.id)
+        accountStore.setEnabled(sender.state == .on, for: account.id)
         reload()
         notifyAccountsChanged()
     }
@@ -399,6 +410,24 @@ final class AccountsPreferencesViewController: NSViewController {
     private func account(at index: Int) -> AgentAccount? {
         guard index >= 0, index < accounts.count else { return nil }
         return accounts[index]
+    }
+
+    private func commitNameEdit(
+        in field: ThemedTextField,
+        reloadAfterCommit: Bool
+    ) {
+        guard let account = account(at: field.tag) else { return }
+        let previous = accountStore.displayNameOverride(for: account.id)
+        accountStore.setDisplayNameOverride(field.stringValue, for: account.id)
+        let current = accountStore.displayNameOverride(for: account.id)
+
+        guard current != previous else { return }
+        if reloadAfterCommit {
+            // Rebuild from discovery so clearing the field immediately restores its automatic
+            // name, and trimming is reflected in the standing value.
+            reload()
+        }
+        notifyAccountsChanged()
     }
 
     private func abbreviated(_ path: String) -> String {
@@ -419,6 +448,23 @@ final class AccountsPreferencesViewController: NSViewController {
         var count = 0
         tableView.enumerateAvailableRowViews { _, _ in count += 1 }
         return count
+    }
+}
+
+// MARK: - Account Name Editing
+
+extension AccountsPreferencesViewController: NSTextFieldDelegate {
+    func controlTextDidBeginEditing(_ notification: Notification) {
+        guard let field = notification.object as? ThemedTextField else { return }
+        editingNameField = field
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard let field = notification.object as? ThemedTextField else { return }
+        if editingNameField === field {
+            editingNameField = nil
+        }
+        commitNameEdit(in: field, reloadAfterCommit: true)
     }
 }
 

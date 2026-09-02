@@ -360,11 +360,13 @@ enum AgentAccountDiscovery {
 
     private static func applyingPreferences(to account: AgentAccount) -> AgentAccount {
         let preferences = AccountPreferencesStore.shared
+        let displayNameOverride = preferences.displayNameOverride(for: account.id)
         return AgentAccount(
             provider: account.provider,
             handle: account.handle,
             configPath: account.configPath,
-            displayName: preferences.displayNameOverride(for: account.id) ?? account.displayName,
+            displayName: account.displayName,
+            displayNameOverride: displayNameOverride,
             emoji: preferences.emoji(for: account.id),
             isEnabled: preferences.isEnabled(account.id)
         )
