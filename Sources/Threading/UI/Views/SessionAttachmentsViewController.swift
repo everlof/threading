@@ -1,4 +1,3 @@
-import AVFoundation
 import AppKit
 import ThreadingExtensionKit
 import WebKit
@@ -2969,20 +2968,10 @@ enum SessionAttachmentThumbnails {
         let url = attachment.url
         let pixels = SessionAttachmentsDefaults.iconSize * SessionAttachmentsDefaults.thumbnailScale
         Task { @MainActor in
-            let frame = await Task.detached(priority: .utility) { () -> CGImage? in
-                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-                // The rotation a recording stores rather than applies. Without this a portrait
-                // capture arrives on its side in a 26-point well, which is exactly the size at
-                // which nobody can tell that is what happened.
-                generator.appliesPreferredTrackTransform = true
-                generator.maximumSize = CGSize(width: pixels, height: pixels)
-                // The first frame the decoder can give, not the first frame there is: asking for
-                // an exact time makes the generator decode forward from a keyframe, and a poster
-                // for a row is not worth that. The tolerance runs forwards only, so a clip
-                // shorter than the window still answers with something inside itself.
-                generator.requestedTimeToleranceBefore = .zero
-                generator.requestedTimeToleranceAfter = Self.posterFrameTolerance
-                return try? await generator.image(at: .zero).image
+            // `.utility`: a row scrolling into view is not something the user is waiting on, and
+            // the composer asks the same extractor for a dropped file at a higher priority.
+            let frame = await Task.detached(priority: .utility) {
+                await MoviePosterFrame.extract(from: url, maximumPixels: pixels)
             }.value
 
             pendingPosterKeys.remove(key)
@@ -3005,9 +2994,6 @@ enum SessionAttachmentThumbnails {
             completion(poster)
         }
     }
-
-    /// How far into a movie a poster frame may be taken from.
-    private static let posterFrameTolerance = CMTime(seconds: 1, preferredTimescale: 600)
 
     private static func posterKey(for url: URL) -> String {
         let pixels = Int(

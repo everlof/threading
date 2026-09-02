@@ -62,7 +62,7 @@ final class PromptView: NSView, ThemedComponent {
     /// leading group empties itself down to nothing.
     private let footerSpacer = NSView()
     private let completionPresenter = PromptCompletionPresenter()
-    private var attachments: [PromptImageAttachment] = []
+    private var attachments: [PromptMediaAttachment] = []
     /// Paths are cheap queue state. File inspection and ImageIO rasterization happen serially on
     /// a worker, and only the bounded finished frame returns to this AppKit component.
     private var pendingAttachmentPaths: [String] = []
@@ -300,6 +300,16 @@ final class PromptView: NSView, ThemedComponent {
     /// inspector notes, where turning a dropped path into hidden transport metadata would change
     /// the meaning of the field rather than improve its presentation.
     var showsImageAttachments = false
+
+    /// Whether movies join the same strip, as their first frame under a play mark.
+    ///
+    /// Separate from images because the two are different promises. A picture is something the
+    /// agent can *see*; a movie is a file it can only be told about — which the chat composers
+    /// are happy to do, since Threading's own `video_frames` tool reads one — and the report form
+    /// is not, because its backend takes pictures only. Meaningful only beside
+    /// `showsImageAttachments`: a movie thumbnail is the image thumbnail's shape with a play mark
+    /// on it, and a composer with no strip at all keeps every file as a path.
+    var showsMovieAttachments = false
 
     /// The most preview attachments this particular surface may retain.
     ///
@@ -797,8 +807,9 @@ final class PromptView: NSView, ThemedComponent {
 
     /// Adds files through the same path used by paste and drop.
     ///
-    /// Images become previews; anything else remains literal text because a source file or
-    /// folder has no meaningful thumbnail in a chat composer.
+    /// Images — and movies, where the composer takes them — become previews; anything else
+    /// remains literal text because a source file or folder has no meaningful thumbnail in a
+    /// chat composer.
     func attachFiles(at paths: [String]) {
         insertAttachments(paths)
     }
@@ -1178,12 +1189,14 @@ final class PromptView: NSView, ThemedComponent {
         onSubmit?(submissionValue)
     }
 
-    /// Makes images visible as attachments while leaving other files as paths in the editor.
+    /// Makes images and movies visible as attachments while leaving other files as paths in
+    /// the editor.
     ///
     /// Both cases still become paths before submission — neither CLI can see pixels that only
     /// existed on the pasteboard — but the distinction matters to the person composing the
-    /// prompt. An image is something they should be able to recognise and remove at a glance;
-    /// a source file's exact path is the useful content.
+    /// prompt. An image is something they should be able to recognise and remove at a glance,
+    /// and a recording is recognised by its first frame; a source file's exact path is the
+    /// useful content.
     private func insertAttachments(_ paths: [String]) {
         guard !paths.isEmpty else { return }
 
@@ -1227,13 +1240,32 @@ final class PromptView: NSView, ThemedComponent {
         attachmentPreparationTask = Task { @MainActor [weak self] in
             while !Task.isCancelled {
                 guard let path = self?.pendingAttachmentPaths.first else { break }
+                let url = URL(fileURLWithPath: path)
+                // Decided by the name before a decoder is spent, and confirmed by the decoder:
+                // a `.mov` that is not a movie gives up no poster and falls back to a path, the
+                // same way bytes that are not a picture do.
+                let kind: PromptMediaAttachment.Kind = self?.showsMovieAttachments == true
+                    && AttachmentReferenceDetector.isMovie(url)
+                    ? .movie
+                    : .image
                 let frame: CGImage? = await Task.detached(priority: .userInitiated) {
                     let policy = BoundedImageDecodePolicy.composerAttachmentThumbnail
-                    guard let data = try? BoundedFileReader.read(
-                        URL(fileURLWithPath: path),
-                        maximumBytes: policy.maximumBytes
-                    ) else { return nil }
-                    return BoundedImageDecoder.thumbnailFrame(data, policy: policy)
+                    switch kind {
+                    case .image:
+                        guard let data = try? BoundedFileReader.read(
+                            url,
+                            maximumBytes: policy.maximumBytes
+                        ) else { return nil }
+                        return BoundedImageDecoder.thumbnailFrame(data, policy: policy)
+                    case .movie:
+                        // Nothing is read into memory: a movie streams off disk, so the byte
+                        // ceiling that bounds a decoded picture has nothing to bound here — the
+                        // rule the attachments pane keeps for its own preview ceiling.
+                        return await MoviePosterFrame.extract(
+                            from: url,
+                            maximumPixels: CGFloat(policy.maximumRenderedPixelDimension)
+                        )
+                    }
                 }.value
 
                 guard !Task.isCancelled,
@@ -1245,7 +1277,7 @@ final class PromptView: NSView, ThemedComponent {
                 self.pendingAttachmentPaths.removeFirst()
 
                 if let frame {
-                    self.installAttachment(path: path, frame: frame)
+                    self.installAttachment(path: path, kind: kind, frame: frame)
                 } else {
                     self.handleUnpreviewableImagePaths(
                         [path],
@@ -1263,12 +1295,16 @@ final class PromptView: NSView, ThemedComponent {
         }
     }
 
-    private func installAttachment(path: String, frame: CGImage) {
+    private func installAttachment(
+        path: String,
+        kind: PromptMediaAttachment.Kind,
+        frame: CGImage
+    ) {
         let image = NSImage(
             cgImage: frame,
             size: NSSize(width: frame.width, height: frame.height)
         )
-        let attachment = PromptImageAttachment(path: path, image: image)
+        let attachment = PromptMediaAttachment(path: path, kind: kind, image: image)
         attachments.append(attachment)
 
         let thumbnail = PromptAttachmentThumbnail(attachment: attachment)
@@ -1278,21 +1314,15 @@ final class PromptView: NSView, ThemedComponent {
                       $0.id == attachment.id
                   })
             else { return nil }
-
-            let items = self.attachments.map {
-                MediaInspectorItem(
-                    url: URL(fileURLWithPath: $0.path),
-                    title: $0.name,
-                    image: $0.image
-                )
-            }
-            return MediaInspectorSelection(items: items, selectedIndex: selectedIndex)
+            return self.mediaInspectorSelection(forAttachmentAt: selectedIndex)
         }
         thumbnail.onRemove = { [weak self, weak thumbnail] in
             guard let self, let thumbnail else { return }
             self.removeAttachment(id: attachment.id, thumbnail: thumbnail)
         }
-        if onRequestImageComment != nil {
+        // A comment is a mark on a picture. A movie has no still to point at, so the offer is
+        // not made rather than made and refused.
+        if kind == .image, onRequestImageComment != nil {
             thumbnail.onComment = { [weak self] in
                 self?.onRequestImageComment?(attachment.path)
             }
@@ -1300,6 +1330,26 @@ final class PromptView: NSView, ThemedComponent {
         attachmentStack.addArrangedSubview(thumbnail)
         attachmentScrollView.isHidden = false
         layoutAttachmentStrip()
+    }
+
+    /// The strip as a collection the lightbox can walk: every attachment, the pressed one
+    /// selected.
+    ///
+    /// A movie goes on the rail as what it is, so the arrow keys reach it *and* it plays there
+    /// rather than opening as a document Quick Look happens to know; its poster is handed over
+    /// so the rail shows the recording rather than a file icon. `.document` is the fallback for
+    /// a host with no player registered, made the same way the attachments pane makes it.
+    func mediaInspectorSelection(forAttachmentAt index: Int) -> MediaInspectorSelection? {
+        guard attachments.indices.contains(index) else { return nil }
+        let items = attachments.map {
+            MediaInspectorItem(
+                url: URL(fileURLWithPath: $0.path),
+                title: $0.name,
+                image: $0.image,
+                content: $0.inspectorContent
+            )
+        }
+        return MediaInspectorSelection(items: items, selectedIndex: index)
     }
 
     private func insertLiteralPaths(_ paths: [String]) {
@@ -1615,22 +1665,53 @@ final class PromptView: NSView, ThemedComponent {
 
 // MARK: - Prompt Image Attachment
 
-private struct PromptImageAttachment {
+/// One file waiting in the strip, and the picture standing in for it.
+private struct PromptMediaAttachment {
+
+    /// What the picture is *of*: the file itself, or the first frame of a movie.
+    enum Kind: Equatable {
+        case image
+        case movie
+    }
+
     let id = UUID()
     let path: String
+    let kind: Kind
+    /// The image decoded to thumbnail size — or, for a movie, its poster frame.
     let image: NSImage
 
     var name: String {
         URL(fileURLWithPath: path).lastPathComponent
     }
+
+    /// What the lightbox opens this as. Main-actor because the registry it asks is.
+    @MainActor
+    var inspectorContent: MediaInspectorItemContent {
+        switch kind {
+        case .image:
+            return .image
+        case .movie:
+            return MediaDocumentRendererRegistry.supports(.video)
+                ? .media(format: .video)
+                : .document
+        }
+    }
 }
 
 /// One recognisable image with its removal control over the corner, matching the attachment
 /// treatment in the chat composer rather than exposing a temporary path as if it were prose.
+///
+/// A movie is drawn as its poster frame under a play mark. A poster is a picture of a moment
+/// and so is a screenshot — at 80 points nothing else says which of the two tiles in the strip
+/// can be played, and the mark is the same answer the attachments pane gives its rows.
 private final class PromptAttachmentThumbnail: ThemedControl {
 
-    private let attachment: PromptImageAttachment
+    private let attachment: PromptMediaAttachment
     private let removeButton: PromptAttachmentRemoveButton
+    /// Present for a movie only. A subview rather than ink in `draw`, so a test can find the
+    /// mark the way it finds the pane's, and so the glyph stays a configured symbol rather than
+    /// a scaled render.
+    private let playMark: NSImageView?
     private var isPressed = false { didSet { needsDisplay = true } }
     private var menuSession: AnyObject?
 
@@ -1638,13 +1719,31 @@ private final class PromptAttachmentThumbnail: ThemedControl {
     var onComment: (() -> Void)?
     var inspectorSelectionProvider: (() -> MediaInspectorSelection?)?
 
-    init(attachment: PromptImageAttachment) {
+    init(attachment: PromptMediaAttachment) {
         self.attachment = attachment
         removeButton = PromptAttachmentRemoveButton(
             accessibility: "Remove \(attachment.name)"
         )
+        playMark = attachment.kind == .movie ? Self.makePlayMark() : nil
         super.init(frame: .zero)
         setup()
+    }
+
+    private static func makePlayMark() -> NSImageView {
+        let mark = NSImageView()
+        let slot = Design.Symbol.slot(
+            inControlOfHeight: PromptViewDefaults.attachmentPlayMarkDiameter
+        )
+        mark.image = Design.Symbol.image(
+            PromptViewDefaults.attachmentPlayMarkSymbol,
+            slot: slot,
+            pointSize: Design.Symbol.pointSize(forSlot: slot),
+            weight: .semibold
+        )
+        mark.setAccessibilityElement(false)
+        mark.setAccessibilityIdentifier(PromptViewDefaults.attachmentPlayMarkIdentifier)
+        mark.translatesAutoresizingMaskIntoConstraints = false
+        return mark
     }
 
     @available(*, unavailable)
@@ -1668,6 +1767,16 @@ private final class PromptAttachmentThumbnail: ThemedControl {
                 constant: -Design.Spacing.tight
             )
         ])
+
+        if let playMark {
+            // Under the remove button in the hierarchy: the two never overlap, but the corner
+            // control is the one that must win if a theme ever grows the mark towards it.
+            addSubview(playMark, positioned: .below, relativeTo: removeButton)
+            NSLayoutConstraint.activate([
+                playMark.centerXAnchor.constraint(equalTo: centerXAnchor),
+                playMark.centerYAnchor.constraint(equalTo: centerYAnchor)
+            ])
+        }
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -1703,6 +1812,8 @@ private final class PromptAttachmentThumbnail: ThemedControl {
 
         NSGraphicsContext.restoreGraphicsState()
 
+        if let playMark { drawPlate(under: playMark) }
+
         let borderWidth = Design.Radius.border
         let borderPath = NSBezierPath(
             roundedRect: bounds.insetBy(dx: borderWidth / 2, dy: borderWidth / 2),
@@ -1723,6 +1834,29 @@ private final class PromptAttachmentThumbnail: ThemedControl {
             around: ThemedSurface.Shape(rect: bounds, radius: radius),
             color: Design.Surface.accent
         )
+    }
+
+    /// The play mark floats over arbitrary pixels, so it stands on the same opaque themed plate
+    /// the remove button does: a poster frame is as likely to be white as black under it, and a
+    /// bare glyph in the label colour would vanish on half of them.
+    private func drawPlate(under mark: NSImageView) {
+        let diameter = PromptViewDefaults.attachmentPlayMarkDiameter
+        let plate = NSRect(
+            x: bounds.midX - diameter / 2,
+            y: bounds.midY - diameter / 2,
+            width: diameter,
+            height: diameter
+        )
+        let panel = Design.Surface.panel.composited(over: Design.Surface.ground)
+        let fill = Design.Surface.elevated.composited(over: panel)
+        let ink = Design.Text.on(fill)
+        ThemedSurface.draw(
+            plate,
+            fill: fill,
+            border: ink.border,
+            radius: Design.Radius.pill(height: diameter)
+        )
+        mark.contentTintColor = isEnabled ? ink.label : ink.quaternary
     }
 
     /// A thumbnail in the tray is a picture you press, not a control's plate. See
@@ -1762,6 +1896,11 @@ private final class PromptAttachmentThumbnail: ThemedControl {
         L10n.format("Press to inspect %@", attachment.name)
     }
 
+    /// What the picture is of, for a reader who cannot see the play mark.
+    override func accessibilityValue() -> Any? {
+        attachment.kind == .movie ? L10n.string("Movie") : nil
+    }
+
     override func performPrimaryAction() -> Bool {
         guard isEnabled else { return false }
         window?.makeFirstResponder(self)
@@ -1796,8 +1935,14 @@ private final class PromptAttachmentThumbnail: ThemedControl {
         entries += [
             item("Open in Default App") { [weak self] in self?.openInDefaultApp() },
             item("Reveal in Finder") { [weak self] in self?.revealInFinder() },
-            .separator,
-            item("Copy Image") { [weak self] in self?.copyImage() },
+            .separator
+        ]
+        // A movie's poster is a frame the strip chose. The frame worth copying is the one the
+        // user stops on, and that is the lightbox's Copy Frame.
+        if attachment.kind == .image {
+            entries.append(item("Copy Image") { [weak self] in self?.copyImage() })
+        }
+        entries += [
             item("Copy File Name") { [weak self] in self?.copyFileName() },
             item("Copy File Path") { [weak self] in self?.copyFilePath() },
             .separator,
@@ -2367,6 +2512,12 @@ enum PromptSubmitIntent: Equatable {
 enum PromptViewDefaults {
     static let submitSize = Design.Size.compactSubmitHeight
     static let maximumImageAttachments = 32
+
+    /// The plate under a movie thumbnail's play mark: the chooser height, so the mark reads as
+    /// a small control of the same size as every other small control in the box.
+    static let attachmentPlayMarkDiameter = Design.Size.chipHeight
+    static let attachmentPlayMarkSymbol = "play.fill"
+    static let attachmentPlayMarkIdentifier = "composer.attachment.play"
 
     /// Below every control the footer row can hold, so the empty middle between the two runs is
     /// what stretches when there is room and what disappears when there is not. Any real

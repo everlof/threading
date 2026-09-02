@@ -692,6 +692,7 @@ final class SessionComposerViewController: NSViewController {
 
     private func wirePrompt() {
         promptView.showsImageAttachments = true
+        promptView.showsMovieAttachments = true
         promptView.placeholder = ComposerDefaults.promptPlaceholder
         promptView.minimumHeight = ComposerDefaults.promptHeight
         // Return belongs to the text here; `startButton` sends. The box still carries the

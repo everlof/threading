@@ -420,6 +420,12 @@ final class MediaInspectorView: NSView, ThemedComponent {
 
     private var selectedItem: MediaInspectorItem { items[selectedIndex] }
 
+    /// What the lightbox is showing, for a test that opened it from somewhere else — the composer
+    /// strip, say — and has to prove the file landed in the right renderer rather than just that
+    /// a lightbox opened.
+    var selectedItemContentForTesting: MediaInspectorItemContent { selectedItem.content }
+    var isShowingMediaPlayerForTesting: Bool { hasInstalledMediaPlayer && !mediaPlayer.isHidden }
+
     var showsCollectionRail: Bool { items.count > 1 && !railScrollView.isHidden }
     var collectionThumbnailCount: Int { thumbnails.count }
 

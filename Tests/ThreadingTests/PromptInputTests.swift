@@ -115,6 +115,14 @@ final class PromptInputTests: XCTestCase {
         return url
     }
 
+    /// A real recording, so the poster the composer shows is a frame a decoder gave up.
+    private func makeMovieFile(named name: String = "capture.mov") throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-\(name)")
+        try MovieFixture.write(to: url)
+        return url
+    }
+
     private func captureAppFixture(_ window: NSWindow, named name: String) throws {
         let root = try XCTUnwrap(window.contentView)
         root.layoutSubtreeIfNeeded()
@@ -538,6 +546,147 @@ final class PromptInputTests: XCTestCase {
         XCTAssertEqual(NSPasteboard.general.string(forType: .string), imageURL.path)
         XCTAssertEqual(NSPasteboard.general.availableType(from: [.fileURL]), .fileURL)
 
+        try performMenuItem(named: "Remove Attachment", from: thumbnail, in: root)
+        XCTAssertTrue(prompt.attachmentPaths.isEmpty)
+    }
+
+    // MARK: - Movies
+
+    /// A recording dropped on the composer is recognised by its first frame, the way a
+    /// screenshot is recognised by its pixels — and says it can be played, because at 80 points
+    /// a poster and a screenshot are the same picture. Pressing it opens the lightbox with the
+    /// movie in the player, not as a still.
+    func testMoviesBecomePosterThumbnailsThatOpenInThePlayer() throws {
+        let movieURL = try makeMovieFile()
+        defer { try? FileManager.default.removeItem(at: movieURL) }
+
+        let prompt = PromptView()
+        prompt.showsImageAttachments = true
+        prompt.showsMovieAttachments = true
+        let window = makeWindow(hosting: prompt)
+        defer { MediaInspectorPresenter.dismiss(in: window) }
+        prompt.stringValue = "What happens at the end of this"
+        prompt.attachFiles(at: [movieURL.path])
+        waitForAttachmentPreparation(prompt)
+
+        XCTAssertEqual(
+            prompt.stringValue,
+            "What happens at the end of this",
+            "the movie's path leaked into the prose"
+        )
+        XCTAssertEqual(prompt.attachmentPaths, [movieURL.path])
+        XCTAssertEqual(
+            prompt.submissionValue,
+            "What happens at the end of this \(PromptAttachment.quotedPath(movieURL.path))"
+        )
+
+        let thumbnail = try XCTUnwrap(
+            descendants(of: prompt).first {
+                $0.accessibilityRole() == .image
+                    && $0.accessibilityLabel() == movieURL.lastPathComponent
+            },
+            "the movie never became a thumbnail"
+        )
+        XCTAssertEqual(thumbnail.accessibilityValue() as? String, "Movie")
+        XCTAssertEqual(
+            descendants(of: thumbnail).filter {
+                $0.accessibilityIdentifier() == PromptViewDefaults.attachmentPlayMarkIdentifier
+            }.count,
+            1,
+            "a movie thumbnail carries no play mark"
+        )
+        try captureAppFixture(window, named: "attachment-movie-thumbnail")
+
+        let selection = try XCTUnwrap(prompt.mediaInspectorSelection(forAttachmentAt: 0))
+        XCTAssertEqual(selection.items.first?.content, .media(format: .video))
+        XCTAssertNotNil(selection.items.first?.image, "the rail has no poster to show")
+
+        XCTAssertTrue(thumbnail.accessibilityPerformPress())
+        XCTAssertTrue(MediaInspectorPresenter.isPresenting(in: window))
+        let inspector = try XCTUnwrap(
+            descendants(of: try XCTUnwrap(window.contentView))
+                .compactMap { $0 as? MediaInspectorView }
+                .first
+        )
+        XCTAssertEqual(inspector.selectedItemContentForTesting, .media(format: .video))
+        XCTAssertTrue(inspector.isShowingMediaPlayerForTesting, "the movie opened as a still")
+    }
+
+    /// Every composer took only pictures before this, and the report form still does: a movie
+    /// stays a literal path — or a stated refusal — unless the host asked for movies. And a name
+    /// is only a claim: a `.mov` the decoder cannot open falls back to a path the same way.
+    func testAMovieStaysAPathUnlessTheComposerTakesMoviesAndTheDecoderAgrees() throws {
+        let movieURL = try makeMovieFile()
+        defer { try? FileManager.default.removeItem(at: movieURL) }
+
+        let pictures = PromptView()
+        pictures.showsImageAttachments = true
+        pictures.attachFiles(at: [movieURL.path])
+        waitForAttachmentPreparation(pictures)
+        XCTAssertTrue(pictures.attachmentPaths.isEmpty)
+        XCTAssertEqual(pictures.stringValue, PromptAttachment.quotedPath(movieURL.path))
+
+        let report = PromptView()
+        report.showsImageAttachments = true
+        report.unpreviewableImageBehavior = .reject
+        var rejection: PromptView.ImageAttachmentRejection?
+        report.onImageAttachmentRejection = { rejection = $0 }
+        report.attachFiles(at: [movieURL.path])
+        waitForAttachmentPreparation(report)
+        XCTAssertTrue(report.attachmentPaths.isEmpty)
+        XCTAssertEqual(report.stringValue, "", "a rejected movie's path leaked into report prose")
+        XCTAssertEqual(rejection, .unreadable(count: 1))
+
+        let impostor = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(UUID().uuidString)-not-really.mov")
+        try Data("not a movie".utf8).write(to: impostor)
+        defer { try? FileManager.default.removeItem(at: impostor) }
+        let movies = PromptView()
+        movies.showsImageAttachments = true
+        movies.showsMovieAttachments = true
+        movies.attachFiles(at: [impostor.path])
+        waitForAttachmentPreparation(movies)
+        XCTAssertTrue(movies.attachmentPaths.isEmpty, "a file that is not a movie became a thumbnail")
+        XCTAssertEqual(movies.stringValue, PromptAttachment.quotedPath(impostor.path))
+    }
+
+    /// A movie's menu is the image's without the two actions that need a picture: there is no
+    /// still to comment on, and the frame worth copying is the one the lightbox stops on.
+    func testAMovieThumbnailOffersNoPictureToCopyAndNothingToCommentOn() throws {
+        let movieURL = try makeMovieFile()
+        defer { try? FileManager.default.removeItem(at: movieURL) }
+
+        let prompt = PromptView()
+        prompt.showsImageAttachments = true
+        prompt.showsMovieAttachments = true
+        prompt.onRequestImageComment = { _ in XCTFail("a movie offered a comment") }
+        let window = makeWindow(hosting: prompt)
+        prompt.attachFiles(at: [movieURL.path])
+        waitForAttachmentPreparation(prompt)
+
+        let thumbnail = try XCTUnwrap(
+            descendants(of: prompt).first {
+                $0.accessibilityRole() == .image
+                    && $0.accessibilityLabel() == movieURL.lastPathComponent
+            }
+        )
+        let root = try XCTUnwrap(window.contentView)
+        XCTAssertTrue(thumbnail.accessibilityPerformShowMenu())
+        root.layoutSubtreeIfNeeded()
+        XCTAssertEqual(
+            descendants(of: root)
+                .filter { $0.accessibilityRole() == .menuItem }
+                .compactMap { $0.accessibilityTitle() },
+            [
+                "Inspect",
+                "Open in Default App",
+                "Reveal in Finder",
+                "Copy File Name",
+                "Copy File Path",
+                "Open in System Quick Look",
+                "Remove Attachment"
+            ]
+        )
         try performMenuItem(named: "Remove Attachment", from: thumbnail, in: root)
         XCTAssertTrue(prompt.attachmentPaths.isEmpty)
     }

@@ -407,6 +407,13 @@ Two rules in the pane follow from the file never being read:
   refusal is the cost of a success and a row that cannot have a picture would otherwise pay it on
   every scroll. A movie row also carries a small play mark: a poster frame is a picture of a
   moment and so is a screenshot, and at 26 points nothing else tells them apart.
+- **The composer asks the same extractor.** `MoviePosterFrame` is the one place a poster is
+  taken — rotation applied, size bounded, the first frame the decoder will give rather than the
+  first there is — so a recording dropped on the chat composer shows the same frame in its
+  80-point tile that its row later shows in the pane. The composer runs it at `.userInitiated`
+  because the user is waiting on that file; the pane's rows run it at `.utility` because they
+  are not. Pressing the tile opens the lightbox with the movie in the player, exactly as a
+  selected row does, and a name the decoder refuses falls back to a path in the text.
 
 The phone shows a movie the way it shows an animation — a card saying it plays on the Mac, and no
 bytes are asked for. Note what the *listing* already does above it: `RemoteAccessServer` omits any

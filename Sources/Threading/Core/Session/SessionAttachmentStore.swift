@@ -1878,6 +1878,16 @@ enum AttachmentReferenceDetector {
         return nil
     }
 
+    /// Whether a name claims to be a movie the platform can play.
+    ///
+    /// The composer's question, asked before it spends a decoder on a dropped file. A name is a
+    /// claim and the decoder answers it — a `.mov` that is not one gives up no poster frame and
+    /// falls back to being a path — but the *set* is decided here once, so the composer and the
+    /// attachments pane cannot disagree about which files are movies.
+    static func isMovie(_ url: URL) -> Bool {
+        videoExtensions.contains(url.pathExtension.lowercased())
+    }
+
     /// The host-owned hint that admits an otherwise ambiguous file, or nil.
     ///
     /// Only a hint on the host's small admission list gets a row of its own. Other hints may

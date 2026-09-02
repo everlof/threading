@@ -738,9 +738,9 @@ final class SessionAttachmentVideoTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private static let movieSize = CGSize(width: 160, height: 120)
-    private static let movieSeconds: Double = 1
-    private static let movieFrameRate: Int32 = 10
+    private static let movieSize = MovieFixture.size
+    private static let movieSeconds = MovieFixture.seconds
+    private static let movieFrameRate = MovieFixture.frameRate
 
     @discardableResult
     private func write(_ relativePath: String, _ data: Data) throws -> URL {
@@ -781,85 +781,17 @@ final class SessionAttachmentVideoTests: XCTestCase {
         return try write(name, png)
     }
 
-    /// A real movie, written by the platform rather than checked in.
-    ///
-    /// A fixture that is genuinely decodable is the only kind worth having here: every claim in
-    /// this file — the size, the length, the refusal of a file that only looks like one — is a
-    /// claim about what a decoder says, and a stub would prove none of them.
+    /// A genuinely decodable movie, because every claim in this file — the size, the length, the
+    /// refusal of a file that only looks like one — is a claim about what a decoder says.
     private func writeMovie(named name: String) throws -> URL {
         let url = root.appendingPathComponent(name)
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Int(Self.movieSize.width),
-            AVVideoHeightKey: Int(Self.movieSize.height)
-        ])
-        input.expectsMediaDataInRealTime = false
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32ARGB),
-                kCVPixelBufferWidthKey as String: Int(Self.movieSize.width),
-                kCVPixelBufferHeightKey as String: Int(Self.movieSize.height)
-            ]
+        try MovieFixture.write(
+            to: url,
+            size: Self.movieSize,
+            seconds: Self.movieSeconds,
+            frameRate: Self.movieFrameRate
         )
-        writer.add(input)
-        XCTAssertTrue(writer.startWriting(), "\(writer.error?.localizedDescription ?? "")")
-        writer.startSession(atSourceTime: .zero)
-
-        let frames = Int(Double(Self.movieFrameRate) * Self.movieSeconds)
-        for index in 0..<frames {
-            waitUntil("the writer takes a frame") { input.isReadyForMoreMediaData }
-            let buffer = try pixelBuffer(
-                gray: Double(index) / Double(max(frames - 1, 1)),
-                pool: adaptor.pixelBufferPool
-            )
-            adaptor.append(
-                buffer,
-                withPresentationTime: CMTime(
-                    value: CMTimeValue(index),
-                    timescale: Self.movieFrameRate
-                )
-            )
-        }
-        input.markAsFinished()
-        writer.endSession(atSourceTime: CMTime(
-            value: CMTimeValue(frames),
-            timescale: Self.movieFrameRate
-        ))
-        let finished = expectation(description: "the movie is written")
-        writer.finishWriting { finished.fulfill() }
-        wait(for: [finished], timeout: 20)
-        XCTAssertEqual(writer.status, .completed, "\(writer.error?.localizedDescription ?? "")")
         return url
-    }
-
-    private func pixelBuffer(gray: Double, pool: CVPixelBufferPool?) throws -> CVPixelBuffer {
-        var buffer: CVPixelBuffer?
-        if let pool {
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
-        }
-        if buffer == nil {
-            CVPixelBufferCreate(
-                nil,
-                Int(Self.movieSize.width),
-                Int(Self.movieSize.height),
-                kCVPixelFormatType_32ARGB,
-                nil,
-                &buffer
-            )
-        }
-        let pixels = try XCTUnwrap(buffer)
-        CVPixelBufferLockBaseAddress(pixels, [])
-        defer { CVPixelBufferUnlockBaseAddress(pixels, []) }
-        if let base = CVPixelBufferGetBaseAddress(pixels) {
-            memset(
-                base,
-                Int32(min(max(gray, 0), 1) * 255),
-                CVPixelBufferGetBytesPerRow(pixels) * CVPixelBufferGetHeight(pixels)
-            )
-        }
-        return pixels
     }
 
     private func videoAttachment(named name: String) -> SessionAttachment {

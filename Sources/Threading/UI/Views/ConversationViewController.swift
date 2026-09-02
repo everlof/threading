@@ -304,6 +304,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         prompt.translatesAutoresizingMaskIntoConstraints = false
         prompt.fontSurface = .conversation
         prompt.showsImageAttachments = true
+        prompt.showsMovieAttachments = true
         // The model, effort and speed a reply is sent with live on the box's own bottom row —
         // see `PromptView.SubmitPlacement.footer`.
         prompt.submitPlacement = .footer
