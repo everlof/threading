@@ -1,0 +1,1 @@
+../../../../../Sources/Threading/UI/Design/TemplateImageDrawing.swift

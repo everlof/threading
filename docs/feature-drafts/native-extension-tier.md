@@ -350,6 +350,70 @@ one that proves whether the facade is the right shape. Do not block the log pane
 build that host-native beside `ExecutionAuditViewController`, and let it become the first consumer
 of the plugin tier once the tier exists.
 
+## How the design system reaches a plugin — measured 2026-09-02
+
+The extraction plan recorded here said "lift `UI/Design/` into `ThreadingDesignKit` and have the
+app import it". That was measured and is wrong, in two ways worth writing down so the next attempt
+does not repeat them.
+
+**Publishing the module is not the cost; the imports are.** 441 declarations live under
+`UI/Design/`, 323 of them used elsewhere in the app. Making a module out of the directory means
+annotating those *and* adding an import line to roughly four hundred application files, which is a
+very large diff for a rearrangement nobody asked for.
+
+**The directory is not separable as it stands.** `UI/Design/` reads `AppThemePalette` 136 times,
+`L10n` 343 times, and a set of application models — `ImageAnnotation`, `KeyboardShortcut`,
+`SystemAlert`, `ChartSpec`, `ConversationContextAttachment`, `RunProgress`. Those references are
+concentrated in files that are **features filed under `Design/`** rather than design primitives:
+the composer prompt, the command palette, the media player, the image-annotation rail, the limit
+strip, the agent work summary. Two more of that kind — `UsageDashboardView` and
+`ConversationHandoffView` — were moved out first for the same reason.
+
+Two measurement traps cost time here and are worth naming. A whole-app dependency closure computed
+by matching capitalised identifiers reported that 91% of the application was reachable from
+`Design/`; that number is an artifact. Doc comments mention application types constantly, and
+nested type names (`Surface`, `Role`, `Status`, `Name`, `Text`) collide with unrelated
+declarations elsewhere, so a token scan cannot tell `Design.Surface` from somebody else's
+`Surface`. **The compiler is the only instrument that resolves a qualified name.** Subtractive
+convergence — build, drop whatever the errors point at, repeat — does not work either: errors
+cascade onto the support files a broken file needed, so the loop evicts exactly the wrong ones.
+Adding files to a set that already builds is the shape that converges.
+
+### What was built instead
+
+`Packages/ThreadingDesignKit` compiles the application's own source files a second time. Its
+`Sources/ThreadingDesignKit/Shared` directory holds **symlinks** into `Sources/Threading`, so there
+is one copy of every component in the repository and no possibility of drift. The application is
+untouched: no import churn, no access-level annotations, no risk to a working target.
+
+A plugin gets the real `Design` tokens plus `ThemedButton`, `ThemedControl`, `ThemedIndicators`,
+`ControlRow`, `PaneHeader`, `PaneFooter`, `FontRole`, `MorphingTitleLabel`, the optical-alignment
+and pointer-claim machinery, and the whole theme model including every stock style — 27 design
+files and 42 supporting ones. The set grows by adding a symlink and rebuilding; nothing has to be
+designed in advance for a request nobody has made yet, which was the point.
+
+Five things the application owns are supplied by `Seam/HostSeam.swift` instead, because they read
+stores a plugin has no business touching: `AppThemePalette` (the host installs its theme and the
+plugin's tokens resolve through it), the five `DesignSettings` values, `AppThemeLibrary`,
+`ThemeAssetStore` and `ThemeManager`. `PaneHeaderDefaults` is stated rather than copied — both its
+members are expressions over types the kit already has. `HostSeamTests` proves the part that could
+silently be wrong: a token follows the installed theme, the same `NSColor` re-resolves when the
+theme changes rather than capturing a value, and text size comes from the host.
+
+One setting is load-bearing and non-obvious: the package builds with
+`-strict-concurrency=complete` because the application does. A component inherits main-actor
+isolation from its AppKit superclass only under complete checking, and without it the shared
+sources fail on default arguments the application compiles happily.
+
+### Still open
+
+The kit's symbols are `internal`, which is enough to compile and test it but not for a plugin in a
+*different* package to link. Choosing that public surface is the next decision, and it is now a
+small one: it applies to the components actually exported rather than to 323 declarations. The
+69 files also do not yet include the components a log pane wants most — `ThemedTables`,
+`ThemedScrollView`, `ThemedPopUp`, `ThemedTextField`, `ThemedMenu` — each held back by one or two
+support types on the same pattern as those already resolved.
+
 ## Reopen / revisit triggers
 
 - Apple ships a supported in-app plugin view story that beats `EXHostViewController`.
