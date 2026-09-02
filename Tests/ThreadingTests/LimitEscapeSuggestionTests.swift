@@ -340,6 +340,54 @@ final class LimitEscapeSuggestionTests: XCTestCase {
         XCTAssertFalse(store.hasStandingRefusal(for: sessionID))
     }
 
+    /// A refusal belongs to the login that produced it. Once the session moves, a reading that
+    /// was already in flight must not re-rank that refusal using the destination as its source
+    /// and offer the login the user just left.
+    func testAnAccountMigrationPreventsADelayedReadingFromReversingTheOffer() {
+        let center = NotificationCenter()
+        let sessionID = SessionID()
+        let stop = UsageLimitStop(message: "Usage limit reached")
+        let store = LimitEscapeSuggestionStore(
+            center: center,
+            computeSuggestion: { sessionID, _ in
+                Fixture.suggestion(for: sessionID)
+            },
+            warmCandidateReadings: { _ in }
+        )
+        store.refusalStands(stop, for: sessionID)
+        XCTAssertTrue(store.hasStandingRefusal(for: sessionID))
+        XCTAssertNotNil(store.offer(for: sessionID))
+
+        store.accountWasMigrated(for: sessionID)
+        center.post(AccountUsageDidChange(accountID: Fixture.account("late")))
+
+        XCTAssertFalse(store.hasStandingRefusal(for: sessionID))
+        XCTAssertNil(store.offer(for: sessionID))
+    }
+
+    /// The escape path is itself an account migration. Its old refusal stops standing at the
+    /// same boundary, while the busy receipt survives until continuation scheduling reports its
+    /// outcome; otherwise the press would disappear mid-action and could not explain a failure.
+    func testAnAccountMigrationKeepsOnlyAnInFlightEscapeReceipt() throws {
+        let center = NotificationCenter()
+        let sessionID = SessionID()
+        let store = LimitEscapeSuggestionStore(
+            center: center,
+            computeSuggestion: { sessionID, _ in
+                Fixture.suggestion(for: sessionID)
+            },
+            warmCandidateReadings: { _ in }
+        )
+        store.refusalStands(UsageLimitStop(message: "Usage limit reached"), for: sessionID)
+        store.setBusy(.moveAccount, for: sessionID)
+
+        store.accountWasMigrated(for: sessionID)
+        center.post(AccountUsageDidChange(accountID: Fixture.account("late")))
+
+        XCTAssertFalse(store.hasStandingRefusal(for: sessionID))
+        XCTAssertEqual(try XCTUnwrap(store.offer(for: sessionID)).busy, .moveAccount)
+    }
+
     /// A session whose agent exited has nothing left to migrate into.
     func testAnAgentExitingTakesTheOfferWithIt() {
         let center = NotificationCenter()

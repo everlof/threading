@@ -461,9 +461,11 @@ being refused.
    as the menu route does, and keeps its failure alert. The copied transcript carries the source
    account's refusal at its tail, but that is already-observed output rather than a refusal by the
    destination account: `ObservedUsageLimit.transcriptWasMigrated` records the installed copy's
-   exact byte boundary at the new path while clearing the account-scoped stop. Without that boundary the
-   first poll after relaunch immediately offers a second account before the destination has tried
-   a turn.
+   exact byte boundary at the new path, while `LimitRecoveryCoordinator.accountWasMigrated`
+   clears the old login's park and standing suggestion. Both halves are necessary: seeding the
+   destination reader nil-to-nil intentionally raises no changed-value callback, so without the
+   explicit in-memory invalidation a delayed account-usage reading can re-rank the source refusal
+   after the move and offer the login the conversation just left.
 5. The continuation is a `ScheduledMessage` — `LimitRecoveryDefaults.continuationText`, due
    `LimitEscapeDefaults.continuationDelay` from now, wall-clock anchored. **Not typed**: everything
    hard about typing into a just-relaunched TUI is already solved in

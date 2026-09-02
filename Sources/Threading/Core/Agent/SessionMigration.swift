@@ -556,6 +556,7 @@ enum SessionMigration {
             to: destination,
             copiedByteCount: copiedByteCount
         )
+        LimitRecoveryCoordinator.shared.accountWasMigrated(for: sessionID)
 
         ThreadingLogger.agent.info(
             "Migrated session \(sessionID, privacy: .public) to account \(account.handle, privacy: .private(mask: .hash))"

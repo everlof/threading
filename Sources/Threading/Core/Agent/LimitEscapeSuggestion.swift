@@ -456,14 +456,30 @@ final class LimitEscapeSuggestionStore {
 
     private let center: NotificationCenter
     private let observations: AppEventObservations
+    private let computeSuggestion:
+        @MainActor (SessionID, UsageLimitStop) -> LimitEscapeSuggestion?
+    private let warmCandidateReadings: @MainActor (SessionID) -> Void
 
     // MARK: - Initialization
 
     /// Not private: a test builds its own rather than reaching for the singleton, which is what
     /// lets the dismissal and clearing rules be asserted without a coordinator, a timer or a
     /// live agent.
-    init(center: NotificationCenter = .default) {
+    init(
+        center: NotificationCenter = .default,
+        computeSuggestion: @escaping @MainActor (
+            SessionID,
+            UsageLimitStop
+        ) -> LimitEscapeSuggestion? = {
+            LimitEscapeSuggestion.compute(for: $0, stop: $1)
+        },
+        warmCandidateReadings: @escaping @MainActor (SessionID) -> Void = {
+            LimitEscapeSuggestion.warmCandidateReadings(for: $0)
+        }
+    ) {
         self.center = center
+        self.computeSuggestion = computeSuggestion
+        self.warmCandidateReadings = warmCandidateReadings
         observations = AppEventObservations(center: center)
 
         // A session whose agent exited has nothing to migrate *into* — the offer named a login
@@ -494,9 +510,9 @@ final class LimitEscapeSuggestionStore {
         // happens and looked at minutes later, which is the only moment a fetch has time to land
         // before it is needed. Every pacing rule in `AccountUsageService` still applies, so a
         // refusal cannot become a way to hammer the usage endpoints.
-        LimitEscapeSuggestion.warmCandidateReadings(for: sessionID)
+        warmCandidateReadings(sessionID)
 
-        guard let suggestion = LimitEscapeSuggestion.compute(for: sessionID, stop: stop) else {
+        guard let suggestion = computeSuggestion(sessionID, stop) else {
             // Only a session that is no longer there. A refusal with no login to escape to still
             // gets a record, because waiting for the reset needs no second account.
             clear(sessionID)
@@ -524,6 +540,21 @@ final class LimitEscapeSuggestionStore {
     func refusalCleared(for sessionID: SessionID) {
         standingRefusals.removeValue(forKey: sessionID)
         clear(sessionID)
+    }
+
+    /// The conversation now belongs to another login, so a refusal by the login it left cannot
+    /// be re-ranked against the destination when a delayed usage reading arrives.
+    ///
+    /// A limit escape keeps its busy receipt just long enough to file the continuation or state
+    /// why that failed. Every other move removes the offer immediately. In both cases the
+    /// standing refusal goes first, so `AccountUsageDidChange` cannot turn David's refusal into
+    /// an offer to leave Viktor for David.
+    func accountWasMigrated(for sessionID: SessionID) {
+        standingRefusals.removeValue(forKey: sessionID)
+        guard entries[sessionID]?.busy == .moveAccount else {
+            clear(sessionID)
+            return
+        }
     }
 
     /// Whether a refusal is standing over this session — the flag the surfaces read back rather
@@ -657,7 +688,7 @@ final class LimitEscapeSuggestionStore {
     private func rerankStandingRefusals() {
         for (sessionID, stop) in standingRefusals {
             guard entries[sessionID] != nil,
-                  let suggestion = LimitEscapeSuggestion.compute(for: sessionID, stop: stop)
+                  let suggestion = computeSuggestion(sessionID, stop)
             else { continue }
             update(suggestion)
         }

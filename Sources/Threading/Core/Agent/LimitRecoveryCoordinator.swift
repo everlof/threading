@@ -94,6 +94,17 @@ final class LimitRecoveryCoordinator {
         ThreadingLogger.agent.debug("Limit recovery watching live sessions")
     }
 
+    /// A successful account move invalidates every fact scoped to the login the session left.
+    ///
+    /// `ObservedUsageLimit.transcriptWasMigrated` seeds the destination reader with nil at the
+    /// copied byte boundary. Nil-to-nil deliberately raises no reader callback, so the ordinary
+    /// transcript-cleared path cannot lower an already-standing park or offer on its own.
+    func accountWasMigrated(for sessionID: SessionID) {
+        terminalConfirmations.removeValue(forKey: sessionID)
+        rejectedTerminalConfirmations.removeValue(forKey: sessionID)
+        limitReadingMoved(sessionID, stop: nil, accountWasMigrated: true)
+    }
+
     // MARK: - Private Methods — Detection
 
     private func poll() {
@@ -225,7 +236,11 @@ final class LimitRecoveryCoordinator {
             ?? "\(observation.stop.message)|\(observation.stop.resetHint ?? "")"
     }
 
-    private func limitReadingMoved(_ sessionID: SessionID, stop: UsageLimitStop?) {
+    private func limitReadingMoved(
+        _ sessionID: SessionID,
+        stop: UsageLimitStop?,
+        accountWasMigrated: Bool = false
+    ) {
         guard let stop else {
             // The provider produced a newer outcome — the continuation landed, or the user's
             // retry was accepted. Tell that to the tracker rather than leaving it to the
@@ -246,7 +261,11 @@ final class LimitRecoveryCoordinator {
                     "count": String(obsolete.count)
                 ])
             }
-            LimitEscapeSuggestionStore.shared.refusalCleared(for: sessionID)
+            if accountWasMigrated {
+                LimitEscapeSuggestionStore.shared.accountWasMigrated(for: sessionID)
+            } else {
+                LimitEscapeSuggestionStore.shared.refusalCleared(for: sessionID)
+            }
             AgentRuntime.shared.limitRecoverySurface(for: sessionID)?
                 .noteLimitCleared()
             ThreadingLogger.agent.debug(

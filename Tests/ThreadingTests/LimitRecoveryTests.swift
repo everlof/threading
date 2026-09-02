@@ -232,6 +232,24 @@ final class LimitRecoveryTests: XCTestCase {
         XCTAssertNil(store.offer(for: sessionID))
     }
 
+    /// Migration is a stronger account-scope boundary than a transcript update: the copied
+    /// destination is intentionally seeded nil-to-nil, so the coordinator must clear the old
+    /// login's in-memory offer explicitly rather than waiting for a callback that will not fire.
+    func testAccountMigrationExplicitlyClearsTheOldLoginsOffer() {
+        let store = LimitEscapeSuggestionStore.shared
+        let sessionID = SessionID()
+        store.record(LimitEscapeSuggestion(
+            sessionID: sessionID,
+            resetHint: "9:40pm (Europe/Rome)",
+            model: nil
+        ))
+        defer { store.refusalCleared(for: sessionID) }
+
+        LimitRecoveryCoordinator.shared.accountWasMigrated(for: sessionID)
+
+        XCTAssertNil(store.offer(for: sessionID))
+    }
+
     /// The button's presence and the arm's own guard read one predicate, so the strip cannot
     /// offer something the code behind it would decline. A session with nothing scheduled has
     /// nothing owed.
