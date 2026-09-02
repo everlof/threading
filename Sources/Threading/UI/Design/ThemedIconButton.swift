@@ -13,7 +13,7 @@ import AppKit
 ///
 /// It draws from an `InkSource` rather than the chrome roles, which is what lets the same button
 /// serve the toolbar — floating over the terminal's own palette — and a tab inside the chrome.
-final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
+public final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     ThemedMenuPresentationObserving {
 
     /// When the symbol backing the control becomes an `NSImage`.
@@ -23,7 +23,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// though, and resolving every hidden row glyph made CoreUI part of cold launch. Deferred
     /// controls keep their geometry, action and accessibility contract, then resolve the latest
     /// symbol or custom image when first drawn or explicitly revealed.
-    enum GlyphMaterialization {
+    public enum GlyphMaterialization {
         case immediate
         case deferred
     }
@@ -31,7 +31,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// What an icon button is for, which is what decides how big it is and how much air the glyph
     /// gets. Padding is the difference between the two, so stating both here is what makes it a
     /// system rule instead of arithmetic repeated at each call site.
-    enum Target {
+    public enum Target {
 
         /// A top-level action in the window's chrome.
         case toolbar
@@ -76,7 +76,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         /// member's — the same mark in a larger box would be more padding, not more button.
         case besidePrimary
 
-        var size: NSSize {
+        public var size: NSSize {
             switch self {
             case .toolbar:
                 NSSize(
@@ -109,7 +109,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         }
 
         /// The glyph's slot. The remainder is the padding, equal on every side.
-        var glyph: CGFloat {
+        public var glyph: CGFloat {
             switch self {
             case .toolbar, .splitMenu: Design.Size.tabIconSlot
             case .compactSplitMenu: 8
@@ -128,7 +128,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         /// (`gearshape` renders 14×14 at 11pt) were shrunk *after* rendering, thinning the
         /// stroke the configuration had chosen. `Design.Symbol.image(_:slot:pointSize:)` is
         /// the fit.
-        var glyphRole: Design.Symbol.Role {
+        public var glyphRole: Design.Symbol.Role {
             switch self {
             case .toolbar, .splitMenu: .toolbar
             case .compactSplitMenu: .control
@@ -144,7 +144,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         /// invisible and it has to go a step further. This was previously a `hoverFill` set by
         /// hand at the one call site that had noticed; stating it per role is what stops the next
         /// nested button from being the one that did not.
-        var hoverFill: KeyPath<Design.Ink, NSColor> {
+        public var hoverFill: KeyPath<Design.Ink, NSColor> {
             switch self {
             case .toolbar: \.surface
             // The rest sit on a surface something else already drew — another control's fill,
@@ -156,7 +156,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         }
     }
 
-    var onPress: (() -> Void)?
+    public var onPress: (() -> Void)?
 
     /// Whether this button draws its own fill and border, or leaves them to whoever hosts it.
     ///
@@ -165,7 +165,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// their own rounded rect is the seam those components exist to remove. Everything else about
     /// the button — the glyph, the focus ring, the press gesture, the accessibility — is
     /// unchanged, because none of it is the surface.
-    var drawsSurface = true {
+    public var drawsSurface = true {
         didSet {
             guard drawsSurface != oldValue else { return }
             needsDisplay = true
@@ -177,11 +177,11 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// A host cannot observe a hover it does not track, and it must not track one of its own: two
     /// tracking areas over the same points answer in whichever order AppKit delivers them, which
     /// is how a raised half survives the pointer leaving it.
-    var surfaceStateDidChange: (() -> Void)?
+    public var surfaceStateDidChange: (() -> Void)?
 
     /// Whether a host drawing for this button should raise its half — the pointer is on it, the
     /// press is held, or the menu opened by that press is still being browsed.
-    var isRaised: Bool { isHovered || isPressed || isPresentingMenu }
+    public var isRaised: Bool { isHovered || isPressed || isPresentingMenu }
 
     /// Set when the press opens a menu rather than performing an action.
     ///
@@ -199,7 +199,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// The presenter's dropdown owns the pointer while it is up — the held press's drag and
     /// release are forwarded to the open menu — so the button reads as held for exactly as
     /// long as its menu is, the way a menu-bar title does.
-    var presentsMenu = false
+    public var presentsMenu = false
 
     /// The menu presenter owns this state for every route — pointer, keyboard, accessibility and
     /// secondary click — so a button cannot forget to keep its source treatment while its menu is
@@ -223,9 +223,9 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     ///
     /// Returning `false` lets the click fall through to whatever would have handled it, which is
     /// how a row keeps its own context menu when a button on it offers none.
-    var onContextMenu: ((ThemedMenuAnchor) -> Bool)?
+    public var onContextMenu: ((ThemedMenuAnchor) -> Bool)?
 
-    var isSelected = false {
+    public var isSelected = false {
         didSet {
             guard isSelected != oldValue else { return }
             needsDisplay = true
@@ -302,7 +302,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// grows later, ours or an extension's, is not one more call site that has to know.
     private let releaseWatch = LocalEventMonitor()
 
-    init(
+    public init(
         symbolName: String,
         accessibility: String,
         target: Target = .toolbar,
@@ -321,7 +321,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -355,18 +355,18 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         }
     }
 
-    override var intrinsicContentSize: NSSize { drawnSize }
+    public override var intrinsicContentSize: NSSize { drawnSize }
 
     /// The padding held around the glyph — `(target − glyph) / 2`, by construction. What
     /// `PaneFooterView` and `ControlRowView` subtract to put the *ink* on a stated margin.
-    var opticalHorizontalInset: CGFloat {
+    public var opticalHorizontalInset: CGFloat {
         (drawnSize.width - drawnGlyph) / 2
     }
 
     /// The target and the glyph are both design-system geometry, and a control row may promote
     /// the former without making the latter arbitrary. Section layout asks with the height it
     /// actually gave the button, so its visible mark — not its click target — keeps the gap.
-    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
+    public func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
         max(0, (frameHeight - drawnGlyph) / 2)
     }
 
@@ -398,7 +398,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
 
     /// Crosses the presentation-only lazy boundary for a control that is about to be shown.
     /// Idempotent so both an explicit reveal and AppKit's first draw can safely ask.
-    func materializeGlyphIfNeeded() {
+    public func materializeGlyphIfNeeded() {
         guard !hasMaterializedGlyph else { return }
         renderSlot()
     }
@@ -407,7 +407,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     ///
     /// One slot, two roles: a project row's `⋯` and a branch heading's gear are the same control
     /// in the same place, and swapping the glyph is the whole difference between them.
-    func setSymbol(_ symbolName: String, accessibility: String) {
+    public func setSymbol(_ symbolName: String, accessibility: String) {
         // The custom image is cleared along with it, because `renderSlot` prefers one: a slot
         // that has held an app's icon must draw the next symbol at the size every other glyph
         // in the app has — configured to fit, never squeezed to.
@@ -427,7 +427,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// `contentTintColor`, so it keeps its own colours while everything the theme owns — the
     /// surface, the hover lift, the focus ring — stays ours. Passing nil empties the slot rather
     /// than leaving the previous app's mark behind.
-    func setImage(_ image: NSImage?, accessibility: String) {
+    public func setImage(_ image: NSImage?, accessibility: String) {
         customImage = image
         symbolName = nil
         if hasMaterializedGlyph { renderSlot() }
@@ -435,12 +435,12 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         setAccessibilityTitle(accessibility)
     }
 
-    override func applyInk(_ ink: Design.Ink) {
+    public override func applyInk(_ ink: Design.Ink) {
         iconView.tint = isEnabled ? ink.secondary : ink.quaternary
         needsDisplay = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         materializeGlyphIfNeeded()
 
         // Half of a split control draws no surface of its own: the plate underneath is one
@@ -504,12 +504,12 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     }
 
     /// A raised half is drawn by the plate, not by this button, so the plate has to be told.
-    override func hoverDidChange() {
+    public override func hoverDidChange() {
         super.hoverDidChange()
         surfaceStateDidChange?()
     }
 
-    func themedMenuPresentationDidChange(isPresented: Bool) {
+    public func themedMenuPresentationDidChange(isPresented: Bool) {
         isPresentingMenu = isPresented
     }
 
@@ -522,7 +522,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// System theme that is the difference between the accent blue and a flat grey. Pressing a
     /// row's `⋯` recoloured the selection of a row it had nothing to do with — reported as the
     /// selection being "sometimes gray sometimes blue".
-    override func mouseDown(with event: NSEvent) {
+    public override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         isPressed = true
 
@@ -541,7 +541,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
 
     /// The secondary click, anchored where it landed — the idiom `ThemedMenuAnchor.pointer`
     /// states. A button offering no such menu passes the click on rather than eating it.
-    override func rightMouseDown(with event: NSEvent) {
+    public override func rightMouseDown(with event: NSEvent) {
         guard isEnabled, let onContextMenu else {
             super.rightMouseDown(with: event)
             return
@@ -605,7 +605,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// Without it the press was decided at the release and shown nowhere: a slip of a few points
     /// off a 20-point target cancelled silently, leaving the button drawn as though it had been
     /// pressed all along.
-    override func mouseDragged(with event: NSEvent) {
+    public override func mouseDragged(with event: NSEvent) {
         guard isEnabled, !presentsMenu else { return }
         isPressed = bounds.contains(convert(event.locationInWindow, from: nil))
     }
@@ -613,7 +613,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
     /// The same decision for a view still in its window, and the only one when a press is
     /// delivered straight to the view. Whichever arrives first ends the gesture, so a press
     /// completed by the watch above is already spent by the time this runs.
-    override func mouseUp(with event: NSEvent) {
+    public override func mouseUp(with event: NSEvent) {
         guard !presentsMenu else { return }
 
         completePress(
@@ -621,15 +621,15 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         )
     }
 
-    override func accessibilityRole() -> NSAccessibility.Role? { .button }
-    override func accessibilityTitle() -> String? { accessibilityName }
-    override func accessibilityPerformPress() -> Bool {
+    public override func accessibilityRole() -> NSAccessibility.Role? { .button }
+    public override func accessibilityTitle() -> String? { accessibilityName }
+    public override func accessibilityPerformPress() -> Bool {
         performPress()
     }
 
     /// The pointerless route to the secondary click's menu, anchored to the button itself —
     /// and, for a button whose press *is* its menu, to that same menu.
-    override func accessibilityPerformShowMenu() -> Bool {
+    public override func accessibilityPerformShowMenu() -> Bool {
         if let onContextMenu, isEnabled {
             return onContextMenu(.control)
         }
@@ -637,7 +637,7 @@ final class ThemedIconButton: BackdropThemedControl, OpticalInsetProviding,
         return performPress()
     }
 
-    override func performPrimaryAction() -> Bool {
+    public override func performPrimaryAction() -> Bool {
         performPress()
     }
 
@@ -664,7 +664,7 @@ extension ThemedIconButton: ControlRowMember {
     /// The glyph grows with the button. A promoted 26pt button keeping its 12pt slot would be
     /// the same mark in a larger box — more padding, not more button — which reads as a target
     /// that missed rather than one that was sized.
-    func adopt(_ metrics: ControlRowMetrics) {
+    public func adopt(_ metrics: ControlRowMetrics) {
         rowHoverFill = \.surface
         let size = NSSize(width: metrics.height, height: metrics.height)
         guard size != drawnSize || metrics.glyphSlot != drawnGlyph else { return }

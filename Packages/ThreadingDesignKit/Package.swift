@@ -56,7 +56,7 @@ let package = Package(
         .target(name: "ThreadingDesignKitExample", dependencies: ["ThreadingDesignKit"]),
         .testTarget(
             name: "ThreadingDesignKitTests",
-            dependencies: ["ThreadingDesignKit"],
+            dependencies: ["ThreadingDesignKit", "ThreadingDesignKitExample"],
             path: "Tests/ThreadingDesignKitTests"
         ),
     ]

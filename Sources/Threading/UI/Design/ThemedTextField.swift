@@ -11,7 +11,7 @@ import AppKit
 /// A label is deliberately *not* this. `NSTextField(labelWithString:)` draws no bezel and no
 /// background, so it is already nothing but text in a themed colour; the erosion this exists to
 /// stop is the bezel, not the type.
-class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, PointerClaiming {
+public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, PointerClaiming {
 
     /// Whether the editable well is permanent or belongs only to interaction.
     ///
@@ -20,7 +20,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
     /// outlined object around that content only competes with the page. It keeps the same frame,
     /// text inset and hit target, raises a quiet plate under the pointer, and becomes the ordinary
     /// focused field once editing begins.
-    enum SurfacePresentation: Equatable {
+    public enum SurfacePresentation: Equatable {
         case persistent
         case onInteraction
     }
@@ -39,7 +39,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
     private let placeholderRefresh = AppEventObservations()
     private var hoverTrackingArea: NSTrackingArea?
 
-    let surfacePresentation: SurfacePresentation
+    public let surfacePresentation: SurfacePresentation
 
     private(set) var isHovered = false {
         didSet {
@@ -57,37 +57,37 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
     /// Overridden so every `NSTextField` initializer — `init()`, `init(frame:)`, `init(string:)`
     /// — builds the inset-aware cell. Assigning `cell` afterwards would work too, and would drop
     /// whatever each initializer had already configured on the cell it made.
-    override class var cellClass: AnyClass? {
+    public override class var cellClass: AnyClass? {
         get { ThemedTextFieldCell.self }
         set { super.cellClass = newValue }
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         surfacePresentation = .persistent
         super.init(frame: frameRect)
         setup()
     }
 
-    init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
+    public init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
         self.surfacePresentation = surfacePresentation
         super.init(frame: frameRect)
         setup()
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     /// Declared rather than inherited. `NSTextField(string:)` imports a *class factory* method,
     /// which is free to hand back a plain `NSTextField` — a subclass would then be one only by
     /// the type annotation at the call site.
-    convenience init(string: String) {
+    public convenience init(string: String) {
         self.init(frame: .zero)
         stringValue = string
     }
 
-    convenience init(surfacePresentation: SurfacePresentation) {
+    public convenience init(surfacePresentation: SurfacePresentation) {
         self.init(frame: .zero, surfacePresentation: surfacePresentation)
     }
 
@@ -128,7 +128,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
     /// text view. They are the field editor that preserves selection, input methods and undo—not
     /// application chrome. Permit only that exact direct hierarchy; a text view elsewhere under
     /// the component is still a violation.
-    func permitsSystemChrome(_ view: NSView) -> Bool {
+    public func permitsSystemChrome(_ view: NSView) -> Bool {
         if let clip = view as? NSClipView {
             return clip.superview === self
         }
@@ -142,7 +142,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
 
     /// Restated in the theme's own tertiary label, because AppKit's placeholder is drawn in a
     /// *system* grey that a styled page has already moved away from.
-    override var placeholderString: String? {
+    public override var placeholderString: String? {
         didSet { applyPlaceholderColour() }
     }
 
@@ -156,7 +156,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
 
     // MARK: - Layout
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         var size = super.intrinsicContentSize
         size.height = max(size.height, Layout.height)
         return size
@@ -164,7 +164,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
 
     // MARK: - Hover
 
-    override func updateTrackingAreas() {
+    public override func updateTrackingAreas() {
         super.updateTrackingAreas()
 
         if let hoverTrackingArea {
@@ -188,12 +188,12 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
         }
     }
 
-    override func mouseEntered(with event: NSEvent) {
+    public override func mouseEntered(with event: NSEvent) {
         guard surfacePresentation == .onInteraction else { return }
         isHovered = true
     }
 
-    override func mouseExited(with event: NSEvent) {
+    public override func mouseExited(with event: NSEvent) {
         guard surfacePresentation == .onInteraction else { return }
         isHovered = false
     }
@@ -202,7 +202,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
 
     /// The room the caret's cursor may claim — the whole control for an ordinary field, and less
     /// for one carrying controls inside its trailing edge.
-    var caretRect: NSRect { bounds }
+    public var caretRect: NSRect { bounds }
 
     /// `NSTextField` claims one I-beam rectangle over its **whole bounds** — measured: it ignores
     /// the cell's drawing rect, so an inset that keeps the *text* clear of something does not keep
@@ -210,39 +210,39 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
     /// selectable. Restated here rather than clipped afterwards, so the field answers the same
     /// question every other view answers, in one place a test can read. `SearchFieldPointerTests`
     /// pins the AppKit behaviour this mirrors.
-    var pointerClaims: [PointerClaim] {
+    public var pointerClaims: [PointerClaim] {
         guard isEnabled, isEditable || isSelectable else { return [] }
         return [PointerClaim(caretRect, .iBeam)]
     }
 
     /// A field is a drawn well, so what is not the caret's room is still the field's own plate.
-    var restingPointer: NSCursor? { .arrow }
+    public var restingPointer: NSCursor? { .arrow }
 
-    override func resetCursorRects() {
+    public override func resetCursorRects() {
         registerPointerClaims()
     }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         refreshPointerClaims()
     }
 
     // MARK: - Focus
 
-    override func becomeFirstResponder() -> Bool {
+    public override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
         needsDisplay = true
         return became
     }
 
-    override func textDidEndEditing(_ notification: Notification) {
+    public override func textDidEndEditing(_ notification: Notification) {
         super.textDidEndEditing(notification)
         needsDisplay = true
     }
 
     // MARK: - Drawing
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         drawSurface()
         withThemeRasterization { super.draw(dirtyRect) }
     }
@@ -330,7 +330,7 @@ class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary, Point
 /// `NSSecureTextFieldCell` descends from `NSTextFieldCell` directly, so the themed cells are
 /// siblings rather than a chain — see `ThemedSecureField`.
 @MainActor
-protocol ThemedFieldCell: AnyObject {
+public protocol ThemedFieldCell: AnyObject {
     var contentInset: CGFloat { get set }
     var trailingContentInset: CGFloat { get set }
 }
@@ -430,32 +430,32 @@ private final class ThemedTextFieldCell: NSTextFieldCell, ThemedFieldCell {
 /// It exists for one screen — entering a test-account password in Settings — and deliberately
 /// offers no reveal control. A field that can be un-masked is a field whose value is on screen
 /// while an agent may be driving the app beside it.
-final class ThemedSecureField: ThemedTextField {
+public final class ThemedSecureField: ThemedTextField {
 
-    override class var cellClass: AnyClass? {
+    public override class var cellClass: AnyClass? {
         get { ThemedSecureFieldCell.self }
         set { super.cellClass = newValue }
     }
 
     // Both designated initializers restated so `init()` keeps being inherited — the search
     // field's note on `init(frame:surfacePresentation:)` applies here too.
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
     }
 
-    override init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
+    public override init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
         super.init(frame: frameRect, surfacePresentation: surfacePresentation)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     /// The secure field editor is a `NSSecureTextView` inside the same private clip view an
     /// ordinary field expands into. `ThemedTextField.permitsSystemChrome` already answers for
     /// `NSTextView` subclasses, so nothing is relaxed here — this is only where that is stated.
-    override func accessibilityRole() -> NSAccessibility.Role? {
+    public override func accessibilityRole() -> NSAccessibility.Role? {
         .textField
     }
 }
@@ -516,7 +516,7 @@ private final class ThemedSecureFieldCell: NSSecureTextFieldCell, ThemedFieldCel
 /// Its own class rather than a flag, because a search field is a *shape*: the magnifier is what
 /// says the field filters rather than accepts, and the find bar and the import sheet both rely
 /// on that being obvious at a glance.
-final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
+public final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
 
     @MainActor
     private enum Layout {
@@ -609,7 +609,7 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
 
     /// Creates the action once. Hidden until `isTrailingActionVisible` says otherwise, because
     /// with nothing typed there is nothing for it to act on.
-    func installTrailingAction(
+    public func installTrailingAction(
         title: String,
         accessibilityLabel: String,
         accessibilityIdentifier: String,
@@ -628,7 +628,7 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
         refreshTrailingControls()
     }
 
-    var isTrailingActionVisible = false {
+    public var isTrailingActionVisible = false {
         didSet {
             guard isTrailingActionVisible != oldValue else { return }
             trailingActionButton?.isHidden = !isTrailingActionVisible
@@ -646,7 +646,7 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
     /// `control(_:textView:doCommandBy:)` seam, because what Escape means belongs to the
     /// surface — the find bar closes on it, the settings sidebar clears. A component that
     /// claimed the key would decide that for every owner at once.
-    func clear() {
+    public func clear() {
         guard !stringValue.isEmpty else { return }
         stringValue = ""
         currentEditor()?.string = ""
@@ -689,7 +689,7 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
     /// The caret's room stops where the trailing run begins: the words are what the I-beam is
     /// for, and Ask AI and the ✕ are buttons. The field's own plate takes the arrow behind them,
     /// and the buttons — themed controls — claim it for themselves as well.
-    override var caretRect: NSRect {
+    public override var caretRect: NSRect {
         guard let edge = trailingControlsLeadingEdge else { return bounds }
         return NSRect(
             x: bounds.minX,
@@ -699,7 +699,7 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
         )
     }
 
-    override var stringValue: String {
+    public override var stringValue: String {
         get { super.stringValue }
         set {
             super.stringValue = newValue
@@ -707,12 +707,12 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
         }
     }
 
-    override func textDidChange(_ notification: Notification) {
+    public override func textDidChange(_ notification: Notification) {
         super.textDidChange(notification)
         refreshTrailingControls()
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         applyGlyphInset()
     }
@@ -720,7 +720,7 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
     /// Overridden alongside `init(frame:)` so the subclass keeps providing **all** of the
     /// field's designated initializers — that is what lets `init()` and `init(string:)` keep
     /// being inherited, which every call site building a bare `ThemedSearchField()` relies on.
-    override init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
+    public override init(frame frameRect: NSRect, surfacePresentation: SurfacePresentation) {
         super.init(frame: frameRect, surfacePresentation: surfacePresentation)
         applyGlyphInset()
     }
@@ -734,7 +734,7 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
     /// type scale — so a theme switch that redrew the query at 0.80× left it starting behind
     /// the room the previous theme's magnifier had asked for. See `SymbolMetric`. The trailing
     /// run re-centres for the same reason: the ink offset is the font's, and the font moved.
-    func rederiveThemedContent() {
+    public func rederiveThemedContent() {
         applyGlyphInset()
         refreshTrailingControls()
         trailingControlsCentering?.constant = textInkCenterOffset
@@ -742,11 +742,11 @@ final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
         guard let glyph = NSImage(

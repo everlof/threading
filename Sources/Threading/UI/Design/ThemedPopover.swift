@@ -4,7 +4,7 @@ import AppKit
 /// is on screen. The observer chain is captured at presentation time so a recycled source can
 /// still release the exact containers that were held when the popover opened.
 @MainActor
-protocol ThemedPopoverPresentationObserving: NSView {
+public protocol ThemedPopoverPresentationObserving: NSView {
     func themedPopoverPresentationDidChange(isPresented: Bool)
 }
 
@@ -15,7 +15,7 @@ protocol ThemedPopoverPresentationObserving: NSView {
 /// and following the window it is attached to. Context and menu-bar menus deliberately do not
 /// use this type; their system behavior is part of their value.
 @MainActor
-final class ThemedPopover {
+public final class ThemedPopover {
 
     private final class WeakPresentationObserver: @unchecked Sendable {
         weak var view: NSView?
@@ -25,7 +25,7 @@ final class ThemedPopover {
         }
     }
 
-    enum Behavior {
+    public enum Behavior {
         /// The owner closes the popover. Escape remains a universal way out.
         case applicationDefined
         /// A click outside the popover closes it.
@@ -34,10 +34,10 @@ final class ThemedPopover {
         case semitransient
     }
 
-    var behavior: Behavior = .applicationDefined
-    var animates = true
-    var contentViewController: NSViewController?
-    var onClose: (() -> Void)?
+    public var behavior: Behavior = .applicationDefined
+    public var animates = true
+    public var contentViewController: NSViewController?
+    public var onClose: (() -> Void)?
 
     /// The responder that holds the keyboard while the popover is open, or nil to leave the
     /// keyboard where it was.
@@ -52,10 +52,10 @@ final class ThemedPopover {
     /// so a caret blinks in the popover's field while every keystroke goes on reaching the
     /// window underneath. That is how ⌘J's file search came to open with a search field that
     /// could not be typed into — and why nothing short of asserting `isKeyWindow` catches it.
-    var initialFirstResponder: NSResponder?
+    public var initialFirstResponder: NSResponder?
 
     private(set) var isShown = false
-    var presentedWindow: NSWindow? { panel }
+    public var presentedWindow: NSWindow? { panel }
 
     /// Every popover currently on screen, so the one thing that outranks it can find it.
     ///
@@ -82,7 +82,7 @@ final class ThemedPopover {
     private var preferredSizeObservation: NSKeyValueObservation?
     private let appEvents = AppEventObservations()
 
-    init() {
+    public init() {
         // A theme switch can change the presentation's geometry, not just its colours: classic
         // hard-bevel materials remove the modern speech-arrow and spend that space on a square
         // period frame. Reposition while the popover is open so the old silhouette never lingers.
@@ -105,7 +105,7 @@ final class ThemedPopover {
         }
     }
 
-    func show(relativeTo positioningRect: NSRect, of positioningView: NSView, preferredEdge: NSRectEdge) {
+    public func show(relativeTo positioningRect: NSRect, of positioningView: NSView, preferredEdge: NSRectEdge) {
         guard let parent = positioningView.window, let controller = contentViewController else { return }
         // The other half of `closeAll(presentedFrom:)`: a dropdown already up in this window
         // would end up underneath, and hover tracking keeps firing while one is open — a row
@@ -172,13 +172,13 @@ final class ThemedPopover {
     /// states. A dropdown opened from a control *inside* a popover is presented in that
     /// panel's own window rather than the window the popover hangs off, so the surface
     /// carrying the menu is not one of these and stays open.
-    static func closeAll(presentedFrom window: NSWindow) {
+    public static func closeAll(presentedFrom window: NSWindow) {
         for popover in shown.allObjects where popover.presentingWindow === window {
             popover.close()
         }
     }
 
-    func close() {
+    public func close() {
         guard isShown || panel != nil else { return }
         let notifiedPresentation = isShown
         isShown = false
@@ -237,7 +237,7 @@ final class ThemedPopover {
     }
 
     /// Re-measures dynamic content and keeps the arrow attached to its anchor.
-    func reposition() {
+    public func reposition() {
         guard let panel, let anchorView, let window = anchorView.window,
               let screen = window.screen ?? NSScreen.main,
               let controller = contentViewController else {
@@ -335,7 +335,7 @@ final class ThemedPopover {
 }
 
 extension ThemedPopover: ChipChoicePresentationSession {
-    func dismissChipChoicePresentation() {
+    public func dismissChipChoicePresentation() {
         close()
     }
 }
@@ -379,35 +379,35 @@ private final class ThemedPopoverPanelHandoff: @unchecked Sendable {
 
 /// Pure screen geometry for an anchored popover, shared by presentation and tests.
 @MainActor
-enum ThemedPopoverLayout {
-    static let arrowLength: CGFloat = 10
-    static let arrowBreadth: CGFloat = 18
-    static let anchorGap: CGFloat = 2
-    static let screenInset: CGFloat = 8
-    static let borderInset: CGFloat = 1
-    static let compactArrowLength: CGFloat = 7
-    static let compactArrowBreadth: CGFloat = 12
-    static let compactAnchorGap: CGFloat = 1
-    static let compactScreenInset: CGFloat = 4
-    static let compactBorderInset: CGFloat = 0.5
+public enum ThemedPopoverLayout {
+    public static let arrowLength: CGFloat = 10
+    public static let arrowBreadth: CGFloat = 18
+    public static let anchorGap: CGFloat = 2
+    public static let screenInset: CGFloat = 8
+    public static let borderInset: CGFloat = 1
+    public static let compactArrowLength: CGFloat = 7
+    public static let compactArrowBreadth: CGFloat = 12
+    public static let compactAnchorGap: CGFloat = 1
+    public static let compactScreenInset: CGFloat = 4
+    public static let compactBorderInset: CGFloat = 0.5
 
-    struct Placement: Equatable {
-        let edge: NSRectEdge
-        let panelFrame: NSRect
-        let bodyFrame: NSRect
-        let contentFrame: NSRect
-        let arrowTip: NSPoint
-        let classic: Bool
-        let arrowBreadth: CGFloat
-        let style: AppTheme.Material.PopoverStyle
-        let hasMaterialShadow: Bool
+    public struct Placement: Equatable {
+        public let edge: NSRectEdge
+        public let panelFrame: NSRect
+        public let bodyFrame: NSRect
+        public let contentFrame: NSRect
+        public let arrowTip: NSPoint
+        public let classic: Bool
+        public let arrowBreadth: CGFloat
+        public let style: AppTheme.Material.PopoverStyle
+        public let hasMaterialShadow: Bool
 
-        var hasArrow: Bool { style.arrow == .triangle }
+        public var hasArrow: Bool { style.arrow == .triangle }
     }
 
     /// Compatibility entry for geometry tests written before popover presentation became
     /// material data. Product presentation uses the style-bearing overload below.
-    static func place(
+    public static func place(
         anchor: NSRect,
         contentSize: NSSize,
         visibleFrame: NSRect,
@@ -434,7 +434,7 @@ enum ThemedPopoverLayout {
         )
     }
 
-    static func place(
+    public static func place(
         anchor: NSRect,
         contentSize: NSSize,
         visibleFrame: NSRect,
@@ -606,7 +606,7 @@ enum ThemedPopoverLayout {
     ///
     /// `strokeWidth` insets the path so a stroke centred on it lands fully inside the panel;
     /// the arrow's base corners are kept clear of the corner arcs.
-    static func outline(
+    public static func outline(
         for placement: Placement,
         cornerRadius: CGFloat,
         strokeWidth: CGFloat
@@ -793,12 +793,12 @@ private final class ThemedPopoverHostController: NSViewController {
 /// Internal rather than private for the same reason `ThemedPopoverLayout` is: the border's
 /// continuity around the arrow is asserted on drawn pixels in `ThemedPresentationTests`.
 @MainActor
-final class ThemedPopoverChromeView: NSView, ThemedComponent {
-    var onStyleChange: (() -> Void)?
-    var placement: ThemedPopoverLayout.Placement? {
+public final class ThemedPopoverChromeView: NSView, ThemedComponent {
+    public var onStyleChange: (() -> Void)?
+    public var placement: ThemedPopoverLayout.Placement? {
         didSet { needsLayout = true; needsDisplay = true }
     }
-    weak var contentView: NSView? {
+    public weak var contentView: NSView? {
         didSet {
             guard contentView !== oldValue else { return }
             oldValue?.removeFromSuperview()
@@ -809,7 +809,7 @@ final class ThemedPopoverChromeView: NSView, ThemedComponent {
 
     private let appEvents = AppEventObservations()
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
@@ -821,26 +821,26 @@ final class ThemedPopoverChromeView: NSView, ThemedComponent {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    public required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override var wantsUpdateLayer: Bool { false }
-    override var isFlipped: Bool { false }
+    public override var wantsUpdateLayer: Bool { false }
+    public override var isFlipped: Bool { false }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         guard let placement, let contentView else { return }
         contentView.frame = placement.contentFrame
         contentView.layoutSubtreeIfNeeded()
     }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
         window?.invalidateShadow()
         onStyleChange?()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         guard let placement else { return }
         let style = placement.style
         let material = AppThemePalette.current.material(for: effectiveAppearance)

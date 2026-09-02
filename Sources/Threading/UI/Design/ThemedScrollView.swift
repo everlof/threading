@@ -14,15 +14,15 @@ import AppKit
 ///
 /// A scroller that stands alone — outside any `NSScrollView` — additionally owns its own fade;
 /// see `isUnmanaged`.
-final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
+public final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
 
-    let inkSource: InkSource
+    public let inkSource: InkSource
 
     /// Reports a proportional-thumb action immediately before the scroll view receives it.
     /// `NSScrollView`'s live-scroll notification arrives after tracking has started, which is
     /// too late for a large virtualized document to choose cheap transient rows before the first
     /// jump. Line buttons and track clicks deliberately stay on the ordinary scroll path.
-    var onWillScrollWithKnob: (() -> Void)?
+    public var onWillScrollWithKnob: (() -> Void)?
 
     private var themeRedraw: ThemeRedraw?
     private let appEvents = AppEventObservations()
@@ -30,33 +30,33 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
     private var isHovered = false
     private var hideWork: DispatchWorkItem?
 
-    override class var isCompatibleWithOverlayScrollers: Bool {
+    public override class var isCompatibleWithOverlayScrollers: Bool {
         self == ThemedScroller.self
     }
 
     /// The identity theme owns no scrollbar appearance; AppKit draws both parts.
-    var delegatesDrawingToAppKit: Bool {
+    public var delegatesDrawingToAppKit: Bool {
         AppThemePalette.current.isSystem
     }
 
-    var scrollerAppearance: AppTheme.Material.ScrollerAppearance {
+    public var scrollerAppearance: AppTheme.Material.ScrollerAppearance {
         AppThemePalette.current.material(for: effectiveAppearance).scrollerAppearance
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         inkSource = .chrome
         super.init(frame: frameRect)
         observeAppearance()
     }
 
-    init(frame frameRect: NSRect, inkSource: InkSource) {
+    public init(frame frameRect: NSRect, inkSource: InkSource) {
         self.inkSource = inkSource
         super.init(frame: frameRect)
         observeAppearance()
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -71,7 +71,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         }
     }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
     }
@@ -87,7 +87,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
     /// points short of the arrows. Declining the layer path puts `draw(_:)` back in the loop,
     /// where the clip is the whole view and the control is drawn once, exactly as the archived
     /// reference reproductions draw it.
-    override var wantsUpdateLayer: Bool {
+    public override var wantsUpdateLayer: Bool {
         scrollerAppearance.usesLegacyPresentation ? false : super.wantsUpdateLayer
     }
 
@@ -119,7 +119,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
             || NSScroller.preferredScrollerStyle == .legacy
     }
 
-    override func viewDidMoveToSuperview() {
+    public override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         settleVisibility()
         updateTrackingAreas()
@@ -165,7 +165,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
     /// reports the same position — SwiftTerm's `scrollPosition` saturates at 1 — while its thumb
     /// shrinks on every line an agent prints. Revealing on the thumb would hold the scrollbar up
     /// for the whole of a streaming answer, which is the state this was reported in.
-    override var doubleValue: Double {
+    public override var doubleValue: Double {
         get { super.doubleValue }
         set {
             let moved = newValue != super.doubleValue
@@ -176,7 +176,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
 
     /// Nothing to scroll, nothing to show — a terminal that just handed its screen to a
     /// full-screen program takes its scrollbar with it rather than leaving one behind.
-    override var isEnabled: Bool {
+    public override var isEnabled: Bool {
         get { super.isEnabled }
         set {
             super.isEnabled = newValue
@@ -193,7 +193,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
     /// The terminal's scroller is exactly the view `PointerTracking` describes — it is resized
     /// under a stationary pointer on every window resize and every font change — so the hover
     /// flag is re-derived here rather than waiting for a `mouseExited` that will not come.
-    override func updateTrackingAreas() {
+    public override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if hoverIsStale(isHovered) {
             isHovered = false
@@ -213,19 +213,19 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         hoverTracking = area
     }
 
-    override func mouseEntered(with event: NSEvent) {
+    public override func mouseEntered(with event: NSEvent) {
         super.mouseEntered(with: event)
         isHovered = true
         reveal()
     }
 
-    override func mouseExited(with event: NSEvent) {
+    public override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
         isHovered = false
         scheduleHide()
     }
 
-    override func sendAction(_ action: Selector?, to target: Any?) -> Bool {
+    public override func sendAction(_ action: Selector?, to target: Any?) -> Bool {
         if hitPart == .knob {
             onWillScrollWithKnob?()
         }
@@ -265,7 +265,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         hasScrollableRange ? channel : channel + (1 - channel) * Self.disabledGlyphLift
     }
 
-    override func rect(for part: NSScroller.Part) -> NSRect {
+    public override func rect(for part: NSScroller.Part) -> NSRect {
         let appearance = scrollerAppearance
         guard appearance.usesLegacyPresentation else { return super.rect(for: part) }
 
@@ -497,7 +497,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         }
     }
 
-    override func testPart(_ point: NSPoint) -> NSScroller.Part {
+    public override func testPart(_ point: NSPoint) -> NSScroller.Part {
         guard scrollerAppearance.usesLegacyPresentation else {
             return super.testPart(point)
         }
@@ -515,7 +515,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
 
     // MARK: - Drawing
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         guard scrollerAppearance.usesLegacyPresentation else {
             super.draw(dirtyRect)
             return
@@ -529,7 +529,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         drawKnobSlot(in: rect(for: .knobSlot), highlight: false)
     }
 
-    override func drawKnob() {
+    public override func drawKnob() {
         guard !delegatesDrawingToAppKit else {
             super.drawKnob()
             return
@@ -604,7 +604,7 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
         }
     }
 
-    override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
+    public override func drawKnobSlot(in slotRect: NSRect, highlight flag: Bool) {
         guard !delegatesDrawingToAppKit else {
             super.drawKnobSlot(in: slotRect, highlight: flag)
             return
@@ -2408,15 +2408,15 @@ final class ThemedScroller: NSScroller, ThemedComponent, InkSourced {
 /// Kept separate because conversations replace the ordinary clip view with a flipped subclass.
 /// Subclassing this preserves the invariant without every call site remembering to turn the
 /// AppKit background off after construction.
-class ThemedClipView: NSClipView, ThemedComponent {
+public class ThemedClipView: NSClipView, ThemedComponent {
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         drawsBackground = false
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 }
@@ -2435,7 +2435,7 @@ class ThemedClipView: NSClipView, ThemedComponent {
 /// scrollbar anatomy; that is a persistent legacy-width control because overlay pills cannot
 /// contain end arrows. System delegates everything straight back to AppKit, so the identity
 /// theme remains genuinely native rather than an imitation.
-struct NestedScrollGestureRouter {
+public struct NestedScrollGestureRouter {
     private enum Axis {
         case horizontal
         case vertical
@@ -2449,7 +2449,7 @@ struct NestedScrollGestureRouter {
     /// retarget later events from the conversation to a nested Markdown table or code block.
     /// Re-deciding from every tiny tail delta lets horizontal noise consume the rest of a
     /// vertical flick, which feels like the conversation hit an invisible stop.
-    mutating func forwardsToAncestor(
+    public mutating func forwardsToAncestor(
         deltaX: CGFloat,
         deltaY: CGFloat,
         phase: NSEvent.Phase,
@@ -2474,7 +2474,7 @@ struct NestedScrollGestureRouter {
         return forwards
     }
 
-    mutating func reset() {
+    public mutating func reset() {
         axis = nil
     }
 }
@@ -2491,9 +2491,9 @@ struct NestedScrollGestureRouter {
 /// The decision is a function of nothing but the event's own properties, so the whole matrix can
 /// be asserted without a window to deliver an event into — which matters here because AppKit
 /// ignores a synthesised `scrollWheel` outside a real event stream.
-enum HorizontalOnlyWheelMapping {
+public enum HorizontalOnlyWheelMapping {
 
-    static func mapsVerticalTicksToHorizontal(
+    public static func mapsVerticalTicksToHorizontal(
         phase: NSEvent.Phase,
         momentumPhase: NSEvent.Phase,
         hasPreciseScrollingDeltas: Bool,
@@ -2512,7 +2512,7 @@ enum HorizontalOnlyWheelMapping {
         return scrollingDeltaY != 0 && scrollingDeltaX == 0
     }
 
-    static func mapsVerticalTicksToHorizontal(_ event: NSEvent) -> Bool {
+    public static func mapsVerticalTicksToHorizontal(_ event: NSEvent) -> Bool {
         mapsVerticalTicksToHorizontal(
             phase: event.phase,
             momentumPhase: event.momentumPhase,
@@ -2524,16 +2524,16 @@ enum HorizontalOnlyWheelMapping {
     }
 }
 
-class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
+public class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
 
-    enum SurfaceRole {
+    public enum SurfaceRole {
         /// The long-standing default: the document is visually part of its containing pane.
         case transparent
         /// A theme-authored project-tree work area, if the active theme states one.
         case sidebarNavigator
     }
 
-    var surfaceRole: SurfaceRole = .transparent {
+    public var surfaceRole: SurfaceRole = .transparent {
         didSet { applySurfaceRole() }
     }
 
@@ -2544,7 +2544,7 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     /// pointer crosses something nested inside it. There are two different nested viewports
     /// here and they need two different answers, so this is a policy rather than a flag.
     /// Horizontal-dominant gestures always remain local.
-    enum VerticalScrollHandoff: Equatable {
+    public enum VerticalScrollHandoff: Equatable {
         /// The gesture is this viewport's, always. The default, and right for anything that
         /// owns its own vertical range outright.
         case never
@@ -2569,14 +2569,14 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     /// deliberately stay on `verticalScrollHandoff = .always` instead of taking this: they sit
     /// inside a page that scrolls, so a wheel over them belongs to that page rather than to their
     /// one axis. This case is for a strip with nothing of its own behind it — a pane header's.
-    enum ScrollAxis {
+    public enum ScrollAxis {
         /// The ordinary document: both axes are this viewport's own. The default.
         case both
         /// A horizontal run with no vertical range at all.
         case horizontalOnly
     }
 
-    var axis: ScrollAxis = .both {
+    public var axis: ScrollAxis = .both {
         didSet {
             guard axis != oldValue else { return }
             // The rubber band is a complaint on its own, separately from the routing: a gesture
@@ -2595,7 +2595,7 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         axis == .horizontalOnly ? .always : verticalScrollHandoff
     }
 
-    var verticalScrollHandoff: VerticalScrollHandoff = .never {
+    public var verticalScrollHandoff: VerticalScrollHandoff = .never {
         didSet {
             guard verticalScrollHandoff != oldValue else { return }
             // Exhaustion has to be exact for `.atContentEnds`: a rubber band *is* movement, so
@@ -2619,11 +2619,11 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     /// routes only real gestures through here, so no generation counter is needed to keep
     /// programmatic scrolls from being mistaken for the user leaving. Scroller-thumb drags
     /// never pass through `scrollWheel` — watch the live-scroll notifications for those.
-    var onUserScroll: (() -> Void)?
+    public var onUserScroll: (() -> Void)?
     private var nestedGestureRouter = NestedScrollGestureRouter()
     private let appEvents = AppEventObservations()
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         drawsBackground = false
         contentView = ThemedClipView(frame: contentView.frame)
@@ -2637,11 +2637,11 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         if surfaceRole == .sidebarNavigator,
            let well = SidebarAppearance.navigatorWell(for: effectiveAppearance) {
             ThemedSurface.draw(
@@ -2654,7 +2654,7 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         super.draw(dirtyRect)
     }
 
-    override func viewDidChangeEffectiveAppearance() {
+    public override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         applyScrollerPresentation()
         applySurfaceRole()
@@ -2692,7 +2692,7 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     /// sidebar's header ground reappeared in a four-point sliver on the wrong side of the
     /// header's rule, reading as the band bleeding through its border. The scrollers keep the
     /// well's own edge — they span the surface, not the content's breathing.
-    var contentBreathing: NSEdgeInsets = NSEdgeInsets() {
+    public var contentBreathing: NSEdgeInsets = NSEdgeInsets() {
         didSet { applySurfaceRole() }
     }
 
@@ -2713,7 +2713,7 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         needsDisplay = true
     }
 
-    override func scrollWheel(with event: NSEvent) {
+    public override func scrollWheel(with event: NSEvent) {
         // Before any routing: over a strip, a wheel's ticks *are* the strip's axis. Decided from
         // the event alone, so it can never be mistaken for the trackpad gestures below — those
         // are phased for their whole life and are routed rather than translated.
@@ -2823,7 +2823,7 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
     /// A table with a header makes AppKit insert a second clip view beside `contentView`.
     /// It is framework-owned and cannot be replaced through the public API, but its stock
     /// background is still ours to neutralise.
-    override func tile() {
+    public override func tile() {
         super.tile()
         if AppThemePalette.current.material(
             for: effectiveAppearance
@@ -2861,7 +2861,7 @@ class ThemedScrollView: NSScrollView, ThemedComponent, SystemChromeBoundary {
         }
     }
 
-    func permitsSystemChrome(_ view: NSView) -> Bool {
+    public func permitsSystemChrome(_ view: NSView) -> Bool {
         // macOS 26 inserts visual-effect views into overlay-scrolling chrome. Depending on
         // the scroll view's state, the effect is either direct or nested under private
         // NSScrollPocket/NSHardPocketView wrappers. Permit that AppKit-owned side of the tree

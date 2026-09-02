@@ -431,12 +431,28 @@ ThemedButton: ThemedControl,` … `{`) hides its opening brace from a line-orien
 everything inside it looks like a function body and silently goes unpublished; that one cost a full
 round of override errors.
 
+### What a plugin gets today
+
+80 shared files. Beyond the tokens and the theme model: `ThemedButton`, `ThemedControl`,
+`ThemedIconButton`, `ThemedPopUp`, `ThemedTextField`/`ThemedSearchField`/`ThemedSecureField`,
+`ThemedTextView`, `ThemedMenu`, `ThemedPopover`, `ThemedTableView` with its virtual cell and
+grouped variant, `ThemedScrollView` with its themed scroller and clip view, `ThemedIndicators`,
+`ChipView`, `GlyphView`, `ControlRowView`, `PaneHeaderView`, `PaneFooter`, `FontRole`,
+`MorphingTitleLabel`, and the optical-alignment, pointer-claim and symbol-metric machinery.
+
+`ExamplePluginPane` assembles the shape a log pane needs out of those — header, source chooser,
+filter field, follow button, spinner, and a virtualised table on the themed ground — from a
+separate module, so it stops compiling the moment any of them stops being reachable from outside
+the kit. `PluginViewThemingTests` then asserts the part a compile cannot: that the view a plugin
+built paints the *host's* ground.
+
 ### Still open
 
-The 69 shared files do not yet include the components a log pane wants most — `ThemedTables`,
-`ThemedScrollView`, `ThemedPopUp`, `ThemedTextField`, `ThemedMenu` — each held back by one or two
-support types, on the same pattern as those already resolved. Moving Device logs into a plugin is
-what should drive the next additions, so the set keeps growing against a real consumer.
+Moving Device logs itself into a plugin bundle. The components are in place; what is not yet built
+is the host side of loading one — `NativePluginCatalog` opens the door and
+`NativePluginPaneViewController` hosts a view, but `ThreadingPluginKit.framework` still has to be
+embedded in `Contents/Frameworks` before a shipped plugin can resolve its `@rpath`, and the host
+has to install its theme into the plugin's copy of the palette on load and on every change.
 
 ## Reopen / revisit triggers
 

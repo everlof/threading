@@ -11,7 +11,7 @@ import AppKit
 /// Its dropdown is app-owned too: `ThemedMenuPresenter` draws the rows, selection, scrolling,
 /// and elevation from the same theme roles as the closed control. Callers provide semantic
 /// `ThemedMenuItem` values, so system menu chrome never leaks through this API.
-final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
+public final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
 
     // MARK: - Geometry
 
@@ -43,14 +43,14 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
 
     // MARK: - Configuration
 
-    override var isEnabled: Bool {
+    public override var isEnabled: Bool {
         didSet { alphaValue = isEnabled ? 1 : Layout.disabledAlpha }
     }
 
     /// Mirrors `NSPopUpButton.pullsDown`: the first item is a fixed label rather than a choice,
     /// which is what an actions or gear button wants. No selection is recorded, and the button
     /// keeps showing item 0 whatever is picked.
-    var pullsDown = false {
+    public var pullsDown = false {
         didSet { needsDisplay = true }
     }
 
@@ -59,7 +59,7 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
     /// A borderless pop-up is an icon that happens to open a menu — the gear on the themes
     /// list — and a chevron beside a 14pt glyph in a bare slot reads as clutter rather than as
     /// a hint. So the two travel together rather than being separate knobs.
-    var isBordered = true {
+    public var isBordered = true {
         didSet {
             invalidateIntrinsicContentSize()
             needsDisplay = true
@@ -76,13 +76,13 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
     /// is the value AppKit reports for an empty pop-up.
     private(set) var indexOfSelectedItem: Int = -1
 
-    var selectedItem: ThemedMenuItem? {
+    public var selectedItem: ThemedMenuItem? {
         pullsDown ? nil : item(at: indexOfSelectedItem)
     }
 
     /// Every entry, rules and section heads included — the bound its callers iterate `item(at:)`
     /// over, and the index the next `addItem` will take.
-    var numberOfItems: Int { entries.count }
+    public var numberOfItems: Int { entries.count }
 
     /// What the button itself shows: the choice, or a pull-down's fixed first item.
     private var displayedItem: ThemedMenuItem? {
@@ -98,11 +98,11 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
 
     // MARK: - Initialization
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
     }
 
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
+    public override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil {
             ThemedMenuPresenter.dismiss(menuSession)
         }
@@ -111,11 +111,11 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
 
     // MARK: - Items
 
-    func addItem(withTitle title: String) {
+    public func addItem(withTitle title: String) {
         addItem(ThemedMenuItem(title: title))
     }
 
-    func addItem(_ item: ThemedMenuItem) {
+    public func addItem(_ item: ThemedMenuItem) {
         entries.append(.item(item))
         // AppKit selects the first item a pop-up is given, and call sites rely on it — a menu
         // built without an explicit `selectItem(at:)` still shows something. The index is this
@@ -125,7 +125,7 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
         itemsChanged()
     }
 
-    func addSeparator() {
+    public func addSeparator() {
         entries.append(.separator)
         itemsChanged()
     }
@@ -139,12 +139,12 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
     /// A head belongs to a chooser rather than to a pull-down, whose first entry is its fixed
     /// label: `pullsDown` shows and skips entry zero, and a head there would be shown as the
     /// button's title and hidden from the list it names.
-    func addHeader(_ title: String) {
+    public func addHeader(_ title: String) {
         entries.append(.header(title))
         itemsChanged()
     }
 
-    func item(at index: Int) -> ThemedMenuItem? {
+    public func item(at index: Int) -> ThemedMenuItem? {
         guard entries.indices.contains(index),
               case .item(let item) = entries[index]
         else { return nil }
@@ -154,7 +154,7 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
     /// Out-of-range is tolerated rather than trapped, the way `NSPopUpButton` tolerates it: the
     /// index most often comes from looking a stored value up in a list, and a value the list no
     /// longer holds should leave the control unselected rather than crash the settings window.
-    func selectItem(at index: Int) {
+    public func selectItem(at index: Int) {
         indexOfSelectedItem = item(at: index) == nil ? -1 : index
         needsDisplay = true
     }
@@ -165,7 +165,7 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
     /// menu carries a separator or a section head, so a caller that looked its selection up in
     /// the list it built the pop-up *from* lands one row further down for every head above it —
     /// or on a head, which is no row at all and reads as the pop-up having forgotten the choice.
-    func indexOfItem(where predicate: (ThemedMenuItem) -> Bool) -> Int? {
+    public func indexOfItem(where predicate: (ThemedMenuItem) -> Bool) -> Int? {
         entries.firstIndex { entry in
             guard case .item(let item) = entry else { return false }
             return predicate(item)
@@ -174,9 +174,9 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
 
     /// The first choosable row — where a pop-up lands when the value it was asked to show is
     /// not in the list.
-    var indexOfFirstItem: Int? { indexOfItem { _ in true } }
+    public var indexOfFirstItem: Int? { indexOfItem { _ in true } }
 
-    func removeAllItems() {
+    public func removeAllItems() {
         entries.removeAll()
         indexOfSelectedItem = -1
         itemsChanged()
@@ -189,7 +189,7 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
 
     // MARK: - Layout
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         var width = contentInset * 2
         if let image = displayedItem?.image, !image.size.equalTo(.zero) {
             width += imageSize + Layout.gap
@@ -211,9 +211,9 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
     // MARK: - Interaction
 
     /// Swallowed rather than passed on, which is what `NSPopUpButton` does.
-    override func rightMouseDown(with event: NSEvent) {}
+    public override func rightMouseDown(with event: NSEvent) {}
 
-    override func mouseDown(with event: NSEvent) {
+    public override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         window?.makeFirstResponder(self)
         _ = performPrimaryAction()
@@ -223,7 +223,7 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
     // item it is let go over — the way the stock pop-up this replaces always did. The open menu
     // tracks that press itself, so this control has nothing to forward.
 
-    override func performPrimaryAction() -> Bool {
+    public override func performPrimaryAction() -> Bool {
         presentMenu()
     }
 
@@ -260,13 +260,13 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
         return true
     }
 
-    func themedMenuPresentationDidChange(isPresented: Bool) {
+    public func themedMenuPresentationDidChange(isPresented: Bool) {
         isPresentingMenu = isPresented
     }
 
     /// The single point at which a choice becomes the selection. Reachable from a test, which
     /// otherwise could only get here by opening a modal menu.
-    func chooseItem(at index: Int) {
+    public func chooseItem(at index: Int) {
         guard let item = item(at: index), item.isEnabled else { return }
         if !pullsDown {
             indexOfSelectedItem = index
@@ -284,24 +284,24 @@ final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
     /// close the whole window must dismiss first: tearing the window down while the overlay still
     /// owns responder and tracking state can end a hosted AppKit process before XCTest records the
     /// current case's result.
-    func dismissMenu() {
+    public func dismissMenu() {
         ThemedMenuPresenter.dismiss(menuSession)
     }
 
-    override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
-    override func accessibilityValue() -> Any? { displayedItem?.title }
-    override func accessibilityTitle() -> String? {
+    public override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
+    public override func accessibilityValue() -> Any? { displayedItem?.title }
+    public override func accessibilityTitle() -> String? {
         accessibilityLabel() ?? displayedItem?.title
     }
 
     /// Both the press and the show-menu actions open the list, because assistive clients and UI
     /// scripts reach a pop-up through either one.
-    override func accessibilityPerformPress() -> Bool { presentMenu() }
-    override func accessibilityPerformShowMenu() -> Bool { presentMenu() }
+    public override func accessibilityPerformPress() -> Bool { presentMenu() }
+    public override func accessibilityPerformShowMenu() -> Bool { presentMenu() }
 
     // MARK: - Drawing
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         var content = bounds.insetBy(dx: contentInset, dy: 0)
 
         if isBordered {

@@ -13,7 +13,7 @@ import AppKit
 /// Copyright (c) 2026 Ben Letchford. Licensed under SIL OFL 1.1; the complete license and
 /// source record ship beside the app's other font notices.
 @MainActor
-enum PlatinumBitmapFont {
+public enum PlatinumBitmapFont {
     private struct Glyph {
         let advance: Int
         let width: Int
@@ -107,7 +107,7 @@ enum PlatinumBitmapFont {
         return Face(ascent: Int(rawAscent), descent: Int(rawDescent), glyphs: glyphs)
     }()
 
-    static func advance(of text: String) -> Int? {
+    public static func advance(of text: String) -> Int? {
         guard let face else { return nil }
         let scalars = Array(text.unicodeScalars)
         var result = 0
@@ -128,7 +128,7 @@ enum PlatinumBitmapFont {
     /// Draws at a top-down QuickDraw baseline and returns false for unsupported Unicode so
     /// the caller can preserve the user's ordinary AppKit fallback.
     @discardableResult
-    static func draw(
+    public static func draw(
         _ text: String,
         penX: CGFloat,
         baselineFromTop: CGFloat,
@@ -173,7 +173,7 @@ enum PlatinumBitmapFont {
         return true
     }
 
-    static func centeredBaseline(in rect: NSRect, offset: CGFloat = 0) -> CGFloat? {
+    public static func centeredBaseline(in rect: NSRect, offset: CGFloat = 0) -> CGFloat? {
         guard let face else { return nil }
         let lineHeight = face.ascent + face.descent
         return floor((rect.height - CGFloat(lineHeight)) / 2) + CGFloat(face.ascent) + offset

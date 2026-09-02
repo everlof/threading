@@ -12,19 +12,19 @@ import AppKit
 /// see `ThemedTableRowView`, which a list hands back from `rowViewForRow:` and the sidebar
 /// answers its own way. How *strongly* they draw it is this file's, and every list's:
 /// `ListSelectionStrength`.
-class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, SelectionStrengthStating {
+public class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, SelectionStrengthStating {
 
     private lazy var selectionStrength = ListSelectionStrength(self)
 
     /// See `SoleColumnFitting`.
-    var soleColumnFitWidth: CGFloat = -1
+    public var soleColumnFitWidth: CGFloat = -1
 
     /// See `SelectionStrengthStating` — asked by this list's own rows as AppKit demotes them.
-    var drawsSelectionAtFullStrength: Bool { selectionStrength.drawsAsKey }
+    public var drawsSelectionAtFullStrength: Bool { selectionStrength.drawsAsKey }
 
     /// See `ListSelectionStrength.fixtureIsKey`. Restated on both classes rather than shared,
     /// for the reason `ThemedOutlineView` gives: `NSOutlineView` is already an `NSTableView`.
-    var fixtureIsKey: Bool? {
+    public var fixtureIsKey: Bool? {
         get { selectionStrength.fixtureIsKey }
         set { selectionStrength.fixtureIsKey = newValue }
     }
@@ -33,7 +33,7 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
     /// stretch below the last one. `ThemedOutlineView`'s hook, restated here for the same reason
     /// its own comment gives, and with the same contract: reported rather than handled, with the
     /// anchor the gesture carries, answering whether a menu actually opened.
-    var onContextMenu: ((Int, ThemedMenuAnchor) -> Bool)?
+    public var onContextMenu: ((Int, ThemedMenuAnchor) -> Bool)?
 
     /// Space over a row, and the trackpad's preview gesture on one — Finder's preview keys,
     /// answered here by the app's own inspector rather than the system panel.
@@ -42,7 +42,7 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
     /// whether that row holds anything worth inspecting, and a `false` answer leaves the event
     /// with AppKit, so a list that has nothing to preview keeps type-select and the system
     /// gesture it would otherwise have swallowed.
-    var onQuickLook: ((Int) -> Bool)?
+    public var onQuickLook: ((Int) -> Bool)?
 
     /// A drag left this list without landing in it — the pointer went outside, or the whole drag
     /// ended.
@@ -52,35 +52,35 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
     /// else in the drop protocol ever fires, so a host's highlight would be left on the last row
     /// the pointer crossed. `draggingEnded` is included deliberately — a cancelled drag exits
     /// nothing.
-    var onDraggingExited: (() -> Void)?
+    public var onDraggingExited: (() -> Void)?
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         backgroundColor = .clear
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func viewWillDraw() {
+    public override func viewWillDraw() {
         super.viewWillDraw()
         fitSoleColumnToWidth()
         selectionStrength.apply()
     }
 
-    override func viewDidMoveToWindow() {
+    public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         selectionStrength.followWindow()
     }
 
-    override func setFrameSize(_ newSize: NSSize) {
+    public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         fitSoleColumnToWidth()
     }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         fitSoleColumnToWidth()
     }
@@ -88,7 +88,7 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
     /// See `ThemedTableRowDefaults.vendedView(for:recycling:)` — this is where a list that says
     /// nothing about selection still gets the theme's row, and where a view coming back out of
     /// the reuse queue is brought up to the theme in force.
-    override func makeView(
+    public override func makeView(
         withIdentifier identifier: NSUserInterfaceItemIdentifier,
         owner: Any?
     ) -> NSView? {
@@ -98,7 +98,7 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
         )
     }
 
-    override func validateProposedFirstResponder(
+    public override func validateProposedFirstResponder(
         _ responder: NSResponder,
         for event: NSEvent?
     ) -> Bool {
@@ -110,7 +110,7 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
         return super.validateProposedFirstResponder(responder, for: event)
     }
 
-    override func rightMouseDown(with event: NSEvent) {
+    public override func rightMouseDown(with event: NSEvent) {
         guard let onContextMenu else {
             super.rightMouseDown(with: event)
             return
@@ -120,7 +120,7 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
     }
 
     /// The pointerless route to the same menu, anchored to the selected row itself.
-    override func accessibilityPerformShowMenu() -> Bool {
+    public override func accessibilityPerformShowMenu() -> Bool {
         guard let onContextMenu, selectedRow >= 0 else {
             return super.accessibilityPerformShowMenu()
         }
@@ -130,7 +130,7 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
     /// Bare Space on the selected row. A modifier makes it something else — Command-Space is
     /// Spotlight's — so only the unmodified key is claimed, and even then only if the host
     /// answers it.
-    override func keyDown(with event: NSEvent) {
+    public override func keyDown(with event: NSEvent) {
         guard event.charactersIgnoringModifiers == " ",
               event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
               let onQuickLook,
@@ -144,7 +144,7 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
     /// The trackpad's preview gesture — three-finger tap, or a force click — on the row under
     /// the pointer rather than the selected one, because that is the row it was aimed at. The
     /// same route `ThemedImagePreview` takes for the same gesture.
-    override func quickLook(with event: NSEvent) {
+    public override func quickLook(with event: NSEvent) {
         let row = row(at: convert(event.locationInWindow, from: nil))
         guard let onQuickLook, row >= 0, onQuickLook(row) else {
             super.quickLook(with: event)
@@ -152,12 +152,12 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
         }
     }
 
-    override func draggingExited(_ sender: NSDraggingInfo?) {
+    public override func draggingExited(_ sender: NSDraggingInfo?) {
         super.draggingExited(sender)
         onDraggingExited?()
     }
 
-    override func draggingEnded(_ sender: NSDraggingInfo) {
+    public override func draggingEnded(_ sender: NSDraggingInfo) {
         super.draggingEnded(sender)
         onDraggingExited?()
     }
@@ -172,14 +172,14 @@ class ThemedTableView: NSTableView, ThemedComponent, SoleColumnFitting, Selectio
 /// narrowest legal width, reports a very tall height, and only later gets stretched by the table.
 /// The host owns that one piece of table plumbing so virtualized feature lists do not each grow a
 /// subtly different copy.
-final class ThemedVirtualTableCell: NSTableCellView {
+public final class ThemedVirtualTableCell: NSTableCellView {
     private lazy var columnWidth: NSLayoutConstraint = {
         let constraint = widthAnchor.constraint(equalToConstant: 0)
         constraint.priority = NSLayoutConstraint.Priority(999)
         return constraint
     }()
 
-    func install(
+    public func install(
         _ content: NSView,
         columnWidth width: CGFloat,
         horizontalInset: CGFloat = 0,
@@ -199,7 +199,7 @@ final class ThemedVirtualTableCell: NSTableCellView {
         ])
     }
 
-    func setColumnWidth(_ width: CGFloat) {
+    public func setColumnWidth(_ width: CGFloat) {
         guard width > 0 else {
             columnWidth.isActive = false
             return
@@ -209,7 +209,7 @@ final class ThemedVirtualTableCell: NSTableCellView {
         columnWidth.isActive = true
     }
 
-    override func prepareForReuse() {
+    public override func prepareForReuse() {
         super.prepareForReuse()
         subviews.forEach { $0.removeFromSuperview() }
     }
@@ -220,10 +220,10 @@ final class ThemedVirtualTableCell: NSTableCellView {
 /// `topInset` and `bottomInset` belong to the first and last row hosts respectively. Repeating
 /// them here keeps the painted panel behind the content rather than behind the inter-section
 /// breathing room carried by those rows.
-struct ThemedTableCardDecoration: Equatable {
-    let rows: ClosedRange<Int>
-    var topInset: CGFloat = 0
-    var bottomInset: CGFloat = 0
+public struct ThemedTableCardDecoration: Equatable {
+    public let rows: ClosedRange<Int>
+    public var topInset: CGFloat = 0
+    public var bottomInset: CGFloat = 0
 }
 
 /// A virtual table that paints grouped settings-card surfaces behind row runs.
@@ -231,12 +231,12 @@ struct ThemedTableCardDecoration: Equatable {
 /// The surface belongs to the table, not to a retained container around all of its rows. AppKit
 /// can therefore recycle every offscreen cell while the group still reads as one continuous card;
 /// only the cheap row range survives outside the viewport.
-final class ThemedGroupedTableView: ThemedTableView {
-    var cardDecorations: [ThemedTableCardDecoration] = [] {
+public final class ThemedGroupedTableView: ThemedTableView {
+    public var cardDecorations: [ThemedTableCardDecoration] = [] {
         didSet { needsDisplay = true }
     }
 
-    override func drawBackground(inClipRect clipRect: NSRect) {
+    public override func drawBackground(inClipRect clipRect: NSRect) {
         super.drawBackground(inClipRect: clipRect)
 
         for decoration in cardDecorations where decoration.rows.lowerBound >= 0
@@ -363,7 +363,7 @@ final class ThemedGroupedTableView: ThemedTableView {
 /// property with a default value is initialized in phase one, so it is the one piece of state that
 /// is always there to read.
 @MainActor
-protocol SoleColumnFitting: NSTableView {
+public protocol SoleColumnFitting: NSTableView {
 
     /// The list width the sole column was last fitted to; negative until it has been.
     ///
@@ -381,7 +381,7 @@ protocol SoleColumnFitting: NSTableView {
 @MainActor
 extension SoleColumnFitting {
 
-    func fitSoleColumnToWidth() {
+    public func fitSoleColumnToWidth() {
         guard bounds.width > 0, tableColumns.count == 1,
               let column = tableColumns.first else { return }
 
@@ -406,7 +406,7 @@ extension SoleColumnFitting {
 /// otherwise. See `ListSelectionStrength`, which holds the answer, and
 /// `NSTableRowView.listSelectionStrength(insteadOf:)`, which asks it.
 @MainActor
-protocol SelectionStrengthStating: AnyObject {
+public protocol SelectionStrengthStating: AnyObject {
 
     /// Whether this list's selection draws at full strength right now.
     var drawsSelectionAtFullStrength: Bool { get }
@@ -422,14 +422,14 @@ extension NSTableRowView {
     /// it is here. A row's `superview` *is* its table, so there is nothing to wire up and nothing
     /// to keep in sync: a row asks the list it is in, or it is in no list of ours and AppKit's
     /// answer stands.
-    func listSelectionStrength(insteadOf appKitsAnswer: Bool) -> Bool {
+    public func listSelectionStrength(insteadOf appKitsAnswer: Bool) -> Bool {
         (superview as? SelectionStrengthStating)?.drawsSelectionAtFullStrength ?? appKitsAnswer
     }
 
     /// Take the list's strength now, for the one moment the refusal cannot cover: AppKit sets a
     /// row's emphasis while building it, *before* it has a superview to ask — measured, not
     /// assumed. Landing in the list is the first moment there is anything to ask.
-    func adoptListSelectionStrength() {
+    public func adoptListSelectionStrength() {
         let strength = listSelectionStrength(insteadOf: isEmphasized)
         guard isEmphasized != strength else { return }
         isEmphasized = strength
@@ -478,19 +478,19 @@ extension NSTableRowView {
 /// notification and no ordering. Rows stay nearly dumb: they read `isEmphasized` and draw, and
 /// the one thing they know is which list to ask before believing a demotion.
 @MainActor
-final class ListSelectionStrength {
+public final class ListSelectionStrength {
 
     /// Key state stated by a fixture. An unshown test window is never key, and the emphasized
     /// selection is the state worth asserting, so without this the rule is unrenderable outside
     /// a window ordered on screen — which `Threading-Fast` is built to avoid.
-    var fixtureIsKey: Bool? {
+    public var fixtureIsKey: Bool? {
         didSet { apply() }
     }
 
     private weak var table: NSTableView?
     private let windowStateObservations = AppEventObservations()
 
-    init(_ table: NSTableView) {
+    public init(_ table: NSTableView) {
         self.table = table
     }
 
@@ -499,7 +499,7 @@ final class ListSelectionStrength {
     /// lowering all of them when the list resigns, and a row built later while scrolling. Rows
     /// already holding the right answer are left alone, so this costs a comparison per visible
     /// row and no invalidation.
-    func apply() {
+    public func apply() {
         guard let table else { return }
 
         let emphasized = drawsAsKey
@@ -513,7 +513,7 @@ final class ListSelectionStrength {
     /// list is unemphasized before and after its window comes back, so it has no change to report
     /// and no row to invalidate. Applied directly rather than by invalidating the list, because
     /// raising a row's emphasis is what marks that row for display.
-    func followWindow() {
+    public func followWindow() {
         windowStateObservations.removeAll()
 
         defer { apply() }
@@ -534,7 +534,7 @@ final class ListSelectionStrength {
     ///
     /// Read by the list's `drawsSelectionAtFullStrength`, which is what a row about to be demoted
     /// asks — so this is the single answer both halves of the rule are applying.
-    var drawsAsKey: Bool {
+    public var drawsAsKey: Bool {
         guard let window = table?.window else { return fixtureIsKey ?? true }
         return fixtureIsKey ?? window.isKeyWindow
     }
@@ -569,7 +569,7 @@ final class ListSelectionStrength {
 ///
 /// Under **System** it defers to `super` entirely, so the stock selection — the user's own
 /// accent, its emphasized and unemphasized strengths, its vibrancy — is untouched.
-class ThemedTableRowView: NSTableRowView, ThemedComponent {
+public class ThemedTableRowView: NSTableRowView, ThemedComponent {
 
     /// The interactive cell currently asking this row to draw its hover/press plate.
     ///
@@ -589,7 +589,7 @@ class ThemedTableRowView: NSTableRowView, ThemedComponent {
     /// plate visibly narrower than the selection stacked directly above it while standing exactly
     /// as tall: read as a hover that had lost its edges. Drawn here it is the *same* silhouette
     /// selection uses, by construction rather than by two call sites agreeing.
-    var isDropTarget = false {
+    public var isDropTarget = false {
         didSet {
             guard isDropTarget != oldValue else { return }
             needsDisplay = true
@@ -598,17 +598,17 @@ class ThemedTableRowView: NSTableRowView, ThemedComponent {
 
     /// A demotion is believed only if the list this row is in asks for one. See
     /// `ListSelectionStrength` for the rule, and why a hook at the draw could not hold it.
-    override var isEmphasized: Bool {
+    public override var isEmphasized: Bool {
         get { super.isEmphasized }
         set { super.isEmphasized = listSelectionStrength(insteadOf: newValue) }
     }
 
-    override func viewDidMoveToSuperview() {
+    public override func viewDidMoveToSuperview() {
         super.viewDidMoveToSuperview()
         adoptListSelectionStrength()
     }
 
-    override func drawBackground(in dirtyRect: NSRect) {
+    public override func drawBackground(in dirtyRect: NSRect) {
         super.drawBackground(in: dirtyRect)
 
         if let source = interactionHighlightSource,
@@ -628,7 +628,7 @@ class ThemedTableRowView: NSTableRowView, ThemedComponent {
     /// Lets an interactive cell borrow the row's plate without exposing row geometry to the
     /// cell. A later cell cannot be cleared by an earlier reused one: only the source that owns
     /// the current claim may release it.
-    func setInteractionHighlight(
+    public func setInteractionHighlight(
         _ highlighted: Bool,
         from source: NSView,
         inkSource: InkSource
@@ -648,14 +648,14 @@ class ThemedTableRowView: NSTableRowView, ThemedComponent {
         needsDisplay = true
     }
 
-    var interactionHighlightIsActiveForTesting: Bool {
+    public var interactionHighlightIsActiveForTesting: Bool {
         guard let source = interactionHighlightSource else { return false }
         return source.isDescendant(of: self)
     }
 
-    var plateRectForTesting: NSRect { platePath.bounds }
+    public var plateRectForTesting: NSRect { platePath.bounds }
 
-    override func drawSelection(in dirtyRect: NSRect) {
+    public override func drawSelection(in dirtyRect: NSRect) {
         guard !AppThemeLibrary.current.isSystem else {
             return super.drawSelection(in: dirtyRect)
         }
@@ -693,7 +693,7 @@ class ThemedTableRowView: NSTableRowView, ThemedComponent {
     /// the wrong one for a cell that has: it keeps tier one legible and leaves the rest where they
     /// were. Windows 98's quaternary on its held-back navy measured 1.18:1. A cell that took the
     /// trouble to ask gets the ladder measured on what is actually under it.
-    var contentInk: Design.Ink {
+    public var contentInk: Design.Ink {
         guard let ground = selectionGround else { return .chrome }
         return Design.Text.on(ground)
     }
@@ -704,7 +704,7 @@ class ThemedTableRowView: NSTableRowView, ThemedComponent {
     /// which of the two selection strengths was in force — `isEmphasized` is not simply what it
     /// was set to (see `ListSelectionStrength`), and a test that recomputed the fill by hand was
     /// measuring ink against a ground the row had not painted.
-    var selectionGround: NSColor? {
+    public var selectionGround: NSColor? {
         guard isSelected else { return nil }
         guard AppThemeLibrary.current.isSystem else {
             return SelectionSurface.quiet(over: resolvedGround()).ground
@@ -751,12 +751,12 @@ class ThemedTableRowView: NSTableRowView, ThemedComponent {
     }
 }
 
-enum ThemedTableRowDefaults {
+public enum ThemedTableRowDefaults {
     /// Enough to keep the fill off the list's edges without pulling it in from the row's
     /// content, which starts one `small` step in.
-    static let selectionInsetX: CGFloat = Design.Spacing.hairline
+    public static let selectionInsetX: CGFloat = Design.Spacing.hairline
     /// The same 1pt the sidebar's rows leave, so two consecutive selected rows read as two.
-    static let selectionInsetY: CGFloat = Design.Spacing.hairline / 2
+    public static let selectionInsetY: CGFloat = Design.Spacing.hairline / 2
 
     /// How far AppKit holds an inset-style table's selection in from the row, under **System**,
     /// where the selection is its plate and not ours.
@@ -766,12 +766,12 @@ enum ThemedTableRowDefaults {
     /// reads both plates off drawn pixels and fails if they ever stop agreeing — which is what a
     /// macOS release changing this number should produce, rather than a list whose drop
     /// affordance quietly grew wider than its selection.
-    static let systemInsetStylePadding: CGFloat = Design.Spacing.medium
+    public static let systemInsetStylePadding: CGFloat = Design.Spacing.medium
 
     /// AppKit's own key for a list's row view, held here because its Swift binding was obsoleted
     /// in Swift 3 while the constant itself was not: `NSTableView.h` still declares
     /// `NSTableViewRowViewKey` and still pins it to this string.
-    static let rowViewKey = NSUserInterfaceItemIdentifier("NSTableViewRowViewKey")
+    public static let rowViewKey = NSUserInterfaceItemIdentifier("NSTableViewRowViewKey")
 
     /// **Every list in this app selects through `ThemedTableRowView`, including the lists that
     /// never say so.**
@@ -812,7 +812,7 @@ enum ThemedTableRowDefaults {
     ///
     /// `repaintIfNeeded` is generation-stamped, so a view already current costs one associated
     /// object read per vend, and the repaint itself runs once per view per theme change.
-    static func vendedView(
+    public static func vendedView(
         for identifier: NSUserInterfaceItemIdentifier,
         recycling recycled: NSView?
     ) -> NSView? {
@@ -854,7 +854,7 @@ enum ThemedTableRowDefaults {
 /// anywhere else still selects it — "anywhere else" meaning outside every such control, the glyphs
 /// and labels *inside* one included, for the reason `takesItsOwnClick` states.
 @MainActor
-enum RowControls {
+public enum RowControls {
 
     /// Whether the click that landed on `responder` belongs to a control rather than to the row.
     ///
@@ -874,7 +874,7 @@ enum RowControls {
     /// control. Letting it through is enough — the press then reaches the control the way it
     /// already does outside a list, an `NSImageView` with no action of its own forwarding it up the
     /// responder chain.
-    static func takesItsOwnClick(_ responder: NSResponder) -> Bool {
+    public static func takesItsOwnClick(_ responder: NSResponder) -> Bool {
         guard let view = responder as? NSView else { return false }
         return owner(of: view) != nil
     }
@@ -894,7 +894,7 @@ enum RowControls {
 
 /// `ThemedTableView`'s rule again, one class up: `NSOutlineView` inherits `NSTableView`,
 /// so the two-line duplication here is what lets both keep their real superclass.
-class ThemedOutlineView:
+public class ThemedOutlineView:
     NSOutlineView,
     ThemedComponent,
     SystemChromeBoundary,
@@ -908,7 +908,7 @@ class ThemedOutlineView:
     ///
     /// This replaces `menu(for:)`/`.menu`: the host presents an app-owned dropdown instead of
     /// an `NSMenu`, so the outline's part shrinks to resolving the row under the gesture.
-    var onContextMenu: ((Int, ThemedMenuAnchor) -> Bool)?
+    public var onContextMenu: ((Int, ThemedMenuAnchor) -> Bool)?
 
     /// Starts every row's content at one leading edge, whatever its depth.
     ///
@@ -921,18 +921,18 @@ class ThemedOutlineView:
     ///
     /// The host owns relayout: rows already built keep their old frames until the next
     /// `reloadData()`, so flipping this mid-list without one shows both geometries at once.
-    struct FlattenedIndentation {
-        let cellLeading: CGFloat
-        let markerLeading: CGFloat
+    public struct FlattenedIndentation {
+        public let cellLeading: CGFloat
+        public let markerLeading: CGFloat
 
-        init(cellLeading: CGFloat, markerLeading: CGFloat) {
+        public init(cellLeading: CGFloat, markerLeading: CGFloat) {
             self.cellLeading = cellLeading
             self.markerLeading = markerLeading
         }
     }
 
     /// Nil draws the ordinary indented tree.
-    var flattenedIndentation: FlattenedIndentation?
+    public var flattenedIndentation: FlattenedIndentation?
 
     /// Points of the style's own trailing padding handed back to the cells.
     ///
@@ -945,11 +945,11 @@ class ThemedOutlineView:
     /// because what bounds it is the shape that host draws: content moving out into this band has
     /// to stay inside the silhouette a selected row fills, and only the host knows where that is.
     /// See `SidebarDefaults.tightTrailingCellReclaim`.
-    var trailingCellReclaim: CGFloat = 0
+    public var trailingCellReclaim: CGFloat = 0
 
     /// Only the outline column indents, and this list has only that column — so the override
     /// applies wherever the frame came back indented rather than guessing at column indexes.
-    override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
+    public override func frameOfCell(atColumn column: Int, row: Int) -> NSRect {
         var frame = super.frameOfCell(atColumn: column, row: row)
         guard tableColumns.indices.contains(column),
               tableColumns[column] === outlineTableColumn, !frame.isEmpty else { return frame }
@@ -968,7 +968,7 @@ class ThemedOutlineView:
     }
 
     /// AppKit answers `.zero` for a row with nothing to disclose; that answer stands.
-    override func frameOfOutlineCell(atRow row: Int) -> NSRect {
+    public override func frameOfOutlineCell(atRow row: Int) -> NSRect {
         var frame = super.frameOfOutlineCell(atRow: row)
         guard let flattened = flattenedIndentation, !frame.isEmpty else { return frame }
 
@@ -994,7 +994,7 @@ class ThemedOutlineView:
     /// The chevron is AppKit's own button, added as a direct subview of the row view and stamped
     /// with `NSOutlineView.disclosureButtonIdentifier` — the identifier the framework documents
     /// for exactly this, so the marker is named rather than guessed at by position or class.
-    func refitIndentedRows() {
+    public func refitIndentedRows() {
         guard let column = outlineTableColumn,
               let columnIndex = tableColumns.firstIndex(where: { $0 === column })
         else { return }
@@ -1031,45 +1031,45 @@ class ThemedOutlineView:
     private lazy var selectionStrength = ListSelectionStrength(self)
 
     /// See `SoleColumnFitting`.
-    var soleColumnFitWidth: CGFloat = -1
+    public var soleColumnFitWidth: CGFloat = -1
 
     /// See `SelectionStrengthStating` — asked by this list's own rows as AppKit demotes them,
     /// which in the sidebar is every time a click hands focus to the session it just opened.
-    var drawsSelectionAtFullStrength: Bool { selectionStrength.drawsAsKey }
+    public var drawsSelectionAtFullStrength: Bool { selectionStrength.drawsAsKey }
 
     /// See `ListSelectionStrength.fixtureIsKey`.
-    var fixtureIsKey: Bool? {
+    public var fixtureIsKey: Bool? {
         get { selectionStrength.fixtureIsKey }
         set { selectionStrength.fixtureIsKey = newValue }
     }
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         backgroundColor = .clear
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func viewWillDraw() {
+    public override func viewWillDraw() {
         super.viewWillDraw()
         fitSoleColumnToWidth()
         selectionStrength.apply()
     }
 
-    override func viewDidMoveToWindow() {
+    public override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         selectionStrength.followWindow()
     }
 
-    override func setFrameSize(_ newSize: NSSize) {
+    public override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         fitSoleColumnToWidth()
     }
 
-    override func layout() {
+    public override func layout() {
         super.layout()
         fitSoleColumnToWidth()
     }
@@ -1077,7 +1077,7 @@ class ThemedOutlineView:
     /// See `ThemedTableRowDefaults.vendedView(for:recycling:)` — this is where a list that says
     /// nothing about selection still gets the theme's row, and where a view coming back out of
     /// the reuse queue is brought up to the theme in force.
-    override func makeView(
+    public override func makeView(
         withIdentifier identifier: NSUserInterfaceItemIdentifier,
         owner: Any?
     ) -> NSView? {
@@ -1087,7 +1087,7 @@ class ThemedOutlineView:
         )
     }
 
-    override func rightMouseDown(with event: NSEvent) {
+    public override func rightMouseDown(with event: NSEvent) {
         guard let onContextMenu else {
             super.rightMouseDown(with: event)
             return
@@ -1097,7 +1097,7 @@ class ThemedOutlineView:
     }
 
     /// The pointerless route to the same menu, anchored to the selected row itself.
-    override func accessibilityPerformShowMenu() -> Bool {
+    public override func accessibilityPerformShowMenu() -> Bool {
         guard let onContextMenu, selectedRow >= 0 else {
             return super.accessibilityPerformShowMenu()
         }
@@ -1107,13 +1107,13 @@ class ThemedOutlineView:
     /// Disclosure triangles are controls AppKit inserts into outline rows after the data source
     /// returns them. Permit only that identified system control; an ordinary button anywhere in
     /// a cell remains a runtime violation.
-    func permitsSystemChrome(_ view: NSView) -> Bool {
+    public func permitsSystemChrome(_ view: NSView) -> Bool {
         guard let button = view as? NSButton else { return false }
         return button.identifier == NSOutlineView.disclosureButtonIdentifier
     }
 
     /// The sidebar's own case of `RowControls`, and the one the reports were about.
-    override func validateProposedFirstResponder(
+    public override func validateProposedFirstResponder(
         _ responder: NSResponder,
         for event: NSEvent?
     ) -> Bool {
@@ -1131,21 +1131,21 @@ class ThemedOutlineView:
 /// Unlike AppKit's header cells, this draws both its surface and titles from semantic roles.
 /// Mouse tracking and divider resizing remain `NSTableHeaderView` behavior; only its pixels are
 /// replaced.
-class ThemedTableHeaderView: NSTableHeaderView, ThemedComponent {
+public class ThemedTableHeaderView: NSTableHeaderView, ThemedComponent {
 
     private var themeRedraw: ThemeRedraw?
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         themeRedraw = ThemeRedraw(self)
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         Design.Surface.controlResting.setFill()
         bounds.fill()
 
@@ -1199,12 +1199,12 @@ class ThemedTableHeaderView: NSTableHeaderView, ThemedComponent {
 /// semantic block and never edits its column structure, so asking Auto Layout to rediscover that
 /// grid on every scroll tick is pure overhead. This component measures the attributed cell text
 /// once, places the labels directly, and draws header/separator surfaces from live design roles.
-final class ThemedDocumentTableView: NSView, ThemedComponent {
+public final class ThemedDocumentTableView: NSView, ThemedComponent {
     private let scrollView = ThemedScrollView()
     private let canvas: ThemedDocumentTableCanvas
     private var themeRedraw: ThemeRedraw?
 
-    init(
+    public init(
         headers: [NSAttributedString],
         rows: [[NSAttributedString]],
         alignments: [NSTextAlignment],
@@ -1247,11 +1247,11 @@ final class ThemedDocumentTableView: NSView, ThemedComponent {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func setFrameSize(_ newSize: NSSize) {
+    public override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = abs(newSize.width - frame.width) > 0.5
         super.setFrameSize(newSize)
         guard widthChanged, newSize.width > 0 else { return }
@@ -1260,7 +1260,7 @@ final class ThemedDocumentTableView: NSView, ThemedComponent {
         }
     }
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         NSSize(width: NSView.noIntrinsicMetric, height: canvas.frame.height)
     }
 }

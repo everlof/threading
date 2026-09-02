@@ -16,10 +16,10 @@ import AppKit
 ///
 /// Decorative by construction: the control or row around it carries the accessible name, the
 /// same split `SeparatorView` states.
-final class GlyphView: NSView {
+public final class GlyphView: NSView {
 
     /// The artwork. Natural size is the view's intrinsic size unless `slot` caps it.
-    var image: NSImage? {
+    public var image: NSImage? {
         didSet {
             invalidateIntrinsicContentSize()
             needsDisplay = true
@@ -31,14 +31,14 @@ final class GlyphView: NSView {
     /// No default colour on purpose — the host's ink is the only right answer, and a stated
     /// fallback here would be a second, wrong one (the boundary lint agrees). Until the host's
     /// first `applyInk`, a template draws as itself, which is never on screen.
-    var tint: NSColor? {
+    public var tint: NSColor? {
         didSet { needsDisplay = true }
     }
 
     /// A cap for artwork whose natural size is not ours to choose — an installed app's icon
     /// arrives at whatever LaunchServices holds. A symbol should not need one: it is sized by
     /// its configuration (`Design.Symbol.image(_:slot:pointSize:)`), not squeezed after.
-    var slot: NSSize? {
+    public var slot: NSSize? {
         didSet {
             invalidateIntrinsicContentSize()
             needsDisplay = true
@@ -65,7 +65,7 @@ final class GlyphView: NSView {
 
     private var symbolRequest: SymbolRequest?
 
-    init() {
+    public init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         setAccessibilityElement(false)
@@ -74,7 +74,7 @@ final class GlyphView: NSView {
     /// Shows `name` at a mark's size, re-rendered whenever the theme moves the type it is
     /// weighed against. The route for every SF Symbol in an app-owned control; assigning
     /// `image` directly stays right for artwork that is not ours (an app's own icon).
-    func setSymbol(
+    public func setSymbol(
         _ name: String,
         slot: CGFloat? = nil,
         role: Design.Symbol.Role = .control,
@@ -86,7 +86,7 @@ final class GlyphView: NSView {
 
     /// Empties the slot, and forgets the request with it — a view handed real artwork or
     /// nothing at all must not have a stale symbol re-rendered under it by the next sweep.
-    func clearSymbol() {
+    public func clearSymbol() {
         symbolRequest = nil
     }
 
@@ -102,11 +102,11 @@ final class GlyphView: NSView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         guard let image else { return .zero }
         guard let slot else { return image.size }
         return NSSize(
@@ -115,7 +115,7 @@ final class GlyphView: NSView {
         )
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         guard let image, image.size.width > 0, image.size.height > 0 else { return }
 
         var size = image.size
@@ -152,7 +152,7 @@ extension GlyphView: ThemeDerivedContent {
     /// freezes like both: `Design.Symbol.image` *configures* a symbol at a point size, and the
     /// point size follows the chrome's type scale. Without this a theme switch redrew a 0.80×
     /// label beside the mark the previous theme had rendered.
-    func rederiveThemedContent() {
+    public func rederiveThemedContent() {
         renderSymbol()
     }
 }

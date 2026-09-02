@@ -32,12 +32,12 @@ import AppKit
 /// dictionary is set once and never rebuilt. The **ground** is dynamic for the same reason and is
 /// therefore passed as a closure: what a text view sits on moves with the theme too.
 @MainActor
-enum ThemedTextSelection {
+public enum ThemedTextSelection {
 
     /// `host` is what the selection is painted over. Weakly held: these attributes outlive nothing,
     /// but they are read by TextKit at arbitrary later moments and a strong capture would make a
     /// text view own itself.
-    static func attributes(over host: NSView?) -> [NSAttributedString.Key: Any] {
+    public static func attributes(over host: NSView?) -> [NSAttributedString.Key: Any] {
         let selection = SelectionSurface.dynamic { [weak host] in
             host?.resolvedGround() ?? Design.Surface.ground
         }
@@ -53,14 +53,14 @@ enum ThemedTextSelection {
     ///
     /// The **field** is the ground, not the editor: the editor is lent, re-parented and reused, so
     /// a ground read through it answers for whichever field borrowed it last.
-    static func apply(to editor: NSText, in field: NSView?) {
+    public static func apply(to editor: NSText, in field: NSView?) {
         guard let editor = editor as? NSTextView else { return }
         editor.selectedTextAttributes = attributes(over: field)
         editor.insertionPointColor = Design.Surface.accent
     }
 }
 
-class ThemedTextView: NSTextView, ThemedComponent {
+public class ThemedTextView: NSTextView, ThemedComponent {
 
     private var themeRedraw: ThemeRedraw?
 
@@ -78,7 +78,7 @@ class ThemedTextView: NSTextView, ThemedComponent {
     /// every selection, and reports a nil `layoutManager` to anything sizing itself to the
     /// text. `NSTextView()` builds the network; this initializer did not, which is how the
     /// composer's prompt became an inert box that looked focused.
-    override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
+    public override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
         if let container {
             ownedTextStorage = nil
             super.init(frame: frameRect, textContainer: container)
@@ -102,7 +102,7 @@ class ThemedTextView: NSTextView, ThemedComponent {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -142,7 +142,7 @@ class ThemedTextView: NSTextView, ThemedComponent {
     /// The themed replacement for `NSTextView.scrollableTextView()`: a transparent scroll
     /// view around a width-tracking, vertically growing text view — the wiring every
     /// scrolling text pane needs and nobody should re-derive.
-    static func scrolling() -> ThemedTextScrollView { ThemedTextScrollView() }
+    public static func scrolling() -> ThemedTextScrollView { ThemedTextScrollView() }
 }
 
 /// A scrolling text surface whose document type remains visible to the compiler.
@@ -151,10 +151,10 @@ class ThemedTextView: NSTextView, ThemedComponent {
 /// `documentView as? ThemedTextView`—and two important editors used `as!`. The composite owns the
 /// invariant instead: replacing its document view remains possible through AppKit, but code built
 /// by this factory never needs a runtime cast to reach the text view it created.
-final class ThemedTextScrollView: ThemedScrollView {
-    let textView: ThemedTextView
+public final class ThemedTextScrollView: ThemedScrollView {
+    public let textView: ThemedTextView
 
-    init() {
+    public init() {
         textView = ThemedTextView(frame: .zero, textContainer: nil)
         super.init(frame: .zero)
 
@@ -168,7 +168,7 @@ final class ThemedTextScrollView: ThemedScrollView {
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 }

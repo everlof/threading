@@ -3,7 +3,7 @@ import AppKit
 /// A non-menu chooser presented from a chip. The chip owns the held/pressed state and dismissal
 /// bookkeeping; the session owns only its presentation surface.
 @MainActor
-protocol ChipChoicePresentationSession: AnyObject {
+public protocol ChipChoicePresentationSession: AnyObject {
     func dismissChipChoicePresentation()
 }
 
@@ -13,18 +13,18 @@ protocol ChipChoicePresentationSession: AnyObject {
 /// material cannot acquire two different arrow wells merely because the caller used the other
 /// semantic wrapper.
 @MainActor
-enum ClassicChoiceDrawing {
-    static let edge: CGFloat = 2
-    static let arrowWidth: CGFloat = 18
-    static let textInset: CGFloat = 5
+public enum ClassicChoiceDrawing {
+    public static let edge: CGFloat = 2
+    public static let arrowWidth: CGFloat = 18
+    public static let textInset: CGFloat = 5
 
     /// The Aqua chooser's own corner. Tiger draws its small pop-up a step tighter than the push
     /// button beside it, so this is the chooser's measure rather than the material's control
     /// radius — and it is one measure for both chooser implementations, which is the point of
     /// this type.
-    static let aquaCornerRadius: CGFloat = 5
+    public static let aquaCornerRadius: CGFloat = 5
 
-    static func arrowRect(
+    public static func arrowRect(
         in bounds: NSRect,
         style: AppTheme.Material.ChoiceStyle
     ) -> NSRect {
@@ -44,7 +44,7 @@ enum ClassicChoiceDrawing {
         )
     }
 
-    static func drawIntegratedSeparator(at x: CGFloat, in bounds: NSRect) {
+    public static func drawIntegratedSeparator(at x: CGFloat, in bounds: NSRect) {
         Design.Surface.bevelShadow.setFill()
         NSRect(x: x, y: 2, width: 1, height: max(0, bounds.height - 4)).fill()
         Design.Surface.bevelHighlight.setFill()
@@ -57,7 +57,7 @@ enum ClassicChoiceDrawing {
     /// Both implementations put a one-point border on the control: `ThemedPopUp` strokes it,
     /// `ChipView` hands it to the layer, and either way it occupies the outermost point of the
     /// silhouette. The well belongs *inside* that, with the button's own corner.
-    static func aquaFace(in bounds: NSRect) -> ThemedSurface.Shape {
+    public static func aquaFace(in bounds: NSRect) -> ThemedSurface.Shape {
         let border = Design.Radius.controlBorder
         return ThemedSurface.Shape(
             rect: bounds.insetBy(dx: border, dy: border),
@@ -71,7 +71,7 @@ enum ClassicChoiceDrawing {
     /// circular arc for both of them. See `ChipView.updateBackground` for what a layer border
     /// does to this radius instead.
     @discardableResult
-    static func drawAquaSurface(in bounds: NSRect) -> ThemedSurface.Shape {
+    public static func drawAquaSurface(in bounds: NSRect) -> ThemedSurface.Shape {
         ThemedSurface.draw(
             bounds,
             fill: Design.Surface.controlResting,
@@ -88,7 +88,7 @@ enum ClassicChoiceDrawing {
     /// hard blue block and read as cut off at the right. The clip is also what leaves the three
     /// outer edges to the border already around them; only the seam against the value is the
     /// well's own to draw.
-    static func drawAquaArrowWell(in rect: NSRect, face: ThemedSurface.Shape, pressed: Bool) {
+    public static func drawAquaArrowWell(in rect: NSRect, face: ThemedSurface.Shape, pressed: Bool) {
         let leading = max(rect.minX, face.rect.minX)
         let well = NSRect(
             x: leading,
@@ -123,11 +123,11 @@ enum ClassicChoiceDrawing {
     /// against the accent instead — `Text.selected`, the tone this app already puts on a selected
     /// row. On Tiger's blue that measures to the same dark mark it was using; on a theme whose
     /// authored accent is dark it is the difference between an arrow and a smudge.
-    static func indicatorInk(for style: AppTheme.Material.ChoiceStyle) -> NSColor {
+    public static func indicatorInk(for style: AppTheme.Material.ChoiceStyle) -> NSColor {
         style == .aquaPopup ? Design.Text.selected : Design.Text.label
     }
 
-    static func drawIndicator(
+    public static func drawIndicator(
         _ style: AppTheme.Material.ChoiceStyle,
         in rect: NSRect,
         color: NSColor
@@ -217,9 +217,9 @@ enum ClassicChoiceDrawing {
 /// rather than the edge of a plate that is not drawn.
 ///
 /// See `Design` for the vocabulary this belongs to.
-final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentationObserving {
+public final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentationObserving {
 
-    enum HeightStyle {
+    public enum HeightStyle {
         /// A compact chooser among other compact controls.
         case compact
         /// A chooser sharing a row with a single-line text field.
@@ -254,7 +254,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     /// the one row that had none to spare: the composer's footer overflowed a 720-point column
     /// and crushed the usage reading beside the send. The plate still reads at six, because it
     /// only ever appears under one chip at a time and the eye is already on it.
-    static let horizontalPadding = Design.Spacing.small
+    public static let horizontalPadding = Design.Spacing.small
 
     /// One point, for the fraction AppKit's text cell needs and Auto Layout rounds away. See
     /// `intrinsicContentSize`.
@@ -270,7 +270,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     private var choicePresentationSession: (any ChipChoicePresentationSession)?
     private var heightConstraint: NSLayoutConstraint?
 
-    var heightStyle: HeightStyle = .compact {
+    public var heightStyle: HeightStyle = .compact {
         didSet {
             guard heightStyle != oldValue else { return }
             applyHeight()
@@ -384,7 +384,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     private var hoverWidthConstraint: NSLayoutConstraint?
 
     /// Choices to offer, rebuilt each time so the menu always reflects current state.
-    var itemsProvider: (() -> [ThemedMenuEntry])?
+    public var itemsProvider: (() -> [ThemedMenuEntry])?
 
     /// Replaces only the choice surface while leaving this chip's appearance and layout intact.
     ///
@@ -392,7 +392,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     /// invoked exactly once when its transient surface closes. Returning nil falls back to the
     /// ordinary menu provider. Kept at the design boundary so a feature never intercepts AppKit
     /// mouse events or subclasses this control just to present different themed content.
-    var choicePresentationProvider: ((
+    public var choicePresentationProvider: ((
         _ chip: ChipView,
         _ didDismiss: @escaping () -> Void
     ) -> (any ChipChoicePresentationSession)?)?
@@ -401,13 +401,13 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     private(set) var selectedItem: ThemedMenuItem?
 
     /// Called after a menu item is chosen.
-    var onSelect: ((ThemedMenuItem) -> Void)?
+    public var onSelect: ((ThemedMenuItem) -> Void)?
 
     /// Replaces AppKit presentation in behavior tests. Returning a choice simulates selecting it.
     /// Production leaves this nil.
-    var menuPresentationOverride: ((ThemedMenuPresentation) -> ThemedMenuItem?)?
+    public var menuPresentationOverride: ((ThemedMenuPresentation) -> ThemedMenuItem?)?
 
-    override var intrinsicContentSize: NSSize {
+    public override var intrinsicContentSize: NSSize {
         // The row may compress a chooser, but it first needs an honest natural width to
         // compress *from*. Returning no width made `NSStackView` treat the classic chooser as
         // if its value cost no space: the row's spring absorbed hundreds of spare points while
@@ -481,22 +481,22 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
 
     /// A neighbouring reading can align to the title's ink rather than the pill's geometric
     /// centre. The icon and chevron do not define a text baseline.
-    var contentFirstBaselineAnchor: NSLayoutYAxisAnchor { titleLabel.firstBaselineAnchor }
+    public var contentFirstBaselineAnchor: NSLayoutYAxisAnchor { titleLabel.firstBaselineAnchor }
 
-    override var isEnabled: Bool {
+    public override var isEnabled: Bool {
         didSet { updateBackground() }
     }
 
     // MARK: - Initialization
 
-    override init(frame frameRect: NSRect) {
+    public override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupViews()
     }
 
     /// ThemeRedraw invalidates drawing, while a chooser style also changes which children take
     /// part and how much trailing room the independent arrow button owns.
-    override func setNeedsDisplay(_ invalidRect: NSRect) {
+    public override func setNeedsDisplay(_ invalidRect: NSRect) {
         let anatomyChanged = choiceStyle != appliedChoiceStyle
             || controlHeight != appliedChoiceHeight
         super.setNeedsDisplay(invalidRect)
@@ -511,12 +511,12 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
         }
     }
 
-    override func layout() {
+    public override func layout() {
         updateChoiceStyleIfNeeded()
         super.layout()
     }
 
-    override func viewWillMove(toWindow newWindow: NSWindow?) {
+    public override func viewWillMove(toWindow newWindow: NSWindow?) {
         if newWindow == nil {
             ThemedMenuPresenter.dismiss(menuSession)
             choicePresentationSession?.dismissChipChoicePresentation()
@@ -525,7 +525,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     }
 
     @available(*, unavailable)
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -604,7 +604,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     // MARK: - Public Methods
 
     /// Sets what the chip currently shows.
-    func configure(symbolName: String?, title: String) {
+    public func configure(symbolName: String?, title: String) {
         configure(
             icon: symbolName.flatMap {
                 NSImage(systemSymbolName: $0, accessibilityDescription: nil)?
@@ -615,7 +615,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     }
 
     /// The image variant, for marks that are not SF Symbols — an agent's brand icon.
-    func configure(icon: NSImage?, title: String) {
+    public func configure(icon: NSImage?, title: String) {
         configuredIcon = icon
         iconView.image = icon
         iconView.isHidden = icon == nil || choiceStyle.isClassic
@@ -626,7 +626,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     }
 
     /// Selects an item by its represented value, so a rebuilt menu keeps its choice.
-    func select(_ item: ThemedMenuItem?) {
+    public func select(_ item: ThemedMenuItem?) {
         selectedItem = item
     }
 
@@ -634,12 +634,12 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
 
     /// The chip's hover is a fill *and* a width, so it answers the base's hook rather than
     /// redrawing: see `updateHoverWidth`.
-    override func hoverDidChange() {
+    public override func hoverDidChange() {
         super.hoverDidChange()
         updateHoverState()
     }
 
-    override func mouseDown(with event: NSEvent) {
+    public override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
         window?.makeFirstResponder(self)
         _ = presentMenu()
@@ -648,21 +648,21 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
     // The press that opened the menu may still be held; the menu tracks it from there, so
     // nothing about press-drag-release is this chip's business.
 
-    override var acceptsFirstResponder: Bool { isEnabled }
+    public override var acceptsFirstResponder: Bool { isEnabled }
 
-    override func becomeFirstResponder() -> Bool {
+    public override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()
         if accepted { updateBackground(focused: true) }
         return accepted
     }
 
-    override func resignFirstResponder() -> Bool {
+    public override func resignFirstResponder() -> Bool {
         let resigned = super.resignFirstResponder()
         if resigned { updateBackground(focused: false) }
         return resigned
     }
 
-    override func keyDown(with event: NSEvent) {
+    public override func keyDown(with event: NSEvent) {
         guard isEnabled else {
             super.keyDown(with: event)
             return
@@ -678,7 +678,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
 
     /// Builds the semantic presentation separately from showing it. Kept internal for behavior
     /// tests without exposing the contained AppKit menu.
-    func preparedPresentation() -> ThemedMenuPresentation? {
+    public func preparedPresentation() -> ThemedMenuPresentation? {
         guard let entries = itemsProvider?(),
               entries.contains(where: {
                   if case .item = $0 { return true }
@@ -738,7 +738,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
         return true
     }
 
-    func themedMenuPresentationDidChange(isPresented: Bool) {
+    public func themedMenuPresentationDidChange(isPresented: Bool) {
         isPresentingMenu = isPresented
     }
 
@@ -832,14 +832,14 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
 
     /// The padding the hover plate needs, which the frame carries at rest as well so nothing
     /// moves when the plate appears. A row aligning by ink subtracts it — see `ControlRowView`.
-    var opticalHorizontalInset: CGFloat {
+    public var opticalHorizontalInset: CGFloat {
         choiceStyle == .chip ? Self.horizontalPadding : ClassicChoiceDrawing.textInset
     }
 
     /// A classic chooser draws its well to the frame and therefore has no invisible vertical
     /// padding. A modern chip rests as content inside a hover target, so section layout measures
     /// to the tallest visible child instead of to that target.
-    func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
+    public func opticalVerticalInset(forFrameHeight frameHeight: CGFloat) -> CGFloat {
         guard !choiceStyle.isClassic else { return 0 }
         let contentHeight = contentStack.arrangedSubviews.reduce(CGFloat.zero) { height, view in
             guard !view.isHidden else { return height }
@@ -895,7 +895,7 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
         invalidateIntrinsicContentSize()
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    public override func draw(_ dirtyRect: NSRect) {
         let style = choiceStyle
         guard style.isClassic else { return }
 
@@ -966,12 +966,12 @@ final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPresentati
 
     // MARK: - Accessibility
 
-    override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
-    override func accessibilityTitle() -> String? { titleLabel.stringValue }
-    override func accessibilityValue() -> Any? { selectedItem?.title ?? titleLabel.stringValue }
-    override func isAccessibilityEnabled() -> Bool { isEnabled }
-    override func accessibilityPerformPress() -> Bool { presentMenu() }
-    override func accessibilityPerformShowMenu() -> Bool { presentMenu() }
+    public override func accessibilityRole() -> NSAccessibility.Role? { .popUpButton }
+    public override func accessibilityTitle() -> String? { titleLabel.stringValue }
+    public override func accessibilityValue() -> Any? { selectedItem?.title ?? titleLabel.stringValue }
+    public override func isAccessibilityEnabled() -> Bool { isEnabled }
+    public override func accessibilityPerformPress() -> Bool { presentMenu() }
+    public override func accessibilityPerformShowMenu() -> Bool { presentMenu() }
 }
 
 // MARK: - ControlRowMember
@@ -982,7 +982,7 @@ extension ChipView: ControlRowMember {
     /// compact measure *from* the chooser. It is the taller rows that move it, and the live
     /// theme switch: `choiceHeight` is the material's, so a style change resizes every chip in
     /// a row along with the row itself.
-    func adopt(_ metrics: ControlRowMetrics) {
+    public func adopt(_ metrics: ControlRowMetrics) {
         guard rowHeight != metrics.height else { return }
         rowHeight = metrics.height
         applyHeight()
@@ -992,29 +992,29 @@ extension ChipView: ControlRowMember {
 // MARK: - Design Symbols
 
 /// Symbols the design system uses itself, as opposed to ones a feature chooses.
-enum DesignSymbols {
-    static let chevron = "chevron.down"
-    static let submit = "return"
+public enum DesignSymbols {
+    public static let chevron = "chevron.down"
+    public static let submit = "return"
 
     /// The send glyph's other face, while a turn is running. A filled square rather than an
     /// outlined one: Stop is the only control in the box that acts on something already
     /// happening, and it has to read as the more definite of the two at 18pt.
-    static let stop = "stop.fill"
+    public static let stop = "stop.fill"
 
     /// Adding to the turn already running, as opposed to starting another one.
-    static let steer = "arrow.turn.down.right"
-    static let search = "magnifyingglass"
-    static let attachment = "paperclip"
-    static let removeAttachment = "xmark"
+    public static let steer = "arrow.turn.down.right"
+    public static let search = "magnifyingglass"
+    public static let attachment = "paperclip"
+    public static let removeAttachment = "xmark"
     /// Entering annotation mode on a browser page, and being in it.
-    static let annotate = "plus.bubble"
-    static let annotating = "checkmark.bubble.fill"
+    public static let annotate = "plus.bubble"
+    public static let annotating = "checkmark.bubble.fill"
     /// How a report ended: filed, or refused. Beside wording that already says which, so the
     /// pair carries the outcome without relying on the colour they are tinted.
-    static let reportFiled = "checkmark.circle"
-    static let reportRefused = "exclamationmark.triangle"
+    public static let reportFiled = "checkmark.circle"
+    public static let reportRefused = "exclamationmark.triangle"
 
     /// A `PaneNoticeView` stating a fact rather than a problem. Its shape differs from the
     /// warning triangle beside it so the two are told apart without their tints.
-    static let noticeInformational = "info.circle"
+    public static let noticeInformational = "info.circle"
 }

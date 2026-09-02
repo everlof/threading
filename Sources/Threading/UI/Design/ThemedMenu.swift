@@ -12,11 +12,11 @@ import AppKit
 /// for lives in exactly two of them. A tone names what a run *is* — furniture or a value, calm
 /// or under pressure — and the row resolves it to a colour at draw time, so a live theme switch
 /// re-inks the next frame rather than honouring colours frozen in at decoration time.
-struct ThemedMenuSubtitleSegment {
+public struct ThemedMenuSubtitleSegment {
 
     /// Semantic, not a colour: the row owns the palette, including the grounds where a tone
     /// cannot be honoured at all (a classic selection band flattens every run to its own ink).
-    enum Tone {
+    public enum Tone {
         /// The subtitle's own ink — what a plain, unsegmented subtitle draws in.
         case standard
         /// Quieter than the line: labels and separators, the furniture between values.
@@ -27,10 +27,10 @@ struct ThemedMenuSubtitleSegment {
         case critical
     }
 
-    let text: String
-    let tone: Tone
+    public let text: String
+    public let tone: Tone
 
-    init(_ text: String, _ tone: Tone = .standard) {
+    public init(_ text: String, _ tone: Tone = .standard) {
         self.text = text
         self.tone = tone
     }
@@ -50,21 +50,21 @@ struct ThemedMenuSubtitleSegment {
 /// for a window whose number is not knowable rather than one that is empty. `tone` is semantic
 /// for the same reason `ThemedMenuSubtitleSegment.Tone` is — the row owns the palette, and a
 /// classic selection band flattens both text and bar to its own authored ink.
-struct ThemedMenuMetric {
+public struct ThemedMenuMetric {
 
     /// The column this reading belongs in, and its written name — `5h`, `7d`. Rows sharing a
     /// label share a column; a row with no metric for a column leaves it empty, which is how
     /// a plan metering one window says so beside a plan metering two.
-    let label: String
+    public let label: String
     /// The precise answer, in the column's own digits — `27%`, or `—` where the window's number
     /// would be a leftover from the window before it.
-    let value: String
+    public let value: String
     /// The same answer as a length, 0…1. Nil draws the empty track: no bar at all would read as
     /// a missing column, and a full-length one as a spent window.
-    let fraction: Double?
-    let tone: ThemedMenuSubtitleSegment.Tone
+    public let fraction: Double?
+    public let tone: ThemedMenuSubtitleSegment.Tone
 
-    init(
+    public init(
         label: String,
         value: String,
         fraction: Double?,
@@ -77,7 +77,7 @@ struct ThemedMenuMetric {
     }
 }
 
-struct ThemedMenuItem {
+public struct ThemedMenuItem {
     /// What choosing this row can do. Kept as one value because an action and a submenu are
     /// mutually exclusive interaction contracts: a row that carries both answers its press
     /// with the action while its chevron and hover answer with the submenu.
@@ -87,23 +87,23 @@ struct ThemedMenuItem {
         case submenu([ThemedMenuEntry])
     }
 
-    let title: String
+    public let title: String
     /// Explanatory hover and assistive help that adds meaning beyond the visible title.
     ///
     /// This stays separate from `subtitle`: a subtitle is part of the menu's standing layout,
     /// while help is supplementary and appears only when somebody lingers or asks assistive
     /// technology for more detail. The row owns both presentations so callers never install a
     /// second tracking area over menu chrome.
-    var help: String?
-    var subtitle: String?
+    public var help: String?
+    public var subtitle: String?
     /// The complete chord that invokes the same action outside this menu.
     ///
     /// One value drives every modifier and the key, rather than asking a caller to bake glyphs
     /// into the title. The row can therefore align a real shortcut column and keep a rebound
     /// command truthful. `keyEquivalent` remains as the historical command-only shorthand used
     /// by the component-gallery reproductions below.
-    var shortcut: KeyboardShortcut?
-    var keyEquivalent: String?
+    public var shortcut: KeyboardShortcut?
+    public var keyEquivalent: String?
     /// Toned runs over `subtitle`, set through `setSubtitle(_:)` so the two cannot disagree.
     /// The row draws these when present; everything that is not drawing — the tooltip, the
     /// type-to-filter, the measured width — keeps reading the plain string. One font across
@@ -113,30 +113,30 @@ struct ThemedMenuItem {
     /// Readings this row states in shared columns beside its title, aligned with every other
     /// row's. See `ThemedMenuMetric`. Empty on a row that has none — a menu whose rows all have
     /// none reserves no columns at all.
-    var metrics: [ThemedMenuMetric] = []
+    public var metrics: [ThemedMenuMetric] = []
     /// The one fact that follows the columns, right-aligned in a column of its own: the account
     /// rows' reset countdown. Separated from the metrics because it is not a reading of a
     /// window, and separated from the subtitle because it is the fact that must never be the
     /// thing an over-long line truncates.
-    var trailingDetail: String?
+    public var trailingDetail: String?
     /// A quiet qualifier drawn immediately after the title, in the same line — the account
     /// rows' plan name. It belongs to the title rather than to the subtitle: it identifies the
     /// row, and demoting it to a second line gives a subtitle-height row to every login whose
     /// provider happens to report a plan.
-    var titleDetail: String?
-    var image: NSImage?
-    var preview: ThemedMenuPreview?
+    public var titleDetail: String?
+    public var image: NSImage?
+    public var preview: ThemedMenuPreview?
     /// A second action offered at the trailing edge under the pointer, which does not choose the
     /// row. See `ThemedMenuAccessory`. Set after construction like the other trailing columns,
     /// because it is a property of the *list* a row was put in — one caller builds the row and
     /// the list's owner decides that its rows can be auditioned.
-    var accessory: ThemedMenuAccessory?
-    var representedValue: Any?
-    var isSelected: Bool
-    var isEnabled: Bool
+    public var accessory: ThemedMenuAccessory?
+    public var representedValue: Any?
+    public var isSelected: Bool
+    public var isEnabled: Bool
     private let destination: Destination
 
-    var onChoose: (() -> Void)? {
+    public var onChoose: (() -> Void)? {
         guard case .action(let action) = destination else { return nil }
         return action
     }
@@ -145,12 +145,12 @@ struct ThemedMenuItem {
     /// hover, on ⌘-less right-arrow, and on press; choosing anywhere in the chain closes the
     /// whole menu. `Destination` makes the parent-or-action rule structural rather than a
     /// convention each caller and interaction path has to remember.
-    var submenu: [ThemedMenuEntry]? {
+    public var submenu: [ThemedMenuEntry]? {
         guard case .submenu(let entries) = destination else { return nil }
         return entries
     }
 
-    init(
+    public init(
         title: String,
         help: String? = nil,
         subtitle: String? = nil,
@@ -177,7 +177,7 @@ struct ThemedMenuItem {
         )
     }
 
-    init(
+    public init(
         title: String,
         help: String? = nil,
         subtitle: String? = nil,
@@ -205,7 +205,7 @@ struct ThemedMenuItem {
         )
     }
 
-    init(
+    public init(
         title: String,
         help: String? = nil,
         subtitle: String? = nil,
@@ -261,7 +261,7 @@ struct ThemedMenuItem {
 
     /// The full chord a row draws. Historical fixture call sites that provide one bare key are
     /// command-key rows by definition, which preserves their authored classic-theme grammar.
-    var resolvedShortcut: KeyboardShortcut? {
+    public var resolvedShortcut: KeyboardShortcut? {
         shortcut ?? keyEquivalent.map { KeyboardShortcut(key: $0, modifiers: .command) }
     }
 
@@ -269,7 +269,7 @@ struct ThemedMenuItem {
     /// join every non-drawing consumer keeps — the tooltip, the filter, the measured width.
     /// One entry point rather than two properties, because the two drifting apart is a row
     /// whose tooltip says something its pixels do not.
-    mutating func setSubtitle(_ segments: [ThemedMenuSubtitleSegment]) {
+    public mutating func setSubtitle(_ segments: [ThemedMenuSubtitleSegment]) {
         subtitleSegments = segments.isEmpty ? nil : segments
         subtitle = segments.isEmpty ? nil : segments.map(\.text).joined()
     }
@@ -280,7 +280,7 @@ struct ThemedMenuItem {
     /// Announcing `item.title` alone was survivable while the reading lived in the subtitle the
     /// tooltip already carried; once it moved into aligned columns and a drawn bar, a row
     /// announced by its name alone would be a login with no reading at all.
-    var spokenSummary: String {
+    public var spokenSummary: String {
         var parts: [String] = []
         // Every part is admitted only when it has something in it, the title included: a row
         // built to carry a reading and no name — which is how `AccountUsageMenu.summary`
@@ -294,10 +294,10 @@ struct ThemedMenuItem {
     }
 }
 
-enum ThemedMenuItemDefaults {
+public enum ThemedMenuItemDefaults {
     /// Between the parts of a spoken or hovered summary. A comma rather than the drawn `·`,
     /// because this string exists for the two consumers that read it aloud or wrap it.
-    static let spokenSeparator = ", "
+    public static let spokenSeparator = ", "
 }
 
 /// A live view standing in for a choice, so a menu of animations can be watched rather than
@@ -308,9 +308,9 @@ enum ThemedMenuItemDefaults {
 /// which is also what keeps a preview honest — the working indicator's row draws the same
 /// `WorkingOrbView` the conversation status draws, and a name transition's row the same
 /// `MorphingTitleLabel` the sidebar morphs, rather than a second rendering of either.
-struct ThemedMenuPreview {
+public struct ThemedMenuPreview {
 
-    enum Placement {
+    public enum Placement {
         /// A fixed slot before the title, which still draws beside it.
         case leading
         /// The title's own place. The row draws no title of its own, because the preview *is*
@@ -318,8 +318,8 @@ struct ThemedMenuPreview {
         case title
     }
 
-    let placement: Placement
-    let view: NSView
+    public let placement: Placement
+    public let view: NSView
 
     /// The row's highlight arrived or left, by pointer or by arrow key.
     ///
@@ -331,7 +331,7 @@ struct ThemedMenuPreview {
     /// `false` is also delivered when the row leaves the window, so a menu dismissed
     /// mid-demonstration ends it rather than leaving something stepping against a view nobody
     /// can see.
-    var highlightChanged: ((Bool) -> Void)?
+    public var highlightChanged: ((Bool) -> Void)?
 }
 
 /// A second thing a row can do, offered at its trailing edge and never chosen by accident.
@@ -359,17 +359,17 @@ struct ThemedMenuPreview {
 /// offer nothing to press inside one — so the accessory answers a click on an open menu, which is
 /// how a picker is actually used. `ThemedMenuAccessoryTests` pins it so the day it changes is a
 /// decision.
-struct ThemedMenuAccessory {
+public struct ThemedMenuAccessory {
     /// The symbol drawn in the trailing slot, resolved through `ThemedMenuIcon` so it is the
     /// size and weight every other mark in a menu is.
-    let symbolName: String
+    public let symbolName: String
     /// What pressing it does, in the imperative: "Play". VoiceOver offers it under this name and
     /// the row says it as a tooltip while the pointer is on the glyph, which is the only
     /// explanation a hover-revealed control gets to give.
-    let title: String
-    let action: () -> Void
+    public let title: String
+    public let action: () -> Void
 
-    init(symbolName: String, title: String, action: @escaping () -> Void) {
+    public init(symbolName: String, title: String, action: @escaping () -> Void) {
         self.symbolName = symbolName
         self.title = title
         self.action = action
@@ -385,8 +385,8 @@ struct ThemedMenuAccessory {
 /// size is `control` rather than the slot's nominal one: these sit beside a 13pt title, and that
 /// pairing is what `Design.Symbol.control` is measured for.
 @MainActor
-enum ThemedMenuIcon {
-    static func symbol(_ name: String) -> NSImage? {
+public enum ThemedMenuIcon {
+    public static func symbol(_ name: String) -> NSImage? {
         Design.Symbol.image(
             name,
             slot: ThemedMenuMetrics.imageSize,
@@ -398,7 +398,7 @@ enum ThemedMenuIcon {
     /// is derived from the slot rather than stated, so a smaller mark is *configured* smaller and
     /// keeps the stroke weight its optical size chose instead of being a shrunk render of a
     /// larger one.
-    static func accessorySymbol(_ name: String) -> NSImage? {
+    public static func accessorySymbol(_ name: String) -> NSImage? {
         Design.Symbol.image(
             name,
             slot: ThemedMenuMetrics.accessorySize,
@@ -407,7 +407,7 @@ enum ThemedMenuIcon {
     }
 }
 
-enum ThemedMenuEntry {
+public enum ThemedMenuEntry {
     case item(ThemedMenuItem)
     case separator
     /// A name over the rows that follow it, choosing nothing itself.
@@ -422,9 +422,9 @@ enum ThemedMenuEntry {
 }
 
 /// The semantic payload handed to menu-presentation test seams.
-struct ThemedMenuPresentation {
-    let entries: [ThemedMenuEntry]
-    let minimumWidth: CGFloat
+public struct ThemedMenuPresentation {
+    public let entries: [ThemedMenuEntry]
+    public let minimumWidth: CGFloat
 }
 
 // MARK: - Presentation
@@ -435,7 +435,7 @@ struct ThemedMenuPresentation {
 /// menu opened by a secondary click belongs to the *pointer*: anchoring one to its whole view
 /// instead puts it in the same place wherever inside the view the click landed, which reads as
 /// the menu ignoring the click that asked for it.
-enum ThemedMenuAnchor {
+public enum ThemedMenuAnchor {
     /// Under — or over, where there is no room — the control that opened it, aligned to its
     /// leading edge.
     case control
@@ -452,7 +452,7 @@ enum ThemedMenuAnchor {
 /// The session remembers the observer chain it opened with, so dismissal reaches the same views
 /// even when a list has since detached or rearranged them.
 @MainActor
-protocol ThemedMenuPresentationObserving: NSView {
+public protocol ThemedMenuPresentationObserving: NSView {
     func themedMenuPresentationDidChange(isPresented: Bool)
 }
 
@@ -472,10 +472,10 @@ protocol ThemedMenuPresentationObserving: NSView {
 /// and a call site that dropped the token got the worst possible failure — the overlay stayed
 /// over the whole window, every dismissal callback already dead, and the window read as hung.
 @MainActor
-enum ThemedMenuPresenter {
+public enum ThemedMenuPresenter {
 
     @discardableResult
-    static func present(
+    public static func present(
         _ presentation: ThemedMenuPresentation,
         from source: NSView,
         anchor: ThemedMenuAnchor = .control,
@@ -516,7 +516,7 @@ enum ThemedMenuPresenter {
         )
     }
 
-    static func dismiss(_ token: AnyObject?) {
+    public static func dismiss(_ token: AnyObject?) {
         (token as? ThemedMenuSession)?.close()
     }
 
@@ -525,7 +525,7 @@ enum ThemedMenuPresenter {
     /// A dropdown is a view rather than a window, so nothing about the window itself says one
     /// is open — and `ThemedPopover`, which would draw over it, has to ask. Counted per open
     /// session rather than read off the view tree, so a menu still fading out is already gone.
-    static func isMenuOpen(in window: NSWindow) -> Bool {
+    public static func isMenuOpen(in window: NSWindow) -> Bool {
         ThemedMenuSession.open.allObjects.contains { $0.window === window }
     }
 
@@ -535,13 +535,13 @@ enum ThemedMenuPresenter {
     ///
     /// An open session watches that press itself (see `heldPressMask`); this is the same
     /// tracking entered by hand, for a caller holding the events already.
-    static func dragUpdated(_ token: AnyObject?, event: NSEvent) {
+    public static func dragUpdated(_ token: AnyObject?, event: NSEvent) {
         (token as? ThemedMenuSession)?.dragUpdated(event)
     }
 
     /// The held press ends. Over an enabled row it chooses; back over the source it goes
     /// sticky (the ordinary click-then-browse open); anywhere else it lets the menu go.
-    static func dragEnded(_ token: AnyObject?, event: NSEvent) {
+    public static func dragEnded(_ token: AnyObject?, event: NSEvent) {
         (token as? ThemedMenuSession)?.dragEnded(event)
     }
 
@@ -555,7 +555,7 @@ enum ThemedMenuPresenter {
     /// corroboration, and either one alone is enough. A menu opened from a timer during a held
     /// press is still tracking that press, and a synthesized open (tests, scripted UI) has no
     /// current event to read.
-    static func heldPressMask(
+    public static func heldPressMask(
         opening event: NSEvent?,
         pressedButtons: Int
     ) -> NSEvent.EventTypeMask? {
@@ -587,7 +587,7 @@ enum ThemedMenuPresenter {
 /// exactly as if no menu had been open. Everything else keeps the platform's swallow — a click
 /// on the terminal to let a menu go must not also type into it.
 @MainActor
-protocol ThemedMenuOpening: NSView {
+public protocol ThemedMenuOpening: NSView {
     /// Whether a press would open this control's menu right now — enabled, and for controls
     /// that carry both gestures, configured to present one.
     var opensMenuOnPress: Bool { get }
@@ -596,15 +596,15 @@ protocol ThemedMenuOpening: NSView {
 // Gathered here rather than spread across the adopters: who may take the handoff is the
 // presenter's contract, and one place states the whole roster.
 extension ChipView: ThemedMenuOpening {
-    var opensMenuOnPress: Bool { isEnabled }
+    public var opensMenuOnPress: Bool { isEnabled }
 }
 
 extension ThemedPopUp: ThemedMenuOpening {
-    var opensMenuOnPress: Bool { isEnabled }
+    public var opensMenuOnPress: Bool { isEnabled }
 }
 
 extension ThemedIconButton: ThemedMenuOpening {
-    var opensMenuOnPress: Bool { presentsMenu && isEnabled }
+    public var opensMenuOnPress: Bool { presentsMenu && isEnabled }
 }
 
 /// Where a press-drag-release ended, as the overlay reports it to the session.
@@ -618,33 +618,33 @@ private enum ThemedMenuDragTarget {
 extension ThemedMenuEntry {
     /// The item this entry carries — nil for a separator. How call sites and tests read a
     /// built menu, since entries are values rather than a mutable menu object.
-    var item: ThemedMenuItem? {
+    public var item: ThemedMenuItem? {
         if case .item(let item) = self { return item }
         return nil
     }
 
-    var isItem: Bool { item != nil }
+    public var isItem: Bool { item != nil }
 }
 
 // MARK: - Geometry
 
 @MainActor
-enum ThemedMenuLayout {
+public enum ThemedMenuLayout {
     /// Modern popovers float off their opener. A classic dropdown is the other half of its
     /// control and starts on the control's edge, as a Win32 popup menu does.
-    static var gap: CGFloat { ThemedMenuMetrics.usesClassicGrammar ? 0 : Design.Spacing.tight }
-    static let screenInset: CGFloat = Design.Spacing.small
+    public static var gap: CGFloat { ThemedMenuMetrics.usesClassicGrammar ? 0 : Design.Spacing.tight }
+    public static let screenInset: CGFloat = Design.Spacing.small
     /// The tallest panel a window may carry — a share of the window rather than a flat number.
     /// The cap was a flat 360, set when the longest menu was half its eventual size; by the
     /// time the session row's menu had grown, it overflowed that cap in every ordinarily sized
     /// window, which made scrolling the *normal* state and put Delete Session below the fold
     /// on every right-click. A menu's ceiling is the window it serves: a tall window shows the
     /// whole list, and the floor keeps a cramped window exactly where the flat cap left it.
-    static let maximumHeightRatio: CGFloat = 0.75
-    static let maximumHeightFloor: CGFloat = 360
-    static let maximumWidth: CGFloat = 440
+    public static let maximumHeightRatio: CGFloat = 0.75
+    public static let maximumHeightFloor: CGFloat = 360
+    public static let maximumWidth: CGFloat = 440
 
-    static func maximumHeight(in bounds: NSRect) -> CGFloat {
+    public static func maximumHeight(in bounds: NSRect) -> CGFloat {
         max(maximumHeightFloor, bounds.height * maximumHeightRatio)
     }
 
@@ -657,9 +657,9 @@ enum ThemedMenuLayout {
     /// Four rows is where a dropdown starts reading as a list; below that the panel stops
     /// respecting the control's edge and takes the window instead (see `frame`), which is what
     /// a platform menu does on a screen too short to hold it.
-    static let minimumVisibleRows: CGFloat = 4
+    public static let minimumVisibleRows: CGFloat = 4
 
-    static var minimumUsefulHeight: CGFloat {
+    public static var minimumUsefulHeight: CGFloat {
         ThemedMenuMetrics.verticalOuterInset * 2 + ThemedMenuMetrics.rowHeight * minimumVisibleRows
     }
 
@@ -667,7 +667,7 @@ enum ThemedMenuLayout {
     /// a panel that cannot show every row ends on half a row instead of on a clean edge. It is
     /// passed in rather than read from the entries so this stays plain geometry a test can call;
     /// `ThemedMenuMetrics.clippedHeight(for:atMost:)` is what every caller hands it.
-    static func frame(
+    public static func frame(
         anchor: NSRect,
         desiredSize: NSSize,
         in bounds: NSRect,
@@ -725,7 +725,7 @@ enum ThemedMenuLayout {
 
     /// How far a submenu tucks under its parent panel's edge. Panels that merely touched read
     /// as two unrelated windows; the platform's own submenus overlap for the same reason.
-    static var submenuOverlap: CGFloat {
+    public static var submenuOverlap: CGFloat {
         switch ThemedMenuMetrics.appearance {
         case .windows98: return 5
         case .automatic: return gap
@@ -739,7 +739,7 @@ enum ThemedMenuLayout {
     ///
     /// `firstRowInset` is the panel's own padding above its first row
     /// (`ThemedMenuMetrics.outerInset`), passed in so this stays plain geometry a test can call.
-    static func submenuFrame(
+    public static func submenuFrame(
         parentPanel: NSRect,
         rowFrame: NSRect,
         desiredSize: NSSize,
@@ -1171,7 +1171,7 @@ private final class ThemedMenuSession: NSObject {
 
 /// How a closing menu leaves the screen. Every path has already ended the session; this only
 /// names the pixels' exit.
-enum ThemedMenuExit {
+public enum ThemedMenuExit {
     case instant
     case fade
     /// The classic confirmation blink: the chosen row flickers once, then the panel fades.
@@ -2052,21 +2052,21 @@ private final class ThemedMenuOverlayView: ThemedControl {
 /// pinned by a test: a preview hosted in a row and a title drawn in one have to start at the
 /// same place, and that is an arithmetic claim rather than something a render shows.
 @MainActor
-enum ThemedMenuMetrics {
+public enum ThemedMenuMetrics {
     /// Menus have their own authored anatomy. A chooser and the menu it opens are related, but
     /// Platinum's paired-arrow field does not imply its menu frame or row rhythm, and three
     /// workstation families all use a down-arrow popup while drawing different menus.
-    static var appearance: AppTheme.Material.MenuAppearance {
+    public static var appearance: AppTheme.Material.MenuAppearance {
         AppThemePalette.current.material.menuAppearance
     }
 
-    static var usesClassicGrammar: Bool {
+    public static var usesClassicGrammar: Bool {
         appearance.isHistorical
     }
 
     /// Between the panel's edge and its rows, so a highlighted row's capsule floats inside
     /// the panel instead of grazing its border.
-    static var outerInset: CGFloat {
+    public static var outerInset: CGFloat {
         switch appearance {
         case .platinum: return 1
         case .automatic: return Design.Spacing.small
@@ -2086,12 +2086,12 @@ enum ThemedMenuMetrics {
     /// So the rows start where the corner has finished. Every theme whose corner is at or under
     /// the margin keeps `outerInset` exactly, which is all of them but Botanical (19) and
     /// Claymorphism (14).
-    static var verticalOuterInset: CGFloat {
+    public static var verticalOuterInset: CGFloat {
         let margin = outerInset
         let reach = Design.Radius.edgeReach(of: Design.Radius.panel, clearing: margin)
         return max(margin, reach.rounded(.up))
     }
-    static var rowHeight: CGFloat {
+    public static var rowHeight: CGFloat {
         switch appearance {
         case .platinum: return 19
         case .windows98: return 21
@@ -2109,7 +2109,7 @@ enum ThemedMenuMetrics {
     /// lines already filled all but 2.5pt of the slot, so the gap *between* two rows was narrower
     /// than the gap inside one and the column read as evenly spaced single lines rather than as
     /// pairs — the same fault 46 was chosen to avoid on the modern side.
-    static var subtitleRowHeight: CGFloat { usesClassicGrammar ? 36 : 46 }
+    public static var subtitleRowHeight: CGFloat { usesClassicGrammar ? 36 : 46 }
 
     /// Between a title and the subtitle under it.
     ///
@@ -2118,7 +2118,7 @@ enum ThemedMenuMetrics {
     /// boxes are drawn tight around the glyphs: the two lines touched, and a name with its
     /// reading immediately beneath read as one wrapped sentence rather than as a heading and its
     /// detail. Small enough that the pair still groups by proximity against the row's own margins.
-    static var subtitleGap: CGFloat { Design.Spacing.hairline }
+    public static var subtitleGap: CGFloat { Design.Spacing.hairline }
     /// How far a row's fill sits inside its own slot, so two *adjacent* filled rows are parted
     /// by a hairline rather than meeting.
     ///
@@ -2131,33 +2131,33 @@ enum ThemedMenuMetrics {
     ///
     /// Half a hairline each side, so the gap the pair opens is the whole one. Same arithmetic,
     /// and the same 1pt, as the sidebar's `hoverHighlightInsetY`.
-    static var fillInset: CGFloat {
+    public static var fillInset: CGFloat {
         usesClassicGrammar ? 0 : Design.Spacing.hairline / 2
     }
     /// A separator's slot. Sized so the gap it opens between two rows' text reads as the
     /// ordinary inter-row rhythm plus the rule — at the old 9pt the rule crowded whichever
     /// row's fill it sat against and the spacing read as unequal.
-    static var separatorHeight: CGFloat {
+    public static var separatorHeight: CGFloat {
         appearance == .platinum ? 2 : (usesClassicGrammar ? 9 : 13)
     }
     /// The strip across the top echoing what has been typed while the menu is open.
-    static var filterHeaderHeight: CGFloat { usesClassicGrammar ? 18 : 22 }
+    public static var filterHeaderHeight: CGFloat { usesClassicGrammar ? 18 : 22 }
     /// How far a filtered-out row's ink drops. Dimmed rather than hidden, so the menu keeps
     /// its shape while the user types and nothing moves under the pointer.
-    static let filteredOutDimming: CGFloat = 0.4
+    public static let filteredOutDimming: CGFloat = 0.4
     /// A row that cannot be chosen at all.
-    static let disabledDimming: CGFloat = 0.45
+    public static let disabledDimming: CGFloat = 0.45
     /// The wash a *disabled* row shows under the pointer — feedback that the hover was
     /// seen, well short of the fill that says "choosable".
-    static let disabledHoverWash: CGFloat = 0.4
+    public static let disabledHoverWash: CGFloat = 0.4
     /// A row's own leading and trailing padding — also where the checkmark sits, which was
     /// previously drawn 4pt from the row's edge and read as pinned to the panel's side.
-    static var contentInset: CGFloat {
+    public static var contentInset: CGFloat {
         appearance == .windows98 ? 5 : (usesClassicGrammar ? 4 : Design.Spacing.medium)
     }
-    static var checkSize: CGFloat { usesClassicGrammar ? 8 : 10 }
+    public static var checkSize: CGFloat { usesClassicGrammar ? 8 : 10 }
     /// The checkmark column: glyph plus the gap to whatever follows it.
-    static var leadingSlot: CGFloat {
+    public static var leadingSlot: CGFloat {
         checkSize + (usesClassicGrammar ? 3 : Design.Spacing.small)
     }
     /// A row's leading mark — the **slot**, which caps the artwork rather than sizing it.
@@ -2169,27 +2169,27 @@ enum ThemedMenuMetrics {
     /// that; a whole column of them does not, and the column is what these menus now have.
     /// `Design.Size.tabIconSlot` is the same slot every other mark-that-names-something in the
     /// chrome sits in.
-    static var imageSize: CGFloat { Design.Size.tabIconSlot }
-    static var imageSlot: CGFloat {
+    public static var imageSize: CGFloat { Design.Size.tabIconSlot }
+    public static var imageSlot: CGFloat {
         imageSize + (usesClassicGrammar ? 3 : Design.Spacing.small)
     }
     /// A live preview's column. The orb is the widest thing that goes in it and states its own
     /// 20pt footprint, so the slot is that plus the gap to whatever follows — the same shape as
     /// the image column one size up, rather than a second guess at it.
-    static var previewSize: CGFloat { usesClassicGrammar ? 16 : 20 }
-    static var previewSlot: CGFloat {
+    public static var previewSize: CGFloat { usesClassicGrammar ? 16 : 20 }
+    public static var previewSlot: CGFloat {
         previewSize + (usesClassicGrammar ? 3 : Design.Spacing.tight)
     }
 
     /// The chevron marking a row that opens a submenu, and the column it sits in — trailing,
     /// where the platform's own submenu arrow lives.
-    static var submenuChevronSize: CGFloat {
+    public static var submenuChevronSize: CGFloat {
         appearance == .windows98 ? 6 : (usesClassicGrammar ? 7 : 8)
     }
-    static var submenuTrailingInset: CGFloat {
+    public static var submenuTrailingInset: CGFloat {
         appearance == .windows98 ? 4 : contentInset
     }
-    static var submenuChevronSlot: CGFloat {
+    public static var submenuChevronSlot: CGFloat {
         submenuChevronSize + (usesClassicGrammar ? 4 : Design.Spacing.small)
     }
 
@@ -2200,33 +2200,33 @@ enum ThemedMenuMetrics {
     /// Smaller than a row's leading mark (`imageSize`): that column names what a row is and is
     /// read down the menu as a column, while this one is a control on a single row and is drawn
     /// only where the pointer already is.
-    static var accessorySize: CGFloat { usesClassicGrammar ? 11 : 13 }
-    static var accessorySlot: CGFloat {
+    public static var accessorySize: CGFloat { usesClassicGrammar ? 11 : 13 }
+    public static var accessorySlot: CGFloat {
         accessorySize + (usesClassicGrammar ? 4 : Design.Spacing.small)
     }
     /// How far past its glyph the press still lands. A 13pt symbol is a 13pt target, which is
     /// under half of what a pointer is aimed with; the padding is invisible and the difference
     /// between a control and a dare. It never reaches past the glyph's own column, so the row
     /// beside it keeps every pixel a press on the *row* can land on.
-    static var accessoryHitPadding: CGFloat { Design.Spacing.tight }
+    public static var accessoryHitPadding: CGFloat { Design.Spacing.tight }
     /// What a press takes off the accessory's ink — the same answer `ThemedButton` gives a press,
     /// an alpha step rather than a second surface. A plate was drawn here first and was invisible:
     /// the row under it is *already* filled with `controlHover`, because the accessory only ever
     /// appears on the row the pointer or the highlight is on, so the press painted the hover fill
     /// over itself. Ink is the only channel this glyph has left, and it is enough.
-    static let accessoryPressedDimming: CGFloat = 0.55
+    public static let accessoryPressedDimming: CGFloat = 0.55
 
     /// Reserved on the image column's terms — only when some row in this menu carries one — and
     /// then on **every** row of it. A slot that appeared with the pointer would reflow the title
     /// underneath it, so the width is spent whether or not the row draws anything in it.
-    static func hasAccessoryColumn(_ entries: [ThemedMenuEntry]) -> Bool {
+    public static func hasAccessoryColumn(_ entries: [ThemedMenuEntry]) -> Bool {
         entries.contains { entry in
             guard case .item(let item) = entry else { return false }
             return item.accessory != nil
         }
     }
 
-    static var titleFont: NSFont {
+    public static var titleFont: NSFont {
         if appearance == .platinum {
             return Design.Typography.control(weight: .bold)
         }
@@ -2249,24 +2249,24 @@ enum ThemedMenuMetrics {
     /// Classic GDI placed the menu face one device pixel below AppKit's centred line box.
     /// Keep this on the anatomy axis: a custom theme choosing Win98 menus inherits the same
     /// baseline, while a different menu family under the Win98 palette does not.
-    static var titleBaselineOffset: CGFloat {
+    public static var titleBaselineOffset: CGFloat {
         appearance == .windows98 ? -1 : 0
     }
 
     /// Win32 seats a 16px menu bitmap one device pixel above AppKit's geometric centre.
-    static var imageBaselineOffset: CGFloat {
+    public static var imageBaselineOffset: CGFloat {
         appearance == .windows98 ? 1 : 0
     }
 
-    static var panelFill: NSColor {
+    public static var panelFill: NSColor {
         usesClassicGrammar ? Design.Surface.controlResting : Design.Surface.elevated
     }
 
-    static var panelHasGlow: Bool { appearance == .automatic }
+    public static var panelHasGlow: Bool { appearance == .automatic }
 
     /// The image column is reserved only when some item actually carries an image. Reserving
     /// it always left an 18pt hole between checkmark and title in every icon-less menu.
-    static func hasImageColumn(_ entries: [ThemedMenuEntry]) -> Bool {
+    public static func hasImageColumn(_ entries: [ThemedMenuEntry]) -> Bool {
         entries.contains { entry in
             guard case .item(let item) = entry else { return false }
             return item.image != nil
@@ -2275,7 +2275,7 @@ enum ThemedMenuMetrics {
 
     /// Reserved on the image column's terms: only when some row actually opens a submenu, so a
     /// menu of plain actions keeps its trailing edge tight against the longest title.
-    static func hasSubmenuColumn(_ entries: [ThemedMenuEntry]) -> Bool {
+    public static func hasSubmenuColumn(_ entries: [ThemedMenuEntry]) -> Bool {
         entries.contains { entry in
             guard case .item(let item) = entry else { return false }
             return item.submenu != nil
@@ -2284,7 +2284,7 @@ enum ThemedMenuMetrics {
 
     /// Reserved on the same terms as the image column, and only for a preview that sits *beside*
     /// a title — one placed in the title's own slot occupies a column that already exists.
-    static func hasPreviewColumn(_ entries: [ThemedMenuEntry]) -> Bool {
+    public static func hasPreviewColumn(_ entries: [ThemedMenuEntry]) -> Bool {
         entries.contains { entry in
             guard case .item(let item) = entry else { return false }
             return item.preview?.placement == .leading
@@ -2296,39 +2296,39 @@ enum ThemedMenuMetrics {
     /// The font every metric column is drawn and measured in. Tabular by role: a column of
     /// proportional digits is only accidentally a column, and `27%` over `81%` misaligning by
     /// the width of a `2` is the whole reason the numbers left the subtitle.
-    static var metricFont: NSFont {
+    public static var metricFont: NSFont {
         usesClassicGrammar ? titleFont : Design.Typography.numericDetail()
     }
 
     /// The bar between a column's name and its value. Wide enough that two readings differing
     /// by ten points differ visibly — the 14pt meter under `AccountMarkImage` could only ever
     /// carry a hue, which the value's own tint already said.
-    static var metricBarWidth: CGFloat { usesClassicGrammar ? 22 : 28 }
+    public static var metricBarWidth: CGFloat { usesClassicGrammar ? 22 : 28 }
 
     /// The air around the rule between the columns and the trailing detail. Wider than the gap
     /// between two columns, because what it parts is a change of *kind* rather than the next
     /// window: readings and the countdown are not the same sort of fact, and at an equal gap
     /// `99%` and `7d · 5d 3h` ran together as one line of numbers.
-    static var metricDividerGap: CGFloat { Design.Spacing.inset }
-    static var metricDividerWidth: CGFloat { Design.Radius.border }
+    public static var metricDividerGap: CGFloat { Design.Spacing.inset }
+    public static var metricDividerWidth: CGFloat { Design.Radius.border }
     /// Thick enough to hold a status hue at this size without becoming a second row of content.
-    static var metricBarHeight: CGFloat { Design.Spacing.tight - 1 }
+    public static var metricBarHeight: CGFloat { Design.Spacing.tight - 1 }
     /// Inside a column: name, bar, value.
-    static var metricInnerGap: CGFloat { Design.Spacing.tight }
+    public static var metricInnerGap: CGFloat { Design.Spacing.tight }
     /// Between one column and the next, and between the last one and the trailing detail. Wider
     /// than the inner gap, so a column reads as one group rather than as three loose runs.
-    static var metricColumnGap: CGFloat { Design.Spacing.medium }
+    public static var metricColumnGap: CGFloat { Design.Spacing.medium }
     /// Below this a fill is shorter than its own cap and draws as a dot at the track's head.
-    static let metricMinimumFraction = 0.02
+    public static let metricMinimumFraction = 0.02
     /// How much of its ink an empty track keeps — of `tertiary` normally, and of a classic
     /// selection band's own label ink over a band, where an unrelated grey cannot be measured
     /// against the band's solid fill.
-    static let metricTrackOpacity: CGFloat = 0.45
+    public static let metricTrackOpacity: CGFloat = 0.45
 
     /// A 440-point menu cannot carry a provider-sized union of metric columns. Three preserves
     /// the common account pair plus one additional window while leaving a readable title slot.
     /// Callers keep omitted values in the row's bounded subtitle/tooltip projection.
-    static let maximumMetricColumns = 3
+    public static let maximumMetricColumns = 3
 
     /// The columns this menu reserves, in first-seen order.
     ///
@@ -2336,7 +2336,7 @@ enum ThemedMenuMetrics {
     /// metering two must put their shared `7d` reading in the same place, which is exactly the
     /// comparison that a per-row layout destroys. The empty cell that leaves on the shorter
     /// plan's row is not a hole — it says that plan has no window there.
-    static func metricColumns(_ entries: [ThemedMenuEntry]) -> [String] {
+    public static func metricColumns(_ entries: [ThemedMenuEntry]) -> [String] {
         var seen: Set<String> = []
         var ordered: [String] = []
         for entry in entries {
@@ -2353,7 +2353,7 @@ enum ThemedMenuMetrics {
     /// in the menu. Equal columns rather than each sized to its own content, because unequal
     /// ones put the second column's bar at a different offset on rows whose first column is
     /// absent — and a bar that moves sideways between rows cannot be compared by length.
-    static func metricColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
+    public static func metricColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
         let admitted = Set(metricColumns(entries))
         let all = entries.flatMap { entry -> [ThemedMenuMetric] in
             guard case .item(let item) = entry else { return [] }
@@ -2368,7 +2368,7 @@ enum ThemedMenuMetrics {
     }
 
     /// The trailing detail's own column, measured from the longest one present.
-    static func trailingDetailWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
+    public static func trailingDetailWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
         entries.compactMap { entry -> CGFloat? in
             guard case .item(let item) = entry,
                   let detail = item.trailingDetail,
@@ -2384,7 +2384,7 @@ enum ThemedMenuMetrics {
     /// its characters is the countdown — `7d resets in 5d 1…`, a sentence claiming to be
     /// complete. A name is the one thing on this row a reader can still recognise from its
     /// first half, so the name is what gives way and the numbers never do.
-    static func metricReservation(_ entries: [ThemedMenuEntry]) -> CGFloat {
+    public static func metricReservation(_ entries: [ThemedMenuEntry]) -> CGFloat {
         let columns = metricColumns(entries)
         let columnWidth = metricColumnWidth(entries)
         let detail = trailingDetailWidth(entries)
@@ -2411,7 +2411,7 @@ enum ThemedMenuMetrics {
     ///
     /// `reservesSubtitleLine` is the *run's* answer, not the row's, which is what keeps a row
     /// without a subtitle on its neighbours' line rather than in the middle of its own slot.
-    static func firstLineCenter(inRowOf height: CGFloat, reservesSubtitleLine: Bool) -> CGFloat {
+    public static func firstLineCenter(inRowOf height: CGFloat, reservesSubtitleLine: Bool) -> CGFloat {
         guard reservesSubtitleLine else { return height / 2 }
         let subtitleHeight = Design.Typography.lineHeight(of: Design.Typography.detail())
         return height / 2 + (subtitleGap + subtitleHeight) / 2
@@ -2420,43 +2420,43 @@ enum ThemedMenuMetrics {
     /// A section head is a *label*, not a quiet row: `caption` is the app's semibold 11pt
     /// heading role, which is what keeps it from reading as a disabled choice in a menu whose
     /// rows are 13pt.
-    static var headerFont: NSFont {
+    public static var headerFont: NSFont {
         usesClassicGrammar ? titleFont : Design.Typography.caption()
     }
 
     /// A section head's slot: its line, plus the air that makes it belong to what follows it
     /// rather than sitting between two groups equally.
-    static var headerHeight: CGFloat { usesClassicGrammar ? 20 : 30 }
+    public static var headerHeight: CGFloat { usesClassicGrammar ? 20 : 30 }
     /// How much of that slot is above the line. More above than below, so the header reads as
     /// attached to the rows under it — the same proximity argument `subtitleRowHeight` makes
     /// for a title and its subtitle.
-    static var headerTopInset: CGFloat { usesClassicGrammar ? 8 : 14 }
+    public static var headerTopInset: CGFloat { usesClassicGrammar ? 8 : 14 }
 
-    static var shortcutGap: CGFloat { usesClassicGrammar ? 8 : Design.Spacing.large }
+    public static var shortcutGap: CGFloat { usesClassicGrammar ? 8 : Design.Spacing.large }
 
-    static let amigaCommandCapWidth: CGFloat = 13
-    static let amigaCommandCapGap: CGFloat = 2
+    public static let amigaCommandCapWidth: CGFloat = 13
+    public static let amigaCommandCapGap: CGFloat = 2
 
     /// The exact visible spelling for a chord under this menu grammar.
     ///
     /// Windows and Workbench keep their authored command-key forms for the ordinary ⌘ chord;
     /// every other chord uses the platform glyph spelling so additional modifiers are never
     /// hidden or guessed from one bare key.
-    static func shortcutText(_ shortcut: KeyboardShortcut) -> String {
+    public static func shortcutText(_ shortcut: KeyboardShortcut) -> String {
         if appearance == .windows98, shortcut.modifiers == .command {
             return "Ctrl+" + KeyboardShortcut.keyDisplay(shortcut.key)
         }
         return shortcut.displayString
     }
 
-    static func usesAmigaCommandCap(_ shortcut: KeyboardShortcut) -> Bool {
+    public static func usesAmigaCommandCap(_ shortcut: KeyboardShortcut) -> Bool {
         appearance == .amiga && shortcut.modifiers == .command
     }
 
     /// One shared trailing column, measured from the widest complete chord. Workbench draws its
     /// ordinary command modifier as artwork rather than a font character, so the fixed key cap
     /// participates in the same measurement as the following Topaz key.
-    static func shortcutColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
+    public static func shortcutColumnWidth(_ entries: [ThemedMenuEntry]) -> CGFloat {
         entries.compactMap { entry -> CGFloat? in
             guard case .item(let item) = entry,
                   let shortcut = item.resolvedShortcut else { return nil }
@@ -2484,7 +2484,7 @@ enum ThemedMenuMetrics {
     /// drawing already assumed by putting the check at `contentInset`. Only a menu where one
     /// row carries *both* needs two, and one exists: Open in marks the preferred app in a list
     /// where every row wears that app's own icon.
-    enum CheckColumn {
+    public enum CheckColumn {
         /// No row in this panel is marked.
         case none
         /// Marks and icons share one leading column, because no row has both.
@@ -2499,7 +2499,7 @@ enum ThemedMenuMetrics {
     /// are built to treat those identically, so the measurement has to as well — a menu whose
     /// only mark came from the presenter measured itself without one and drew the check into
     /// the first title.
-    static func checkColumn(
+    public static func checkColumn(
         _ entries: [ThemedMenuEntry],
         selectedEntryIndex: Int? = nil
     ) -> CheckColumn {
@@ -2520,7 +2520,7 @@ enum ThemedMenuMetrics {
     /// menu still starts its titles after the mark column — and Win32 draws exactly one, which
     /// a row fills with its check *or* its bitmap. Both are part of the anatomy those
     /// reconstructions are measured against, so only the modern menu asks the entries.
-    static func resolved(_ column: CheckColumn) -> CheckColumn {
+    public static func resolved(_ column: CheckColumn) -> CheckColumn {
         switch appearance {
         case .platinum, .amiga: return .separate
         case .windows98: return .shared
@@ -2529,13 +2529,13 @@ enum ThemedMenuMetrics {
     }
 
     /// Where a row's leading mark begins — its icon, or its check where the two share a column.
-    static func markInset(checkColumn: CheckColumn) -> CGFloat {
+    public static func markInset(checkColumn: CheckColumn) -> CGFloat {
         contentInset + (resolved(checkColumn) == .separate ? leadingSlot : 0)
     }
 
     /// The leading mark column's width: the icon's slot where the panel has icons, else the
     /// mark's own, else nothing at all.
-    static func markWidth(checkColumn: CheckColumn, hasImageColumn: Bool) -> CGFloat {
+    public static func markWidth(checkColumn: CheckColumn, hasImageColumn: Bool) -> CGFloat {
         if hasImageColumn { return imageSlot }
         return resolved(checkColumn) == .shared ? leadingSlot : 0
     }
@@ -2544,12 +2544,12 @@ enum ThemedMenuMetrics {
     /// in the same place. A preview replaces the text rather than joining it, and a column of
     /// names that shifted sideways when one of them animated would read as a layout bug in the
     /// menu rather than as the transition it is demonstrating.
-    static func previewInset(checkColumn: CheckColumn, hasImageColumn: Bool) -> CGFloat {
+    public static func previewInset(checkColumn: CheckColumn, hasImageColumn: Bool) -> CGFloat {
         markInset(checkColumn: checkColumn)
             + markWidth(checkColumn: checkColumn, hasImageColumn: hasImageColumn)
     }
 
-    static func titleInset(
+    public static func titleInset(
         checkColumn: CheckColumn,
         hasImageColumn: Bool,
         hasPreviewColumn: Bool
@@ -2582,7 +2582,7 @@ enum ThemedMenuMetrics {
     /// actions sit after a separator, so they stay short while the projects above them keep the
     /// height their paths need. A change of height across a rule or a heading is explained by
     /// the rule or the heading; a change of height between two adjacent rows is not.
-    static func heights(for entries: [ThemedMenuEntry]) -> [CGFloat] {
+    public static func heights(for entries: [ThemedMenuEntry]) -> [CGFloat] {
         var heights = [CGFloat](repeating: 0, count: entries.count)
         var run: [Int] = []
 
@@ -2611,7 +2611,7 @@ enum ThemedMenuMetrics {
         return heights
     }
 
-    static func height(for entries: [ThemedMenuEntry]) -> CGFloat {
+    public static func height(for entries: [ThemedMenuEntry]) -> CGFloat {
         heights(for: entries).reduce(verticalOuterInset * 2, +)
     }
 
@@ -2628,7 +2628,7 @@ enum ThemedMenuMetrics {
     /// Only items are cut. A separator sliced down its middle reads as a stray rule against the
     /// panel's edge rather than as a row with more below it, so one is carried whole into the
     /// hidden part and the item above it does the peeking.
-    static func clippedHeight(for entries: [ThemedMenuEntry], atMost limit: CGFloat) -> CGFloat {
+    public static func clippedHeight(for entries: [ThemedMenuEntry], atMost limit: CGFloat) -> CGFloat {
         let budget = limit - verticalOuterInset * 2
         var consumed: CGFloat = 0
         var peeked: CGFloat?
@@ -2651,7 +2651,7 @@ enum ThemedMenuMetrics {
     /// `selectedEntryIndex` participates because it is one of the two ways a row is marked, and
     /// the panel's width has to reserve the same columns the rows will draw in. Measured without
     /// it, a menu whose only mark comes from the presenter drew its check into the title.
-    static func width(
+    public static func width(
         for entries: [ThemedMenuEntry],
         minimum: CGFloat,
         selectedEntryIndex: Int? = nil
@@ -2686,45 +2686,45 @@ enum ThemedMenuMetrics {
     }
 
     /// The title as it is drawn: the name, and the qualifier that shares its line.
-    static func titleLine(of item: ThemedMenuItem) -> String {
+    public static func titleLine(of item: ThemedMenuItem) -> String {
         guard let detail = item.titleDetail, !detail.isEmpty else { return item.title }
         return item.title + titleDetailGap + detail
     }
 
     /// Between a title and the qualifier after it. Wider than a word space, so the pair reads as
     /// a name and its footnote rather than as a two-word name.
-    static let titleDetailGap = "   "
+    public static let titleDetailGap = "   "
 }
 
 /// How the menu moves. File-local because no other surface animates this way yet; a second
 /// one promotes these to `Design`.
 @MainActor
-enum ThemedMenuMotion {
-    static let appearScale: CGFloat = 0.97
-    static let appearAnimationKey = "threading.menu.appear"
-    static let vanishAnimationKey = "threading.menu.vanish"
+public enum ThemedMenuMotion {
+    public static let appearScale: CGFloat = 0.97
+    public static let appearAnimationKey = "threading.menu.appear"
+    public static let vanishAnimationKey = "threading.menu.vanish"
     /// A classic menu is separated by its raised frame. A diffuse shadow is a modern floating-
     /// card cue and makes the two-pixel submenu overlap look like an accidental gap.
-    static var shadowOpacity: Float { ThemedMenuMetrics.usesClassicGrammar ? 0 : 0.28 }
-    static var shadowRadius: CGFloat { ThemedMenuMetrics.usesClassicGrammar ? 0 : 16 }
+    public static var shadowOpacity: Float { ThemedMenuMetrics.usesClassicGrammar ? 0 : 0.28 }
+    public static var shadowRadius: CGFloat { ThemedMenuMetrics.usesClassicGrammar ? 0 : 16 }
 
     /// How long the pointer rests on a parent row before its submenu opens. Short enough to
     /// feel attached to the hover, long enough that sweeping down a menu does not fan panels
     /// out of every parent row on the way past.
-    static let submenuOpenDelay: TimeInterval = 0.16
+    public static let submenuOpenDelay: TimeInterval = 0.16
     /// How long an open submenu survives the pointer leaving its row for a sibling. This is
     /// the recovery window for an overshoot; the safe-travel corridor below covers the
     /// deliberate diagonal.
-    static let submenuCloseGrace: TimeInterval = 0.28
+    public static let submenuCloseGrace: TimeInterval = 0.28
     /// How long a pointer may sit still inside the safe-travel corridor before the row it is
     /// actually on wins. Without a deadline, parking the pointer between panels would pin the
     /// menu to a highlight it has visibly left.
-    static let safeTravelStall: TimeInterval = 0.35
+    public static let safeTravelStall: TimeInterval = 0.35
     /// How far the pointer must actually travel, after a panel has scrolled under it, before
     /// hover may claim the highlight again. Scrolling hands `mouseEntered` to whichever row
     /// slides under a stationary pointer; the tolerance is hysteresis for a physical mouse
     /// nudged while its wheel turns, not an allowance for deliberate movement.
-    static let scrollHoverTolerance: CGFloat = 4
+    public static let scrollHoverTolerance: CGFloat = 4
     /// How far the held press must have travelled from where it opened the menu before its
     /// release is read as a choice rather than as a click.
     ///
@@ -2733,7 +2733,7 @@ enum ThemedMenuMotion {
     /// without moving — would choose whatever the panel happened to place there. The platform's
     /// sticky menu is the same rule, and the same number does for a hand that shifts a point or
     /// two between the press and the release.
-    static let stickyPressDistance: CGFloat = 4
+    public static let stickyPressDistance: CGFloat = 4
 }
 
 private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
@@ -2974,8 +2974,8 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
 /// private surface means the archive exercises the live rows, separators, selection, type,
 /// bevel, and scrolling implementation while ordinary callers still enter through the presenter.
 @MainActor
-enum ThemedMenuReferenceFixture {
-    static func make(
+public enum ThemedMenuReferenceFixture {
+    public static func make(
         entries: [ThemedMenuEntry],
         size: NSSize,
         selectedEntryIndex: Int? = nil,
@@ -3005,7 +3005,7 @@ enum ThemedMenuReferenceFixture {
     /// `view` may be the surface itself or anything containing one — a presented menu wraps it in
     /// an overlay and a panel chassis, and a test should not have to know that shape to aim at a
     /// control. The rect comes back in `view`'s own coordinates either way.
-    static func accessoryHitRect(in view: NSView, entryIndex: Int) -> NSRect? {
+    public static func accessoryHitRect(in view: NSView, entryIndex: Int) -> NSRect? {
         guard let surface = surface(in: view),
               let row = surface.row(at: entryIndex),
               row.item.accessory != nil
@@ -3020,7 +3020,7 @@ enum ThemedMenuReferenceFixture {
     /// what the tracking area and the press set and nothing else, so what it draws is what a
     /// press draws — the routing that decides *whether* a press lands on the accessory is left to
     /// the ordinary event path, where a behaviour test drives it.
-    static func setAccessoryPointerState(
+    public static func setAccessoryPointerState(
         in view: NSView,
         entryIndex: Int,
         hovering: Bool,
@@ -3043,7 +3043,7 @@ enum ThemedMenuReferenceFixture {
     /// A clipped source-sized view of a live submenu cascade. The production presenter owns
     /// placement on screen; this seam keeps the same two menu surfaces while letting the
     /// evidence archive compare the few overlapping edge pixels retained by a historical crop.
-    static func makeCascade(
+    public static func makeCascade(
         entries: [ThemedMenuEntry],
         size: NSSize,
         highlightedEntryIndex: Int,
