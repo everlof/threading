@@ -89,11 +89,14 @@ public struct PluginLoader {
     }
 
     public func load(bundleAt url: URL) throws -> ThreadingNativePlugin {
-        if !acceptsAnyTeam {
-            try verifySignature(at: url)
-        }
+        // Forming a Bundle validates the path and metadata but does not map its executable. Do
+        // this before the signature check so an absent path is reported as absent rather than as
+        // a corrupt signature; principalClass stays below verification because it loads code.
         guard let bundle = Bundle(url: url) else {
             throw PluginLoadFailure.unreadableBundle(path: url.path)
+        }
+        if !acceptsAnyTeam {
+            try verifySignature(at: url)
         }
         // Everything past this line has mapped and run the bundle's code.
         guard let principal = bundle.principalClass else {

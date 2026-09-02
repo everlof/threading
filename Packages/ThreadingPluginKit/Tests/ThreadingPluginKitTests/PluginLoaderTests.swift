@@ -21,7 +21,7 @@ final class PluginLoaderTests: XCTestCase {
     }
 
     func testAMissingBundleIsRefusedByPath() {
-        let loader = PluginLoader.acceptingAnyTeam()
+        let loader = PluginLoader(allowedTeams: [])
         XCTAssertThrowsError(try loader.load(bundleAt: directory.appendingPathComponent("nope.bundle"))) {
             XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "unreadable_bundle")
         }

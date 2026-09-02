@@ -19,6 +19,10 @@ import ThreadingPluginKit
 @MainActor
 enum NativePluginCatalog {
 
+    /// The shipping policy, kept separate from the mutable test seam so a test can always restore
+    /// the real configuration instead of guessing what it was.
+    static let defaultAllowedTeams: Set<String> = ["SMQ3E8Y57T"]
+
     /// Teams whose plugins may be loaded.
     ///
     /// A tier that runs unsandboxed code in this process opens by refusing, not by trusting, so
@@ -30,7 +34,7 @@ enum NativePluginCatalog {
     /// The one entry is Threading's own signing team, which is what the first-party Device Logs
     /// plugin is signed with. A third-party tier needs a review flow and its own decision; this is
     /// not it.
-    static var allowedTeams: Set<String> = ["SMQ3E8Y57T"]
+    static var allowedTeams = defaultAllowedTeams
 
     /// `~/Library/Application Support/Threading/Plugins`. Bundles are dropped in by hand today;
     /// an install flow is a later slice and needs its own review copy.

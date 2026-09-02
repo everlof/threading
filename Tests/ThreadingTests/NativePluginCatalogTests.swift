@@ -12,8 +12,11 @@ import ThreadingPluginKit
 final class NativePluginCatalogTests: XCTestCase {
 
     private var directory: URL!
+    private var previousAllowedTeams: Set<String>!
 
     override func setUpWithError() throws {
+        previousAllowedTeams = NativePluginCatalog.allowedTeams
+        NativePluginCatalog.allowedTeams = NativePluginCatalog.defaultAllowedTeams
         directory = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("plugin-catalog-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -21,15 +24,17 @@ final class NativePluginCatalogTests: XCTestCase {
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: directory)
-        NativePluginCatalog.allowedTeams = []
+        NativePluginCatalog.allowedTeams = previousAllowedTeams
     }
 
-    /// The default that matters. A tier running unsandboxed code in this process opens by refusing.
-    func testTheShippingDefaultTrustsNobody() {
-        XCTAssertTrue(
-            NativePluginCatalog.allowedTeams.isEmpty,
-            "an empty allowlist is the point: the tier opens closed"
+    /// The default that matters. This tier runs unsandboxed code in process, so the shipping
+    /// policy names only the first-party signing team and does not infer trust from installation.
+    func testTheShippingDefaultTrustsOnlyTheFirstPartyTeam() {
+        XCTAssertEqual(
+            NativePluginCatalog.allowedTeams,
+            NativePluginCatalog.defaultAllowedTeams
         )
+        XCTAssertEqual(NativePluginCatalog.allowedTeams, ["SMQ3E8Y57T"])
     }
 
     func testAMissingBundleIsRefusedByNameRatherThanIgnored() {

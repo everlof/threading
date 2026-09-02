@@ -173,6 +173,10 @@ final class ListSelectionStrengthTests: XCTestCase {
     /// difference between the accent and a flat grey — so this also pins that raising the flag
     /// reaches the drawing we do not do ourselves.
     func testTheTwoStrengthsPaintDifferentFills() throws {
+        let previousTheme = AppThemeLibrary.current
+        defer { AppThemeLibrary.apply(previousTheme) }
+        AppThemeLibrary.apply(.system)
+
         let front = try draw(try list(isKey: true))
         let behind = try draw(try list(isKey: false))
 
@@ -293,7 +297,7 @@ final class ListSelectionStrengthTests: XCTestCase {
     /// written next year inherits it without its author needing to know it exists.
     func testEveryListInTheAppIsOneOfTheTwoThatCarryTheRule() throws {
         let declarations = try NSRegularExpression(
-            pattern: #"(?m)^(?:final )?class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:NSTableView|NSOutlineView)\b"#
+            pattern: #"(?m)^(?:(?:public|internal|package|private|fileprivate|open|final)\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(?:NSTableView|NSOutlineView)\b"#
         )
 
         var lists: Set<String> = []
@@ -319,7 +323,7 @@ final class ListSelectionStrengthTests: XCTestCase {
     /// is free and stays free.
     func testEveryRowBuiltFromScratchInTheAppIsOneOfTheTwoThatRefuseTheDemotion() throws {
         let declarations = try NSRegularExpression(
-            pattern: #"(?m)^(?:final )?class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*NSTableRowView\b"#
+            pattern: #"(?m)^(?:(?:public|internal|package|private|fileprivate|open|final)\s+)*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*NSTableRowView\b"#
         )
 
         var rowClasses: Set<String> = []
