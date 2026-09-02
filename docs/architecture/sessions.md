@@ -698,7 +698,11 @@ runtime's logins**, each carrying its runtime's mark and its usage reading (see
 [`accounts.md`](accounts.md), which holds the reasoning and the `ComposerIdentity` contract). A
 runtime gets a row of its own only where it offers no login to name. Choosing any row sets the
 runtime and the login together and clears the model and effort — both belong to a catalog the
-new login may not publish.
+new login may not publish. Before anything is chosen, the login follows the most recently used
+enabled account for the selected runtime. A successful start consumes that default, so a later
+account move on the session — including the move away from an exhausted model-scoped window — is
+the next fresh chat's starting point. Merely looking away from an unfinished composer changes
+nothing about it.
 
 The prompt below those chips also owns pre-launch slash completion. `refreshChips()` projects a
 bounded built-in expectation catalog for the selected runtime and resolved Terminal/Chat surface

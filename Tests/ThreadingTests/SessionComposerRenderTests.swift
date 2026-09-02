@@ -1495,6 +1495,44 @@ final class SessionComposerRenderTests: HostedStoreTestCase {
         XCTAssertTrue(prompt.attachmentPaths.isEmpty)
     }
 
+    /// Returning to an unfinished form preserves its account, while returning after a successful
+    /// start is a fresh chat and follows the latest durable account decision. That second edge is
+    /// what carries an account move made after a model-scoped limit into the next chat.
+    func testAFreshComposerFollowsTheLatestAccountButADetourKeepsTheDraftsChoice() throws {
+        var defaultHandle = AccountHandle.standard
+        let composer = SessionComposerViewController(
+            newSessionAccountHandle: { _ in defaultHandle }
+        )
+        _ = composer.view
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: fixtureFolder()))
+        defer { store.removeProject(id: project.id) }
+        let alternate = AccountHandle.named("claude-work")
+
+        composer.show(projectID: project.id)
+        XCTAssertEqual(composer.selectedAccountHandle, .standard)
+
+        // An ordinary detour must not rewrite the identity beside an unfinished draft.
+        defaultHandle = alternate
+        composer.show(projectID: project.id)
+        XCTAssertEqual(composer.selectedAccountHandle, .standard)
+
+        let recorder = StartRecorder()
+        composer.delegate = recorder
+        let prompt = try XCTUnwrap(promptView(in: composer.view))
+        prompt.stringValue = "Continue after the model limit"
+        try startButton(in: composer.view).performClick()
+        XCTAssertEqual(recorder.prompts.last, "Continue after the model limit")
+        XCTAssertEqual(prompt.stringValue, "", "the successful start did not consume the form")
+
+        composer.show(projectID: project.id)
+        XCTAssertEqual(
+            composer.selectedAccountHandle,
+            alternate,
+            "the consumed composer kept the account from before the latest session moved"
+        )
+    }
+
     /// The other half of keeping the composer: what has been sent must not still be sitting in
     /// it. Nothing else empties it any more, and a composer returned to after starting a session
     /// would otherwise offer that session's opening prompt, and its images, as though they were

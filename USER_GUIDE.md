@@ -459,6 +459,12 @@ offer — either it does not use accounts, or none was found. Whichever row you 
 reasoning effort go back to that login's own defaults, since a model pinned on one account is not
 necessarily offered on another.
 
+A fresh composer starts on the enabled login that agent used most recently. If a chat was moved
+to another account after its model ran out, the next chat follows that account instead of jumping
+back to the exhausted one. A half-written composer is left exactly as you set it when you look
+away and return. With no usable history, the standard login is used when enabled, then the first
+enabled login.
+
 **The prompt is focused the moment the composer appears**, however you got there, so the
 first message can be typed straight away without clicking the field. If a draft is waiting,
 the caret lands at the end of it — typing continues the sentence rather than cutting in front
@@ -1900,9 +1906,10 @@ A switched-off account stays listed here, dimmed, so you can switch it back on; 
 & Icon** restores only those two presentation choices and leaves the switch and usage readings
 alone.
 
-If the account you switch off is the CLI's default one, new sessions start on the first login
-that is still on. Switch off every account for an agent and it stops being offered for new
-sessions altogether.
+If the account you switch off is the one a fresh composer would have remembered, the next most
+recent login that is still on is used; with no such history, Threading uses the standard login or
+the first login that is still on. Switch off every account for an agent and it stops being offered
+for new sessions altogether.
 
 ### What counts as an account
 A directory must prove it holds a real login:

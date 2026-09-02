@@ -133,9 +133,51 @@ enum AgentAccountDiscovery {
         return offered.first { $0.isDefault } ?? offered.first
     }
 
+    /// The account a fresh composer should offer: the enabled login this runtime most recently
+    /// used, then the ordinary standard-login preference.
+    ///
+    /// The session pass is deliberately linear and allocation-free. It runs only when a composer
+    /// needs a fresh default, never while laying out or rebuilding the account menu. Filtering by
+    /// offered handles *before* choosing the newest session matters: if the latest login was
+    /// switched off, the next-most-recent enabled login is a better continuation than jumping
+    /// straight back to the standard account.
+    static func preferred<S: Sequence>(
+        among discovered: [AgentAccount],
+        for provider: AgentKind,
+        recentlyUsedIn sessions: S
+    ) -> AgentAccount? where S.Element == AgentSession {
+        let offered = discovered.filter(\.isEnabled)
+        let offeredHandles = Set(offered.map(\.handle))
+        var latest: (usedAt: Date, handle: AccountHandle)?
+
+        for session in sessions where session.kind == provider && !session.isArchived {
+            guard offeredHandles.contains(session.accountHandle) else { continue }
+            if let latest, session.lastUsedAt <= latest.usedAt { continue }
+            latest = (session.lastUsedAt, session.accountHandle)
+        }
+
+        if let handle = latest?.handle,
+           let account = offered.first(where: { $0.handle == handle }) {
+            return account
+        }
+        return offered.first { $0.isDefault } ?? offered.first
+    }
+
     /// The handle `preferredAccount` names, or the standard one when a provider offers nothing.
     static func preferredHandle(for provider: AgentKind) -> AccountHandle {
         preferredAccount(for: provider)?.handle ?? .standard
+    }
+
+    /// The handle form of the fresh-composer rule, using all currently discovered logins.
+    static func preferredHandle<S: Sequence>(
+        for provider: AgentKind,
+        recentlyUsedIn sessions: S
+    ) -> AccountHandle where S.Element == AgentSession {
+        preferred(
+            among: allAccounts(for: provider),
+            for: provider,
+            recentlyUsedIn: sessions
+        )?.handle ?? .standard
     }
 
     /// Drops the short filesystem cache after an in-app login has created or reverified a

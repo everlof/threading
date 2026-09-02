@@ -76,11 +76,19 @@ refetches immediately. The inherited default and any explicit in-progress choice
 so changing visibility cannot strand the launch state. iOS deliberately consumes the result but
 does not grow a second management surface.
 
-The composer starts on the standard handle, so a disabled *default* is the case that bites —
-without `preferredAccount`, the login the user just switched off is still what a fresh session
-launches on, while the chip names it as though it had been chosen. `preferredAccount` is the
-standard login while it is on, else the first that is; `preferred(among:)` is the same rule as a
-pure function, so it can be tested without a home directory to scan.
+A fresh composer starts on the enabled login this runtime most recently used, falling back to the
+standard login while it is on and then the first enabled login. Recency comes from
+`AgentSession.lastUsedAt`, not a second preference: moving a conversation after its selected model
+runs out changes that same latest session's `accountHandle`, so the next chat follows the escape
+instead of falling back to the exhausted login. Evidence from disabled or missing logins and from
+archived sessions is filtered before recency, which lets the next-most-recent enabled login win
+rather than jumping straight to standard. `preferred(among:for:recentlyUsedIn:)` is the pure form
+of the rule.
+
+Resolving this default is one allocation-free pass over in-memory session values when the composer
+first enters a project or returns after a successful start. An ordinary detour keeps the existing
+form whole; usage readings remain decision evidence in its menus and do not silently switch an
+unfinished draft on the strength of a cached or unknown value.
 
 **Who a session runs as is one decision, so the composer's identity menu is one list.** It used
 to be two sections — the selected runtime's logins, a separator, then the other runtimes — which

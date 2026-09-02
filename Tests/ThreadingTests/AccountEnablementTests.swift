@@ -147,6 +147,70 @@ final class AccountEnablementTests: XCTestCase {
         )
     }
 
+    func testAFreshComposerPrefersTheMostRecentlyUsedEnabledLogin() throws {
+        let standard = account(handle: .standard)
+        let alternate = account(handle: .named("claude-work"))
+        var earlier = AgentSession(
+            kind: .claude,
+            title: "Earlier",
+            accountHandle: .standard
+        )
+        earlier.lastTurnAt = Date(timeIntervalSince1970: 1_000)
+        var latest = AgentSession(
+            kind: .claude,
+            title: "Latest",
+            accountHandle: alternate.handle,
+            model: "claude-fable-5[1m]"
+        )
+        latest.lastTurnAt = Date(timeIntervalSince1970: 2_000)
+
+        XCTAssertEqual(
+            AgentAccountDiscovery.preferred(
+                among: [standard, alternate],
+                for: .claude,
+                recentlyUsedIn: [earlier, latest]
+            )?.handle,
+            alternate.handle,
+            "the standard login replaced the account used by the latest chat"
+        )
+    }
+
+    /// Eligibility is applied before recency. Jumping directly to the default when the newest
+    /// login is off would skip the enabled login the user used immediately before it.
+    func testAFreshComposerSkipsDisabledAndArchivedRecentLogins() throws {
+        let standard = account(handle: .standard)
+        let disabled = account(handle: .named("claude-disabled"), isEnabled: false)
+        let available = account(handle: .named("claude-available"))
+        var archived = AgentSession(
+            kind: .claude,
+            title: "Archived",
+            accountHandle: standard.handle
+        )
+        archived.lastTurnAt = Date(timeIntervalSince1970: 4_000)
+        archived.isArchived = true
+        var unavailable = AgentSession(
+            kind: .claude,
+            title: "Disabled",
+            accountHandle: disabled.handle
+        )
+        unavailable.lastTurnAt = Date(timeIntervalSince1970: 3_000)
+        var usable = AgentSession(
+            kind: .claude,
+            title: "Available",
+            accountHandle: available.handle
+        )
+        usable.lastTurnAt = Date(timeIntervalSince1970: 2_000)
+
+        XCTAssertEqual(
+            AgentAccountDiscovery.preferred(
+                among: [standard, disabled, available],
+                for: .claude,
+                recentlyUsedIn: [archived, unavailable, usable]
+            )?.handle,
+            available.handle
+        )
+    }
+
     func testAProviderWithEveryLoginSwitchedOffOffersNone() {
         let discovered = [
             account(handle: .standard, isEnabled: false),

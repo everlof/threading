@@ -9,6 +9,8 @@ final class SessionComposerViewController: NSViewController {
 
     // MARK: - Properties
 
+    typealias NewSessionAccountHandle = @MainActor (AgentKind) -> AccountHandle
+
     private(set) var projectID: ProjectID?
 
     /// Whether `show(projectID:)` has configured this composer at all yet.
@@ -17,6 +19,16 @@ final class SessionComposerViewController: NSViewController {
     /// be `nil` — the choose-a-project mode a store with no projects opens onto — and that one
     /// still has to configure the chips and the greeting rather than return early.
     private var hasBeenShown = false
+
+    /// A successful start consumes the form. The next time that project asks for a composer, its
+    /// account default is therefore a new decision and follows the session that was just used —
+    /// including a later account move after a model-scoped limit. An ordinary detour does not set
+    /// this flag, so a half-written draft and the choices beside it remain untouched.
+    private var shouldResolveNewSessionAccount = false
+
+    /// Injected so the account-default lifecycle can be exercised without scanning real homes or
+    /// manufacturing a global project store. Production resolves from durable session history.
+    private let newSessionAccountHandle: NewSessionAccountHandle
 
     /// The hero: the mark above a greeting that knows what day it is. It fills the room the
     /// bottom-flush composer leaves, and hides when a short pane leaves none.
@@ -418,9 +430,16 @@ final class SessionComposerViewController: NSViewController {
     init(
         customizationLookup: @escaping ComponentCustomizationHost.Lookup = {
             ComponentCustomizationProviderSlot.shared.customization(for: $0)
+        },
+        newSessionAccountHandle: @escaping NewSessionAccountHandle = { kind in
+            AgentAccountDiscovery.preferredHandle(
+                for: kind,
+                recentlyUsedIn: ProjectStore.shared.projects.lazy.flatMap { $0.sessions }
+            )
         }
     ) {
         self.customizationLookup = customizationLookup
+        self.newSessionAccountHandle = newSessionAccountHandle
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -978,6 +997,10 @@ final class SessionComposerViewController: NSViewController {
     /// nothing else does it any more.
     func show(projectID: ProjectID?) {
         if hasBeenShown, projectID == self.projectID {
+            if shouldResolveNewSessionAccount {
+                shouldResolveNewSessionAccount = false
+                resolveNewSessionAccount()
+            }
             refreshDerivedState()
             return
         }
@@ -999,10 +1022,12 @@ final class SessionComposerViewController: NSViewController {
         updatePromptCustomization(for: projectID)
 
         selectedAgent = AppSettings.shared.defaultAgentKind
-        // The login this agent offers rather than the standard handle: the standard one may be
-        // exactly the account the user switched off, and a composer that still starts there
-        // would launch on it while naming it in the chip.
-        selectedAccountHandle = AgentAccountDiscovery.preferredHandle(for: selectedAgent)
+        // Follow the most recently used enabled login for this runtime. Besides matching the
+        // user's last deliberate account choice, this carries a limit escape forward: moving a
+        // session after its model runs out updates that same latest session record. The resolver
+        // falls back to the standard/first enabled login when there is no usable history.
+        selectedAccountHandle = newSessionAccountHandle(selectedAgent)
+        shouldResolveNewSessionAccount = false
         selectedModel = nil
         selectedReasoningEffort = nil
         selectedFastMode = nil
@@ -1052,6 +1077,20 @@ final class SessionComposerViewController: NSViewController {
 
         refreshChips()
         discoverImportable(for: project)
+    }
+
+    /// Re-resolves only the login-dependent part of a consumed composer.
+    ///
+    /// If the latest session moved accounts, its old explicit model and catalog-specific effort
+    /// cannot safely cross with it. This is the same reset the identity chip performs for a
+    /// direct account choice. A matching account keeps the previous quick-repeat configuration.
+    private func resolveNewSessionAccount() {
+        let resolved = newSessionAccountHandle(selectedAgent)
+        guard resolved != selectedAccountHandle else { return }
+        selectedAccountHandle = resolved
+        selectedModel = nil
+        selectedReasoningEffort = nil
+        selectedFastMode = nil
     }
 
     /// Restates the hero from the line this composer is holding, morphing in place when a
@@ -2246,6 +2285,7 @@ final class SessionComposerViewController: NSViewController {
         // Only once a session actually exists: a start that failed leaves the words where the
         // user can still use them, which is also why `DraftStore` is cleared on the same answer.
         guard started else { return }
+        shouldResolveNewSessionAccount = true
         promptView.clear()
     }
 
