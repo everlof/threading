@@ -21,10 +21,16 @@ enum NativePluginCatalog {
 
     /// Teams whose plugins may be loaded.
     ///
-    /// Empty means **load nothing**, which is the shipping default: a tier that runs unsandboxed
-    /// code in this process opens by refusing, not by trusting. The first-party team is added when
-    /// the tier ships a plugin of its own.
-    static var allowedTeams: Set<String> = []
+    /// A tier that runs unsandboxed code in this process opens by refusing, not by trusting, so
+    /// this is an allowlist and nothing else gets in. `PluginLoader` used to read an *empty* set as
+    /// "accept anything" — the opposite of what this comment claimed — which meant the shipping
+    /// default would have mapped any bundle dropped into the folder. It now refuses, and running
+    /// anything has to be asked for by name.
+    ///
+    /// The one entry is Threading's own signing team, which is what the first-party Device Logs
+    /// plugin is signed with. A third-party tier needs a review flow and its own decision; this is
+    /// not it.
+    static var allowedTeams: Set<String> = ["SMQ3E8Y57T"]
 
     /// `~/Library/Application Support/Threading/Plugins`. Bundles are dropped in by hand today;
     /// an install flow is a later slice and needs its own review copy.

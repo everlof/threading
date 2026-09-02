@@ -59,16 +59,37 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
 /// The policy this mirrors is `simulator-pane.md`'s helper check: exact location, signing
 /// identifier and team, verified before launch.
 public struct PluginLoader {
-    /// Teams whose bundles may be loaded. **Empty means accept anything**, which is only
-    /// appropriate for a probe or a test; a shipping host passes a non-empty set.
+    /// Teams whose bundles may be loaded. An empty set loads nothing: this tier maps unsandboxed
+    /// code into the host process, so it opens by refusing rather than by trusting.
     public var allowedTeams: Set<String>
+
+    /// Skips the signature check entirely. **Only a probe or a test may set this**, which is why
+    /// it cannot be reached through `init(allowedTeams:)` — see `acceptingAnyTeam()`.
+    private let acceptsAnyTeam: Bool
 
     public init(allowedTeams: Set<String>) {
         self.allowedTeams = allowedTeams
+        self.acceptsAnyTeam = false
+    }
+
+    /// A loader that runs whatever it is pointed at, signed or not.
+    ///
+    /// This existed as "an empty allowlist means accept anything", which read as a convenience and
+    /// was in fact the shipping default: `NativePluginCatalog.allowedTeams` is empty until the
+    /// first-party team is added, and its own documentation said that meant *load nothing*. The
+    /// host and the loader stated opposite policies and the loader won. Naming the dangerous
+    /// behaviour is what stops it being reached by leaving something out.
+    public static func acceptingAnyTeam() -> PluginLoader {
+        PluginLoader(allowedTeams: [], acceptsAnyTeam: true)
+    }
+
+    private init(allowedTeams: Set<String>, acceptsAnyTeam: Bool) {
+        self.allowedTeams = allowedTeams
+        self.acceptsAnyTeam = acceptsAnyTeam
     }
 
     public func load(bundleAt url: URL) throws -> ThreadingNativePlugin {
-        if !allowedTeams.isEmpty {
+        if !acceptsAnyTeam {
             try verifySignature(at: url)
         }
         guard let bundle = Bundle(url: url) else {
@@ -102,8 +123,16 @@ public struct PluginLoader {
         guard valid == errSecSuccess else {
             throw PluginLoadFailure.signatureInvalid(status: valid)
         }
+        // `kSecCSSigningInformation` is what puts the team into the dictionary. Asked with no
+        // flags — as this did — the call succeeds and simply omits it, so every correctly signed
+        // bundle read back as "team none" and was refused. An allowlist that cannot see a team
+        // rejects everything, which looks exactly like a plugin that will not load.
         var information: CFDictionary?
-        let read = SecCodeCopySigningInformation(staticCode, [], &information)
+        let read = SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &information
+        )
         guard read == errSecSuccess, let dictionary = information as? [String: Any] else {
             throw PluginLoadFailure.signatureInvalid(status: read)
         }

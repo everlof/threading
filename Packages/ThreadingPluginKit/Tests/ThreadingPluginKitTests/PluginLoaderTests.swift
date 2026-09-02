@@ -21,7 +21,7 @@ final class PluginLoaderTests: XCTestCase {
     }
 
     func testAMissingBundleIsRefusedByPath() {
-        let loader = PluginLoader(allowedTeams: [])
+        let loader = PluginLoader.acceptingAnyTeam()
         XCTAssertThrowsError(try loader.load(bundleAt: directory.appendingPathComponent("nope.bundle"))) {
             XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "unreadable_bundle")
         }
@@ -29,7 +29,7 @@ final class PluginLoaderTests: XCTestCase {
 
     func testABundleWithNoPrincipalClassIsRefused() throws {
         let bundle = try makeBundle(principalClass: nil)
-        let loader = PluginLoader(allowedTeams: [])
+        let loader = PluginLoader.acceptingAnyTeam()
         XCTAssertThrowsError(try loader.load(bundleAt: bundle)) {
             XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "no_principal_class")
         }
@@ -50,13 +50,32 @@ final class PluginLoaderTests: XCTestCase {
         }
     }
 
-    func testAnEmptyAllowlistSkipsTheSignatureCheckEntirely() throws {
-        // The probe default. Stated as a test because it is the one configuration where the
-        // security boundary is deliberately off, and that must be a choice rather than a slip.
+    /// An empty allowlist loads **nothing**.
+    ///
+    /// It used to skip the signature check, and that read as a convenience for probes while being
+    /// the shipping default: `NativePluginCatalog.allowedTeams` is empty until a first-party team
+    /// is added, and its own documentation said empty meant *load nothing*. The host and the loader
+    /// stated opposite policies and the loader won, so any bundle dropped into the plugins folder
+    /// would have been mapped into the process unsandboxed.
+    func testAnEmptyAllowlistLoadsNothingRatherThanEverything() throws {
         let bundle = try makeBundle(principalClass: nil)
         let loader = PluginLoader(allowedTeams: [])
         XCTAssertThrowsError(try loader.load(bundleAt: bundle)) {
-            XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "no_principal_class")
+            let code = ($0 as? PluginLoadFailure)?.code
+            XCTAssertTrue(
+                code == "signature_invalid" || code == "untrusted_team",
+                "an empty allowlist must refuse before the principal class is read, got \(code ?? "nil")"
+            )
+        }
+    }
+
+    /// The unsafe mode still exists, because a probe needs it — but it has to be asked for by name
+    /// rather than reached by leaving an argument empty.
+    func testRunningAnythingHasToBeAskedForByName() throws {
+        let bundle = try makeBundle(principalClass: nil)
+        XCTAssertThrowsError(try PluginLoader.acceptingAnyTeam().load(bundleAt: bundle)) {
+            XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "no_principal_class",
+                           "the signature check is skipped, so the bundle's contents decide")
         }
     }
 
