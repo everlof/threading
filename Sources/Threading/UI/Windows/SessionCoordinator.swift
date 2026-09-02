@@ -1,5 +1,27 @@
 import AppKit
 
+/// Session-scoped handoff between creation and the deferred sidebar presentation that launches it.
+///
+/// A dictionary is intentional even though the ordinary path contains one entry for less than a
+/// run-loop turn. More than one newly created row can have its presentation interrupted, and a new
+/// opening must not overwrite an older session's still-undelivered first turn. Storage and lookup
+/// are O(changed session); nothing here is projected into the sidebar or scanned during selection.
+struct PendingSessionOpeningPrompts {
+    private var promptsBySessionID: [SessionID: String] = [:]
+
+    mutating func stage(_ prompt: String?, for sessionID: SessionID) {
+        guard let prompt else {
+            promptsBySessionID.removeValue(forKey: sessionID)
+            return
+        }
+        promptsBySessionID[sessionID] = prompt
+    }
+
+    mutating func take(for sessionID: SessionID) -> String? {
+        promptsBySessionID.removeValue(forKey: sessionID)
+    }
+}
+
 /// Owns session lifecycle decisions while the window controller owns only navigation chrome.
 ///
 /// Creation, import, worktree targeting, surface switches, and closing all converge here so an
@@ -26,8 +48,13 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// and standalone hosts default to the native sidebar presenter.
     let toastPresenter: (ToastRequest) -> Void
 
-    /// Consumed by the next selected session exactly once.
-    private var pendingPrompt: String?
+    /// Opening messages waiting for the session they belong to to be presented.
+    ///
+    /// Sidebar presentation is deliberately deferred by one main-queue turn. Another selection
+    /// can cancel that presentation before the container sees it, so this cannot be one global
+    /// "next selection" slot: that would let the unrelated selection consume the opening and
+    /// leave the new session to launch without its first turn when it is selected later.
+    private var pendingPrompts = PendingSessionOpeningPrompts()
 
     /// One network publication per session. The generated ref makes retries idempotent across
     /// launches; this gate also prevents two finish notifications in the same launch from
@@ -135,9 +162,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
     }
 
-    func takePendingPrompt() -> String? {
-        defer { pendingPrompt = nil }
-        return pendingPrompt
+    func takePendingPrompt(for sessionID: SessionID) -> String? {
+        pendingPrompts.take(for: sessionID)
     }
 
     func newSession() {
@@ -810,10 +836,13 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             guard let self else { return }
             switch result {
             case .success(let session):
-                self.pendingPrompt = NewChatOpeningMessage.compose(
-                    prompt: ConversationContinuation.openingPrompt(for: session),
-                    prefix: environment.settings.newChatOpeningPrefix,
-                    suffix: environment.settings.newChatOpeningSuffix
+                self.pendingPrompts.stage(
+                    NewChatOpeningMessage.compose(
+                        prompt: ConversationContinuation.openingPrompt(for: session),
+                        prefix: environment.settings.newChatOpeningPrefix,
+                        suffix: environment.settings.newChatOpeningSuffix
+                    ),
+                    for: session.id
                 )
                 self.sidebar.reload()
                 self.sidebar.select(sessionID: session.id)
@@ -849,7 +878,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             "prompt": opening ?? ""
         ])
 
-        pendingPrompt = opening
+        pendingPrompts.stage(opening, for: session.id)
         sidebar.reload()
         sidebar.select(sessionID: session.id)
     }
@@ -1062,7 +1091,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         }
 
         DraftStore.shared.clear(for: projectID)
-        pendingPrompt = opening
+        pendingPrompts.stage(opening, for: session.id)
         sidebar.reload()
         sidebar.select(sessionID: session.id)
         return true
@@ -1243,7 +1272,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             "prompt": opening ?? "",
         ])
 
-        pendingPrompt = opening
+        pendingPrompts.stage(opening, for: session.id)
         // `ProjectStore.addSession` publishes the exact structural insertion synchronously.
         // Rebuilding the complete sidebar here made remote creation scale with every archived
         // session and duplicated work the store notification had already completed.
@@ -1256,8 +1285,8 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
     /// Deliberately *not* `startRemoteSession`'s route. That one selects the row, because a
     /// phone asking for a session wants it on screen when its owner looks; a schedule firing at
     /// 09:00 must not reach across whatever the user is reading and replace it. The launch is
-    /// `container.launchInBackground`'s job, and `pendingPrompt` — a single slot spent by the
-    /// next selection — is not involved at all.
+    /// `container.launchInBackground`'s job, and the selected-session opening handoff is not
+    /// involved at all.
     func startSessionUnattended(plan: ScheduledSessionPlan, title: String) -> AgentSession? {
         let targetProjectID = Self.targetProjectID(
             startingAt: plan.projectID,

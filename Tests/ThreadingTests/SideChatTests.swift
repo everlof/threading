@@ -704,6 +704,38 @@ final class SideChatTests: XCTestCase {
 @MainActor
 final class SessionCoordinatorTests: XCTestCase {
 
+    /// Sidebar presentation happens on the next main-queue turn. If another row wins that race,
+    /// it must not spend the opening that belongs to the newly created session; selecting the new
+    /// row later still has to launch with its first turn.
+    func testInterruptedSelectionDoesNotConsumeAnotherSessionsOpeningPrompt() {
+        var prompts = PendingSessionOpeningPrompts()
+        let intendedSessionID = SessionID()
+        let interveningSessionID = SessionID()
+        let opening = "Investigate the missing first turn."
+
+        prompts.stage(opening, for: intendedSessionID)
+
+        XCTAssertNil(prompts.take(for: interveningSessionID))
+        XCTAssertEqual(prompts.take(for: intendedSessionID), opening)
+        XCTAssertNil(
+            prompts.take(for: intendedSessionID),
+            "the matching launch spends it once"
+        )
+    }
+
+    /// Two interrupted starts are two conversations, not two writes to one global handoff slot.
+    func testInterruptedOpeningsRemainBoundToBothSessions() {
+        var prompts = PendingSessionOpeningPrompts()
+        let firstSessionID = SessionID()
+        let secondSessionID = SessionID()
+
+        prompts.stage("First opening", for: firstSessionID)
+        prompts.stage("Second opening", for: secondSessionID)
+
+        XCTAssertEqual(prompts.take(for: firstSessionID), "First opening")
+        XCTAssertEqual(prompts.take(for: secondSessionID), "Second opening")
+    }
+
     func testRetainsTheApplicationServicesInjectedAtItsOwnershipBoundary() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("SessionCoordinatorTests.\(UUID().uuidString)")

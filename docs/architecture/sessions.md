@@ -96,7 +96,7 @@ A **side chat** is a session forked from another: it opens carrying the parent's
 keeps its own record, so a question can be asked without joining the conversation it asks
 about. `⋯` on a session row offers **New Side Chat** and **Ask on the Side…**, the second
 being the same fork with its question already asked, delivered through the composer's own
-`pendingPrompt`.
+session-scoped opening handoff.
 
 The primitive is `--fork-session`, and every claim here was measured on Claude 2.1.217 rather
 than inferred:
@@ -1018,10 +1018,15 @@ authoritative.
 entered under Settings ▸ General, one field on each side of the task. `NewChatOpeningMessage`
 trims all three parts, drops the empty ones, and joins what is left with one blank line in the
 order prefix, task, suffix; `SessionCoordinator` hands the combined text through the existing
-one-shot `pendingPrompt`, so a terminal launch keeps one trailing operand while a Native launch
-sends the same string over its stream. Ordinary sessions, side chats (including a plain fork
-with no question), cross-provider continuations, and sessions started from the paired owner
-device all converge there.
+one-shot opening handoff, so a terminal launch keeps one trailing operand while a Native launch
+sends the same string over its stream. The handoff is keyed by `SessionID`, not by whichever row
+happens to be selected next: sidebar presentation is deferred by one main-queue turn, and another
+selection can cancel it. Two real failures recorded the complete composer message and then launched
+that session 7 and 31 minutes later without an opening because the old global slot had been spent
+while its presentation was interrupted. An unrelated selection now leaves the opening in place for
+its own session, and several interrupted starts retain their messages independently. Ordinary
+sessions, side chats (including a plain fork with no question), cross-provider continuations, and
+sessions started from the paired owner device all converge there.
 
 Two fields rather than one because the halves are read differently: text before the task frames
 how the work should be done, and text after it is an instruction about the answer — an order the

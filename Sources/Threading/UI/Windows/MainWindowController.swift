@@ -4750,7 +4750,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSession sessionID: SessionID) {
         // Taken rather than read: an opening prompt belongs to the launch that follows it,
         // not to every later selection of the same session.
-        let prompt = sessionCoordinator.takePendingPrompt()
+        let prompt = sessionCoordinator.takePendingPrompt(for: sessionID)
         let previousSessionID = containerViewController.currentSessionID
         let previousTerminalID = containerViewController.currentTerminalID
 
