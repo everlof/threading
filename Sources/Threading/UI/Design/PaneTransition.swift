@@ -62,7 +62,7 @@ enum PaneTransition {
     ///
     /// **A window nobody can see gets the final state at once.** Motion there is waste, and
     /// worse than waste: AppKit has been measured withholding an off-screen window's resize
-    /// notifications and animation completions (see `MainWindowController.toggleSidebar`),
+    /// notifications and animation completions (see the window controller's sidebar toggle),
     /// and every completion below carries real work — a restored width, a cleared guard flag,
     /// a hidden band. This is also what keeps hosted tests deterministic: their windows are
     /// built and never shown, so a fixture asserts final state without waiting out a slide.

@@ -7,7 +7,7 @@ import AppKit
 /// The material is what the sidebar *lost* when its split item stopped being
 /// `sidebarWithViewController:` — that behaviour was declined for the floating inset panel it
 /// forces on macOS 26, not for the material it drew, and the note that made the change
-/// (`MainWindowController.setupSplitViewController`) names the material as one of the two things
+/// (the window controller's split-view setup) names the material as one of the two things
 /// to be replaced by hand. This is that replacement. Under System the sidebar is again the
 /// frosted column every platform app has, which is also what separates it from the content pane
 /// beside it: the two system grounds are otherwise the same colour, and a window whose sidebar
