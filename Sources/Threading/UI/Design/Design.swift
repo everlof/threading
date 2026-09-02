@@ -428,7 +428,7 @@ enum Design {
             let material = AppThemePalette.current.material(
                 for: NSApplication.shared.effectiveAppearance
             )
-            return material.textScale * AppSettings.appTextSize.scale
+            return material.textScale * DesignSettings.current.appTextSize.scale
         }
 
         /// Resolves the user's semantic text-size preference in the one place point sizes enter
@@ -610,13 +610,13 @@ enum Design {
         /// one, but a defaults value written by hand or by a migration would otherwise be
         /// handed to the descriptor matcher, whose answer for `""` is not a documented `nil`.
         private static func overrideFamilies(for surface: FontSurface) -> [String] {
-            let chrome = AppSettings.chromeFontFamily
+            let chrome = DesignSettings.current.chromeFontFamily
             let families: [String?]
             switch surface {
             case .chrome:
                 families = [chrome]
             case .conversation:
-                families = [AppSettings.conversationFontFamily, chrome]
+                families = [DesignSettings.current.conversationFontFamily, chrome]
             }
             return families.compactMap { $0 }.filter { !$0.isEmpty }
         }

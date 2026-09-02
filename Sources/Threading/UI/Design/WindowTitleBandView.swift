@@ -51,7 +51,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
 
     private var usesPlatinumBitmapTitle: Bool {
         resolvedStyle?.glyphStyle == .platinum
-            && AppSettings.chromeFontFamily == nil
+            && DesignSettings.current.chromeFontFamily == nil
             && titleLabel.font?.familyName?.caseInsensitiveCompare("Charcoal") != .orderedSame
             && PlatinumBitmapFont.advance(of: titleLabel.stringValue) != nil
     }
@@ -805,7 +805,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
         NSBezierPath(rect: clip).addClip()
-        if AppSettings.chromeFontFamily == nil,
+        if DesignSettings.current.chromeFontFamily == nil,
            IRIXBitmapCaptionFont.draw(
                titleLabel.stringValue,
                penX: bounds.minX + 44,
@@ -1026,7 +1026,7 @@ final class WindowTitleBandView: NSView, ThemedComponent {
     private func drawOpenStepTitle() {
         guard !titleLabel.stringValue.isEmpty else { return }
         let material = AppThemePalette.current.material(for: effectiveAppearance)
-        if AppSettings.chromeFontFamily == nil,
+        if DesignSettings.current.chromeFontFamily == nil,
            material.fontFamilies.first?.caseInsensitiveCompare("Helvetica") == .orderedSame,
            OpenStepBitmapCaptionFont.draw(
                titleLabel.stringValue,

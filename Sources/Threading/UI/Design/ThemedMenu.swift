@@ -3998,7 +3998,7 @@ private final class ThemedMenuRowView: ThemedControl {
             NSGraphicsContext.current?.cgContext.setAllowsFontSmoothing(false)
         }
         let drewPlatinumBitmap = ThemedMenuMetrics.appearance == .platinum
-            && AppSettings.chromeFontFamily == nil
+            && DesignSettings.current.chromeFontFamily == nil
             && titleFont.familyName?.caseInsensitiveCompare("Charcoal") != .orderedSame
             && !hasSubtitle
             // The bitmap strike draws one ink. A title carrying a quieter qualifier after it is

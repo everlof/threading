@@ -234,7 +234,7 @@ final class PromptView: NSView, ThemedComponent {
     }
 
     /// Where the control that sends this prompt lives — and therefore what Return does *by
-    /// default*, until `AppSettings.promptReturnKey` says otherwise.
+    /// default*, until `DesignSettings.current.promptReturnKey` says otherwise.
     enum SubmitPlacement {
         /// The glyph inside the box. Return sends; Shift- or Option-Return breaks the line.
         /// The shape of a reply box, where a message is usually one line and sending it is
@@ -618,7 +618,7 @@ final class PromptView: NSView, ThemedComponent {
     /// The mapping lives here rather than on `PromptReturnKey` so the setting stays a Core type
     /// that knows nothing about a view's submit affordance.
     private func submitsOnReturn() -> Bool {
-        switch AppSettings.promptReturnKey {
+        switch DesignSettings.current.promptReturnKey {
         case .sends: true
         case .startsNewLine: false
         // `.footer` is `.inside` with the glyph on a row rather than in a corner: the send is
@@ -1495,7 +1495,7 @@ final class PromptView: NSView, ThemedComponent {
     /// A tooltip is the only name a glyph has, so it is also the accessible one — and a send
     /// that fires on a key its own label does not name is the defect this exists to prevent. It
     /// shipped in the opposite direction: a composer sending on Return while its glyph promised
-    /// ⌘Return. Recomputed here rather than stored because `AppSettings.promptReturnKey` is read
+    /// ⌘Return. Recomputed here rather than stored because `DesignSettings.current.promptReturnKey` is read
     /// at the keystroke, and this is called on every edit, every enable change and every
     /// placement change — so the words follow the setting without observing it.
     private func refreshSubmitTitle() {
@@ -2098,7 +2098,7 @@ private final class PromptTextView: ThemedTextView {
     /// Two rules hold whatever the surface and whatever the user has set, so there is always a
     /// key that cannot surprise: **⌘Return sends**, and **Shift- or Option-Return breaks the
     /// line**. What a bare Return does is the only part that varies, and `submitsOnReturn`
-    /// answers it — the composer's own default unless `AppSettings.promptReturnKey` overrides.
+    /// answers it — the composer's own default unless `DesignSettings.current.promptReturnKey` overrides.
     ///
     /// ⌘Return is handled here as well as by whatever button names it, because a prompt is
     /// used without one — the chord belongs to the *field*, and only reaches a key equivalent

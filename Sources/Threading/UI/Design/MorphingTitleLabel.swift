@@ -228,7 +228,7 @@ final class MorphingTitleLabel: NSView, ThemedComponent {
     }
 
     private var currentPreset: MorphPreset? {
-        let style = morphStyleOverride ?? AppSettings.shared.chatNameMorphStyle
+        let style = morphStyleOverride ?? DesignSettings.current.chatNameMorphStyle
         return MorphPreset(rawValue: style.rawValue)
     }
 
