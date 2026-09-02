@@ -29,6 +29,16 @@ extension UIColor {
 /// accent, rather than leaving the keyboard to `getWhite`'s unspecified grayscale conversion and
 /// a separate midpoint that can drift away from the rest of the palette.
 enum MobileKeyboardAppearance {
+    /// The explicit appearance that matches an application-owned surface's resolved mode.
+    ///
+    /// Most UIKit editors can inherit this through `preferredColorScheme`. An editor that takes
+    /// focus during a navigation transition must state it before becoming first responder:
+    /// while the destination is in flight, `.default` can briefly resolve against the transition
+    /// scene instead of the destination and make the keyboard material flash between modes.
+    static func matching(_ colorScheme: ColorScheme) -> UIKeyboardAppearance {
+        colorScheme == .light ? .light : .dark
+    }
+
     /// The keyboard that belongs over this background.
     static func over(_ background: UIColor) -> UIKeyboardAppearance {
         guard let luminance = background.remoteRelativeLuminance else { return .dark }

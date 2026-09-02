@@ -66,6 +66,7 @@ struct MobileUniversalSearchView: View {
 
     @State private var selectedScope: MobileUniversalSearchScope
     @State private var query = ""
+    @State private var isSearchPresented: Bool
     // The Mac keeps completed result tokens alive for one minute and rejects an older request
     // that arrives after a newer response. Start each presentation from a wall-clock epoch so
     // reopening Search (or restarting the phone app) cannot look like a delayed generation zero.
@@ -81,6 +82,7 @@ struct MobileUniversalSearchView: View {
         initialQuery: String = "",
         initialResponse: RemoteSearchResponseDTO? = nil,
         performsRemoteSearch: Bool = true,
+        initiallyPresentsSearch: Bool = true,
         onRoute: @escaping (MobileNavigationRoute) -> Void = { _ in }
     ) {
         self.initialScope = initialScope
@@ -89,6 +91,7 @@ struct MobileUniversalSearchView: View {
         _selectedScope = State(initialValue: initialScope)
         _query = State(initialValue: initialQuery)
         _response = State(initialValue: initialResponse)
+        _isSearchPresented = State(initialValue: initiallyPresentsSearch)
     }
 
     private var scopes: [MobileUniversalSearchScope] {
@@ -158,9 +161,11 @@ struct MobileUniversalSearchView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(
             text: $query,
+            isPresented: $isSearchPresented,
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: MobileL10n.string("Search conversations, files, and destinations")
         )
+        .mobileUIEvidenceKeyboardFocus($isSearchPresented)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button(MobileL10n.string("Done")) { dismiss() }

@@ -266,8 +266,13 @@ install and trust story, so `UIKeyboardAppearance` is the entire seam.
 
 `MobileKeyboardAppearance.over(_:)` answers it from sRGB relative luminance, sharing one crossover
 with the ink chosen over the accent. The terminal reads it from the session's own terminal
-background; every other surface gets it from `preferredColorScheme`, which is why that value
-travels with the palette in `mobileTheme(_:)` rather than being left behind at a sheet.
+background; ordinary application surfaces get it from `preferredColorScheme`, which is why that
+value travels with the palette in `mobileTheme(_:)` rather than being left behind at a sheet.
+The new-session editor is the narrow exception: it takes focus on the first frame of the
+navigation push, when the system's `.default` appearance can briefly resolve against the
+transition scene and flash before settling on the destination. It explicitly assigns the same
+light/dark answer from the resolved colour scheme before becoming first responder. This keeps the
+keyboard in the push without delaying focus or changing the composer's entrance choreography.
 
 What *is* ours is the strip above the keyboard. `TerminalKeyBar` is fully themed, and
 `RemoteTerminalView.dropBuiltInKeyboardAccessory()` removes SwiftTerm's own esc/ctrl/tab/arrow

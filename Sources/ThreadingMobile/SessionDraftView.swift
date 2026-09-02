@@ -1703,6 +1703,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         view.firstLineAccessoriesInline = firstLineAccessoriesInline
         view.preferredCaretHeight = font.pointSize
         view.onFirstLineAccessoryOverflowChange = context.coordinator.reportAccessoryOverflow
+        view.keyboardAppearance = MobileKeyboardAppearance.matching(theme.colorScheme)
         return view
     }
 
@@ -1727,6 +1728,10 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         view.preferredCaretHeight = font.pointSize
         view.offersFiles = offersFiles
         view.pasteFiles = pasteFiles
+        let keyboardAppearance = MobileKeyboardAppearance.matching(theme.colorScheme)
+        if view.keyboardAppearance != keyboardAppearance {
+            view.keyboardAppearance = keyboardAppearance
+        }
 
         if isFocused, !view.isFirstResponder {
             Task { @MainActor [weak view] in

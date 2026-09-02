@@ -236,6 +236,11 @@ final class MobileRootBackdropTests: XCTestCase {
 /// saturated cases, where a channel average and perceived luminance disagree most, and pin the
 /// keyboard to the same crossover the accent's ink already uses.
 final class MobileKeyboardAppearanceTests: XCTestCase {
+    func testApplicationSurfaceModesResolveToExplicitKeyboardAppearances() {
+        XCTAssertEqual(MobileKeyboardAppearance.matching(.light), .light)
+        XCTAssertEqual(MobileKeyboardAppearance.matching(.dark), .dark)
+    }
+
     func testADarkTerminalKeepsTheDarkKeyboard() {
         XCTAssertEqual(
             MobileKeyboardAppearance.over(UIColor(remoteHex: "#0A0C10")!),
@@ -301,6 +306,83 @@ final class MobileKeyboardAppearanceTests: XCTestCase {
                 borderWidth: 1
             )
         )
+    }
+}
+
+@MainActor
+final class SessionDraftKeyboardAppearanceTests: XCTestCase {
+    func testEditorPinsItsLightAppearanceBeforeTakingFocus() throws {
+        let (window, textView) = try mountedEditor(theme: theme(mode: .light))
+        defer { window.isHidden = true }
+
+        XCTAssertEqual(textView.keyboardAppearance, .light)
+        XCTAssertFalse(textView.isFirstResponder)
+    }
+
+    func testEditorPinsItsDarkAppearanceBeforeTakingFocus() throws {
+        let (window, textView) = try mountedEditor(theme: theme(mode: .dark))
+        defer { window.isHidden = true }
+
+        XCTAssertEqual(textView.keyboardAppearance, .dark)
+        XCTAssertFalse(textView.isFirstResponder)
+    }
+
+    private func mountedEditor(
+        theme: RemoteThemePalette
+    ) throws -> (UIWindow, IntrinsicTextView) {
+        let controller = UIHostingController(rootView: Harness(theme: theme))
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        window.layoutIfNeeded()
+        return (window, try XCTUnwrap(descendant(of: IntrinsicTextView.self, in: window)))
+    }
+
+    private func descendant<T: UIView>(of type: T.Type, in root: UIView) -> T? {
+        if let root = root as? T { return root }
+        return root.subviews.lazy.compactMap { self.descendant(of: type, in: $0) }.first
+    }
+
+    private func theme(mode: RemoteThemeMode) -> RemoteThemePalette {
+        RemoteThemePalette(RemoteThemeDTO(
+            id: "draft-keyboard-\(mode.rawValue)",
+            name: "Draft keyboard",
+            mode: mode,
+            colors: ["ground": mode == .light ? "#FFFFFF" : "#101010"],
+            material: RemoteThemeDTO.Material(
+                panelRadius: 20,
+                controlRadius: 10,
+                borderWidth: 1
+            )
+        ))
+    }
+
+    private struct Harness: View {
+        @State private var text = ""
+        @State private var isFocused = false
+        @State private var isOverflowing = false
+        let theme: RemoteThemePalette
+
+        var body: some View {
+            SessionDraftPromptEditor(
+                text: $text,
+                isFocused: $isFocused,
+                isOverflowing: $isOverflowing,
+                isEnabled: true,
+                theme: theme,
+                offersFiles: { false },
+                pasteFiles: { false },
+                firstLineLeadingAccessoryWidth: 0,
+                firstLineTrailingAccessoryWidth: 0,
+                firstLineAccessoryHeight: 0,
+                firstLineAccessoriesInline: true
+            )
+        }
     }
 }
 
