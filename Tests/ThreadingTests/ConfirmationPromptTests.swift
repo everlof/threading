@@ -73,6 +73,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "approveSystemPermissionPrompt",
             "conferManagerRole",
             "controlSimulatorDevice",
+            "linkDeviceLogTap",
             "installUpdate",
             "installUpdateAndRelaunch"
         ])
