@@ -11,7 +11,10 @@ let package = Package(
     name: "ThreadingDesignKit",
     platforms: [.macOS(.v13)],
     products: [
-        .library(name: "ThreadingDesignKit", type: .dynamic, targets: ["ThreadingDesignKit"]),
+        // Static: a plugin carries its own copy of the design system. The host has one compiled
+        // into the app already, and the two never exchange a component — only an encoded theme —
+        // so there is nothing to share and a self-contained bundle is the simpler artifact.
+        .library(name: "ThreadingDesignKit", targets: ["ThreadingDesignKit"]),
         .library(name: "ThreadingDesignKitExample", targets: ["ThreadingDesignKitExample"]),
     ],
     dependencies: [

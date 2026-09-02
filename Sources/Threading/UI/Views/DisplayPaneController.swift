@@ -526,6 +526,19 @@ final class DisplayPaneController: NSViewController {
         }
       ),
     ]
+    // Installed native plugins, listed by name. The enumeration is shallow and capped by the
+    // catalogue, and this runs when the menu opens rather than on every render.
+    for bundle in NativePluginCatalog.installedBundles() {
+      let name = bundle.deletingPathExtension().lastPathComponent
+      choices.append(
+        (
+          name, "puzzlepiece.extension", nil, true,
+          {
+            [weak self] in _ = self?.activateNativePlugin(bundleURL: bundle, for: sessionID)
+          }
+        )
+      )
+    }
     if ControlGrantStore.shared.isManager(sessionID) {
       choices.insert(
         (
@@ -966,6 +979,41 @@ final class DisplayPaneController: NSViewController {
 
     let controller = DeviceLogPaneViewController(owningSessionID: sessionID)
     let tab = DisplayTab(body: .deviceLog(controller), owningSessionID: sessionID)
+    tabs.append(tab)
+    tabsBySession[sessionID] = tabs
+    activeTabIDBySession[sessionID] = tab.id
+    persist(sessionID)
+    if sessionID == currentSessionID { render() }
+    return controller
+  }
+
+  /// Reveals a native plugin's pane, creating it the first time.
+  ///
+  /// One tab per bundle per session: a plugin owns whatever it started — a stream, a process, a
+  /// window of its own — and a second instance would own a second one without either knowing.
+  @discardableResult
+  func activateNativePlugin(
+    bundleURL: URL,
+    for sessionID: SessionID
+  ) -> NativePluginPaneViewController? {
+    restoreIfNeeded(sessionID)
+    var tabs = tabsBySession[sessionID] ?? []
+    if let existing = tabs.first(where: {
+      if case .nativePlugin(let plugin) = $0.body { return plugin.bundleURL == bundleURL }
+      return false
+    }) {
+      activeTabIDBySession[sessionID] = existing.id
+      persist(sessionID)
+      if sessionID == currentSessionID { render() }
+      if case .nativePlugin(let plugin) = existing.body { return plugin }
+      return nil
+    }
+
+    let controller = NativePluginPaneViewController(
+      bundleURL: bundleURL,
+      owningSessionID: sessionID
+    )
+    let tab = DisplayTab(body: .nativePlugin(controller), owningSessionID: sessionID)
     tabs.append(tab)
     tabsBySession[sessionID] = tabs
     activeTabIDBySession[sessionID] = tab.id
@@ -2382,6 +2430,14 @@ final class DisplayPaneController: NSViewController {
       contentMenuButton.isHidden = true
       installHosted(logs)
 
+    case .nativePlugin(let plugin):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(plugin)
+
     case .extensionPanel(let panel):
       imageView.image = nil
       imageView.isHidden = true
@@ -2524,6 +2580,7 @@ final class DisplayPaneController: NSViewController {
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"
     case .browserComparison: return "browser-comparison"
+    case .nativePlugin: return "native-plugin"
     case nil: return "empty"
     }
   }

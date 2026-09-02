@@ -204,7 +204,7 @@ public final class ThemedIconButton: BackdropThemedControl, OpticalInsetProvidin
     /// The menu presenter owns this state for every route — pointer, keyboard, accessibility and
     /// secondary click — so a button cannot forget to keep its source treatment while its menu is
     /// being browsed.
-    private(set) var isPresentingMenu = false {
+    public private(set) var isPresentingMenu = false {
         didSet {
             guard isPresentingMenu != oldValue else { return }
             needsDisplay = true
@@ -260,11 +260,11 @@ public final class ThemedIconButton: BackdropThemedControl, OpticalInsetProvidin
     /// and that needs its name back.
     private var symbolName: String?
     private var customImage: NSImage?
-    private(set) var hasMaterializedGlyph = false
+    public private(set) var hasMaterializedGlyph = false
 
     private var widthConstraint: NSLayoutConstraint?
     private var heightConstraint: NSLayoutConstraint?
-    private(set) var isPressed = false {
+    public private(set) var isPressed = false {
         didSet {
             guard isPressed != oldValue else { return }
             needsDisplay = true

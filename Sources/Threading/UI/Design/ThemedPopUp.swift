@@ -70,11 +70,11 @@ public final class ThemedPopUp: ThemedControl, ThemedMenuPresentationObserving {
 
     /// Readable so a caller can assert on the list it built — the heads and rules included,
     /// which `numberOfItems` and `item(at:)` deliberately cannot see.
-    private(set) var entries: [ThemedMenuEntry] = []
+    public private(set) var entries: [ThemedMenuEntry] = []
 
     /// Mirrors `NSPopUpButton.indexOfSelectedItem`. `-1` while there is nothing to select, which
     /// is the value AppKit reports for an empty pop-up.
-    private(set) var indexOfSelectedItem: Int = -1
+    public private(set) var indexOfSelectedItem: Int = -1
 
     public var selectedItem: ThemedMenuItem? {
         pullsDown ? nil : item(at: indexOfSelectedItem)

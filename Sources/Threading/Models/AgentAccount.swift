@@ -20,6 +20,13 @@ struct AgentAccount: Equatable, Identifiable, Sendable {
     /// Name shown in menus. A user override wins, then the user's own shell alias.
     let displayName: String
 
+    /// The explicit name the user chose, before falling back to discovery.
+    ///
+    /// Keep the provenance as well as the resolved `displayName`: account choice surfaces may
+    /// derive a person's name from the login email, and that automatic answer must never outrank
+    /// a name the user typed in Settings.
+    let displayNameOverride: String?
+
     /// Emoji shown in place of the agent's symbol, when the user has chosen one.
     let emoji: String?
 
@@ -43,13 +50,15 @@ struct AgentAccount: Equatable, Identifiable, Sendable {
         handle: AccountHandle,
         configPath: String,
         displayName: String? = nil,
+        displayNameOverride: String? = nil,
         emoji: String? = nil,
         isEnabled: Bool = true
     ) {
         self.provider = provider
         self.handle = handle
         self.configPath = configPath
-        self.displayName = displayName ?? handle.name
+        self.displayNameOverride = displayNameOverride
+        self.displayName = displayNameOverride ?? displayName ?? handle.name
         self.emoji = emoji
         self.isEnabled = isEnabled
     }

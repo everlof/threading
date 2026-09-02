@@ -109,7 +109,7 @@ public struct ThemedMenuItem {
     /// type-to-filter, the measured width — keeps reading the plain string. One font across
     /// every run, deliberately: tones change ink only, so the plain string measures exactly
     /// what the styled line draws.
-    private(set) var subtitleSegments: [ThemedMenuSubtitleSegment]?
+    public private(set) var subtitleSegments: [ThemedMenuSubtitleSegment]?
     /// Readings this row states in shared columns beside its title, aligned with every other
     /// row's. See `ThemedMenuMetric`. Empty on a row that has none — a menu whose rows all have
     /// none reserves no columns at all.

@@ -122,8 +122,8 @@ public final class ControlRowView: NSView {
     /// The row's own measurements, which is what its members are handed.
     public var metrics: ControlRowMetrics { ControlRowMetrics(scale: scale) }
 
-    private(set) var leadingViews: [NSView] = []
-    private(set) var trailingViews: [NSView] = []
+    public private(set) var leadingViews: [NSView] = []
+    public private(set) var trailingViews: [NSView] = []
 
     /// **One stack, not two, with a spring in the middle.**
     ///

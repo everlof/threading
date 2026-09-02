@@ -79,6 +79,7 @@ final class PaneTab {
     case supervision(SupervisionListViewController)
     case simulator(SimulatorPaneViewController)
     case deviceLog(DeviceLogPaneViewController)
+    case nativePlugin(NativePluginPaneViewController)
     case extensionPanel(ExtensionPanelViewController)
     case compare(CompareViewController)
     case browserComparison(BrowserComparisonViewController)
@@ -217,6 +218,7 @@ final class PaneTab {
     case .extensionPanel(let panel): return panel
     case .compare(let compare): return compare
     case .browserComparison(let comparison): return comparison
+    case .nativePlugin(let plugin): return plugin
     }
   }
 
@@ -257,6 +259,8 @@ final class PaneTab {
       return "rectangle.on.rectangle"
     case .browserComparison:
       return "square.on.square.dashed"
+    case .nativePlugin:
+      return "puzzlepiece.extension"
     }
   }
 
@@ -302,6 +306,10 @@ final class PaneTab {
       return "Compare"
     case .browserComparison:
       return L10n.string("Visual diff")
+    case .nativePlugin(let plugin):
+      // The plugin's own identity, so a refusal is still a named tab rather than an empty one.
+      return plugin.pluginIdentifier.map { String($0.split(separator: ".").last ?? "") }
+        ?? L10n.string("Plugin")
     }
   }
 }

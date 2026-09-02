@@ -41,7 +41,7 @@ public final class PaneHeaderView: NSView {
     /// state one and the band asks for it, the band's own edges otherwise. Exposed so a test can
     /// assert the margin against what the content is actually measured from.
     private let margin: PaneBandMargin
-    private(set) lazy var contentGuide: NSLayoutGuide = makeContentGuide(margin)
+    public private(set) lazy var contentGuide: NSLayoutGuide = makeContentGuide(margin)
 
     /// The vertical content region, ending where the separator begins. Exposed as an anchor so
     /// composite pane headers can align their host-owned controls to the same row without

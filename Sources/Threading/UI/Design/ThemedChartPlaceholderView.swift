@@ -62,7 +62,7 @@ public final class ThemedChartPlaceholderView: NSView, ThemedComponent {
     private let appEvents = AppEventObservations()
     private var themeRedraw: ThemeRedraw?
 
-    private(set) var placeholder: ThemedChartPlaceholder = .empty
+    public private(set) var placeholder: ThemedChartPlaceholder = .empty
 
     /// A seam for tests, which cannot watch a compositor.
     public var isBreathing: Bool { band.isPulsing }

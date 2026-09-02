@@ -173,7 +173,7 @@ public final class RecoverableDefaultsStore<Value: Codable> {
     private let key: String
     private let criticality: PersistenceCriticality
     private let sizePolicy: RecoverableDefaultsSizePolicy
-    private(set) var writesAllowed = true
+    public private(set) var writesAllowed = true
 
     public init(
         defaults: UserDefaults,
@@ -297,7 +297,7 @@ public final class RecoverableFileStore<Value: Codable> {
     private let sizePolicy: RecoverableFileSizePolicy
     private let dateEncodingStrategy: JSONEncoder.DateEncodingStrategy
     private let dateDecodingStrategy: JSONDecoder.DateDecodingStrategy
-    private(set) var writesAllowed = true
+    public private(set) var writesAllowed = true
 
     public init(
         url: URL,

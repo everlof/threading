@@ -44,6 +44,7 @@
 		7C000007000000000000A009 /* threading-simulator-helper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B011 /* threading-simulator-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		7C000007000000000000A010 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C010 /* ThreadingSimulatorKit */; };
 		7C000007000000000000A0F0 /* ThreadingPluginKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F0 /* ThreadingPluginKit */; };
+		7C000007000000000000A0F2 /* ThreadingPluginKit in Embed Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F0 /* ThreadingPluginKit */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		7C000007000000000000A0F1 /* ThreadingPluginKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C0F1 /* ThreadingPluginKit */; };
 		7C000007000000000000A011 /* ThreadingSimulatorKit in Frameworks */ = {isa = PBXBuildFile; productRef = 7C000007000000000000C011 /* ThreadingSimulatorKit */; };
 		7C000006000000000000A001 /* codes.threading.ptyd.plist in Embed Launch Agents */ = {isa = PBXBuildFile; fileRef = 7C000006000000000000B001 /* codes.threading.ptyd.plist */; };
@@ -196,6 +197,17 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
+		7C000007000000000000C0F2 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				7C000007000000000000A0F2 /* ThreadingPluginKit in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -976,6 +988,7 @@
 				E77100010000000000000001 /* Embed Extension SDK */,
 				877EDD4F2A5B003140CB8A81 /* Embed Extension Helpers */,
 				7C000006000000000000C001 /* Embed Launch Agents */,
+				7C000007000000000000C0F2 /* Embed Frameworks */,
 				E77300010000000000000001 /* Embed UI Scenario Helper */,
 			);
 			buildRules = (

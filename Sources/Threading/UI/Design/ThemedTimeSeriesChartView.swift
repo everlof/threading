@@ -684,11 +684,11 @@ public enum ThemedChartGeometry {
 /// pixels currently on screen, including when another switch interrupts it; Reduce Motion lands
 /// synchronously. Axes, marker glyphs, focus and hover are drawn from semantic design roles.
 public class ThemedTimeSeriesChartView: ThemedControl {
-    private(set) var model: ThemedChartModel = .empty
-    private(set) var composition: ThemedChartComposition
-    private(set) var animationProgress: Double = 1
-    private(set) var renderedPointCount = 0
-    private(set) var renderedMarkerCount = 0
+    public private(set) var model: ThemedChartModel = .empty
+    public private(set) var composition: ThemedChartComposition
+    public private(set) var animationProgress: Double = 1
+    public private(set) var renderedPointCount = 0
+    public private(set) var renderedMarkerCount = 0
     public var displayedGeometryForTesting: [ThemedChartRenderedSeries] { displayedGeometry }
     public var resolvedXRangeForTesting: ClosedRange<Date>? { resolvedXRange }
     public var resolvedYRangeForTesting: ClosedRange<Double> { resolvedYRange }

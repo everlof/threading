@@ -43,7 +43,7 @@ public enum WindowBackdrop {
         case terminal(NSColor)
     }
 
-    private(set) static var ground: Ground = .chrome
+    public private(set) static var ground: Ground = .chrome
 
     /// The colour the window is painted with right now.
     public static var color: NSColor {

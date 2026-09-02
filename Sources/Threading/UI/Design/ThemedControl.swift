@@ -116,7 +116,7 @@ public class ThemedControl: NSControl, ThemedComponent, PointerClaiming {
     /// from under a stationary pointer is never told it was left and stays lit. See
     /// `NSView.isPointerInside` for how that reaches the screen. One implementation is also what
     /// stops the seventh control from being the one that forgot.
-    private(set) var isHovered = false {
+    public private(set) var isHovered = false {
         didSet {
             guard isHovered != oldValue else { return }
             hoverDidChange()
@@ -345,7 +345,7 @@ public enum DisabledControlDrawing {
 /// in `ThemedControl`: every ordinary control should keep answering focus the way it does.
 public struct KeyboardFocusOrigin {
 
-    private(set) var isFromKeyboard = false
+    public private(set) var isFromKeyboard = false
 
     public mutating func arrived(from event: NSEvent?) {
         isFromKeyboard = event?.type == .keyDown

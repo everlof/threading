@@ -68,7 +68,7 @@ public final class PaneFooterView: NSView {
     /// assert the margin against what the content is actually measured from.
     private let margin: PaneBandMargin
     private let outerEdgeAlignment: PaneFooterOuterEdgeAlignment
-    private(set) lazy var contentGuide: NSLayoutGuide = makeContentGuide(margin)
+    public private(set) lazy var contentGuide: NSLayoutGuide = makeContentGuide(margin)
 
     private let separator = SeparatorView()
 

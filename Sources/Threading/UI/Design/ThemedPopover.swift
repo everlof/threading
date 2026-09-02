@@ -54,7 +54,7 @@ public final class ThemedPopover {
     /// could not be typed into — and why nothing short of asserting `isKeyWindow` catches it.
     public var initialFirstResponder: NSResponder?
 
-    private(set) var isShown = false
+    public private(set) var isShown = false
     public var presentedWindow: NSWindow? { panel }
 
     /// Every popover currently on screen, so the one thing that outranks it can find it.

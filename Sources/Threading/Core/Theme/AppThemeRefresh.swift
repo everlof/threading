@@ -344,7 +344,7 @@ public enum AppThemeRefresh {
     /// Advances only for a whole-app sweep. A detached retained tree keeps the generation it
     /// last saw, which lets its host distinguish a real missed theme change from an ordinary
     /// remove-and-reinsert cycle without subscribing every view to notifications.
-    private(set) static var generation: UInt64 = 0
+    public private(set) static var generation: UInt64 = 0
 
     /// AppKit refreshes stock controls when these preferences move; app-owned chrome needs the
     /// same signal. Installed once at launch, after the palette is restored and before windows

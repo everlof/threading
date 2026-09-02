@@ -41,7 +41,7 @@ public class ThemedTextField: NSTextField, ThemedComponent, SystemChromeBoundary
 
     public let surfacePresentation: SurfacePresentation
 
-    private(set) var isHovered = false {
+    public private(set) var isHovered = false {
         didSet {
             guard isHovered != oldValue else { return }
             needsDisplay = true
@@ -589,7 +589,7 @@ public final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
 
     /// The way a query leaves without being deleted a character at a time. At the far edge —
     /// every search field's own convention — and only while there is something to clear.
-    private(set) lazy var clearButton: ThemedIconButton = {
+    public private(set) lazy var clearButton: ThemedIconButton = {
         let button = ThemedIconButton(
             symbolName: "xmark",
             accessibility: L10n.string("Clear Search"),
@@ -605,7 +605,7 @@ public final class ThemedSearchField: ThemedTextField, ThemeDerivedContent {
     ///
     /// Tertiary emphasis on purpose: no surface until the pointer is on it, so at rest it
     /// reads as part of the field, not as a second control fighting the caret for the row.
-    private(set) var trailingActionButton: ThemedButton?
+    public private(set) var trailingActionButton: ThemedButton?
 
     /// Creates the action once. Hidden until `isTrailingActionVisible` says otherwise, because
     /// with nothing typed there is nothing for it to act on.

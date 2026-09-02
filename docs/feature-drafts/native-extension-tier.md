@@ -465,12 +465,46 @@ struct-equality assertion on `AppTheme` fails on the seventh decimal — so `Hos
 asserts identity and material exactly, and colour to `1/255`, which is the precision the format
 actually promises.
 
+### It runs
+
+`Plugins/DeviceLogsPlugin` is a real bundle: built by `scripts/build_plugin.sh`, signed with
+Threading's Developer ID, installed to `~/Library/Application Support/Threading/Plugins`, and
+opened from the panel's new-tab menu like any other pane. It streams `log stream --style=ndjson`
+from this Mac or a booted simulator, decodes off the main thread, hands rows to a virtualised
+`ThemedTableView` on a timer, and drops the oldest when the stream outruns the table — saying how
+many rather than hiding it. Measured on first run: 6,854 rows in four seconds, no drops.
+
+Everything visible in it is a real Threading component compiled into the bundle, resolving the
+host's theme through `HostThemeHandoff`. `NativePluginLoadingTests` loads that signed bundle,
+asserts the pane's ground matches the host's, renders it to a PNG, and checks the same bundle is
+refused when no team is trusted. It skips when no plugin is installed, so a green run on a machine
+without one is not mistaken for coverage.
+
+Three things this cost that are worth knowing:
+
+**Install names have to match.** SwiftPM links the contract as `@rpath/libThreadingPluginKit.dylib`;
+the host embeds it as `ThreadingPluginKit.framework/Versions/A/ThreadingPluginKit`. dyld would have
+mapped a *second* copy, and two `@objc` protocol declarations in two images are two protocols — the
+plugin would have been refused for not conforming to the protocol it plainly conforms to, which is
+the same trap the probe hit from the other direction. `build_plugin.sh` rewrites the dependency to
+the name the host already has loaded.
+
+**The framework has to be embedded.** It was resolving only through the DerivedData
+`PackageFrameworks` rpath, so it worked in development and would have failed in a shipped app. The
+app now has an Embed Frameworks phase.
+
+**A render found what no assertion would.** The first working pane drew every cell as its own
+rounded plate, because a table of `ThemedTextField`s is a table of wells; the row's ground belongs
+to the table. The message column was also clipped and the filter field had collapsed to its
+magnifier. All three were obvious in a picture and invisible to every assertion that passed.
+
 ### Still open
 
-Moving Device logs itself into a plugin bundle. `NativePluginCatalog` opens the door,
-`NativePluginPaneViewController` hosts a view, and the theme now crosses; what remains is embedding
-`ThreadingPluginKit.framework` in `Contents/Frameworks` so a shipped plugin can resolve its
-`@rpath`, and calling `apply(theme:)` from the host's own theme-change observation.
+`DeviceLogPaneViewController` still lives in the app — the plugin is a second, simpler
+implementation rather than a move. Retiring the host-side pane means the plugin needs the paired
+device and app-container routes, the tap consent, and the agent tools that drive them, all of which
+cross the contract rather than the design system. That is the next slice, and it is a question
+about `PluginContext` rather than about components.
 
 ## Reopen / revisit triggers
 

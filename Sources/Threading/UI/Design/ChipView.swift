@@ -398,7 +398,7 @@ public final class ChipView: ThemedControl, OpticalInsetProviding, ThemedMenuPre
     ) -> (any ChipChoicePresentationSession)?)?
 
     /// The item currently represented, so callers can read the selection back.
-    private(set) var selectedItem: ThemedMenuItem?
+    public private(set) var selectedItem: ThemedMenuItem?
 
     /// Called after a menu item is chosen.
     public var onSelect: ((ThemedMenuItem) -> Void)?

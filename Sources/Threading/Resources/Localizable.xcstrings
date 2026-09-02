@@ -24542,6 +24542,17 @@
         }
       }
     },
+    "Movie" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Film"
+          }
+        }
+      }
+    },
     "Must not render" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29422,6 +29433,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rita upp mätvärden inbyggt – jämförelser, rangordningar, uppdelningar, trender."
+          }
+        }
+      }
+    },
+    "Plugin" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillägg"
           }
         }
       }
@@ -39799,6 +39821,17 @@
         }
       }
     },
+    "SubagentNavigatorRowView" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "SubagentNavigatorRowView"
+          }
+        }
+      }
+    },
     "SubagentSummaryView" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40862,6 +40895,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Simulatorinmatningen avbröts."
+          }
+        }
+      }
+    },
+    "The Subagents pane's navigator: selectable rows, the child on screen drawn selected, a row that leads nowhere disabled, and the heading that names whose transcript follows." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Underagentpanelens navigator: valbara rader, barnet på skärmen ritat som valt, en rad som inte leder någonstans avstängd, och rubriken som säger vems transkription som följer."
           }
         }
       }
@@ -47510,6 +47554,17 @@
         }
       }
     },
+    "Transcript" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transkription"
+          }
+        }
+      }
+    },
     "Transcript Path" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -47528,6 +47583,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Transkriptindex är inte tillgängligt"
+          }
+        }
+      }
+    },
+    "Transcript of %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transkription av %@"
           }
         }
       }
