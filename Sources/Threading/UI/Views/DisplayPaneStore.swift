@@ -25,6 +25,7 @@ extension PersistedPanel {
       case .files: return "f"
       case .attachments: return "a"
       case .simulator: return "m:\(tab.simulatorDeviceID ?? "automatic")"
+      case .deviceLog: return "l"
       case .extensionPanel:
         return "e:\(tab.extensionIdentifier ?? "")/\(tab.extensionPanelID ?? "")"
       case .compare:
@@ -78,6 +79,10 @@ extension PersistedPanel {
         detail =
           "the in-panel iOS Simulator (prefer this device surface instead of opening "
           + "Apple Simulator in a separate window)"
+      case .deviceLog:
+        detail =
+          "a live log stream from a booted simulator or a paired iPhone (the user is "
+          + "watching os_log and stdout from the app under development)"
       case .extensionPanel:
         detail = "extension panel \"\(tab.title ?? "Panel")\""
       case .compare:

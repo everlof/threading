@@ -351,8 +351,9 @@ enum LogSourceCatalog {
             if idevicesyslogPath != nil {
                 for (udid, network) in pairedDevices() {
                     let label = network ? "Wi-Fi" : "USB"
+                    let name = deviceName(udid: udid) ?? String(udid.prefix(8)) + "…"
                     options.append(.init(
-                        title: "􀟠  \(String(udid.prefix(8)))… (\(label))",
+                        title: "􀟠  \(name) (\(label))",
                         kind: .device(udid: udid, overNetwork: network)
                     ))
                 }
@@ -396,6 +397,16 @@ enum LogSourceCatalog {
             result.append((udid, true))
         }
         return result
+    }
+
+    /// The name the owner gave the phone. `ideviceinfo` answers this on a locked device, unlike
+    /// the syslog relay, so a named-but-silent source is a meaningful state rather than a puzzle.
+    private static func deviceName(udid: String) -> String? {
+        guard let raw = run("/opt/homebrew/bin/ideviceinfo", ["-u", udid, "-k", "DeviceName"]) else {
+            return nil
+        }
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 
     private static func run(_ executable: String, _ arguments: [String]) -> String? {
@@ -598,6 +609,11 @@ final class LogPaneView: NSView {
                 return
             }
             self.sourcePopUp.isEnabled = true
+            // Suppressed while the menu is rebuilt: AppKit sends the popup's action as items are
+            // added, which reads as a user choice and restarted the stream on the wrong source.
+            let action = self.sourcePopUp.action
+            self.sourcePopUp.action = nil
+            defer { self.sourcePopUp.action = action }
             found.forEach { self.sourcePopUp.addItem(withTitle: $0.title) }
             Probe.log("sources: " + found.map(\.title).joined(separator: " | "))
             var index = (previous >= 0 && previous < found.count) ? previous : 0
@@ -612,9 +628,13 @@ final class LogPaneView: NSView {
 
     @objc private func sourceChanged() { startSelectedSource() }
 
+    private var runningSourceTitle: String?
+
     private func startSelectedSource() {
         let index = sourcePopUp.indexOfSelectedItem
         guard index >= 0, index < options.count else { return }
+        guard options[index].title != runningSourceTitle else { return }
+        runningSourceTitle = options[index].title
         source?.stop()
         rows.removeAll(keepingCapacity: true)
         visibleRows.removeAll(keepingCapacity: true)

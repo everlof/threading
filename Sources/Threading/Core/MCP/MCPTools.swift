@@ -1532,6 +1532,16 @@ struct PanelActivateTabArguments: Codable, Sendable {
   let tab: PanelTabReference?
 }
 
+struct DeviceLogPrepareArguments: Codable, Sendable {
+  /// "device", "simulator" or "macos". Absent means the device, which is the case that needs the
+  /// tap most: a simulator's own logs are already complete without it.
+  let platform: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case platform
+  }
+}
+
 struct SimulatorPrepareArguments: Codable, Sendable {
   let deviceID: String?
 
@@ -2548,6 +2558,7 @@ enum MCPTools {
   static let browserPerformance = MCPBuiltInTool.browserPerformance.rawValue
   static let browserAccessibilityAudit = MCPBuiltInTool.browserAccessibilityAudit.rawValue
 
+  static let deviceLogPrepare = MCPBuiltInTool.deviceLogPrepare.rawValue
   static let simulatorPrepare = MCPBuiltInTool.simulatorPrepare.rawValue
   static let simulatorInstallLaunch = MCPBuiltInTool.simulatorInstallLaunch.rawValue
   static let simulatorScreenshot = MCPBuiltInTool.simulatorScreenshot.rawValue
@@ -5545,6 +5556,45 @@ enum MCPTools {
               \(BrowserAgentDefaults.maximumAccessibilityAuditIssues). Defaults to \
               \(BrowserAgentDefaults.defaultAccessibilityAuditIssues).
               """
+          )
+        ],
+        required: []
+      )
+    ),
+    MCPToolDefinition(
+      tool: .deviceLogPrepare,
+      name: "device_log_prepare",
+      groupID: "device-log",
+      family: .deviceLog,
+      annotations: MCPToolAnnotations(
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false
+      ),
+      title: "Prepare Device Logs",
+      detail: "Reveal this session's live log pane and build the tap an app links to be readable.",
+      symbol: "list.bullet.rectangle",
+      decodeArguments: { container in
+        try container.decodeIfPresent(DeviceLogPrepareArguments.self, forKey: .arguments)
+          ?? DeviceLogPrepareArguments(platform: nil)
+      },
+      observesPanel: true,
+      executeArguments: { handler, arguments, sessionID, completion in
+        handler.deviceLogPrepare(arguments, for: sessionID, completion: completion)
+      },
+      description: """
+        Reveal this session's Device logs pane and return the exact build setting that makes an \
+        app's own output readable in it. Call this before building an app whose `print()` output \
+        the user wants to see: printed output never reaches the unified log, so without the tap \
+        the pane shows only framework noise and nothing the app itself wrote. The returned value \
+        is added to your own xcodebuild invocation; Threading does not build the project for you.
+        """,
+      inputSchema: MCPInputSchema(
+        properties: [
+          "platform": MCPPropertySchema(
+            type: .string,
+            description: "device (default), simulator, or macos."
           )
         ],
         required: []

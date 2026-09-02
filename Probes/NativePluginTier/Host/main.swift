@@ -112,7 +112,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.contentView = content
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // Taking the keyboard is right for a person and wrong for a scripted run: a shell driving
+        // this would otherwise type its next command into the filter field, and a space on the
+        // focused source popup changes which source is streaming.
+        if environment["PROBE_NO_ACTIVATE"] == nil {
+            NSApp.activate(ignoringOtherApps: true)
+        }
         installThemeSignal()
     }
 

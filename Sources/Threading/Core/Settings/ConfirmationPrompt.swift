@@ -103,6 +103,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case approveSystemPermissionPrompt
     case conferManagerRole
     case controlSimulatorDevice
+    case linkDeviceLogTap
 
     // MARK: Software updates
 
@@ -283,6 +284,11 @@ enum ConfirmationPrompt: String, CaseIterable {
              .shareChatLink,
              .conferManagerRole,
              .controlSimulatorDevice,
+             // Linking the log tap gives an app's output a capability it did not have: whatever
+             // it prints stops being ephemeral and is published into the device's unified log,
+             // where it persists and leaves in a sysdiagnose or a log archive. Rebuilding without
+             // the tap stops new lines; it cannot unwrite the ones already there.
+             .linkDeviceLogTap,
              // Storing a test credential is the moment an origin gains the right to be signed
              // in to unattended, so it belongs with the other grants rather than with the
              // reversible edits: removing the entry later does not un-ring whatever an agent

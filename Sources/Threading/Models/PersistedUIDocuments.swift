@@ -178,6 +178,7 @@ struct PersistedTab: Codable {
     case files
     case attachments
     case simulator
+    case deviceLog
     case extensionPanel
     case compare
   }

@@ -78,6 +78,7 @@ final class PaneTab {
     case sharing(SessionSharingViewController)
     case supervision(SupervisionListViewController)
     case simulator(SimulatorPaneViewController)
+    case deviceLog(DeviceLogPaneViewController)
     case extensionPanel(ExtensionPanelViewController)
     case compare(CompareViewController)
     case browserComparison(BrowserComparisonViewController)
@@ -212,6 +213,7 @@ final class PaneTab {
     case .sharing(let sharing): return sharing
     case .supervision(let supervision): return supervision
     case .simulator(let simulator): return simulator
+    case .deviceLog(let logs): return logs
     case .extensionPanel(let panel): return panel
     case .compare(let compare): return compare
     case .browserComparison(let comparison): return comparison
@@ -247,6 +249,8 @@ final class PaneTab {
       return "person.3"
     case .simulator:
       return "iphone"
+    case .deviceLog:
+      return "list.bullet.rectangle"
     case .extensionPanel:
       return "puzzlepiece.extension"
     case .compare:
@@ -290,6 +294,8 @@ final class PaneTab {
       return L10n.string("Chats")
     case .simulator:
       return L10n.string("iOS Simulator")
+    case .deviceLog:
+      return L10n.string("Device logs")
     case .extensionPanel(let panel):
       return panel.panelTitle
     case .compare:

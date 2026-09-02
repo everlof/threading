@@ -6744,6 +6744,17 @@
         }
       }
     },
+    "App log" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applogg"
+          }
+        }
+      }
+    },
     "App theme" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10561,6 +10572,17 @@
         }
       }
     },
+    "Clear" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rensa"
+          }
+        }
+      }
+    },
     "Clear Browsing Data" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12277,6 +12299,17 @@
         }
       }
     },
+    "Connected, but no log lines yet." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ansluten, men inga loggrader än."
+          }
+        }
+      }
+    },
     "Connecting" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12339,6 +12372,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Anslutning"
+          }
+        }
+      }
+    },
+    "Console" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konsol"
           }
         }
       }
@@ -15126,6 +15170,17 @@
         }
       }
     },
+    "Device logs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enhetsloggar"
+          }
+        }
+      }
+    },
     "Diff options" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17905,6 +17960,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Filtrera filer…"
+          }
+        }
+      }
+    },
+    "Filter log lines" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filtrera loggrader"
           }
         }
       }
@@ -22177,6 +22243,17 @@
         }
       }
     },
+    "Let Threading read this app's printed output?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ska Threading få läsa appens utskrifter?"
+          }
+        }
+      }
+    },
     "Let a new provider read the frozen history that created its session." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22239,6 +22316,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Låt agenter meddela den här Macen eller en parad iPhone när det begärda arbetet är klart."
+          }
+        }
+      }
+    },
+    "Let agents open a live log stream from a simulator or a paired iPhone." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Låt agenter öppna en direktström av loggar från en simulator eller en ansluten iPhone."
           }
         }
       }
@@ -25473,6 +25561,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inga baslinjer i projektet än"
+          }
+        }
+      }
+    },
+    "No booted simulator or paired iPhone found." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hittade ingen startad simulator eller ansluten iPhone."
           }
         }
       }
@@ -33624,6 +33723,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Återuppta en tidigare konversation"
+          }
+        }
+      }
+    },
+    "Resume · %@ new" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Återuppta · %@ nya"
           }
         }
       }
@@ -46791,6 +46901,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Threading startades med återställningsflaggan."
+          }
+        }
+      }
+    },
+    "Threading will give this chat's agent a small library to link into the app it builds. Everything the app prints then appears in the Device logs pane, and also in the device's own system log, where it stays and can leave the device in a sysdiagnose. Building without it stops new lines but does not remove lines already written.\n\nThis answer is remembered for this chat." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Threading ger chattens agent ett litet bibliotek att länka in i appen den bygger. Allt appen skriver ut visas då i panelen Enhetsloggar, och även i enhetens egen systemlogg, där det ligger kvar och kan lämna enheten i en sysdiagnose. Att bygga utan det stoppar nya rader men tar inte bort rader som redan skrivits.\n\nSvaret sparas för den här chatten."
           }
         }
       }

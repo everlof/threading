@@ -477,6 +477,12 @@ final class DisplayPaneController: NSViewController {
         }
       ),
       (
+        L10n.string("Device logs"), "list.bullet.rectangle", nil, true,
+        {
+          [weak self] in _ = self?.activateDeviceLog(for: sessionID)
+        }
+      ),
+      (
         L10n.string("Execution audit"), "checklist.checked", nil, canAddBrowser,
         {
           [weak self] in _ = self?.addAuditTab(for: sessionID)
@@ -934,6 +940,35 @@ final class DisplayPaneController: NSViewController {
     tabsBySession[sessionID] = tabs
     activeTabIDBySession[sessionID] = tab.id
     activeBrowserTabIDBySession[sessionID] = tab.id
+    persist(sessionID)
+    if sessionID == currentSessionID { render() }
+    return controller
+  }
+
+  /// Reveals this session's live device log pane, creating it the first time.
+  ///
+  /// One per session on purpose: a second tab would be a second child process reading the same
+  /// firehose, and the filter belongs to the pane rather than to the source.
+  @discardableResult
+  func activateDeviceLog(for sessionID: SessionID) -> DeviceLogPaneViewController? {
+    restoreIfNeeded(sessionID)
+    var tabs = tabsBySession[sessionID] ?? []
+    if let existing = tabs.first(where: {
+      if case .deviceLog = $0.body { return true }
+      return false
+    }) {
+      activeTabIDBySession[sessionID] = existing.id
+      persist(sessionID)
+      if sessionID == currentSessionID { render() }
+      if case .deviceLog(let logs) = existing.body { return logs }
+      return nil
+    }
+
+    let controller = DeviceLogPaneViewController(owningSessionID: sessionID)
+    let tab = DisplayTab(body: .deviceLog(controller), owningSessionID: sessionID)
+    tabs.append(tab)
+    tabsBySession[sessionID] = tabs
+    activeTabIDBySession[sessionID] = tab.id
     persist(sessionID)
     if sessionID == currentSessionID { render() }
     return controller
@@ -2339,6 +2374,14 @@ final class DisplayPaneController: NSViewController {
       contentMenuButton.isHidden = true
       installHosted(simulator)
 
+    case .deviceLog(let logs):
+      imageView.image = nil
+      imageView.isHidden = true
+      hideHTML()
+      captionLabel.isHidden = true
+      contentMenuButton.isHidden = true
+      installHosted(logs)
+
     case .extensionPanel(let panel):
       imageView.image = nil
       imageView.isHidden = true
@@ -2477,6 +2520,7 @@ final class DisplayPaneController: NSViewController {
     case .sharing: return "sharing"
     case .supervision: return "supervision"
     case .simulator: return "simulator"
+    case .deviceLog: return "device-log"
     case .extensionPanel: return "extension-panel"
     case .compare: return "compare"
     case .browserComparison: return "browser-comparison"
@@ -2611,6 +2655,13 @@ final class DisplayPaneController: NSViewController {
       case .attachments:
         guard let controller = makeAttachments(for: sessionID) else { continue }
         tabs.append(DisplayTab(id: id, body: .attachments(controller)))
+
+      case .deviceLog:
+        tabs.append(DisplayTab(
+          id: id,
+          body: .deviceLog(DeviceLogPaneViewController(owningSessionID: sessionID)),
+          owningSessionID: sessionID
+        ))
 
       case .simulator:
         let deviceID = persisted.simulatorDeviceID.flatMap(SimulatorDeviceID.init)

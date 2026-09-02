@@ -50,14 +50,90 @@ attached** for the app's lifetime (verified: still streaming at a 20s timeout, r
 |---|---|
 | `log stream --device…` | **does not exist**. `--device`/`--device-name`/`--device-udid` are `log collect` options only |
 | `log collect --device-name …` | `Must be root to collect logs from attached device`. Dead end for a GUI app |
-| `idevicesyslog -u <udid>` | **works**, live, no root, no tunnel, USB or Wi-Fi, iOS 26.6. Text lines: process, sender image, level, message. **No subsystem or category**, and its `-m`/`-p` filters are client-side string matches, so nothing bounds the daemon's work on this route |
+| `idevicesyslog -u <udid>` | **works**, live, no root, no tunnel, USB or Wi-Fi, iOS 26.6. Text lines: process, sender image, level, message. **No subsystem or category**, and its `-m`/`-p` filters are client-side string matches, so nothing bounds the daemon's work on this route. **Single-client — see below** |
 | `idevicesyslog archive - --age-limit N` | **works**, no root, pulls a real `.logarchive` as a tar on stdout |
-| `devicectl device process launch --console` | app `stdout`/`stderr` only, and it fights the syslog relay (see gotchas) |
+| `devicectl device process launch --console` | **the best device route, and it was nearly missed.** See below |
 
-The archive route is the valuable one: `log show --archive … --style ndjson` produces **byte-identical
-field structure to the simulator stream**, so one parser serves the simulator and the device
-archive. The live device stream is a poorer, second shape; the row model carries subsystem and
-category as optional, and a device live row never has them.
+#### The relay is single-client, and a leaked reader looks exactly like a dead device
+
+**Read this before concluding anything about a device that will not stream.**
+
+`com.apple.os_trace_relay` behaves as a single-client service. A second reader connects, is
+acknowledged, prints `[connected:<udid>]`, and then receives **nothing at all**. No error, no
+refusal, no timeout — silence indistinguishable from a quiet device.
+
+This cost most of a day. Three `idevicesyslog` processes had been orphaned to `launchd` by earlier
+test runs:
+
+```
+1795   ppid 1  Tue Sep  1 22:13  idevicesyslog -u 00008140… --no-colors -n
+41493  ppid 1  Wed Sep  2 07:57  idevicesyslog -u 00008140… --no-colors
+45374  ppid 1  Wed Sep  2 07:59  idevicesyslog -u 00008140… --no-colors
+```
+
+Killing them restored streaming on the next command. Everything below that reads as "the live device
+route is broken" was this, and the misdiagnosis drove a redesign around archive pulls and a tap
+whose stated purpose was to reach output the unified log supposedly could not carry.
+
+Two things made it convincing, and both are worth distrusting next time:
+
+- **A second implementation agreed.** `pymobiledevice3 syslog live` also received nothing, which
+  read as proof the fault was device-side. It only proved both clients were being starved by the
+  same holder. Independent tools agreeing tells you the *resource* is contended, not that it is
+  broken.
+- **The archive route worked.** `idevicesyslog archive` pulled 275 MB happily through the same
+  service, which made "live is broken, archive is fine" look like a real distinction. It was one
+  request shape being free while the other was occupied.
+
+**The leak is ours.** A source spawns `idevicesyslog` as a child; `Process.terminate()` only runs
+from `stop()`. Force-quit the app, kill a probe, crash — and the child reparents to `launchd` and
+holds the relay indefinitely. So: use the device source once, exit uncleanly, and the device source
+is silently broken for every later reader until somebody finds the orphan.
+
+`DeviceRelayReclaim` now sweeps before connecting, bounded to processes orphaned to `launchd` whose
+arguments name this exact tool and device — a reader started in the user's own terminal has their
+shell as its parent and is left alone. `DeviceLogLineReader` also terminates its child on `deinit`.
+`DeviceRelayReclaimTests` holds the bound.
+
+#### `--console` is the device answer
+
+Written off in one word above — "only" — and it is the entire thing you want. Measured 2026-09-02
+against Lotus on a real iPhone:
+
+```
+$ xcrun devicectl device process launch --device <id> --console --terminate-existing com.lotus.watch
+rc=124 (still streaming when cut at 40s)   81 lines
+lines containing <private>: 0
+```
+
+| | `idevicesyslog` | `--console` |
+|---|---|---|
+| live | broken on this phone; connects and sends nothing | **works** |
+| redacted | **94%** of app lines | **0** |
+| needs libimobiledevice (GPL, unbundlable) | yes | **no**, `devicectl` ships with Xcode |
+| size | 280 MB archive pulls | a stream |
+| stopping the reader | n/a | **does not stop the app** (verified: pid survived) |
+
+`stdout` has no privacy model, which is why the redaction column reads as it does: `<private>` is a
+*unified log* reader-privilege concept and simply does not apply. The same fact that makes printed
+output invisible to every log reader is what makes it unredactable once you read the stream itself.
+
+Its one constraint: `devicectl` must **launch** the app, so output begins at that launch and an
+already-running app cannot be attached to. For watching a build you just made, that is what Xcode
+does too.
+
+**How this was missed.** One phone's `os_trace_relay` accepted a live connection and then sent
+nothing, twice, from two independent implementations. That was read as "device streaming is dead"
+and the whole design bent around it: archive pulls, and a tap whose purpose was to smuggle `print()`
+into the unified log because the unified log looked like the only readable channel. The row above
+had been written and dismissed. **A route dismissed in a table cell is not a route that was tried.**
+
+The archive route is the one that produces **byte-identical field structure to the simulator
+stream**, so one parser serves the simulator and a device archive. It is not, as an earlier revision
+of this draft claimed, the *valuable* one: the live stream works, and the reason it appeared not to
+is recorded above. The live device row is a poorer shape — the row model carries subsystem and
+category as optional, and a device live row never has them — but it is live, and it is the only
+route that shows the system's account of the app as it happens.
 
 `idevicesyslog` is not Xcode's. It is libimobiledevice (1.4.0 here, from Homebrew), GPL-2.0 tools
 over an LGPL library, so it is **never bundled**: Threading resolves it on the user's login-shell
@@ -98,8 +174,11 @@ should therefore have produced own-binary lines. Two readings fit, and both are 
 Neither was separated in the capture; both are listed under *Not proven*. Nothing about the
 `<private>` ratio changes either way.
 
-**Conclusion: on a real device the live host-side reader gives you framework noise, 94% redacted,
-and little or none of your own signal, and it may be dropping the level your own logging uses.**
+**Conclusion: on a real device the live host-side reader gives you the system's account of the app —
+framework noise, 94% redacted — and little or none of the app's own signal.** That is a statement
+about *what the unified log carries*, not about whether the route works. It works. What it cannot
+give you is the app's own printed output, because printed output never enters the unified log at
+all; for that, read the stream directly with `--console` or make it durable with the tap.
 
 ### OSLogStore is not a tailing mechanism
 

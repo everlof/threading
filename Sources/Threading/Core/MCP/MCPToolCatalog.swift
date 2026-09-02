@@ -151,6 +151,7 @@ enum MCPToolCatalog {
     authoredContinuation,
     authoredDisplay,
     authoredBrowser,
+    authoredDeviceLog,
     authoredSimulator,
     authoredTabs,
     authoredProject,
@@ -355,6 +356,26 @@ enum MCPToolCatalog {
       File selection and download destinations are likewise chosen by the user in native \
       panels; if one opens, ask the user to complete it in the visible browser. \
       browser_query remains an expert fallback when you already know a CSS selector.
+      """
+  )
+
+  private static let authoredDeviceLog = MCPToolGroup(
+    id: "device-log",
+    family: .deviceLog,
+    title: "Device logs",
+    summary: "Let agents open a live log stream from a simulator or a paired iPhone.",
+    symbol: "list.bullet.rectangle",
+    tools: [],
+    instruction: """
+      When the user wants to see what an iOS app is actually saying, use Threading's Device logs \
+      pane rather than telling them to open Xcode or Console. Start with device_log_prepare: it \
+      reveals the pane and returns the exact build setting to add to your own xcodebuild.
+
+      The setting matters more than it looks. An app's `print()` output never reaches the unified \
+      log at all, so without the tap the pane shows the system's account of the app and nothing \
+      the app itself wrote. Add the returned OTHER_LDFLAGS value as a command-line build setting, \
+      not through an -xcconfig, which a target that sets OTHER_LDFLAGS without $(inherited) \
+      silently overrides.
       """
   )
 

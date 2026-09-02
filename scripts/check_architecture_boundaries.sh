@@ -133,6 +133,10 @@ fi
 # SimulatorAgentCommandService, and the 94 lines counted here decode, reveal the pane, and map a
 # result. Raise this number only for that shape again -- a family whose policy already lives in an
 # application service -- and never to make room for logic that could have gone in one.
+#
+# Raised from 9,063 to 9,097 when the Device logs family landed, for exactly that shape: platform
+# validation and result shaping are in DeviceLogAgentCommandService, and the 34 lines counted here
+# decode one argument, reveal the pane, and map a result.
 agent_tool_authority="$(python3 - "${repository_directory}" <<'PY'
 import re
 import sys
@@ -147,9 +151,9 @@ print(sum(
 ))
 PY
 )"
-if (( agent_tool_authority > 9063 )); then
+if (( agent_tool_authority > 9097 )); then
   echo "architecture-boundary: AgentToolCoordinator authority grew to ${agent_tool_authority}" >&2
-  echo "  keep it at or below the 9,063-line application-service ratchet" >&2
+  echo "  keep it at or below the 9,097-line application-service ratchet" >&2
   failed=1
 fi
 

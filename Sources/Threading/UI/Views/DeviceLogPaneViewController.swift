@@ -1,0 +1,580 @@
+import AppKit
+
+/// A live log stream from a booted simulator or a paired iPhone.
+///
+/// Host-owned for the same reasons `simulator-pane.md` gives for the simulator: the sources are
+/// device transactions, and log content is the user's. An extension may later contribute a
+/// *source*; it does not get to own the buffer, the virtualization or the ceilings.
+///
+/// The scaling contract is in
+/// [`device-and-simulator-logs.md`](../../../../docs/feature-drafts/device-and-simulator-logs.md):
+/// a real device produces ~5,800 rows/sec unfiltered. Rows stay a value model in a bounded ring,
+/// the table owns viewport rows only, and the drain is coalesced onto a timer so one batch of
+/// main-thread work happens per tick regardless of the source's rate.
+@MainActor
+final class DeviceLogPaneViewController: NSViewController {
+
+    // MARK: Constants
+
+    private enum Metrics {
+        static let drainInterval: TimeInterval = 0.1
+        static let rateInterval: TimeInterval = 1
+        static let rowHeight: CGFloat = 16
+        static let bottomSlack: CGFloat = 4
+        /// The header is created with an explicit height on purpose: `NSTableHeaderView` built from
+        /// a zero frame reserves no room in the scroll view, and the first rows then draw *under*
+        /// the column titles rather than below them.
+        static let headerHeight: CGFloat = 22
+        /// One height for every control in the bar. Their intrinsic heights differ — a popup, a
+        /// button and a field each measure themselves — and a row of controls that disagree by a
+        /// point or two reads as sloppy long before anyone can say why.
+        static let controlHeight: CGFloat = 22
+        /// How long a source may produce nothing before the pane says so rather than showing a
+        /// bare zero. Long enough that an ordinarily quiet moment does not read as a fault.
+        static let silenceGrace: TimeInterval = 6
+    }
+
+    private enum Columns {
+        static let time = NSUserInterfaceItemIdentifier("time")
+        static let level = NSUserInterfaceItemIdentifier("level")
+        static let process = NSUserInterfaceItemIdentifier("process")
+        static let subsystem = NSUserInterfaceItemIdentifier("subsystem")
+        static let message = NSUserInterfaceItemIdentifier("message")
+
+        static let widths: [(NSUserInterfaceItemIdentifier, String, CGFloat)] = [
+            (time, "Time", 92),
+            (level, "Level", 62),
+            (process, "Process", 150),
+            (subsystem, "Subsystem", 180),
+            (message, "Message", 640),
+        ]
+    }
+
+    // MARK: Chrome
+
+    private let sourcePopUp = ThemedPopUp()
+    private let routePopUp = ThemedPopUp()
+    private let levelPopUp = ThemedPopUp()
+    private let filterField = ThemedTextField()
+    private let statusLabel = NSTextField(labelWithString: "")
+    private lazy var followButton = ThemedButton(
+        title: L10n.string("Resume"),
+        target: self,
+        action: #selector(resumeFollowing)
+    )
+    private let table = ThemedTableView()
+    private var scroll: ThemedScrollView?
+
+    // MARK: State
+
+    private var options: [DeviceLogSourceOption] = []
+    private var source: DeviceLogRowSource?
+    private var runningSourceTitle: String?
+    private var route: DeviceLogSourceOption.Route = .appLog
+    private var rows: [DeviceLogRow] = []
+    private var visibleRows: [DeviceLogRow] = []
+    private var filter = ""
+    private var minimumSeverity = 0
+    private var drainTimer: Timer?
+    private var boundsObserver: NSObjectProtocol?
+    /// Whether new rows carry the view with them. True until the reader scrolls away, and true
+    /// again the moment they come back to the bottom — so following is something you leave and
+    /// rejoin rather than a mode you have to remember to switch.
+    private var isFollowing = true
+    private var rateTimer: Timer?
+    private var received = 0
+    private var lastCount = 0
+    private var rate = 0
+    /// When the running source was started, so a source that connects and then says nothing can
+    /// be told apart from one that simply has not been asked yet.
+    private var startedAt: Date?
+
+    /// The session this tab belongs to, kept so a predicate could later be scoped to its project.
+    let owningSessionID: SessionID?
+
+    init(owningSessionID: SessionID?) {
+        self.owningSessionID = owningSessionID
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    deinit {
+        if let boundsObserver { NotificationCenter.default.removeObserver(boundsObserver) }
+        // Timers and the child process must not outlive the pane. `source` is stopped on the main
+        // actor by `viewWillDisappear`; this is the belt for a controller released another way.
+        drainTimer?.invalidate()
+        rateTimer?.invalidate()
+    }
+
+    // MARK: Lifecycle
+
+    override func loadView() {
+        view = NSView()
+        buildTable()
+        buildChrome()
+    }
+
+    override func viewDidAppear() {
+        super.viewDidAppear()
+        guard drainTimer == nil else { return }
+        reloadSources()
+        drainTimer = Timer.scheduledTimer(
+            withTimeInterval: Metrics.drainInterval,
+            repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.drain() }
+        }
+        rateTimer = Timer.scheduledTimer(
+            withTimeInterval: Metrics.rateInterval,
+            repeats: true
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.rate = self.received - self.lastCount
+                self.lastCount = self.received
+                self.updateStatus()
+            }
+        }
+    }
+
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        // A hidden tab must not keep a child process reading a firehose.
+        source?.stop()
+        source = nil
+        runningSourceTitle = nil
+        drainTimer?.invalidate()
+        drainTimer = nil
+        rateTimer?.invalidate()
+        rateTimer = nil
+    }
+
+    // MARK: Building
+
+    private func buildTable() {
+        for (identifier, title, width) in Columns.widths {
+            let column = NSTableColumn(identifier: identifier)
+            column.title = title
+            column.width = width
+            table.addTableColumn(column)
+        }
+        table.dataSource = self
+        table.delegate = self
+        table.rowHeight = Metrics.rowHeight
+        table.usesAlternatingRowBackgroundColors = false
+        table.gridStyleMask = []
+        table.allowsMultipleSelection = true
+        let scroll = ThemedScrollView()
+        scroll.documentView = table
+        scroll.hasVerticalScroller = true
+        scroll.drawsBackground = false
+
+        // Order matters, and getting it wrong is subtle: a header assigned *before* the table has a
+        // scroll view is adopted by the table itself, so it scrolls with the content — the first
+        // rows draw under the column titles and a ghost copy of the header appears mid-list. Set it
+        // once the scroll view owns the table, then tile so the header band is actually reserved.
+        table.headerView = ThemedTableHeaderView(
+            frame: NSRect(x: 0, y: 0, width: 0, height: Metrics.headerHeight)
+        )
+        scroll.tile()
+
+        // The pane follows the tail until the reader scrolls away, so it has to know when they do.
+        scroll.contentView.postsBoundsChangedNotifications = true
+        boundsObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: scroll.contentView,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.scrollPositionChanged() }
+        }
+        self.scroll = scroll
+    }
+
+    /// The level filter's thresholds, in menu order. `ThemedMenuItem` carries no tag, so the
+    /// menu's own order is the mapping.
+    private static let levelThresholds = [0, 1, 3]
+
+    /// Sources the user actually reached for, most recent first.
+    ///
+    /// A phone carries every app its owner has ever built — 29 here — and alphabetical order says
+    /// nothing about which of them is being worked on today. Ordering by what was last opened lets
+    /// the list organise itself, and costs no round trip to the device to work out.
+    private enum Recents {
+        static let key = "deviceLogRecentSources"
+        static let capacity = 12
+
+        static func titles() -> [String] {
+            PreferenceStore.shared.stringArray(forKey: key) ?? []
+        }
+
+        static func remember(_ title: String) {
+            var titles = self.titles().filter { $0 != title }
+            titles.insert(title, at: 0)
+            PreferenceStore.shared.set(Array(titles.prefix(capacity)), forKey: key)
+        }
+
+        /// Recently used first, in the order they were used; everything else after, as found.
+        static func ordered(_ options: [DeviceLogSourceOption]) -> [DeviceLogSourceOption] {
+            let ranks = titles().enumerated().reduce(into: [String: Int]()) { $0[$1.element] = $1.offset }
+            let recent = options.filter { ranks[$0.title] != nil }
+                .sorted { (ranks[$0.title] ?? 0) < (ranks[$1.title] ?? 0) }
+            let rest = options.filter { ranks[$0.title] == nil }
+            return recent + rest
+        }
+    }
+
+    private func buildChrome() {
+        sourcePopUp.target = self
+        sourcePopUp.action = #selector(sourceChanged)
+
+        // Built from `allCases` so the menu order and the enum order cannot drift apart.
+        for route in DeviceLogSourceOption.Route.allCases {
+            routePopUp.addItem(withTitle: route.title)
+        }
+        routePopUp.selectItem(at: 0)
+        routePopUp.target = self
+        routePopUp.action = #selector(routeChanged)
+        routePopUp.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+
+        for title in ["All levels", "Info and above", "Errors only"] {
+            levelPopUp.addItem(withTitle: L10n.string(title))
+        }
+        levelPopUp.selectItem(at: 0)
+        levelPopUp.target = self
+        levelPopUp.action = #selector(levelChanged)
+
+        filterField.placeholderString = L10n.string("Filter log lines")
+        filterField.delegate = self
+
+        let rescan = ThemedButton(
+            title: L10n.string("Rescan"),
+            target: self,
+            action: #selector(reloadSources)
+        )
+        let clear = ThemedButton(
+            title: L10n.string("Clear"),
+            target: self,
+            action: #selector(clearRows)
+        )
+
+        // Counts and rate live in a footer rather than the control bar. In the bar they competed
+        // with the filter field for width, so every control resized as the number of rows grew —
+        // chrome that moves while you read it.
+        statusLabel.alignment = .right
+        statusLabel.setAccessibilityIdentifier("device-log-status")
+        statusLabel.font = Design.Typography.compactCode()
+        statusLabel.textColor = Design.Text.secondary
+
+        let bar = NSStackView(views: [sourcePopUp, routePopUp, rescan, levelPopUp, filterField, clear])
+        bar.orientation = .horizontal
+        bar.spacing = Design.Spacing.small
+        bar.alignment = .centerY
+        bar.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.small,
+            left: Design.Spacing.medium,
+            bottom: Design.Spacing.small,
+            right: Design.Spacing.medium
+        )
+        for control in [sourcePopUp, routePopUp, levelPopUp] as [NSView] + [rescan, clear, filterField] {
+            control.heightAnchor.constraint(equalToConstant: Metrics.controlHeight).isActive = true
+        }
+
+        let footer = NSStackView(views: [statusLabel])
+        footer.orientation = .horizontal
+        footer.alignment = .centerY
+        footer.edgeInsets = NSEdgeInsets(
+            top: Design.Spacing.tight,
+            left: Design.Spacing.medium,
+            bottom: Design.Spacing.tight,
+            right: Design.Spacing.medium
+        )
+
+        guard let scroll else { return }
+        let stack = NSStackView(views: [bar, scroll, footer])
+        stack.orientation = .vertical
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: view.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+
+        // Over the rows rather than in the chrome: it belongs to the thing that stopped moving,
+        // and it must not take a permanent slice of a bar that is already full.
+        followButton.isHidden = true
+        followButton.setAccessibilityIdentifier("device-log-resume-follow")
+        followButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(followButton)
+        NSLayoutConstraint.activate([
+            followButton.trailingAnchor.constraint(
+                equalTo: scroll.trailingAnchor,
+                constant: -Design.Spacing.large
+            ),
+            followButton.bottomAnchor.constraint(
+                equalTo: scroll.bottomAnchor,
+                constant: -Design.Spacing.medium
+            ),
+        ])
+    }
+
+    // MARK: Sources
+
+    @objc private func reloadSources() {
+        DeviceLogSourceCatalog.discover { [weak self] found in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.options = Recents.ordered(found)
+                let found = self.options
+                // Populating must not read as a user choice: AppKit sends a popup's action as
+                // items are added, which restarted the stream on the wrong source.
+                let action = self.sourcePopUp.action
+                self.sourcePopUp.action = nil
+                self.sourcePopUp.removeAllItems()
+                found.forEach { self.sourcePopUp.addItem(withTitle: $0.title) }
+                // Rescan looks for sources; it is not a request to change the one being read.
+                // Keep the running selection when it survived the rescan, so plugging a phone in
+                // does not yank the pane off the simulator it was watching.
+                let keep = self.runningSourceTitle.flatMap { title in
+                    found.firstIndex { $0.title == title }
+                }
+                if !found.isEmpty { self.sourcePopUp.selectItem(at: keep ?? 0) }
+                self.sourcePopUp.action = action
+                self.startSelectedSource()
+            }
+        }
+    }
+
+    private func startSelectedSource() {
+        let index = sourcePopUp.indexOfSelectedItem
+        guard index >= 0, index < options.count else {
+            updateStatus()
+            return
+        }
+        let option = options[index]
+        // The route only means something for an app; a device's system log has just the one.
+        var isApp = false
+        if case .app = option.kind { isApp = true }
+        routePopUp.isHidden = !isApp
+        let identity = isApp ? "\(option.title)#\(route.rawValue)" : option.title
+        // Restarting the source already running would throw away every row read so far.
+        guard identity != runningSourceTitle else { return }
+        runningSourceTitle = identity
+        Recents.remember(option.title)
+
+        source?.stop()
+        rows.removeAll(keepingCapacity: true)
+        visibleRows.removeAll(keepingCapacity: true)
+        received = 0
+        lastCount = 0
+        table.reloadData()
+
+        source = option.makeSource(predicate: nil, route: route)
+        source?.start()
+        startedAt = Date()
+        updateStatus()
+    }
+
+    @objc private func sourceChanged() { startSelectedSource() }
+
+    @objc private func routeChanged() {
+        // The menu is built from `allCases` in order, so its index *is* the route. An index that
+        // is not one leaves the current route alone rather than quietly meaning "app log": a
+        // selection nobody made must not decide which of an app's two logs is read.
+        let routes = DeviceLogSourceOption.Route.allCases
+        let index = routePopUp.indexOfSelectedItem
+        guard routes.indices.contains(index) else { return }
+        route = routes[index]
+        startSelectedSource()
+    }
+
+    @objc private func levelChanged() {
+        let index = levelPopUp.indexOfSelectedItem
+        minimumSeverity = Self.levelThresholds.indices.contains(index)
+            ? Self.levelThresholds[index]
+            : 0
+        recomputeVisible()
+        table.reloadData()
+        updateStatus()
+    }
+
+    @objc private func clearRows() {
+        rows.removeAll(keepingCapacity: true)
+        visibleRows.removeAll(keepingCapacity: true)
+        table.reloadData()
+        updateStatus()
+    }
+
+    /// Rows without a device, so the pane's own layout can be reviewed as a picture.
+    ///
+    /// `design-system.md` asks for a rendered state on a new component, and this surface earns it:
+    /// its header sat *on top of* the first rows for a whole build because nothing drew it.
+    func installRowsForTesting(_ fixture: [DeviceLogRow]) {
+        rows = fixture
+        recomputeVisible()
+        table.reloadData()
+        updateStatus()
+    }
+
+    // MARK: Filtering
+
+    private var isFiltering: Bool { !filter.isEmpty || minimumSeverity > 0 }
+
+    private func matches(_ row: DeviceLogRow) -> Bool {
+        guard row.severity >= minimumSeverity else { return false }
+        guard !filter.isEmpty else { return true }
+        return row.message.lowercased().contains(filter)
+            || row.process.lowercased().contains(filter)
+            || (row.subsystem?.lowercased().contains(filter) ?? false)
+    }
+
+    private func recomputeVisible() {
+        visibleRows = isFiltering ? rows.filter { matches($0) } : rows
+    }
+
+    // MARK: Streaming
+
+    /// One batch per tick. The bottom stays pinned only when it was already pinned, so scrolling
+    /// back to read something is not fought by the stream.
+    private func drain() {
+        guard let source else { return }
+        let incoming = source.drain()
+        guard !incoming.isEmpty else { return }
+        received += incoming.count
+
+        rows.append(contentsOf: incoming)
+        if rows.count > DeviceLogLimits.ringCapacity {
+            rows.removeFirst(rows.count - DeviceLogLimits.ringCapacity)
+        }
+
+        if isFiltering {
+            visibleRows.append(contentsOf: incoming.filter { matches($0) })
+            if visibleRows.count > DeviceLogLimits.ringCapacity {
+                visibleRows.removeFirst(visibleRows.count - DeviceLogLimits.ringCapacity)
+            }
+        } else {
+            visibleRows = rows
+        }
+
+        table.reloadData()
+        if isFollowing, !visibleRows.isEmpty {
+            table.scrollRowToVisible(visibleRows.count - 1)
+        }
+        updateFollowAffordance()
+    }
+
+    /// The reader moved the view. Leaving the bottom stops the follow; arriving back resumes it.
+    private func scrollPositionChanged() {
+        let atBottom = isPinnedToBottom()
+        guard atBottom != isFollowing else { return }
+        isFollowing = atBottom
+        updateFollowAffordance()
+    }
+
+    @objc private func resumeFollowing() {
+        isFollowing = true
+        if !visibleRows.isEmpty { table.scrollRowToVisible(visibleRows.count - 1) }
+        updateFollowAffordance()
+    }
+
+    /// The button is the only thing that says the view has stopped moving on purpose. Without it a
+    /// reader who scrolled up sees a still list and cannot tell it from a source that went quiet.
+    private func updateFollowAffordance() {
+        followButton.isHidden = isFollowing
+        let behind = max(0, visibleRows.count - (table.rows(in: table.visibleRect).location
+            + table.rows(in: table.visibleRect).length))
+        followButton.title = behind > 0
+            ? L10n.format("Resume · %@ new", "\(behind)")
+            : L10n.string("Resume")
+    }
+
+    private func isPinnedToBottom() -> Bool {
+        guard let scroll, let document = scroll.documentView else { return true }
+        return scroll.contentView.documentVisibleRect.maxY
+            >= document.bounds.height - Metrics.bottomSlack
+    }
+
+    private func updateStatus() {
+        guard !options.isEmpty else {
+            statusLabel.stringValue = L10n.string("No booted simulator or paired iPhone found.")
+            return
+        }
+        // Silence is a state, not an absence of one. A device whose relay accepts the connection
+        // and then sends nothing looks identical to a quiet device unless the pane says so, and
+        // that exact case cost an afternoon: `os_trace_relay` connects, streams nothing, and the
+        // archive route through the same service works fine.
+        if received == 0, let startedAt, Date().timeIntervalSince(startedAt) > Metrics.silenceGrace {
+            statusLabel.stringValue = L10n.string("Connected, but no log lines yet.")
+            statusLabel.textColor = Design.Status.warning
+            return
+        }
+        statusLabel.textColor = Design.Text.secondary
+        var parts = [isFiltering ? "\(visibleRows.count)/\(rows.count)" : "\(rows.count)"]
+        parts.append("\(rate)/s")
+        if let dropped = source?.dropped, dropped > 0 { parts.append("⚠︎ \(dropped)") }
+        statusLabel.stringValue = parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - Filter field
+
+extension DeviceLogPaneViewController: NSTextFieldDelegate {
+    func controlTextDidChange(_ notification: Notification) {
+        filter = filterField.stringValue.lowercased()
+        recomputeVisible()
+        table.reloadData()
+        updateStatus()
+    }
+}
+
+// MARK: - Table
+
+extension DeviceLogPaneViewController: NSTableViewDataSource {
+    func numberOfRows(in tableView: NSTableView) -> Int { visibleRows.count }
+}
+
+extension DeviceLogPaneViewController: NSTableViewDelegate {
+    /// Only the viewport's rows are ever built, through ordinary reuse. This is the whole reason
+    /// the pane is a table rather than a stack of labels.
+    func tableView(
+        _ tableView: NSTableView,
+        viewFor tableColumn: NSTableColumn?,
+        row: Int
+    ) -> NSView? {
+        guard let tableColumn, visibleRows.indices.contains(row) else { return nil }
+        let identifier = tableColumn.identifier
+        let host = tableView.makeView(withIdentifier: identifier, owner: self)
+            as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
+        host.identifier = identifier
+
+        let entry = visibleRows[row]
+        let label = NSTextField(labelWithString: text(for: entry, column: identifier))
+        label.font = Design.Typography.compactCode()
+        label.lineBreakMode = .byTruncatingTail
+        label.isSelectable = true
+        label.textColor = ink(for: entry, column: identifier)
+        host.install(label, columnWidth: tableColumn.width, horizontalInset: Design.Spacing.tight)
+        return host
+    }
+
+    private func text(for entry: DeviceLogRow, column: NSUserInterfaceItemIdentifier) -> String {
+        switch column {
+        case Columns.time: return entry.time
+        case Columns.level: return entry.level
+        case Columns.process: return entry.process
+        case Columns.subsystem: return entry.subsystem ?? ""
+        default: return entry.message
+        }
+    }
+
+    private func ink(for entry: DeviceLogRow, column: NSUserInterfaceItemIdentifier) -> NSColor {
+        if entry.severity >= 3 { return Design.Status.warning }
+        switch column {
+        case Columns.process, Columns.message: return Design.Text.label
+        default: return Design.Text.secondary
+        }
+    }
+}
