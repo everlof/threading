@@ -43,8 +43,7 @@ struct WorkspaceNavigatorIntentDispatcher {
     ) -> WorkspaceNavigatorIntentDispatchResult {
         guard let session = projectStore.session(withID: sessionID),
               !session.isArchived,
-              !hasScheduledStart(sessionID)
-        else {
+              !hasScheduledStart(sessionID) else {
             return .targetUnavailable
         }
 
@@ -174,7 +173,6 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         coordinator.onDismiss = { [weak self] in self?.dismissTemporarilyRevealedSidebar() }
         return coordinator
     }()
-
     private lazy var sidebarEdgeTrackingView: HoverTrackingView = {
         let tracker = HoverTrackingView()
         tracker.passesHitTestingThrough = true
@@ -184,10 +182,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         return tracker
     }()
-
-    #if DEBUG
-        private var allowsUnkeyedSidebarEdgeRevealForTesting = false
-    #endif
+#if DEBUG
+    private var allowsUnkeyedSidebarEdgeRevealForTesting = false
+#endif
 
     /// Owns session creation, import, worktree targeting, surface switches, and closing.
     lazy var sessionCoordinator = SessionCoordinator(
@@ -874,7 +871,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                 if self.sidebarEdgeRevealCoordinator.isTemporarilyRevealed {
                     self.sidebarEdgeRevealCoordinator.revealDidComplete(
                         pointerIsInsideSidebar:
-                        self.workspaceSidebarViewController.view.isPointerInside
+                            self.workspaceSidebarViewController.view.isPointerInside
                     )
                 }
             }
@@ -941,7 +938,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             ),
             tracker.widthAnchor.constraint(
                 equalToConstant: SidebarEdgeRevealCoordinator.triggerWidth
-            ),
+            )
         ])
     }
 
@@ -956,9 +953,9 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     }
 
     private var sidebarEdgeRevealIsEligible: Bool {
-        #if DEBUG
-            if allowsUnkeyedSidebarEdgeRevealForTesting { return sidebarItem.isCollapsed }
-        #endif
+#if DEBUG
+        if allowsUnkeyedSidebarEdgeRevealForTesting { return sidebarItem.isCollapsed }
+#endif
         guard sidebarItem.isCollapsed,
               let window,
               window.isKeyWindow,
@@ -993,39 +990,38 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let self else { return }
             if let window = self.window,
                NSApp.keyWindow?.parent === window,
-               self.sidebarEdgeRevealCoordinator.isHoldingPresentedInteraction
-            {
+               self.sidebarEdgeRevealCoordinator.isHoldingPresentedInteraction {
                 return
             }
             self.sidebarEdgeRevealCoordinator.dismissImmediately()
         }
     }
 
-    #if DEBUG
-        var sidebarEdgeRevealPolicyForTesting: SidebarEdgeRevealCoordinator.Policy {
-            get { sidebarEdgeRevealCoordinator.policy }
-            set { sidebarEdgeRevealCoordinator.policy = newValue }
-        }
+#if DEBUG
+    var sidebarEdgeRevealPolicyForTesting: SidebarEdgeRevealCoordinator.Policy {
+        get { sidebarEdgeRevealCoordinator.policy }
+        set { sidebarEdgeRevealCoordinator.policy = newValue }
+    }
 
-        var sidebarIsTemporarilyRevealedForTesting: Bool {
-            sidebarEdgeRevealCoordinator.isTemporarilyRevealed
-        }
+    var sidebarIsTemporarilyRevealedForTesting: Bool {
+        sidebarEdgeRevealCoordinator.isTemporarilyRevealed
+    }
 
-        var sidebarEdgeTrackingViewForTesting: HoverTrackingView { sidebarEdgeTrackingView }
+    var sidebarEdgeTrackingViewForTesting: HoverTrackingView { sidebarEdgeTrackingView }
 
-        func simulateSidebarEdgeHoverForTesting(_ hovering: Bool) {
-            allowsUnkeyedSidebarEdgeRevealForTesting = true
-            sidebarEdgeHoverChanged(hovering)
-        }
+    func simulateSidebarEdgeHoverForTesting(_ hovering: Bool) {
+        allowsUnkeyedSidebarEdgeRevealForTesting = true
+        sidebarEdgeHoverChanged(hovering)
+    }
 
-        func simulateSidebarHoverForTesting(_ hovering: Bool) {
-            sidebarEdgeRevealCoordinator.sidebarHoverChanged(hovering)
-        }
+    func simulateSidebarHoverForTesting(_ hovering: Bool) {
+        sidebarEdgeRevealCoordinator.sidebarHoverChanged(hovering)
+    }
 
-        func simulateSidebarPresentationForTesting(_ presented: Bool) {
-            sidebarEdgeRevealCoordinator.sidebarPresentationDidChange(isPresented: presented)
-        }
-    #endif
+    func simulateSidebarPresentationForTesting(_ presented: Bool) {
+        sidebarEdgeRevealCoordinator.sidebarPresentationDidChange(isPresented: presented)
+    }
+#endif
 
     /// Attributes only the delegate work nested inside the initial `NSWindow.setToolbar` call.
     /// Theme reinstalls and later AppKit requests are deliberately excluded from the launch

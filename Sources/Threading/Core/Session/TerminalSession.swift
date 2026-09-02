@@ -94,11 +94,11 @@ final class TerminalSession: NSObject {
     /// finding from the page just left must not repopulate the notice after its invalidation.
     private var profileApplicationGeneration = 0
 
-    /// A launch requested after SIGTERM but before SwiftTerm has reaped the old child.
+    /// A launch requested after SIGTERM but before SwiftTerm has finished the old lifecycle.
     ///
-    /// LocalProcess deliberately remains occupied during that interval so an exit callback can
-    /// never reap a replacement PID. Keep the user's latest launch request here and perform it
-    /// from the exact old child's termination callback.
+    /// LocalProcess deliberately remains occupied through its output drain and `windingDown`
+    /// interval so an exit callback can never reap a replacement PID. Keep the user's latest
+    /// launch request here and perform it from the exact old child's termination callback.
     private enum PendingLaunch {
         case shell(initialDirectory: URL?, initialCommand: ShellCommand?)
         case agent(AgentLaunchPlan)
@@ -370,8 +370,12 @@ final class TerminalSession: NSObject {
         // itself — so it must be sent only after the palette above is in place, and it moves
         // nothing unless the answer to the re-ask has actually changed. Gated on the
         // background actually changing so font tweaks and re-applies stay silent.
-        if terminalView.terminalStateSnapshot().backgroundColor != previousBackground {
-            terminalView.reportColorSchemeChange(dark: profile.theme.hasDarkBackground)
+        let backgroundChanged = terminalView.terminalStateSnapshot().backgroundColor != previousBackground
+        terminalView.updateColorScheme(
+            profile.theme.hasDarkBackground ? .dark : .light,
+            notify: backgroundChanged
+        )
+        if backgroundChanged {
             promptColorRereadThroughFocus()
         }
     }
@@ -388,8 +392,9 @@ final class TerminalSession: NSObject {
 
     /// Re-sends this terminal's focus state as a second prompt to re-read the palette.
     ///
-    /// `DECSET 2031` is the mechanism designed for this and is what `reportColorSchemeChange`
-    /// above sends. Codex does not implement it (filed as openai/codex#38575) and instead
+    /// `DECSET 2031` is the mechanism designed for this and is what SwiftTerm's
+    /// `updateColorScheme(_:notify:)` above honors. Codex does not implement it (filed as
+    /// openai/codex#38575) and instead
     /// re-reads `OSC 10/11` when it is told focus was gained, so a focus report is the only
     /// prompt it can hear. Measured against a bare PTY: 0.146.0 answers a synthetic focus
     /// report with a fresh `OSC 10 ; ?` / `OSC 11 ; ?` pair and repaints its composer, while
@@ -469,7 +474,7 @@ final class TerminalSession: NSObject {
     private func startShell(initialDirectory: URL?, initialCommand: ShellCommand?) {
         guard !isRunning else { return }
 
-        guard !terminalView.process.running else {
+        guard !terminalView.process.running, !terminalView.process.windingDown else {
             pendingLaunch = .shell(
                 initialDirectory: initialDirectory,
                 initialCommand: initialCommand
@@ -544,7 +549,7 @@ final class TerminalSession: NSObject {
     func start(plan: AgentLaunchPlan) {
         guard !isRunning else { return }
 
-        guard !terminalView.process.running else {
+        guard !terminalView.process.running, !terminalView.process.windingDown else {
             pendingLaunch = .agent(plan)
             return
         }

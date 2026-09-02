@@ -219,6 +219,7 @@ final class SimulatorPaneTests: XCTestCase {
         screen.interactionState = .recoverable
         window.contentView = screen
         window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.animationBehavior = .none
         window.orderFront(nil)
 
         var taps: [CGPoint] = []

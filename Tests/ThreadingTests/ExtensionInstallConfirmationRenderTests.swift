@@ -53,6 +53,7 @@ final class ExtensionInstallConfirmationRenderTests: XCTestCase {
         )
         parent.appearance = appearance
         parent.isReleasedWhenClosed = false
+        parent.animationBehavior = .none
         parent.makeKeyAndOrderFront(nil)
         defer { parent.orderOut(nil) }
 

@@ -1481,7 +1481,10 @@ private final class ThemedMenuOverlayView: ThemedControl {
     /// One arrival for every panel, so a submenu materialises exactly as its root did.
     private static func animateAppear(_ host: NSView) {
         let duration = Design.Motion.appear
-        guard duration > 0, let layer = host.layer else { return }
+        // AppKit does not advance offscreen window animations. Apart from doing work nobody can
+        // see, attaching one here leaves test and preview windows holding animation machinery
+        // whose completion can never be delivered.
+        guard duration > 0, host.window?.isVisible == true, let layer = host.layer else { return }
 
         // Composed about the layer's visual centre whatever its anchor point, so the maths
         // holds under AppKit's own layer geometry rather than assuming it.
@@ -1519,21 +1522,21 @@ private final class ThemedMenuOverlayView: ThemedControl {
         }
 
         let duration = Design.Motion.vanish
+        // An invisible window has no display cycle to advance an AppKit animation. Waiting for
+        // that completion retains a blocking animation worker indefinitely; a gallery that opens
+        // many hidden menus can exhaust the process's dispatch-thread allowance and starve
+        // unrelated asynchronous work. There are no pixels to preserve offscreen, so finish now.
+        let canAnimate = duration > 0 && window?.isVisible == true
         let fadeOut: @MainActor @Sendable () -> Void = {
-            NSAnimationContext.runAnimationGroup({ context in
-                context.duration = Design.Motion.vanish
-                self.animator().alphaValue = 0
-            }, completionHandler: { [weak self] in
-                Task { @MainActor in
-                    self?.removeFromSuperview()
-                }
-            })
+            Self.fadeOut(self, duration: duration) { [weak self] in
+                self?.removeFromSuperview()
+            }
         }
 
         switch exit {
         case .instant:
             removeFromSuperview()
-        case .fade where duration <= 0, .confirm where duration <= 0:
+        case .fade where !canAnimate, .confirm where !canAnimate:
             removeFromSuperview()
         case .fade:
             fadeOut()
@@ -1551,6 +1554,43 @@ private final class ThemedMenuOverlayView: ThemedControl {
                 row.isKeyboardHighlighted = true
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + beat * 2, execute: fadeOut)
+        }
+    }
+
+    /// Fades pixels without AppKit's blocking `NSAnimation` worker.
+    ///
+    /// `animator().alphaValue` is implemented by AppKit as a blocking animation dispatched to
+    /// a worker thread. If the window closes after that worker starts, its display cycle stops
+    /// and the worker never receives completion. A gallery closing many preview windows then
+    /// parks one dispatch thread per menu until the process reaches its soft thread limit and
+    /// unrelated async tests cannot run. Core Animation owns the pixels here, while the main
+    /// queue owns the lifetime; the removal therefore happens after the stated beat whether the
+    /// view is still onscreen or not.
+    private static func fadeOut(
+        _ view: NSView,
+        duration: TimeInterval,
+        completion: @escaping @MainActor @Sendable () -> Void
+    ) {
+        guard duration > 0, view.window?.isVisible == true, let layer = view.layer else {
+            completion()
+            return
+        }
+
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = layer.presentation()?.opacity ?? layer.opacity
+        fade.toValue = 0
+        fade.duration = Design.Motion.vanish
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        layer.opacity = 0
+        CATransaction.commit()
+        layer.add(fade, forKey: ThemedMenuMotion.vanishAnimationKey)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            layer.removeAnimation(forKey: ThemedMenuMotion.vanishAnimationKey)
+            completion()
         }
     }
 
@@ -1798,15 +1838,12 @@ private final class ThemedMenuOverlayView: ThemedControl {
             let duration = Design.Motion.vanish
             if case .instant = exit {
                 host.removeFromSuperview()
-            } else if duration <= 0 {
+            } else if duration <= 0 || window?.isVisible != true {
                 host.removeFromSuperview()
             } else {
-                NSAnimationContext.runAnimationGroup({ context in
-                    context.duration = Design.Motion.vanish
-                    host.animator().alphaValue = 0
-                }, completionHandler: {
-                    Task { @MainActor in host.removeFromSuperview() }
-                })
+                Self.fadeOut(host, duration: duration) {
+                    host.removeFromSuperview()
+                }
             }
         }
     }
@@ -2665,6 +2702,7 @@ enum ThemedMenuMetrics {
 enum ThemedMenuMotion {
     static let appearScale: CGFloat = 0.97
     static let appearAnimationKey = "threading.menu.appear"
+    static let vanishAnimationKey = "threading.menu.vanish"
     /// A classic menu is separated by its raised frame. A diffuse shadow is a modern floating-
     /// card cue and makes the two-pixel submenu overlap look like an accidental gap.
     static var shadowOpacity: Float { ThemedMenuMetrics.usesClassicGrammar ? 0 : 0.28 }

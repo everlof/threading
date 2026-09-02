@@ -21,6 +21,9 @@ SIDEBAR_NODES = pathlib.PurePosixPath("Sources/Threading/UI/Views/SidebarOutline
 PROJECT_SIDEBAR = pathlib.PurePosixPath(
     "Sources/Threading/UI/Views/ProjectSidebarViewController.swift"
 )
+NATIVE_OPTIONS = pathlib.PurePosixPath(
+    "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift"
+)
 SOURCE_ROOT = pathlib.PurePosixPath("Sources/Threading")
 
 DOMAIN_TYPES = ("AgentSession", "Project", "ProjectTerminal")
@@ -733,7 +736,10 @@ def split_top_level(source: str) -> List[str]:
     return parts
 
 
-def function_parameters(function_source: str) -> Set[str]:
+def function_parameters(
+    function_source: str,
+    excluding_types: Iterable[str] = (),
+) -> Set[str]:
     masked = mask_comments_and_strings(function_source)
     match = re.search(r"\bfunc\s+[A-Za-z_][A-Za-z0-9_]*\s*\(", masked)
     if match is None:
@@ -743,7 +749,13 @@ def function_parameters(function_source: str) -> Set[str]:
     if closing is None:
         return set()
     names: Set[str] = set()
+    excluded = tuple(excluding_types)
     for parameter in split_top_level(masked[opening + 1:closing]):
+        if any(
+            re.search(rf":\s*{re.escape(type_name)}\b", parameter)
+            for type_name in excluded
+        ):
+            continue
         head = parameter.split(":", 1)[0]
         identifiers = re.findall(r"[A-Za-z_][A-Za-z0-9_]*", head)
         if identifiers and identifiers[-1] != "_":
@@ -1796,7 +1808,14 @@ def audit_scope(
 
 def check(repository: pathlib.Path) -> List[str]:
     failures: List[str] = []
-    for path in (CATALOG, MARKERS, SESSION_ROW, SIDEBAR_NODES, PROJECT_SIDEBAR):
+    for path in (
+        CATALOG,
+        MARKERS,
+        SESSION_ROW,
+        SIDEBAR_NODES,
+        PROJECT_SIDEBAR,
+        NATIVE_OPTIONS,
+    ):
         if not (repository / path).is_file():
             failures.append(f"{path}: required navigator parity source is missing")
     if failures:
@@ -1848,6 +1867,39 @@ def check(repository: pathlib.Path) -> List[str]:
 
     all_usage: Counter[Tuple[str, str]] = Counter()
     all_source_usage: Counter[Tuple[str, str]] = Counter()
+
+    native_options_source = (repository / NATIVE_OPTIONS).read_text(encoding="utf-8")
+    native_options_bounds = declaration_slice(
+        native_options_source,
+        r"\benum\s+NativeSidebarPipelineOptions\b",
+    )
+    if native_options_bounds is None:
+        failures.append(f"{NATIVE_OPTIONS}: has no NativeSidebarPipelineOptions enum")
+    else:
+        native_options = native_options_source[
+            native_options_bounds[0]:native_options_bounds[1]
+        ]
+        native_options_line_offset = (
+            line_number(native_options_source, native_options_bounds[0]) - 1
+        )
+        option_scope_failures, usage = audit_scope(
+            NATIVE_OPTIONS,
+            "NativeSidebarPipelineOptions",
+            native_options,
+            {},
+            domain_targets,
+            allowed,
+            semantic_tokens,
+            host_provider_tokens,
+            fact_input_tokens,
+            option_source_tokens,
+            host_input_tokens,
+            all_source_usage,
+            line_offset=native_options_line_offset,
+            audit_domain=False,
+        )
+        failures.extend(option_scope_failures)
+        all_usage.update(usage)
 
     row_source = (repository / SESSION_ROW).read_text(encoding="utf-8")
     row_bounds = declaration_slice(row_source, r"\bfinal\s+class\s+SessionRowView\b")
@@ -1951,7 +2003,10 @@ def check(repository: pathlib.Path) -> List[str]:
                 option_source_tokens,
                 host_input_tokens,
                 all_source_usage,
-                function_parameters(function),
+                function_parameters(
+                    function,
+                    excluding_types={"NativeSidebarPipelineOptionValues"},
+                ),
                 scalar_domain_parameters(function),
                 line_offset=function_line_offset,
                 audit_domain=False,

@@ -291,6 +291,11 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
     private var findBarOptions: SearchOptions = SearchOptions()
     var debug: TerminalDebugView?
     let viewStateLock = NSLock()
+    /// Cropped bitmaps for the Kitty placements on screen, reused between
+    /// repaints. Building a crop copies the visible pixels and makes a new
+    /// image, which is far too expensive to repeat on every frame - a cursor
+    /// blink alone would rebuild every placement.
+    nonisolated let kittyPlacementImageCache = Locked([KittyPlacementImageKey: TTImage]())
     nonisolated let crossThreadState = Locked(TerminalViewCrossThreadState())
     nonisolated let frameSignal = FrameDriverSignal()
     public nonisolated let inputSender = TerminalInputSender()
@@ -1600,18 +1605,13 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
     /// line-feed event.
     @available(*, deprecated, message: "Use notifyUpdateChanges and TerminalViewDelegate.rangeChanged(source:startY:endY:) for display updates, or use a separate Terminal(delegate:) for each line-feed event.")
     nonisolated open func linefeed(source: Terminal) {
-        // SelectionService adjusts registered selections when the buffer
-        // scrolls or trims, so ordinary output does not invalidate them.
+        // Terminal scroll operations update or clear the selection as necessary.
     }
     
     /// This vaiable controls whether mouse events are sent to the application running under the
     /// terminal if it has requested the data.   This poses a problem for selection, so users
     /// need a way of toggling this behavior.
-    public var allowMouseReporting: Bool = true {
-        didSet {
-            crossThreadState.withLock { $0.allowMouseReporting = allowMouseReporting }
-        }
-    }
+    public var allowMouseReporting: Bool = true
 
     /// Controls how link tracking resolves hovered links:
     /// `.explicit` = OSC 8 only, `.implicit` = explicit + implicit fallback, `.none` = off.
@@ -3481,6 +3481,9 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
     /// tests to confirm the F.5 pre-gate skips scheduling when routing cannot
     /// apply.
     private(set) var semanticDeferralScheduleCount = 0
+    var semanticClickPendingForTesting: Bool {
+        pendingSemanticClick != nil
+    }
 
     open override func mouseDown(with event: NSEvent) {
         pendingSemanticClick?.cancel()
@@ -3724,8 +3727,8 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         let definition = NSAttributedString(
             string: wordAndScreenRow.word.text,
             attributes: [.font: fontSet.normal])
-        let baselineOffset = ceil(
-            CTFontGetDescent(fontSet.normal) + CTFontGetLeading(fontSet.normal))
+        // The popover anchors on the word's baseline, which lineSpacing moves.
+        let baselineOffset = self.baselineOffset
         let baseline = NSPoint(
             x: CGFloat(wordAndScreenRow.word.start.col) * cellDimension.width,
             y: frame.height - CGFloat(wordAndScreenRow.screenRow + 1) * cellDimension.height
@@ -3934,7 +3937,16 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
     /// Leftover fractional trackpad scroll (in points) carried between events so
     /// sub-cell precise deltas accumulate instead of being dropped.
     private var scrollAccumulator: CGFloat = 0
-    private var wheelBudget = WheelReportBudget()
+    private var wheelReportBudget = WheelReportBudget()
+
+    /// Why this wheel event belongs to SwiftTerm. Keeping bypass and alternate-scroll decisions
+    /// distinct prevents a modifier intended for local handling from becoming cursor-key input.
+    private enum WheelRoute: String {
+        case mouse
+        case cursorKeys
+        case localScrollback
+        case none
+    }
 
     /// Multiplier applied to wheel/trackpad scroll deltas. `1.0` scrolls at the
     /// system's native rate; values below `1.0` slow scrolling down, above speed
@@ -3968,6 +3980,12 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         }
     }
 
+    private static let logsMouseInput =
+        ProcessInfo.processInfo.environment["SWIFTTERM_MOUSE_LOG"] == "1"
+
+    /// Routes wheel input between application reporting, alternate-screen cursor keys,
+    /// and local scrollback. Open so embedding terminal subclasses can apply host input policy
+    /// around the route while retaining SwiftTerm's implementation.
     open override func scrollWheel(with event: NSEvent) {
         // Preserves the previous `deltaY == 0` early exit, restated against the
         // delta this method now reads. Without it a zero delta would fall into
@@ -3979,27 +3997,26 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
             return
         }
 
-        let scrollRouting = withTerminal { terminal in
-            let reportsMouse = allowMouseReporting &&
-                !shiftBypassesMouseReportingLocked(for: event) &&
-                !event.modifierFlags.contains(.option) &&
-                terminal.mouseMode != .off
-            return (
-                reportsMouse: reportsMouse,
-                isAlternate: terminal.isDisplayBufferAlternate,
-                alternateScrollMode: terminal.alternateScrollMode
-            )
+        let scrollRoute = withTerminal { terminal -> WheelRoute in
+            let requestsLocalHandling =
+                shiftBypassesMouseReportingLocked(for: event) ||
+                event.modifierFlags.contains(.option)
+            if requestsLocalHandling {
+                return terminal.isDisplayBufferAlternate ? .none : .localScrollback
+            }
+            if allowMouseReporting && terminal.mouseMode != .off {
+                return .mouse
+            }
+            if terminal.isDisplayBufferAlternate {
+                return terminal.alternateScrollMode ? .cursorKeys : .none
+            }
+            return .localScrollback
         }
 
-        // Alternate Scroll Mode (DECSET 1007): while the alternate screen is
-        // active and the application is not tracking the mouse, the wheel is
-        // translated into cursor keys below. With the mode reset the wheel
-        // produces nothing at all — the alternate buffer has no scrollback to
-        // move either. Decided here, before the accumulator is touched, so that
-        // suppressed motion is not banked and then handed to the first event
-        // after the mode comes back.
-        if !scrollRouting.reportsMouse && scrollRouting.isAlternate &&
-            !scrollRouting.alternateScrollMode {
+        // A suppressed event must not bank a partial trackpad row and hand it to a later route.
+        // This includes Alternate Scroll Mode being reset and a local-handling modifier being
+        // held over the alternate buffer, which has no local scrollback.
+        if scrollRoute == .none {
             scrollAccumulator = 0
             return
         }
@@ -4025,30 +4042,62 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
             lines = rounded != 0 ? rounded : (event.scrollingDeltaY > 0 ? 1 : -1)
         }
         if lines == 0 {
+            if Self.logsMouseInput {
+                NSLog("SwiftTerm mouse scroll: deltaY=%g scrollingDeltaY=%g precise=%@ inverted=%@ accumulated=%g lines=0 route=%@",
+                      event.deltaY, event.scrollingDeltaY,
+                      event.hasPreciseScrollingDeltas.description,
+                      event.isDirectionInvertedFromDevice.description,
+                      scrollAccumulator,
+                      scrollRoute.rawValue)
+            }
             return
         }
         let scrollingUp = lines > 0
         let magnitude = abs(lines)
 
-        if scrollRouting.reportsMouse {
+        if scrollRoute == .mouse {
             let hit = calculateMouseHit(with: event)
+            // AppKit has already applied the system scroll-direction setting to
+            // scrollingDeltaY. Preserve that sign, as Ghostty does, when the
+            // delta becomes a terminal mouse report. Applying
+            // isDirectionInvertedFromDevice here would invert trackpad input a
+            // second time.
             let button = scrollingUp ? 4 : 5
+            if Self.logsMouseInput {
+                NSLog("SwiftTerm mouse scroll: deltaY=%g scrollingDeltaY=%g precise=%@ inverted=%@ accumulated=%g lines=%ld route=mouse button=%d",
+                      event.deltaY, event.scrollingDeltaY,
+                      event.hasPreciseScrollingDeltas.description,
+                      event.isDirectionInvertedFromDevice.description,
+                      scrollAccumulator, lines, button)
+            }
             let flags = event.modifierFlags
             withTerminal { terminal in
                 let displayBuffer = terminal.displayBuffer
                 let screenRow = max(0, min(displayBuffer.rows - 1, hit.grid.row - displayBuffer.yDisp))
                 let buttonFlags = terminal.encodeButton(button: button, release: false,
                                                         shift: flags.contains(.shift), meta: flags.contains(.option), control: flags.contains(.control))
-                let wantedReports = event.hasPreciseScrollingDeltas ? magnitude : 1
-                let reports = wheelBudget.grant(
-                    min(wantedReports, Int(WheelReportBudget.burst)))
+                let wantedReports = WheelReportBudget.requestedReports(
+                    lineCount: lines,
+                    isPrecise: event.hasPreciseScrollingDeltas)
+                let reports = wheelReportBudget.grant(wantedReports)
                 for _ in 0..<reports {
                     terminal.sendEvent(buttonFlags: buttonFlags, x: hit.grid.col, y: screenRow,
                                        pixelX: hit.pixels.col, pixelY: hit.pixels.row)
                 }
             }
-        } else if scrollRouting.isAlternate {
-            for _ in 0..<magnitude {
+        } else if scrollRoute == .cursorKeys {
+            if Self.logsMouseInput {
+                NSLog("SwiftTerm mouse scroll: deltaY=%g scrollingDeltaY=%g precise=%@ inverted=%@ accumulated=%g lines=%ld route=alternate key=%@",
+                      event.deltaY, event.scrollingDeltaY,
+                      event.hasPreciseScrollingDeltas.description,
+                      event.isDirectionInvertedFromDevice.description,
+                      scrollAccumulator, lines, scrollingUp ? "up" : "down")
+            }
+            // A full-screen application executes each arrow key on its own, so a flick that
+            // banked a hundred lines must not become a hundred keystrokes in one event.
+            let keys = wheelReportBudget.grant(
+                WheelReportBudget.requestedKeys(lineCount: lines))
+            for _ in 0..<keys {
                 if scrollingUp {
                     sendKeyUp()
                 } else {
@@ -4056,6 +4105,13 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
                 }
             }
         } else {
+            if Self.logsMouseInput {
+                NSLog("SwiftTerm mouse scroll: deltaY=%g scrollingDeltaY=%g precise=%@ inverted=%@ accumulated=%g lines=%ld route=scrollback direction=%@",
+                      event.deltaY, event.scrollingDeltaY,
+                      event.hasPreciseScrollingDeltas.description,
+                      event.isDirectionInvertedFromDevice.description,
+                      scrollAccumulator, lines, scrollingUp ? "up" : "down")
+            }
             if scrollingUp {
                 scrollUp(lines: magnitude)
             } else {

@@ -35,6 +35,19 @@ final class MorphingMultilineTitleLabel: NSView, ThemedComponent {
     /// count it had to the count it is taking. Nil at rest, where the lines state their own.
     private var heightTravel: NSLayoutConstraint?
 
+    /// Drives the one piece of this component that Auto Layout owns: the block's travelling
+    /// height. AppKit's constraint animator runs an `NSAnimation` on a shared worker. If the
+    /// window goes away before that animation is flushed, the worker keeps waiting forever;
+    /// theme and evidence sweeps eventually exhaust the pool and unrelated async work stops.
+    /// A main-run-loop clock has the same visible frames and an owner whose lifetime we control.
+    private var heightTravelTimer: Timer?
+    private var heightTravelStart = CGFloat.zero
+    private var heightTravelTarget = CGFloat.zero
+    private var heightTravelStartedAt = TimeInterval.zero
+    private var heightTravelDuration = TimeInterval.zero
+    private var heightTravelGeneration = 0
+    private weak var heightTravelWindow: NSWindow?
+
     /// Tells the end of the morph now running from the end of the one it interrupted, which
     /// would otherwise put the interrupted transition's lines away.
     private var transitionGeneration = 0
@@ -285,24 +298,108 @@ final class MorphingMultilineTitleLabel: NSView, ThemedComponent {
     /// the ones dissolving in the room being taken back.
     private func travelHeight(to count: Int, over settle: TimeInterval, generation: Int) {
         guard let travel = heightTravel else { return }
-        NSAnimationContext.runAnimationGroup { context in
-            // The morph's own clock, so the block arrives as its characters do. Stated against
-            // `Design.Motion` all the same: this is only ever reached with motion on, and a
-            // duration that reads its own settle is exactly the shape the lint exists to catch.
-            context.duration = Design.Motion.reducesMotion ? 0 : settle
-            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            travel.animator().constant = height(ofLines: count)
+        heightTravelTimer?.invalidate()
+        heightTravelStart = travel.constant
+        heightTravelTarget = height(ofLines: count)
+        heightTravelStartedAt = ProcessInfo.processInfo.systemUptime
+        heightTravelDuration = Design.Motion.reducesMotion ? 0 : settle
+        heightTravelGeneration = generation
+
+        stopObservingHeightTravelWindow()
+        if let window {
+            heightTravelWindow = window
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(heightTravelWindowWillClose(_:)),
+                name: NSWindow.willCloseNotification,
+                object: window
+            )
         }
 
-        // The end of the transition is put on the clock rather than on the animation's own
-        // completion handler. That handler is a Core Animation transaction's, and a transaction
-        // belonging to a window that is never flushed — one still off screen, or closed while a
-        // line was arriving — is not one to hang the block's layout state on. What is waiting on
-        // it is not the look but the release: a block whose height stayed pinned and whose
-        // dropped lines stayed in layout would be stuck at the shape it was passing through.
-        DispatchQueue.main.asyncAfter(deadline: .now() + settle) { [weak self] in
-            self?.endTransition(generation)
+        guard heightTravelDuration > 0, window != nil else {
+            travel.constant = heightTravelTarget
+            window?.layoutIfNeeded()
+            endTransition(generation)
+            return
         }
+
+        let timer = Timer(
+            timeInterval: 1 / 60,
+            target: self,
+            selector: #selector(stepHeightTravel(_:)),
+            userInfo: nil,
+            repeats: true
+        )
+        heightTravelTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    @objc private func heightTravelWindowWillClose(_ notification: Notification) {
+        guard notification.object as? NSWindow === heightTravelWindow,
+              transitionGeneration == heightTravelGeneration,
+              let travel = heightTravel else { return }
+        travel.constant = heightTravelTarget
+        endTransition(heightTravelGeneration)
+    }
+
+    private func stopObservingHeightTravelWindow() {
+        if let heightTravelWindow {
+            NotificationCenter.default.removeObserver(
+                self,
+                name: NSWindow.willCloseNotification,
+                object: heightTravelWindow
+            )
+        }
+        heightTravelWindow = nil
+    }
+
+    /// Advances the layout-owned part of a line morph without handing an unbounded lifetime to
+    /// AppKit. Closing the window completes the model immediately; there are no visible frames
+    /// left to preserve and, critically, no animation worker left behind.
+    @objc private func stepHeightTravel(_ timer: Timer) {
+        guard timer === heightTravelTimer else {
+            timer.invalidate()
+            return
+        }
+        guard transitionGeneration == heightTravelGeneration, let travel = heightTravel else {
+            timer.invalidate()
+            return
+        }
+
+        let elapsed = ProcessInfo.processInfo.systemUptime - heightTravelStartedAt
+        let phase = min(max(CGFloat(elapsed / heightTravelDuration), 0), 1)
+        let eased = standardEaseInOut(phase)
+        travel.constant = heightTravelStart + (heightTravelTarget - heightTravelStart) * eased
+        window?.layoutIfNeeded()
+
+        if phase >= 1 || window == nil {
+            travel.constant = heightTravelTarget
+            window?.layoutIfNeeded()
+            endTransition(heightTravelGeneration)
+        }
+    }
+
+    /// The standard Core Animation `.easeInEaseOut` curve, evaluated for a clock we own. Its
+    /// control points are (0.42, 0) and (0.58, 1); solve x for the curve parameter, then read y.
+    private func standardEaseInOut(_ progress: CGFloat) -> CGFloat {
+        func coordinate(_ parameter: CGFloat, _ first: CGFloat, _ second: CGFloat) -> CGFloat {
+            let inverse = 1 - parameter
+            return 3 * inverse * inverse * parameter * first
+                + 3 * inverse * parameter * parameter * second
+                + parameter * parameter * parameter
+        }
+
+        var lower = CGFloat.zero
+        var upper = CGFloat(1)
+        for _ in 0..<12 {
+            let parameter = (lower + upper) / 2
+            if coordinate(parameter, 0.42, 0.58) < progress {
+                lower = parameter
+            } else {
+                upper = parameter
+            }
+        }
+        return coordinate((lower + upper) / 2, 0, 1)
     }
 
     /// Puts the block back on its own lines: the ones the value no longer has leave layout, and
@@ -317,6 +414,9 @@ final class MorphingMultilineTitleLabel: NSView, ThemedComponent {
     /// screen is using.
     private func endTransition(_ generation: Int) {
         guard transitionGeneration == generation else { return }
+        heightTravelTimer?.invalidate()
+        heightTravelTimer = nil
+        stopObservingHeightTravelWindow()
         for (index, label) in lineLabels.enumerated() {
             let isPresented = index < presentedLineCount
             label.isHidden = !isPresented

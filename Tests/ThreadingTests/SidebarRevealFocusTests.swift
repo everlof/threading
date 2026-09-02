@@ -79,6 +79,7 @@ final class SidebarRevealFocusTests: HostedStoreTestCase {
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false
         panel.contentViewController = sidebar
+        panel.animationBehavior = .none
         panel.makeKeyAndOrderFront(nil)
         defer {
             panel.orderOut(nil)

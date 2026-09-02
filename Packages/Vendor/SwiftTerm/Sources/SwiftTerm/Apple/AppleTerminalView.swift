@@ -18,6 +18,8 @@ import ImageIO
 import SwiftUI
 
 let SwiftTermUnderlineStyleKey = NSAttributedString.Key("SwiftTermUnderlineStyle")
+/// Marks a run whose terminal cells specify a non-default background.
+let SwiftTermExplicitBackgroundKey = NSAttributedString.Key("SwiftTermExplicitBackground")
 /// Carries a ``TerminalGlyphPlacementPolicy`` on runs whose font is a host
 /// glyph fallback, so both draw paths can apply the placement to each glyph.
 let SwiftTermGlyphPolicyKey = NSAttributedString.Key("SwiftTermGlyphPolicy")
@@ -303,6 +305,7 @@ fileprivate struct CoreTextRunAttributeNames: Sendable {
     let foreground = NSAttributedString.Key.foregroundColor.rawValue
     let background = NSAttributedString.Key.backgroundColor.rawValue
     let selectionBackground = NSAttributedString.Key.selectionBackgroundColor.rawValue
+    let explicitBackground = SwiftTermExplicitBackgroundKey.rawValue
     let underlineStyle = NSAttributedString.Key.underlineStyle.rawValue
     let strikethroughStyle = NSAttributedString.Key.strikethroughStyle.rawValue
     let glyphPolicy = SwiftTermGlyphPolicyKey.rawValue
@@ -319,6 +322,7 @@ fileprivate struct CoreTextRunAttributeKeys {
     let foreground: NSString
     let background: NSString
     let selectionBackground: NSString
+    let explicitBackground: NSString
     let underlineStyle: NSString
     let strikethroughStyle: NSString
     let glyphPolicy: NSString
@@ -328,6 +332,7 @@ fileprivate struct CoreTextRunAttributeKeys {
         foreground = names.foreground as NSString
         background = names.background as NSString
         selectionBackground = names.selectionBackground as NSString
+        explicitBackground = names.explicitBackground as NSString
         underlineStyle = names.underlineStyle as NSString
         strikethroughStyle = names.strikethroughStyle as NSString
         glyphPolicy = names.glyphPolicy as NSString
@@ -342,6 +347,7 @@ struct PreparedRun {
     let font: TTFont?
     let foregroundColor: TTColor?
     let backgroundColor: TTColor?
+    let hasExplicitBackground: Bool
     let glyphPolicy: TerminalGlyphPlacementPolicy?
     /// True when the run carries underline or strikethrough attributes.
     let hasDecorations: Bool
@@ -524,6 +530,9 @@ final class CoreGraphicsRenderCache {
                 backgroundColor: selectionBackground
                     ?? attrs.object(
                         forKey: runAttributeKeys.background) as? TTColor,
+                hasExplicitBackground: selectionBackground != nil
+                    || attrs.object(
+                        forKey: runAttributeKeys.explicitBackground) != nil,
                 glyphPolicy: attrs.object(
                     forKey: runAttributeKeys.glyphPolicy)
                     as? TerminalGlyphPlacementPolicy,
@@ -916,9 +925,55 @@ struct SnapshotRenderContext {
         identity = UInt64(bitPattern: Int64(identityHasher.finalize()))
     }
 
+    /// ``CellGeometry/baselineOffset(normalFont:cellHeight:)`` for the fonts and
+    /// cell geometry captured in this frame. Both renderers read it from here so
+    /// a frame's text, caret, and scaled glyphs share one baseline.
+    var baselineOffset: CGFloat {
+        CellGeometry.baselineOffset(normalFont: fonts.normal,
+                                    cellHeight: cellDimension.height)
+    }
+
     func glyphSlotFit (font: CTFont, glyph: CGGlyph, columnWidth: Int) -> GlyphSlotFit {
         GlyphSlotFit.calculate(font: font, glyph: glyph, columnWidth: columnWidth,
                                cellDimension: cellDimension, normalFont: fonts.normal)
+    }
+}
+
+/// Text geometry derived from a cell's size. Not isolated to the main actor:
+/// the snapshot renderers do this arithmetic on their own threads, from the
+/// fonts and cell dimensions captured for the frame.
+enum CellGeometry {
+    /// Distance from the bottom of a cell to the glyph baseline.
+    ///
+    /// ``TerminalView/lineSpacing`` makes the cell taller than the font's
+    /// natural line (ascent + descent + leading) in `computeFontDimensions`,
+    /// but the baseline used to stay pinned at `descent + leading` from the
+    /// cell's bottom, so every bit of the added height piled up above the text
+    /// and rows looked bottom-heavy at the larger values (1.4-1.6). This
+    /// splits the extra evenly above and below the glyph instead — the
+    /// half-leading model iTerm2 and WezTerm use — so text stays vertically
+    /// centered in its cell.
+    ///
+    /// The classic `ceil(descent + leading)` term is kept intact and the
+    /// glyph's share of the extra is added as a whole number of points on top,
+    /// rather than rounding the sum: that keeps the baseline on the same pixel
+    /// grid the old offset landed on, and it makes the default exact rather
+    /// than approximate. A cell within two points of the font's natural height
+    /// — which pixel-grid snapping alone can produce at `lineSpacing == 1` on
+    /// a fractional backing scale — yields the classic offset unchanged, so
+    /// nobody who leaves `lineSpacing` alone sees a single pixel move.
+    ///
+    /// Every renderer — CoreGraphics, Metal, the caret views — and the glyph
+    /// slot fitter must derive baselines from this one function. The local
+    /// copies of the formula it replaces are how those paths drifted out of
+    /// sync in the first place.
+    static func baselineOffset (normalFont: CTFont, cellHeight: CGFloat) -> CGFloat
+    {
+        let descent = CTFontGetDescent (normalFont)
+        let leading = CTFontGetLeading (normalFont)
+        let naturalHeight = ceil (CTFontGetAscent (normalFont) + descent + leading)
+        let extra = max (0, cellHeight - naturalHeight)
+        return ceil (descent + leading) + floor (extra / 2)
     }
 }
 
@@ -972,8 +1027,8 @@ struct GlyphSlotFit {
         guard columnWidth >= 2 else { return .identity }
 
         let metrics = GlyphMetrics.measure(font: font, glyph: glyph)
-        let baselineFromBottom = ceil(CTFontGetDescent(normalFont) +
-                                      CTFontGetLeading(normalFont))
+        let baselineFromBottom = CellGeometry.baselineOffset(normalFont: normalFont,
+                                                             cellHeight: cellDimension.height)
         return calculate(metrics: metrics,
                          columnWidth: columnWidth,
                          cellDimension: cellDimension,
@@ -1384,6 +1439,17 @@ public final class TerminalFeedSender: Sendable {
     }
 }
 
+/// Identifies one cropped Kitty placement bitmap in `kittyPlacementImageCache`.
+///
+/// The crop depends on the placement, on the pixels of the frame on display and
+/// on the part of the image the placement currently shows, so all three take
+/// part in the key: a cache hit is only valid while none of them has changed.
+struct KittyPlacementImageKey: Hashable {
+    let token: UInt64
+    let contentGeneration: UInt64
+    let source: KittyGraphicsPixelRect
+}
+
 struct TerminalViewCrossThreadState: Sendable {
     var reverseColorsActive = false
     var cachedCellPointSize: CGSize?
@@ -1391,7 +1457,6 @@ struct TerminalViewCrossThreadState: Sendable {
     var cachedCellPixelSize: (width: Int, height: Int)?
     var cachedNativeColors: (foreground: Color, background: Color)?
     var scrolledDirty = false
-    var allowMouseReporting = true
 }
 
 extension TerminalView {
@@ -1521,6 +1586,9 @@ extension TerminalView {
 
     /// Multiplier for vertical line spacing. 1.0 = default (ascent + descent + leading).
     /// Set to 1.1 for 110% vertical spacing (matches iTerm2's vertical spacing setting).
+    /// The extra height is split evenly above and below each glyph (see
+    /// ``CellGeometry/baselineOffset(normalFont:cellHeight:)``), so text stays vertically
+    /// centered within its cell.
     /// Triggers a font reset and terminal resize when changed.
     @objc open var lineSpacing: CGFloat {
         get { _lineSpacing }
@@ -1690,14 +1758,28 @@ extension TerminalView {
         frameSignal.markDirty()
     }
 
-    /// Reports a host color-scheme transition when the application subscribed with DECSET 2031.
-    public nonisolated func reportColorSchemeChange(dark: Bool) {
-        renderOwner.reportColorSchemeChange(dark: dark)
-    }
-
     /// Reports host focus changes when the application enabled focus tracking.
     public nonisolated func setTerminalFocus(_ focused: Bool) {
         renderOwner.setTerminalFocus(focused)
+    }
+
+    /// Records the light/dark preference represented by the current palette and optionally
+    /// notifies an application that subscribed with `CSI ? 2031 h`.
+    ///
+    /// Call this after installing the palette so the application's follow-up OSC 10/11 query
+    /// sees the new colors. Pass `notify: false` to record the preference without announcing it,
+    /// then call ``notifyColorScheme()`` when the host is ready for the application to re-query.
+    public nonisolated func updateColorScheme(
+        _ colorScheme: TerminalColorScheme,
+        notify: Bool = true
+    ) {
+        renderOwner.updateColorScheme(colorScheme, notify: notify)
+    }
+
+    /// Re-sends the current light/dark preference when the application subscribed with
+    /// `CSI ? 2031 h`.
+    public nonisolated func notifyColorScheme() {
+        renderOwner.notifyColorScheme()
     }
 
     /// Returns the closest primary semantic-prompt row above the viewport.
@@ -1941,6 +2023,14 @@ extension TerminalView {
         let snappedWidth = (cellWidth * scale).rounded() / scale
         let snappedHeight = ceil(cellHeight * scale) / scale
         return CellDimension(width: max(1, snappedWidth), height: max(min(snappedHeight, 8192), 1))
+    }
+
+    /// ``CellGeometry/baselineOffset(normalFont:cellHeight:)`` for this view's
+    /// current font and cell geometry.
+    var baselineOffset: CGFloat {
+        let currentCellDimension: CellDimension? = cellDimension
+        return CellGeometry.baselineOffset (normalFont: fontSet.normal,
+                                            cellHeight: currentCellDimension?.height ?? 0)
     }
 
     /// Computes how to center `glyph` within its `columnWidth`-cell slot (and
@@ -2513,9 +2603,10 @@ extension TerminalView {
 
 
 
-    private func kittyImageFromRgba(bytes: [UInt8], width: Int, height: Int) -> TTImage? {
+    nonisolated private func kittyImageFromRgba(bytes: [UInt8], width: Int, height: Int) -> TTImage? {
         let rgbColorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        let bitmapInfo = CGBitmapInfo(rawValue:
+            CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.last.rawValue)
         let data = Data(bytes)
         guard let providerRef = CGDataProvider(data: data as CFData) else {
             return nil
@@ -2534,27 +2625,6 @@ extension TerminalView {
             return nil
         }
         return TTImage(cgImage: cgimage, size: CGSize(width: width, height: height))
-    }
-
-    private func kittyPlaceholderImage(imageId: UInt32, kitty: SnapshotKitty,
-                                       cache: inout [UInt32: TTImage]) -> TTImage? {
-        if let cached = cache[imageId] {
-            return cached
-        }
-        guard let kittyImage = kitty.imagesById[imageId] else {
-            return nil
-        }
-        let image: TTImage?
-        switch kittyImage.payload {
-        case .png(let data):
-            image = TTImage(data: data)
-        case .rgba(let bytes, let width, let height):
-            image = kittyImageFromRgba(bytes: bytes, width: width, height: height)
-        }
-        if let image {
-            cache[imageId] = image
-        }
-        return image
     }
 
     private func kittyAspectFitRect(imageSize: CGSize, in rect: CGRect) -> CGRect {
@@ -2811,66 +2881,7 @@ extension TerminalView {
         guard let selection = self.selection, selection.active else {
             return nil
         }
-
-        let startRow = selection.start.row
-        let endRow = selection.end.row
-        let startCol = selection.start.col
-        let endCol = selection.end.col
-
-        var selectionRange: NSRange = .empty
-
-        // single row
-        if endRow == startRow && startRow == row {
-            if startCol < endCol {
-                let extra = endCol == terminal.cols-1 ? 1 : 0
-                selectionRange = NSRange(location: startCol, length: endCol - startCol + extra)
-            } else if startCol > endCol {
-                selectionRange = NSRange(location: endCol, length: startCol - endCol)
-            }
-        } else if endRow > startRow {
-            // first row
-            if startRow == row && endRow > row {
-                selectionRange = NSRange(location: startCol, length: cols - startCol)
-            }
-
-            // in between
-            if startRow < row && endRow > row {
-                selectionRange = NSRange(location: 0, length: cols)
-            }
-
-            // last row
-            if startRow < row && endRow == row {
-                let extra = endCol == terminal.cols-1 ? 1 : 0
-                selectionRange = NSRange(location: 0, length: endCol + extra)
-            }
-        } else if endRow < startRow {
-            // first row
-            if endRow == row && startRow > row {
-                selectionRange = NSRange(location: endCol, length: cols - endCol)
-            }
-
-            // in between
-            if startRow > row && endRow < row {
-                selectionRange = NSRange(location: 0, length: cols)
-            }
-
-            // last row
-            if endRow < row && startRow == row {
-                let extra = startCol == terminal.cols-1 ? 1 : 0
-                selectionRange = NSRange(location: 0, length: startCol + extra)
-            }
-        }
-
-        if selectionRange == .empty || selectionRange.length == 0 {
-            return nil
-        }
-
-        let lowerBound = max(0, min(selectionRange.location, cols))
-        let upperBound = max(lowerBound, min(cols, selectionRange.location + selectionRange.length))
-        if lowerBound == upperBound {
-            return nil
-        }
-        return lowerBound..<upperBound
+        return selection.selectedColumnsRange(row: row, cols: cols)
     }
     
 
@@ -3154,10 +3165,11 @@ extension TerminalView {
         }
 
         guard let viewState = captureFrameViewState() else { return }
+        let kittyCellWidth = cellDimension.width
+        let kittyCellHeight = cellDimension.height
+        let kittyImageScale = getImageScale()
         renderOwner.withSnapshotForDrawing(viewState: viewState) { snapshot, renderContext in
-        let lineDescent = CTFontGetDescent(fontSet.normal)
-        let lineLeading = CTFontGetLeading(fontSet.normal)
-        let yOffset = ceil(lineDescent+lineLeading)
+        let yOffset = renderContext.baselineOffset
         #if os(macOS)
         let renderBufferOffset = snapshot.yDisp
         #else
@@ -3187,8 +3199,101 @@ extension TerminalView {
         let lastRow = snapshot.yDisp+Int((boundsMaxY-dirtyRect.minY)/cellHeight)
         #endif
 
-        let virtualPlacementsByImageId = snapshot.kitty.virtualPlacementsByImageId
-        var placeholderImageCache: [UInt32: TTImage] = [:]
+        let kittyRenderSnapshot = snapshot.kitty.renderSnapshot
+        // Most frames carry no image at all. Everything below - the grouping
+        // dictionary, the live-key set, and the three per-row placement passes -
+        // produces nothing in that case, so it is all behind this one test.
+        let hasKittyPlacements = !kittyRenderSnapshot.placements.isEmpty
+        let virtualPlacementsByImageId: [UInt32: [KittyGraphicsRenderPlacement]]
+        if hasKittyPlacements {
+            virtualPlacementsByImageId = Dictionary(
+                grouping: kittyRenderSnapshot.placements.filter(\.isVirtual),
+                by: \.imageId)
+
+            // Drop the crops that this snapshot can no longer use - a removed
+            // placement, a new animation frame, a new visible source rectangle -
+            // and keep the rest for the placements this pass does not repaint.
+            var liveKittyImageKeys = Set<KittyPlacementImageKey>()
+            liveKittyImageKeys.reserveCapacity(kittyRenderSnapshot.placements.count)
+            for placement in kittyRenderSnapshot.placements {
+                guard let image = kittyRenderSnapshot.imagesById[placement.imageId] else { continue }
+                liveKittyImageKeys.insert(KittyPlacementImageKey(
+                    token: placement.token,
+                    contentGeneration: image.contentGeneration,
+                    source: placement.visibleSource))
+            }
+            kittyPlacementImageCache.withLock { cache in
+                if cache.contains(where: { !liveKittyImageKeys.contains($0.key) }) {
+                    cache = cache.filter { liveKittyImageKeys.contains($0.key) }
+                }
+            }
+        } else {
+            virtualPlacementsByImageId = [:]
+            // No placement survives, so no crop can be reused. The sweep still
+            // has to run once to release the last frame's crops.
+            kittyPlacementImageCache.withLock { cache in
+                if !cache.isEmpty {
+                    cache.removeAll()
+                }
+            }
+        }
+
+        func kittyRenderImage(_ placement: KittyGraphicsRenderPlacement) -> TTImage? {
+            guard let image = kittyRenderSnapshot.imagesById[placement.imageId] else {
+                return nil
+            }
+            let source = placement.visibleSource
+            let key = KittyPlacementImageKey(
+                token: placement.token,
+                contentGeneration: image.contentGeneration,
+                source: source)
+            if let cached = kittyPlacementImageCache.withLock({ $0[key] }) { return cached }
+            var rgba = [UInt8]()
+            rgba.reserveCapacity(source.width * source.height * 4)
+            for row in source.y..<(source.y + source.height) {
+                let start = (row * image.width + source.x) * 4
+                let end = start + source.width * 4
+                rgba.append(contentsOf: image.rgba[start..<end])
+            }
+            guard let decoded = kittyImageFromRgba(
+                bytes: rgba, width: source.width, height: source.height) else { return nil }
+            kittyPlacementImageCache.withLock { $0[key] = decoded }
+            return decoded
+        }
+
+        func drawKittyPlacements(
+            onScreenRow screenRow: Int,
+            lineOrigin: CGPoint,
+            layer: KittyGraphicsRenderLayer
+        ) {
+            let offsetScale = kittyImageScale
+            let lineRect = CGRect(
+                x: 0, y: lineOrigin.y,
+                width: CGFloat(snapshot.cols) * kittyCellWidth,
+                height: kittyCellHeight)
+            for placement in kittyRenderSnapshot.placements where !placement.isVirtual {
+                guard KittyGraphicsRenderLayer(zIndex: placement.zIndex) == layer else {
+                    continue
+                }
+                let geometry = placement.geometry
+                guard screenRow >= geometry.row,
+                      screenRow < geometry.row + geometry.rows,
+                      let image = kittyRenderImage(placement) else { continue }
+                let offsetX = CGFloat(placement.pixelOffsetX) / offsetScale
+                let offsetY = CGFloat(placement.pixelOffsetY) / offsetScale
+                let rowsBelow = geometry.row + geometry.rows - 1 - screenRow
+                let rect = CGRect(
+                    x: CGFloat(geometry.column) * kittyCellWidth + offsetX,
+                    y: lineOrigin.y - CGFloat(rowsBelow) * kittyCellHeight + offsetY,
+                    width: max(0, CGFloat(geometry.columns) * kittyCellWidth - offsetX),
+                    height: max(0, CGFloat(geometry.rows) * kittyCellHeight - offsetY))
+                guard rect.width > 0, rect.height > 0 else { continue }
+                context.saveGState()
+                context.clip(to: lineRect)
+                image.draw(in: rect)
+                context.restoreGState()
+            }
+        }
         coreGraphicsRenderCache.retainRows(
             in: snapshot.firstRow..<(snapshot.firstRow + snapshot.rowCount))
 
@@ -3269,40 +3374,27 @@ extension TerminalView {
                 builder: textBuilder)
             let lineInfo = preparedRow.lineInfo
             let rowBase = lineOrigin.y + cellDimension.height
-            var underTextImages: [SnapshotImage] = []
-            var overTextKittyImages: [SnapshotImage] = []
             var otherImages: [SnapshotImage] = []
             if let images = lineInfo.images {
                 for basicImage in images {
                     guard let image = basicImage as? SnapshotImage else {
                         continue
                     }
-                    if image.kittyIsKitty {
-                        if image.kittyZIndex < 0 {
-                            underTextImages.append(image)
-                        } else {
-                            overTextKittyImages.append(image)
-                        }
-                    } else {
-                        otherImages.append(image)
-                    }
+                    otherImages.append(image)
                 }
-                let sortKitty: (SnapshotImage, SnapshotImage) -> Bool = { lhs, rhs in
-                    if lhs.kittyZIndex != rhs.kittyZIndex {
-                        return lhs.kittyZIndex < rhs.kittyZIndex
-                    }
-                    let leftId = lhs.kittyImageId ?? 0
-                    let rightId = rhs.kittyImageId ?? 0
-                    return leftId < rightId
-                }
-                underTextImages.sort(by: sortKitty)
-                overTextKittyImages.sort(by: sortKitty)
             }
 
             // Attributed strings, CTLines and run attributes are cached per
             // immutable snapshot-row revision. This is the main-thread answer
             // to AppKit promoting a narrow invalidation to a full-view draw.
             let preparedSegments = preparedRow.segments
+
+            if hasKittyPlacements {
+                drawKittyPlacements(
+                    onScreenRow: row - snapshot.yDisp,
+                    lineOrigin: lineOrigin,
+                    layer: .belowBackground)
+            }
 
             // Background fill loop — uses cached CTLines
             context.saveGState()
@@ -3346,8 +3438,8 @@ extension TerminalView {
                     // view's layer background already paints that color, and
                     // filling it again would double-composite when the
                     // background is translucent (backgroundOpacity < 1)
-                    if let backgroundColor = preparedRun.backgroundColor,
-                       backgroundColor != renderContext.effectiveBackgroundColor {
+                    if preparedRun.hasExplicitBackground,
+                       let backgroundColor = preparedRun.backgroundColor {
                         let columnSpan = max(0, endColumn - startColumn)
                         if columnSpan > 0 {
                             var rect = CGRect(
@@ -3376,18 +3468,11 @@ extension TerminalView {
 
             context.restoreGState()
 
-            if !underTextImages.isEmpty {
-                let offsetScale = getImageScale()
-                for image in underTextImages {
-                    let col = image.col
-                    let offsetX = CGFloat(image.kittyPixelOffsetX) / offsetScale
-                    let offsetY = CGFloat(image.kittyPixelOffsetY) / offsetScale
-                    let rect = CGRect(x: CGFloat (col)*cellDimension.width + offsetX,
-                                      y: rowBase - CGFloat (image.pixelHeight) + offsetY,
-                                      width: CGFloat (image.pixelWidth),
-                                      height: CGFloat (image.pixelHeight))
-                    image.image.draw (in: rect)
-                }
+            if hasKittyPlacements {
+                drawKittyPlacements(
+                    onScreenRow: row - snapshot.yDisp,
+                    lineOrigin: lineOrigin,
+                    layer: .belowText)
             }
 
             if !lineInfo.boxDrawings.isEmpty {
@@ -3551,16 +3636,14 @@ extension TerminalView {
                         if placeholder.placementId != 0 && record.placementId != placeholder.placementId {
                             return false
                         }
-                        return record.cols > placeholder.placeholderCol &&
-                            record.rows > placeholder.placeholderRow &&
-                            record.cols > 0 &&
-                            record.rows > 0
+                        return record.geometry.columns > placeholder.placeholderCol &&
+                            record.geometry.rows > placeholder.placeholderRow &&
+                            record.geometry.columns > 0 &&
+                            record.geometry.rows > 0
                     }) else {
                         continue
                     }
-                    guard let image = kittyPlaceholderImage(imageId: placeholder.imageId,
-                                                            kitty: snapshot.kitty,
-                                                            cache: &placeholderImageCache) else {
+                    guard let image = kittyRenderImage(record) else {
                         continue
                     }
 
@@ -3569,11 +3652,11 @@ extension TerminalView {
                     let offsetY = CGFloat(record.pixelOffsetY) / offsetScale
                     let placementOriginX = lineOrigin.x + CGFloat(placeholder.col - placeholder.placeholderCol) * cellDimension.width + offsetX
                     let placementTopY = lineOrigin.y + CGFloat(placeholder.placeholderRow) * cellDimension.height
-                    let placementOriginY = placementTopY - CGFloat(record.rows - 1) * cellDimension.height + offsetY
+                    let placementOriginY = placementTopY - CGFloat(record.geometry.rows - 1) * cellDimension.height + offsetY
                     let placementRect = CGRect(x: placementOriginX,
                                                y: placementOriginY,
-                                               width: CGFloat(record.cols) * cellDimension.width,
-                                               height: CGFloat(record.rows) * cellDimension.height)
+                                               width: CGFloat(record.geometry.columns) * cellDimension.width,
+                                               height: CGFloat(record.geometry.rows) * cellDimension.height)
                     if placementRect.width <= 0 || placementRect.height <= 0 {
                         continue
                     }
@@ -3589,18 +3672,11 @@ extension TerminalView {
                 }
             }
 
-            if !overTextKittyImages.isEmpty {
-                let offsetScale = getImageScale()
-                for image in overTextKittyImages {
-                    let col = image.col
-                    let offsetX = CGFloat(image.kittyPixelOffsetX) / offsetScale
-                    let offsetY = CGFloat(image.kittyPixelOffsetY) / offsetScale
-                    let rect = CGRect(x: CGFloat (col)*cellDimension.width + offsetX,
-                                      y: rowBase - CGFloat (image.pixelHeight) + offsetY,
-                                      width: CGFloat (image.pixelWidth),
-                                      height: CGFloat (image.pixelHeight))
-                    image.image.draw (in: rect)
-                }
+            if hasKittyPlacements {
+                drawKittyPlacements(
+                    onScreenRow: row - snapshot.yDisp,
+                    lineOrigin: lineOrigin,
+                    layer: .aboveText)
             }
             if !otherImages.isEmpty {
                 for image in otherImages {
@@ -4437,9 +4513,6 @@ extension TerminalView {
     {
         terminal.terminalLock.preconditionLocked()
         search.invalidate()
-        // Buffer mutation keeps registered selections aligned with scrolling
-        // and scrollback trimming. Do not discard a user's selection merely
-        // because more output arrived.
     }
     
     func feedFinish (synchronizedOutputActive: Bool)
@@ -4592,22 +4665,11 @@ extension TerminalView {
         sendHorizontalKey(left: false)
     }
     
-    class AppleImage: TerminalImage, KittyPlacementImage {
+    class AppleImage: TerminalImage {
         var image: TTImage
         var pixelWidth: Int
         var pixelHeight: Int
         var col: Int
-        var kittyIsKitty: Bool = false
-        var kittyImageId: UInt32?
-        var kittyImageNumber: UInt32?
-        var kittyPlacementId: UInt32?
-        var kittyZIndex: Int = 0
-        var kittyCol: Int = 0
-        var kittyRow: Int = 0
-        var kittyCols: Int = 0
-        var kittyRows: Int = 0
-        var kittyPixelOffsetX: Int = 0
-        var kittyPixelOffsetY: Int = 0
         
         init (image: TTImage, width: Int, height: Int, onCol: Int) {
             self.image = image
@@ -4642,21 +4704,14 @@ extension TerminalView {
         }
         
         let image = TTImage (cgImage: cgimage, size: CGSize (width: width, height: height))
-        if let context = source.kittyPlacementContext {
-            insertImage(image, terminal: source,
-                        width: context.widthRequest,
-                        height: context.heightRequest,
-                        preserveAspectRatio: context.preserveAspectRatio)
-        } else {
-            guard let metrics = cachedImageMetricsValue() else {
-                return
-            }
-            let terminalWidth = CGFloat(source.cols) * metrics.cellSize.width
-            insertImage(image, terminal: source,
-                        width: CGFloat(width) > terminalWidth ? .percent(100) : .auto,
-                        height: .auto,
-                        preserveAspectRatio: true)
+        guard let metrics = cachedImageMetricsValue() else {
+            return
         }
+        let terminalWidth = CGFloat(source.cols) * metrics.cellSize.width
+        insertImage(image, terminal: source,
+                    width: CGFloat(width) > terminalWidth ? .percent(100) : .auto,
+                    height: .auto,
+                    preserveAspectRatio: true)
     }
    
     public nonisolated func createImage (source: Terminal, data: Data, width widthRequest: ImageSizeRequest, height heightRequest: ImageSizeRequest, preserveAspectRatio: Bool)
@@ -4686,7 +4741,6 @@ extension TerminalView {
         let buffer = terminal.buffer
         var img = image
         let displayScale = metrics.imageScale
-        let placementContext = terminal.kittyPlacementContext
         
         // Converts a size request in a single dimension into an absolute pixel value, where
         // the `dim` is the request, `regionSize` is the available view space, and `imageSize` is
@@ -4704,38 +4758,17 @@ extension TerminalView {
             }
         }
 
-        func pixelSizeForImage (_ image: TTImage) -> CGSize? {
-            #if os(macOS)
-            for rep in image.representations {
-                if rep.pixelsWide > 0 && rep.pixelsHigh > 0 {
-                    return CGSize(width: rep.pixelsWide, height: rep.pixelsHigh)
-                }
-            }
-            return nil
-            #else
-            if let cgImage = image.cgImage {
-                return CGSize(width: cgImage.width, height: cgImage.height)
-            }
-            let scale = image.scale
-            if scale > 0 {
-                return CGSize(width: image.size.width * scale, height: image.size.height * scale)
-            }
-            return nil
-            #endif
-        }
-
-        let pixelSize = placementContext == nil ? nil : pixelSizeForImage(img)
         let widthImageSize: CGFloat
         let heightImageSize: CGFloat
         switch widthRequest {
         case .auto:
-            widthImageSize = pixelSize?.width ?? img.size.width
+            widthImageSize = img.size.width
         default:
             widthImageSize = img.size.width
         }
         switch heightRequest {
         case .auto:
-            heightImageSize = pixelSize?.height ?? img.size.height
+            heightImageSize = img.size.height
         default:
             heightImageSize = img.size.height
         }
@@ -4759,27 +4792,6 @@ extension TerminalView {
         }
         
         let rows = Int (ceil (height/cellSize.height))
-        let cols = Int (ceil (width/cellSize.width))
-        let placementRow = buffer.y + buffer.yBase
-        let placementCol = buffer.x
-        if let context = placementContext,
-           let imageId = context.imageId,
-           let placementId = context.placementId {
-            terminal.registerKittyPlacement(imageId: imageId,
-                                            placementId: placementId,
-                                            parentImageId: context.parentImageId,
-                                            parentPlacementId: context.parentPlacementId,
-                                            parentOffsetH: context.parentOffsetH,
-                                            parentOffsetV: context.parentOffsetV,
-                                            pixelOffsetX: context.pixelOffsetX,
-                                            pixelOffsetY: context.pixelOffsetY,
-                                            col: placementCol,
-                                            row: placementRow,
-                                            cols: cols,
-                                            rows: rows,
-                                            zIndex: context.zIndex,
-                                            isVirtual: false)
-        }
         
         let stripeSize = CGSize (width: width, height: cellSize.height)
         var didScroll = false
@@ -4802,20 +4814,6 @@ extension TerminalView {
             #endif
             
             let attachedImage = AppleImage (image: stripe, width: Int (stripeSize.width), height: Int (cellSize.height), onCol: terminal.buffer.x)
-            if let context = placementContext {
-                attachedImage.kittyIsKitty = true
-                attachedImage.kittyImageId = context.imageId
-                attachedImage.kittyImageNumber = context.imageNumber
-                attachedImage.kittyPlacementId = context.placementId
-                attachedImage.kittyZIndex = context.zIndex
-                attachedImage.kittyCol = placementCol
-                attachedImage.kittyRow = placementRow
-                attachedImage.kittyCols = cols
-                attachedImage.kittyRows = rows
-                attachedImage.kittyPixelOffsetX = context.pixelOffsetX
-                attachedImage.kittyPixelOffsetY = context.pixelOffsetY
-            }
-            
             buffer.attachImage(attachedImage, toLineAt: buffer.y+buffer.yBase)
 
             terminal.updateRange (buffer.y)
@@ -4833,17 +4831,6 @@ extension TerminalView {
         }
         if didScroll {
             terminal.updateFullScreen()
-        }
-        if let context = placementContext,
-           context.cursorPolicy == 0,
-           !context.isRelative {
-            let moveCols = max(1, cols)
-            let moveRows = max(1, rows)
-            let targetCol = placementCol + moveCols
-            let targetRow = placementRow + moveRows
-            buffer.x = targetCol
-            buffer.y = targetRow - buffer.yBase
-            terminal.restrictCursor()
         }
     }
     
@@ -4884,30 +4871,107 @@ extension TerminalView {
 
 }
 
-/// Token bucket shared by macOS wheel and iOS finger-to-wheel reporting.
+/// Token bucket shared by macOS wheel and iOS finger-to-wheel reporting, and by the cursor keys
+/// Alternate Scroll Mode generates in their place.
 ///
-/// PTYs do not preserve message boundaries. Bounding the report rate prevents a slowly rendering
-/// application from observing fragments of mouse escapes as typed text, while allowing a small
-/// immediate burst for a deliberate gesture.
+/// Accelerated gestures can represent hundreds of lines in one event. Bounding generated input
+/// keeps a slow terminal application from being overwhelmed while preserving a small immediate
+/// burst for a deliberate gesture.
 public struct WheelReportBudget {
     public static let reportsPerSecond: Double = 100
-    public static let burst: Double = 6
+    public static let burst = 6
 
-    private var allowance: Double = WheelReportBudget.burst
-    private var stamp = DispatchTime.now()
+    private var allowance: Double = Double(Self.burst)
+    private var stampNanoseconds: UInt64
 
-    public init() {}
+    public init(nowNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds) {
+        stampNanoseconds = nowNanoseconds
+    }
 
-    public mutating func grant(_ wanted: Int) -> Int {
-        let now = DispatchTime.now()
-        let elapsed = Double(now.uptimeNanoseconds &- stamp.uptimeNanoseconds) / 1_000_000_000
-        stamp = now
+    /// A classic wheel event is one notch however far acceleration says it travelled, because a
+    /// mouse report is a notch and the application chooses how far a notch scrolls.
+    static func requestedReports(lineCount: Int, isPrecise: Bool) -> Int {
+        guard lineCount != 0 else { return 0 }
+        return isPrecise ? requestedKeys(lineCount: lineCount) : 1
+    }
+
+    /// A cursor key carries its own distance, so an accelerated event keeps its line count up to
+    /// the burst and only the rate is bounded.
+    static func requestedKeys(lineCount: Int) -> Int {
+        Int(min(lineCount.magnitude, UInt(burst)))
+    }
+
+    public mutating func grant(
+        _ wanted: Int,
+        nowNanoseconds: UInt64 = DispatchTime.now().uptimeNanoseconds
+    ) -> Int {
+        guard wanted > 0 else { return 0 }
+        let elapsedNanoseconds: UInt64
+        if nowNanoseconds >= stampNanoseconds {
+            elapsedNanoseconds = nowNanoseconds - stampNanoseconds
+            stampNanoseconds = nowNanoseconds
+        } else {
+            elapsedNanoseconds = 0
+        }
+        let elapsed = Double(elapsedNanoseconds) / 1_000_000_000
         allowance = min(
-            WheelReportBudget.burst,
-            allowance + elapsed * WheelReportBudget.reportsPerSecond)
+            Double(Self.burst),
+            allowance + elapsed * Self.reportsPerSecond)
         let granted = min(wanted, Int(allowance))
         allowance -= Double(granted)
         return granted
+    }
+}
+
+/// Fractional finger travel retained only within one drag gesture.
+struct WheelDragDistanceAccumulator {
+    private var remainder: CGFloat = 0
+
+    mutating func reset() {
+        remainder = 0
+    }
+
+    mutating func takeWholeLines(distance: CGFloat, cellHeight: CGFloat) -> Int {
+        guard cellHeight > 0 else { return 0 }
+        remainder += distance
+        let lines = Int(remainder / cellHeight)
+        remainder -= CGFloat(lines) * cellHeight
+        return lines
+    }
+}
+
+enum ProgramScrollRoute: Equatable {
+    case mouse
+    case cursorKeys
+    case none
+}
+
+struct ProgramScrollRouting {
+    static func route(
+        allowMouseReporting: Bool,
+        shiftBypassesMouseReporting: Bool,
+        mouseTracking: Bool,
+        alternateBuffer: Bool,
+        alternateScrollMode: Bool
+    ) -> ProgramScrollRoute {
+        guard allowMouseReporting, !shiftBypassesMouseReporting else { return .none }
+        if mouseTracking {
+            return .mouse
+        }
+        if alternateBuffer && alternateScrollMode {
+            return .cursorKeys
+        }
+        return .none
+    }
+
+    /// An alternate buffer is captured even when Alternate Scroll Mode is reset. It has no local
+    /// scrollback, so allowing UIScrollView to pan it only exposes empty space.
+    static func capturesGesture(
+        allowMouseReporting: Bool,
+        mouseTracking: Bool,
+        alternateBuffer: Bool
+    ) -> Bool {
+        allowMouseReporting && (mouseTracking || alternateBuffer)
     }
 }
 

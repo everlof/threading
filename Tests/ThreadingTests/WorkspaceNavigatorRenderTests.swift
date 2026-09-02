@@ -410,9 +410,13 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         let calendar = Calendar.current
         let now = Date()
         let today = calendar.startOfDay(for: now)
+        let stableToday = calendar.date(bySettingHour: 12, minute: 0, second: 0, of: today)!
         let lastUsedByID: [String: Date] = [
             "pipeline-1": calendar.date(byAdding: .day, value: -10, to: today)!,
-            "pipeline-2": calendar.date(byAdding: .hour, value: -1, to: now)!,
+            // "One hour ago" changes calendar buckets around midnight and used to collapse the
+            // Today section into Yesterday. This fixture is evidence for every section, so pin
+            // its Today row to the current calendar day rather than the current wall-clock hour.
+            "pipeline-2": stableToday,
             "pipeline-3": calendar.date(byAdding: .hour, value: -2, to: now)!,
             "pipeline-4": calendar.date(byAdding: .hour, value: -12, to: today)!,
             "pipeline-5": calendar.date(byAdding: .day, value: -4, to: today)!,
@@ -548,8 +552,13 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         timeout: TimeInterval = 2
     ) throws -> ThemedTableView {
         let deadline = Date().addingTimeInterval(timeout)
+        var observedTables: [(identifier: String, rows: Int)] = []
         repeat {
             root.layoutSubtreeIfNeeded()
+            observedTables = descendants(of: root).compactMap { view in
+                guard let table = view as? ThemedTableView else { return nil }
+                return (table.accessibilityIdentifier(), table.numberOfRows)
+            }
             if let table = descendants(of: root).compactMap({ $0 as? ThemedTableView }).first(
                 where: {
                     $0.accessibilityIdentifier().hasPrefix("workspace.navigator.collection.")
@@ -562,7 +571,8 @@ final class WorkspaceNavigatorRenderTests: HostedStoreTestCase {
         } while Date() < deadline
         return try XCTUnwrap(
             nil as ThemedTableView?,
-            "pipeline evidence table did not reach \(rowCount) rows before timeout"
+            "pipeline evidence table did not reach \(rowCount) rows before timeout; observed "
+                + observedTables.map { "\($0.identifier)=\($0.rows)" }.joined(separator: ", ")
         )
     }
 

@@ -233,12 +233,13 @@ observe `AppThemeDidChange` alongside the assignment events.
 **The palette is only half of it: the program has to be *told* what it is drawing on.** Claude
 Code ships `"theme": "auto"`, which is not "follow macOS" — it sends `OSC 11 ; ? ST`, reads the
 background out of the reply, and assumes a **dark** terminal when nothing answers. SwiftTerm
-answered nothing (see [`dependencies.md`](dependencies.md) for the off-by-one that swallowed
-every OSC 11), so on a light theme the agent drew its dark palette: a diff's unchanged lines
+used to answer nothing because an off-by-one swallowed every OSC 11, so on a light theme the
+agent drew its dark palette: a diff's unchanged lines
 arrived as near-white text on Bauhaus's paper, invisible, while its changed lines carried
 Claude's own near-black washes — which the harmony transform then correctly left alone, because
 holding lightness is exactly what keeps a program's chosen contrast intact. Nothing in the app's
-own rendering was wrong; the terminal had simply never said what colour it was.
+own rendering was wrong; the terminal had simply never said what colour it was. Current upstream
+SwiftTerm owns the corrected OSC 10/11/12 query path; see [`dependencies.md`](dependencies.md).
 
 `TerminalSession.applyProfile` runs before the child launches, so the answer is the session's own
 palette rather than SwiftTerm's default black. The question is asked **once, at startup**: a theme
@@ -278,10 +279,11 @@ to — `CSI ? 997 ; 1 n` on ink, `; 2 n` on paper — is a **prompt to re-ask, n
 itself**: on hearing it the agent sends a fresh `OSC 11 ; ?` and adopts that answer. This is
 why feeding it `CSI ? 997 ; 2 n` by hand once read as "not wired up in 2.1.220": the terminal
 behind the experiment kept giving the *old* answer to the re-ask, so nothing visibly moved.
-The fork now tracks the 2031 subscription (`Terminal.colorSchemeReportingEnabled`, honoured by
-`reportColorSchemeChange`), and `TerminalSession.applyProfile` reports through it whenever an
-applied profile actually changes the emulator's background — palette first, report second, so
-the re-ask hears the new page; font tweaks and re-applies of the same palette stay silent.
+Upstream SwiftTerm now tracks the 2031 subscription and exposes `TerminalColorScheme` through
+`updateColorScheme(_:notify:)`. `TerminalSession.applyProfile` records the current scheme after
+installing every palette and asks it to notify only when the emulator's background actually
+changed — palette first, report second, so the re-ask hears the new page; font tweaks and
+re-applies of the same palette stay silent.
 Driven against Claude Code 2.1.220 in a PTY: dark ink, report, re-ask, light ink, live.
 
 **A runtime that does not subscribe hears none of that, and Codex is one.** `strings` on the

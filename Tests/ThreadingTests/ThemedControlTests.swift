@@ -1004,6 +1004,7 @@ final class ThemedControlTests: HostedStoreTestCase {
         defer { window.close() }
 
         var dismissals = 0
+        let restingSubviewCount = root.subviews.count
         // Deliberately unretained: the defect being pinned is a call site ignoring the token.
         // The single disabled row is the clock's own refusal menu, where this was found.
         ThemedMenuPresenter.present(
@@ -1031,6 +1032,56 @@ final class ThemedControlTests: HostedStoreTestCase {
 
         XCTAssertEqual(dismissals, 1, "Escape never reached a live session")
         XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+        XCTAssertEqual(
+            root.subviews.count,
+            restingSubviewCount,
+            "an offscreen menu waited for an animation completion the hidden window cannot run"
+        )
+    }
+
+    /// A menu can begin its visible fade and lose the preview window before the first display
+    /// frame. AppKit's `animator().alphaValue` waits on a blocking worker for a window display
+    /// cycle that will never return; doing this once per gallery fixture eventually exhausts the
+    /// process's dispatch threads and starves otherwise unrelated async tests.
+    func testAVisibleMenuFadeFinishesAfterItsWindowCloses() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let source = NSView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        window.animationBehavior = .none
+        window.orderFront(nil)
+
+        let restingSubviewCount = root.subviews.count
+        let session = ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [.item(ThemedMenuItem(title: "Close with the preview"))],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, _ in },
+            onDismiss: {}
+        )
+        XCTAssertNotNil(session)
+        XCTAssertGreaterThan(root.subviews.count, restingSubviewCount)
+
+        ThemedMenuPresenter.dismiss(session)
+        window.close()
+
+        let fadeFinished = expectation(description: "menu pixels finish after window close")
+        DispatchQueue.main.asyncAfter(deadline: .now() + Design.Motion.vanish + 0.1) {
+            fadeFinished.fulfill()
+        }
+        wait(for: [fadeFinished], timeout: Design.Motion.vanish + 1)
+        XCTAssertEqual(root.subviews.count, restingSubviewCount)
     }
 
     /// Two *adjacent* filled rows keep a hairline of panel between them.
@@ -2107,6 +2158,9 @@ final class ThemedControlTests: HostedStoreTestCase {
 
         let (window, root, source) = try menuHarness()
         defer { window.close() }
+        window.animationBehavior = .none
+        window.setFrameOrigin(NSPoint(x: -10_000, y: -10_000))
+        window.orderFront(nil)
 
         let token = try XCTUnwrap(present(from: source))
         defer { ThemedMenuPresenter.dismiss(token) }
@@ -7672,6 +7726,7 @@ final class ThemedControlTests: HostedStoreTestCase {
             defer: false
         )
         window.contentView = root
+        window.animationBehavior = .none
         window.makeKeyAndOrderFront(nil)
         defer { window.orderOut(nil) }
 
@@ -7713,6 +7768,7 @@ final class ThemedControlTests: HostedStoreTestCase {
             defer: false
         )
         window.contentView = root
+        window.animationBehavior = .none
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(field)
         RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
@@ -7744,6 +7800,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ConversationHandoffView",
                 "ConversationOutboxRailView",
                 "ConversationOutboxRowView",
+                "ConversationSearchWindowViewController",
                 "ScheduledSessionPlaceholderView",
                 "ScheduledMessageStripView",
                 "ScheduledMessageRowView",
@@ -7789,6 +7846,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "PanelListView",
                 "PromptCompletionPresenter",
                 "PromptView",
+                "ProjectTextSearchPreviewViewController",
                 "RevealHighlightView",
                 "RunPlanDisclosureView",
                 "SearchMatchLabel",
@@ -7799,6 +7857,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "ShortcutRecorderView",
                 "SidebarBackdropView",
                 "SidebarBrandView",
+                "SidebarEdgeRevealCoordinator",
                 "SimulatorScreenView",
                 "SplitButtonView",
                 "SplitIconButtonView",
@@ -7865,6 +7924,7 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "UsageDashboardView",
                 "UsageLimitLegendView",
                 "UsageReadingLabel",
+                "UniversalSearchOverlayViewController",
                 "WorkspaceNavigatorPipelinePlaceholderView",
                 "WorkspaceNavigatorPipelineResultsView",
                 "WorkspaceNavigatorPipelineSearchBandView",
@@ -7874,7 +7934,11 @@ final class ThemedControlTests: HostedStoreTestCase {
                 "WindowChromeButton",
                 "WindowChromeFrameView",
                 "WindowCommandBandView",
-                "WindowTitleBandView"
+                "WindowTitleBandView",
+                "WorkspaceNavigatorPipelinePlaceholderView",
+                "WorkspaceNavigatorPipelineResultsView",
+                "WorkspaceNavigatorPipelineSearchBandView",
+                "WorkspaceNavigatorPipelineTemplateView"
             ]
         )
 

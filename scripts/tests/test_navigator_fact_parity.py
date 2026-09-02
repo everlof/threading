@@ -266,6 +266,10 @@ final class ProjectSidebarViewController {
 }
 """
 
+NATIVE_OPTIONS = """
+enum NativeSidebarPipelineOptions {}
+"""
+
 
 class NavigatorFactParityTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -282,6 +286,10 @@ class NavigatorFactParityTests(unittest.TestCase):
         self.write(
             "Sources/Threading/UI/Views/ProjectSidebarViewController.swift",
             PROJECT_SIDEBAR,
+        )
+        self.write(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            NATIVE_OPTIONS,
         )
 
     def tearDown(self) -> None:
@@ -314,6 +322,36 @@ class NavigatorFactParityTests(unittest.TestCase):
         self.assertIn(message, result.stderr)
 
     def test_complete_literal_contract_is_clean(self) -> None:
+        result = self.run_checker()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("navigator-fact-parity: clean", result.stdout)
+
+    def test_native_option_adapter_is_a_protected_audit_scope(self) -> None:
+        self.replace(
+            "Sources/Threading/Core/Extensions/NativeSidebarPipelineOptions.swift",
+            "enum NativeSidebarPipelineOptions {}",
+            """enum NativeSidebarPipelineOptions {
+    static let branchGrouping = AppSettings.groupsSessionsByBranch
+}""",
+        )
+
+        self.assert_fails_with(
+            "NativeSidebarPipelineOptions reads provider root "
+            "AppSettings.groupsSessionsByBranch outside NativeSidebarParity"
+        )
+
+    def test_typed_option_snapshot_can_cross_builder_entrypoint(self) -> None:
+        self.replace(
+            "Sources/Threading/UI/Views/SidebarOutlineNodes.swift",
+            "static func rootNodes(from projects: [Project]) {",
+            """static func rootNodes(
+        from projects: [Project],
+        optionValues: NativeSidebarPipelineOptionValues
+    ) {
+        _ = optionValues""",
+        )
+
         result = self.run_checker()
 
         self.assertEqual(result.returncode, 0, result.stderr)

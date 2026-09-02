@@ -289,14 +289,19 @@ struct SendThreadingTests {
         #expect(first.visibleRows.allSatisfy {
             $0.cellWidths.count == first.dimensions.cols
         })
+        #expect(first.keyboardEnhancementFlags.isEmpty)
 
-        view.feed(text: "second")
-        let currentText = view.terminalStateSnapshot().visibleRows
+        view.feed(text: "second\u{1b}[>7u")
+        let current = view.terminalStateSnapshot()
+        let currentText = current.visibleRows
             .map(\.text).joined(separator: "\n")
         let bufferText = String(data: view.getBufferAsData(), encoding: .utf8)
 
         #expect(first.visibleRows.map(\.text).joined(separator: "\n") == firstText)
         #expect(!firstText.contains("second"))
+        #expect(current.keyboardEnhancementFlags == [
+            .disambiguate, .reportEvents, .reportAlternates
+        ])
         #expect(currentText.contains("firstsecond"))
         #expect(bufferText?.contains("firstsecond") == true)
     }
