@@ -254,6 +254,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 key: "remoteAccessAdvertisedHostname",
                 valueType: .string
             ),
+            .remoteHostedServiceEnvironment: .init(
+                key: "remoteHostedServiceEnvironment",
+                valueType: .string
+            ),
             .remoteAccessDiscoveryEnabled: .init(
                 key: "remoteAccessDiscoveryEnabled",
                 valueType: .boolean
