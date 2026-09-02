@@ -490,6 +490,18 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
     }
 
     private func configureActions() {
+        [
+            capabilityButton,
+            attachButton,
+            attentionButton,
+            sendButton,
+            requestControlButton,
+        ].forEach { MobileButtonHaptics.install(on: $0) }
+        MobileButtonHaptics.install(
+            on: controlMenuButton,
+            activationEvent: .menuActionTriggered
+        )
+
         capabilityButton.addAction(UIAction { [weak self] _ in
             guard let self else { return }
             capabilityKindFilter = nil
@@ -901,6 +913,7 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
             let button = UIButton(configuration: configuration, primaryAction: UIAction { [weak self] _ in
                 self?.chooseCapability(item)
             })
+            MobileButtonHaptics.install(on: button)
             button.contentHorizontalAlignment = .leading
             button.backgroundColor = theme.uiElevated
             button.isEnabled = item.isEnabled
@@ -1932,6 +1945,7 @@ private final class RemoteConversationNavigationTitleView: UIControl {
         ])
         titleLabel.isAccessibilityElement = false
         addAction(UIAction { [weak self] _ in self?.reconnect?() }, for: .touchUpInside)
+        MobileButtonHaptics.install(on: self)
         accessibilityTraits = .header
     }
 

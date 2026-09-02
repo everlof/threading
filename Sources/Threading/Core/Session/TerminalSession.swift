@@ -1195,11 +1195,16 @@ extension TerminalSession: @preconcurrency LocalProcessTerminalViewDelegate {
     }
 
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) {
+        let titleChanged = self.title != title
         self.title = title
         self.reportedTitle = title
         // Recorded at the moment of the report, not read back later: by the next poll the
         // program may already have exited, and the title would then look like the shell's.
+        // Refresh ownership even for an identical report. A shell and its foreground command
+        // can deliberately publish the same title, and title retirement still needs to know
+        // which one most recently claimed it.
         self.reportedTitleOwner = currentForegroundGroup()
+        guard titleChanged else { return }
         delegate?.terminalSession(self, titleChangedTo: title)
     }
 

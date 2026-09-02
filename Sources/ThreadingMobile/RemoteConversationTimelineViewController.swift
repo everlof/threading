@@ -1863,6 +1863,7 @@ final class RemoteToolDisclosureControl: UIControl {
 
         isAccessibilityElement = true
         accessibilityTraits = .button
+        MobileButtonHaptics.install(on: self)
     }
 
     @available(*, unavailable)
@@ -2282,6 +2283,7 @@ private final class RemoteCodeBlockView: UIView {
         copy.setImage(UIImage(systemName: "doc.on.doc"), for: .normal)
         copy.tintColor = theme.uiSecondaryLabel
         copy.accessibilityLabel = MobileL10n.string("Copy code")
+        MobileButtonHaptics.install(on: copy)
         copy.addAction(UIAction { _ in UIPasteboard.general.string = code }, for: .touchUpInside)
 
         let scroll = UIScrollView()
@@ -2391,6 +2393,7 @@ private final class RemoteExpandableMessageView: UIView {
         button.titleLabel?.font = .preferredFont(forTextStyle: .subheadline)
         button.titleLabel?.adjustsFontForContentSizeCategory = true
         button.accessibilityValue = MobileL10n.string(isExpanded ? "Expanded" : "Collapsed")
+        MobileButtonHaptics.install(on: button)
         button.addAction(UIAction { _ in toggle() }, for: .touchUpInside)
         stack.addArrangedSubview(button)
         if isExpanded {
@@ -2739,6 +2742,7 @@ private final class RemoteConversationPermissionCell: UICollectionViewCell {
         configuration.cornerStyle = .fixed
         configuration.background.cornerRadius = radius
         let button = UIButton(configuration: configuration)
+        MobileButtonHaptics.install(on: button)
         button.heightAnchor.constraint(
             greaterThanOrEqualToConstant: MobileDesign.Size.minimumTapTarget
         ).isActive = true
@@ -2912,6 +2916,7 @@ private final class RemoteConversationHistoryCell: UICollectionViewCell {
         configuration.imagePadding = MobileDesign.Spacing.small
         configuration.baseForegroundColor = theme.uiSecondaryLabel
         let button = UIButton(configuration: configuration)
+        MobileButtonHaptics.install(on: button)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.isEnabled = !isLoading
         button.accessibilityHint = MobileL10n.string(

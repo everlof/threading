@@ -1163,6 +1163,18 @@ connection, notification preferences and active host directly, coalescing change
 queue render. Draft and viewport continuity still use the host-and-session-scoped store; changing
 the rendering owner did not change which client owns that working state.
 
+Phone terminal keys and native-conversation buttons share one `MobileButtonFeedback`: a light
+`UIImpactFeedbackGenerator` impact at intensity 0.85. The UIKit adapter prepares that one generator
+on touch-down and fires only on the control's successful semantic activation—touch-up-inside for
+ordinary controls and menu-presentation for a menu button—then prepares the next press. A drag-off,
+cancellation or disabled control is silent. SwiftUI controls owned by the conversation call the
+same feedback object from their successful button action; terminal modifier latches deliberately
+keep `UISelectionFeedbackGenerator` because they confirm a state transition instead of a key
+impact. The generator is process-wide rather than row-owned, so a transcript's cardinality cannot
+create haptic engines or mount work. This interaction feedback remains host-owned: extensions may
+supply normalized content for an existing button or row, but cannot add, replace or double its
+confirmation.
+
 The app and scene lifecycle are UIKit-owned so a native route can start without constructing a
 root hosting graph. The dashboard and screens not yet migrated are intentionally contained in one
 `UIHostingController`; the conversation stress route enters a native navigation controller

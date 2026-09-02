@@ -2456,6 +2456,11 @@ metadata only; the Mac resolves and executes the selected action against the sti
 session. An unknown leading Claude slash command remains at the start of the provider message —
 shared-chat attribution never moves it out of command position.
 
+Threading-owned buttons in iPhone Chat use the same light tap as the terminal key bar. The tap
+confirms a completed press; sliding off a button, cancelling the touch or pressing a disabled
+control does not produce a false confirmation. Photo, file and other system sheets retain iOS's
+own feedback.
+
 **Attaching a photo or file from the phone.** The paperclip beside the plus attaches from your
 clipboard, photo library or Files — up to eight per message, images, PDFs, HTML, archives and the
 common document formats. You can also paste a copied picture directly into the text area. Each

@@ -418,7 +418,7 @@ struct TerminalKeyBar: View {
     @EnvironmentObject private var keyboards: MobileTerminalKeyboardStore
     @Environment(\.remoteTheme) private var theme
     @State private var isKeyboardVisible = false
-    @State private var keyFeedback = UIImpactFeedbackGenerator(style: .light)
+    @State private var keyFeedback = MobileButtonFeedback.shared
     @State private var modifierFeedback = UISelectionFeedbackGenerator()
 
     var body: some View {
@@ -622,8 +622,7 @@ struct TerminalKeyBar: View {
 
     private func press(_ key: RemoteTerminalKeyDefinition) {
         guard let bytes = bridge.encodedBytes(for: key.action) else { return }
-        keyFeedback.impactOccurred(intensity: 0.85)
-        keyFeedback.prepare()
+        keyFeedback.perform()
         connection.sendTerminalKey(String(decoding: bytes, as: UTF8.self))
         bridge.consumeModifiersAfterKey()
     }

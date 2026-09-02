@@ -512,6 +512,7 @@ private final class ComposerAttachmentChipView: UIView {
             for: .normal
         )
         removeButton.tintColor = theme.uiLabel
+        MobileButtonHaptics.install(on: removeButton)
         removeButton.addAction(
             UIAction { [weak self] _ in self?.onRemove?() },
             for: .touchUpInside

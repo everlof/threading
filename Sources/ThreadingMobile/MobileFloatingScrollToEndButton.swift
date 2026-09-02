@@ -53,6 +53,7 @@ final class MobileFloatingScrollToEndButton: UIButton {
         self.accessibilityLabel = accessibilityLabel
         self.accessibilityIdentifier = accessibilityIdentifier
         accessibilityTraits.insert(.button)
+        MobileButtonHaptics.install(on: self)
         layer.cornerCurve = .continuous
         layer.cornerRadius = MobileDesign.Size.floatingScrollTarget / 2
         clipsToBounds = true

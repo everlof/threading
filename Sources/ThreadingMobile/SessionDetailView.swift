@@ -3335,6 +3335,7 @@ struct AttentionRequestSheet: View {
     @State private var note = ""
     @State private var requestID: String?
     @State private var notice: String?
+    @State private var buttonFeedback = MobileButtonFeedback.shared
     @FocusState private var noteIsFocused: Bool
 
     var body: some View {
@@ -3343,6 +3344,7 @@ struct AttentionRequestSheet: View {
                 ThemedSettingsSection {
                     ForEach(connection.attentionRecipients) { participant in
                         Button {
+                            buttonFeedback.perform()
                             selectedRecipientID = participant.id
                             notice = nil
                         } label: {
@@ -3406,15 +3408,22 @@ struct AttentionRequestSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") {
+                        buttonFeedback.perform()
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Ask") { send() }
+                    Button("Ask") {
+                        buttonFeedback.perform()
+                        send()
+                    }
                         .disabled(selectedRecipientID == nil
                             || connection.isAttentionRequestPending)
                 }
             }
             .task {
+                buttonFeedback.prepare()
                 if selectedRecipientID == nil {
                     selectedRecipientID = connection.attentionRecipients.first?.id
                 }

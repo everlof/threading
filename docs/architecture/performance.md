@@ -3691,6 +3691,26 @@ mount is inside one 60 Hz frame at the largest valid contract, so there is no cu
 bottleneck to repair. Keep `host_window_ms` as a harness-health diagnostic, but never add it to
 `cold_pane_ms` again.
 
+## Terminal-title update stress target
+
+Terminal title reports (OSC 0/2) are provider-controlled and can arrive many times per second from
+every live TUI session. The expected case is an occasional real title change; the stress case is
+10,000 identical reports. Processing must remain O(1) per report, and identical reports must cause
+zero delegate notifications after the first because a notification reaches persistence, the
+sidebar row, the session title control, and toolbar-state rendering on the main actor.
+
+A 2026-09-02 sample of the running app attributed 654 of 3,611 busy main-thread samples to this
+fan-out. Of those, 395 reached `SessionRowView.configure`; 259 entered agent-icon presentation and
+asset rendition lookup. `TerminalSession.setTerminalTitle` had notified for every report without
+checking whether the title changed.
+
+`TerminalNamingTests.testRepeatedTerminalTitleReportsNotifyOnlyOnce` now drives 10,000 reports
+through the production callback and requires exactly one delegate notification. The adjacent
+changed-title test keeps real transitions ordered and lossless. `TerminalSession` still refreshes
+the reported title's foreground-process owner on every report—even an identical one—because title
+retirement depends on the most recent claimant; only the expensive presentation notification is
+deduplicated.
+
 ## Project sidebar stress target
 
 `SidebarTreeBuilderTests.testStressProjectSidebarWhenEnabled` seeds a throwaway `ProjectStore`

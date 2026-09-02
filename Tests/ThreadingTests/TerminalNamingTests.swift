@@ -11,6 +11,15 @@ final class TerminalNamingTests: XCTestCase {
 
     private let shell = "/bin/zsh"
 
+    @MainActor
+    private final class TitleDelegate: TerminalSessionDelegate {
+        private(set) var titles: [String] = []
+
+        func terminalSession(_ session: TerminalSession, titleChangedTo title: String) {
+            titles.append(title)
+        }
+    }
+
     // MARK: - Derived Names
 
     func testATerminalAtTheProjectRootIsNamedAfterItsShell() {
@@ -180,6 +189,35 @@ final class TerminalNamingTests: XCTestCase {
         XCTAssertFalse(TerminalNaming.isPlaceholder("npm run dev"))
         // A title that happens to contain a path is still something a program chose to say.
         XCTAssertFalse(TerminalNaming.isPlaceholder("vim /etc/hosts"))
+    }
+
+    @MainActor
+    func testRepeatedTerminalTitleReportsNotifyOnlyOnce() {
+        let session = TerminalSession()
+        let delegate = TitleDelegate()
+        session.delegate = delegate
+
+        for _ in 0..<10_000 {
+            session.setTerminalTitle(source: session.terminalView, title: "codex")
+        }
+
+        XCTAssertEqual(session.title, "codex")
+        XCTAssertEqual(session.reportedTitle, "codex")
+        XCTAssertEqual(delegate.titles, ["codex"])
+    }
+
+    @MainActor
+    func testChangedTerminalTitlesStillNotifyInOrder() {
+        let session = TerminalSession()
+        let delegate = TitleDelegate()
+        session.delegate = delegate
+
+        session.setTerminalTitle(source: session.terminalView, title: "codex")
+        session.setTerminalTitle(source: session.terminalView, title: "codex")
+        session.setTerminalTitle(source: session.terminalView, title: "Reviewing")
+        session.setTerminalTitle(source: session.terminalView, title: "Reviewing")
+
+        XCTAssertEqual(delegate.titles, ["codex", "Reviewing"])
     }
 
     func testAnEmptyRenameIsNoRename() {

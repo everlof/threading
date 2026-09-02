@@ -7,6 +7,7 @@ struct MobileRunPlanDisclosure: View {
     @ObservedObject var connection: RemoteSessionConnection
     @Environment(\.remoteTheme) private var theme
     @State private var isExpanded = false
+    @State private var buttonFeedback = MobileButtonFeedback.shared
 
     init(connection: RemoteSessionConnection) {
         self.connection = connection
@@ -21,6 +22,7 @@ struct MobileRunPlanDisclosure: View {
     var body: some View {
         if let plan = connection.runPlan {
             Button {
+                buttonFeedback.perform()
                 isExpanded.toggle()
                 if isExpanded { connection.requestNextRunPlanPage() }
             } label: {
@@ -46,6 +48,7 @@ struct MobileRunPlanDisclosure: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .onAppear { buttonFeedback.prepare() }
             .background(theme.surface)
             .overlay(alignment: .bottom) {
                 Rectangle().fill(theme.divider).frame(height: theme.borderWidth)
