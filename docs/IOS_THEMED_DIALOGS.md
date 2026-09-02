@@ -161,10 +161,17 @@ in behind content that was already standing. The presenter therefore stages
 adopts it, and the completion clears the staging and reapplies the current style as the ordinary
 update path.
 
-The new-session model-and-effort chooser is the first consumer. This is a correction to an
-existing host-only surface, not a new extension component: Threading continues to own catalogue
-validity, inherited/default resolution and the choice submitted to the runtime. Themes own its
-presentation material, while extensions do not replace that operational decision surface.
+UIKit also remains the sole owner of the popover layer's shadow. Do not assign a `shadowPath`
+from `layoutSubviews`: the anchor moves with the composer while its keyboard dismisses, and that
+assignment starts a second implicit path animation that visibly trails the body. The background
+view draws only the themed fill, border and arrow.
+
+The new-session model-and-effort, speed and permission choosers are the first consumers. Keeping
+all three on this boundary matters for square themes in particular: SwiftUI's compact-popover
+mask otherwise rounds away their authored corners. This is a correction to existing host-only
+surfaces, not a new extension component: Threading continues to own catalogue validity,
+inherited/default resolution and the choices submitted to the runtime. Themes own presentation
+material, while extensions do not replace those operational decision surfaces.
 
 ## Settings surfaces
 

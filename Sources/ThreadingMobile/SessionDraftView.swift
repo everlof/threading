@@ -1129,9 +1129,9 @@ private struct SessionDraftComposerScreen: View {
             : originalUISurfaceTitle
     }
 
-    /// Model and effort keep one unchanged one-line trigger. Only its presented choice surface
-    /// is custom: the popover shows the two as the relationship they actually are, while speed
-    /// remains the simpler independent three-way choice beside it.
+    /// Model and effort keep one unchanged one-line trigger. The popover shows the two as the
+    /// relationship they actually are, while speed remains the simpler independent three-way
+    /// choice beside it. All three draft choosers share the theme-owned popover chrome below.
     private var runMenu: some View {
         Button {
             // A chooser needs the height the keyboard is standing on; the prompt regains focus
@@ -1188,9 +1188,9 @@ private struct SessionDraftComposerScreen: View {
         .disabled(isSubmitting)
         .accessibilityLabel(MobileL10n.string("Speed"))
         .accessibilityValue(selectedSpeedName)
-        .popover(
+        .mobileThemedPopover(
             isPresented: $speedChooserIsPresented,
-            attachmentAnchor: .rect(.bounds),
+            theme: theme,
             arrowEdge: .bottom
         ) {
             MobileDraftChooser(
@@ -1202,10 +1202,6 @@ private struct SessionDraftComposerScreen: View {
                     speedChooserIsPresented = false
                 }
             )
-            .mobileTheme(theme)
-            .presentationBackground(theme.floatingSurface)
-            .presentationCornerRadius(theme.panelRadius)
-            .presentationCompactAdaptation(.popover)
         }
     }
 
@@ -1264,9 +1260,9 @@ private struct SessionDraftComposerScreen: View {
         .disabled(isSubmitting)
         .accessibilityLabel(MobileL10n.string("Permissions"))
         .accessibilityValue(selectedPermissionName)
-        .popover(
+        .mobileThemedPopover(
             isPresented: $permissionChooserIsPresented,
-            attachmentAnchor: .rect(.bounds),
+            theme: theme,
             arrowEdge: .bottom
         ) {
             MobileDraftChooser(
@@ -1278,10 +1274,6 @@ private struct SessionDraftComposerScreen: View {
                     permissionChooserIsPresented = false
                 }
             )
-            .mobileTheme(theme)
-            .presentationBackground(theme.floatingSurface)
-            .presentationCornerRadius(theme.panelRadius)
-            .presentationCompactAdaptation(.popover)
         }
     }
 

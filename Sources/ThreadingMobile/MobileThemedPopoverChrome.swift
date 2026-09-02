@@ -268,7 +268,9 @@ final class MobileThemedPopoverBackgroundView: UIPopoverBackgroundView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        layer.shadowPath = outlinePath().cgPath
+        // `UIPopoverPresentationController` owns this layer's moving shadow. Replacing its
+        // path here starts a second implicit animation whenever UIKit follows an anchor that is
+        // moving with the keyboard, so the shadow trails the body during presentation.
         setNeedsDisplay()
     }
 
@@ -293,13 +295,6 @@ final class MobileThemedPopoverBackgroundView: UIPopoverBackgroundView {
         arrowSides.lineWidth = style.borderWidth
         arrowSides.lineJoinStyle = .round
         arrowSides.stroke()
-    }
-
-    private func outlinePath() -> UIBezierPath {
-        let body = bodyRect
-        let path = UIBezierPath(roundedRect: body, cornerRadius: fittedCornerRadius)
-        path.append(arrowPath(body: body, cornerRadius: fittedCornerRadius))
-        return path
     }
 
     private var fittedCornerRadius: CGFloat {

@@ -82,6 +82,32 @@ final class MobileFloatingSurfaceTests: XCTestCase {
 
 @MainActor
 final class MobileThemedPopoverChromeTests: XCTestCase {
+    func testThemeDoesNotReplaceUIKitManagedShadowPath() throws {
+        let view = MobileThemedPopoverBackgroundView(
+            frame: CGRect(x: 0, y: 0, width: 100, height: 80)
+        )
+        view.arrowDirection = .down
+        view.apply(.init(
+            fill: .white,
+            border: .black,
+            borderWidth: 2,
+            cornerRadius: 0
+        ))
+        view.layoutIfNeeded()
+
+        let shadowBounds = try XCTUnwrap(view.layer.shadowPath).boundingBoxOfPath
+        XCTAssertGreaterThan(
+            shadowBounds.minX,
+            view.bounds.minX,
+            "the theme must not replace UIKit's inset shadow with its body outline"
+        )
+        XCTAssertLessThan(
+            shadowBounds.maxY,
+            view.bounds.maxY,
+            "UIKit's shadow excludes the arrow instead of following the theme's full outline"
+        )
+    }
+
     func testThemeRadiusReachesTheOuterCornerAndArrowHasNoBodySeam() throws {
         let view = MobileThemedPopoverBackgroundView(
             frame: CGRect(x: 0, y: 0, width: 100, height: 80)
