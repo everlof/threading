@@ -12,6 +12,8 @@ struct ProjectTerminalDetailView: View {
     let terminal: RemoteProjectTerminalSummaryDTO
 
     @State private var connection: RemoteSessionConnection?
+    /// The Mac `connection` was opened against, so a route move on another Mac is not adopted.
+    @State private var connectedHostID: String?
     @State private var launchError: String?
     @State private var actionError: String?
     @State private var pendingShareCapability: RemoteCapability?
@@ -91,6 +93,11 @@ struct ProjectTerminalDetailView: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .background(theme.ground)
         .task { await open() }
+        .onChange(of: model.routeIdentity) { _, _ in
+            guard let connection, let client = model.client,
+                  model.activeHostID == connectedHostID else { return }
+            connection.adoptRoute(client)
+        }
         .onDisappear { connection?.disconnect(markEnded: false) }
         .sheet(item: $sharedLink) { link in
             SharedSessionLinkView(link: link)
@@ -125,6 +132,7 @@ struct ProjectTerminalDetailView: View {
             guard let hostID = model.activeHostID else {
                 throw RemoteClientError.invalidResponse
             }
+            connectedHostID = hostID
             try await model.makeTerminalReady(currentTerminal)
             guard let client = model.client else { throw RemoteClientError.invalidResponse }
             let latest = model.me?.terminals?.first(where: { $0.id == terminal.id }) ?? terminal
@@ -147,8 +155,8 @@ struct ProjectTerminalDetailView: View {
                 session: presentation,
                 target: .projectTerminal(latest.id),
                 client: client,
-                reconnectClient: { attempt in
-                    await model.clientForSessionReconnect(hostID: hostID, attempt: attempt)
+                reconnectClient: { request in
+                    await model.clientForSessionReconnect(hostID: hostID, request: request)
                 }
             )
             connection = made

@@ -400,17 +400,168 @@ final class RemoteConnectionFailureTests: XCTestCase {
         XCTAssertFalse(encoded.contains("\"z\""))
     }
 
+    // MARK: - A dead route is not dialled blind
+
+    /// The 2026-09-02 report: Wi-Fi went, both sockets died within a millisecond, and the
+    /// session socket's first retry kept the LAN origin because a hello had reset its ladder. It
+    /// then dialled an address that no longer existed until the person backed out of the chat.
+    /// A loss with no close frame now asks the model for a route on the very first retry, and
+    /// says so in the journal.
+    func testALossWithoutACloseFrameAsksTheModelForARouteOnTheFirstRetry() async throws {
+        let server = try SilentTCPServer()
+        defer { server.stop() }
+
+        let sessionID = UUID().uuidString.lowercased()
+        let pseudonym = MobileDiagnostics.pseudonym(sessionID, prefix: "session")
+        let requests = ReconnectRequestLog()
+        let connection = makeConnection(port: server.port, sessionID: sessionID) { request in
+            requests.record(request)
+            return nil
+        }
+        connection.connect()
+        _ = try await terminalFailure(of: connection)
+        let request = try await requests.first(within: terminalAllowance)
+        connection.disconnect(markEnded: false)
+
+        XCTAssertEqual(request, MobileSessionReconnectRequest(attempt: 0, peerSentClose: false))
+        XCTAssertTrue(
+            MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(
+                request,
+                dashboardRecoveryPending: false
+            ),
+            "the first retry after a wire loss goes through host recovery"
+        )
+        let scheduled = try XCTUnwrap(
+            MobileDiagnostics.journal.records().last {
+                $0.event == .socketReconnectScheduled
+                    && $0.fields[RemoteDiagnosticField.session.rawValue] == pseudonym
+            }
+        )
+        XCTAssertEqual(scheduled.fields[RemoteDiagnosticField.detail.rawValue], "routeSuspect")
+    }
+
+    /// The other half of the same report: once the dashboard socket had found the Mac over
+    /// cellular, nothing told the session socket, which sat out its hello deadline on the LAN
+    /// origin. A route that moves now restarts a waiting hello on the new origin, and the
+    /// abandoned attempt still gets its terminal journal entry.
+    func testARouteThatMovesRestartsAHelloStillWaitingOnTheOldOne() async throws {
+        let oldServer = try SilentTCPServer()
+        defer { oldServer.stop() }
+        let newServer = try SilentTCPServer()
+        defer { newServer.stop() }
+
+        let sessionID = UUID().uuidString.lowercased()
+        let pseudonym = MobileDiagnostics.pseudonym(sessionID, prefix: "session")
+        let connection = makeConnection(port: oldServer.port, sessionID: sessionID)
+        connection.connect()
+        XCTAssertEqual(connection.phase, .connecting)
+
+        XCTAssertFalse(
+            connection.adoptRoute(makeClient(port: oldServer.port)),
+            "the same origin is not a move"
+        )
+        XCTAssertTrue(connection.adoptRoute(makeClient(port: newServer.port)))
+        XCTAssertEqual(connection.phase, .connecting)
+
+        let failure = try await terminalFailure(of: connection)
+        connection.disconnect(markEnded: false)
+        XCTAssertEqual(failure.cause, .helloTimeout)
+
+        let records = MobileDiagnostics.journal.records().filter {
+            $0.fields[RemoteDiagnosticField.session.rawValue] == pseudonym
+        }
+        let connecting = records.filter { $0.event == .socketConnecting }
+        XCTAssertEqual(connecting.count, 2, "one attempt per origin")
+        let superseded = try XCTUnwrap(records.last { $0.event == .socketEnded })
+        XCTAssertEqual(superseded.fields[RemoteDiagnosticField.result.rawValue], "superseded")
+        XCTAssertEqual(superseded.fields[RemoteDiagnosticField.reason.rawValue], "routeChanged")
+        XCTAssertEqual(superseded.fields[RemoteDiagnosticField.phase.rawValue], "hello")
+        XCTAssertEqual(
+            superseded.fields[RemoteDiagnosticField.trace.rawValue],
+            connecting.first?.fields[RemoteDiagnosticField.trace.rawValue],
+            "the abandoned attempt is the one that ends"
+        )
+        XCTAssertEqual(
+            superseded.fields[RemoteDiagnosticField.origin.rawValue],
+            originDigest(port: oldServer.port)
+        )
+        XCTAssertEqual(
+            connecting.last?.fields[RemoteDiagnosticField.origin.rawValue],
+            originDigest(port: newServer.port)
+        )
+        let failed = try XCTUnwrap(records.last { $0.event == .socketFailed })
+        XCTAssertEqual(
+            failed.fields[RemoteDiagnosticField.trace.rawValue],
+            connecting.last?.fields[RemoteDiagnosticField.trace.rawValue],
+            "the deadline that fires belongs to the new attempt, not the abandoned one"
+        )
+    }
+
+    func testARouteThatMovesDuringBackoffDialsTheNewOneAtOnce() async throws {
+        let oldServer = try SilentTCPServer()
+        defer { oldServer.stop() }
+        let newServer = try SilentTCPServer()
+        defer { newServer.stop() }
+
+        let sessionID = UUID().uuidString.lowercased()
+        let pseudonym = MobileDiagnostics.pseudonym(sessionID, prefix: "session")
+        let connection = makeConnection(port: oldServer.port, sessionID: sessionID) { _ in nil }
+        connection.connect()
+        _ = try await terminalFailure(of: connection)
+
+        XCTAssertTrue(
+            connection.adoptRoute(makeClient(port: newServer.port)),
+            "a backoff toward the old origin is abandoned for the new one"
+        )
+        XCTAssertEqual(connection.phase, .connecting)
+        connection.disconnect(markEnded: false)
+
+        let records = MobileDiagnostics.journal.records().filter {
+            $0.fields[RemoteDiagnosticField.session.rawValue] == pseudonym
+        }
+        let superseded = try XCTUnwrap(records.last { $0.event == .socketEnded })
+        XCTAssertEqual(superseded.fields[RemoteDiagnosticField.result.rawValue], "superseded")
+        XCTAssertEqual(superseded.fields[RemoteDiagnosticField.phase.rawValue], "backoff")
+        XCTAssertEqual(
+            records.last { $0.event == .socketConnecting }?
+                .fields[RemoteDiagnosticField.origin.rawValue],
+            originDigest(port: newServer.port)
+        )
+    }
+
+    func testAConnectedSocketIsNotRestartedWhenTheRouteMoves() {
+        let connection = RemoteSessionConnection(
+            session: RemoteSessionSummaryDTO(
+                id: UUID().uuidString.lowercased(),
+                title: "Fixture",
+                agentKind: "codex",
+                surface: .terminal,
+                state: .idle,
+                projectName: "Fixture"
+            ),
+            client: RemoteClient(link: DemoExperience.link)
+        )
+        connection.connect()
+        defer { connection.disconnect(markEnded: false) }
+        XCTAssertEqual(connection.phase, .connected)
+
+        XCTAssertFalse(
+            connection.adoptRoute(makeClient(port: 1)),
+            "a working socket is left alone; its own reconnect asks for the current route"
+        )
+        XCTAssertEqual(connection.phase, .connected)
+    }
+
     // MARK: - Helpers
 
     private func makeConnection(
         port: UInt16,
-        sessionID: String
+        sessionID: String,
+        reconnectClient: (
+            @MainActor (MobileSessionReconnectRequest) async -> RemoteClient?
+        )? = nil
     ) -> RemoteSessionConnection {
-        let link = RemoteConnectionLink(
-            baseURL: URL(string: "http://127.0.0.1:\(port)")!,
-            token: Self.bearer
-        )!
-        return RemoteSessionConnection(
+        RemoteSessionConnection(
             session: RemoteSessionSummaryDTO(
                 id: sessionID,
                 title: "Fixture",
@@ -419,9 +570,21 @@ final class RemoteConnectionFailureTests: XCTestCase {
                 state: .idle,
                 projectName: "Fixture"
             ),
-            client: RemoteClient(link: link),
+            client: makeClient(port: port),
+            reconnectClient: reconnectClient,
             helloDeadline: injectedDeadline
         )
+    }
+
+    private func makeClient(port: UInt16) -> RemoteClient {
+        RemoteClient(link: RemoteConnectionLink(
+            baseURL: URL(string: "http://127.0.0.1:\(port)")!,
+            token: Self.bearer
+        )!)
+    }
+
+    private func originDigest(port: UInt16) -> String {
+        MobileDiagnostics.originDigest(URL(string: "http://127.0.0.1:\(port)")!)
     }
 
     @discardableResult
@@ -451,6 +614,26 @@ final class RemoteConnectionFailureTests: XCTestCase {
         }
         XCTFail("The connection never reached a terminal state.")
         throw XCTSkip("no terminal state")
+    }
+}
+
+/// What a connection asked the model for, in order, readable from the test's own actor.
+@MainActor
+private final class ReconnectRequestLog {
+    private(set) var requests: [MobileSessionReconnectRequest] = []
+
+    func record(_ request: MobileSessionReconnectRequest) {
+        requests.append(request)
+    }
+
+    func first(within allowance: TimeInterval) async throws -> MobileSessionReconnectRequest {
+        let deadline = Date().addingTimeInterval(allowance)
+        while Date() < deadline {
+            if let first = requests.first { return first }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        XCTFail("The connection never asked the model for a route.")
+        throw XCTSkip("no reconnect request")
     }
 }
 

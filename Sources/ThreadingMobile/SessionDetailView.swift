@@ -255,6 +255,8 @@ struct SessionDetailView: View {
     let installsPrincipalTitle: Bool
     @StateObject private var workspaceActivity: MobileWorkspaceActivity
     @State private var connection: RemoteSessionConnection?
+    /// The Mac `connection` was opened against, so a route move on another Mac is not adopted.
+    @State private var connectedHostID: String?
     @State private var isShowingUsage = false
     @State private var launchError: String?
     @State private var themeError: String?
@@ -432,6 +434,9 @@ struct SessionDetailView: View {
         }
         .onChange(of: model.notificationOpenRequest?.eventID) { _, _ in
             openPendingNotificationDestination()
+        }
+        .onChange(of: model.routeIdentity) { _, _ in
+            adoptRouteIfMoved()
         }
         .onDisappear {
             guard let connection else { return }
@@ -860,6 +865,7 @@ struct SessionDetailView: View {
             launchError = RemoteClientError.invalidResponse.localizedDescription
             return
         }
+        connectedHostID = hostID
         let pool = MobileSessionConnectionPool.shared
         pool.discardEntries(exceptHostID: hostID)
         let key = MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
@@ -885,8 +891,8 @@ struct SessionDetailView: View {
             let made = RemoteSessionConnection(
                 session: current,
                 client: client,
-                reconnectClient: { attempt in
-                    await model.clientForSessionReconnect(hostID: hostID, attempt: attempt)
+                reconnectClient: { request in
+                    await model.clientForSessionReconnect(hostID: hostID, request: request)
                 }
             )
             made.onWorkspaceChanged = { [weak workspaceActivity] event in
@@ -900,6 +906,14 @@ struct SessionDetailView: View {
             MobileDiagnostics.logDegraded(.sessionAction, error: error)
             launchError = error.localizedDescription
         }
+    }
+
+    /// A refresh adopted another route while this socket was still dialling the previous one.
+    /// The dashboard socket re-resolves on its own; the session socket has to be told.
+    private func adoptRouteIfMoved() {
+        guard let connection, let client = model.client,
+              model.activeHostID == connectedHostID else { return }
+        connection.adoptRoute(client)
     }
 
     private func chooseTerminalTheme(_ id: String?) {

@@ -765,6 +765,47 @@ host id, so a host switch cannot hand an old session a client for the new Mac.
 `MobileHostRefreshSingleFlightTests` holds the escalation boundary, coalescing, waiter cancellation,
 explicit invalidation, late stale completion and fresh later refreshes.
 
+### A session socket does not dial a dead route blind, 2026-09-02
+
+An iPhone report captured the other failure the single-flight contract left open. The phone
+walked off Wi-Fi with a chat open; the terminal socket and the dashboard event socket died within
+a millisecond. The dashboard's recovery always re-resolves, and it was back on the Mac over
+cellular via Tailscale 2.5 seconds later. The session socket's first retry reused the last
+authenticated route, because a successful hello twenty seconds earlier had reset its ladder to
+attempt zero and its check for a dashboard flight ran 72 ms before that flight started: both
+sockets sleep the same flat second. It dialled the LAN origin that no longer existed, produced no
+journal record for the attempt, and would have spent the 15-second hello deadline there before
+escalating. The person backed out of the chat at about 13 seconds, which ran a refresh and was
+what "fixed" it.
+
+Three rules replace the "one cheap retry first" one:
+
+- **The cheap retry is for a socket the Mac closed on purpose.** `MobileSessionReconnectRequest`
+  carries whether a close frame arrived (`URLSessionWebSocketTask.closeCode`, read before the
+  task is cancelled, since cancelling writes a code of its own). A close frame proves bytes
+  crossed the route on the way down; a socket that died without one may have died of its route
+  and re-resolves on the first retry. The `socketReconnectScheduled` record says which
+  (`detail: peerClosed` or `routeSuspect`), so the next report can tell them apart.
+- **A scheduled dashboard recovery counts as one in flight.** `isDashboardRecoveryPending(for:)`
+  is true from the moment the event socket schedules its backoff until that recovery has run,
+  not only while the route race exists. Whichever socket wakes first starts the race and the
+  other joins it; the 72 ms window is gone without adding jitter.
+- **A route that moves supersedes a socket still dialling the old one.** `routeIdentity` is
+  derived from the model's published host state; the detail views watch it and hand the new
+  client to `RemoteSessionConnection.adoptRoute(_:)`. A hello still waiting or a backoff still
+  counting restarts on the new origin at once, and the abandoned attempt gets the terminal
+  `socketEnded` record (`result: superseded`, `reason: routeChanged`) every connect is owed. A
+  connected socket is left alone: it is either fine or about to say it is not, and its own
+  reconnect asks the model for the current route. The route race can also flip between two
+  healthy routes (the Tailscale candidate won over Wi-Fi at 04:35:26 in the same report), so
+  adoption may restart a sub-second connect that would have succeeded; that costs one handshake
+  and is accepted for a deterministic rule.
+
+The client still has no `NWPathMonitor` on the connection path; a Wi-Fi to cellular switch is
+learned from a socket dying of it. `RemoteConnectionFailureTests` holds the first-retry request,
+the superseded hello, the superseded backoff and the untouched connected socket;
+`MobileHostRefreshSingleFlightTests` holds the policy table.
+
 ### Token-free iOS terminal wire lab, 2026-08-20
 
 A static ANSI fixture proves rendering but cannot benchmark the entry path that flickered: it

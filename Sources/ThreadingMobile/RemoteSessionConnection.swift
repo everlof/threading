@@ -290,7 +290,9 @@ final class RemoteSessionConnection: ObservableObject {
     let target: RemoteLiveConnectionTarget
     let conversationStore = RemoteConversationStore()
     private var client: RemoteClient
-    private let reconnectClient: (@MainActor (_ attempt: Int) async -> RemoteClient?)?
+    private let reconnectClient: (
+        @MainActor (MobileSessionReconnectRequest) async -> RemoteClient?
+    )?
     private let deviceID: String
     private var task: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
@@ -301,6 +303,9 @@ final class RemoteSessionConnection: ObservableObject {
     private let helloDeadline: Duration
     private var reconnectAttempt = 0
     private var reconnectSequence = 0
+    /// Whether the loss being recovered from ended with the Mac's close frame. Read off the task
+    /// before anything cancels it, because `cancel(with:)` writes a close code of its own.
+    private var lossPeerSentClose = false
     private var socketTrace: String?
     private var socketStartedAt: UInt64?
     private var socketAttempt = 1
@@ -459,7 +464,9 @@ final class RemoteSessionConnection: ObservableObject {
         session: RemoteSessionSummaryDTO,
         target: RemoteLiveConnectionTarget? = nil,
         client: RemoteClient,
-        reconnectClient: (@MainActor (_ attempt: Int) async -> RemoteClient?)? = nil,
+        reconnectClient: (
+            @MainActor (MobileSessionReconnectRequest) async -> RemoteClient?
+        )? = nil,
         helloDeadline: Duration = RemoteMobileConnectionDefaults.helloDeadline,
         viewportSettleDelay: Duration = RemoteMobileConnectionDefaults.viewportSettleDelay,
         terminalHydrationQuietDelay: Duration =
@@ -523,6 +530,7 @@ final class RemoteSessionConnection: ObservableObject {
         MobileTerminalWirePerformanceProbe.connectionStarted(session)
 #endif
         stopped = false
+        lossPeerSentClose = false
         phase = .connecting
         beginTerminalHydration()
         lastSentTerminalViewport = nil
@@ -933,8 +941,9 @@ final class RemoteSessionConnection: ObservableObject {
         reconnectTask = nil
         reconnectAttempt = 0
         let generation = connectionGeneration
+        let request = MobileSessionReconnectRequest(attempt: 0, peerSentClose: lossPeerSentClose)
         Task { [weak self] in
-            guard let client = await reconnectClient(0) else {
+            guard let client = await reconnectClient(request) else {
                 self?.isAwaitingResume = false
                 return
             }
@@ -943,6 +952,39 @@ final class RemoteSessionConnection: ObservableObject {
             self.client = client
             self.connect()
         }
+    }
+
+    /// The model's authoritative route moved while this socket was still on the previous one.
+    ///
+    /// A hello that has not come is not made faster by waiting for it, and a backoff counting
+    /// toward the old origin counts toward nothing; both restart on the new route now, and the
+    /// abandoned attempt gets the terminal journal entry every connect is owed. A connected
+    /// socket is left alone: it is either fine or about to say it is not, and its own reconnect
+    /// asks the model for the current route. Returns whether anything was restarted.
+    @discardableResult
+    func adoptRoute(_ client: RemoteClient) -> Bool {
+        guard !isOwnedByConnectionPool, demoScript == nil else { return false }
+        guard client.link.baseURL != self.client.link.baseURL
+            || client.endpointKind != self.client.endpointKind else { return false }
+        let abandonedPhase: String
+        if reconnectTask != nil {
+            abandonedPhase = "backoff"
+        } else if phase == .connecting, task != nil {
+            abandonedPhase = "hello"
+        } else {
+            return false
+        }
+        MobileDiagnostics.recordConnectivity(.socketEnded, fields: socketFields(
+            phase: abandonedPhase
+        ).merging([
+            .result: "superseded",
+            .reason: "routeChanged",
+        ]) { current, _ in current })
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        self.client = client
+        connect()
+        return true
     }
 
     private func completeTerminalHydration(ifMatching ready: RemoteTerminalReadyDTO) {
@@ -1342,6 +1384,7 @@ final class RemoteSessionConnection: ObservableObject {
                     self.invalidatePooledConnection()
                     return
                 }
+                self.lossPeerSentClose = Self.peerSentClose(on: task)
                 self.fail(
                     with: RemoteConnectionFailure.transport(
                         error,
@@ -1413,6 +1456,7 @@ final class RemoteSessionConnection: ObservableObject {
                 invalidatePooledConnection()
                 return
             }
+            lossPeerSentClose = Self.peerSentClose(on: task)
             fail(
                 with: RemoteConnectionFailure.transport(error, host: destinationHost),
                 httpStatus: Self.httpStatus(of: task)
@@ -2150,6 +2194,19 @@ final class RemoteSessionConnection: ObservableObject {
         (task.response as? HTTPURLResponse)?.statusCode
     }
 
+    /// Whether a close frame reached this task. `closeCode` stays `.invalid` for a socket that
+    /// died on the wire and is set both by the peer's frame and by our own `cancel(with:)`,
+    /// which is why it is read before anything here cancels the task.
+    private static func peerSentClose(on task: URLSessionWebSocketTask) -> Bool {
+        task.closeCode != .invalid
+    }
+
+    /// What the journal says about the loss a retry answers: `peerClosed` when the Mac's close
+    /// frame arrived, `routeSuspect` when the socket died without one.
+    private static func lossToken(peerSentClose: Bool) -> String {
+        peerSentClose ? "peerClosed" : "routeSuspect"
+    }
+
     private func scheduleReconnect(generation: Int) {
         guard reconnectClient != nil, reconnectTask == nil,
               connectionGeneration == generation else { return }
@@ -2158,23 +2215,27 @@ final class RemoteSessionConnection: ObservableObject {
         task = nil
         receiveTask?.cancel()
         receiveTask = nil
-        let attempt = reconnectAttempt
+        let request = MobileSessionReconnectRequest(
+            attempt: reconnectAttempt,
+            peerSentClose: lossPeerSentClose
+        )
         reconnectAttempt = min(reconnectAttempt + 1, 4)
         reconnectSequence &+= 1
-        let delay = min(pow(2.0, Double(attempt)), 8.0)
+        let delay = min(pow(2.0, Double(request.attempt)), 8.0)
         MobileDiagnostics.recordConnectivity(.socketReconnectScheduled, fields: socketFields(
             phase: "backoff"
         ).merging([
             .result: "scheduled",
             .attempt: String(reconnectSequence + 1),
             .delayMS: MobileDiagnostics.milliseconds(delay),
+            .detail: Self.lossToken(peerSentClose: request.peerSentClose),
         ]) { current, _ in current })
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard !Task.isCancelled, let self,
                   self.connectionGeneration == generation,
                   let reconnectClient = self.reconnectClient else { return }
-            guard let client = await reconnectClient(attempt) else {
+            guard let client = await reconnectClient(request) else {
                 // Nothing to reconnect with: the locked screen would never be released.
                 self.isAwaitingResume = false
                 return

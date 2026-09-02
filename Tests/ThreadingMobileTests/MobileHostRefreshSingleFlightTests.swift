@@ -3,15 +3,42 @@ import XCTest
 
 @MainActor
 final class MobileHostRefreshSingleFlightTests: XCTestCase {
-    func testSessionReconnectEscalatesAfterOneCheapRouteRetry() {
+    /// The cheap retry on the last authenticated route is for a socket the Mac closed on purpose.
+    /// A socket that died without a close frame may have died of its route (2026-09-02: Wi-Fi
+    /// went, the LAN origin stayed cached, and the first retry dialled it), and a dashboard
+    /// recovery already scheduled is the same loss seen by the other socket on that route.
+    func testOnlyASocketTheMacClosedGetsTheCheapRouteRetry() {
+        let closedByMac = MobileSessionReconnectRequest(attempt: 0, peerSentClose: true)
+        let lostOnTheWire = MobileSessionReconnectRequest(attempt: 0, peerSentClose: false)
+        let closedThenLostAgain = MobileSessionReconnectRequest(attempt: 1, peerSentClose: true)
+
         XCTAssertFalse(
-            MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(attempt: 0)
+            MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(
+                closedByMac,
+                dashboardRecoveryPending: false
+            ),
+            "the address answered with a close frame, so the route is not what broke"
         )
         XCTAssertTrue(
-            MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(attempt: 1)
+            MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(
+                lostOnTheWire,
+                dashboardRecoveryPending: false
+            ),
+            "no close frame is evidence about the route, and the first retry re-resolves"
         )
         XCTAssertTrue(
-            MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(attempt: 4)
+            MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(
+                closedThenLostAgain,
+                dashboardRecoveryPending: false
+            ),
+            "a second loss escalates whatever the first looked like"
+        )
+        XCTAssertTrue(
+            MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(
+                closedByMac,
+                dashboardRecoveryPending: true
+            ),
+            "a scheduled dashboard recovery is joined rather than raced by 72 ms"
         )
     }
 

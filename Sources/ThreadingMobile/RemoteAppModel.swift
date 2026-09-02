@@ -89,13 +89,47 @@ enum MobileNavigationRoute: Hashable {
 /// One miss is ordinary network movement and the automatic retry already owns it. Three
 /// consecutive bounded route races are enough to say that the Mac is unavailable *for now*
 /// without flashing the full recovery surface between every backoff attempt.
+/// What a live-session socket knows about the loss it is recovering from, handed to the model
+/// so the model can decide whether the last authenticated route deserves another try.
+struct MobileSessionReconnectRequest: Equatable {
+    /// Retries already made against this loss. A hello resets it, so a socket that connects and
+    /// dies twenty seconds later is back at zero each time.
+    let attempt: Int
+    /// The Mac's close frame arrived after the loss began. Bytes crossed the route on the way
+    /// down, so whatever broke was not the route. A socket that ended without one may well have
+    /// ended because its address stopped existing: a phone that walked off Wi-Fi still holds the
+    /// LAN origin, and every retry against it waits out the whole hello deadline.
+    let peerSentClose: Bool
+}
+
+/// Where the model would send a new socket right now.
+///
+/// Derived from published state, so a SwiftUI `onChange` sees it move the moment a refresh adopts
+/// another route and can hand the new route to a session socket still dialling the old one.
+struct MobileRouteIdentity: Equatable {
+    let origin: URL
+    let endpointKind: RemoteHostEndpointKind
+}
+
 enum MobileConnectionRecoveryPolicy {
     static let settledFailureAttempt = 3
 
-    /// A single socket reset is often transient and should first retry the authenticated route.
-    /// If that retry also fails, the route itself is suspect and the session joins host recovery.
-    static func sessionReconnectNeedsHostRecovery(attempt: Int) -> Bool {
-        attempt > 0
+    /// Whether a session socket's retry goes through host recovery or straight back to the last
+    /// authenticated route.
+    ///
+    /// The cheap retry exists for a socket the Mac closed on purpose: the address answered, the
+    /// route is fine, and one catalogue race per refused socket would be waste. A loss with no
+    /// close frame is evidence about the route itself, and so is the dashboard event socket
+    /// already recovering from the same loss. The 2026-09-02 report had both sockets die within a
+    /// millisecond of Wi-Fi going away; the session's retry looked for a dashboard flight 72 ms
+    /// before that flight began, kept the LAN origin, and dialled it until the person backed out.
+    static func sessionReconnectNeedsHostRecovery(
+        _ request: MobileSessionReconnectRequest,
+        dashboardRecoveryPending: Bool
+    ) -> Bool {
+        if dashboardRecoveryPending { return true }
+        if request.attempt > 0 { return true }
+        return !request.peerSentClose
     }
 }
 
@@ -298,6 +332,9 @@ final class RemoteAppModel: ObservableObject {
     private var themeEventsHostID: String?
     private var themeEventsGeneration = 0
     private var themeEventsRecoveryTask: Task<Void, Never>?
+    /// The host whose dashboard recovery is scheduled but has not run yet. Set beside
+    /// `themeEventsRecoveryTask`, cleared when that recovery runs or the socket's owner ends it.
+    private var themeEventsRecoveryHostID: String?
     /// Consecutive automatic recovery waits since the last successful catalogue/event socket.
     /// The dashboard uses the count to keep a transient miss in compact progress chrome and
     /// disclose the full recovery surface only after repeated bounded attempts.
@@ -991,21 +1028,43 @@ final class RemoteAppModel: ObservableObject {
         }
     }
 
-    /// Returns a route for a live-session reconnect without turning one broken session socket
-    /// into a full catalogue race. If dashboard recovery already owns that race, the session
-    /// joins it; if the model has no authoritative catalogue, it starts it. Otherwise the last
-    /// authenticated route is exactly the route that should get the first inexpensive retry.
-    func clientForSessionReconnect(hostID: String, attempt: Int) async -> RemoteClient? {
+    /// Returns a route for a live-session reconnect without turning one refused session socket
+    /// into a full catalogue race. If dashboard recovery owns or has scheduled that race, the
+    /// session joins it; if the model has no authoritative catalogue, or the loss says the route
+    /// itself is suspect, it starts one. Only a socket the Mac closed on purpose gets the last
+    /// authenticated route back for an inexpensive first retry.
+    func clientForSessionReconnect(
+        hostID: String,
+        request: MobileSessionReconnectRequest
+    ) async -> RemoteClient? {
         guard activeHostID == hostID else { return nil }
-        if hostRefreshSingleFlight.hasFlight(for: hostID)
-            || phase != .online
+        if phase != .online
             || me == nil
-            || MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(attempt: attempt)
+            || MobileConnectionRecoveryPolicy.sessionReconnectNeedsHostRecovery(
+                request,
+                dashboardRecoveryPending: isDashboardRecoveryPending(for: hostID)
+            )
         {
             await refresh()
         }
         guard activeHostID == hostID else { return nil }
         return client
+    }
+
+    /// True from the moment the dashboard event socket schedules its recovery until that
+    /// recovery has run, not only while the route race itself is in flight.
+    ///
+    /// Both sockets lose the same transport within milliseconds and both sleep the same second
+    /// before retrying, so whichever wakes first finds no flight. Counting the scheduled recovery
+    /// closes that window: the session starts the race and the dashboard joins it, or the other
+    /// way round, and neither dials the old origin on its own.
+    func isDashboardRecoveryPending(for hostID: String) -> Bool {
+        hostRefreshSingleFlight.hasFlight(for: hostID) || themeEventsRecoveryHostID == hostID
+    }
+
+    /// The origin and kind of address a new socket would be given now. See ``MobileRouteIdentity``.
+    var routeIdentity: MobileRouteIdentity? {
+        client.map { MobileRouteIdentity(origin: $0.link.baseURL, endpointKind: $0.endpointKind) }
     }
 
     private func performRefresh(from host: PairedRemoteHost) async {
@@ -2961,6 +3020,7 @@ final class RemoteAppModel: ObservableObject {
         clearThemeEventSocket(reason: "owner")
         themeEventsRecoveryTask?.cancel()
         themeEventsRecoveryTask = nil
+        themeEventsRecoveryHostID = nil
         if connectionRecoveryAttempt != 0 {
             connectionRecoveryAttempt = 0
         }
@@ -3017,6 +3077,7 @@ final class RemoteAppModel: ObservableObject {
                 ]) { _, new in new }
             )
         }
+        themeEventsRecoveryHostID = hostID
         themeEventsRecoveryTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: .seconds(delay))
@@ -3030,6 +3091,7 @@ final class RemoteAppModel: ObservableObject {
 
     private func recoverThemeEvents(for hostID: String) async {
         themeEventsRecoveryTask = nil
+        themeEventsRecoveryHostID = nil
         guard !isDemo, activeHostID == hostID, themeEventsTask == nil else { return }
         await refresh()
         if activeHostID == hostID, themeEventsTask == nil {
