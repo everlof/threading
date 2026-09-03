@@ -3773,6 +3773,37 @@ agent workload, and the curfew engine does not re-evaluate unrelated sessions. A
 the event as an undifferentiated request for a whole-catalogue refresh puts this stall back.
 The final 5,000-session fixture measured the production exact title event at 6.22 ms.
 
+### The archive event still reached the extension host as a whole-catalogue refresh
+
+A 2026-09-03 archive on the 38f613284 build, with 708 retained sessions across 18 projects,
+stalled the main thread for 1.63 s after the exact-row write above had completed in 0.3 ms and
+the sidebar's subtree application in 0.5 ms. The archive publishes `.projectStructure(project)`,
+and `ExtensionHostService.refreshSnapshotJournal(for:)` routed that case beside `.structure`: one
+archived row re-snapshotted every retained conversation and re-read four git files for every
+checkout on the main actor. It now re-reads that project's sessions alone through
+`sessionSnapshots(inProject:)` and diffs them against the standing journal;
+`ExtensionRendererTests.testProjectStructureChangeReSnapshotsOnlyThatProjectsSessions` counts the
+provider reads and the events. That was not the 1.63 s, though: the interval carried no span and
+wrote no file, and the trace shows the refresh's git reads did not run in it.
+
+### The rest of the archive stall is the input method's activation
+
+Every archive and most session switches that day ended the same way: a cursor deactivation logged
+by `CursorUIViewService` just before the stall, an activation logged just after it, and 1.6–2.3 s
+of nothing in between. The stall monitor deliberately keeps no stacks, so the attribution came
+from `sample` run against the installed app the moment `log stream` printed its "Main thread
+unresponsive" line. One switch stall put about one second of the main thread inside
+`TSMToolboxListener → utOpenActivateAllSelectedIMInDoc → -[IMKInputSession_Modern activate] →
+invocationAwaitXPCReply → -[HIRunLoopSemaphore wait:]`: the Text Services Manager activating the
+selected input method (Press and Hold, `PAH_Extension`) for the newly focused terminal and waiting
+on its XPC reply, with the main queue undrained and nothing of ours running. A standalone AppKit
+process activating a fresh text context on the same Mac at the same time took 2–43 ms, active or
+not, so the wait is specific to this process and not yet explained; the machine was at load
+average 17–45 on ten cores throughout. `AgentSessionViewController.focusTerminal()` now opens the
+`focus.terminal-input` span and closes it on the next main-queue turn, which runs behind the
+activation the responder change queued, so the next stall trace names the wait instead of
+leaving the interval empty.
+
 ## Update All terminal creation is one exact leaf
 
 The 2026-09-03 report arrived with the action and its evidence: pressing **Update All** in the

@@ -1568,14 +1568,19 @@ final class ExtensionHostService {
     /// Applies the exact project-store delta to the extension event journal. A one-row rename
     /// must not rebuild repository and runtime snapshots for every retained conversation before
     /// the Enter key can return to AppKit.
-    private func refreshSnapshotJournal(for change: ProjectsDidChange) {
+    ///
+    /// Internal, like the whole-catalogue refresh, so a focused test can hand it one exact
+    /// impact and count what the provider was asked for.
+    func refreshSnapshotJournal(for change: ProjectsDidChange) {
         guard hasSnapshotBaseline else {
             refreshSnapshotJournal()
             return
         }
         switch change.sidebarImpact {
-        case .structure, .projectStructure:
+        case .structure:
             refreshSnapshotJournal()
+        case .projectStructure(let projectID):
+            refreshProjectStructure(id: projectID.uuidString.lowercased())
         case .projectRemoved(let projectID, let sessionIDs, _):
             refreshProjectSnapshot(id: projectID.uuidString.lowercased())
             for sessionID in sessionIDs {
@@ -1597,6 +1602,46 @@ final class ExtensionHostService {
             }
         case .terminalAdded, .terminalRow:
             break
+        }
+    }
+
+    /// Rows joined, left or regrouped inside one project. Every other project's sessions, the
+    /// checkouts, the providers and the accounts stand, so only that project's sessions are
+    /// re-read and compared. This is the impact an archive publishes, and until it was routed
+    /// here it was treated as `.structure`: one archived row re-snapshotted every retained
+    /// conversation and re-read every checkout's git metadata on the main actor.
+    private func refreshProjectStructure(id projectID: String) {
+        let next = Dictionary(
+            uniqueKeysWithValues: snapshotProvider.sessionSnapshots(inProject: projectID)
+                .map { ($0.id, $0) }
+        )
+        let standing = sessionSnapshots.filter { $0.value.projectID == projectID }.keys
+        for identifier in Set(standing).union(next.keys).sorted() {
+            switch (sessionSnapshots[identifier], next[identifier]) {
+            case (.some(let old), .some(let new)) where old != new:
+                sessionSnapshots[identifier] = new
+                appendEvent(
+                    kind: .sessionChanged,
+                    entityID: identifier,
+                    projectID: new.projectID
+                )
+            case (.none, .some(let new)):
+                sessionSnapshots[identifier] = new
+                appendEvent(
+                    kind: .sessionChanged,
+                    entityID: identifier,
+                    projectID: new.projectID
+                )
+            case (.some(let old), .none):
+                sessionSnapshots.removeValue(forKey: identifier)
+                appendEvent(
+                    kind: .sessionRemoved,
+                    entityID: identifier,
+                    projectID: old.projectID
+                )
+            default:
+                break
+            }
         }
     }
 

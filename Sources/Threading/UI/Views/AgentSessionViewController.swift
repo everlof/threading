@@ -650,8 +650,27 @@ final class AgentSessionViewController: NSViewController {
         return true
     }
 
+    /// Hands the keyboard to the terminal, and names what that costs.
+    ///
+    /// Becoming first responder activates the terminal's text input context, and that is not
+    /// the cheap part: the Text Services Manager queues the activation of the selected input
+    /// method on the main queue and then waits, synchronously, for that input method to answer
+    /// over XPC. On 2026-09-03 the wait was 1.6–2.3 s after every archive and most session
+    /// switches, and it left the stall trace an empty interval, because no span of ours was
+    /// open. The block queued here runs behind whatever the activation queued, so ending the
+    /// span there is what lets a stall trace say "the input method" rather than nothing.
+    /// A repeated call for the view that already holds the keyboard changes nothing and is not
+    /// measured.
     func focusTerminal() {
-        view.window?.makeFirstResponder(session.terminalView)
+        guard let window = view.window, window.firstResponder !== session.terminalView else {
+            return
+        }
+        let span = PerformanceRecorder.shared.begin(
+            "focus.terminal-input",
+            category: "responsiveness"
+        )
+        window.makeFirstResponder(session.terminalView)
+        DispatchQueue.main.async { span.end() }
     }
 
 #if DEBUG

@@ -10,6 +10,8 @@ import ThreadingExtensionKit
 protocol ExtensionHostSnapshotProviding: AnyObject {
     func projectSnapshots() -> [ExtensionProjectSnapshot]
     func sessionSnapshots() -> [ExtensionSessionSnapshot]
+    /// One project's sessions only, for a change that names the project its rows stayed inside.
+    func sessionSnapshots(inProject projectID: String) -> [ExtensionSessionSnapshot]
     func projectSnapshot(id: String) -> ExtensionProjectSnapshot?
     func sessionSnapshot(id: String) -> ExtensionSessionSnapshot?
     func providerSnapshots() -> [ExtensionProviderSnapshot]
@@ -31,6 +33,10 @@ protocol ExtensionSessionRuntimeSnapshotProviding: AnyObject {
 extension ExtensionHostSnapshotProviding {
     func projectSnapshot(id: String) -> ExtensionProjectSnapshot? {
         projectSnapshots().first { $0.id == id }
+    }
+
+    func sessionSnapshots(inProject projectID: String) -> [ExtensionSessionSnapshot] {
+        sessionSnapshots().filter { $0.projectID == projectID }
     }
 
     func sessionSnapshot(id: String) -> ExtensionSessionSnapshot? {
@@ -64,6 +70,15 @@ final class LiveExtensionHostSnapshotProvider:
         let liveIDs = Set(snapshots.compactMap { SessionID(uuidString: $0.id) })
         runtimeReaders = runtimeReaders.filter { liveIDs.contains($0.key) }
         return snapshots
+    }
+
+    /// Walks the named project alone. The whole-catalogue read above is the one that prunes
+    /// runtime readers, so a per-project read never retires a reader for a session it did not
+    /// look at.
+    func sessionSnapshots(inProject rawProjectID: String) -> [ExtensionSessionSnapshot] {
+        guard let projectID = ProjectID(uuidString: rawProjectID),
+              let project = ProjectStore.shared.project(withID: projectID) else { return [] }
+        return project.sessions.map { sessionSnapshot($0, in: project) }
     }
 
     func projectSnapshot(id rawProjectID: String) -> ExtensionProjectSnapshot? {

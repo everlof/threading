@@ -6126,6 +6126,84 @@ final class ExtensionRendererTests: HostedStoreTestCase {
     XCTAssertEqual(empty.nextCursor, second.nextCursor)
   }
 
+  /// An archive publishes `.projectStructure`: rows joined, left or regrouped inside one
+  /// project. The journal must re-read that project's sessions alone — the whole-catalogue read
+  /// it used to take re-snapshotted every retained conversation and every checkout's git
+  /// metadata on the main actor, once per archived row.
+  func testProjectStructureChangeReSnapshotsOnlyThatProjectsSessions() throws {
+    let projectA = ProjectID()
+    let projectB = ProjectID()
+    let a = projectA.uuidString.lowercased()
+    let b = projectB.uuidString.lowercased()
+    func session(_ id: String, in projectID: String, title: String) -> ExtensionSessionSnapshot {
+      .init(
+        id: id,
+        projectID: projectID,
+        providerID: "codex",
+        displayTitle: title,
+        activity: .idle,
+        isSideChat: false,
+        isArchived: false,
+        usesNativeUI: false
+      )
+    }
+    let provider = TestExtensionHostSnapshotProvider(
+      projects: [.init(id: a, displayName: "A"), .init(id: b, displayName: "B")],
+      sessions: [
+        session("a-1", in: a, title: "One"),
+        session("a-2", in: a, title: "Two"),
+        session("b-1", in: b, title: "Elsewhere"),
+      ]
+    )
+    let service = ExtensionHostService(
+      registry: ComponentCustomizationRegistry(),
+      baseURL: try XCTUnwrap(URL(string: "http://127.0.0.1:1/v1")),
+      snapshotProvider: provider
+    )
+    let authorization = try XCTUnwrap(
+      try service.authorize(
+        extensionIdentifier: "com.example.structure",
+        processGeneration: "one",
+        order: 0,
+        capabilities: [.hostSessionsRead, .hostEvents]
+      ))
+    let token = authorization.connection.bearerToken
+    let baseline: ExtensionSessionSnapshotPage = try decodedGET(
+      "/v1/sessions",
+      token: token,
+      through: service
+    )
+    let wholeReadsAtBaseline = provider.wholeCatalogueReads
+
+    // Inside A: one row renamed, one gone, one new. Outside A: a change the event does not name.
+    provider.sessions = [
+      session("a-1", in: a, title: "Renamed"),
+      session("a-3", in: a, title: "Three"),
+      session("b-1", in: b, title: "Changed elsewhere"),
+    ]
+    service.refreshSnapshotJournal(
+      for: ProjectsDidChange(sidebarImpact: .projectStructure(projectA))
+    )
+
+    XCTAssertEqual(provider.wholeCatalogueReads, wholeReadsAtBaseline)
+    XCTAssertEqual(provider.projectReads, [a])
+
+    // Serving events settles the journal with one whole-catalogue pass first. The three rows
+    // inside A were journaled by the narrowed pass, in identifier order, before that read; the
+    // change outside A is what the read-time pass then finds, and it lands after them.
+    let events: ExtensionHostEventPage = try decodedGET(
+      "/v1/events?after=\(baseline.cursor)&limit=10",
+      token: token,
+      through: service
+    )
+    XCTAssertEqual(provider.wholeCatalogueReads, wholeReadsAtBaseline + 1)
+    XCTAssertEqual(
+      events.events.map { "\($0.kind.rawValue):\($0.entityID)" },
+      ["session.changed:a-1", "session.removed:a-2", "session.changed:a-3", "session.changed:b-1"]
+    )
+    XCTAssertEqual(events.events.map(\.projectID), [a, a, a, b])
+  }
+
   func testRepositoryRemoteSanitizerDropsCredentialsAndLocalPaths() {
     XCTAssertEqual(
       ExtensionRepositoryIdentity(
@@ -9554,6 +9632,9 @@ private final class TestExtensionHostSnapshotProvider:
   var accounts: [ExtensionAccountSnapshot]
   var runtimeSnapshots: [String: ExtensionSessionRuntimeSnapshot]
   var runtimeRequests: [String] = []
+  /// How often the host asked for every session at once, and which projects it asked for alone.
+  var wholeCatalogueReads = 0
+  var projectReads: [String] = []
 
   init(
     projects: [ExtensionProjectSnapshot] = [],
@@ -9574,7 +9655,13 @@ private final class TestExtensionHostSnapshotProvider:
   }
 
   func sessionSnapshots() -> [ExtensionSessionSnapshot] {
-    sessions
+    wholeCatalogueReads += 1
+    return sessions
+  }
+
+  func sessionSnapshots(inProject projectID: String) -> [ExtensionSessionSnapshot] {
+    projectReads.append(projectID)
+    return sessions.filter { $0.projectID == projectID }
   }
 
   func providerSnapshots() -> [ExtensionProviderSnapshot] {
