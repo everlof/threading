@@ -127,7 +127,7 @@ final class NativePluginPaneViewController: NSViewController {
     /// plugin has to mean the bytes that were described, or an update inherits an answer nobody
     /// gave it.
     @objc private func askAboutThisPlugin() {
-        guard let identity = try? PluginLoader.acceptingAnyTeam().identity(of: bundleURL) else {
+        guard let identity = try? PluginLoader.identity(of: bundleURL) else {
             return
         }
         NativePluginApprovalPrompt.ask(

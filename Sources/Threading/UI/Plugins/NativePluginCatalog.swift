@@ -15,12 +15,13 @@ import ThreadingPluginKit
 ///
 /// **The operating system enforces nothing here.** Threading ships hardened runtime carrying
 /// `com.apple.security.cs.disable-library-validation`, so `dlopen` will map a bundle signed by any
-/// team, or none. Every check is `PluginLoader`'s, and the allowlist below is the whole policy.
+/// team, or none. Every check is `PluginLoader`'s, and the user's recorded decision below is the
+/// whole policy.
 @MainActor
 enum NativePluginCatalog {
 
-    /// Whether an installed plugin may run, which is now the user's decision rather than a list
-    /// of teams we happen to trust.
+    /// Whether an installed plugin may run, which is the user's decision rather than a list of
+    /// teams we happen to trust.
     ///
     /// It was an allowlist holding Threading's own signing team and nothing else, which meant the
     /// tier was closed by construction: we could ship plugins and nobody else could, and a platform
@@ -44,10 +45,12 @@ enum NativePluginCatalog {
 
     /// The plugins Threading ships inside itself.
     ///
-    /// Trusted by *location* rather than by allowlist: code inside the app bundle is sealed by the
+    /// Trusted by *location* rather than by a decision: code inside the app bundle is sealed by the
     /// app's own signature, so altering it invalidates the app the operating system already
-    /// checked. That is a stronger guarantee than a team identifier, and it is the reason a
-    /// first-party pane can ship as a plugin without the user installing anything.
+    /// checked. That is a stronger guarantee than anything a prompt could add, and it is the reason
+    /// a first-party pane can ship as a plugin without the user installing anything. It is not a
+    /// privilege either: it is what any app gets for the plugins inside its own bundle, and a
+    /// plugin of ours installed the ordinary way is refused until approved.
     static func bundledPlugins() -> [URL] {
         guard let plugIns = Bundle.main.builtInPlugInsURL else { return [] }
         let contents = (try? FileManager.default.contentsOfDirectory(
@@ -120,25 +123,18 @@ enum NativePluginCatalog {
             // A bundled plugin is part of the app: altering it invalidates the signature the
             // operating system already checked, so there is nothing left for a decision to add.
             guard !isBundled(bundle) else {
-                return .success(try PluginLoader.acceptingAnyTeam().load(bundleAt: bundle))
+                return .success(try PluginLoader.sealedByHostBundle().load(bundleAt: bundle))
             }
-            // Anything else is somebody's code, and running it is the user's call. The signature
-            // has to validate first — not to prove who wrote it, but so the identity a decision is
-            // recorded against means the bytes that were shown.
-            //
-            // Readability is checked before any of that, because a bundle that is not there is
-            // *missing*, not badly signed. Asking the signing API first reported every absent
-            // plugin as `signature_invalid`, which is the failure this tier's named refusals exist
-            // to prevent: "the plugin did not appear" is not a diagnosis.
-            guard Bundle(url: bundle) != nil else {
-                return .failure(.unreadableBundle(path: bundle.path))
-            }
-            let loader = PluginLoader.acceptingAnyTeam()
-            let identity = try loader.identity(of: bundle)
-            guard approvals.decision(for: identity) == true else {
-                return .failure(.notApproved(identifier: identity.bundleIdentifier))
-            }
-            return .success(try loader.load(bundleAt: bundle))
+            // Anything else is somebody's code, and running it is the user's call. The loader
+            // owns the order — readable, then validly signed, then approved, then mapped — which
+            // it did not when this method sequenced those steps itself. Getting the first two the
+            // wrong way round reported every absent plugin as `signature_invalid`, which is the
+            // failure this tier's named refusals exist to prevent.
+            return .success(
+                try PluginLoader.signatureAndDecision().load(bundleAt: bundle) { identity in
+                    approvals.decision(for: identity) == true
+                }
+            )
         } catch let failure as PluginLoadFailure {
             return .failure(failure)
         } catch {

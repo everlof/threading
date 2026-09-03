@@ -11,7 +11,6 @@ import Security
 public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
     case unreadableBundle(path: String)
     case signatureInvalid(status: OSStatus)
-    case untrustedTeam(String?)
     case noPrincipalClass
     case wrongProtocol
     case apiVersionMismatch(found: Int, expected: Int)
@@ -24,8 +23,6 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
             return "bundle could not be opened at \(path)"
         case .signatureInvalid(let status):
             return "signature invalid or absent (OSStatus \(status))"
-        case .untrustedTeam(let team):
-            return "signing team \(team ?? "none") is not allowlisted"
         case .noPrincipalClass:
             return "bundle declares no NSPrincipalClass"
         case .wrongProtocol:
@@ -42,7 +39,6 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
         switch self {
         case .unreadableBundle: return "unreadable_bundle"
         case .signatureInvalid: return "signature_invalid"
-        case .untrustedTeam: return "untrusted_team"
         case .noPrincipalClass: return "no_principal_class"
         case .wrongProtocol: return "wrong_protocol"
         case .apiVersionMismatch: return "api_version_mismatch"
@@ -61,47 +57,104 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
 /// verified before `Bundle.principalClass` is touched, because reading the principal class is what
 /// maps and runs the bundle's code.
 ///
-/// The policy this mirrors is `simulator-pane.md`'s helper check: exact location, signing
-/// identifier and team, verified before launch.
+/// The policy is a valid signature plus the user's decision about the identity it carries, and
+/// `NativePluginApprovals` in the host holds the second half. A team allowlist stood here first
+/// and was removed: it closed the tier to everyone but us, which is not a platform.
 public struct PluginLoader {
-    /// Teams whose bundles may be loaded. An empty set loads nothing: this tier maps unsandboxed
-    /// code into the host process, so it opens by refusing rather than by trusting.
-    public var allowedTeams: Set<String>
 
-    /// Skips the signature check entirely. **Only a probe or a test may set this**, which is why
-    /// it cannot be reached through `init(allowedTeams:)` — see `acceptingAnyTeam()`.
-    private let acceptsAnyTeam: Bool
-
-    public init(allowedTeams: Set<String>) {
-        self.allowedTeams = allowedTeams
-        self.acceptsAnyTeam = false
-    }
-
-    /// A loader that runs whatever it is pointed at, signed or not.
+    /// What a bundle has to satisfy before its code is mapped.
     ///
-    /// This existed as "an empty allowlist means accept anything", which read as a convenience and
-    /// was in fact the shipping default: `NativePluginCatalog.allowedTeams` is empty until the
-    /// first-party team is added, and its own documentation said that meant *load nothing*. The
-    /// host and the loader stated opposite policies and the loader won. Naming the dangerous
-    /// behaviour is what stops it being reached by leaving something out.
-    public static func acceptingAnyTeam() -> PluginLoader {
-        PluginLoader(allowedTeams: [], acceptsAnyTeam: true)
+    /// There is no `init`, so a loader cannot be built without saying which of these it is. That
+    /// is deliberate, and it is the inverse of the bug this replaced: trust used to be a
+    /// `Set<String>` of teams whose *empty* value silently meant "run anything", so leaving an
+    /// argument out produced the dangerous loader. Leaving something out here does not compile.
+    private enum Trust {
+        /// A valid signature — from anyone, ad-hoc included — plus a decision about the identity
+        /// it carries. The policy for anything a user installed.
+        case signatureAndDecision
+        /// Already covered by a signature the operating system checked: the bundle sits inside the
+        /// host's own app bundle, so altering it invalidates the app itself.
+        case sealedByHostBundle
+        /// Nothing is checked at all.
+        case unchecked
     }
 
-    private init(allowedTeams: Set<String>, acceptsAnyTeam: Bool) {
-        self.allowedTeams = allowedTeams
-        self.acceptsAnyTeam = acceptsAnyTeam
+    private let trust: Trust
+
+    private init(trust: Trust) {
+        self.trust = trust
     }
 
+    /// The ordinary policy for an installed plugin: the signature must validate, and then the
+    /// decision handed to `load(bundleAt:approving:)` must say yes to the identity read from it.
+    ///
+    /// The signature is not evidence of who to trust — anyone can sign, and ad-hoc counts. It is
+    /// what makes the identity a decision is recorded against *mean the bytes the user was shown*.
+    public static func signatureAndDecision() -> PluginLoader {
+        PluginLoader(trust: .signatureAndDecision)
+    }
+
+    /// For a bundle inside the host's own app bundle, whose integrity the operating system already
+    /// enforced. Nothing a decision could add: altering it breaks the app's own signature.
+    ///
+    /// **Not a first-party privilege.** Anyone shipping an app that loads plugins has this for the
+    /// plugins inside their own bundle; a plugin of ours installed the ordinary way is refused
+    /// until approved, and `NativePluginParityTests` asserts exactly that.
+    public static func sealedByHostBundle() -> PluginLoader {
+        PluginLoader(trust: .sealedByHostBundle)
+    }
+
+    /// Runs whatever it is pointed at, signed or not, approved or not.
+    ///
+    /// **Probes and tests only.** Named at length because the danger has to be typed out rather
+    /// than reached by omission.
+    public static func uncheckedForProbesAndTests() -> PluginLoader {
+        PluginLoader(trust: .unchecked)
+    }
+
+    /// Load under a policy that needs no decision. Refuses a `signatureAndDecision()` loader,
+    /// which has to be asked through `load(bundleAt:approving:)`.
+    @MainActor
     public func load(bundleAt url: URL) throws -> ThreadingNativePlugin {
+        try load(bundleAt: url) { identity in
+            // Reaching here means the caller used the decision-free overload on a loader whose
+            // whole policy is the decision. Refusing beats defaulting to yes: a bypass would be
+            // silent, and this is the boundary between a plugins folder and arbitrary code in
+            // this process.
+            throw PluginLoadFailure.notApproved(identifier: identity.bundleIdentifier)
+        }
+    }
+
+    /// Load one bundle, asking `decide` about its verified identity before any code is mapped.
+    ///
+    /// The order is the whole point and it is a property of this method rather than of the
+    /// caller: readability, then signature, then the decision, and only then `principalClass` —
+    /// which is the call that maps and runs the bundle's code. An earlier shape left the first
+    /// three to whoever happened to call `identity(of:)` first.
+    ///
+    /// `decide` is non-escaping and called synchronously, so a host may consult main-actor state
+    /// (a stored approval, a modal prompt) inside it.
+    ///
+    /// Main-actor because `ThreadingNativePlugin` is: the thing being constructed vends `NSView`s
+    /// and is called back on every theme change, so the isolation belongs in the type rather than
+    /// in a sentence a plugin author has to find. Reading a bundle's `identity(of:)` stays
+    /// nonisolated — that part is only file and signature reading.
+    @MainActor
+    public func load(
+        bundleAt url: URL,
+        approving decide: (PluginIdentity) throws -> Bool
+    ) throws -> ThreadingNativePlugin {
         // Forming a Bundle validates the path and metadata but does not map its executable. Do
         // this before the signature check so an absent path is reported as absent rather than as
         // a corrupt signature; principalClass stays below verification because it loads code.
         guard let bundle = Bundle(url: url) else {
             throw PluginLoadFailure.unreadableBundle(path: url.path)
         }
-        if !acceptsAnyTeam {
-            try verifySignature(at: url)
+        if case .signatureAndDecision = trust {
+            let identity = try Self.identity(of: url)
+            guard try decide(identity) else {
+                throw PluginLoadFailure.notApproved(identifier: identity.bundleIdentifier)
+            }
         }
         // Everything past this line has mapped and run the bundle's code.
         guard let principal = bundle.principalClass else {
@@ -138,7 +191,11 @@ public struct PluginLoader {
     }
 
     /// Reads the identity, validating the signature on the way.
-    public func identity(of url: URL) throws -> PluginIdentity {
+    ///
+    /// Static because trust plays no part in reading one: a host showing an approval prompt needs
+    /// the identity *before* it has a policy to apply to it, and making the caller construct a
+    /// loader to ask would imply the answer depended on which one.
+    public static func identity(of url: URL) throws -> PluginIdentity {
         var staticCode: SecStaticCode?
         let created = SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode)
         guard created == errSecSuccess, let staticCode else {
@@ -148,6 +205,11 @@ public struct PluginLoader {
         guard valid == errSecSuccess else {
             throw PluginLoadFailure.signatureInvalid(status: valid)
         }
+        // `kSecCSSigningInformation` is what puts the identifier, team and cdhash into the
+        // dictionary. Asked with no flags — as this was — the call still succeeds and simply
+        // omits them, so every correctly signed bundle read back as "team none, hash empty". A
+        // check that cannot see an identity refuses everything, which looks exactly like a plugin
+        // that will not load.
         var information: CFDictionary?
         let read = SecCodeCopySigningInformation(
             staticCode,
@@ -166,40 +228,5 @@ public struct PluginLoader {
             team: dictionary[kSecCodeInfoTeamIdentifier as String] as? String,
             cdHash: hash
         )
-    }
-
-    /// The signing team of a bundle, or `nil` when it carries none (ad-hoc).
-    /// Throws if the signature is absent or does not validate.
-    public func signingTeam(of url: URL) throws -> String? {
-        var staticCode: SecStaticCode?
-        let created = SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode)
-        guard created == errSecSuccess, let staticCode else {
-            throw PluginLoadFailure.signatureInvalid(status: created)
-        }
-        let valid = SecStaticCodeCheckValidity(staticCode, [], nil)
-        guard valid == errSecSuccess else {
-            throw PluginLoadFailure.signatureInvalid(status: valid)
-        }
-        // `kSecCSSigningInformation` is what puts the team into the dictionary. Asked with no
-        // flags — as this did — the call succeeds and simply omits it, so every correctly signed
-        // bundle read back as "team none" and was refused. An allowlist that cannot see a team
-        // rejects everything, which looks exactly like a plugin that will not load.
-        var information: CFDictionary?
-        let read = SecCodeCopySigningInformation(
-            staticCode,
-            SecCSFlags(rawValue: kSecCSSigningInformation),
-            &information
-        )
-        guard read == errSecSuccess, let dictionary = information as? [String: Any] else {
-            throw PluginLoadFailure.signatureInvalid(status: read)
-        }
-        return dictionary[kSecCodeInfoTeamIdentifier as String] as? String
-    }
-
-    private func verifySignature(at url: URL) throws {
-        let team = try signingTeam(of: url)
-        guard let team, allowedTeams.contains(team) else {
-            throw PluginLoadFailure.untrustedTeam(team)
-        }
     }
 }

@@ -70,14 +70,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         container.translatesAutoresizingMaskIntoConstraints = false
         container.addArrangedSubview(header)
 
-        // Empty means "accept any bundle", which is only right for a probe. A shipping host passes
-        // a non-empty set and the loader refuses everything else.
         // The probe loads an ad-hoc signed bundle it just built, so it names the unsafe mode
-        // rather than reaching it by leaving the allowlist empty — which is what the shipping
-        // host does, and now means "load nothing".
-        let loader = environment["THREADING_PLUGIN_TEAMS"]
-            .map { PluginLoader(allowedTeams: Set($0.split(separator: ",").map(String.init))) }
-            ?? PluginLoader.acceptingAnyTeam()
+        // outright. The shipping host uses `signatureAndDecision()`, which cannot be reached by
+        // leaving something out.
+        let loader = PluginLoader.uncheckedForProbesAndTests()
 
         var pluginArguments: [String: String] = [:]
         if arguments.count > 2 { pluginArguments["udid"] = arguments[2] }

@@ -1,0 +1,98 @@
+# ThreadingPluginKit
+
+The contract between Threading and a **native plugin**: a code bundle the app `dlopen`s into its
+own process, with full AppKit and no sandbox.
+
+This is not the safe extension tier. A safe extension is an out-of-process executable built
+against `ThreadingExtensionKit`, and the operating system contains it. A native plugin runs with
+everything Threading has: the user's files, the network, and every TCC grant the app holds. An
+install review has to say plainly which of the two a thing is.
+
+## What you need
+
+This package, and nothing else. `Examples/HelloPanePlugin` is the proof: one dependency, one
+source file, one build command.
+
+Threading's own Device Logs plugin additionally links `ThreadingDesignKit` so its rows are drawn
+by the same components as the rest of the window. That package is not published, so it is worth
+saying exactly what the asymmetry is and is not. It is **convenience, not capability**: nothing in
+`ThreadingDesignKit` reaches the host, and a plugin without it is refused nothing, offered nothing
+less, and asked for by the agent in exactly the same way. What it buys is appearance. The floor
+for everyone else is `PluginTheme`, whose tokens the host keeps up to date across live theme
+changes.
+
+## Writing one
+
+```swift
+import AppKit
+import ThreadingPluginKit
+
+@objc(MyPlugin)
+public final class MyPlugin: NSObject, ThreadingNativePlugin {
+    public static var pluginAPIVersion: Int { ThreadingPluginAPI.version }
+    public var pluginIdentifier: String { "com.example.myplugin" }
+
+    public override required init() { super.init() }
+
+    public func makePaneView(context: PluginContext) -> NSView { ... }
+    public func apply(theme: PluginTheme) { ... }
+}
+```
+
+`@objc(MyPlugin)` is load-bearing. `NSBundle` resolves `NSPrincipalClass` through the Objective-C
+runtime, so the name in `Info.plist` has to be that one and not the mangled Swift symbol.
+
+Optionally contribute tools the agent can call, through `pluginTools` and `invokeTool`. Tool names
+are unqualified — `search`, not `my_plugin_search` — and the host prefixes them with your identity
+so two plugins cannot collide.
+
+## Building one
+
+```sh
+Tools/build-plugin.sh path/to/MyPlugin --identifier com.example.myplugin --install
+```
+
+Three of the steps it performs are not guessable, and each fails by blaming something else:
+
+* the product is linked `-bundle`, not as a plain dylib;
+* `NSPrincipalClass` names the `@objc` class;
+* the dependency's install name is rewritten to
+  `@rpath/ThreadingPluginKit.framework/Versions/A/ThreadingPluginKit`. Without it dyld maps a
+  second copy of this framework, and two `@objc` protocol declarations in two images are two
+  protocols — so the host refuses your plugin for *not conforming to a protocol it plainly
+  conforms to*.
+
+Signing defaults to ad-hoc, which Threading accepts. A Developer ID is not required to write a
+plugin; it is how the person installing it knows who you are.
+
+## How the host decides
+
+`~/Library/Application Support/Threading/Plugins` is where installed bundles go. Threading ships
+hardened runtime carrying `com.apple.security.cs.disable-library-validation`, so the operating
+system will map a bundle signed by anyone, or ad-hoc. **Every check is this package's**, and the
+order is a property of `PluginLoader` rather than of whoever calls it:
+
+1. the bundle is readable;
+2. its signature validates — from any signer, ad-hoc included;
+3. the user has approved *this build*, recorded against the code directory hash, so an update asks
+   again;
+4. only then is `principalClass` touched, which is the call that maps and runs your code.
+
+There is no team allowlist. There was one, holding Threading's own team and nothing else, which
+closed the tier to everyone but us. A plugin of ours installed the ordinary way is refused until
+approved exactly as yours is; `NativePluginParityTests` in the app asserts it.
+
+Every refusal has a name (`PluginLoadFailure.code`) carrying no path or identity, because "the
+plugin did not appear" is not a diagnosis.
+
+## Versioning
+
+`ThreadingPluginAPI.version` is the generation the host will load, and it describes the **binary
+call shape**. A mismatch is refused rather than called into, so it moves for a removal or a
+re-type and not for an addition: new protocol members are `@objc optional`, and new payload fields
+are additive under library evolution.
+
+A change that affects your source but not the selectors the host calls does not move it either —
+your installed build keeps working, and rebuilding tells you in one compile error. Those are in
+the release notes. `PluginLoader` and `PluginLoadFailure` are host-side and not part of the number
+at all.

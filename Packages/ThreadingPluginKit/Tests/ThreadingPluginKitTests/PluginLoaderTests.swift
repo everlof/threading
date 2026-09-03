@@ -6,6 +6,7 @@ import XCTest
 /// nothing about who may be `dlopen`ed into this process. Each refusal is asserted by name, and
 /// the ordering rule — signature before principal class — is asserted separately, because getting
 /// that backwards would run untrusted code and still report a tidy error.
+@MainActor
 final class PluginLoaderTests: XCTestCase {
 
     private var directory: URL!
@@ -21,15 +22,17 @@ final class PluginLoaderTests: XCTestCase {
     }
 
     func testAMissingBundleIsRefusedByPath() {
-        let loader = PluginLoader(allowedTeams: [])
-        XCTAssertThrowsError(try loader.load(bundleAt: directory.appendingPathComponent("nope.bundle"))) {
+        let loader = PluginLoader.signatureAndDecision()
+        XCTAssertThrowsError(
+            try loader.load(bundleAt: directory.appendingPathComponent("nope.bundle")) { _ in true }
+        ) {
             XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "unreadable_bundle")
         }
     }
 
     func testABundleWithNoPrincipalClassIsRefused() throws {
         let bundle = try makeBundle(principalClass: nil)
-        let loader = PluginLoader.acceptingAnyTeam()
+        let loader = PluginLoader.uncheckedForProbesAndTests()
         XCTAssertThrowsError(try loader.load(bundleAt: bundle)) {
             XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "no_principal_class")
         }
@@ -40,40 +43,53 @@ final class PluginLoaderTests: XCTestCase {
     /// checked the signature afterwards would report `no_principal_class` for this fixture.
     func testAnUnsignedBundleIsRefusedForItsSignatureNotItsContents() throws {
         let bundle = try makeBundle(principalClass: nil)
-        let loader = PluginLoader(allowedTeams: ["SOMETEAM"])
-        XCTAssertThrowsError(try loader.load(bundleAt: bundle)) {
-            let code = ($0 as? PluginLoadFailure)?.code
-            XCTAssertTrue(
-                code == "signature_invalid" || code == "untrusted_team",
-                "expected a signature refusal before the principal class was read, got \(code ?? "nil")"
-            )
+        XCTAssertThrowsError(
+            try PluginLoader.signatureAndDecision().load(bundleAt: bundle) { _ in true }
+        ) {
+            XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "signature_invalid",
+                           "the signature must be judged before the principal class is read")
         }
     }
 
-    /// An empty allowlist loads **nothing**.
+    /// The decision runs before the code does.
     ///
-    /// It used to skip the signature check, and that read as a convenience for probes while being
-    /// the shipping default: `NativePluginCatalog.allowedTeams` is empty until a first-party team
-    /// is added, and its own documentation said empty meant *load nothing*. The host and the loader
-    /// stated opposite policies and the loader won, so any bundle dropped into the plugins folder
-    /// would have been mapped into the process unsandboxed.
-    func testAnEmptyAllowlistLoadsNothingRatherThanEverything() throws {
+    /// A decision consulted afterwards would be a prompt shown about a plugin that had already
+    /// run, which is the whole failure this tier is built to avoid. The fixture is unsigned, so
+    /// this asserts the pair: refused, and never asked, because the signature settled it first.
+    func testTheDecisionIsAskedBeforeAnyCodeIsMapped() throws {
         let bundle = try makeBundle(principalClass: nil)
-        let loader = PluginLoader(allowedTeams: [])
-        XCTAssertThrowsError(try loader.load(bundleAt: bundle)) {
+        var asked = false
+        XCTAssertThrowsError(
+            try PluginLoader.signatureAndDecision().load(bundleAt: bundle) { _ in
+                asked = true
+                return true
+            }
+        )
+        XCTAssertFalse(asked, "an invalid signature must refuse before a decision is worth asking")
+    }
+
+    /// Leaving the decision out must refuse rather than default to yes.
+    ///
+    /// The overload exists for the two policies that need no decision, and nothing stops it being
+    /// called on this one. A silent bypass is precisely how the previous shape failed — an empty
+    /// allowlist read as "accept anything" — so the omission is a refusal.
+    func testALoaderThatWantsADecisionRefusesWhenAskedWithoutOne() throws {
+        let bundle = try makeBundle(principalClass: "NSObject")
+        XCTAssertThrowsError(try PluginLoader.signatureAndDecision().load(bundleAt: bundle)) {
             let code = ($0 as? PluginLoadFailure)?.code
             XCTAssertTrue(
-                code == "signature_invalid" || code == "untrusted_team",
-                "an empty allowlist must refuse before the principal class is read, got \(code ?? "nil")"
+                code == "not_approved" || code == "signature_invalid",
+                "expected a refusal, got \(code ?? "nil")"
             )
         }
     }
 
     /// The unsafe mode still exists, because a probe needs it — but it has to be asked for by name
-    /// rather than reached by leaving an argument empty.
+    /// rather than reached by leaving an argument empty. There is no `init`, so there is no way to
+    /// build a loader without choosing.
     func testRunningAnythingHasToBeAskedForByName() throws {
         let bundle = try makeBundle(principalClass: nil)
-        XCTAssertThrowsError(try PluginLoader.acceptingAnyTeam().load(bundleAt: bundle)) {
+        XCTAssertThrowsError(try PluginLoader.uncheckedForProbesAndTests().load(bundleAt: bundle)) {
             XCTAssertEqual(($0 as? PluginLoadFailure)?.code, "no_principal_class",
                            "the signature check is skipped, so the bundle's contents decide")
         }
@@ -83,14 +99,14 @@ final class PluginLoaderTests: XCTestCase {
         let failures: [PluginLoadFailure] = [
             .unreadableBundle(path: "/Users/someone/secret/Plugin.bundle"),
             .signatureInvalid(status: -67062),
-            .untrustedTeam("ABCDE12345"),
             .noPrincipalClass,
             .wrongProtocol,
             .apiVersionMismatch(found: 9, expected: 1),
+            .notApproved(identifier: "codes.threading.plugin.example"),
         ]
         for failure in failures {
             XCTAssertFalse(failure.code.contains("/"), "\(failure.code) leaks a path")
-            XCTAssertFalse(failure.code.contains("ABCDE12345"), "\(failure.code) leaks a team")
+            XCTAssertFalse(failure.code.contains("codes.threading"), "\(failure.code) leaks an identity")
             XCTAssertEqual(failure.code, failure.code.lowercased())
         }
     }

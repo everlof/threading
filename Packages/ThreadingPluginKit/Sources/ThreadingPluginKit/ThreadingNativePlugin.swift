@@ -6,8 +6,26 @@ public enum ThreadingPluginAPI {
     /// The contract generation this build of the framework speaks.
     ///
     /// A plugin records the value it was compiled against in `pluginAPIVersion`; the host refuses
-    /// a mismatch rather than calling into a differently-shaped protocol. Bump this whenever a
-    /// member is added, removed or re-typed.
+    /// a mismatch rather than calling into a differently-shaped protocol.
+    ///
+    /// **This number describes the binary call shape, and moves for a removal or a re-type.** A
+    /// mismatch stops every installed plugin from loading until its author rebuilds, so the rule
+    /// decides whether this is an SDK or a moving target — and the first draft said "bump whenever
+    /// a member is added", which would have broken every third-party plugin the next time we grew
+    /// a hook. `ThreadingNativePlugin` is an `@objc protocol`, so a new member declared
+    /// `@objc optional` breaks no existing conformer, and a new stored property on a payload class
+    /// below is additive under library evolution. Neither is a generation.
+    ///
+    /// A change that affects an author's *source* but not the selectors and signatures the host
+    /// calls does not move it either. Adding `@MainActor` to the protocol was exactly that: an
+    /// existing plugin binary keeps working, and someone rebuilding gets a compile error they fix
+    /// in one line. Bumping would have refused working binaries to announce a change that could
+    /// not break them, which is the cost this gate exists to avoid — so such changes belong in
+    /// release notes rather than here.
+    ///
+    /// Host-side symbols are not the contract at all. `PluginLoader` and `PluginLoadFailure` live
+    /// here because the host and its tests need them, but nothing a plugin compiles against
+    /// depends on their shape.
     public static let version = 3
 }
 
@@ -148,6 +166,7 @@ public final class PluginTool: NSObject {
 /// another into the plugin does not work: two `@objc protocol` declarations in two binaries are two
 /// protocols, and the conformance check fails. `Probes/NativePluginTier` found that the hard way
 /// and its README records it.
+@MainActor
 @objc(ThreadingNativePlugin)
 public protocol ThreadingNativePlugin: NSObjectProtocol {
     init()
