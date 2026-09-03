@@ -242,6 +242,10 @@ public enum DeviceLogLimits {
     /// or a continuation. Written once because two decoders and the fallback all compare it.
     public static let undatedTime = "--:--:--"
 
+    /// Rows kept either side of a match when the rest is folded. Two is what makes a failure
+    /// readable — the line before it is usually the cause.
+    public static let foldContext = 2
+
     /// A single line longer than this is abandoned rather than accumulated.
     public static let maximumLineBytes = 1_048_576
     /// Rows retained by the pane. A firehose must not grow memory without limit.

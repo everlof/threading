@@ -583,3 +583,35 @@ not take the stream down.
 Retention is 500,000 rows, trimmed every 50,000 written rather than on every batch. The FTS index
 follows deletions through a trigger — an index row left behind would return an id whose row no
 longer exists, which is a test.
+
+## Focus, rather than filter
+
+The filter used to *remove* the rows that did not match, which meant the lines explaining a failure
+went with them. It now **folds**: matches keep two rows either side, every run between them becomes
+one line saying how many are inside, and clicking it opens that run in place. Nothing is lost, and
+the match itself is drawn in a heavier weight at the same size — the same metrics keep the column
+aligned, and the eye lands on the reason rather than on its neighbours.
+
+`LogFocus` and `LogFocusLayout` are a pure value model over the ring — the table owns viewport views
+only, and a fold costs nothing for the rows inside it. Hiding views after building them would save
+pixels but not construction, layout or memory, which is the trap the Scaling Gate names.
+
+The controls are the focus: the filter field and the level chooser build a `LogFocus` rather than
+holding separate state, so the two cannot drift.
+
+**The substring search is byte-wise for a measured reason.** The layout runs over the whole ring on
+every drain, and the two obvious spellings were both too slow to leave on:
+
+| Spelling | 50,000 rows, Debug |
+|---|---|
+| `lowercased()` per field | 57 ms |
+| `range(of:options: .caseInsensitive)` | 158 ms |
+| UTF-8 bytes, ASCII folding | 49 ms |
+
+Release is **8.9 ms**, which is what the app runs and is 9% of one 100 ms drain. Debug is ~5× that
+because none of it inlines. ASCII-only folding is the honest limit: a log's identifiers, levels and
+symbol names are ASCII, so `Ä` still finds `Ä`, it just will not also find `ä`, and paying ICU's
+price per row to change that would cost focus its ability to stay on while a device is talking.
+
+If focus-while-streaming ever feels heavy, the structural answer is an incremental layout — only the
+tail changes when rows are appended — rather than a faster scan.

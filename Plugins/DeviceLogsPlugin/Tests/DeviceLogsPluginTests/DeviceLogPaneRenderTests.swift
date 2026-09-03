@@ -190,4 +190,26 @@ final class DeviceLogPaneRenderTests: XCTestCase {
         )
         XCTAssertFalse(resume.isHidden, "having scrolled away, the pane should offer to resume")
     }
+
+    /// Focus, drawn. The matches keep their context, the runs between them become one line each
+    /// saying how much is folded, and the match is the heavier ink so the eye lands on the reason
+    /// rather than on its neighbours.
+    @MainActor
+    func testRendersAFocusedPaneToAnImage() throws {
+        let controller = DeviceLogPaneViewController(owningSessionID: UUID().uuidString)
+        controller.loadView()
+        controller.installRowsForTesting(fixtureRows(), focusing: "entry 7")
+        let host = laidOut(controller.view, width: 900, height: 460)
+        host.wantsLayer = true
+        host.layer?.backgroundColor = Design.Surface.ground.cgColor
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        XCTAssertGreaterThan(png.count, 2_000, "the focused render came out blank")
+        if let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !directory.isEmpty {
+            try png.write(to: URL(fileURLWithPath: directory)
+                .appendingPathComponent("device-log-pane-focused.png"))
+        }
+    }
 }

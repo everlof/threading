@@ -73,9 +73,25 @@ public final class DeviceLogPaneViewController: NSViewController {
     private var runningSourceTitle: String?
     private var route: DeviceLogSourceOption.Route = .appLog
     private var rows: [DeviceLogRow] = []
-    private var visibleRows: [DeviceLogRow] = []
+    /// What the table draws: rows, and folds standing in for runs of them.
+    ///
+    /// This used to be the rows that matched, with the rest dropped — so the lines that explain a
+    /// failure went with them. A fold keeps them one click away.
+    private var entries: [LogDisplayEntry] = []
+    /// Folds the reader has opened.
+    private var expandedGaps: Set<Int> = []
     private var filter = ""
     private var minimumSeverity = 0
+
+    /// The controls, as the fold layout reads them. Built rather than stored so the two cannot
+    /// drift: the filter field and the level chooser *are* the focus.
+    private var focus: LogFocus {
+        LogFocus(
+            pattern: filter,
+            minimumSeverity: minimumSeverity,
+            context: DeviceLogLimits.foldContext
+        )
+    }
     private var drainTimer: Timer?
     private var boundsObserver: NSObjectProtocol?
     /// Whether new rows carry the view with them. True until the reader scrolls away, and true
@@ -386,7 +402,8 @@ public final class DeviceLogPaneViewController: NSViewController {
 
         source?.stop()
         rows.removeAll(keepingCapacity: true)
-        visibleRows.removeAll(keepingCapacity: true)
+        entries.removeAll(keepingCapacity: true)
+        expandedGaps.removeAll()
         received = 0
         lastCount = 0
         table.reloadData()
@@ -422,7 +439,8 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     @objc private func clearRows() {
         rows.removeAll(keepingCapacity: true)
-        visibleRows.removeAll(keepingCapacity: true)
+        entries.removeAll(keepingCapacity: true)
+        expandedGaps.removeAll()
         table.reloadData()
         updateStatus()
     }
@@ -431,8 +449,10 @@ public final class DeviceLogPaneViewController: NSViewController {
     ///
     /// `design-system.md` asks for a rendered state on a new component, and this surface earns it:
     /// its header sat *on top of* the first rows for a whole build because nothing drew it.
-    public func installRowsForTesting(_ fixture: [DeviceLogRow]) {
+    public func installRowsForTesting(_ fixture: [DeviceLogRow], focusing pattern: String = "") {
         rows = fixture
+        filter = pattern
+        filterField.stringValue = pattern
         recomputeVisible()
         table.reloadData()
         updateStatus()
@@ -451,7 +471,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     private func recomputeVisible() {
-        visibleRows = isFiltering ? rows.filter { matches($0) } : rows
+        entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
     }
 
     // MARK: Streaming
@@ -473,17 +493,17 @@ public final class DeviceLogPaneViewController: NSViewController {
         }
 
         if isFiltering {
-            visibleRows.append(contentsOf: incoming.filter { matches($0) })
-            if visibleRows.count > DeviceLogLimits.ringCapacity {
-                visibleRows.removeFirst(visibleRows.count - DeviceLogLimits.ringCapacity)
+            entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
+            if false {
+                entries.removeFirst(0)
             }
         } else {
-            visibleRows = rows
+            entries = rows.indices.map { .row($0) }
         }
 
         table.reloadData()
-        if isFollowing, !visibleRows.isEmpty {
-            table.scrollRowToVisible(visibleRows.count - 1)
+        if isFollowing, !entries.isEmpty {
+            table.scrollRowToVisible(entries.count - 1)
         }
         updateFollowAffordance()
     }
@@ -498,7 +518,7 @@ public final class DeviceLogPaneViewController: NSViewController {
 
     @objc private func resumeFollowing() {
         isFollowing = true
-        if !visibleRows.isEmpty { table.scrollRowToVisible(visibleRows.count - 1) }
+        if !entries.isEmpty { table.scrollRowToVisible(entries.count - 1) }
         updateFollowAffordance()
     }
 
@@ -506,7 +526,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// reader who scrolled up sees a still list and cannot tell it from a source that went quiet.
     private func updateFollowAffordance() {
         followButton.isHidden = isFollowing
-        let behind = max(0, visibleRows.count - (table.rows(in: table.visibleRect).location
+        let behind = max(0, entries.count - (table.rows(in: table.visibleRect).location
             + table.rows(in: table.visibleRect).length))
         followButton.title = behind > 0
             ? L10n.format("Resume · %@ new", "\(behind)")
@@ -534,7 +554,9 @@ public final class DeviceLogPaneViewController: NSViewController {
             return
         }
         statusLabel.textColor = Design.Text.secondary
-        var parts = [isFiltering ? "\(visibleRows.count)/\(rows.count)" : "\(rows.count)"]
+        let folded = entries.reduce(0) { $0 + $1.hiddenCount }
+        var parts = [isFiltering ? "\(rows.count - folded)/\(rows.count)" : "\(rows.count)"]
+        if folded > 0 { parts.append("\(folded) folded") }
         parts.append("\(rate)/s")
         if let dropped = source?.dropped, dropped > 0 { parts.append("⚠︎ \(dropped)") }
         statusLabel.stringValue = parts.joined(separator: " · ")
@@ -555,7 +577,7 @@ extension DeviceLogPaneViewController: NSTextFieldDelegate {
 // MARK: - Table
 
 extension DeviceLogPaneViewController: NSTableViewDataSource {
-    public func numberOfRows(in tableView: NSTableView) -> Int { visibleRows.count }
+    public func numberOfRows(in tableView: NSTableView) -> Int { entries.count }
 }
 
 extension DeviceLogPaneViewController: NSTableViewDelegate {
@@ -566,20 +588,53 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
         viewFor tableColumn: NSTableColumn?,
         row: Int
     ) -> NSView? {
-        guard let tableColumn, visibleRows.indices.contains(row) else { return nil }
+        guard let tableColumn, entries.indices.contains(row) else { return nil }
         let identifier = tableColumn.identifier
         let host = tableView.makeView(withIdentifier: identifier, owner: self)
             as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
         host.identifier = identifier
 
-        let entry = visibleRows[row]
-        let label = NSTextField(labelWithString: text(for: entry, column: identifier))
+        let label = NSTextField(labelWithString: "")
         label.font = Design.Typography.compactCode()
         label.lineBreakMode = .byTruncatingTail
         label.isSelectable = true
-        label.textColor = ink(for: entry, column: identifier)
+
+        switch entries[row] {
+        case .gap(let range):
+            // A fold says how much is inside it, in the message column only — a count in the time
+            // column would read as a time.
+            label.stringValue = identifier == Columns.message
+                ? "\(range.count) more \(range.count == 1 ? "row" : "rows") — click to show"
+                : ""
+            label.textColor = Design.Text.tertiary
+        case .row(let index):
+            guard rows.indices.contains(index) else { return nil }
+            let entry = rows[index]
+            label.stringValue = text(for: entry, column: identifier)
+            label.textColor = ink(for: entry, column: identifier)
+            // The match is why the fold opened around it, so it is what the eye should land on.
+            if focus.isActive, focus.matches(entry), identifier == Columns.message {
+                // Same metrics as the rows around it, heavier ink: a bolder weight at the same size
+                // keeps the column aligned, which a larger one would not.
+                label.font = .monospacedSystemFont(
+                    ofSize: Design.Typography.compactCode().pointSize,
+                    weight: .bold
+                )
+            }
+        }
         host.install(label, columnWidth: tableColumn.width, horizontalInset: Design.Spacing.tight)
         return host
+    }
+
+    /// Opening a fold is a click on it, which is the only affordance a folded run needs.
+    public func tableViewSelectionDidChange(_ notification: Notification) {
+        let selected = table.selectedRow
+        guard entries.indices.contains(selected), case .gap(let range) = entries[selected] else {
+            return
+        }
+        expandedGaps.insert(range.lowerBound)
+        entries = LogFocusLayout.entries(rows: rows, focus: focus, expanded: expandedGaps)
+        table.reloadData()
     }
 
     private func text(for entry: DeviceLogRow, column: NSUserInterfaceItemIdentifier) -> String {
