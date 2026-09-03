@@ -13,47 +13,66 @@ struct TranscriptSearchSource: Hashable, Sendable {
     let providerName: String
     let isArchived: Bool
     let updatedAt: Date
+
+    func replacingProjectName(_ projectName: String) -> TranscriptSearchSource {
+        TranscriptSearchSource(
+            sourceID: sourceID,
+            url: url,
+            kind: kind,
+            projectID: projectID,
+            projectName: projectName,
+            sessionID: sessionID,
+            sessionTitle: sessionTitle,
+            providerName: providerName,
+            isArchived: isArchived,
+            updatedAt: updatedAt
+        )
+    }
 }
 
 @MainActor
 enum TranscriptSearchProjection {
     static func sources(projects: [Project]) -> [TranscriptSearchSource] {
-        projects.flatMap { project in
-            project.sessions.compactMap { session in
-                guard TranscriptReplayFormat(kind: session.kind) != nil,
-                      let transcriptID = session.resumeState.transcriptID,
-                      let account = AgentAccountDiscovery.account(
-                          for: session.kind,
-                          handle: session.accountHandle
-                      ),
-                      let url = SessionTranscript.url(
-                          sessionID: transcriptID,
-                          for: session,
-                          in: project,
-                          account: account
-                      ) else { return nil }
+        projects.flatMap { sources(project: $0) }
+    }
 
-                let sourceKey = [
-                    session.kind.rawValue,
-                    account.handle.name,
-                    transcriptID.rawValue,
-                    project.id.uuidString,
-                    session.id.uuidString,
-                ].joined(separator: ":")
-                return TranscriptSearchSource(
-                    sourceID: SearchSourceID(rawValue: sourceKey),
-                    url: url,
-                    kind: session.kind,
-                    projectID: project.id,
-                    projectName: project.name,
-                    sessionID: session.id,
-                    sessionTitle: session.displayTitle,
-                    providerName: session.kind.displayName,
-                    isArchived: session.isArchived,
-                    updatedAt: session.lastUsedAt
-                )
-            }
-        }
+    static func sources(project: Project) -> [TranscriptSearchSource] {
+        project.sessions.compactMap { source(session: $0, in: project) }
+    }
+
+    static func source(session: AgentSession, in project: Project) -> TranscriptSearchSource? {
+        guard TranscriptReplayFormat(kind: session.kind) != nil,
+              let transcriptID = session.resumeState.transcriptID,
+              let account = AgentAccountDiscovery.account(
+                  for: session.kind,
+                  handle: session.accountHandle
+              ),
+              let url = SessionTranscript.url(
+                  sessionID: transcriptID,
+                  for: session,
+                  in: project,
+                  account: account
+              ) else { return nil }
+
+        let sourceKey = [
+            session.kind.rawValue,
+            account.handle.name,
+            transcriptID.rawValue,
+            project.id.uuidString,
+            session.id.uuidString,
+        ].joined(separator: ":")
+        return TranscriptSearchSource(
+            sourceID: SearchSourceID(rawValue: sourceKey),
+            url: url,
+            kind: session.kind,
+            projectID: project.id,
+            projectName: project.name,
+            sessionID: session.id,
+            sessionTitle: session.displayTitle,
+            providerName: session.kind.displayName,
+            isArchived: session.isArchived,
+            updatedAt: session.lastUsedAt
+        )
     }
 }
 

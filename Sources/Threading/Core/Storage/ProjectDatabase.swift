@@ -104,6 +104,19 @@ struct ProjectsStateLoad {
 /// interrupted halfway leaves the previous state rather than a truncated document.
 final class ProjectDatabase {
 
+    /// One existing project row whose payload changed without changing graph membership/order.
+    struct ProjectWrite {
+        let project: Project
+        let position: Int
+    }
+
+    /// One existing session row whose payload changed without changing graph membership/order.
+    struct SessionWrite {
+        let session: AgentSession
+        let projectID: ProjectID
+        let position: Int
+    }
+
     // MARK: - Properties
 
     private let database: SQLiteDatabase
@@ -393,6 +406,21 @@ final class ProjectDatabase {
         try upsert(project, position: position)
     }
 
+    /// Inserts one project row and advances graph membership without reconciling standing rows.
+    func addProject(_ project: Project, position: Int) throws {
+        try graphTransaction {
+            let found = try storeGeneration()
+            if let observedGeneration, observedGeneration != found {
+                throw ProjectDatabaseWriteError.staleGeneration(
+                    observed: observedGeneration,
+                    found: found
+                )
+            }
+            try upsert(project, position: position)
+            return try writeAdvancedGeneration(from: found)
+        }
+    }
+
     /// Inserts one new session row and advances the graph generation in the same transaction.
     /// Creation changes membership; walking every standing row to prove that one addition made
     /// remote Start scale with the entire archive.
@@ -414,6 +442,25 @@ final class ProjectDatabase {
         }
     }
 
+    /// Inserts a batch of new sessions in one graph transaction. Import cost follows the number
+    /// selected, not every conversation the user already retained.
+    func addSessions(_ writes: [SessionWrite]) throws {
+        guard !writes.isEmpty else { return }
+        try graphTransaction {
+            let found = try storeGeneration()
+            if let observedGeneration, observedGeneration != found {
+                throw ProjectDatabaseWriteError.staleGeneration(
+                    observed: observedGeneration,
+                    found: found
+                )
+            }
+            for write in writes {
+                try upsert(write.session, in: write.projectID, position: write.position)
+            }
+            return try writeAdvancedGeneration(from: found)
+        }
+    }
+
     /// Persists one standing session without touching any neighbouring row. Membership and row
     /// order are unchanged, so this deliberately does not move the graph generation.
     func saveSession(
@@ -422,6 +469,33 @@ final class ProjectDatabase {
         position: Int
     ) throws {
         try upsert(session, in: projectID, position: position)
+    }
+
+    /// Persists a related set of standing-session mutations atomically, without walking any
+    /// neighbouring row. Provider archive reconciliation can change several retained sessions;
+    /// one transaction keeps those observed states together while its cost remains proportional
+    /// to the rows that actually changed.
+    func saveSessions(_ writes: [SessionWrite]) throws {
+        try saveRecords(projects: [], sessions: writes)
+    }
+
+    /// Persists coalesced standing rows in one transaction. A burst of title, icon, location,
+    /// and agent metadata updates therefore pays for one commit rather than one commit per row.
+    /// These payload-only writes do not change graph membership or ordering.
+    func saveRecords(projects: [ProjectWrite], sessions: [SessionWrite]) throws {
+        guard !projects.isEmpty || !sessions.isEmpty else { return }
+        try database.transaction {
+            for write in projects {
+                try upsert(write.project, position: write.position)
+            }
+            for write in sessions {
+                try upsert(
+                    write.session,
+                    in: write.projectID,
+                    position: write.position
+                )
+            }
+        }
     }
 
     /// Persists only window navigation state.
@@ -461,6 +535,32 @@ final class ProjectDatabase {
             // Membership changed, so a whole-graph writer holding the older picture must be
             // refused rather than allowed to resurrect this row.
             return try writeAdvancedGeneration(from: try storeGeneration())
+        }
+    }
+
+    /// Deletes one project and shifts only the project positions that followed it. Session rows
+    /// and their normalized dependants leave through the foreign-key cascade.
+    func removeProject(
+        id projectID: ProjectID,
+        at position: Int,
+        selectedSessionID: SessionID?
+    ) throws {
+        try graphTransaction {
+            let found = try storeGeneration()
+            if let observedGeneration, observedGeneration != found {
+                throw ProjectDatabaseWriteError.staleGeneration(
+                    observed: observedGeneration,
+                    found: found
+                )
+            }
+            try database.prepare("DELETE FROM project WHERE id = ?")
+                .bind(1, projectID.uuidString)
+                .run()
+            try database.prepare("UPDATE project SET position = position - 1 WHERE position > ?")
+                .bind(1, position)
+                .run()
+            try setSelectedSessionID(selectedSessionID)
+            return try writeAdvancedGeneration(from: found)
         }
     }
 

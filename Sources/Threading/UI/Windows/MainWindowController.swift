@@ -1161,8 +1161,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard event.sessionID == self?.currentSessionID else { return }
             self?.presentManagerMoveNoticeIfNeeded(for: event.sessionID)
         }
-        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
-            self?.workspaceSidebarViewController.refreshDocument()
+        appEvents.observe(ProjectsDidChange.self) { [weak self] event in
+            guard let self else { return }
+            switch event.sidebarImpact {
+            case .sessionAdded(_, let sessionID), .sessionRemoved(_, let sessionID),
+                 .sessionStructure(_, let sessionID), .sessionTitle(let sessionID, _),
+                 .sessionRow(let sessionID):
+                workspaceSidebarViewController.sessionDidChange(sessionID)
+            case .structure, .projectRemoved, .projectStructure, .projectRow, .terminalRow:
+                workspaceSidebarViewController.refreshDocument()
+            }
         }
         appEvents.observe(SessionActivityDidChange.self) { [weak self] event in
             self?.workspaceSidebarViewController.sessionDidChange(event.sessionID)
@@ -2708,7 +2716,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     /// Closes one deleted session's detached windows without rewriting its soon-to-be-deleted
     /// panel document once per window.
     func closeDetachedWindows(forSession sessionID: SessionID) {
-        let controllers = orderedDetachedWindows.filter { $0.sessionID == sessionID }
+        closeDetachedWindows(forSessions: [sessionID])
+    }
+
+    /// Closes every detached window owned by a removed project with one proxy refresh.
+    func closeDetachedWindows(forSessions sessionIDs: Set<SessionID>) {
+        let controllers = orderedDetachedWindows.filter { sessionIDs.contains($0.sessionID) }
         guard !controllers.isEmpty else { return }
         for controller in controllers {
             detachedBrowserWindows.removeValue(forKey: controller.windowID)
@@ -4963,7 +4976,6 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         SessionAttachmentStore.shared.removeSession(sessionID)
         DisplayPaneStore.shared.removeSession(sessionID)
         MCPSessionRegistry.remove(sessionID: sessionID)
-        GitTurnBaselineStore.shared.remove(sessionID: sessionID)
         sessionActivityTransitions.remove(sessionID)
         BrowserAutoCaptureRing.shared.clear(for: sessionID)
 
@@ -4977,51 +4989,53 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         syncDisplayPane(to: containerViewController.currentSessionID)
     }
 
-    func projectSidebarDidRemoveSessions(_: ProjectSidebarViewController) {
-        // A window pinned to a session that no longer exists goes with it — before the store
-        // sweep, or its own persistence writes the deleted session's document back.
-        closeDetachedWindows(
-            forSessionsOutside: Set(environment.projectStore.projects.flatMap(\.sessions).map(\.id))
+    func projectSidebar(
+        _: ProjectSidebarViewController,
+        didRemoveProject project: Project
+    ) {
+        let sessionIDs = Set(project.sessions.map(\.id))
+        let terminalIDs = Set(project.terminals.map(\.id))
+        let span = PerformanceRecorder.shared.begin(
+            "sidebar.project-remove.cleanup",
+            category: "sidebar",
+            metadata: [
+                "removed_sessions": String(sessionIDs.count),
+                "removed_terminals": String(terminalIDs.count),
+            ]
         )
+        defer { span.end() }
 
-        // The shown session may have just been deleted; fall back to an empty pane.
-        if let currentSessionID, environment.projectStore.session(withID: currentSessionID) == nil {
+        // Close exact owners before their panel documents can be persisted back during teardown.
+        closeDetachedWindows(forSessions: sessionIDs)
+        if let currentSessionID, sessionIDs.contains(currentSessionID) {
             containerViewController.show(sessionID: nil)
         }
-        if let currentTerminalID, environment.projectStore.terminal(withID: currentTerminalID) == nil {
+        if let currentTerminalID, terminalIDs.contains(currentTerminalID) {
             containerViewController.closeTerminal(for: currentTerminalID)
         }
 
-        // A deleted session must not keep its image in memory, nor leave a live MCP endpoint
-        // addressing a session that no longer exists.
-        let liveSessionIDs = Set(environment.projectStore.projects.flatMap { $0.sessions.map(\.id) })
-        let liveTerminalIDs = Set(environment.projectStore.projects.flatMap { $0.terminals.map(\.id) })
-        displayPaneController.retainOnly(sessionIDs: liveSessionIDs)
-        dismissedDisplayPaneRevisionBySession = dismissedDisplayPaneRevisionBySession.filter {
-            liveSessionIDs.contains($0.key)
+        displayPaneController.removeSessions(sessionIDs)
+        for sessionID in sessionIDs {
+            dismissedDisplayPaneRevisionBySession.removeValue(forKey: sessionID)
+            sessionActivityTransitions.remove(sessionID)
+            BrowserAutoCaptureRing.shared.clear(for: sessionID)
         }
-        containerViewController.retainDrawerSessions(liveSessionIDs)
-        MCPSessionRegistry.retainOnly(sessionIDs: liveSessionIDs)
-        GitTurnBaselineStore.shared.retainOnly(sessionIDs: liveSessionIDs)
-        // The before-shot ring is per session and in memory, so a deleted chat's pixels go with it.
-        BrowserAutoCaptureRing.shared.retainOnly(sessionIDs: liveSessionIDs)
-        environment.agentRuntime.retainOnly(sessionIDs: liveSessionIDs)
-        // Visual baselines are the project's, not the session's, so this sweep is by project: a
-        // deleted chat leaves the library alone, and a removed project takes its own with it. The
-        // removal confirmation says so.
-        BrowserBaselineStore.shared.retainOnly(
-            projectIDs: Set(environment.projectStore.projects.map(\.id))
-        )
+        containerViewController.removeDrawerSessions(sessionIDs)
+        SessionAttachmentStore.shared.removeSessionsAfterProjectDeletion(sessionIDs)
+        DisplayPaneStore.shared.removeSessionsAfterProjectDeletion(sessionIDs)
+        MCPSessionRegistry.remove(sessionIDs: sessionIDs)
+        BrowserBaselineStore.shared.remove(projectID: project.id)
 
-        // Nor stay reachable through Back: a retraced page must exist to be presented.
+        // Only pages owned by the removed project leave Back history; no live-project catalogue
+        // or resident-cache sweep is needed to discover identities the caller already supplied.
         navigation.prune { page in
             switch page {
             case let .session(sessionID):
-                return liveSessionIDs.contains(sessionID)
+                return !sessionIDs.contains(sessionID)
             case let .terminal(terminalID):
-                return liveTerminalIDs.contains(terminalID)
+                return !terminalIDs.contains(terminalID)
             case let .composer(projectID):
-                return environment.projectStore.project(withID: projectID) != nil
+                return projectID != project.id
             case .settings, .settingsAISearch:
                 return true
             }

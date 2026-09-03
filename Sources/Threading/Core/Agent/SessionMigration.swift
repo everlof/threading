@@ -1391,6 +1391,20 @@ enum ConversationHandoffStore {
         }
     }
 
+    /// Deletes a project's frozen handoffs away from the main actor. Session ids are immutable,
+    /// and a removed id is never reused, so this cannot race a replacement document into loss.
+    static func removeInBackground(
+        for sessionIDs: Set<SessionID>,
+        rootDirectory: URL? = nil
+    ) {
+        guard !sessionIDs.isEmpty else { return }
+        DispatchQueue.global(qos: .utility).async {
+            for sessionID in sessionIDs {
+                remove(for: sessionID, rootDirectory: rootDirectory)
+            }
+        }
+    }
+
     private static func directory(rootDirectory: URL?) -> URL {
         if let rootDirectory {
             return rootDirectory.appendingPathComponent(directoryName, isDirectory: true)

@@ -3711,14 +3711,78 @@ the reported title's foreground-process owner on every report—even an identica
 retirement depends on the most recent claimant; only the expensive presentation notification is
 deduplicated.
 
+## Archive mutation is an exact row write
+
+A 2026-09-02 live incident contained 686 retained sessions, 630 of them archived. Ten quick archive
+requests coincided with main-thread stalls from 1.97 to 7.66 seconds; the longest interval contained
+four provider completions roughly 1.9 seconds apart. Trace phases ruled out the visible tree: sidebar
+reloads took 9–12 ms, tree construction stayed below 1 ms, and applying a project structure stayed
+below 1 ms. The uninstrumented interval began at the archive completion's store mutation.
+
+Both `ProjectStore.setArchived` and `synchronizeArchiveStates` still called the legacy `save()`.
+That path encoded and upserted every project and all 686 session payloads inside a synchronous
+transaction on `ProjectStore`'s main actor. A provider command already ran off-main; returning from
+it made each successful completion pay O(all retained sessions) before the next main-actor callback
+could return. Several completions therefore serialized into the multi-second hang.
+
+Archive now uses the standing-session write seam. A click encodes/upserts one session;
+reconciliation collects only sessions whose observed value changed and commits them in one SQLite
+transaction. The rollback snapshot advances per accepted row, and an injected pre-commit failure
+proves a batch publishes none of its values. A future-format sentinel in an untouched neighbouring
+row proves neither the database primitive nor the shipping store path rewrites it. A single archive
+event carries its session and project identities: the sidebar rebuilds only that project while
+search, extension and curfew consumers update only the named session. `CheckoutBranchFollower`
+ignores all non-project-list impacts instead of acquiring an unrelated O(projects) reconciliation
+on every row mutation. `persistence.sessions.save` records `changed_rows` for trace attribution,
+while the project-sidebar stress fixture times archive, restore, subtree application and layout
+independently.
+
+The final 20-project × 250-session deterministic run retained all 5,000 sessions and completed in
+1.81 seconds total. The single-row archive mutation took 8.75 ms, its targeted subtree application
+accounting for 2.97 ms inside that synchronous call; the following layout took 0.90 ms. Restore took
+7.51 ms including 3.79 ms of subtree work, then 0.88 ms of layout. The fixture's deliberately
+retained whole-graph comparison took 246 ms in the same process. That ratio is the regression signal:
+archive work follows the changed row and its 250-row project, not the 5,000-row retained catalog.
+
+### Rename commits do not drain unrelated work
+
+The same audit found a separate Enter-key hitch. Session and project renames had already moved to
+exact row writes, but both helpers first called `flushPendingRecordSaves()`. One press could
+therefore synchronously commit every unrelated title, process, location and agent-metadata update
+waiting in the 500 ms coalescing window. The sidebar then performed its own unconditional full
+reload after the store's synchronous targeted notification had already applied the rename.
+
+An immediate standing-row write now subtracts only its own pending identity and leaves every other
+row on the timer. When that timer fires, all dirty project and session rows share one SQLite
+transaction rather than taking one commit per identity. Project renames publish a project-row
+impact, session renames publish a title impact carrying whether Name order can move them, and the
+rename completion does not reload the complete outline a second time. The regression test queues
+an automatic title for one session, replaces its durable payload with a future-format sentinel,
+presses the exact rename path on a neighbour, and proves the sentinel is untouched while the
+renamed row is already durable.
+
+The event fan-out is part of the Enter-key boundary too. Navigation and transcript search used to
+re-project every retained project/session synchronously on the main actor before handing their
+finished values to background indexers. The navigation store now changes one keyed record and the
+transcript store one keyed source for a session title/archive edge; flattening their copy-on-write
+snapshots stays with the detached indexing work. Project-name overlays are likewise applied by the
+workers. The extension host journal and host-fact publisher refresh one named project/session, the
+extension navigator receives a one-session delta, title-only events do not remeasure aggregate
+agent workload, and the curfew engine does not re-evaluate unrelated sessions. Adding a new
+`ProjectsDidChange` consumer therefore requires routing every exact impact explicitly; observing
+the event as an undifferentiated request for a whole-catalogue refresh puts this stall back.
+The final 5,000-session fixture measured the production exact title event at 6.22 ms.
+
 ## Project sidebar stress target
 
 `SidebarTreeBuilderTests.testStressProjectSidebarWhenEnabled` seeds a throwaway `ProjectStore`
 database and loads the production `ProjectSidebarViewController`. It measures cold load and layout,
 same-shape content refresh, collapse/re-expand, a reveal through branch and nested side-chat levels,
-one targeted title event, 250 repeated row updates, one exact session creation, two exact removals,
-and the pure tree builder. Creation and removal retain deliberate whole-graph/full-reload comparison
-phases so an ostensibly faster targeted path is measured against the broad work it replaced. The
+one targeted title event, 250 repeated row updates, one exact session creation, an archive/restore
+pair, two exact removals, and the pure tree builder. Creation and removal retain deliberate
+whole-graph/full-reload comparison phases so an ostensibly faster targeted path is measured against
+the broad work it replaced. Archive and restore report mutation, project-subtree outline and layout
+phases separately. The
 fixture fixes the grouping defaults, parameterizes manual/recent/name order, and never reads or
 changes the user's projects. It also asserts that the expanded outline contains exactly as many
 rows as the pure tree; this catches an ancestor that a sort order accidentally left closed, not just
@@ -3748,10 +3812,10 @@ virtualization is already doing its job. The measured fixes are above that layer
   model lookup used by every live row constant-time;
 - content refresh touches only the viewport, since an off-screen row reads current store state when
   AppKit eventually asks for its view;
-- `ProjectsDidChange` carries a session-row impact for ordinary title repainting and a
-  session-order impact under Name order. The latter rebuilds, adopts and diffs only the affected
-  project's subtree; an identity-set guard falls back to the complete builder if a supposedly
-  title-only event ever adds or removes a row;
+- `ProjectsDidChange` carries a session-title impact with an explicit Name-order bit. Ordinary
+  title changes repaint one row; Name order rebuilds, adopts and diffs only the affected project's
+  subtree. An identity-set guard falls back to the complete builder if a supposedly title-only
+  event ever adds or removes a row;
 - a `sessionAdded` impact inserts the common manual-order leaf and its exact indexes directly.
   Branch-group transitions and non-manual orders fall back to the affected project's subtree,
   never the complete sidebar;
@@ -3816,7 +3880,9 @@ parent existed and silently exposed only 5,063 rows; expansion now walks the pre
 
 `sidebar.outline.apply-structure`, `sidebar.session-order.apply`, and
 `sidebar.disclosure.persist` keep the remaining AppKit, local reorder, and SQLite costs separable in
-a trace. The earlier recursive `expandChildren` experiment was initially reverted because the old
+a trace. `persistence.sessions.save` reports the changed-row count for archive and every other
+immediate standing-session write, so a filesystem wait cannot hide inside the outline phase. The
+earlier recursive `expandChildren` experiment was initially reverted because the old
 fixture made it look slower. With persisted disclosure fixed and the production lifecycle in the
 fixture, batching the first expansion is now retained. A focused semantic test also caught and fixed
 two adjacent disclosure errors: a lone root project had ignored persisted closure, and groups below
@@ -3846,8 +3912,19 @@ project's positional shift, replaces only that project's rendered tree and index
 continuity persistence, invalidates the exact runtime/panel/drawer/attachment/MCP/capture/subagent
 records, and removes owned cache directories on a utility task. `sidebar.session-remove.persist`,
 `sidebar.project-structure.apply`, and `sidebar.session-remove.cleanup` keep those boundaries visible
-in a CLI trace. Whole-set `retainOnly` sweeps remain appropriate for project deletion and startup
-reconciliation, never for an ordinary one-chat click.
+in a CLI trace. Whole-set `retainOnly` sweeps remain appropriate for startup reconciliation, never
+for an ordinary one-chat click or a project removal whose exact identities are already in hand.
+
+Project deletion has its own batching boundary because its input is a project-sized set rather
+than one chat. Git checkpoint metadata is scanned and saved once for the complete removed set;
+scheduled sends are filtered and committed once rather than once per session; conversation
+handoff and execution-audit files leave on worker queues. The remaining attachment-copy,
+panel-cache and visual-baseline directory retention sweeps also enumerate and delete away from
+AppKit. Its project-store event carries the removed project, session and terminal identities, so
+search indexes, curfew state and extension fact indexes delete those keys without reconstructing
+the surviving catalogue. This keeps the synchronous portion proportional to in-memory ownership
+teardown and the one authoritative SQLite graph transaction, instead of sessions × auxiliary-store
+size plus filesystem latency.
 
 A follow-up audit found two broad passes still hiding inside that exact-looking route. Compact-tree
 rule refresh asked the outline for every logical row merely to discover which row views AppKit had

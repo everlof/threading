@@ -695,18 +695,31 @@ final class GitTurnBaselineStore {
     /// until its refs are successfully removed, making a failed cleanup retryable rather than
     /// stranding untracked app-owned refs with no record of their repository.
     func remove(sessionID: SessionID) {
+        remove(sessionIDs: [sessionID])
+    }
+
+    /// Removes a project's sessions as one metadata mutation. Project deletion used to scan and
+    /// rewrite the complete checkpoint archive once per session before its batched ref cleanup
+    /// even began, making confirmation time grow as sessions × retained checkpoints.
+    func remove(sessionIDs: Set<SessionID>) {
+        guard !sessionIDs.isEmpty else { return }
         let span = PerformanceRecorder.shared.begin(
-            "sidebar.session-remove.git-checkpoints",
-            category: "sidebar"
+            "sidebar.sessions-remove.git-checkpoints",
+            category: "sidebar",
+            metadata: ["removed_sessions": String(sessionIDs.count)]
         )
         defer { span.end() }
 
-        archive.nextOrdinalBySession.removeValue(forKey: sessionID.uuidString)
-        activeCheckpointIDs.removeValue(forKey: sessionID)
-        generations[sessionID] = (generations[sessionID] ?? 0) + 1
-        cancelPreparation(for: sessionID)
-        let ids = archive.checkpoints.filter { $0.sessionID == sessionID }.map(\.id)
-        _ = saveAndNotify(sessionID)
+        for sessionID in sessionIDs {
+            archive.nextOrdinalBySession.removeValue(forKey: sessionID.uuidString)
+            activeCheckpointIDs.removeValue(forKey: sessionID)
+            generations[sessionID] = (generations[sessionID] ?? 0) + 1
+            cancelPreparation(for: sessionID)
+        }
+        let ids = archive.checkpoints
+            .filter { sessionIDs.contains($0.sessionID) }
+            .map(\.id)
+        _ = saveAndNotify(sessionIDs)
         discard(checkpointIDs: ids)
     }
 

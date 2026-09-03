@@ -192,9 +192,13 @@ final class ProjectStore {
         )
         project.folderPath = normalizedPath
 
+        guard flushPendingRecordSaves() else {
+            notifyChanged()
+            return nil
+        }
         projects.append(project)
         rebuildLookupIndexes()
-        guard save() else {
+        guard saveProjectAddition(project, at: projects.count - 1) else {
             notifyChanged()
             return nil
         }
@@ -227,27 +231,30 @@ final class ProjectStore {
         if let index = projects.firstIndex(where: \.isTheScratchpad) {
             guard projects[index].folderPath != normalizedPath else { return projects[index] }
             projects[index].folderPath = normalizedPath
-            return commitScratchpadChange(at: index)
+            return commitScratchpadChange(at: index, isAddition: false)
         }
 
         if let index = projects.firstIndex(where: { $0.folderPath == normalizedPath }) {
             projects[index].isScratchpad = true
-            return commitScratchpadChange(at: index)
+            return commitScratchpadChange(at: index, isAddition: false)
         }
 
         var project = Project(name: L10n.string("Scratchpad"), folderURL: folderURL)
         project.folderPath = normalizedPath
         project.isScratchpad = true
         projects.append(project)
-        return commitScratchpadChange(at: projects.count - 1)
+        return commitScratchpadChange(at: projects.count - 1, isAddition: true)
     }
 
     /// Saves an edit to the scratchpad row and hands it back, or nil when the store refused the
     /// write — the same contract `addProject` has, so a caller cannot mistake a refused save for
     /// a successful one and go on to select a row that was not persisted.
-    private func commitScratchpadChange(at index: Int) -> Project? {
+    private func commitScratchpadChange(at index: Int, isAddition: Bool) -> Project? {
         rebuildLookupIndexes()
-        guard save() else {
+        let saved = isAddition
+            ? saveProjectAddition(projects[index], at: index)
+            : saveProjectRecord(at: index)
+        guard saved else {
             notifyChanged()
             return nil
         }
@@ -257,15 +264,20 @@ final class ProjectStore {
 
     @discardableResult
     func removeProject(id: ProjectID) -> ProjectMutationResult {
-        guard let removedProject = project(withID: id) else { return .targetNotFound }
+        guard let projectIndex = index(ofProject: id) else { return .targetNotFound }
+        let removedProject = projects[projectIndex]
+        guard flushPendingRecordSaves() else {
+            notifyChanged()
+            return .persistenceRefused
+        }
 
-        projects.removeAll { $0.id == id }
+        projects.remove(at: projectIndex)
         if let selectedSessionID,
            removedProject.sessions.contains(where: { $0.id == selectedSessionID }) {
             setSelectedSessionWithoutPersistence(nil)
         }
         rebuildLookupIndexes()
-        guard save() else {
+        guard saveProjectRemoval(id, at: projectIndex) else {
             notifyChanged()
             return .persistenceRefused
         }
@@ -277,21 +289,28 @@ final class ProjectStore {
         if let icon = removedProject.icon {
             ProjectIconStore.remove(fileName: icon.fileName)
         }
-        for session in removedProject.sessions {
-            // Checkpoint refs are collected here rather than before the commit, with the same
-            // reasoning as the cleanup above. Losing the repository is not destructive: discard
-            // keeps a checkpoint's metadata when its root no longer resolves, and the orphaned-ref
-            // reconciliation pass collects it later.
-            GitTurnBaselineStore.shared.remove(sessionID: session.id)
-            ConversationHandoffStore.remove(for: session.id)
-            ExecutionAuditStore.shared.remove(sessionID: session.id)
-            ScheduledMessageStore.shared.forget(sessionID: session.id)
-        }
+        let removedSessionIDs = Set(removedProject.sessions.map(\.id))
+        let removedTerminalIDs = Set(removedProject.terminals.map(\.id))
+        // Checkpoint refs are collected here rather than before the commit, with the same
+        // reasoning as the cleanup above. Losing the repository is not destructive: discard
+        // keeps a checkpoint's metadata when its root no longer resolves, and the orphaned-ref
+        // reconciliation pass collects it later. Each auxiliary owner receives one bounded
+        // project-sized mutation rather than one whole-store pass per session.
+        GitTurnBaselineStore.shared.remove(sessionIDs: removedSessionIDs)
+        ConversationHandoffStore.removeInBackground(for: removedSessionIDs)
+        ExecutionAuditStore.shared.removeInBackground(sessionIDs: removedSessionIDs)
         DraftStore.shared.clear(for: id)
         // Session starts waiting on this project would otherwise fire into a folder the app no
         // longer knows, or be re-armed forever against a project id nothing can resolve.
-        ScheduledMessageStore.shared.forget(projectID: id)
-        notifyChanged()
+        ScheduledMessageStore.shared.forget(
+            sessionIDs: removedSessionIDs,
+            projectID: id
+        )
+        notifyChanged(sidebarImpact: .projectRemoved(
+            projectID: id,
+            sessionIDs: removedSessionIDs,
+            terminalIDs: removedTerminalIDs
+        ))
         return .applied
     }
 
@@ -300,11 +319,11 @@ final class ProjectStore {
         guard let index = index(ofProject: id) else { return .targetNotFound }
         guard projects[index].name != name else { return .unchanged }
         projects[index].name = name
-        guard save() else {
-            notifyChanged()
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .projectRow(id))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .projectRow(id))
         return .applied
     }
 
@@ -345,14 +364,14 @@ final class ProjectStore {
         // that points at bytes which no longer exist.
         let old = projects[index].icon
         projects[index].icon = icon
-        guard save() else {
-            notifyChanged()
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .projectRow(projectID))
             return false
         }
         if let old, old.fileName != icon?.fileName {
             ProjectIconStore.remove(fileName: old.fileName)
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .projectRow(projectID))
         return true
     }
 
@@ -500,13 +519,22 @@ final class ProjectStore {
         // which keeps it following the app default exactly as the parent does.
         session.permissionMode = parent.permissionMode
 
-        projects[location.projectIndex].sessions.append(session)
-        rebuildLookupIndexes()
-        guard save() else {
+        guard flushPendingRecordSaves() else {
             notifyChanged()
             return nil
         }
-        notifyChanged()
+        projects[location.projectIndex].sessions.append(session)
+        let position = projects[location.projectIndex].sessions.count - 1
+        sessionLocationsByID[session.id] = (location.projectIndex, position)
+        let projectID = projects[location.projectIndex].id
+        guard saveSessionAddition(session, to: projectID, position: position) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
+            return nil
+        }
+        notifyChanged(sidebarImpact: .sessionAdded(
+            projectID: projectID,
+            sessionID: session.id
+        ))
 
         return session
     }
@@ -716,13 +744,25 @@ final class ProjectStore {
         }
 
         guard !adopted.isEmpty else { return [] }
-        projects[index].sessions.append(contentsOf: adopted)
-        rebuildLookupIndexes()
-        guard save() else {
+        guard flushPendingRecordSaves() else {
             notifyChanged()
             return []
         }
-        notifyChanged()
+        let firstPosition = projects[index].sessions.count
+        projects[index].sessions.append(contentsOf: adopted)
+        rebuildLookupIndexes()
+        let writes = adopted.enumerated().map { offset, session in
+            ProjectDatabase.SessionWrite(
+                session: session,
+                projectID: projectID,
+                position: firstPosition + offset
+            )
+        }
+        guard saveSessionAdditions(writes) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
+            return []
+        }
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
 
         return adopted
     }
@@ -740,6 +780,7 @@ final class ProjectStore {
         at date: Date = Date()
     ) -> ProjectMutationResult {
         guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        let projectID = projects[location.projectIndex].id
         guard projects[location.projectIndex].sessions[location.sessionIndex].isArchived
             != archived else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].isArchived = archived
@@ -750,49 +791,67 @@ final class ProjectStore {
         // "Snoozed"/"Woke" overlay it carries back on restore would describe a wait nobody is
         // still having. Archive semantics themselves are unchanged.
         if archived { projects[location.projectIndex].sessions[location.sessionIndex].clearAttentionOverlay() }
-        guard save() else {
+        guard saveSessionRecords(at: [location], description: "archive") else {
             notifyChanged()
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionStructure(
+            projectID: projectID,
+            sessionID: sessionID
+        ))
         return .applied
     }
 
     /// Commits values that have been observed or applied on both sides of provider archive sync.
-    /// One save and notification for a launch reconciliation, however many retained sessions it
-    /// initializes, rather than rewriting the whole project graph once per conversation.
+    /// One changed-row transaction and notification for a launch reconciliation, however many
+    /// retained sessions it initializes. Standing neighbours are neither encoded nor written.
     @discardableResult
     func synchronizeArchiveStates(
         _ states: [SessionID: Bool],
         at date: Date = Date()
     ) -> ProjectMutationResult {
-        var changed = false
+        var changedLocations: [(projectIndex: Int, sessionIndex: Int)] = []
+        var changedProjectIDs: Set<ProjectID> = []
         for (sessionID, archived) in states {
             guard let location = locate(sessionID: sessionID) else { continue }
-            changed = projects[location.projectIndex].sessions[location.sessionIndex]
-                .synchronizeArchiveState(archived, at: date) || changed
+            guard projects[location.projectIndex].sessions[location.sessionIndex]
+                .synchronizeArchiveState(archived, at: date) else { continue }
+            changedLocations.append(location)
+            changedProjectIDs.insert(projects[location.projectIndex].id)
         }
 
-        guard changed else { return .unchanged }
-        guard save() else {
+        guard !changedLocations.isEmpty else { return .unchanged }
+        guard saveSessionRecords(at: changedLocations, description: "archive reconciliation")
+        else {
             notifyChanged()
             return .persistenceRefused
         }
-        notifyChanged()
+        if changedProjectIDs.count == 1, let projectID = changedProjectIDs.first {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
+        } else {
+            notifyChanged()
+        }
         return .applied
     }
 
     @discardableResult
     func setPinned(_ pinned: Bool, for sessionID: SessionID) -> ProjectMutationResult {
         guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        let projectID = projects[location.projectIndex].id
         guard projects[location.projectIndex].sessions[location.sessionIndex].isPinned != pinned
         else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].isPinned = pinned
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionStructure(
+                projectID: projectID,
+                sessionID: sessionID
+            ))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionStructure(
+            projectID: projectID,
+            sessionID: sessionID
+        ))
         return .applied
     }
 
@@ -803,7 +862,10 @@ final class ProjectStore {
         hadTurnInFlight: Bool,
         for sessionID: SessionID
     ) {
-        guard let session = session(withID: sessionID), !session.isArchived, deadline > date else {
+        guard let session = session(withID: sessionID),
+              let projectID = project(forSessionID: sessionID)?.id,
+              !session.isArchived,
+              deadline > date else {
             return
         }
         update(sessionID: sessionID) {
@@ -813,11 +875,15 @@ final class ProjectStore {
             $0.wake = nil
         }
         // The row moves between the attention and Snoozed scopes.
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionStructure(
+            projectID: projectID,
+            sessionID: sessionID
+        ))
     }
 
     func clearSnooze(for sessionID: SessionID) {
         guard let session = session(withID: sessionID),
+              let projectID = project(forSessionID: sessionID)?.id,
               session.snoozedAt != nil || session.snoozedUntil != nil else { return }
         update(sessionID: sessionID) {
             $0.snoozedAt = nil
@@ -825,7 +891,10 @@ final class ProjectStore {
             $0.hadTurnInFlightWhenSnoozed = false
         }
         // The row moves from Snoozed back into the attention scope.
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionStructure(
+            projectID: projectID,
+            sessionID: sessionID
+        ))
     }
 
     func wakeSnoozedSession(
@@ -833,7 +902,8 @@ final class ProjectStore {
         reason: SessionWakeReason,
         at date: Date
     ) {
-        guard session(withID: sessionID)?.snoozedAt != nil else { return }
+        guard session(withID: sessionID)?.snoozedAt != nil,
+              let projectID = project(forSessionID: sessionID)?.id else { return }
         update(sessionID: sessionID) {
             $0.snoozedAt = nil
             $0.snoozedUntil = nil
@@ -841,7 +911,10 @@ final class ProjectStore {
             $0.wake = SessionWake(reason: reason, wokeAt: date)
         }
         // An early or deadline wake moves the row between sidebar scopes.
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionStructure(
+            projectID: projectID,
+            sessionID: sessionID
+        ))
     }
 
     func acknowledgeWake(for sessionID: SessionID) {
@@ -864,11 +937,11 @@ final class ProjectStore {
         guard !usesNative || session.kind.supportsNativeUI else { return .unsupportedValue }
         guard session.usesNativeUI != usesNative else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].usesNativeUI = usesNative
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -885,11 +958,11 @@ final class ProjectStore {
         guard session.kind.supportsAccounts else { return .unsupportedValue }
         guard session.accountHandle != accountHandle else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].accountHandle = accountHandle
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -913,11 +986,11 @@ final class ProjectStore {
             != remoteControl else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex]
             .setClaudeRemoteControl(remoteControl)
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -939,11 +1012,11 @@ final class ProjectStore {
         guard projects[location.projectIndex].sessions[location.sessionIndex].permissionMode != mode
         else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].permissionMode = mode
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -958,11 +1031,11 @@ final class ProjectStore {
         guard projects[location.projectIndex].sessions[location.sessionIndex].themeID != themeID
         else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].themeID = themeID
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -975,11 +1048,11 @@ final class ProjectStore {
         guard let index = index(ofProject: projectID) else { return .targetNotFound }
         guard projects[index].themeID != themeID else { return .unchanged }
         projects[index].themeID = themeID
-        guard save() else {
-            notifyChanged()
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
         return .applied
     }
 
@@ -1001,24 +1074,25 @@ final class ProjectStore {
         )
         projects[projectIndex].terminals.append(terminal)
         rebuildLookupIndexes()
-        guard save() else {
-            notifyChanged()
+        guard saveProjectRecord(at: projectIndex) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
             return nil
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
         return terminal
     }
 
     @discardableResult
     func removeTerminal(id terminalID: TerminalID) -> ProjectMutationResult {
         guard let location = locate(terminalID: terminalID) else { return .targetNotFound }
+        let projectID = projects[location.projectIndex].id
         projects[location.projectIndex].terminals.remove(at: location.terminalIndex)
         rebuildLookupIndexes()
-        guard save() else {
-            notifyChanged()
+        guard saveProjectRecord(at: location.projectIndex) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
         return .applied
     }
 
@@ -1030,7 +1104,7 @@ final class ProjectStore {
         guard projects[location.projectIndex].terminals[location.terminalIndex].customTitle != stored
         else { return .unchanged }
         projects[location.projectIndex].terminals[location.terminalIndex].customTitle = stored
-        guard save() else {
+        guard saveProjectRecord(at: location.projectIndex) else {
             notifyChanged(sidebarImpact: .terminalRow(terminalID))
             return .persistenceRefused
         }
@@ -1077,7 +1151,7 @@ final class ProjectStore {
         projects[location.projectIndex].terminals[location.terminalIndex].currentDirectory = normalized
         projects[location.projectIndex].terminals[location.terminalIndex].branch = branch
         _ = saveProjectRecord(at: location.projectIndex)
-        notifyChanged()
+        notifyChanged(sidebarImpact: .terminalRow(terminalID))
     }
 
     /// Records a terminal-only override. Nil returns to its owning project, then the app theme.
@@ -1090,7 +1164,7 @@ final class ProjectStore {
         guard projects[location.projectIndex].terminals[location.terminalIndex].themeID != themeID
         else { return .unchanged }
         projects[location.projectIndex].terminals[location.terminalIndex].themeID = themeID
-        guard save() else {
+        guard saveProjectRecord(at: location.projectIndex) else {
             notifyChanged(sidebarImpact: .terminalRow(terminalID))
             return .persistenceRefused
         }
@@ -1111,11 +1185,11 @@ final class ProjectStore {
         guard projects[location.projectIndex].sessions[location.sessionIndex].notificationsMuted
             != muted else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].notificationsMuted = muted
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -1128,11 +1202,11 @@ final class ProjectStore {
         guard let index = index(ofProject: projectID) else { return .targetNotFound }
         guard projects[index].notificationsMuted != muted else { return .unchanged }
         projects[index].notificationsMuted = muted
-        guard save() else {
-            notifyChanged()
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
         return .applied
     }
 
@@ -1151,11 +1225,11 @@ final class ProjectStore {
         guard projects[location.projectIndex].sessions[location.sessionIndex].limitRecoveryPolicy
             != policy else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].limitRecoveryPolicy = policy
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -1168,11 +1242,11 @@ final class ProjectStore {
         guard let index = index(ofProject: projectID) else { return .targetNotFound }
         guard projects[index].limitRecoveryPolicy != policy else { return .unchanged }
         projects[index].limitRecoveryPolicy = policy
-        guard save() else {
-            notifyChanged()
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
         return .applied
     }
 
@@ -1203,11 +1277,11 @@ final class ProjectStore {
         // reset-conditioned rule has no deadline until its provider event arrives; re-arming it
         // must not inherit the previous condition's hold or interrupt receipts.
         projects[location.projectIndex].sessions[location.sessionIndex].curfewState = nil
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -1231,11 +1305,11 @@ final class ProjectStore {
         }
         guard projects[index].curfewRule != rule else { return .unchanged }
         projects[index].curfewRule = rule
-        guard save() else {
-            notifyChanged()
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
         return .applied
     }
 
@@ -1254,11 +1328,11 @@ final class ProjectStore {
         guard projects[location.projectIndex].sessions[location.sessionIndex].curfewState
             != state else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].curfewState = state
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -1278,11 +1352,11 @@ final class ProjectStore {
         guard projects[location.projectIndex].sessions[location.sessionIndex].soundOverrides
             != overrides else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].soundOverrides = overrides
-        guard save() else {
-            notifyChanged()
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
         return .applied
     }
 
@@ -1296,11 +1370,11 @@ final class ProjectStore {
         guard let index = index(ofProject: projectID) else { return .targetNotFound }
         guard projects[index].soundOverrides != overrides else { return .unchanged }
         projects[index].soundOverrides = overrides
-        guard save() else {
-            notifyChanged()
+        guard saveProjectRecord(at: index) else {
+            notifyChanged(sidebarImpact: .projectStructure(projectID))
             return .persistenceRefused
         }
-        notifyChanged()
+        notifyChanged(sidebarImpact: .projectStructure(projectID))
         return .applied
     }
 
@@ -1315,7 +1389,7 @@ final class ProjectStore {
         guard projects[location.projectIndex].terminals[location.terminalIndex].soundOverrides
             != overrides else { return .unchanged }
         projects[location.projectIndex].terminals[location.terminalIndex].soundOverrides = overrides
-        guard save() else {
+        guard saveProjectRecord(at: location.projectIndex) else {
             notifyChanged(sidebarImpact: .terminalRow(terminalID))
             return .persistenceRefused
         }
@@ -1412,11 +1486,11 @@ final class ProjectStore {
         guard projects[location.projectIndex].sessions[location.sessionIndex].customTitle != stored
         else { return .unchanged }
         projects[location.projectIndex].sessions[location.sessionIndex].customTitle = stored
-        let sidebarImpact: ProjectsDidChange.SidebarImpact =
-            NativeSidebarPipelineOptions.sessionOrder == .name
-                ? .sessionOrder(sessionID)
-                : .sessionRow(sessionID)
-        guard save() else {
+        let sidebarImpact: ProjectsDidChange.SidebarImpact = .sessionTitle(
+            sessionID,
+            reorders: NativeSidebarPipelineOptions.sessionOrder == .name
+        )
+        guard saveSessionRecord(at: location) else {
             notifyChanged(sidebarImpact: sidebarImpact)
             return .persistenceRefused
         }
@@ -1445,11 +1519,11 @@ final class ProjectStore {
         else { return .unchanged }
 
         projects[location.projectIndex].sessions[location.sessionIndex].title = title
-        let sidebarImpact: ProjectsDidChange.SidebarImpact =
-            NativeSidebarPipelineOptions.sessionOrder == .name
-                ? .sessionOrder(sessionID)
-                : .sessionRow(sessionID)
-        guard save() else {
+        let sidebarImpact: ProjectsDidChange.SidebarImpact = .sessionTitle(
+            sessionID,
+            reorders: NativeSidebarPipelineOptions.sessionOrder == .name
+        )
+        guard saveSessionRecord(at: location) else {
             notifyChanged(sidebarImpact: sidebarImpact)
             return .persistenceRefused
         }
@@ -1540,9 +1614,7 @@ final class ProjectStore {
         let titleCanReorderSidebar = NativeSidebarPipelineOptions.sessionOrder == .name
             && AppSettings.usesAgentTitleInSidebar
         notifyChanged(
-            sidebarImpact: titleCanReorderSidebar
-                ? .sessionOrder(sessionID)
-                : .sessionRow(sessionID)
+            sidebarImpact: .sessionTitle(sessionID, reorders: titleCanReorderSidebar)
         )
         return cleaned == nil ? .cleared : .accepted
     }
@@ -1569,11 +1641,12 @@ final class ProjectStore {
         else { return }
 
         projects[location.projectIndex].sessions[location.sessionIndex].title = title
-        save()
+        _ = saveSessionRecord(at: location)
         notifyChanged(
-            sidebarImpact: NativeSidebarPipelineOptions.sessionOrder == .name
-                ? .sessionOrder(sessionID)
-                : .sessionRow(sessionID)
+            sidebarImpact: .sessionTitle(
+                sessionID,
+                reorders: NativeSidebarPipelineOptions.sessionOrder == .name
+            )
         )
     }
 
@@ -1617,8 +1690,11 @@ final class ProjectStore {
         else { return }
 
         projects[location.projectIndex].sessions[location.sessionIndex].branch = branch
-        save()
-        notifyChanged()
+        _ = saveSessionRecord(at: location)
+        notifyChanged(sidebarImpact: .sessionStructure(
+            projectID: projects[location.projectIndex].id,
+            sessionID: sessionID
+        ))
     }
 
     /// Re-reads a checkout's branch and applies it to every session standing in that
@@ -1640,13 +1716,14 @@ final class ProjectStore {
         guard let identity = GitInfo.worktreeIdentity(for: folderPath),
               let branch = GitInfo.currentBranch(for: folderPath) else { return }
 
-        var changed = false
+        var changedSessionLocations: [(projectIndex: Int, sessionIndex: Int)] = []
+        var changedProjectIndexes: Set<Int> = []
         for projectIndex in projects.indices
         where GitInfo.worktreeIdentity(for: projects[projectIndex].folderPath) == identity {
             for sessionIndex in projects[projectIndex].sessions.indices
             where projects[projectIndex].sessions[sessionIndex].branch != branch {
                 projects[projectIndex].sessions[sessionIndex].branch = branch
-                changed = true
+                changedSessionLocations.append((projectIndex, sessionIndex))
             }
         }
 
@@ -1658,12 +1735,25 @@ final class ProjectStore {
                 && projects[projectIndex].terminals[terminalIndex].branch != branch
             {
                 projects[projectIndex].terminals[terminalIndex].branch = branch
-                changed = true
+                changedProjectIndexes.insert(projectIndex)
             }
         }
 
-        guard changed else { return }
-        save()
+        guard !changedSessionLocations.isEmpty || !changedProjectIndexes.isEmpty else { return }
+        if !changedSessionLocations.isEmpty,
+           !saveSessionRecords(
+               at: changedSessionLocations,
+               description: "checkout branch sessions"
+           ) {
+            notifyChanged()
+            return
+        }
+        for projectIndex in changedProjectIndexes.sorted() {
+            guard saveProjectRecord(at: projectIndex) else {
+                notifyChanged()
+                return
+            }
+        }
         notifyChanged()
     }
 
@@ -1905,8 +1995,8 @@ final class ProjectStore {
         _ = flushPendingRecordSaves()
     }
 
-    /// Flushes only the coalesced project/session rows. Successful rows update the rollback
-    /// snapshot as they commit, so a later failure restores exactly what SQLite accepted.
+    /// Flushes only the coalesced project/session rows. The complete burst shares one SQLite
+    /// transaction so commit cost does not multiply with the number of dirty rows.
     @discardableResult
     private func flushPendingRecordSaves() -> Bool {
         guard saveTimer != nil
@@ -1920,30 +2010,61 @@ final class ProjectStore {
         pendingProjectSaveIDs.removeAll(keepingCapacity: true)
         pendingSessionSaveIDs.removeAll(keepingCapacity: true)
 
-        guard prepareForImmediateSave("coalesced records") else { return false }
-
+        var projectWrites: [ProjectDatabase.ProjectWrite] = []
+        var projectIndexes: [Int] = []
+        projectWrites.reserveCapacity(projectIDs.count)
+        projectIndexes.reserveCapacity(projectIDs.count)
         for projectID in projectIDs {
-            guard let index = index(ofProject: projectID) else { continue }
-            guard stateManager.saveProject(projects[index], position: index) else {
-                recordFailedWritePolicy()
-                restorePersistedSnapshot()
-                return false
-            }
-            recordPersistedProject(at: index)
+            guard let projectIndex = index(ofProject: projectID) else { continue }
+            projectWrites.append(ProjectDatabase.ProjectWrite(
+                project: projects[projectIndex],
+                position: projectIndex
+            ))
+            projectIndexes.append(projectIndex)
         }
+
+        var sessionWrites: [ProjectDatabase.SessionWrite] = []
+        var sessionLocations: [(projectIndex: Int, sessionIndex: Int)] = []
+        sessionWrites.reserveCapacity(sessionIDs.count)
+        sessionLocations.reserveCapacity(sessionIDs.count)
         for sessionID in sessionIDs {
             guard let location = locate(sessionID: sessionID) else { continue }
             let project = projects[location.projectIndex]
             let session = project.sessions[location.sessionIndex]
-            guard stateManager.saveSession(
-                session,
-                in: project.id,
+            sessionWrites.append(ProjectDatabase.SessionWrite(
+                session: session,
+                projectID: project.id,
                 position: location.sessionIndex
-            ) else {
-                recordFailedWritePolicy()
-                restorePersistedSnapshot()
-                return false
-            }
+            ))
+            sessionLocations.append(location)
+        }
+
+        guard !projectWrites.isEmpty || !sessionWrites.isEmpty else { return true }
+        guard prepareForImmediateSave("coalesced records") else { return false }
+
+        let span = PerformanceRecorder.shared.begin(
+            "persistence.records.save",
+            category: "persistence",
+            metadata: [
+                "project_rows": String(projectWrites.count),
+                "session_rows": String(sessionWrites.count),
+            ]
+        )
+        let saved = stateManager.saveRecords(
+            projects: projectWrites,
+            sessions: sessionWrites
+        )
+        span.end(metadata: ["saved": String(saved)])
+        guard saved else {
+            recordFailedWritePolicy()
+            restorePersistedSnapshot()
+            return false
+        }
+
+        for projectIndex in projectIndexes {
+            recordPersistedProject(at: projectIndex)
+        }
+        for location in sessionLocations {
             recordPersistedSession(
                 projectIndex: location.projectIndex,
                 sessionIndex: location.sessionIndex
@@ -1979,6 +2100,21 @@ final class ProjectStore {
         return true
     }
 
+    /// The new-project fast path: one row and one graph-generation edge.
+    private func saveProjectAddition(_ project: Project, at position: Int) -> Bool {
+        guard flushPendingRecordSaves(), prepareForImmediateSave("project addition") else {
+            restorePersistedSnapshot()
+            return false
+        }
+        guard stateManager.addProject(project, position: position) else {
+            recordFailedWritePolicy()
+            restorePersistedSnapshot()
+            return false
+        }
+        recordPersistedSnapshot()
+        return true
+    }
+
     /// The new-row fast path: one validated SQL upsert plus the graph-generation edge.
     private func saveSessionAddition(
         _ session: AgentSession,
@@ -1998,35 +2134,83 @@ final class ProjectStore {
         return true
     }
 
-    /// The standing-row fast path used by launch bookkeeping and other isolated mutations.
-    private func saveSessionRecord(
-        at location: (projectIndex: Int, sessionIndex: Int)
-    ) -> Bool {
-        guard projects.indices.contains(location.projectIndex),
-              projects[location.projectIndex].sessions.indices.contains(location.sessionIndex)
-        else { return false }
-        let sessionID = projects[location.projectIndex].sessions[location.sessionIndex].id
-        // This write includes the target's latest coalesced fields. Flush only the other rows.
-        pendingSessionSaveIDs.remove(sessionID)
-        guard flushPendingRecordSaves(), prepareForImmediateSave("session") else {
+    /// The bulk-import fast path: only the appended rows, committed together.
+    private func saveSessionAdditions(_ writes: [ProjectDatabase.SessionWrite]) -> Bool {
+        guard prepareForImmediateSave("session additions") else {
             restorePersistedSnapshot()
             return false
         }
-        let project = projects[location.projectIndex]
-        let session = project.sessions[location.sessionIndex]
-        guard stateManager.saveSession(
-            session,
-            in: project.id,
-            position: location.sessionIndex
-        ) else {
+        guard stateManager.addSessions(writes) else {
             recordFailedWritePolicy()
             restorePersistedSnapshot()
             return false
         }
-        recordPersistedSession(
-            projectIndex: location.projectIndex,
-            sessionIndex: location.sessionIndex
+        recordPersistedSnapshot()
+        return true
+    }
+
+    /// The standing-row fast path used by launch bookkeeping and other isolated mutations.
+    private func saveSessionRecord(
+        at location: (projectIndex: Int, sessionIndex: Int)
+    ) -> Bool {
+        saveSessionRecords(at: [location], description: "session")
+    }
+
+    /// Writes exactly the standing rows named by the caller. Multi-session provider
+    /// reconciliation is atomic, but never pays for unrelated projects or archived history.
+    private func saveSessionRecords(
+        at locations: [(projectIndex: Int, sessionIndex: Int)],
+        description: String
+    ) -> Bool {
+        var writes: [ProjectDatabase.SessionWrite] = []
+        writes.reserveCapacity(locations.count)
+        var validLocations: [(projectIndex: Int, sessionIndex: Int)] = []
+        validLocations.reserveCapacity(locations.count)
+        var includedSessionIDs: Set<SessionID> = []
+
+        for location in locations {
+            guard projects.indices.contains(location.projectIndex),
+                  projects[location.projectIndex].sessions.indices.contains(location.sessionIndex)
+            else { return false }
+            let project = projects[location.projectIndex]
+            let session = project.sessions[location.sessionIndex]
+            guard includedSessionIDs.insert(session.id).inserted else { continue }
+            writes.append(ProjectDatabase.SessionWrite(
+                session: session,
+                projectID: project.id,
+                position: location.sessionIndex
+            ))
+            validLocations.append(location)
+        }
+
+        guard !writes.isEmpty else { return true }
+        // This exact write includes each target's latest coalesced fields. Unrelated dirty rows
+        // stay coalesced; an Enter-key rename must not synchronously drain background updates.
+        pendingSessionSaveIDs.subtract(includedSessionIDs)
+        cancelSaveTimerIfNoPendingRecords()
+        guard prepareForImmediateSave(description) else {
+            restorePersistedSnapshot()
+            return false
+        }
+
+        let span = PerformanceRecorder.shared.begin(
+            "persistence.sessions.save",
+            category: "persistence",
+            metadata: ["changed_rows": String(writes.count)]
         )
+        let saved = stateManager.saveSessions(writes)
+        span.end(metadata: ["saved": String(saved)])
+        guard saved else {
+            recordFailedWritePolicy()
+            restorePersistedSnapshot()
+            return false
+        }
+        for location in validLocations {
+            recordPersistedSession(
+                projectIndex: location.projectIndex,
+                sessionIndex: location.sessionIndex
+            )
+        }
         return true
     }
 
@@ -2036,7 +2220,8 @@ final class ProjectStore {
         guard projects.indices.contains(projectIndex) else { return false }
         let projectID = projects[projectIndex].id
         pendingProjectSaveIDs.remove(projectID)
-        guard flushPendingRecordSaves(), prepareForImmediateSave("project") else {
+        cancelSaveTimerIfNoPendingRecords()
+        guard prepareForImmediateSave("project") else {
             restorePersistedSnapshot()
             return false
         }
@@ -2047,6 +2232,12 @@ final class ProjectStore {
         }
         recordPersistedProject(at: projectIndex)
         return true
+    }
+
+    private func cancelSaveTimerIfNoPendingRecords() {
+        guard pendingProjectSaveIDs.isEmpty, pendingSessionSaveIDs.isEmpty else { return }
+        saveTimer?.invalidate()
+        saveTimer = nil
     }
 
     /// The permanent-delete fast path: one SQL delete and one positional shift, instead of
@@ -2074,6 +2265,25 @@ final class ProjectStore {
         )
         span.end(metadata: ["saved": String(saved)])
         guard saved else {
+            recordFailedWritePolicy()
+            restorePersistedSnapshot()
+            return false
+        }
+        recordPersistedSnapshot()
+        return true
+    }
+
+    /// The project-delete fast path: one delete/cascade and a positional shift of later projects.
+    private func saveProjectRemoval(_ projectID: ProjectID, at position: Int) -> Bool {
+        guard prepareForImmediateSave("project removal") else {
+            restorePersistedSnapshot()
+            return false
+        }
+        guard stateManager.removeProject(
+            id: projectID,
+            at: position,
+            selectedSessionID: selectedSessionID
+        ) else {
             recordFailedWritePolicy()
             restorePersistedSnapshot()
             return false

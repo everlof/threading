@@ -383,16 +383,29 @@ final class ScheduledMessageStore {
     /// one choke point every deletion route passes, and Settings ▸ Archived deletes sessions
     /// without going anywhere near the sidebar.
     func forget(sessionID: SessionID) {
+        forget(sessionIDs: [sessionID])
+    }
+
+    /// Applies a project deletion in one pass and one durable commit. The former per-session
+    /// calls rescanned and rewrote the entire scheduled-message document for every removed row.
+    func forget(sessionIDs: Set<SessionID>, projectID: ProjectID? = nil) {
+        guard !sessionIDs.isEmpty || projectID != nil else { return }
         var changed = false
         var retained: [ScheduledMessage] = []
         retained.reserveCapacity(messages.count)
 
         for var message in messages {
-            if message.target.sessionID == sessionID {
+            if let targetSessionID = message.target.sessionID,
+               sessionIDs.contains(targetSessionID) {
                 changed = true
                 continue
             }
-            if message.trigger.watchedSessionID == sessionID {
+            if let projectID, message.target.projectID == projectID {
+                changed = true
+                continue
+            }
+            if let watchedSessionID = message.trigger.watchedSessionID,
+               sessionIDs.contains(watchedSessionID) {
                 message.state = .failed(L10n.string(
                     "The conversation this was waiting for was deleted."
                 ))
@@ -408,10 +421,7 @@ final class ScheduledMessageStore {
     }
 
     func forget(projectID: ProjectID) {
-        let retained = messages.filter { $0.target.projectID != projectID }
-        guard retained.count != messages.count, commit(retained) else { return }
-        claimed.formIntersection(Set(retained.map(\.id)))
-        attachments.retainOnly(Set(retained.map(\.id)))
+        forget(sessionIDs: [], projectID: projectID)
     }
 
     /// Drops everything whose target is not in the given sets. The sweep for a store that has

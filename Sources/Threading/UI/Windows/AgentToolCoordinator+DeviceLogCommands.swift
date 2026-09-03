@@ -22,13 +22,12 @@ extension AgentToolCoordinator {
         displayPaneController.activateDeviceLog(for: sessionID)
         revealDisplayPane(for: sessionID)
         guard platform.isLinked else {
-            completion(DeviceLogAgentCommandService.result(building: platform))
+            Task { completion(await DeviceLogAgentCommandService.result(building: platform)) }
             return
         }
         DeviceLogTapConsentController.shared.authorize(for: sessionID, in: windowProvider()) { approved in
-            completion(approved
-                ? DeviceLogAgentCommandService.result(building: platform)
-                : DeviceLogAgentCommandService.refusedResult())
+            guard approved else { return completion(DeviceLogAgentCommandService.refusedResult()) }
+            Task { completion(await DeviceLogAgentCommandService.result(building: platform)) }
         }
     }
 }

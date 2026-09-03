@@ -68,6 +68,143 @@ final class ProjectStoreMutationTests: XCTestCase {
         XCTAssertEqual(reopenedProject.terminals.first(where: { $0.id == terminal.id })?.themeID, themeID)
     }
 
+    func testArchiveWritesOnlyTheChangedSessionRows() throws {
+        let manager = StateManager(appSupportDirectory: directory)
+        let store = ProjectStore(stateManager: manager, refusesWrites: false)
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let untouched = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let first = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let second = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+
+        // A payload from a newer build must survive an archive action on neighbouring rows.
+        // The old whole-graph save rewrote this sentinel and made the test fail.
+        let inspection = try SQLiteDatabase(
+            path: directory.appendingPathComponent("threading.db").path
+        )
+        defer { inspection.close() }
+        let sentinel = #"{"futureSessionFormat":true}"#
+        try inspection.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, sentinel)
+            .bind(2, untouched.id.uuidString)
+            .run()
+
+        XCTAssertEqual(
+            store.synchronizeArchiveStates([first.id: true, second.id: true]),
+            .applied
+        )
+        XCTAssertEqual(store.setArchived(false, for: first.id), .applied)
+
+        let payload = try inspection.prepare("SELECT data FROM session WHERE id = ?")
+        defer { payload.finalize() }
+        payload.bind(1, untouched.id.uuidString)
+        XCTAssertTrue(try payload.step())
+        XCTAssertEqual(payload.text(0), sentinel)
+    }
+
+    func testRenameDoesNotFlushUnrelatedCoalescedSessionWrites() throws {
+        let manager = StateManager(appSupportDirectory: directory)
+        let store = ProjectStore(stateManager: manager, refusesWrites: false)
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let background = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let renamed = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+
+        XCTAssertEqual(
+            store.updateAgentTitle("Background report", for: background.id),
+            .accepted
+        )
+
+        // Stand in for a newer build's payload after the automatic title was queued. Pressing
+        // Enter on another row must commit only that rename, leaving this pending row alone until
+        // its coalescing deadline. The old path synchronously drained it and overwrote the marker.
+        let inspection = try SQLiteDatabase(
+            path: directory.appendingPathComponent("threading.db").path
+        )
+        defer { inspection.close() }
+        let sentinel = #"{"futureSessionFormat":true}"#
+        try inspection.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, sentinel)
+            .bind(2, background.id.uuidString)
+            .run()
+
+        let observations = AppEventObservations()
+        var renameImpact: ProjectsDidChange.SidebarImpact?
+        observations.observe(ProjectsDidChange.self) { renameImpact = $0.sidebarImpact }
+        XCTAssertEqual(store.renameSession(id: renamed.id, to: "Renamed"), .applied)
+
+        guard case let .sessionTitle(renamedID, reorders) = renameImpact else {
+            return XCTFail("rename must publish one non-reordering title delta")
+        }
+        XCTAssertEqual(renamedID, renamed.id)
+        XCTAssertEqual(reorders, NativeSidebarPipelineOptions.sessionOrder == .name)
+
+        let backgroundPayload = try inspection.prepare("SELECT data FROM session WHERE id = ?")
+        defer { backgroundPayload.finalize() }
+        backgroundPayload.bind(1, background.id.uuidString)
+        XCTAssertTrue(try backgroundPayload.step())
+        XCTAssertEqual(backgroundPayload.text(0), sentinel)
+
+        let renamedPayload = try inspection.prepare("SELECT data FROM session WHERE id = ?")
+        defer { renamedPayload.finalize() }
+        renamedPayload.bind(1, renamed.id.uuidString)
+        XCTAssertTrue(try renamedPayload.step())
+        let durableRename = try JSONDecoder().decode(
+            AgentSession.self,
+            from: try XCTUnwrap(renamedPayload.data(0))
+        )
+        XCTAssertEqual(durableRename.customTitle, "Renamed")
+    }
+
+    func testInteractiveStructuralMutationsDoNotRewriteStandingSessions() throws {
+        let manager = StateManager(appSupportDirectory: directory)
+        let store = ProjectStore(stateManager: manager, refusesWrites: false)
+        let standingProject = try XCTUnwrap(store.addProject(folderURL: directory))
+        let untouched = try XCTUnwrap(store.addSession(to: standingProject.id, kind: .claude))
+
+        let inspection = try SQLiteDatabase(
+            path: directory.appendingPathComponent("threading.db").path
+        )
+        defer { inspection.close() }
+        let sentinel = #"{"futureSessionFormat":true}"#
+        try inspection.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, sentinel)
+            .bind(2, untouched.id.uuidString)
+            .run()
+
+        let addedFolder = directory.appendingPathComponent("added", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: addedFolder,
+            withIntermediateDirectories: true
+        )
+        let addedProject = try XCTUnwrap(store.addProject(folderURL: addedFolder))
+        let imported = store.importSessions([
+            ImportableSession(
+                agentSessionID: TranscriptID("imported"),
+                kind: .codex,
+                accountHandle: .standard,
+                title: "Imported",
+                lastActiveAt: Date(timeIntervalSince1970: 1_750_000_000)
+            )
+        ], into: addedProject.id)
+        XCTAssertEqual(imported.count, 1)
+        let observations = AppEventObservations()
+        var removalImpact: ProjectsDidChange.SidebarImpact?
+        observations.observe(ProjectsDidChange.self) { removalImpact = $0.sidebarImpact }
+        XCTAssertEqual(store.removeProject(id: addedProject.id), .applied)
+
+        guard case let .projectRemoved(projectID, sessionIDs, terminalIDs) = removalImpact else {
+            return XCTFail("project removal must publish its exact owned identities")
+        }
+        XCTAssertEqual(projectID, addedProject.id)
+        XCTAssertEqual(sessionIDs, Set(imported.map(\.id)))
+        XCTAssertTrue(terminalIDs.isEmpty)
+
+        let payload = try inspection.prepare("SELECT data FROM session WHERE id = ?")
+        defer { payload.finalize() }
+        payload.bind(1, untouched.id.uuidString)
+        XCTAssertTrue(try payload.step())
+        XCTAssertEqual(payload.text(0), sentinel)
+    }
+
     func testAlreadyStandingValuesAreSuccessfulWithoutTakingAWrite() throws {
         let manager = StateManager(appSupportDirectory: directory)
         let seed = ProjectStore(stateManager: manager, refusesWrites: false)

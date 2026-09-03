@@ -35,16 +35,22 @@ cannot leave usable authority or an orphaned audit stream. Event insertion and p
 SQLite writes are **per row, in one transaction**, and `ProjectStore` has both exact-record and
 graph-reconciliation routes. Session creation appends its one row at the project's final position;
 removal deletes its row and shifts only later positions in that project. Generic single-session
-updates, terminal location/title updates, and coalesced agent-title/turn metadata also retain the
-affected identifiers rather than converting a burst into a delayed whole-graph save. The
-graph-reconciliation path remains for operations whose input really is the complete graph and for
-structural routes that have not declared a narrower transaction; it is not the persistence
-primitive behind a newly started chat or high-frequency row observation. This is the actual gain
-over the document, and it retires the rolling `projects.json.bak`, whose whole job was covering the
-window in which a full rewrite could be interrupted. WAL is the other half: a read never blocks the
-writer, and `busy_timeout` turns "another process has it" into a wait. That makes multiple writers
-*possible*, not permitted — `SingleInstanceLock` still stands, and is a chosen concurrency model
-rather than a workaround.
+updates, project settings, embedded-terminal updates, side-chat creation and coalesced
+agent-title/turn metadata also retain the affected identifiers rather than converting a burst into
+a delayed whole-graph save. Coalesced project/session payloads share one transaction when their
+timer expires; an immediate rename or other exact write removes only its own identity from that
+set and never drains unrelated pending rows on the caller's main-actor stack. Project add/remove
+changes one row plus the generation and later
+positions; bulk conversation import inserts only the selected rows. Provider archive reconciliation
+supplies every changed session row to one SQLite transaction: the values observed together either
+all commit or all roll back, while unrelated archived history is not encoded or upserted. The
+graph-reconciliation path remains for inputs that really are the complete graph—legacy migration,
+recovery and authoritative test/maintenance setup. No ordinary interactive `ProjectStore` mutation
+uses it. This is the actual gain over the document, and it retires
+the rolling `projects.json.bak`, whose whole job was covering the window in which a full rewrite
+could be interrupted. WAL is the other half: a read never blocks the writer, and `busy_timeout`
+turns "another process has it" into a wait. That makes multiple writers *possible*, not permitted
+— `SingleInstanceLock` still stands, and is a chosen concurrency model rather than a workaround.
 
 **SQLite handles have one deterministic lifetime.** `SQLiteDatabase.Statement` finalizes in
 `deinit` as well as after `run`: fluent binding can throw while the statement expression is still

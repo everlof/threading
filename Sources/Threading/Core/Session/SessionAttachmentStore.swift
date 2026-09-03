@@ -1248,6 +1248,27 @@ final class SessionAttachmentStore {
         }
     }
 
+    /// Drops a removed project's in-memory references and owned copies as one batch. The project
+    /// transaction has already cascade-deleted the normalized attachment rows, so issuing one
+    /// redundant SQLite delete per session here would only put commit latency back on AppKit.
+    func removeSessionsAfterProjectDeletion(_ sessionIDs: Set<SessionID>) {
+        guard !sessionIDs.isEmpty else { return }
+        var directories: [URL] = []
+        directories.reserveCapacity(sessionIDs.count)
+        for sessionID in sessionIDs {
+            attachmentsBySession.removeValue(forKey: sessionID)
+            withheldBySession.removeValue(forKey: sessionID)
+            loadedSessions.remove(sessionID)
+            if let directory = copiesRoot(for: sessionID) { directories.append(directory) }
+        }
+        Task.detached(priority: .utility) {
+            let fileManager = FileManager()
+            for directory in directories {
+                try? fileManager.removeItem(at: directory)
+            }
+        }
+    }
+
     // MARK: Persistence
 
     private static let encoder = JSONEncoder()
@@ -1668,30 +1689,33 @@ final class SessionAttachmentStore {
     private func discardCopiesOutside(_ sessionIDs: Set<SessionID>) {
         guard let directory = copiesDirectory?() else { return }
         let kept = Set(sessionIDs.map(\.uuidString))
-        let contents: [URL]
-        do {
-            contents = try fileManager.contentsOfDirectory(
-                at: directory,
-                includingPropertiesForKeys: nil
-            )
-        } catch {
-            ThreadingLogger.session.warning(
-                "Attachment copy cleanup could not enumerate directory=\(directory.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
-            return
-        }
-        var failureCount = 0
-        for url in contents where !kept.contains(url.lastPathComponent) {
+        Task.detached(priority: .utility) {
+            let fileManager = FileManager()
+            let contents: [URL]
             do {
-                try fileManager.removeItem(at: url)
+                contents = try fileManager.contentsOfDirectory(
+                    at: directory,
+                    includingPropertiesForKeys: nil
+                )
             } catch {
-                failureCount += 1
+                ThreadingLogger.session.warning(
+                    "Attachment copy cleanup could not enumerate directory=\(directory.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+                return
             }
-        }
-        if failureCount > 0 {
-            ThreadingLogger.session.warning(
-                "Attachment orphan cleanup incomplete failures=\(failureCount, privacy: .public) candidates=\(contents.count, privacy: .public)"
-            )
+            var failureCount = 0
+            for url in contents where !kept.contains(url.lastPathComponent) {
+                do {
+                    try fileManager.removeItem(at: url)
+                } catch {
+                    failureCount += 1
+                }
+            }
+            if failureCount > 0 {
+                ThreadingLogger.session.warning(
+                    "Attachment orphan cleanup incomplete failures=\(failureCount, privacy: .public) candidates=\(contents.count, privacy: .public)"
+                )
+            }
         }
     }
 }

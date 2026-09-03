@@ -59,13 +59,14 @@ enum DeviceLogAgentCommandService {
 
     /// Build the tap and shape whichever answer comes back. Result shaping is this service's
     /// job, so the coordinator stays a router.
-    @MainActor
-    static func result(building platform: DeviceLogTap.Platform) -> MCPToolResult {
-        do {
-            return preparationResult(for: try DeviceLogTap.build(for: platform))
-        } catch {
-            return .failure("The log tap could not be prepared: \(error).")
-        }
+    static func result(building platform: DeviceLogTap.Platform) async -> MCPToolResult {
+        await Task.detached(priority: .userInitiated) {
+            do {
+                return preparationResult(for: try DeviceLogTap.build(for: platform))
+            } catch {
+                return .failure("The log tap could not be prepared: \(error).")
+            }
+        }.value
     }
 
     static func preparationResult(for built: DeviceLogTap.Built) -> MCPToolResult {

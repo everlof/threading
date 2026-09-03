@@ -421,45 +421,65 @@ final class DisplayPaneStore {
     }
   }
 
+  /// Drops cache ownership after the project's SQLite cascade has already removed panel rows.
+  func removeSessionsAfterProjectDeletion(_ sessionIDs: Set<SessionID>) {
+    guard !sessionIDs.isEmpty else { return }
+    quarantined.subtract(sessionIDs)
+    StateManager.shared.forgetCascadeDeletedPanelLayouts(for: sessionIDs)
+    let directories = sessionIDs.map(cacheDirectory)
+    Task.detached(priority: .utility) {
+      let fileManager = FileManager()
+      for directory in directories {
+        try? fileManager.removeItem(at: directory)
+      }
+    }
+  }
+
   /// Drops the stored layout and cache of every session not in the set, called when sessions are
   /// deleted so a removed session leaves nothing behind on disk.
   func retainOnly(sessionIDs: Set<SessionID>) {
     StateManager.shared.retainPanelLayouts(sessionIDs: sessionIDs)
 
-    // The image caches are still directories on disk, so they are still swept by hand.
+    // The image caches are still directories on disk, so they are still swept by hand. Directory
+    // size comes from retained sessions and must not make a project-removal confirmation block
+    // AppKit while the filesystem enumerates and deletes it.
     let keep = Set(sessionIDs.map(\.uuidString))
-    let entries: [URL]
-    do {
-      entries = try fileManager.contentsOfDirectory(
-        at: root, includingPropertiesForKeys: nil
-      )
-    } catch {
-      let cocoa = error as NSError
-      if cocoa.domain == NSCocoaErrorDomain,
-         cocoa.code == CocoaError.fileReadNoSuchFile.rawValue {
+    let root = root
+    Task.detached(priority: .utility) {
+      let fileManager = FileManager()
+      let entries: [URL]
+      do {
+        entries = try fileManager.contentsOfDirectory(
+          at: root, includingPropertiesForKeys: nil
+        )
+      } catch {
+        let cocoa = error as NSError
+        if cocoa.domain == NSCocoaErrorDomain,
+           cocoa.code == CocoaError.fileReadNoSuchFile.rawValue {
+          return
+        }
+        ThreadingLogger.mcp.warning(
+          "Panel cache cleanup could not enumerate directory=\(root.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
+        )
         return
       }
-      ThreadingLogger.mcp.warning(
-        "Panel cache cleanup could not enumerate directory=\(self.root.path, privacy: .private(mask: .hash)): \(error.localizedDescription, privacy: .private(mask: .hash))"
-      )
-      return
-    }
 
-    var removalFailures = 0
-    for entry in entries {
-      let base = entry.deletingPathExtension().lastPathComponent
-      if !keep.contains(base) {
-        do {
-          try fileManager.removeItem(at: entry)
-        } catch {
-          removalFailures += 1
+      var removalFailures = 0
+      for entry in entries {
+        let base = entry.deletingPathExtension().lastPathComponent
+        if !keep.contains(base) {
+          do {
+            try fileManager.removeItem(at: entry)
+          } catch {
+            removalFailures += 1
+          }
         }
       }
-    }
-    if removalFailures > 0 {
-      ThreadingLogger.mcp.warning(
-        "Panel cache cleanup incomplete failures=\(removalFailures, privacy: .public) candidates=\(entries.count, privacy: .public)"
-      )
+      if removalFailures > 0 {
+        ThreadingLogger.mcp.warning(
+          "Panel cache cleanup incomplete failures=\(removalFailures, privacy: .public) candidates=\(entries.count, privacy: .public)"
+        )
+      }
     }
   }
 

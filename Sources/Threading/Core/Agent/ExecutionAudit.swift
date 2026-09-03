@@ -667,6 +667,23 @@ final class ExecutionAuditStore: @unchecked Sendable {
     /// transcript files are intentionally outside this store and remain governed by the provider.
     func remove(sessionID: SessionID) {
         queue.sync {
+            removeLocked(sessionIDs: [sessionID])
+        }
+    }
+
+    /// Queues a project's bounded ledger cleanup behind any admitted writes. A later read uses
+    /// the same serial queue and therefore still observes the deletion, while project removal no
+    /// longer performs filesystem work for every session on the main actor.
+    func removeInBackground(sessionIDs: Set<SessionID>) {
+        guard !sessionIDs.isEmpty else { return }
+        queue.async { [self] in
+            removeLocked(sessionIDs: sessionIDs)
+        }
+    }
+
+    private func removeLocked(sessionIDs: Set<SessionID>) {
+        let manager = FileManager.default
+        for sessionID in sessionIDs {
             chainStates.removeValue(forKey: sessionID)
             pendingTools.removeValue(forKey: sessionID)
             appendFailureStages.removeValue(forKey: sessionID)
@@ -675,7 +692,6 @@ final class ExecutionAuditStore: @unchecked Sendable {
             // The store owns a closed set of names for one session. Address those names directly
             // instead of enumerating every other session's ledger (and accepting arbitrary
             // `baseName.*` files as ours) whenever a session is deleted.
-            let manager = FileManager.default
             let urls = [currentURL(for: sessionID)]
                 + (1...Self.maximumRetainedRotatedSegments).map {
                     rotatedURL(for: sessionID, index: $0)

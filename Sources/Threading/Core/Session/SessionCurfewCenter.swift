@@ -244,8 +244,27 @@ final class SessionCurfewCenter {
         }
         // A rule written on a session or its checkout changes what resolves for it, and the store
         // is the only place that says so.
-        observations.observe(ProjectsDidChange.self) { [weak self] _ in
-            self?.evaluateAll()
+        observations.observe(ProjectsDidChange.self) { [weak self] event in
+            guard let self else { return }
+            switch event.sidebarImpact {
+            case .structure:
+                evaluateAll()
+            case .projectRemoved(_, let sessionIDs, _):
+                for sessionID in sessionIDs {
+                    pendingMoments[sessionID] = nil
+                    turnStartedWatched[sessionID] = nil
+                }
+                rearmTimer()
+            case .projectStructure(let projectID):
+                evaluateProject(projectID)
+            case .sessionAdded(_, let sessionID), .sessionRemoved(_, let sessionID),
+                 .sessionRow(let sessionID):
+                evaluateSession(sessionID)
+            case .sessionStructure(_, let sessionID):
+                sessionStructureChanged(sessionID)
+            case .projectRow, .sessionTitle, .terminalRow:
+                break
+            }
         }
         self.observations = observations
 
@@ -459,6 +478,27 @@ final class SessionCurfewCenter {
         defer { isEvaluating = false }
 
         evaluate(sessionID, at: now(), materializing: false)
+        rearmTimer()
+    }
+
+    private func evaluateProject(_ projectID: ProjectID) {
+        guard !isEvaluating else { return }
+        isEvaluating = true
+        defer { isEvaluating = false }
+
+        let moment = now()
+        for session in projectStore.project(withID: projectID)?.sessions ?? [] {
+            evaluate(session.id, at: moment, materializing: false)
+        }
+        rearmTimer()
+    }
+
+    private func sessionStructureChanged(_ sessionID: SessionID) {
+        guard projectStore.session(withID: sessionID)?.isArchived == true else {
+            evaluateSession(sessionID)
+            return
+        }
+        pendingMoments[sessionID] = nil
         rearmTimer()
     }
 

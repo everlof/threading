@@ -183,8 +183,13 @@ final class AgentWorkloadMonitor {
         // effort is chosen, which is not an activity change and posts no activity event. The
         // pulse path used to catch that incidentally by re-measuring on every 200 bytes of
         // output; observing the change itself is what lets it stop.
-        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
-            self?.refresh()
+        appEvents.observe(ProjectsDidChange.self) { [weak self] event in
+            switch event.sidebarImpact {
+            case .projectRow, .sessionTitle, .terminalRow:
+                break
+            default:
+                self?.refresh()
+            }
         }
         refresh()
     }

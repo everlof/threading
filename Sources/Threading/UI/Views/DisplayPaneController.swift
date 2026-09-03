@@ -2004,12 +2004,24 @@ final class DisplayPaneController: NSViewController {
 
   /// Tears down one deleted session without filtering every resident panel.
   func removeSession(_ sessionID: SessionID) {
-    if syntheticOverview?.sessionID == sessionID { discardSyntheticOverview() }
-    tabsBySession.removeValue(forKey: sessionID)?.forEach { teardownHosted($0) }
-    activeTabIDBySession.removeValue(forKey: sessionID)
-    contentRevisionBySession.removeValue(forKey: sessionID)
-    activeBrowserTabIDBySession.removeValue(forKey: sessionID)
-    if currentSessionID == sessionID { currentSessionID = nil }
+    removeSessions([sessionID])
+  }
+
+  /// Tears down a removed project's panels in one pass and renders the surviving pane once.
+  func removeSessions(_ sessionIDs: Set<SessionID>) {
+    guard !sessionIDs.isEmpty else { return }
+    if let syntheticOverview, sessionIDs.contains(syntheticOverview.sessionID) {
+      discardSyntheticOverview()
+    }
+    for sessionID in sessionIDs {
+      tabsBySession.removeValue(forKey: sessionID)?.forEach { teardownHosted($0) }
+      activeTabIDBySession.removeValue(forKey: sessionID)
+      contentRevisionBySession.removeValue(forKey: sessionID)
+      activeBrowserTabIDBySession.removeValue(forKey: sessionID)
+    }
+    if let currentSessionID, sessionIDs.contains(currentSessionID) {
+      self.currentSessionID = nil
+    }
     render()
   }
 

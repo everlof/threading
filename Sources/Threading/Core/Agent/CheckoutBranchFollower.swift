@@ -9,8 +9,8 @@ import Foundation
 /// projects — keyed by `GitInfo.worktreeIdentity`, the durable "which checkout" key — each
 /// watching only the worktree's own `HEAD`, so builds and agent edits never wake one.
 ///
-/// Gated on `AppSettings.followsCheckoutBranch` and reconciled on every settings or project
-/// change: toggling the setting off stops every stream and leaves the records frozen at
+/// Gated on `AppSettings.followsCheckoutBranch` and reconciled on settings or project-membership
+/// changes: toggling the setting off stops every stream and leaves the records frozen at
 /// whatever they last said, which is the original rule (see `docs/architecture/git.md`).
 @MainActor
 final class CheckoutBranchFollower {
@@ -42,8 +42,19 @@ final class CheckoutBranchFollower {
     /// Begins following: watches the store and the settings, and reconciles immediately.
     /// Called once at launch.
     func start() {
-        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
-            MainActor.assumeIsolated { self?.reconcile() }
+        appEvents.observe(ProjectsDidChange.self) { [weak self] event in
+            MainActor.assumeIsolated {
+                // Session payload, grouping and terminal-row changes cannot alter which project
+                // folders need watchers. Rewalking every project for those high-frequency
+                // notifications made an exact row mutation acquire unrelated O(projects) work.
+                switch event.sidebarImpact {
+                case .structure, .projectRemoved:
+                    break
+                default:
+                    return
+                }
+                self?.reconcile()
+            }
         }
         appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
             MainActor.assumeIsolated { self?.reconcile() }
@@ -54,8 +65,8 @@ final class CheckoutBranchFollower {
     // MARK: - Private Methods
 
     /// Aligns the watcher set with the added projects: one per unique checkout, none while
-    /// the setting is off. Cheap enough to run on every store change — `worktreeIdentity`
-    /// is memoised, and an unchanged checkout keeps its running stream.
+    /// the setting is off. `worktreeIdentity` is memoised, and an unchanged checkout keeps its
+    /// running stream. Row and project-payload changes never enter this catalog walk.
     ///
     /// Catch-up reads run after the set is aligned: a refresh that changes a record posts
     /// `ProjectsDidChange`, which re-enters here synchronously, and against an aligned set

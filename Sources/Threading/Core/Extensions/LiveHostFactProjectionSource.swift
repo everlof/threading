@@ -139,6 +139,7 @@ final class LiveHostFactProjectionSource {
             allSessionProjections: { [self] in allSessionProjections() },
             sessionProjectionsForAccount: { [self] in sessionProjections(for: $0) },
             projectionsInProject: { [self] in projections(in: $0) },
+            projectProjection: { [self] in projectProjection(for: $0) },
             sessionProjection: { [self] in sessionProjection(for: $0) },
             terminalProjection: { [self] in terminalProjection(for: $0) },
             prepareScheduledState: { [self] in refreshScheduledState() },
@@ -276,6 +277,14 @@ final class LiveHostFactProjectionSource {
             manualOrder: manualOrder,
             context: &context
         )
+    }
+
+    func projectProjection(for projectID: ProjectID) -> HostFactProjection? {
+        guard let project = dependencies.project(projectID) else {
+            removeProjectFromIndexes(projectID)
+            return nil
+        }
+        return projectProjection(project, manualOrder: manualOrder(of: projectID))
     }
 
     func terminalProjection(for terminalID: TerminalID) -> HostFactProjection? {

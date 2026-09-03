@@ -35,6 +35,24 @@ struct NavigationSearchRecord: Hashable, Sendable {
         self.searchableMetadata = searchableMetadata
         self.updatedAt = updatedAt
     }
+
+    func replacingProjectName(_ projectName: String) -> NavigationSearchRecord {
+        let title: String
+        if case .project = destination {
+            title = projectName
+        } else {
+            title = self.title
+        }
+        return NavigationSearchRecord(
+            destination: destination,
+            title: title,
+            projectName: projectName,
+            providerName: providerName,
+            branch: branch,
+            searchableMetadata: searchableMetadata,
+            updatedAt: updatedAt
+        )
+    }
 }
 
 /// Immutable, warm structured index. Construction belongs on a background task when the project

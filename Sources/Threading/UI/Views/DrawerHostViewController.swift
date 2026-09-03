@@ -270,13 +270,21 @@ final class DrawerHostViewController: NSViewController {
     /// Permanent deletion uses the same live teardown as closing; persistence is removed once
     /// both panel hosts have released their surfaces.
     func removeSession(_ sessionID: SessionID) {
-        openSessions.remove(sessionID)
-        if let state = statesBySession.removeValue(forKey: sessionID) {
-            state.tabs.forEach { teardownHosted($0) }
+        removeSessions([sessionID])
+    }
+
+    /// Tears down a removed project's drawer sessions and re-renders at most once.
+    func removeSessions(_ sessionIDs: Set<SessionID>) {
+        guard !sessionIDs.isEmpty else { return }
+        for sessionID in sessionIDs {
+            openSessions.remove(sessionID)
+            if let state = statesBySession.removeValue(forKey: sessionID) {
+                state.tabs.forEach { teardownHosted($0) }
+            }
+            restoredSessions.remove(sessionID)
         }
-        restoredSessions.remove(sessionID)
-        if currentSessionID == sessionID {
-            currentSessionID = nil
+        if let currentSessionID, sessionIDs.contains(currentSessionID) {
+            self.currentSessionID = nil
             render()
         }
     }

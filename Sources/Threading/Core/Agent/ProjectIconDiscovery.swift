@@ -43,8 +43,8 @@ final class ProjectIconDiscovery {
     /// Begins watching the store, and sweeps whatever it already holds. Called once at launch.
     @MainActor
     func start() {
-        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
-            self?.projectsDidChange()
+        appEvents.observe(ProjectsDidChange.self) { [weak self] event in
+            self?.projectsDidChange(event)
         }
         sweep()
     }
@@ -88,9 +88,11 @@ final class ProjectIconDiscovery {
     // MARK: - Private Methods
 
     @MainActor
-    private func projectsDidChange() {
-        // Catches newly added and imported projects. `attempted` keeps this from looping:
-        // the sweep itself changes the store when it finds something.
+    private func projectsDidChange(_ event: ProjectsDidChange) {
+        // Only a top-level structural change can add a project. Row edits, archive state,
+        // selection and sessions changing inside an existing project cannot introduce a new
+        // icon-discovery candidate, so walking the complete project list for them is pure work.
+        guard case .structure = event.sidebarImpact else { return }
         sweep()
     }
 

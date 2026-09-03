@@ -247,6 +247,27 @@ final class StateManager {
         }
     }
 
+    /// Commits one project addition without reconciling standing graph rows.
+    @discardableResult
+    func addProject(_ project: Project, position: Int) -> Bool {
+        guard writesAreAllowed(for: "project addition") else { return false }
+        do {
+            try database().addProject(project, position: position)
+            return true
+        } catch ProjectDatabaseWriteError.staleGeneration(let observed, let found) {
+            ThreadingLogger.agent.error(
+                "Refused a stale project addition: store moved from \(observed, privacy: .public) to \(found, privacy: .public)"
+            )
+            return false
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to add project: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
     /// Commits one graph addition without reconciling every project and session row.
     @discardableResult
     func addSession(
@@ -272,6 +293,27 @@ final class StateManager {
         }
     }
 
+    /// Commits a bounded batch of graph additions without rewriting standing rows.
+    @discardableResult
+    func addSessions(_ writes: [ProjectDatabase.SessionWrite]) -> Bool {
+        guard writesAreAllowed(for: "session additions") else { return false }
+        do {
+            try database().addSessions(writes)
+            return true
+        } catch ProjectDatabaseWriteError.staleGeneration(let observed, let found) {
+            ThreadingLogger.agent.error(
+                "Refused stale session additions: store moved from \(observed, privacy: .public) to \(found, privacy: .public)"
+            )
+            return false
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to add sessions: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
     /// Writes one session payload without walking the graph around it.
     @discardableResult
     func saveSession(
@@ -286,6 +328,41 @@ final class StateManager {
         } catch {
             ThreadingLogger.agent.error(
                 "Failed to save session: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
+    /// Writes only the standing session rows supplied by the caller, in one transaction.
+    @discardableResult
+    func saveSessions(_ writes: [ProjectDatabase.SessionWrite]) -> Bool {
+        guard writesAreAllowed(for: "sessions") else { return false }
+        do {
+            try database().saveSessions(writes)
+            return true
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to save sessions: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
+    /// Writes coalesced standing project and session rows in one transaction.
+    @discardableResult
+    func saveRecords(
+        projects: [ProjectDatabase.ProjectWrite],
+        sessions: [ProjectDatabase.SessionWrite]
+    ) -> Bool {
+        guard writesAreAllowed(for: "records") else { return false }
+        do {
+            try database().saveRecords(projects: projects, sessions: sessions)
+            return true
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to save records: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             recordPersistenceFailure(error)
             return false
@@ -328,6 +405,35 @@ final class StateManager {
         } catch {
             ThreadingLogger.agent.error(
                 "Failed to remove session: \(error.localizedDescription, privacy: .private(mask: .hash))"
+            )
+            recordPersistenceFailure(error)
+            return false
+        }
+    }
+
+    /// Commits one project removal without walking the surviving graph.
+    @discardableResult
+    func removeProject(
+        id projectID: ProjectID,
+        at position: Int,
+        selectedSessionID: SessionID?
+    ) -> Bool {
+        guard writesAreAllowed(for: "project removal") else { return false }
+        do {
+            try database().removeProject(
+                id: projectID,
+                at: position,
+                selectedSessionID: selectedSessionID
+            )
+            return true
+        } catch ProjectDatabaseWriteError.staleGeneration(let observed, let found) {
+            ThreadingLogger.agent.error(
+                "Refused a stale project removal: store moved from \(observed, privacy: .public) to \(found, privacy: .public)"
+            )
+            return false
+        } catch {
+            ThreadingLogger.agent.error(
+                "Failed to remove project: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             recordPersistenceFailure(error)
             return false
@@ -949,6 +1055,13 @@ final class StateManager {
             )
             recordPersistenceFailure(error)
         }
+    }
+
+    /// Forgets rows already removed by a project foreign-key cascade without issuing redundant
+    /// per-session delete transactions.
+    func forgetCascadeDeletedPanelLayouts(for sessionIDs: Set<SessionID>) {
+        readablePanelRows.subtract(sessionIDs)
+        unreadableAuxiliaryRows.panelLayouts.sessions.subtract(sessionIDs)
     }
 
     // MARK: - Session Attachments

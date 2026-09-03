@@ -9,10 +9,9 @@ import Foundation
 ///
 /// The C source is embedded rather than read from the repository so an installed Threading can
 /// build it without a checkout. It compiles in well under a second.
-@MainActor
 enum DeviceLogTap {
 
-    enum Platform: String, CaseIterable {
+    enum Platform: String, CaseIterable, Sendable {
         case device
         case simulator
         case macOS
@@ -50,7 +49,7 @@ enum DeviceLogTap {
         }
     }
 
-    struct Built {
+    struct Built: Sendable {
         let path: URL
         let platform: Platform
 

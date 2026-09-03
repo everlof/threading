@@ -1391,6 +1391,29 @@ final class SidebarTreeBuilderTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         let additionFullReloadComparisonEnded = DispatchTime.now().uptimeNanoseconds
 
+        // Archive used to route through the matched whole-graph comparison above for every
+        // provider completion. Exercise archive and restore against the same populated store;
+        // both should write one row and rebuild only their owning project's subtree.
+        let archiveStarted = DispatchTime.now().uptimeNanoseconds
+        XCTAssertEqual(store.setArchived(true, for: addedSession.id), .applied)
+        let archiveMutationEnded = DispatchTime.now().uptimeNanoseconds
+        #if DEBUG
+        let archiveSidebarPhases = controller.lastProjectStructurePerformance
+        #endif
+        controller.view.layoutSubtreeIfNeeded()
+        let archiveLayoutEnded = DispatchTime.now().uptimeNanoseconds
+        XCTAssertFalse(controller.presentedRowKeys.contains(.session(addedSession.id)))
+
+        let restoreStarted = DispatchTime.now().uptimeNanoseconds
+        XCTAssertEqual(store.setArchived(false, for: addedSession.id), .applied)
+        let restoreMutationEnded = DispatchTime.now().uptimeNanoseconds
+        #if DEBUG
+        let restoreSidebarPhases = controller.lastProjectStructurePerformance
+        #endif
+        controller.view.layoutSubtreeIfNeeded()
+        let restoreLayoutEnded = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(controller.presentedRowKeys.contains(.session(addedSession.id)))
+
         func nodeCount(_ nodes: [NSObject]) -> Int {
             nodes.reduce(0) { count, node in
                 count + 1 + nodeCount(SidebarTreeBuilder.children(of: node))
@@ -1518,6 +1541,14 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + Self.milliseconds(
                     additionFullReloadComparisonEnded - additionFullReloadComparisonStarted
                 ) + " "
+                + "archive_mutation_ms="
+                + Self.milliseconds(archiveMutationEnded - archiveStarted) + " "
+                + "archive_layout_ms="
+                + Self.milliseconds(archiveLayoutEnded - archiveMutationEnded) + " "
+                + "restore_mutation_ms="
+                + Self.milliseconds(restoreMutationEnded - restoreStarted) + " "
+                + "restore_layout_ms="
+                + Self.milliseconds(restoreLayoutEnded - restoreMutationEnded) + " "
                 + "resize_ticks=\(resizeTickCount) "
                 + "resize_total_ms=\(Self.milliseconds(resizeElapsed)) "
                 + "resize_p50_ms=\(Self.milliseconds(Self.percentile(0.50, in: orderedResizeSamples))) "
@@ -1546,6 +1577,18 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + Self.milliseconds(additionSidebarPhases.indexingNanoseconds)
                 + " add_outline_ms="
                 + Self.milliseconds(additionSidebarPhases.outlineNanoseconds)
+                + " archive_tree_ms="
+                + Self.milliseconds(archiveSidebarPhases.treeNanoseconds)
+                + " archive_shape_ms="
+                + Self.milliseconds(archiveSidebarPhases.shapeNanoseconds)
+                + " archive_outline_ms="
+                + Self.milliseconds(archiveSidebarPhases.outlineNanoseconds)
+                + " restore_tree_ms="
+                + Self.milliseconds(restoreSidebarPhases.treeNanoseconds)
+                + " restore_shape_ms="
+                + Self.milliseconds(restoreSidebarPhases.shapeNanoseconds)
+                + " restore_outline_ms="
+                + Self.milliseconds(restoreSidebarPhases.outlineNanoseconds)
                 + " remove_dormant_sidebar_ms="
                 + Self.milliseconds(dormantSidebarUpdate)
                 + " remove_dormant_tree_ms="

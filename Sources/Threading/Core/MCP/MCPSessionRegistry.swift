@@ -484,24 +484,35 @@ enum MCPSessionRegistry {
     /// Revokes one permanently deleted session without filtering the complete endpoint map.
     @MainActor
     static func remove(sessionID: SessionID) {
+        remove(sessionIDs: [sessionID])
+    }
+
+    /// Revokes a removed project's endpoints with one durable token snapshot.
+    @MainActor
+    static func remove(sessionIDs: Set<SessionID>) {
+        guard !sessionIDs.isEmpty else { return }
         var deferred = DeferredWork()
 
-        let removed = storage.withLock { storage -> Bool in
+        let removed = storage.withLock { storage -> [SessionID] in
             loadDurableTokensIfNeeded(&storage, deferring: &deferred)
 
-            guard storage.adHocScopesBySession[sessionID] == nil else { return false }
-            if let token = storage.tokensBySession.removeValue(forKey: sessionID) {
-                storage.sessionsByToken.removeValue(forKey: token)
+            let ordinary = sessionIDs.filter { storage.adHocScopesBySession[$0] == nil }
+            guard !ordinary.isEmpty else { return [] }
+            for sessionID in ordinary {
+                if let token = storage.tokensBySession.removeValue(forKey: sessionID) {
+                    storage.sessionsByToken.removeValue(forKey: token)
+                }
             }
             // Taken even when this launch never minted for the session: the row may have come
             // from the file, and a deleted session must not stay addressable across a restart.
             deferred.snapshot = durableSnapshot(&storage)
-            return true
+            return Array(ordinary)
         }
 
         deferred.perform()
-        guard removed else { return }
-        removeSupportFilesAndPermissions(for: sessionID)
+        for sessionID in removed {
+            removeSupportFilesAndPermissions(for: sessionID)
+        }
     }
 
     /// Blocks until every durable token write has landed.

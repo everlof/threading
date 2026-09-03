@@ -994,6 +994,10 @@ final class TerminalContainerViewController: NSViewController {
         drawerHostController.removeSession(sessionID)
     }
 
+    func removeDrawerSessions(_ sessionIDs: Set<SessionID>) {
+        drawerHostController.removeSessions(sessionIDs)
+    }
+
     /// Puts the failure surface in the pane the first time one is needed, in the placeholder's
     /// own frame so the two occupy exactly the same space and never both show.
     private func installLaunchFailureViewIfNeeded() {

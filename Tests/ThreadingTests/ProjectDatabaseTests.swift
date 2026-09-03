@@ -35,6 +35,33 @@ final class ProjectDatabaseTests: XCTestCase {
         return project
     }
 
+    private func storedSessionPayload(
+        id: SessionID,
+        from database: SQLiteDatabase
+    ) throws -> Data {
+        let statement = try database.prepare("SELECT data FROM session WHERE id = ?")
+        defer { statement.finalize() }
+        statement.bind(1, id.uuidString)
+        guard try statement.step() else {
+            throw ProjectDatabaseLoadError.corruptRow(
+                table: "session",
+                id: id.uuidString,
+                reason: "missing test row"
+            )
+        }
+        return try XCTUnwrap(statement.data(0))
+    }
+
+    private func storedSession(
+        id: SessionID,
+        from database: SQLiteDatabase
+    ) throws -> AgentSession {
+        try JSONDecoder().decode(
+            AgentSession.self,
+            from: storedSessionPayload(id: id, from: database)
+        )
+    }
+
     // MARK: - Native Resource Ownership
 
     func testAStatementFinalizesWhenBindingThrowsBeforeRun() throws {
@@ -482,6 +509,74 @@ final class ProjectDatabaseTests: XCTestCase {
             from: try XCTUnwrap(addedPayload.data(0))
         )
         XCTAssertEqual(restored.title, "Renamed")
+    }
+
+    func testBatchSessionWritesAreAtomicAndDoNotRewriteStandingRows() throws {
+        enum Expected: Error { case commitRefused }
+
+        let url = directory.appendingPathComponent("batch-session-writes.db")
+        var refuseNextCommit = false
+        let database = try ProjectDatabase(
+            url: url,
+            transactionCommitPreflight: {
+                guard refuseNextCommit else { return }
+                refuseNextCommit = false
+                throw Expected.commitRefused
+            }
+        )
+        let untouched = AgentSession(kind: .claude, title: "Untouched")
+        var first = AgentSession(kind: .codex, title: "First")
+        var second = AgentSession(kind: .claude, title: "Second")
+        let project = makeProject("alpha", sessions: [untouched, first, second])
+        try database.save(ProjectsState(projects: [project]))
+
+        let inspection = try SQLiteDatabase(path: url.path)
+        let sentinel = #"{"futureSessionFormat":true}"#
+        try inspection.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, sentinel)
+            .bind(2, untouched.id.uuidString)
+            .run()
+
+        first.title = "First accepted"
+        second.title = "Second accepted"
+        let accepted = [
+            ProjectDatabase.SessionWrite(session: first, projectID: project.id, position: 1),
+            ProjectDatabase.SessionWrite(session: second, projectID: project.id, position: 2)
+        ]
+        try database.saveSessions(accepted)
+
+        XCTAssertEqual(
+            String(decoding: try storedSessionPayload(id: untouched.id, from: inspection), as: UTF8.self),
+            sentinel
+        )
+        XCTAssertEqual(
+            try storedSession(id: first.id, from: inspection).title,
+            "First accepted"
+        )
+        XCTAssertEqual(
+            try storedSession(id: second.id, from: inspection).title,
+            "Second accepted"
+        )
+
+        first.title = "First rejected"
+        second.title = "Second rejected"
+        refuseNextCommit = true
+        XCTAssertThrowsError(try database.saveSessions([
+            ProjectDatabase.SessionWrite(session: first, projectID: project.id, position: 1),
+            ProjectDatabase.SessionWrite(session: second, projectID: project.id, position: 2)
+        ])) { error in
+            guard case Expected.commitRefused = error else {
+                return XCTFail("expected the injected commit refusal, got \(error)")
+            }
+        }
+        XCTAssertEqual(
+            try storedSession(id: first.id, from: inspection).title,
+            "First accepted"
+        )
+        XCTAssertEqual(
+            try storedSession(id: second.id, from: inspection).title,
+            "Second accepted"
+        )
     }
 
     func testSessionReadReceiptsRoundTripAndCascadeWithTheirSession() throws {

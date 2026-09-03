@@ -32,6 +32,7 @@ final class HostFactPublisher {
         let allSessionProjections: () -> [HostFactProjection]
         let sessionProjectionsForAccount: (AccountID) -> [HostFactProjection]
         let projectionsInProject: (ProjectID) -> [HostFactProjection]
+        let projectProjection: (ProjectID) -> HostFactProjection?
         let sessionProjection: (SessionID) -> HostFactProjection?
         let terminalProjection: (TerminalID) -> HostFactProjection?
         let prepareScheduledState: () -> Void
@@ -45,6 +46,7 @@ final class HostFactPublisher {
             allSessionProjections: @escaping () -> [HostFactProjection],
             sessionProjectionsForAccount: @escaping (AccountID) -> [HostFactProjection],
             projectionsInProject: @escaping (ProjectID) -> [HostFactProjection],
+            projectProjection: @escaping (ProjectID) -> HostFactProjection? = { _ in nil },
             sessionProjection: @escaping (SessionID) -> HostFactProjection?,
             terminalProjection: @escaping (TerminalID) -> HostFactProjection?,
             prepareScheduledState: @escaping () -> Void = {},
@@ -57,6 +59,7 @@ final class HostFactPublisher {
             self.allSessionProjections = allSessionProjections
             self.sessionProjectionsForAccount = sessionProjectionsForAccount
             self.projectionsInProject = projectionsInProject
+            self.projectProjection = projectProjection
             self.sessionProjection = sessionProjection
             self.terminalProjection = terminalProjection
             self.prepareScheduledState = prepareScheduledState
@@ -78,6 +81,7 @@ final class HostFactPublisher {
     private let observations: AppEventObservations
     private var publishedSubjects: Set<ExtensionFactSubject> = []
     private var projectIDBySubject: [ExtensionFactSubject: String] = [:]
+    private var subjectsByProjectID: [String: Set<ExtensionFactSubject>] = [:]
     private var hasStarted = false
 
     init(registry: ExtensionFactRegistry, dependencies: Dependencies) {
@@ -107,6 +111,9 @@ final class HostFactPublisher {
         projectIDBySubject = Dictionary(uniqueKeysWithValues: projections.map {
             ($0.subject, $0.projectID)
         })
+        subjectsByProjectID = Dictionary(grouping: projections, by: \.projectID).mapValues {
+            Set($0.map(\.subject))
+        }
     }
 
     func refreshAllSessions() throws {
@@ -123,9 +130,7 @@ final class HostFactPublisher {
                 projectID: key
             )
         }
-        let previous = Set(projectIDBySubject.compactMap { subject, storedProjectID in
-            storedProjectID == key ? subject : nil
-        })
+        let previous = subjectsByProjectID[key] ?? []
         let current = Set(projections.map(\.subject))
         try replace(projections, removing: previous.subtracting(current))
         removeFromIndex(previous)
@@ -138,6 +143,14 @@ final class HostFactPublisher {
         let current = Set(projections.map(\.subject))
         try replace(projections, removing: subjects.subtracting(current))
         removeFromIndex(subjects)
+        addToIndex(projections)
+    }
+
+    func refreshProjectRecord(_ projectID: ProjectID) throws {
+        let subject = ExtensionFactSubject.project(Self.opaqueID(projectID))
+        let projections = dependencies.projectProjection(projectID).map { [$0] } ?? []
+        try replace(projections, removing: projections.isEmpty ? Set([subject]) : [])
+        removeFromIndex([subject])
         addToIndex(projections)
     }
 
@@ -227,12 +240,19 @@ final class HostFactPublisher {
         for projection in projections {
             publishedSubjects.insert(projection.subject)
             projectIDBySubject[projection.subject] = projection.projectID
+            subjectsByProjectID[projection.projectID, default: []].insert(projection.subject)
         }
     }
 
     private func removeFromIndex(_ subjects: Set<ExtensionFactSubject>) {
         publishedSubjects.subtract(subjects)
-        for subject in subjects { projectIDBySubject.removeValue(forKey: subject) }
+        for subject in subjects {
+            guard let projectID = projectIDBySubject.removeValue(forKey: subject) else { continue }
+            subjectsByProjectID[projectID]?.remove(subject)
+            if subjectsByProjectID[projectID]?.isEmpty == true {
+                subjectsByProjectID.removeValue(forKey: projectID)
+            }
+        }
     }
 
     private func installObservers() {
@@ -278,9 +298,15 @@ final class HostFactPublisher {
         switch event.sidebarImpact {
         case .structure:
             refreshAllSafely()
+        case .projectRemoved(let projectID, _, _):
+            refreshProjectSafely(projectID)
         case .projectStructure(let projectID):
             refreshProjectSafely(projectID)
-        case .sessionAdded(_, let sessionID), .sessionOrder(let sessionID),
+        case .projectRow(let projectID):
+            do { try refreshProjectRecord(projectID) }
+            catch { report(error) }
+        case .sessionAdded(_, let sessionID), .sessionStructure(_, let sessionID),
+             .sessionTitle(let sessionID, _),
              .sessionRow(let sessionID):
             refreshSessionsSafely([sessionID])
         case .sessionRemoved(let projectID, _):

@@ -1565,6 +1565,87 @@ final class ExtensionHostService {
         accountSnapshots = nextAccounts
     }
 
+    /// Applies the exact project-store delta to the extension event journal. A one-row rename
+    /// must not rebuild repository and runtime snapshots for every retained conversation before
+    /// the Enter key can return to AppKit.
+    private func refreshSnapshotJournal(for change: ProjectsDidChange) {
+        guard hasSnapshotBaseline else {
+            refreshSnapshotJournal()
+            return
+        }
+        switch change.sidebarImpact {
+        case .structure, .projectStructure:
+            refreshSnapshotJournal()
+        case .projectRemoved(let projectID, let sessionIDs, _):
+            refreshProjectSnapshot(id: projectID.uuidString.lowercased())
+            for sessionID in sessionIDs {
+                refreshSessionSnapshot(id: sessionID.uuidString.lowercased())
+            }
+        case .projectRow(let projectID):
+            refreshProjectSnapshot(id: projectID.uuidString.lowercased())
+        case .sessionAdded(_, let sessionID), .sessionStructure(_, let sessionID),
+             .sessionTitle(let sessionID, _), .sessionRow(let sessionID):
+            refreshSessionSnapshot(id: sessionID.uuidString.lowercased())
+        case .sessionRemoved(_, let sessionID):
+            let identifier = sessionID.uuidString.lowercased()
+            if let previous = sessionSnapshots.removeValue(forKey: identifier) {
+                appendEvent(
+                    kind: .sessionRemoved,
+                    entityID: identifier,
+                    projectID: previous.projectID
+                )
+            }
+        case .terminalRow:
+            break
+        }
+    }
+
+    private func refreshProjectSnapshot(id identifier: String) {
+        let next = snapshotProvider.projectSnapshot(id: identifier)
+        switch (projectSnapshots[identifier], next) {
+        case (.some(let old), .some(let new)) where old != new:
+            projectSnapshots[identifier] = new
+            appendEvent(kind: .projectChanged, entityID: identifier)
+        case (.none, .some(let new)):
+            projectSnapshots[identifier] = new
+            appendEvent(kind: .projectChanged, entityID: identifier)
+        case (.some, .none):
+            projectSnapshots.removeValue(forKey: identifier)
+            appendEvent(kind: .projectRemoved, entityID: identifier)
+        default:
+            break
+        }
+    }
+
+    private func refreshSessionSnapshot(id identifier: String) {
+        let next = snapshotProvider.sessionSnapshot(id: identifier)
+        switch (sessionSnapshots[identifier], next) {
+        case (.some(let old), .some(let new)) where old != new:
+            sessionSnapshots[identifier] = new
+            appendEvent(
+                kind: .sessionChanged,
+                entityID: identifier,
+                projectID: new.projectID
+            )
+        case (.none, .some(let new)):
+            sessionSnapshots[identifier] = new
+            appendEvent(
+                kind: .sessionChanged,
+                entityID: identifier,
+                projectID: new.projectID
+            )
+        case (.some(let old), .none):
+            sessionSnapshots.removeValue(forKey: identifier)
+            appendEvent(
+                kind: .sessionRemoved,
+                entityID: identifier,
+                projectID: old.projectID
+            )
+        default:
+            break
+        }
+    }
+
     private func routeFactPublication(
         _ request: HTTPRequest,
         authority: Authority,
@@ -1927,14 +2008,19 @@ final class ExtensionHostService {
     private func beginObservingHostData() {
         guard appEvents == nil else { return }
         let observations = AppEventObservations()
-        observations.observe(ProjectsDidChange.self) { [weak self] _ in
-            self?.refreshSnapshotJournal()
+        observations.observe(ProjectsDidChange.self) { [weak self] change in
+            self?.refreshSnapshotJournal(for: change)
         }
         observations.observe(AppSettingsDidChange.self) { [weak self] _ in
             self?.refreshSnapshotJournal()
         }
-        observations.observe(SessionActivityDidChange.self) { [weak self] _ in
-            self?.refreshSnapshotJournal()
+        observations.observe(SessionActivityDidChange.self) { [weak self] event in
+            guard let self else { return }
+            if hasSnapshotBaseline {
+                refreshSessionSnapshot(id: event.sessionID.uuidString.lowercased())
+            } else {
+                refreshSnapshotJournal()
+            }
         }
         observations.observe(AccountPreferencesDidChange.self) { [weak self] _ in
             self?.refreshSnapshotJournal()

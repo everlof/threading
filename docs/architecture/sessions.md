@@ -1721,8 +1721,11 @@ session persists `lastSynchronizedArchiveState` as the base of a three-way merge
 
 Successful background changes emit `SessionArchivedStateDidChange`, which refreshes every window
 and clears a pane whose current session was filed elsewhere. The synchronized write is batched in
-`ProjectStore.synchronizeArchiveStates` so one activation produces one save and one store change
-notification rather than one of each per session.
+`ProjectStore.synchronizeArchiveStates` so one activation produces one changed-row transaction and
+one store change notification rather than one of each per session. That transaction encodes and
+upserts only sessions whose archive value changed; a click writes one row, and an account-wide
+reconciliation writes its changed rows atomically. Neither path walks the complete project graph.
+When every changed row belongs to one project, the sidebar replaces only that project's subtree.
 
 The archive has its own chronology. `archivedAt` is captured when an archive request enters the
 synchronizer, not when a possibly slow provider command returns, so several quick presses retain

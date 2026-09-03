@@ -426,6 +426,34 @@ final class ScheduledMessageStoreTests: XCTestCase {
         XCTAssertEqual(store.all.count, 1)
     }
 
+    func testForgettingAProjectBatchesSessionTargetsAndWatchedSessions() {
+        let store = makeStore()
+        let project = ProjectID()
+        let first = SessionID()
+        let second = SessionID()
+        let survivor = SessionID()
+        store.add(message(to: first, text: "First"), now: now)
+        store.add(message(to: second, text: "Second"), now: now)
+        store.add(sessionStart(in: project), now: now)
+        let waiting = ScheduledMessage(
+            createdAt: now,
+            whenSessionFinishes: second,
+            target: .session(survivor),
+            text: "Keep these words"
+        )
+        store.add(waiting, now: now)
+
+        store.forget(sessionIDs: [first, second], projectID: project)
+
+        XCTAssertTrue(store.messages(for: first).isEmpty)
+        XCTAssertTrue(store.messages(for: second).isEmpty)
+        XCTAssertTrue(store.sessionStarts(in: project).isEmpty)
+        XCTAssertEqual(store.messages(for: survivor).map(\.text), ["Keep these words"])
+        guard case .failed = store[waiting.id]?.state else {
+            return XCTFail("the retained send must report that its watched session was deleted")
+        }
+    }
+
     func testRetainOnlySweepsTargetsThatNoLongerExist() {
         let store = makeStore()
         let keptSession = SessionID()

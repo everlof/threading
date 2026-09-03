@@ -886,6 +886,17 @@ final class BrowserBaselineStore {
         announce(projectID)
     }
 
+    /// Drops one removed project's baseline library without enumerating any neighbour.
+    func remove(projectID: ProjectID) {
+        baselinesByProject.removeValue(forKey: projectID)
+        loadedProjects.remove(projectID)
+        unsupportedCountByProject.removeValue(forKey: projectID)
+        let directory = projectDirectory(projectID)
+        Task.detached(priority: .utility) {
+            try? FileManager().removeItem(at: directory)
+        }
+    }
+
     /// Drops the baselines of every project that is no longer in the sidebar.
     ///
     /// Removing a project takes its baselines with it, which is why the removal confirmation says
@@ -896,15 +907,19 @@ final class BrowserBaselineStore {
         unsupportedCountByProject = unsupportedCountByProject.filter { projectIDs.contains($0.key) }
 
         let kept = Set(projectIDs.map(\.uuidString))
-        let entries = (try? fileManager.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: nil
-        )) ?? []
-        for entry in entries {
-            let name = entry.lastPathComponent
-            guard name != BrowserBaselineDefaults.quarantineDirectoryName,
-                  !kept.contains(name) else { continue }
-            try? fileManager.removeItem(at: entry)
+        let root = root
+        Task.detached(priority: .utility) {
+            let fileManager = FileManager()
+            let entries = (try? fileManager.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: nil
+            )) ?? []
+            for entry in entries {
+                let name = entry.lastPathComponent
+                guard name != BrowserBaselineDefaults.quarantineDirectoryName,
+                      !kept.contains(name) else { continue }
+                try? fileManager.removeItem(at: entry)
+            }
         }
     }
 

@@ -151,6 +151,35 @@ final class HostFactPublisherTests: XCTestCase {
         XCTAssertEqual(harness.batches, [Batch(facts: 19, subjects: 2)])
     }
 
+    func testProjectRowEventDoesNotReprojectItsSessions() throws {
+        let center = NotificationCenter()
+        let registry = ExtensionFactRegistry(notificationCenter: center)
+        let projectID = ProjectID()
+        let sessionIDs = (0..<5_000).map { _ in SessionID() }
+        let harness = Harness(center: center, projections: [Self.makeProject(id: projectID)]
+            + sessionIDs.enumerated().map { offset, sessionID in
+                Self.makeSession(id: sessionID, projectID: projectID, manualOrder: offset)
+            })
+        let publisher = HostFactPublisher(registry: registry, dependencies: harness.dependencies)
+        try publisher.start()
+
+        harness.store(Self.makeProject(id: projectID, name: "Renamed"))
+        harness.batches.removeAll()
+        let allCalls = harness.allProjectionCalls
+        center.post(ProjectsDidChange(sidebarImpact: .projectRow(projectID)))
+
+        XCTAssertEqual(harness.projectProjectionCalls, 1)
+        XCTAssertEqual(harness.allProjectionCalls, allCalls)
+        XCTAssertEqual(harness.batches, [Batch(facts: 4, subjects: 1)])
+        XCTAssertEqual(
+            registry.exactFact(
+                ExtensionHostFactKey.projectName,
+                for: .project(Self.opaque(projectID))
+            )?.fact.value,
+            .string("Renamed")
+        )
+    }
+
     func testDuplicateSubjectRefusesTheWholeRefresh() throws {
         let center = NotificationCenter()
         let registry = ExtensionFactRegistry(notificationCenter: center)
@@ -181,6 +210,7 @@ final class HostFactPublisherTests: XCTestCase {
         var batches: [Batch] = []
         var allProjectionCalls = 0
         var allSessionProjectionCalls = 0
+        var projectProjectionCalls = 0
         var sessionProjectionCalls = 0
         var prepareScheduledCalls = 0
         var prepareControlCalls = 0
@@ -211,6 +241,13 @@ final class HostFactPublisherTests: XCTestCase {
                 projectionsInProject: { [unowned self] projectID in
                     let key = HostFactPublisherTests.opaque(projectID)
                     return projections.filter { HostFactPublisherTests.projectID(of: $0) == key }
+                },
+                projectProjection: { [unowned self] projectID in
+                    projectProjectionCalls += 1
+                    let subject = ExtensionFactSubject.project(
+                        HostFactPublisherTests.opaque(projectID)
+                    )
+                    return projections.first { $0.subject == subject }
                 },
                 sessionProjection: { [unowned self] sessionID in
                     sessionProjectionCalls += 1
@@ -279,10 +316,13 @@ final class HostFactPublisherTests: XCTestCase {
         ))
     }
 
-    private static func makeProject(id: ProjectID) -> HostFactProjection {
+    private static func makeProject(
+        id: ProjectID,
+        name: String = "Project"
+    ) -> HostFactProjection {
         .project(NativeSidebarProjectFacts(
             id: opaque(id),
-            name: "Project",
+            name: name,
             manualOrder: 0,
             isScratchpad: false,
             createdAt: Date(timeIntervalSinceReferenceDate: 1),

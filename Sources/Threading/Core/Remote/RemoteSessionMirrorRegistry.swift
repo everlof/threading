@@ -2784,7 +2784,7 @@ final class RemoteSessionMirrorRegistry {
     private func broadcastSessionsChanged(_ change: ProjectsDidChange) {
         invalidateMeCatalogue()
         switch change.sidebarImpact {
-        case .structure, .projectStructure:
+        case .structure, .projectRemoved, .projectStructure, .projectRow:
             let message = encode(RemoteSessionsChangedDTO())
             for connection in themeEventSubscribers.values {
                 connection.sendText(message)
@@ -2816,7 +2816,8 @@ final class RemoteSessionMirrorRegistry {
                       ) else { continue }
                 connection.sendText(encode(delta))
             }
-        case let .sessionAdded(_, sessionID), let .sessionOrder(sessionID),
+        case let .sessionAdded(_, sessionID), let .sessionStructure(_, sessionID),
+             let .sessionTitle(sessionID, _),
              let .sessionRow(sessionID):
             let session = ProjectStore.shared.session(withID: sessionID)
             let project = ProjectStore.shared.project(forSessionID: sessionID)

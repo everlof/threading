@@ -10,6 +10,8 @@ import ThreadingExtensionKit
 protocol ExtensionHostSnapshotProviding: AnyObject {
     func projectSnapshots() -> [ExtensionProjectSnapshot]
     func sessionSnapshots() -> [ExtensionSessionSnapshot]
+    func projectSnapshot(id: String) -> ExtensionProjectSnapshot?
+    func sessionSnapshot(id: String) -> ExtensionSessionSnapshot?
     func providerSnapshots() -> [ExtensionProviderSnapshot]
     func accountSnapshots() -> [ExtensionAccountSnapshot]
 }
@@ -27,6 +29,14 @@ protocol ExtensionSessionRuntimeSnapshotProviding: AnyObject {
 }
 
 extension ExtensionHostSnapshotProviding {
+    func projectSnapshot(id: String) -> ExtensionProjectSnapshot? {
+        projectSnapshots().first { $0.id == id }
+    }
+
+    func sessionSnapshot(id: String) -> ExtensionSessionSnapshot? {
+        sessionSnapshots().first { $0.id == id }
+    }
+
     func providerSnapshots() -> [ExtensionProviderSnapshot] { [] }
     func accountSnapshots() -> [ExtensionAccountSnapshot] { [] }
 }
@@ -44,37 +54,34 @@ final class LiveExtensionHostSnapshotProvider:
     private var runtimeReaders: [SessionID: SessionInfoReader] = [:]
 
     func projectSnapshots() -> [ExtensionProjectSnapshot] {
-        ProjectStore.shared.projects.map { project in
-            ExtensionProjectSnapshot(
-                id: project.id.uuidString.lowercased(),
-                displayName: project.name,
-                repository: repositorySnapshot(for: project.folderPath)
-            )
-        }
+        ProjectStore.shared.projects.map { projectSnapshot($0) }
     }
 
     func sessionSnapshots() -> [ExtensionSessionSnapshot] {
         let snapshots = ProjectStore.shared.projects.flatMap { project in
-            project.sessions.map { session in
-                ExtensionSessionSnapshot(
-                    id: session.id.uuidString.lowercased(),
-                    projectID: project.id.uuidString.lowercased(),
-                    providerID: session.kind.rawValue,
-                    accountID: "\(session.kind.rawValue):\(session.accountHandle.name)",
-                    displayTitle: session.displayTitle,
-                    activity: extensionActivity(
-                        AgentRuntime.shared.activity(sessionID: session.id)
-                    ),
-                    branch: session.branch,
-                    isSideChat: session.isSideChat,
-                    isArchived: session.isArchived,
-                    usesNativeUI: session.usesNativeUI
-                )
-            }
+            project.sessions.map { sessionSnapshot($0, in: project) }
         }
         let liveIDs = Set(snapshots.compactMap { SessionID(uuidString: $0.id) })
         runtimeReaders = runtimeReaders.filter { liveIDs.contains($0.key) }
         return snapshots
+    }
+
+    func projectSnapshot(id rawProjectID: String) -> ExtensionProjectSnapshot? {
+        guard let projectID = ProjectID(uuidString: rawProjectID),
+              let project = ProjectStore.shared.project(withID: projectID) else { return nil }
+        return projectSnapshot(project)
+    }
+
+    func sessionSnapshot(id rawSessionID: String) -> ExtensionSessionSnapshot? {
+        guard let sessionID = SessionID(uuidString: rawSessionID),
+              let session = ProjectStore.shared.session(withID: sessionID),
+              let project = ProjectStore.shared.project(forSessionID: sessionID) else {
+            if let sessionID = SessionID(uuidString: rawSessionID) {
+                runtimeReaders.removeValue(forKey: sessionID)
+            }
+            return nil
+        }
+        return sessionSnapshot(session, in: project)
     }
 
     func providerSnapshots() -> [ExtensionProviderSnapshot] {
@@ -167,6 +174,32 @@ final class LiveExtensionHostSnapshotProvider:
             repositoryPath: remote?.path,
             branch: GitInfo.currentBranch(for: path),
             headRevision: GitInfo.headRevision(for: path)
+        )
+    }
+
+    private func projectSnapshot(_ project: Project) -> ExtensionProjectSnapshot {
+        ExtensionProjectSnapshot(
+            id: project.id.uuidString.lowercased(),
+            displayName: project.name,
+            repository: repositorySnapshot(for: project.folderPath)
+        )
+    }
+
+    private func sessionSnapshot(
+        _ session: AgentSession,
+        in project: Project
+    ) -> ExtensionSessionSnapshot {
+        ExtensionSessionSnapshot(
+            id: session.id.uuidString.lowercased(),
+            projectID: project.id.uuidString.lowercased(),
+            providerID: session.kind.rawValue,
+            accountID: "\(session.kind.rawValue):\(session.accountHandle.name)",
+            displayTitle: session.displayTitle,
+            activity: extensionActivity(AgentRuntime.shared.activity(sessionID: session.id)),
+            branch: session.branch,
+            isSideChat: session.isSideChat,
+            isArchived: session.isArchived,
+            usesNativeUI: session.usesNativeUI
         )
     }
 

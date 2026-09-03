@@ -2569,7 +2569,6 @@ private extension ProjectSidebarViewController {
                     self.presentProjectNotice(L10n.string("The project data could not be saved."))
                     return
                 }
-                self.reload()
             }
         } else if let node = outlineView.item(atRow: row) as? SessionNode {
             let session = projectStore.session(withID: node.sessionID)
@@ -2585,7 +2584,6 @@ private extension ProjectSidebarViewController {
                     self.presentProjectNotice(L10n.string("The project data could not be saved."))
                     return
                 }
-                self.reload()
             }
         } else if let node = outlineView.item(atRow: row) as? TerminalNode {
             let terminal = projectStore.terminal(withID: node.terminalID)
@@ -2665,8 +2663,7 @@ private extension ProjectSidebarViewController {
             RemoteAccessCoordinator.shared.revokeTerminalShares(terminal.id)
         }
         ProjectTerminalRuntime.shared.discard(terminalsIn: project)
-        reload()
-        delegate?.projectSidebarDidRemoveSessions(self)
+        delegate?.projectSidebar(self, didRemoveProject: project)
     }
 
     private func closeTerminal(_ terminalID: TerminalID) {
@@ -2720,18 +2717,23 @@ private extension ProjectSidebarViewController {
 
     private func projectsDidChange(_ change: ProjectsDidChange) {
         switch change.sidebarImpact {
-        case .structure:
+        case .structure, .projectRemoved:
             // Archive, add, remove, reorder, branch and grouping changes add, drop or move rows.
             // `reload` preserves selection and expansion around that structural rebuild.
             reload()
         case .projectStructure(let projectID):
             applyProjectStructureChange(projectID)
+        case .projectRow(let projectID):
+            refreshRow(projectID: projectID)
         case .sessionAdded(let projectID, let sessionID):
             applySessionAddition(sessionID, to: projectID)
         case .sessionRemoved(let projectID, let sessionID):
             applySessionRemoval(sessionID, from: projectID)
-        case .sessionOrder(let sessionID):
-            applySessionOrderChange(sessionID)
+        case .sessionStructure(let projectID, _):
+            applyProjectStructureChange(projectID)
+        case .sessionTitle(let sessionID, let reorders):
+            if reorders { applySessionOrderChange(sessionID) }
+            else { refreshRow(sessionID: sessionID) }
         case .sessionRow(let sessionID):
             refreshRow(sessionID: sessionID)
         case .terminalRow(let terminalID):
@@ -2850,6 +2852,15 @@ private extension ProjectSidebarViewController {
         guard let node = projectNodesByID[projectID] else { return nil }
         let row = outlineView.row(forItem: node)
         return row >= 0 ? row : nil
+    }
+
+    /// Reconfigures one project's visible row from the store. A project rename or icon change
+    /// cannot alter its descendants, so rebuilding their nodes would make Enter scale with every
+    /// conversation nested below the edited row.
+    private func refreshRow(projectID: ProjectID) {
+        guard let row = projectRow(for: projectID) else { return }
+        reconfigureRow(at: row)
+        outlineView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
     }
 
     @objc private func newProjectChatClicked() {
@@ -3959,7 +3970,7 @@ protocol ProjectSidebarViewControllerDelegate: AnyObject {
         prompt: String?
     )
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didRemoveSession sessionID: SessionID)
-    func projectSidebarDidRemoveSessions(_ sidebar: ProjectSidebarViewController)
+    func projectSidebar(_ sidebar: ProjectSidebarViewController, didRemoveProject project: Project)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didCloseTerminal terminalID: TerminalID)
     func projectSidebarDidToggleSettings(_ sidebar: ProjectSidebarViewController)
     func projectSidebar(_ sidebar: ProjectSidebarViewController, didSelectSettingsPage pageID: String)
