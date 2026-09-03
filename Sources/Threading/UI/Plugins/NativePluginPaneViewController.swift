@@ -34,9 +34,19 @@ final class NativePluginPaneViewController: NSViewController {
             ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
     }
 
-    init(bundleURL: URL, owningSessionID: SessionID?) {
+    /// Injected so a test can place a pane in a project without reaching the shared store, and
+    /// defaulted so no call site has to care. `nil` from the closure means "not resolvable", which
+    /// is a pane with no project rather than an error: a plugin that only draws needs neither.
+    private let resolveStore: () -> ProjectStore?
+
+    init(
+        bundleURL: URL,
+        owningSessionID: SessionID?,
+        resolveStore: @escaping () -> ProjectStore? = { ProjectStore.shared }
+    ) {
         self.bundleURL = bundleURL
         self.owningSessionID = owningSessionID
+        self.resolveStore = resolveStore
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -66,10 +76,29 @@ final class NativePluginPaneViewController: NSViewController {
 
     /// What the plugin is told. Narrow and versioned on purpose: never a session, a project, a
     /// store or a window. If a plugin needs to know something, it gets a name here first.
+    ///
+    /// The names live in `NativePluginPlacement` rather than being spelled here, so the host and a
+    /// plugin author read them from one place.
     private func context() -> PluginContext {
-        var arguments: [String: String] = [:]
-        if let owningSessionID { arguments["sessionID"] = owningSessionID.rawValue.uuidString }
-        return PluginContext(theme: NativePluginCatalog.theme(), arguments: arguments)
+        PluginContext(theme: NativePluginCatalog.theme(), arguments: placement().arguments)
+    }
+
+    /// Where the pane is, resolved from the session that owns it.
+    ///
+    /// The checkout comes from the session's *working* directory rather than its project's folder,
+    /// because the two differ exactly when the session opted into a managed workspace. A plugin
+    /// handed the project folder would read the wrong tree for every draft-worktree session, which
+    /// presents as stale content rather than as a wrong path.
+    private func placement() -> NativePluginPlacement {
+        guard let owningSessionID else { return NativePluginPlacement() }
+        let store = resolveStore()
+        let project = store?.project(forSessionID: owningSessionID)
+        return NativePluginPlacement(
+            sessionID: owningSessionID,
+            projectID: project?.id,
+            projectName: project?.name,
+            checkoutPath: store?.workingDirectory(forSessionID: owningSessionID)
+        )
     }
 
     private func install(_ content: NSView) {
