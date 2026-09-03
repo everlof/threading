@@ -54,6 +54,14 @@ struct AgentCapabilities: OptionSet {
   /// effort. Claude only; Codex records its model in a rollout of a different shape.
   static let transcriptModelRecord = Self(rawValue: 1 << 10)
 
+  /// The runtime's catalogue is a set of aliases (`opus`) that name a family rather than a
+  /// version, and only the runtime knows which version an alias resolves to today. Threading
+  /// remembers what each alias resolved to when a session on that login announced its model,
+  /// and names the alias row after it (`ModelAliasResolutionStore`). Claude only: Codex
+  /// publishes dated slugs and no aliases, and Grok, OpenCode and Cursor publish no host
+  /// catalogue at all.
+  static let modelAliasResolution = Self(rawValue: 1 << 36)
+
   /// Fast is a *service tier* on the account's model catalog, inheritable from config and
   /// observable before launch. Codex only. This is what makes a fast reading reportable on a
   /// terminal surface, where no control channel exists to ask.
@@ -423,7 +431,8 @@ enum AgentKind: String, Codable, CaseIterable {
         .liveFastModeControl, .slashCommandPrefix, .terminalThreadingBridge, .headlessResearch,
         .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord,
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
-        .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory
+        .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
+        .modelAliasResolution
       ]
     case .codex:
       return [

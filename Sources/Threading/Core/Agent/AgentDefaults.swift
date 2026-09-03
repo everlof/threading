@@ -132,6 +132,15 @@ enum AgentDefaults {
     /// Observed carrying `claude-fable-5[1m]`, which no alias names.
     static let claudeAdditionalModelsKey = "additionalModelOptionsCache"
 
+    /// The CLI writes each cached model's description as `<name> · <blurb>` — `Fable 5.1 · Most
+    /// capable for your hardest and longest-running tasks` — and the name before this separator
+    /// is its own word for the model. Read only for an id `ModelName` cannot, where the `label`
+    /// beside it (`Fable`) says less than the description does.
+    static let claudeModelDescriptionSeparator = " · "
+
+    /// A name read out of the CLI's cache is a model's name, not a paragraph about it.
+    static let claudeModelLabelMaximumBytes = 64
+
     /// The model a managed organisation defaults its logins to. Null on personal accounts, which
     /// is why it sits *below* the user's own `settings.json` rather than replacing it.
     static let claudeOrgDefaultModelKey = "orgModelDefaultCache"

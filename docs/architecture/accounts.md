@@ -469,6 +469,50 @@ The old words were the actual complaint that started this: a row reading "Defaul
 like a setting whose value is being withheld, when the truth is that nothing has chosen yet. Only
 a login that has never run this agent *anywhere* reaches it.
 
+### Which version an alias is
+
+The four documented aliases name a family, not a version: `opus` is whatever Opus is newest when
+the session launches, which is the point of launching by alias. It is also why a row could only
+ever read "Opus" — the alias table lives inside the CLI binary, and nothing on disk this app may
+read says what `opus` is today. The composer's picker showed `Fable`, `Opus`, `Sonnet`, `Haiku`
+and, from the cache, `Fable 5 · 1M` — and the one row with a version in it was wrong. The
+login's `settings.json` pinned `claude-fable-5-1[1m]`, and `ModelName` matched families by
+prefix, so the 5.1 id hit the `claude-fable-5` row and the row marked *account default* named
+the previous model while running the newer one.
+
+Two fixes, one per half of that.
+
+**The version is read out of the id, not looked up in a table** (`ModelName.read`). Anthropic's
+ids have one shape — `claude-<family>-<major>[-<minor>][-<yyyymmdd>]`, plus the 3.x
+generation's version-first form — so `claude-fable-5-1[1m]` reads `Fable 5.1 · 1M`,
+`claude-opus-4-1-20250805` reads `Opus 4.1`, and a release this code has never seen reads as
+itself. Only the known families are read. An unknown family, or a segment that is neither a
+family, a short version nor a date (`opusplan`, `claude-opus-4-8-fast`), stays verbatim rather
+than half-read — `opusplan` used to read "Opus" by prefix, and it is Opus for planning and
+Sonnet otherwise. For such an id the CLI's cache is asked for its own name: the head of its
+`<name> · <blurb>` description before its label, since "Fable 5.1 · Most capable…" says more
+than "Fable" (`AgentModels.cachedModelName`).
+
+**An alias is named after what the login last watched it resolve to**
+(`ModelAliasResolutionStore`, gated by `AgentCapabilities.modelAliasResolution`). A native
+session's `init` announces the resolved id and a terminal session's transcript records it on
+every answer, so both record `launched → reported` per login — `opus` → `claude-opus-5`,
+`fable[1m]` → `claude-fable-5-1[1m]` — and the catalogue's alias rows, the chips and the status
+line all read `Opus 5` through `AgentModels.displayName(for:account:)`. The identifier stays the
+alias, so the launch keeps following the CLI's latest, and the label is at most one run stale:
+the next start on that login overwrites it. Nothing is inferred. An alias no session on the
+login has launched reads the bare family, an answer from another family is refused rather than
+trusted, and the store keeps aliases only — a launch that names its own version teaches it
+nothing, and costs the terminal surface no extra transcript read.
+
+It is a record of its own rather than a field on `AccountPreference` because the catalogue is
+built off the main actor — the phone's create request names its models from a server handler —
+and `AccountPreferencesStore` is main-actor state. Three other sources were rejected: a
+hand-kept alias table goes stale every release while claiming to be the catalogue (the same
+reason `claudeModels` mirrors none of the CLI's dated second tier); scraping the CLI binary
+reads minified JavaScript out of a 200 MB Mach-O whose key names change per build; and the
+Models API needs the user's token and does not know alias resolution, which is CLI-side.
+
 ### Reading the CLI's own state file
 
 `settings.json` is what the *user* wrote. `.claude.json`, beside it in the same config directory,
@@ -477,7 +521,8 @@ is what the CLI cached from the service, and it answers two things the settings 
 - `additionalModelOptionsCache` — models beyond the documented aliases this login may select,
   each `{value, label, description}`. It carried `claude-fable-5[1m]` on both active logins
   measured, which no alias names, so before this was read that model could not be picked from the
-  menu at all. Appended after the aliases, deduplicated by identifier.
+  menu at all. Appended after the aliases, deduplicated by identifier. The `description` is read
+  only for an id `ModelName` cannot — see *Which version an alias is* above.
 - `orgModelDefaultCache` — a managed organisation's default model, at rank 3 above.
 
 Both keys are **undocumented and frequently absent** — null on two of four real logins when this

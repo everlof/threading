@@ -2548,7 +2548,14 @@ private extension TerminalContainerViewController {
         // answered, so that is the third source; `known` reads memory, and the file is re-read
         // behind the paint. See `ClaudeTranscriptModel`.
         let transcript = observedModelTranscript(for: session, in: project)
-        let model = configured ?? transcript.flatMap { ClaudeTranscriptModel.known(at: $0) }
+        let observed = transcript.flatMap { ClaudeTranscriptModel.known(at: $0) }
+        let model = configured ?? observed
+        // A terminal session launched by alias teaches the login which version that alias is
+        // today, as a native one does from its `init` — for a terminal, the transcript is where
+        // the runtime reports it. The store keeps aliases only, so a versioned launch is skipped.
+        if let account, let configured, let observed {
+            ModelAliasResolutionStore.shared.record(observed, forLaunched: configured, in: account.id)
+        }
         let effort = AgentModels.effectiveEffort(for: session, model: model, account: account)
         // A terminal can only report a Fast setting that exists before launch. A live
         // control-channel flag belongs to a running conversation, which this surface is not,
@@ -2565,7 +2572,7 @@ private extension TerminalContainerViewController {
             )
 
         let reading = GitStatusOverlayView.ModelReading(
-            name: model.map { ModelName.display(for: $0) },
+            name: model.map { AgentModels.displayName(for: $0, account: account) },
             effort: effort.map {
                 AgentReasoningLevel(effort: $0, description: "").displayName
             },
@@ -2577,7 +2584,10 @@ private extension TerminalContainerViewController {
         // so a `/model` lands on the card without a refresh per `ProjectsDidChange`, and the
         // first read of a freshly selected session arrives a beat later rather than stalling the
         // switch.
-        if configured == nil, let transcript {
+        // Re-read for a login that leaves the model to the CLI, and for a launch by alias, whose
+        // version the transcript is a terminal's only source of. A launch naming its own version
+        // has nothing left to learn and costs no read.
+        if let transcript, configured.map({ !ModelName.isVersioned($0) }) ?? true {
             ClaudeTranscriptModel.revalidate(at: transcript) { [weak self] _ in
                 guard let self, self.currentSessionID == sessionID else { return }
                 self.refreshGitStatusOverlayModel()

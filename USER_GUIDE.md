@@ -518,7 +518,7 @@ the menu on hover or **→**, **←** steps back out with the parent still highl
 choice anywhere in the chain answers the whole menu. Only the menu bar at the top of the
 screen remains the system's own.
 
-The model chip names the model the session will **actually run on** — `Fable 5 · 1M`, not
+The model chip names the model the session will **actually run on** — `Fable 5.1 · 1M`, not
 "Default". "Leave the choice to the agent" is not a row of its own: the model that choice
 resolves to is **marked in the list**, where it already stands, with where the name came from.
 Choosing that row keeps the choice with the agent rather than pinning today's answer to it:
@@ -539,9 +539,13 @@ decide at launch. Threading does not guess what it would pick, because that is n
 the service and is not recorded on your machine.
 
 The menu also offers any model your login has beyond the standard ones (`Fable`, `Opus`,
-`Sonnet`, `Haiku`), read from the agent's own cache — `Fable 5 · 1M`, for instance, which no plain
-alias names. Those aliases always mean *the latest* of each family, so they stay current on their
-own as new versions ship.
+`Sonnet`, `Haiku`), read from the agent's own cache — `Fable 5.1 · 1M`, for instance, which no
+plain alias names. Those aliases always mean *the latest* of each family, so they stay current on
+their own as new versions ship. Which version that is today is shown once your login has run the
+alias: a row that read `Opus` reads `Opus 5` after the first session on it, and it still launches
+the alias, so it keeps following the newest. A login that has never run an alias shows the bare
+family rather than a guess. In the model × effort picker the marked row carries its provenance
+(*Account default*, *Last used*) on a second line under the name.
 
 **The list is ordered by capability, most capable first** — Fable, then Opus, then Sonnet, then
 Haiku — so the row at the top is the strongest model your login can run and the list steps down

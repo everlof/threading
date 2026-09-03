@@ -2836,7 +2836,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     }
 
     private var nativeStatusText: String {
-        let model = activeModel.map(ModelName.display) ?? ConversationControlDefaults.defaultModel
+        let model = activeModel.map { AgentModels.displayName(for: $0, account: account) }
+            ?? ConversationControlDefaults.defaultModel
         let activity: String
         if isTurnInFlight {
             activity = L10n.string("Working…")
@@ -2931,6 +2932,20 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         recordAgentActivity(in: event)
         if case .initialised(_, let model) = event, let model {
             reportedModel = model
+            // What the alias this session launched as resolved to, remembered for the login so
+            // the picker's "Opus" row can say which Opus. The store keeps aliases only, so a
+            // session pinned to an id that names its own version teaches it nothing.
+            if let account,
+               let launched = currentSession?.model ?? AgentModels.defaultModel(
+                for: currentSession?.kind ?? agentKind,
+                account: account
+               ) {
+                ModelAliasResolutionStore.shared.record(
+                    model,
+                    forLaunched: launched,
+                    in: account.id
+                )
+            }
             if currentSession?.isCrossProviderContinuation == true {
                 ProjectStore.shared.update(sessionID: sessionID) {
                     $0.recordHandoffTargetModel(model)
@@ -3359,7 +3374,8 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         modelChip.isEnabled = canConfigure && !isChangingConversationConfiguration
         modelChip.configure(
             symbolName: ConversationControlDefaults.modelSymbol,
-            title: model.map(ModelName.display) ?? ConversationControlDefaults.defaultModel
+            title: model.map { AgentModels.displayName(for: $0, account: account) }
+                ?? ConversationControlDefaults.defaultModel
         )
 
         let modelOption = ReasoningEffortPresentation.option(
@@ -3445,7 +3461,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // seventh model rather than as the same one twice.
         let markedInList = options.contains { $0.identifier == resolved.identifier }
         func markedTitle(_ model: String) -> String {
-            "\(ModelName.display(for: model))\(ConversationControlDefaults.suffix(for: resolved.source))"
+            "\(AgentModels.displayName(for: model, account: account))\(ConversationControlDefaults.suffix(for: resolved.source))"
         }
 
         var items: [ThemedMenuEntry] = []

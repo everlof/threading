@@ -3464,3 +3464,17 @@ still draws its own complete plate. The Universal Search evidence fixture delibe
 selected result beside a hovered result, and the focused geometry assertion holds their plates
 apart. Presentation remains host-only; selection, activation, virtualization and result limits are
 still owned by Universal Search.
+
+## 2026-09-03 — A row's provenance is its second line, not its name's tail
+
+The model-by-effort picker appended the marked row's qualifier to its name — `Fable 5 · 1M
+(account default)` — and the model column is 156 points, so the row read `Fable 5 · 1M
+(account d…`. Truncation was cutting the qualifier, which is the part that says why the row is
+marked, and on a longer name it would have cut the name too. The qualifier is now
+`ModelEffortPickerPresentation.Model.detail`, drawn under the name in the detail face and the
+tertiary tier — the two-line shape a subtitled list row already has — and the accessibility value
+says both. The name stays whole, the column stays 156 points, and the mobile picker, which marks
+its default its own way, is unchanged. `ModelEffortPickerRenderTests` renders the marked row with
+its detail and asserts the accessibility value; the words are phrases (*Account default*, *Last
+used*) rather than the menus' parenthesised suffixes, because a line under a name is not an
+aside.

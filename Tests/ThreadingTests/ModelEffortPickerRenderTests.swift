@@ -38,6 +38,18 @@ final class ModelEffortPickerRenderTests: XCTestCase {
         )
     }
 
+    /// The marked row's provenance is a second line rather than the tail of its name — appended,
+    /// "(account default)" was truncated at the column's width and took the name's end with it.
+    /// The accessibility value still says both.
+    func testTheMarkedRowReadsItsProvenanceBesideItsName() {
+        let matrix = ModelEffortMatrixControl(presentation: presentation(), onChoose: { _, _ in })
+
+        XCTAssertEqual(
+            matrix.accessibilityValue() as? String,
+            "GPT-5.6 Sol, Account default, Ultra"
+        )
+    }
+
     func testAxisHighlightStaysBetweenTheThemesRestingAndHoverStates() throws {
         let pure = try XCTUnwrap(
             AppThemeLibrary.stock.first { $0.name == "Pure" }
@@ -178,7 +190,8 @@ final class ModelEffortPickerRenderTests: XCTestCase {
             models: [
                 .init(
                     id: "sol",
-                    name: "GPT-5.6 Sol · Default",
+                    name: "GPT-5.6 Sol",
+                    detail: "Account default",
                     representedValue: nil,
                     supportedEffortIDs: ["medium", "high", "xhigh", "max", "ultra"]
                 ),

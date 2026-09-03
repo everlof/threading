@@ -1956,12 +1956,12 @@ final class SessionComposerViewController: NSViewController {
     /// — the user knows they have not chosen one — while the thing they actually want to know
     /// is what this session will run on, which the account's own settings already state.
     private func modelChipTitle(for account: AgentAccount?) -> String {
-        if let selectedModel { return ModelName.display(for: selectedModel) }
+        if let selectedModel { return AgentModels.displayName(for: selectedModel, account: account) }
 
         guard let resolved = resolvedDefaultModel(for: account).identifier else {
             return ComposerDefaults.defaultModelTitle
         }
-        return ModelName.display(for: resolved)
+        return AgentModels.displayName(for: resolved, account: account)
     }
 
     /// Nothing is running here, so the runtime cannot report — but this login may have run
@@ -1994,7 +1994,7 @@ final class SessionComposerViewController: NSViewController {
         // A model named as the one this session starts on unless something else is chosen, with
         // where that came from — a setting on the account, or what it last ran.
         func markedTitle(_ model: String) -> String {
-            "\(ModelName.display(for: model))\(ComposerDefaults.suffix(for: resolved.source))"
+            "\(AgentModels.displayName(for: model, account: account))\(ComposerDefaults.suffix(for: resolved.source))"
         }
 
         var items: [ThemedMenuEntry] = []
@@ -2031,7 +2031,9 @@ final class SessionComposerViewController: NSViewController {
         items += models.map { model in
             let isDefault = markedInList && model == resolved.identifier
             var item = ThemedMenuItem(
-                title: isDefault ? markedTitle(model) : ModelName.display(for: model),
+                title: isDefault
+                    ? markedTitle(model)
+                    : AgentModels.displayName(for: model, account: account),
                 representedValue: isDefault ? nil : model,
                 isSelected: isDefault
                     ? (selectedModel == nil || selectedModel == model)
@@ -2127,9 +2129,10 @@ final class SessionComposerViewController: NSViewController {
         let markedInList = resolved.identifier.map { identifier in
             options.contains { $0.identifier == identifier }
         } ?? false
-        func markedTitle(_ option: AgentModelOption) -> String {
-            "\(option.displayName)\(ComposerDefaults.suffix(for: resolved.source))"
-        }
+        // The qualifier is the marked row's second line, not part of its name: appended,
+        // "(account default)" was truncated at the column's width and took the tail of the
+        // name with it.
+        let qualifier = ComposerDefaults.qualifier(for: resolved.source)
 
         var models: [ModelEffortPickerPresentation.Model] = []
         if !markedInList {
@@ -2138,8 +2141,10 @@ final class SessionComposerViewController: NSViewController {
             }
             models.append(.init(
                 id: resolved.identifier ?? "threading.model-effort.default-model",
-                name: resolved.identifier.map(ModelName.display)
+                name: resolvedOption?.displayName
+                    ?? resolved.identifier.map { AgentModels.displayName(for: $0, account: account) }
                     ?? ComposerDefaults.defaultModelTitle,
+                detail: resolved.identifier == nil ? nil : qualifier,
                 representedValue: nil,
                 supportedEffortIDs: Set(resolvedOption?.reasoningLevels.map(\.effort) ?? [])
             ))
@@ -2149,7 +2154,8 @@ final class SessionComposerViewController: NSViewController {
             let isDefault = markedInList && option.identifier == resolved.identifier
             return .init(
                 id: option.identifier,
-                name: isDefault ? markedTitle(option) : option.displayName,
+                name: option.displayName,
+                detail: isDefault ? qualifier : nil,
                 representedValue: isDefault ? nil : option.identifier,
                 supportedEffortIDs: Set(option.reasoningLevels.map(\.effort))
             )
@@ -2681,6 +2687,18 @@ enum ComposerDefaults {
         switch source {
         case .accountConfiguration, .reportedByRuntime: return accountDefaultSuffix
         case .rememberedFromEarlierRun: return lastUsedSuffix
+        }
+    }
+
+    /// The same provenance for the model-by-effort picker, whose marked row carries it on a
+    /// line of its own under the name — so it is a phrase rather than a parenthesis.
+    static var accountDefaultQualifier: String { L10n.string("Account default") }
+    static var lastUsedQualifier: String { L10n.string("Last used") }
+
+    static func qualifier(for source: ResolvedDefaultModel.Source) -> String {
+        switch source {
+        case .accountConfiguration, .reportedByRuntime: return accountDefaultQualifier
+        case .rememberedFromEarlierRun: return lastUsedQualifier
         }
     }
     static var newWorktreeTitle: String { L10n.string("New Worktree…") }

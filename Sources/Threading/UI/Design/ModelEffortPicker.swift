@@ -10,8 +10,27 @@ struct ModelEffortPickerPresentation: Equatable {
     struct Model: Equatable {
         let id: String
         let name: String
+        /// Where the name came from, on the row that leaves the choice to the agent — "Account
+        /// default", "Last used". Drawn under the name rather than appended to it: appended,
+        /// it was truncated to "(account d…" at the column's width, and took the tail of the
+        /// name it qualified with it.
+        let detail: String?
         let representedValue: String?
         let supportedEffortIDs: Set<String>
+
+        init(
+            id: String,
+            name: String,
+            detail: String? = nil,
+            representedValue: String?,
+            supportedEffortIDs: Set<String>
+        ) {
+            self.id = id
+            self.name = name
+            self.detail = detail
+            self.representedValue = representedValue
+            self.supportedEffortIDs = supportedEffortIDs
+        }
     }
 
     struct Effort: Equatable {
@@ -177,6 +196,7 @@ final class ModelEffortMatrixControl: ThemedControl {
         static var rowHeight: CGFloat { 48 }
         static var horizontalCellInset: CGFloat { 4 }
         static var verticalCellInset: CGFloat { 6 }
+        static var detailGap: CGFloat { Design.Spacing.hairline }
         static var beacon: CGFloat { 7 }
         static var selectedBeacon: CGFloat { 11 }
         static var axisHoverProgress: CGFloat { 0.46 }
@@ -399,26 +419,58 @@ final class ModelEffortMatrixControl: ThemedControl {
     }
 
     private func drawModel(_ row: Int, in rect: NSRect) {
-        let selected = presentation.models[row].id == presentation.selectedModelID
+        let model = presentation.models[row]
+        let selected = model.id == presentation.selectedModelID
         let onActiveRow = activeCell?.row == row
         let showsHide = hoveredModelRow == row && canHideModel(at: row)
-        drawText(
-            presentation.models[row].name,
-            in: NSRect(
-                x: Design.Spacing.small,
-                y: rect.minY,
-                width: Layout.modelWidth - Design.Spacing.medium - (showsHide ? 26 : 0),
-                height: rect.height
-            ),
-            font: selected || onActiveRow
-                ? Design.Typography.control()
-                : Design.Typography.controlRegular(),
-            color: onActiveRow
-                ? Design.Surface.accent
-                : (selected ? Design.Text.label : Design.Text.secondary),
-            alignment: .left
+        let nameFont = selected || onActiveRow
+            ? Design.Typography.control()
+            : Design.Typography.controlRegular()
+        let nameColor = onActiveRow
+            ? Design.Surface.accent
+            : (selected ? Design.Text.label : Design.Text.secondary)
+        let column = NSRect(
+            x: Design.Spacing.small,
+            y: rect.minY,
+            width: Layout.modelWidth - Design.Spacing.medium - (showsHide ? 26 : 0),
+            height: rect.height
         )
+
+        if let detail = model.detail {
+            // Two lines stacked around the row's middle: the name first, the qualifier under
+            // it in the quietest tier, so the row still leads with the model and its
+            // provenance reads as a note rather than as part of the name.
+            let detailFont = Design.Typography.detail()
+            let nameHeight = lineHeight(of: nameFont)
+            let detailHeight = lineHeight(of: detailFont)
+            let top = column.midY - (nameHeight + Layout.detailGap + detailHeight) / 2
+            drawText(
+                model.name,
+                in: NSRect(x: column.minX, y: top, width: column.width, height: nameHeight),
+                font: nameFont,
+                color: nameColor,
+                alignment: .left
+            )
+            drawText(
+                detail,
+                in: NSRect(
+                    x: column.minX,
+                    y: top + nameHeight + Layout.detailGap,
+                    width: column.width,
+                    height: detailHeight
+                ),
+                font: detailFont,
+                color: Design.Text.tertiary,
+                alignment: .left
+            )
+        } else {
+            drawText(model.name, in: column, font: nameFont, color: nameColor, alignment: .left)
+        }
         if showsHide { drawHideModelButton(row: row) }
+    }
+
+    private func lineHeight(of font: NSFont) -> CGFloat {
+        NSAttributedString(string: " ", attributes: [.font: font]).size().height
     }
 
     private func drawCell(_ cell: Cell, in rect: NSRect) {
@@ -751,9 +803,9 @@ final class ModelEffortMatrixControl: ThemedControl {
             setAccessibilityValue(nil)
             return
         }
-        setAccessibilityValue(
-            "\(presentation.models[cell.row].name), \(presentation.efforts[cell.column].name)"
-        )
+        let model = presentation.models[cell.row]
+        let name = model.detail.map { "\(model.name), \($0)" } ?? model.name
+        setAccessibilityValue("\(name), \(presentation.efforts[cell.column].name)")
     }
 
     private func updateUltraAnimation() {

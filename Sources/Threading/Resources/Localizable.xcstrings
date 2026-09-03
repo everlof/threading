@@ -21990,6 +21990,17 @@
         }
       }
     },
+    "Last used" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Senast använd"
+          }
+        }
+      }
+    },
     "Last used %@, outside the %@ restore window." : {
       "extractionState" : "manual",
       "localizations" : {

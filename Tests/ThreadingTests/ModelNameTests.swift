@@ -41,6 +41,86 @@ final class ModelNameTests: XCTestCase {
         XCTAssertEqual(ModelName.display(for: "   "), "   ")
     }
 
+    /// The bug that started this: the table matched by prefix, so `claude-fable-5-1` hit the
+    /// `claude-fable-5` row and the login pinned to Fable 5.1 was told it ran Fable 5. The
+    /// version is read out of the id now, so a release this file has never seen reads as
+    /// itself.
+    func testAMinorVersionIsNotCollapsedIntoItsMajor() {
+        XCTAssertEqual(ModelName.display(for: "claude-fable-5-1[1m]"), "Fable 5.1 · 1M")
+        XCTAssertEqual(ModelName.display(for: "claude-fable-5-1"), "Fable 5.1")
+        XCTAssertEqual(ModelName.display(for: "claude-opus-4-1-20250805"), "Opus 4.1")
+        XCTAssertEqual(ModelName.display(for: "claude-mythos-5-1"), "Mythos 5.1")
+        XCTAssertEqual(ModelName.display(for: "CLAUDE-OPUS-5[1M]"), "Opus 5 · 1M")
+    }
+
+    /// The 3.x generation wrote the version before the family.
+    func testTheOlderVersionFirstShapeReadsTheSameWay() {
+        XCTAssertEqual(ModelName.display(for: "claude-3-5-sonnet-20241022"), "Sonnet 3.5")
+        XCTAssertEqual(ModelName.display(for: "claude-3-opus-20240229"), "Opus 3")
+    }
+
+    /// A shape this has not seen is left verbatim rather than half-read. `opusplan` used to
+    /// read "Opus" by prefix, and it is not Opus: it is Opus for planning and Sonnet otherwise.
+    func testAnUnfamiliarShapeInAKnownFamilyIsNotGuessed() {
+        XCTAssertEqual(ModelName.display(for: "opusplan"), "opusplan")
+        XCTAssertEqual(ModelName.display(for: "claude-opus-4-8-fast"), "claude-opus-4-8-fast")
+        XCTAssertEqual(ModelName.display(for: "claude-opus"), "claude-opus")
+        XCTAssertEqual(ModelName.display(for: "claude-opus-4-800"), "claude-opus-4-800")
+        XCTAssertEqual(ModelName.display(for: "claude-quasar-9"), "claude-quasar-9")
+    }
+
+    func testOnlyAFullIdentifierNamesAVersion() {
+        XCTAssertTrue(ModelName.isVersioned("claude-opus-5"))
+        XCTAssertTrue(ModelName.isVersioned("claude-fable-5-1[1m]"))
+        XCTAssertFalse(ModelName.isVersioned("opus"))
+        XCTAssertFalse(ModelName.isVersioned("fable[1m]"))
+        XCTAssertFalse(ModelName.isVersioned("gpt-5-codex"))
+    }
+
+    // MARK: - An alias named after what it resolved to
+
+    /// `opus` is whatever Opus is newest at launch, so its row could only say "Opus" until the
+    /// login has watched it resolve. The long-context mark follows the alias, since the alias
+    /// is what will launch — and a transcript records the model without that suffix anyway.
+    func testAnAliasBorrowsTheVersionItWasWatchedResolvingTo() {
+        XCTAssertEqual(
+            ModelName.versionedDisplay(for: "opus", resolvedAs: "claude-opus-5"),
+            "Opus 5"
+        )
+        XCTAssertEqual(
+            ModelName.versionedDisplay(for: "fable[1m]", resolvedAs: "claude-fable-5-1[1m]"),
+            "Fable 5.1 · 1M"
+        )
+        XCTAssertEqual(
+            ModelName.versionedDisplay(for: "fable[1m]", resolvedAs: "claude-fable-5-1"),
+            "Fable 5.1 · 1M"
+        )
+        XCTAssertEqual(
+            ModelName.versionedDisplay(for: "haiku", resolvedAs: "claude-haiku-4-5-20251001"),
+            "Haiku 4.5"
+        )
+    }
+
+    /// Nothing to add is nil, and so is an answer from another family: a mis-keyed record must
+    /// not rename Opus after Sonnet.
+    func testAnAliasKeepsItsOwnNameWhereTheAnswerCannotBeTrusted() {
+        XCTAssertNil(ModelName.versionedDisplay(for: "claude-opus-5", resolvedAs: "claude-opus-5"))
+        XCTAssertNil(ModelName.versionedDisplay(for: "opus", resolvedAs: "claude-sonnet-5"))
+        XCTAssertNil(ModelName.versionedDisplay(for: "opus", resolvedAs: "opus"))
+        XCTAssertNil(ModelName.versionedDisplay(for: "opus", resolvedAs: "claude-quasar-9"))
+        XCTAssertNil(ModelName.versionedDisplay(for: "gpt-5-codex", resolvedAs: "gpt-5-codex-2"))
+    }
+
+    /// The CLI caches an id this cannot read with its own word for it, and the mark this does
+    /// understand still comes from the id.
+    func testTheServicesOwnNameKeepsTheLongContextMark() {
+        XCTAssertEqual(
+            ModelName.display(serviceLabel: "Quasar", for: "claude-quasar-9[1m]"),
+            "Quasar · 1M"
+        )
+        XCTAssertEqual(ModelName.display(serviceLabel: "Quasar", for: "claude-quasar-9"), "Quasar")
+    }
+
     func testClaudeEffortComesFromTheRoutedAccountsSettings() throws {
         let directory = try temporaryAccountDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -160,6 +160,7 @@ enum AgentModels {
             let cached = claudeAdditionalModels(account: account)
                 .filter { !known.contains($0.identifier) }
             return byCapability(aliases + cached, aliases: known)
+                .map { versioned($0, for: kind, account: account) }
         case .codex:
             let catalog = codexCatalog(account: account)
             if !catalog.isEmpty { return catalog }
@@ -484,6 +485,7 @@ enum AgentModels {
         return option(
             identifier: resolvedModel,
             for: kind,
+            account: account,
             among: modelOptions
         )?.supports(reasoningEffort: reasoningEffort) == true
     }
@@ -559,13 +561,34 @@ enum AgentModels {
         option(
             identifier: identifier,
             for: kind,
+            account: account,
             among: options(for: kind, account: account)
         )
+    }
+
+    /// The name a chip or a status line gives `identifier` on this login.
+    ///
+    /// `ModelName.display` reads the id alone, and an alias's id says no version. This is the
+    /// same reading the catalogue's rows get: the alias named after what the login last
+    /// watched it resolve to, so the chip that says "Opus 5" and the row that says "Opus 5" are
+    /// one answer. Without a login — or a runtime whose models are not aliases — it is the
+    /// plain reading.
+    static func displayName(for identifier: String, account: AgentAccount?) -> String {
+        guard let account,
+              account.provider.supports(.modelAliasResolution),
+              let resolved = ModelAliasResolutionStore.shared.resolvedModel(
+                forLaunched: identifier,
+                in: account.id
+              ),
+              let versioned = ModelName.versionedDisplay(for: identifier, resolvedAs: resolved)
+        else { return ModelName.display(for: identifier) }
+        return versioned
     }
 
     private static func option(
         identifier: String?,
         for kind: AgentKind,
+        account: AgentAccount?,
         among options: [AgentModelOption]
     ) -> AgentModelOption? {
         guard let identifier, !identifier.isEmpty else { return nil }
@@ -580,9 +603,13 @@ enum AgentModels {
             // Settings and transcripts may name a dated or long-context variant that is not a
             // picker row. Claude's effort contract is session-wide, so the resolved model still
             // has real metadata even when its identifier came from outside the host catalog.
-            return claudeOption(
-                identifier: identifier,
-                displayName: ModelName.display(for: identifier)
+            return versioned(
+                claudeOption(
+                    identifier: identifier,
+                    displayName: ModelName.display(for: identifier)
+                ),
+                for: kind,
+                account: account
             )
         case .codex, .grok, .openCode, .cursor:
             return nil
@@ -686,10 +713,10 @@ enum AgentModels {
 
     /// The models this login may select beyond the documented aliases.
     ///
-    /// The CLI's own label is preferred only where `ModelName` does not recognise the id — it
+    /// The CLI's own name for a model is used only where `ModelName` cannot read the id — it
     /// returns an unknown identifier verbatim, and a raw `claude-…-5[1m]` in a menu is worse
     /// than the service's own word for it. Where both know the model, ours wins so one model
-    /// reads the same on the chip, the pill and this row.
+    /// reads the same on the chip, the pill and this row. See `cachedModelName`.
     ///
     /// The list is read per entry. It is a menu of independent choices, and the `compactMap`
     /// below already drops an entry with no usable `value` while keeping its neighbours — so
@@ -711,13 +738,66 @@ enum AgentModels {
             guard let identifier = entry["value"] as? String, !identifier.isEmpty else {
                 return nil
             }
-            let display = ModelName.display(for: identifier)
-            let label = entry["label"] as? String
             return claudeOption(
                 identifier: identifier,
-                displayName: display == identifier ? (label ?? identifier) : display
+                displayName: cachedModelName(identifier: identifier, entry: entry)
             )
         }
+    }
+
+    /// Ours where the id can be read, so one model reads the same on the chip, the pill and
+    /// the row; the service's own words where it cannot.
+    ///
+    /// The description is preferred to the label because it says more: the CLI caches
+    /// `claude-fable-5-1[1m]` with the label "Fable" and the description "Fable 5.1 · Most
+    /// capable…", and a row that borrowed the label would drop the version that is the whole
+    /// difference between this entry and the alias above it. Only a description in the CLI's
+    /// `<name> · <blurb>` shape is read; one without the separator is a blurb alone.
+    private static func cachedModelName(identifier: String, entry: [String: Any]) -> String {
+        if ModelName.read(identifier) != nil {
+            return ModelName.display(for: identifier)
+        }
+        let described: String? = (entry["description"] as? String).flatMap { description in
+            let parts = description.components(
+                separatedBy: AgentDefaults.claudeModelDescriptionSeparator
+            )
+            return parts.count > 1 ? parts[0] : nil
+        }
+        let name = [described, entry["label"] as? String]
+            .compactMap { $0?.trimmingCharacters(in: .whitespaces) }
+            .first { !$0.isEmpty && $0.utf8.count <= AgentDefaults.claudeModelLabelMaximumBytes }
+        guard let name else { return ModelName.display(for: identifier) }
+        return ModelName.display(serviceLabel: name, for: identifier)
+    }
+
+    /// The alias row named after what this login watched it resolve to, or the row as it was.
+    ///
+    /// The identifier is untouched — the alias is what launches, and that is what keeps the row
+    /// following the CLI's latest — and only the name changes, so hiding, sorting and selection
+    /// all keep working on the same id. A login that has never launched the alias, a runtime
+    /// whose catalogue has no aliases, and an id that names its own version all come back as
+    /// they went in.
+    private static func versioned(
+        _ option: AgentModelOption,
+        for kind: AgentKind,
+        account: AgentAccount?
+    ) -> AgentModelOption {
+        guard kind.supports(.modelAliasResolution),
+              let account,
+              let resolved = ModelAliasResolutionStore.shared.resolvedModel(
+                forLaunched: option.identifier,
+                in: account.id
+              ),
+              let name = ModelName.versionedDisplay(for: option.identifier, resolvedAs: resolved)
+        else { return option }
+        return AgentModelOption(
+            identifier: option.identifier,
+            displayName: name,
+            fastServiceTier: option.fastServiceTier,
+            defaultServiceTier: option.defaultServiceTier,
+            defaultReasoningLevel: option.defaultReasoningLevel,
+            reasoningLevels: option.reasoningLevels
+        )
     }
 
     /// Claude documents one session-level effort set rather than per-model subsets. Attaching

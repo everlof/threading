@@ -231,6 +231,9 @@ final class ClaudeAccountModelDiscoveryTests: XCTestCase {
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: configDirectory)
         configDirectory = nil
+        // The alias resolutions are process-wide and persisted; a login that "resolved" opus in
+        // one test must not name the next test's rows.
+        ModelAliasResolutionStore.shared.forgetAll()
         try super.tearDownWithError()
     }
 
@@ -281,6 +284,115 @@ final class ClaudeAccountModelDiscoveryTests: XCTestCase {
 
         XCTAssertEqual(options.last?.identifier, "claude-quasar-9")
         XCTAssertEqual(options.last?.displayName, "Quasar")
+    }
+
+    /// The cache names Fable 5.1 twice — in the id and in the description — and the row used to
+    /// read "Fable 5" for it, because the friendly-name table matched `claude-fable-5` by
+    /// prefix. Ours still wins over the service's label, and ours now reads the version out of
+    /// the id.
+    func testACachedMinorVersionReadsAsItself() throws {
+        try writeState(#"""
+        {"additionalModelOptionsCache": [
+          {"value": "claude-fable-5-1[1m]", "label": "Fable",
+           "description": "Fable 5.1 · Most capable for your hardest and longest-running tasks"}
+        ]}
+        """#)
+
+        let options = AgentModels.options(for: .claude, account: account())
+
+        XCTAssertEqual(options[1].identifier, "claude-fable-5-1[1m]")
+        XCTAssertEqual(options[1].displayName, "Fable 5.1 · 1M")
+    }
+
+    /// For an id `ModelName` cannot read, the CLI's description says more than its label —
+    /// `Quasar 9 · blurb` against `Quasar` — and the name before the separator is what the CLI's
+    /// own picker shows. The long-context mark still comes from the id.
+    func testAnUnrecognisedModelPrefersTheServicesDescribedName() throws {
+        try writeState(#"""
+        {"additionalModelOptionsCache": [
+          {"value": "claude-quasar-9[1m]", "label": "Quasar",
+           "description": "Quasar 9 · Built for the unknown"}
+        ]}
+        """#)
+
+        XCTAssertEqual(
+            AgentModels.options(for: .claude, account: account()).last?.displayName,
+            "Quasar 9 · 1M"
+        )
+    }
+
+    /// A description without the CLI's separator is a blurb, not a name, and the label stands.
+    func testADescriptionWithoutANameFallsBackToTheLabel() throws {
+        try writeState(#"""
+        {"additionalModelOptionsCache": [
+          {"value": "claude-quasar-9", "label": "Quasar",
+           "description": "Built for the unknown"}
+        ]}
+        """#)
+
+        XCTAssertEqual(
+            AgentModels.options(for: .claude, account: account()).last?.displayName,
+            "Quasar"
+        )
+    }
+
+    // MARK: - An alias named after what it resolved to
+
+    /// `opus` names a family, and only the runtime knows which Opus it is today. Once the login
+    /// has been watched launching it, the row says so — while the identifier stays the alias,
+    /// so the launch keeps following the CLI's latest. Every surface reads the same answer.
+    func testAnAliasRowNamesTheVersionTheLoginLastResolvedItTo() {
+        let login = account()
+        ModelAliasResolutionStore.shared.record("claude-opus-5", forLaunched: "opus", in: login.id)
+
+        let options = AgentModels.options(for: .claude, account: login)
+        let opus = options.first { $0.identifier == "opus" }
+
+        XCTAssertEqual(opus?.displayName, "Opus 5")
+        XCTAssertEqual(opus?.identifier, "opus")
+        XCTAssertEqual(
+            options.first { $0.identifier == "sonnet" }?.displayName,
+            "Sonnet",
+            "an alias the login has not launched keeps its family name rather than a guess"
+        )
+        XCTAssertEqual(AgentModels.displayName(for: "opus", account: login), "Opus 5")
+        XCTAssertEqual(
+            AgentModels.option(identifier: "opus", for: .claude, account: login)?.displayName,
+            "Opus 5"
+        )
+    }
+
+    /// A configured long-context alias outside the catalogue reads its version the same way —
+    /// that is the row the composer marks as the account default.
+    func testAConfiguredAliasOutsideTheCatalogueIsVersionedToo() {
+        let login = account()
+        ModelAliasResolutionStore.shared.record(
+            "claude-fable-5-1[1m]",
+            forLaunched: "fable[1m]",
+            in: login.id
+        )
+
+        XCTAssertEqual(
+            AgentModels.option(identifier: "fable[1m]", for: .claude, account: login)?.displayName,
+            "Fable 5.1 · 1M"
+        )
+        XCTAssertEqual(
+            AgentModels.options(for: .claude, account: login, including: "fable[1m]")
+                .first { $0.identifier == "fable[1m]" }?.displayName,
+            "Fable 5.1 · 1M"
+        )
+    }
+
+    func testAnotherLoginsResolutionDoesNotNameThisOnesRow() {
+        let other = AccountID(provider: .claude, handle: .named("someone-else"))
+        ModelAliasResolutionStore.shared.record("claude-opus-5", forLaunched: "opus", in: other)
+
+        XCTAssertEqual(
+            AgentModels.options(for: .claude, account: account())
+                .first { $0.identifier == "opus" }?.displayName,
+            "Opus"
+        )
+        XCTAssertEqual(AgentModels.displayName(for: "opus", account: nil), "Opus")
     }
 
     // MARK: - The order
