@@ -1,10 +1,16 @@
 # Native Extension Tier
 
-> **Draft.** Platform facts measured 2026-09-01. Nothing implemented. This is the tier that
-> [`device-and-simulator-logs.md`](device-and-simulator-logs.md) and
-> [`network-inspector-extension.md`](network-inspector-extension.md) are both gated on. Read Host
-> gap 2 of the traffic inspector draft first: it proposes a *different* answer to the same
-> problem, and this draft argues they should coexist rather than compete.
+> **Plan A shipped 2026-09-02.** The durable decisions are in
+> [`docs/architecture/plugins.md`](../architecture/plugins.md) — read that before changing the
+> tier. This file remains as the delivery plan and the decision record: the platform facts measured
+> 2026-09-01, why Plan B is worth keeping, and the implementation record appended as it was built.
+> **Plan B, the crash-isolated ExtensionKit appex, is still proposed and not started**, and the
+> third-party install flow is still open.
+>
+> Read Host gap 2 of [`network-inspector-extension.md`](network-inspector-extension.md) alongside
+> this: it proposes a *different* answer to the same problem — sandboxable for untrusted code and
+> renderable on the iPhone — and this draft argues they coexist rather than compete. Shipping Plan A
+> did not answer it.
 
 ## The problem, stated once
 
@@ -522,13 +528,42 @@ keeps the two copies apart, so a first-party plugin has to load like any other.
 declare. Turning the sandbox off for the whole target to gain a build step is a bad trade when a
 native target needs neither.
 
+### A plugin can offer the agent tools
+
+Contract version 3 adds two optional members: `pluginTools`, read once when the plugin loads, and
+`invokeTool(named:argumentsJSON:completion:)`. Both are optional because a plugin that only draws is
+a complete plugin. Schemas and arguments travel as JSON *text* for the same reason the theme payload
+is a class — the entry point is an `@objc` protocol, and the Objective-C runtime the loader depends
+on cannot carry a Swift enum tree. The host parses at its own edge, so `ThreadingPluginKit` still
+depends on neither side's model.
+
+Nothing in the MCP core changed to allow this, which is what the seam promised.
+`NativePluginMCPToolProvider` is a second `MCPExternalToolProvider` beside the extension tier's, so
+plugin tools reach the catalogue, the wire format, the Settings tool groups and the dispatcher by
+the same path the built-in tools use. The registry now holds a *list* of providers rather than one;
+`invokeTool`'s existing "false when this provider does not own the name" was already the mechanism
+for asking each in turn.
+
+Names are namespaced by the plugin's identity — `plugin__devicelogs__search` — so two plugins
+offering `search` are two tools, and a name in a transcript says which one ran.
+
+Two things are deliberate in the failure paths. A tool call for a plugin whose pane is **closed**
+answers with a reason rather than reporting no such tool: the tool exists, it has nothing to act on,
+and the agent can ask for the pane to be opened. And the reply hops to the main actor rather than
+assuming it — a tool answers when its own work does, a store query completes on the queue that owns
+the store, and `assumeIsolated` off the main thread is a trap rather than a check.
+
+Device Logs offers five: `search` over everything recorded, `focus` to fold the rest away,
+`clear_focus`, `time_range`, and `visible` for what is on screen now. `focus` moves the pane's own
+controls rather than holding a second invisible state, because the person watching has to be able to
+see what the agent did to their view and undo it.
+
 ### Still open
 
-The **third-party** path is proven but has no install flow: a bundle is placed in
-`~/Library/Application Support/Threading/Plugins` by hand and trusted only if signed by an
-allowlisted team, which today means Threading's own. Opening that to other teams needs a review
-surface and a quarantine policy for a plugin that crashes — `pluginIdentifier` exists so that
-policy can name one rather than point at a path.
+The third-party path still has no install flow, and opening the allowlist to other teams needs a
+review surface and a crash-quarantine policy. A plugin's tools are also read once at load: a plugin
+whose tool list changed while running would be a tool that sometimes exists, so that is stated
+rather than supported.
 
 ## Reopen / revisit triggers
 
@@ -536,7 +571,9 @@ policy can name one rather than point at a path.
 - The web surface lands first and turns out to be good enough for logs, which would demote A to a
   first-party-only convenience.
 - Any decision to turn library validation on, or to drop the `disable-library-validation`
-  entitlement, which would break A entirely and needs to be a conscious trade rather than a
-  signing tidy-up.
+  entitlement. This originally read "would break A entirely", which is too strong and is corrected
+  in [`plugins.md`](../architecture/plugins.md): library validation permits same-team code, and the
+  first-party plugin is signed with Threading's own team, so it would survive. What it forecloses is
+  the third-party half. Still a conscious trade rather than a signing tidy-up.
 - A re-measurement of the third row above on a SIP-enabled Mac. Either answer belongs in
   `permissions.md`, because it decides whether that entitlement is documentation or a dependency.

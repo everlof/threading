@@ -505,7 +505,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         // which is exactly what recovery leaves it as. All three are extension seams, and an
         // unfilled slot means every component draws its own answer rather than a package's.
         if plan.startsExtensions {
-            MCPExternalToolRegistry.shared.provider = ExtensionMCPToolProvider()
+            MCPExternalToolRegistry.shared.register(ExtensionMCPToolProvider())
+            MCPExternalToolRegistry.shared.register(NativePluginMCPToolProvider())
             installComponentCustomizationProvider()
             ExtensionIdentityResolverProviderSlot.shared.provider =
                 ExtensionIdentityResolverRegistry.shared

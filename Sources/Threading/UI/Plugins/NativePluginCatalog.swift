@@ -4,7 +4,7 @@ import ThreadingPluginKit
 /// Where native plugins live, and who is allowed to be one.
 ///
 /// This is the trusted tier described in
-/// [`native-extension-tier.md`](../../../../docs/feature-drafts/native-extension-tier.md): a bundle
+/// [`plugins.md`](../../../../docs/architecture/plugins.md): a bundle
 /// Threading `dlopen`s into its own process, with full AppKit and no sandbox. It exists beside the
 /// safe WebAssembly tier rather than replacing it, and the install review has to say plainly which
 /// one a thing is.
@@ -130,9 +130,10 @@ enum NativePluginCatalog {
 
     /// The host's current appearance, as the narrow value a plugin is given.
     ///
-    /// Tokens today. Once `ThreadingDesignKit` exists a plugin links the real components and this
-    /// shrinks to whatever they cannot resolve for themselves — see the extraction plan in
-    /// `native-extension-tier.md`.
+    /// Two layers, and the second is the one that matters. The seven tokens are the floor, for a
+    /// plugin that links nothing; `encodedTheme` carries the whole theme, and a plugin linking
+    /// `ThreadingDesignKit` resolves every role, radius, bevel and font from it exactly as the
+    /// application does. See `plugins.md`.
     static func theme() -> PluginTheme {
         PluginTheme(
             background: Design.Surface.ground,

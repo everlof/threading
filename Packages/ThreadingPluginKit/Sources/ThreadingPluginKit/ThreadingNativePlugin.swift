@@ -8,7 +8,7 @@ public enum ThreadingPluginAPI {
     /// A plugin records the value it was compiled against in `pluginAPIVersion`; the host refuses
     /// a mismatch rather than calling into a differently-shaped protocol. Bump this whenever a
     /// member is added, removed or re-typed.
-    public static let version = 2
+    public static let version = 3
 }
 
 // MARK: - Theme
@@ -24,7 +24,7 @@ public enum ThreadingPluginAPI {
 /// this framework. A plugin that links `ThreadingDesignKit` should prefer `encodedTheme`, which
 /// carries the host's whole theme rather than seven values sampled from it — the components then
 /// resolve every colour, radius, bevel and font themselves, exactly as the application's do. See
-/// `docs/feature-drafts/native-extension-tier.md`.
+/// `docs/architecture/plugins.md`.
 @objc(ThreadingPluginTheme)
 public final class PluginTheme: NSObject {
     public let background: NSColor
@@ -95,6 +95,48 @@ public final class PluginContext: NSObject {
     }
 }
 
+// MARK: - Tools
+
+/// A tool a plugin contributes to the agent.
+///
+/// The schema travels as a JSON *string* for the same reason the payloads above are classes: the
+/// entry point is an `@objc` protocol, and the Objective-C runtime the loader depends on cannot
+/// carry a Swift enum tree. The host parses it at its own edge.
+///
+/// `name` is unqualified — `search`, not `device_log_search`. The host prefixes it with the
+/// plugin's identity so two plugins cannot collide, and so a name in a transcript says where it
+/// came from.
+@objc(ThreadingPluginTool)
+public final class PluginTool: NSObject {
+    public let name: String
+    /// Shown in Settings beside Threading's own tool groups.
+    public let title: String
+    /// One line, for the group's row.
+    public let detail: String
+    public let symbol: String
+    /// What the agent reads when deciding whether to call it.
+    public let summary: String
+    /// A JSON Schema object, as text.
+    public let inputSchemaJSON: String
+
+    public init(
+        name: String,
+        title: String,
+        detail: String,
+        symbol: String,
+        summary: String,
+        inputSchemaJSON: String
+    ) {
+        self.name = name
+        self.title = title
+        self.detail = detail
+        self.symbol = symbol
+        self.summary = summary
+        self.inputSchemaJSON = inputSchemaJSON
+        super.init()
+    }
+}
+
 // MARK: - The contract
 
 /// A natively rendered pane supplied by a loadable bundle.
@@ -123,4 +165,23 @@ public protocol ThreadingNativePlugin: NSObjectProtocol {
 
     /// Called after `makePaneView`, and again on every live theme change.
     @objc func apply(theme: PluginTheme)
+
+    /// Tools this plugin offers the agent, if any.
+    ///
+    /// Optional because a plugin that only draws is a complete plugin. Read once when the plugin
+    /// loads: a tool list that changed underneath the agent's own discovery would be a tool that
+    /// sometimes exists.
+    @objc optional var pluginTools: [PluginTool] { get }
+
+    /// Runs one of them.
+    ///
+    /// `argumentsJSON` is the object the agent sent; the reply is text and whether it is an error,
+    /// which is what an MCP result carries. Asynchronous because a tool may have to ask the thing
+    /// it is a tool for — a query against a store, a pane that has to lay out — and blocking the
+    /// caller to do it would block the agent.
+    @objc optional func invokeTool(
+        named name: String,
+        argumentsJSON: String,
+        completion: @escaping (String, Bool) -> Void
+    )
 }

@@ -111,14 +111,28 @@ struct MCPExternalToolsDidChange: AppEvent {
 final class MCPExternalToolRegistry {
     static let shared = MCPExternalToolRegistry()
 
-    var provider: (any MCPExternalToolProvider)? {
+    /// More than one, because tools now come from two places: the safe extension tier and the
+    /// native plugin tier. `invokeTool` already answered "false when this provider does not own the
+    /// name", which is the whole mechanism for asking each in turn — this only stops there being
+    /// exactly one to ask.
+    private(set) var providers: [any MCPExternalToolProvider] = [] {
         didSet {
             NotificationCenter.default.post(MCPExternalToolsDidChange())
         }
     }
 
+    func register(_ provider: any MCPExternalToolProvider) {
+        providers.append(provider)
+    }
+
+    /// Announces that a provider's tools changed without changing the list itself — a plugin
+    /// loading brings tools with it.
+    func toolsDidChange() {
+        NotificationCenter.default.post(MCPExternalToolsDidChange())
+    }
+
     var groups: [MCPExternalToolGroup] {
-        provider?.groups ?? []
+        providers.flatMap(\.groups)
     }
 
     @discardableResult
@@ -128,11 +142,15 @@ final class MCPExternalToolRegistry {
         for sessionID: SessionID,
         completion: @escaping (MCPExternalToolResponse) -> Void
     ) -> Bool {
-        provider?.invokeTool(
+        for provider in providers
+        where provider.invokeTool(
             named: name,
             arguments: arguments,
             for: sessionID,
             completion: completion
-        ) ?? false
+        ) {
+            return true
+        }
+        return false
     }
 }

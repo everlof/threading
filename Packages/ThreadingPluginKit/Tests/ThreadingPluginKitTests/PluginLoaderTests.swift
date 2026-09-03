@@ -142,7 +142,7 @@ final class PluginContractTests: XCTestCase {
     /// The version is what the loader compares against. If it changes, every installed plugin
     /// stops loading until it is rebuilt, so it should never move by accident.
     func testTheAPIVersionIsTheOneTheLoaderEnforces() {
-        XCTAssertEqual(ThreadingPluginAPI.version, 2)
+        XCTAssertEqual(ThreadingPluginAPI.version, 3)
     }
 
     /// Version 2 added `encodedTheme`, which is how a plugin linking `ThreadingDesignKit` gets the

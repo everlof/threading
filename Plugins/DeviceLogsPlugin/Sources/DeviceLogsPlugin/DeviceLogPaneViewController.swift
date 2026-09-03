@@ -458,6 +458,37 @@ public final class DeviceLogPaneViewController: NSViewController {
         updateStatus()
     }
 
+    // MARK: Driving from outside
+
+    /// Sets the focus from somewhere that is not the controls — an agent, today.
+    ///
+    /// It moves the controls too rather than holding a second, invisible state: a pane whose
+    /// filter field disagrees with what it is showing is a pane nobody can reason about, and the
+    /// user has to be able to see what the agent did and undo it.
+    public func applyFocus(pattern: String, minimumSeverity: Int) {
+        filter = pattern
+        filterField.stringValue = pattern
+        self.minimumSeverity = minimumSeverity
+        expandedGaps.removeAll()
+        recomputeVisible()
+        table.reloadData()
+        updateStatus()
+    }
+
+    /// What is on screen right now, for a tool that has to answer for it.
+    public var focusSummary: (shown: Int, folded: Int, total: Int) {
+        let folded = entries.reduce(0) { $0 + $1.hiddenCount }
+        return (rows.count - folded, folded, rows.count)
+    }
+
+    /// The rows currently visible, newest last, for a tool asked what is on screen.
+    public func visibleRowsForTools(limit: Int) -> [DeviceLogRow] {
+        entries.suffix(limit).compactMap { entry in
+            if case .row(let index) = entry, rows.indices.contains(index) { return rows[index] }
+            return nil
+        }
+    }
+
     // MARK: Filtering
 
     private var isFiltering: Bool { !filter.isEmpty || minimumSeverity > 0 }

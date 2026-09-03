@@ -42,11 +42,17 @@ final class NativePluginPaneViewController: NSViewController {
 
     required init?(coder: NSCoder) { nil }
 
+    deinit {
+        // The tools go with the pane: they act on a stream and a view that are about to be gone.
+        MainActor.assumeIsolated { NativePluginRuntime.shared.deregister(self) }
+    }
+
     override func loadView() {
         view = NSView()
         switch NativePluginCatalog.load(bundleURL) {
         case .success(let plugin):
             loaded = plugin
+            NativePluginRuntime.shared.register(plugin, controller: self, sessionID: owningSessionID)
             install(plugin.makePaneView(context: context()))
         case .failure(let failure):
             refusal = failure
