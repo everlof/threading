@@ -15,6 +15,22 @@ import Foundation
 /// reading asks only for a runtime with `.transcriptModelRecord`. Both are narrower questions
 /// than "where is this session's file", and flattening them into this one would cost the first
 /// its laziness and the second its capability check.
+/// How far a transcript lookup may go to answer.
+///
+/// A Claude transcript is a path computed from the account, the project and the id, so the
+/// effort makes no difference to it. A Codex rollout is *found*: its name carries a timestamp
+/// nobody recorded, so placing one means reading the account's whole sessions tree, and that
+/// is the work a caller with a catalogue of conversations must not do once per conversation
+/// on the main actor.
+enum TranscriptLookupEffort: Sendable {
+    /// Read the filesystem when nothing is known yet. The answer for one conversation.
+    case discovering
+    /// Answer only from what earlier lookups already found. The answer for a projection of the
+    /// whole catalogue on the main actor, which has `CodexTranscript.rolloutIndex` read each
+    /// account's tree once, off it, and then asks again.
+    case known
+}
+
 enum SessionTranscript {
 
     // MARK: - Public Methods
@@ -28,15 +44,34 @@ enum SessionTranscript {
         sessionID: TranscriptID,
         for session: AgentSession,
         in project: Project,
-        account: AgentAccount
+        account: AgentAccount,
+        effort: TranscriptLookupEffort = .discovering
     ) -> URL? {
         switch session.kind {
         case .claude:
             return ClaudeTranscript.url(sessionID: sessionID, account: account, in: project)
         case .codex:
-            return CodexTranscript.url(sessionID: sessionID, account: account)
+            switch effort {
+            case .discovering:
+                return CodexTranscript.url(sessionID: sessionID, account: account)
+            case .known:
+                return CodexTranscript.knownURL(sessionID: sessionID, account: account)
+            }
         case .grok, .openCode, .cursor:
             return nil
+        }
+    }
+
+    /// Whether the runtime's transcript is found by reading a directory rather than by
+    /// computing a path — the runtimes for which `.known` can answer differently from
+    /// `.discovering`, and whose sessions tree a catalogue projection reads once, off the
+    /// main actor, before it asks.
+    static func locatesTranscriptByWalking(_ kind: AgentKind) -> Bool {
+        switch kind {
+        case .codex:
+            return true
+        case .claude, .grok, .openCode, .cursor:
+            return false
         }
     }
 

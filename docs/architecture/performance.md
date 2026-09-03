@@ -3804,6 +3804,79 @@ average 17–45 on ten cores throughout. `AgentSessionViewController.focusTermin
 activation the responder change queued, so the next stall trace names the wait instead of
 leaving the interval empty.
 
+## A sidebar click does not walk the Codex sessions tree, 2026-09-03
+
+The report was "pressing a terminal entry in the sidebar often feels like it hogs the main thread".
+The installed build retained 706 sessions, 343 of them Codex, and its stall monitor had written 20
+incidents in the preceding half hour, from 0.3 to 3.7 s, most with `activeOperations: []`. Each
+empty incident held a 10 ms `sidebar.reload` span somewhere inside it: the freeze was a
+`ProjectsDidChange` fan-out, the sidebar's observer was the cheap one, and the owner was code no
+span covered. A 60 s `sample` of the running app named it: `TranscriptSearchIndexStore.refresh()`
+→ `TranscriptSearchProjection.sources` → `CodexTranscript.url` → `FileManager.enumerator` →
+`getattrlistbulk`, 1.9 s of one main-queue drain.
+
+**A miss walked the whole tree, and a retained catalogue is mostly misses.** `CodexTranscript.url`
+enumerated the account's `sessions` directory — nested by year, month and day, holding every
+conversation the account ever had — and memoised only a found path. An archived conversation's
+rollout is pruned long before its session row is, so the miss is the common case: on the reporting
+machine 311 of the 343 Codex sessions had no rollout on disk, and every projection walked the same
+672 entries 311 times. One warm walk measured 3.3 ms (`swiftc -O`, median of 20), so a pass cost
+about a second warm and 1.7–3.7 s in the app, on the main actor, inside the store observer that
+every click, attention edge and agent title change reached. The rename fix above had already made
+that observer incremental on master; the installed build predated it, and `rebuildAll()` on a
+`.structure` event — provider archive reconciliation posts one on every app activation — still
+paid the full pass.
+
+**The projection now reads nothing on the main actor.** `CodexTranscript` keeps a `RolloutIndex`
+per account: one walk records every rollout by the conversation id its name ends with, and
+answers every later lookup — hit or miss — from a dictionary. A miss re-walks only once the index
+is older than `rolloutIndexMaximumAge` (one second), which folds a burst into one read while a
+rollout Codex has just written is still found on the next ask; a path reported by the lifecycle
+hook joins the index without any walk. `SessionTranscript.url` takes a `TranscriptLookupEffort`:
+`.discovering` is the single-conversation answer and may walk, `.known` answers only from the index.
+`TranscriptSearchIndexStore` projects with `.known`, notes each account it could not place a
+conversation on, reads those trees once each on a utility worker, and projects the sessions on
+them again from the result. A conversation the walk did not see stays unplaced without another
+walk: the next event about it asks again, and until then the answer on disk has not changed.
+
+Measured in the hosted test bundle against a fixture shaped like the report — 343 Codex sessions,
+32 with a rollout among 672 files in 50 day directories — Debug, Apple silicon, warm directory
+cache. One walk of that tree is 10.3 ms in the Debug test host (median of 5; 3.3 ms compiled
+`-O` outside it). The before row ages the index past its bound before every lookup, which is what
+the old code did for every miss:
+
+| | main actor | walks |
+|---|---|---|
+| Before: discovering projection, one walk per miss | 3,579 ms | 343 |
+| After: `.known` projection before the worker's walk | 4.3 ms | 0 |
+| The worker's one walk | 10.9 ms, off the main actor | 1 |
+| After: `.known` projection once the walk has answered | 4.8 ms | 0 |
+
+### Regression boundary
+
+`CodexTranscript.rolloutWalkCount` is the contract's witness. `CodexRolloutIndexTests` drives 300
+misses and 5 hits through the production lookup and requires one walk, proves a miss is re-asked
+only past the bound, that `knownURL` never reads, and that a reported path is indexed without a
+walk. `TranscriptSearchRolloutDiscoveryTests` builds a 24-session catalogue on a fixture account
+and requires the store's main-actor pass to place nothing and walk nothing, then the worker's
+single walk to place exactly the conversations on disk.
+
+### The row re-plated its mark on every tick
+
+The same sample charged a second owner, smaller and steady: 1.05 s of main thread per minute in
+`setTerminalTitle` → `refreshRow` → `SessionRowView.configure` → `applyAgentIcon`, 0.4 s of it
+inside `NSImageView`'s catalogue rendition walk. The row sized and plated the agent's mark afresh
+on every reconfigure and handed the view the new copy, and the view treats every new object as new
+content. Identical title reports were already deduplicated (see the terminal-title target above);
+this is the cost of the reports that do differ, and of every activity and loading edge, which
+reconfigure the row the same way. `SessionRowView` now keeps the mark and its plate while the two
+facts that decide them — the agent, and whether the row is a side chat — hold, and hands the view an
+image only when it is not the one already shown; the plate is decided again where the ground moves,
+never merely because the row was filled in. Extension-supplied marks stay uncached, since their
+bytes may change under the same name. `SessionRowIconReuseTests` asserts the image object survives
+a rename, an activity edge and a loading raise, changes with the agent, and is re-plated by
+selection and kept across a reconfigure while selected.
+
 ## Update All terminal creation is one exact leaf
 
 The 2026-09-03 report arrived with the action and its evidence: pressing **Update All** in the

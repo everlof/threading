@@ -228,6 +228,24 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
     /// the first viewport. Extension images remain uncached because their bytes may change.
     private var agentMarkTone: CGFloat?
 
+    /// What decided `agentMark`, when it is a built-in mark that can be kept.
+    ///
+    /// A row is reconfigured on every title, activity and loading edge of a working agent, and
+    /// each pass used to size and plate the mark afresh and hand `NSImageView` the copy. A new
+    /// image object makes the view enumerate the asset catalogue's renditions again — 0.4 ms a
+    /// row, a second of main thread per minute with ten agents working. The mark's inputs are
+    /// two facts about the session; while they hold, the images already made are the answer.
+    /// Nil after an extension supplied the mark, whose bytes may change under the same name.
+    private var agentMarkIdentity: AgentMarkIdentity?
+    /// `agentMark` against the ground it was last plated for. Re-plated only where the ground
+    /// moves — `rederiveThemedContent` — never merely because the row was filled in again.
+    private var platedAgentMark: NSImage?
+
+    private struct AgentMarkIdentity: Equatable {
+        let provider: AgentKind
+        let isSideChat: Bool
+    }
+
     // MARK: - Initialization
 
     override init(frame frameRect: NSRect) {
@@ -1168,34 +1186,46 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         isSideChat: Bool,
         account: AgentAccount?
     ) {
-        let builtInProviderImage = provider.icon
-        let image: NSImage?
-        let knownMarkTone: CGFloat?
-        if isSideChat {
-            image = NSImage(
-                systemSymbolName: SidebarRowDefaults.sideChatSymbol,
-                accessibilityDescription: SidebarRowDefaults.sideChatAccessibilityLabel
+        let identity = AgentMarkIdentity(provider: provider, isSideChat: isSideChat)
+        let extensionResolution = isSideChat
+            ? nil
+            : NativeSidebarParity.host(
+                .identityPresentation,
+                ExtensionIdentityResolverProviderSlot.shared.providerIcon(
+                    providerID: provider.rawValue
+                )
             )
-            knownMarkTone = nil
-        } else if let resolution = NativeSidebarParity.host(
-            .identityPresentation,
-            ExtensionIdentityResolverProviderSlot.shared.providerIcon(
-                providerID: provider.rawValue
-            )
-        ) {
-            let resolved = resolveIdentityImage(
-                resolution.image,
-                extensionIdentifier: resolution.extensionIdentifier
-            )
-            image = resolved ?? builtInProviderImage
-            knownMarkTone = resolved == nil ? provider.brandIconTone : nil
+
+        if extensionResolution == nil, identity == agentMarkIdentity, let platedAgentMark {
+            // Same agent, same lineage, no extension in the way: the mark and its plate stand.
+            setIconImage(platedAgentMark)
         } else {
-            image = builtInProviderImage
-            knownMarkTone = provider.brandIconTone
+            let builtInProviderImage = provider.icon
+            let image: NSImage?
+            let knownMarkTone: CGFloat?
+            if isSideChat {
+                image = NSImage(
+                    systemSymbolName: SidebarRowDefaults.sideChatSymbol,
+                    accessibilityDescription: SidebarRowDefaults.sideChatAccessibilityLabel
+                )
+                knownMarkTone = nil
+            } else if let resolution = extensionResolution {
+                let resolved = resolveIdentityImage(
+                    resolution.image,
+                    extensionIdentifier: resolution.extensionIdentifier
+                )
+                image = resolved ?? builtInProviderImage
+                knownMarkTone = resolved == nil ? provider.brandIconTone : nil
+            } else {
+                image = builtInProviderImage
+                knownMarkTone = provider.brandIconTone
+            }
+            agentMark = image.map(slotSized)
+            agentMarkTone = knownMarkTone
+            agentMarkIdentity = extensionResolution == nil ? identity : nil
+            platedAgentMark = plated(agentMark)
+            setIconImage(platedAgentMark)
         }
-        agentMark = image.map(slotSized)
-        agentMarkTone = knownMarkTone
-        iconView.image = plated(agentMark)
         iconView.setAccessibilityLabel(
             isSideChat
                 ? SidebarRowDefaults.sideChatAccessibilityLabel
@@ -1203,7 +1233,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         )
         iconView.contentTintColor = isDormant ? Design.Text.tertiary : Design.Text.secondary
 
-        let dimsThroughAlpha = image.map { !$0.isTemplate } ?? false
+        let dimsThroughAlpha = agentMark.map { !$0.isTemplate } ?? false
         iconView.alphaValue = (isDormant && dimsThroughAlpha) ? AgentIconDefaults.dormantAlpha : 1
 
         let builtInChip = AccountBadge.chip(for: account)
@@ -1225,7 +1255,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         }
         if let chip {
             let chipView = accountChipViewForPresentation()
-            chipView.image = chip
+            if chipView.image !== chip { chipView.image = chip }
             chipView.setAccessibilityLabel(account?.displayName)
             chipView.isHidden = false
             chipView.alphaValue = isDormant ? AgentIconDefaults.dormantAlpha : 1
@@ -1261,8 +1291,17 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         // current theme whenever the sweep reaches this retained/reused row.
         applyTextColors()
         guard let agentMark else { return }
-        iconView.image = plated(agentMark)
+        platedAgentMark = plated(agentMark)
+        setIconImage(platedAgentMark)
         nativeIcon = iconView.image
+    }
+
+    /// Hands the view an image only when it is not the one it already shows. `NSImageView`
+    /// treats every assignment as new content — for a catalogue-backed mark that is a walk of
+    /// its renditions — so the same object, assigned again, is not free.
+    private func setIconImage(_ image: NSImage?) {
+        guard iconView.image !== image else { return }
+        iconView.image = image
     }
 
     /// The mark at the ink size this slot draws, `iconSize`, whether or not it is plated.
@@ -1367,7 +1406,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         ]
     ) {
         toolTip = nativeToolTip
-        iconView.image = nativeIcon
+        setIconImage(nativeIcon)
         iconView.contentTintColor = nativeIconTint
         iconView.alphaValue = nativeIconAlpha
 
@@ -1386,7 +1425,7 @@ final class SessionRowView: NSTableCellView, ThemeDerivedContent {
         }
         if case .image(let reference) = properties[.identityImage],
            let image = resolveCustomizationImage(reference) {
-            iconView.image = image
+            setIconImage(image)
         }
     }
 

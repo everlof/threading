@@ -32,26 +32,61 @@ struct TranscriptSearchSource: Hashable, Sendable {
 
 @MainActor
 enum TranscriptSearchProjection {
-    static func sources(projects: [Project]) -> [TranscriptSearchSource] {
-        projects.flatMap { sources(project: $0) }
+    /// Finds the account a session lives on. Production asks discovery; a test places a
+    /// conversation on a sessions tree of its own.
+    typealias AccountResolver = @MainActor (AgentKind, AccountHandle) -> AgentAccount?
+
+    static let discoveredAccount: AccountResolver = { kind, handle in
+        AgentAccountDiscovery.account(for: kind, handle: handle)
     }
 
-    static func sources(project: Project) -> [TranscriptSearchSource] {
-        project.sessions.compactMap { source(session: $0, in: project) }
+    static func sources(
+        projects: [Project],
+        effort: TranscriptLookupEffort = .discovering,
+        account: AccountResolver = discoveredAccount
+    ) -> [TranscriptSearchSource] {
+        projects.flatMap { sources(project: $0, effort: effort, account: account) }
     }
 
-    static func source(session: AgentSession, in project: Project) -> TranscriptSearchSource? {
+    static func sources(
+        project: Project,
+        effort: TranscriptLookupEffort = .discovering,
+        account: AccountResolver = discoveredAccount
+    ) -> [TranscriptSearchSource] {
+        project.sessions.compactMap {
+            source(session: $0, in: project, effort: effort, account: account)
+        }
+    }
+
+    /// The account whose sessions tree has to be read before this session can be placed: a
+    /// conversation with an id, on an account that exists, whose runtime finds its transcript
+    /// by walking. Nil for every session a computed path places, and for one with no
+    /// conversation to place.
+    static func rolloutAccount(
+        for session: AgentSession,
+        account: AccountResolver = discoveredAccount
+    ) -> AgentAccount? {
+        guard TranscriptReplayFormat(kind: session.kind) != nil,
+              SessionTranscript.locatesTranscriptByWalking(session.kind),
+              session.resumeState.transcriptID != nil else { return nil }
+        return account(session.kind, session.accountHandle)
+    }
+
+    static func source(
+        session: AgentSession,
+        in project: Project,
+        effort: TranscriptLookupEffort = .discovering,
+        account: AccountResolver = discoveredAccount
+    ) -> TranscriptSearchSource? {
         guard TranscriptReplayFormat(kind: session.kind) != nil,
               let transcriptID = session.resumeState.transcriptID,
-              let account = AgentAccountDiscovery.account(
-                  for: session.kind,
-                  handle: session.accountHandle
-              ),
+              let account = account(session.kind, session.accountHandle),
               let url = SessionTranscript.url(
                   sessionID: transcriptID,
                   for: session,
                   in: project,
-                  account: account
+                  account: account,
+                  effort: effort
               ) else { return nil }
 
         let sourceKey = [
