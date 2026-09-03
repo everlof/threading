@@ -18,11 +18,38 @@ public struct DeviceLogRow {
     public let subsystem: String?
     public let message: String
 
+    /// When the line was written, as an instant.
+    ///
+    /// Separate from `time` on purpose, and they answer different questions. `time` is the
+    /// characters the file wrote, which is what a reader checking a timestamp wants. This is an
+    /// instant that sorts and subtracts, which is what a range query wants — "everything between
+    /// 14:02 and 14:05", the shape an agent asks in.
+    ///
+    /// `nil` when the line carries no stamp at all: a file's opening banner, a continuation line.
+    /// A stamp naming no zone is read as UTC by convention; see `TimestampParser`.
+    public let timestamp: Date?
+
+    public init(
+        time: String,
+        level: String,
+        process: String,
+        subsystem: String?,
+        message: String,
+        timestamp: Date? = nil
+    ) {
+        self.time = time
+        self.level = level
+        self.process = process
+        self.subsystem = subsystem
+        self.message = message
+        self.timestamp = timestamp
+    }
+
     /// Ordering for the level filter. `log` and the syslog relay use different vocabularies for
     /// the same idea, so both are mapped here rather than at each call site.
     public var severity: Int {
         switch level {
-        case "Fault", "Emergency", "Critical": return 4
+        case "Fault", "Emergency", "Alert", "Critical": return 4
         case "Error": return 3
         case "Default", "Notice", "Warning": return 2
         case "Info": return 1
@@ -493,19 +520,35 @@ public enum DeviceLogDecoding {
             level: level,
             process: appName,
             subsystem: subsystem,
-            message: String(rest)
+            message: String(rest),
+            timestamp: instant(in: trimmed)
         )
     }
 
-    /// Timber's vocabulary mapped onto the one the level filter orders.
+    /// The instant a line was written, for the queries `time` cannot answer.
     ///
-    /// One way only. Apple's unified log has `Notice`, `Fault` and `Emergency`, which this
-    /// vocabulary does not, so the rows keep their own level strings and `severity` keeps ordering
-    /// both. Translating in the other direction would collapse a fault into an unknown.
+    /// `nil` rather than a guess when there is no stamp: a banner has no time, and inventing one
+    /// would put it in a range it does not belong to.
+    static func instant(in text: String?) -> Date? {
+        guard let text, !text.isEmpty else { return nil }
+        return TimestampParser.tryAllTimestampFormats(bytes: Array(text.utf8)).0
+    }
+
+    /// The parser's vocabulary as the rows spell it.
+    ///
+    /// It used to lose things: the detector knew five levels and Apple's `Notice`, `Fault`,
+    /// `Critical`, `Alert` and `Emergency` all came back `unknown`, so a fault in an unfamiliar
+    /// log read as no level at all. The detector carries both vocabularies now, so this maps
+    /// rather than collapses.
     private static func level(from detected: LogLevel) -> String {
         switch detected {
+        case .emergency: return "Emergency"
+        case .alert: return "Alert"
+        case .critical: return "Critical"
+        case .fault: return "Fault"
         case .error: return "Error"
         case .warning: return "Warning"
+        case .notice: return "Notice"
         case .info: return "Info"
         case .debug, .verbose, .trace: return "Debug"
         case .unknown: return "Default"
@@ -583,7 +626,8 @@ public enum DeviceLogDecoding {
             level: (object["messageType"] as? String) ?? "Default",
             process: process,
             subsystem: subsystem,
-            message: (object["eventMessage"] as? String) ?? ""
+            message: (object["eventMessage"] as? String) ?? "",
+            timestamp: instant(in: object["timestamp"] as? String)
         )
     }
 
@@ -628,7 +672,8 @@ public enum DeviceLogDecoding {
             level: level,
             process: name,
             subsystem: subsystem,
-            message: message
+            message: message,
+            timestamp: instant(in: text)
         )
     }
 }

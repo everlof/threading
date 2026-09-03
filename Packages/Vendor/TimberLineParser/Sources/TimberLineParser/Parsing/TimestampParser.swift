@@ -452,7 +452,7 @@ public enum TimestampParser {
         // Simple datetime without timezone - interpret in local timezone
         return makeDate(year: year, month: month, day: day,
                        hour: hour, minute: minute, second: second,
-                       nanoseconds: nanoseconds, tzOffsetSeconds: localTimezoneOffset)
+                       nanoseconds: nanoseconds, tzOffsetSeconds: naiveStampOffsetSeconds)
     }
 
     @inline(__always)
@@ -497,7 +497,9 @@ public enum TimestampParser {
 
         return makeDate(year: year, month: month, day: day,
                        hour: hour, minute: minute, second: second,
-                       nanoseconds: nanoseconds, tzOffsetSeconds: localTimezoneOffset)
+                       nanoseconds: nanoseconds,
+                       tzOffsetSeconds: trailingOffsetUnsafe(ptr: ptr, count: count, at: offset)
+                           ?? naiveStampOffsetSeconds)
     }
 
     // MARK: - Bracketed Datetime: [2024-01-15 10:30:45]
@@ -556,7 +558,7 @@ public enum TimestampParser {
 
         return makeDate(year: year, month: month, day: day,
                        hour: hour, minute: minute, second: second,
-                       nanoseconds: nanoseconds, tzOffsetSeconds: localTimezoneOffset)
+                       nanoseconds: nanoseconds, tzOffsetSeconds: naiveStampOffsetSeconds)
     }
 
     private static func parseBracketedDatetime(bytes: [UInt8]) -> Date? {
@@ -619,7 +621,7 @@ public enum TimestampParser {
         // Bracketed datetime without timezone - interpret in local timezone
         return makeDate(year: year, month: month, day: day,
                        hour: hour, minute: minute, second: second,
-                       nanoseconds: nanoseconds, tzOffsetSeconds: localTimezoneOffset)
+                       nanoseconds: nanoseconds, tzOffsetSeconds: naiveStampOffsetSeconds)
     }
 
     // MARK: - Syslog: Nov 21 10:30:45 or 2024 Nov 21 10:30:45
@@ -726,10 +728,29 @@ public enum TimestampParser {
             return nil
         }
 
-        // Syslog without timezone - interpret in local timezone
+        // `idevicesyslog` writes `Sep  1 16:21:01.549408` — six fractional digits that were being
+        // dropped, so every row in a busy second collapsed onto the same instant and stopped
+        // ordering. The clock column showed them all along; only the instant lost them.
+        var nanoseconds = 0
+        var after = timeStart + 8
+        if after < slice.endIndex, slice[base + (after - base)] == 0x2E {
+            after += 1
+            var frac = 0
+            var digits = 0
+            while after < slice.endIndex, isDigit(slice[after]) {
+                frac = frac * 10 + Int(slice[after] - 0x30)
+                digits += 1
+                after += 1
+            }
+            while digits < 9 { frac *= 10; digits += 1 }
+            while digits > 9 { frac /= 10; digits -= 1 }
+            nanoseconds = frac
+        }
+
+        // Syslog names no zone, so it takes the convention.
         return makeDate(year: year, month: month, day: day,
                        hour: hour, minute: minute, second: second,
-                       nanoseconds: 0, tzOffsetSeconds: localTimezoneOffset)
+                       nanoseconds: nanoseconds, tzOffsetSeconds: naiveStampOffsetSeconds)
     }
 
     // MARK: - Android Logcat: 01-15 10:30:45.123
@@ -793,7 +814,7 @@ public enum TimestampParser {
         // Android logcat without timezone - interpret in local timezone
         return makeDate(year: year, month: month, day: day,
                        hour: hour, minute: minute, second: second,
-                       nanoseconds: nanoseconds, tzOffsetSeconds: localTimezoneOffset)
+                       nanoseconds: nanoseconds, tzOffsetSeconds: naiveStampOffsetSeconds)
     }
 
     // MARK: - US Datetime: 01/15/2024 10:30:45
@@ -877,7 +898,7 @@ public enum TimestampParser {
         // US datetime without timezone - interpret in local timezone
         return makeDate(year: year, month: month, day: day,
                        hour: hour, minute: minute, second: second,
-                       nanoseconds: 0, tzOffsetSeconds: localTimezoneOffset)
+                       nanoseconds: 0, tzOffsetSeconds: naiveStampOffsetSeconds)
     }
 
     // MARK: - Apache CLF: 21/Nov/2024:10:30:45 +0000
@@ -1006,6 +1027,31 @@ public enum TimestampParser {
         return Int(d0 - 0x30) * 1000 + Int(d1 - 0x30) * 100 + Int(d2 - 0x30) * 10 + Int(d3 - 0x30)
     }
 
+    /// A zone suffix at `index`, or nil when the stamp names none.
+    ///
+    /// `2026-09-01 21:13:45.282914+0200` is the shape `log stream --style=ndjson` writes, and the
+    /// simple-datetime reader used to stop at the fraction and discard the `+0200` — so every row
+    /// off a simulator or a device landed an offset away from the instant it names. A stamp that
+    /// says its zone must be believed; only silence gets the UTC convention.
+    @inline(__always)
+    private static func trailingOffsetUnsafe(ptr: UnsafePointer<UInt8>, count: Int, at index: Int) -> Int? {
+        guard index < count else { return nil }
+        let byte = ptr[index]
+        if byte == 0x5A { return 0 }                       // Z
+        guard byte == 0x2B || byte == 0x2D else { return nil }   // + or -
+        guard index + 3 <= count else { return nil }
+        let sign = byte == 0x2B ? 1 : -1
+        let hour = parseDigits2Unsafe(ptr: ptr, at: index + 1)
+        var minute = 0
+        if index + 6 <= count, ptr[index + 3] == 0x3A {    // +HH:MM
+            minute = parseDigits2Unsafe(ptr: ptr, at: index + 4)
+        } else if index + 5 <= count {                     // +HHMM
+            minute = parseDigits2Unsafe(ptr: ptr, at: index + 3)
+        }
+        guard hour <= 14, minute <= 59 else { return nil }
+        return sign * (hour * 3600 + minute * 60)
+    }
+
     @inline(__always)
     private static func parseDigits2Unsafe(ptr: UnsafePointer<UInt8>, at index: Int) -> Int {
         let d0 = ptr[index]
@@ -1048,10 +1094,25 @@ public enum TimestampParser {
 
     // MARK: - Date Creation
 
-    /// Cached timezone offset - computed once at load time
-    /// Note: This won't update if user changes timezone while app is running,
-    /// but that's an acceptable tradeoff for performance.
-    private static let localTimezoneOffset: Int = TimeZone.current.secondsFromGMT()
+    /// The zone a stamp that names none is read in: **UTC**.
+    ///
+    /// This was `TimeZone.current.secondsFromGMT()`, cached at load. That is the offset *now*, not
+    /// the offset at the stamp's own instant, so it was wrong twice over. A January stamp parsed in
+    /// September got summer time — measured here, `2024-01-15 10:30:45.123` came out as
+    /// `08:30:45Z` when the correct local reading is `09:30:45Z`, an hour adrift purely because of
+    /// when the parser happened to run. And the same file parsed in two places, or side of a DST
+    /// change, produced two different instants for the same line.
+    ///
+    /// UTC is a *convention*, not a guess at the truth: a naive stamp genuinely does not say what
+    /// zone it was written in, and no amount of cleverness recovers it. What a convention buys is
+    /// everything that actually matters here — the same line always parses to the same instant, two
+    /// lines in one log order and subtract correctly, and formatting the result back in UTC returns
+    /// the characters the file wrote. A caller that knows the log's zone can shift by that offset;
+    /// a caller that guesses cannot be corrected.
+    ///
+    /// Formats that *do* carry an offset — ISO 8601 and Apache CLF — pass their own and are
+    /// unaffected.
+    private static let naiveStampOffsetSeconds: Int = 0
 
     /// Cached current year for formats that don't include year
     private static let cachedCurrentYear: Int = Calendar.current.component(.year, from: Date())

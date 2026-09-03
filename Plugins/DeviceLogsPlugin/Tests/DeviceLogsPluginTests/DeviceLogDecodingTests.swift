@@ -221,4 +221,46 @@ final class DeviceLogDecodingTests: XCTestCase {
             XCTAssertEqual(row.time, DeviceLogLimits.undatedTime, line)
         }
     }
+
+    /// A fault in a log we have never seen used to arrive as `Default`, because the detector's
+    /// vocabulary stopped at five levels. Both vocabularies now reach the filter.
+    func testAppleSLevelsSurviveAnUnfamiliarLog() throws {
+        func level(_ line: String) throws -> String {
+            try XCTUnwrap(DeviceLogDecoding.appLogLine(line, appName: "App")).level
+        }
+        XCTAssertEqual(try level("10:30:45 <Fault> the scene did not come back"), "Fault")
+        XCTAssertEqual(try level("10:30:45 <Notice> vm: swapout"), "Notice")
+        XCTAssertEqual(try level("10:30:45 <Emergency> halting"), "Emergency")
+    }
+
+    /// The instant is what a range query uses, and it is not the same question as the column.
+    /// `21:13:45.282914+0200` names its zone, and dropping it put every simulator row two hours
+    /// from where it happened.
+    func testTheInstantHonoursAZoneTheLineNames() throws {
+        let row = try XCTUnwrap(DeviceLogDecoding.ndjson(ArraySlice(Array(
+            #"{"timestamp":"2026-09-01 21:13:45.282914+0200","messageType":"Debug","eventMessage":"hi"}"#.utf8
+        ))))
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        XCTAssertEqual(row.time, "21:13:45.282", "the column stays the characters the line wrote")
+        XCTAssertEqual(formatter.string(from: try XCTUnwrap(row.timestamp)), "2026-09-01 19:13:45")
+    }
+
+    /// The relay writes six fractional digits, and dropping them collapsed every row in a busy
+    /// second onto one instant — so they stopped ordering against each other.
+    func testTheInstantKeepsSyslogsFractionalSeconds() throws {
+        let first = try XCTUnwrap(DeviceLogDecoding.syslog(ArraySlice(Array(
+            "Sep  1 16:21:01.100000 kernel[0] <Notice>: first".utf8))))
+        let second = try XCTUnwrap(DeviceLogDecoding.syslog(ArraySlice(Array(
+            "Sep  1 16:21:01.900000 kernel[0] <Notice>: second".utf8))))
+        XCTAssertLessThan(try XCTUnwrap(first.timestamp), try XCTUnwrap(second.timestamp))
+    }
+
+    /// A line with no stamp gets no instant. Inventing one would put a banner inside a range it
+    /// does not belong to.
+    func testALineWithNoStampHasNoInstant() throws {
+        let row = try XCTUnwrap(DeviceLogDecoding.appLogLine("App Version: 1.0.0", appName: "App"))
+        XCTAssertNil(row.timestamp)
+    }
 }

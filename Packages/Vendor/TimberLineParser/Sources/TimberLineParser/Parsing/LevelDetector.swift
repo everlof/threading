@@ -111,10 +111,18 @@ public enum LevelDetector {
 
         // Branch on first character for fast rejection
         switch c0 {
-        case 0x65: // 'e' - error
+        case 0x65: // 'e' - error, or the syslog severity emergency
             if remaining >= 5 && matchesError(ptr: ptr, at: pos) { return .error }
-        case 0x66: // 'f' - fatal (maps to error)
+            if remaining >= 9 && matchesEmergency(ptr: ptr, at: pos) { return .emergency }
+        case 0x66: // 'f' - fatal (maps to error), or Apple's fault
             if remaining >= 5 && matchesFatal(ptr: ptr, at: pos) { return .error }
+            if remaining >= 5 && matchesFault(ptr: ptr, at: pos) { return .fault }
+        case 0x6E: // 'n' - notice
+            if remaining >= 6 && matchesNotice(ptr: ptr, at: pos) { return .notice }
+        case 0x63: // 'c' - critical
+            if remaining >= 8 && matchesCritical(ptr: ptr, at: pos) { return .critical }
+        case 0x61: // 'a' - alert
+            if remaining >= 5 && matchesAlert(ptr: ptr, at: pos) { return .alert }
         case 0x77: // 'w' - warn/warning
             if remaining >= 4 && matchesWarn(ptr: ptr, at: pos) { return .warning }
         case 0x69: // 'i' - info
@@ -145,6 +153,39 @@ public enum LevelDetector {
     }
 
     @inline(__always)
+    private static func matchesFault(ptr: UnsafePointer<UInt8>, at i: Int) -> Bool {
+        // "fault" = 0x66 0x61 0x75 0x6C 0x74
+        return (ptr[i+1] | 0x20) == 0x61 && (ptr[i+2] | 0x20) == 0x75
+            && (ptr[i+3] | 0x20) == 0x6C && (ptr[i+4] | 0x20) == 0x74
+    }
+
+    private static func matchesNotice(ptr: UnsafePointer<UInt8>, at i: Int) -> Bool {
+        // "notice"
+        return (ptr[i+1] | 0x20) == 0x6F && (ptr[i+2] | 0x20) == 0x74
+            && (ptr[i+3] | 0x20) == 0x69 && (ptr[i+4] | 0x20) == 0x63 && (ptr[i+5] | 0x20) == 0x65
+    }
+
+    private static func matchesCritical(ptr: UnsafePointer<UInt8>, at i: Int) -> Bool {
+        // "critical"
+        return (ptr[i+1] | 0x20) == 0x72 && (ptr[i+2] | 0x20) == 0x69
+            && (ptr[i+3] | 0x20) == 0x74 && (ptr[i+4] | 0x20) == 0x69
+            && (ptr[i+5] | 0x20) == 0x63 && (ptr[i+6] | 0x20) == 0x61 && (ptr[i+7] | 0x20) == 0x6C
+    }
+
+    private static func matchesAlert(ptr: UnsafePointer<UInt8>, at i: Int) -> Bool {
+        // "alert"
+        return (ptr[i+1] | 0x20) == 0x6C && (ptr[i+2] | 0x20) == 0x65
+            && (ptr[i+3] | 0x20) == 0x72 && (ptr[i+4] | 0x20) == 0x74
+    }
+
+    private static func matchesEmergency(ptr: UnsafePointer<UInt8>, at i: Int) -> Bool {
+        // "emergency"
+        return (ptr[i+1] | 0x20) == 0x6D && (ptr[i+2] | 0x20) == 0x65
+            && (ptr[i+3] | 0x20) == 0x72 && (ptr[i+4] | 0x20) == 0x67
+            && (ptr[i+5] | 0x20) == 0x65 && (ptr[i+6] | 0x20) == 0x6E
+            && (ptr[i+7] | 0x20) == 0x63 && (ptr[i+8] | 0x20) == 0x79
+    }
+
     private static func matchesFatal(ptr: UnsafePointer<UInt8>, at i: Int) -> Bool {
         // "fatal" = 0x66 0x61 0x74 0x61 0x6C
         let b1 = ptr[i+1] | 0x20

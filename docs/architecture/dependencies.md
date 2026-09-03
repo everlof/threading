@@ -50,12 +50,25 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     source is ours to change.
   - Used by `DeviceLogsPlugin`. Its platform floor was macOS 14 and carried no `@available(macOS 14)`
     anywhere, so it is 13 here; the package builds and its 68 tests pass there.
-  - **What it is used for, and what it is not.** `LevelDetector` reads a level out of a log line
-    whose format we do not know. `TimestampParser` recognises eight stamp formats and returns a
-    `Date`, which is the right answer for a time-range query and the wrong one for the time column:
-    a naive stamp carries no zone, so the `Date` is an interpretation, and rendering `10:30:45.123`
-    came back an hour out formatted locally and two hours out as UTC. The column takes the file's
-    own characters instead. Keep that in mind before reaching for the `Date` to display anything.
+  - **Two answers, not one.** `DeviceLogRow.time` is the characters the line wrote, which is what
+    someone checking a timestamp wants. `DeviceLogRow.timestamp` is an instant that sorts and
+    subtracts, which is what a range query wants. Do not use the instant to draw the column: a
+    stamp that names an offset does not round-trip through UTC, and one that names none never did.
+  - **Four fixes were made to this source, all measured.** They are ours to make and worth knowing
+    about if the upstream copy is ever diffed:
+    1. A stamp naming no zone was read with `TimeZone.current.secondsFromGMT()` *cached at load* —
+       the offset now, not at the stamp's instant. A January line parsed in September came out an
+       hour adrift, and the same file parsed either side of a DST change gave two answers. Naive
+       stamps are read as UTC by convention now: the same line always parses to the same instant,
+       two lines order correctly, and the result formats back to the characters written.
+    2. The simple-datetime reader stopped at the fraction and **discarded a trailing offset**.
+       `log stream --style=ndjson` writes `2026-09-01 21:13:45.282914+0200`, so every simulator and
+       device row landed two hours from the instant it names.
+    3. The syslog reader **dropped fractional seconds**. `idevicesyslog` writes six digits, so every
+       row inside a busy second collapsed onto one instant and stopped ordering.
+    4. `LogLevel` had five levels and no Apple vocabulary, so `Notice`, `Fault`, `Critical`, `Alert`
+       and `Emergency` all detected as `unknown` — a fault read as no level at all. Both
+       vocabularies are in the enum now, with one `severity` ordering across them.
   - Its `SIMDLineScanner` header claims ~2.5 GB/s. Measured here it is **0.19 GB/s** — ~25 ms for
     5 MB, holding across three line lengths and three `Data` shapes, median of nine Release runs.
     Fast enough for a log stream, and not the number in the comment.
