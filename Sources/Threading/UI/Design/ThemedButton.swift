@@ -682,13 +682,13 @@ public final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBasel
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard isEnabled, !isHiddenOrHasHiddenAncestor else { return false }
 
-        if matches(shortcut, event) || (!keyEquivalent.isEmpty
+        if shortcut?.matches(event) == true || (!keyEquivalent.isEmpty
             && event.charactersIgnoringModifiers == keyEquivalent) {
             performClick()
             return true
         }
         if let mnemonicCharacter,
-           event.modifierFlags.intersection(Self.chordModifiers) == .option,
+           event.modifierFlags.intersection(KeyboardShortcut.eventModifierMask) == .option,
            event.charactersIgnoringModifiers?.compare(
                String(mnemonicCharacter), options: .caseInsensitive
            ) == .orderedSame {
@@ -696,24 +696,6 @@ public final class ThemedButton: ThemedControl, OpticalInsetProviding, TextBasel
             return true
         }
         return false
-    }
-
-    /// The chord modifiers a shortcut may state. Caps Lock and the function/numeric-pad bits
-    /// ride along on ordinary events and are not part of anybody's key equivalent, so comparing
-    /// the whole mask would make `⌘↩` stop working the moment Caps Lock was on.
-    private static let chordModifiers: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
-
-    private func matches(_ shortcut: KeyboardShortcut?, _ event: NSEvent) -> Bool {
-        guard let shortcut, !shortcut.key.isEmpty,
-              let typed = event.charactersIgnoringModifiers else { return false }
-
-        // Case-insensitively: a chord holding Shift arrives with an uppercase character while
-        // the shortcut, like a menu item's, states the lowercase key and the modifier.
-        guard typed.compare(shortcut.key, options: .caseInsensitive) == .orderedSame else {
-            return false
-        }
-        return event.modifierFlags.intersection(Self.chordModifiers)
-            == shortcut.modifiers.intersection(Self.chordModifiers)
     }
 
     public override func accessibilityRole() -> NSAccessibility.Role? { .button }

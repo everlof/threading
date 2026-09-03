@@ -313,7 +313,7 @@ final class HostFactPublisher {
             // Removing one array element changes every following sibling's manual-order fact.
             // The project is the smallest correct replacement boundary for that edge.
             refreshProjectSafely(projectID)
-        case .terminalRow(let terminalID):
+        case .terminalAdded(_, let terminalID), .terminalRow(let terminalID):
             do { try refreshTerminal(terminalID) }
             catch { report(error) }
         }

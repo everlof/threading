@@ -92,6 +92,74 @@ struct CodeContextPreview: Equatable, Sendable {
         return CodeContextPreview(rows: rows)
     }
 
+    /// The same bounded rows around several runs of target lines — what a comment on a
+    /// selection with gaps shows. Each run keeps its neighbours while ten code rows can hold
+    /// them all; past that the neighbours go first, and past *that* the preview keeps the
+    /// first and last chosen rows around one counted omission, the single-run rule. Every
+    /// skip between rows is a counted omission, so a gap in the selection is stated rather
+    /// than implied by two rows that happen to sit together.
+    static func make(
+        totalLineCount: Int,
+        targets: [ClosedRange<Int>],
+        lineAt: (Int) -> SourceLine
+    ) -> CodeContextPreview? {
+        let runs = mergedRuns(targets)
+        guard let first = runs.first, let last = runs.last else { return nil }
+        if runs.count == 1 {
+            return make(totalLineCount: totalLineCount, target: first, lineAt: lineAt)
+        }
+        guard totalLineCount > 0,
+              first.lowerBound >= 0,
+              last.upperBound < totalLineCount else { return nil }
+
+        func candidates(radius: Int) -> [Int] {
+            var result: [Int] = []
+            for run in runs {
+                let lower = max(0, run.lowerBound - radius)
+                let upper = min(totalLineCount - 1, run.upperBound + radius)
+                for index in lower...upper where index > (result.last ?? -1) {
+                    result.append(index)
+                }
+            }
+            return result
+        }
+        var chosen = candidates(radius: contextRadius)
+        if chosen.count > maximumVisibleLineRows {
+            chosen = candidates(radius: 0)
+        }
+        if chosen.count > maximumVisibleLineRows {
+            let leading = maximumVisibleLineRows / 2
+            chosen = Array(chosen.prefix(leading))
+                + Array(chosen.suffix(maximumVisibleLineRows - leading))
+        }
+
+        var rows: [Row] = []
+        rows.reserveCapacity(chosen.count * 2)
+        var previous: Int?
+        for index in chosen {
+            if let previous, index > previous + 1 {
+                rows.append(.omission(index - previous - 1))
+            }
+            rows.append(.line(lineAt(index), isTarget: runs.contains { $0.contains(index) }))
+            previous = index
+        }
+        return CodeContextPreview(rows: rows)
+    }
+
+    /// Runs sorted and merged where they touch or overlap, so a run is one row group of the
+    /// sheet and one receipt in the chat — never two that adjoin.
+    static func mergedRuns(_ runs: [ClosedRange<Int>]) -> [ClosedRange<Int>] {
+        var merged: [ClosedRange<Int>] = []
+        for run in runs.sorted(by: { $0.lowerBound < $1.lowerBound }) {
+            if let last = merged.last, run.lowerBound <= last.upperBound + 1 {
+                merged[merged.count - 1] = last.lowerBound...max(last.upperBound, run.upperBound)
+            } else {
+                merged.append(run)
+            }
+        }
+        return merged
+    }
+
     private static let contextRadius = 2
     private static let maximumVisibleLineRows = 10
     private static let maximumLineCharacters = 500

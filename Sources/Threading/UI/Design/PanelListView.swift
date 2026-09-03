@@ -74,12 +74,14 @@ final class PanelListView: NSView {
         }
     }
 
-    /// A quiet heading over the rows that follow — sentence case, no count.
+    /// A quiet heading over the rows that follow — sentence case, no count. A second section
+    /// takes a group's breath above it, so the break between sections is felt before the
+    /// heading is read; the row gap alone left "Ports" reading as one more row of "Processes".
     func addSection(_ title: String) {
         if !stack.arrangedSubviews.isEmpty {
             let spacer = NSView()
             spacer.translatesAutoresizingMaskIntoConstraints = false
-            spacer.heightAnchor.constraint(equalToConstant: Design.Spacing.tight).isActive = true
+            spacer.heightAnchor.constraint(equalToConstant: Design.Spacing.medium).isActive = true
             addRow(spacer)
         }
 
@@ -95,6 +97,22 @@ final class PanelListView: NSView {
     func addNote(_ text: String) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.applyFont(.subheading)
+        label.textColor = Design.Text.tertiary
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.lineBreakMode = .byWordWrapping
+        label.maximumNumberOfLines = 0
+        addRow(label)
+        return label
+    }
+
+    /// Provenance under a section's rows — where a reading came from and how fresh it is. A
+    /// note speaks *for* a section that has nothing else to say; a footnote speaks *about* rows
+    /// that are already there, so it is set a step quieter, in the detail face, and stands on
+    /// the same column.
+    @discardableResult
+    func addFootnote(_ text: String) -> NSTextField {
+        let label = NSTextField(labelWithString: text)
+        label.applyFont(.detail())
         label.textColor = Design.Text.tertiary
         label.translatesAutoresizingMaskIntoConstraints = false
         label.lineBreakMode = .byWordWrapping

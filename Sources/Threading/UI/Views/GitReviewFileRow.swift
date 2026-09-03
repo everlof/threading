@@ -118,7 +118,8 @@ final class GitReviewFileRow: NSView {
     var onAddContextAttachment: ((ConversationContextAttachment) -> Void)? {
         didSet { wireContextDiffs() }
     }
-    var onRequestContextComment: ((ConversationContextAttachment, CodeContextPreview?) -> Void)? {
+    /// One receipt per contiguous run of the commented lines; see `GitReviewDiffTextView`.
+    var onRequestContextComment: (([ConversationContextAttachment], CodeContextPreview?) -> Void)? {
         didSet { wireContextDiffs() }
     }
     private var contextDiffs: [GitReviewDiffTextView] = []
@@ -757,7 +758,7 @@ final class GitReviewFileRow: NSView {
         if onRequestContextComment != nil {
             entries.append(.item(ThemedMenuItem(
                 title: L10n.string("Comment on file…"),
-                onChoose: { [weak self] in self?.onRequestContextComment?(context, nil) }
+                onChoose: { [weak self] in self?.onRequestContextComment?([context], nil) }
             )))
         }
 
@@ -1309,15 +1310,15 @@ final class GitReviewFileRow: NSView {
 
     private func wireContextDiff(_ diff: GitReviewDiffTextView) {
         diff.onAddContextAttachment = onAddContextAttachment
-        diff.onRequestComment = { [weak self] attachment, preview in
-            self?.onRequestContextComment?(attachment, preview)
+        diff.onRequestComment = { [weak self] attachments, preview in
+            self?.onRequestContextComment?(attachments, preview)
         }
     }
 
     private func wireContextDiff(_ diff: GitReviewSplitDiffView) {
         diff.onAddContextAttachment = onAddContextAttachment
-        diff.onRequestComment = { [weak self] attachment, preview in
-            self?.onRequestContextComment?(attachment, preview)
+        diff.onRequestComment = { [weak self] attachments, preview in
+            self?.onRequestContextComment?(attachments, preview)
         }
     }
 

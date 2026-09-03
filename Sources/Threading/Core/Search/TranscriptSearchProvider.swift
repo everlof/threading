@@ -109,7 +109,7 @@ final class TranscriptSearchIndexStore {
         case .sessionRemoved(let projectID, let sessionID):
             sourcesByProjectID[projectID]?.removeValue(forKey: sessionID)
             scheduleRefresh()
-        case .terminalRow:
+        case .terminalAdded, .terminalRow:
             break
         }
     }

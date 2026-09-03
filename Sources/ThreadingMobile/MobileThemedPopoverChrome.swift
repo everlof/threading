@@ -13,6 +13,7 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
     @Binding var isPresented: Bool
     let theme: RemoteThemePalette
     let arrowEdge: Edge
+    let makeRoom: (() -> Void)?
     let content: PopoverContent
 
     func makeCoordinator() -> Coordinator {
@@ -41,7 +42,8 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
             isPresented: isPresented,
             root: root,
             style: style,
-            arrowEdge: arrowEdge
+            arrowEdge: arrowEdge,
+            makeRoom: makeRoom
         )
     }
 
@@ -50,6 +52,7 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
         private weak var presenter: UIViewController?
         private var hostingController: UIHostingController<AnyView>?
         private var style: MobileThemedPopoverBackgroundView.Style?
+        private var makeRoom: (() -> Void)?
         private var presentationIsScheduled = false
 
         init(isPresented: Binding<Bool>) {
@@ -61,10 +64,12 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
             isPresented: Bool,
             root: AnyView,
             style: MobileThemedPopoverBackgroundView.Style,
-            arrowEdge: Edge
+            arrowEdge: Edge,
+            makeRoom: (() -> Void)?
         ) {
             self.presenter = presenter
             self.style = style
+            self.makeRoom = makeRoom
             if let hostingController {
                 hostingController.rootView = root
                 apply(style, to: hostingController)
@@ -101,6 +106,16 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
                 in: CGSize(width: width, height: UIView.layoutFittingExpandedSize.height)
             )
             guard let popover = hosting.popoverPresentationController else { return }
+            if let makeRoom, let window = presenter.view.window,
+               !MobileThemedPopoverRoom.fits(
+                   contentHeight: hosting.preferredContentSize.height,
+                   arrowEdge: arrowEdge,
+                   anchor: presenter.view.convert(presenter.view.bounds, to: window),
+                   between: MobileThemedPopoverRoom.contentTop(of: window),
+                   and: MobileThemedPopoverRoom.contentBottom(of: window)
+               ) {
+                makeRoom()
+            }
             popover.sourceView = presenter.view
             popover.sourceRect = presenter.view.bounds
             popover.permittedArrowDirections = permittedDirection(for: arrowEdge)
@@ -166,6 +181,7 @@ private struct MobileThemedPopoverModifier<PopoverContent: View>: ViewModifier {
     @Binding var isPresented: Bool
     let theme: RemoteThemePalette
     let arrowEdge: Edge
+    let makeRoom: (() -> Void)?
     let popoverContent: PopoverContent
 
     func body(content: Content) -> some View {
@@ -174,17 +190,79 @@ private struct MobileThemedPopoverModifier<PopoverContent: View>: ViewModifier {
                 isPresented: $isPresented,
                 theme: theme,
                 arrowEdge: arrowEdge,
+                makeRoom: makeRoom,
                 content: popoverContent
             )
         }
     }
 }
 
+/// Whether a popover has the room it asks for on the side of its anchor the arrow points from.
+///
+/// UIKit fits a popover into the container inside the safe area and its own ten-point layout
+/// margins, and *shrinks* one that asks for more — the hosted content is then laid out short and
+/// clipped, which for the model-by-effort matrix means rows cut off under the fold. A host with
+/// something it could clear from under the anchor — the composer's keyboard — asks this first,
+/// with the top and bottom the popover's body may stand between in window coordinates, and
+/// clears it only when the answer is no. The arrow is the only chrome between the body and the
+/// anchor; the layout margin is charged where UIKit charges it, at the safe-area edge, and not
+/// again at a navigation bar — counted twice, a full five-row page of the picker came out one
+/// point too tall for an iPhone 17 Pro that has nine to spare. Measured on the phone: the
+/// picker stands above the keyboard-riding composer on an iPhone 17 Pro, and an iPhone SE fits
+/// three rows and asks for the keyboard's room at five, the way every chooser used to
+/// unconditionally.
+@MainActor
+enum MobileThemedPopoverRoom {
+    /// `UIPopoverPresentationController.popoverLayoutMargins`' default, on every side.
+    static let layoutMargin: CGFloat = 10
+
+    static func fits(
+        contentHeight: CGFloat,
+        arrowEdge: Edge,
+        anchor: CGRect,
+        between top: CGFloat,
+        and bottom: CGFloat
+    ) -> Bool {
+        let arrow = MobileThemedPopoverBackgroundView.arrowHeight()
+        switch arrowEdge {
+        case .bottom:
+            return contentHeight <= anchor.minY - top - arrow
+        case .top:
+            return contentHeight <= bottom - anchor.maxY - arrow
+        case .leading, .trailing:
+            // Beside the anchor the popover has the whole height; it moves along the edge rather
+            // than shrinking, and nothing the host could clear would change that.
+            return true
+        }
+    }
+
+    /// The highest edge a popover's body may reach in a window: below the navigation bar when
+    /// one is on screen — a popover standing over the bar would hide Back behind a modal
+    /// surface — and otherwise UIKit's own bound, the top safe-area inset plus its margin.
+    static func contentTop(of window: UIWindow) -> CGFloat {
+        let bars = window.allDescendants(of: UINavigationBar.self)
+            .filter { !$0.isHidden && $0.window != nil }
+            .map { $0.convert($0.bounds, to: window).maxY }
+        return max(window.safeAreaInsets.top + layoutMargin, bars.max() ?? 0)
+    }
+
+    /// The lowest edge a popover's body may reach in a window: UIKit's bound, the bottom
+    /// safe-area inset plus its margin.
+    static func contentBottom(of window: UIWindow) -> CGFloat {
+        window.bounds.maxY - window.safeAreaInsets.bottom - layoutMargin
+    }
+}
+
 extension View {
+    /// - Parameter makeRoom: Called once, just before the popover is presented, when its
+    ///   content would not fit on its arrow's side of the anchor — so the host can clear what
+    ///   stands under the anchor (a keyboard) and the popover lays itself out again as that
+    ///   room arrives. Omitted, the popover is presented into whatever room there is.
     func mobileThemedPopover<PopoverContent: View>(
         isPresented: Binding<Bool>,
         theme: RemoteThemePalette,
         arrowEdge: Edge,
+        makeRoom: (() -> Void)? = nil,
         @ViewBuilder content: () -> PopoverContent
     ) -> some View {
         modifier(
@@ -192,6 +270,7 @@ extension View {
                 isPresented: isPresented,
                 theme: theme,
                 arrowEdge: arrowEdge,
+                makeRoom: makeRoom,
                 popoverContent: content()
             )
         )
@@ -404,6 +483,11 @@ private extension UIView {
             if let match = child.firstDescendant(of: type) { return match }
         }
         return nil
+    }
+
+    func allDescendants<View: UIView>(of type: View.Type) -> [View] {
+        let own = (self as? View).map { [$0] } ?? []
+        return own + subviews.flatMap { $0.allDescendants(of: type) }
     }
 }
 #endif

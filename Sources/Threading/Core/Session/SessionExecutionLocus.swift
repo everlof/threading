@@ -61,11 +61,12 @@ enum SessionExecutionDrift: Equatable, Sendable {
 /// Reconciles what agents report about their working directory against the checkouts that own
 /// their chats.
 ///
-/// **The reported directory is the only sound source, and the alternatives were measured.**
-/// `TerminalSession.effectiveWorkingDirectory()` reads OSC 7 or the PTY root process's real
-/// cwd, and neither moves when a runtime runs `cd x && …` per tool call: a chat observed
-/// building in a sibling worktree for over three hours had a root process still sitting in the
-/// directory it launched from. A provider's own report sees what a process reading cannot.
+/// **Execution is observed, never inferred from command text.** A provider lifecycle report is
+/// the cheapest source when its `cwd` follows tool execution. Some runtimes instead keep that
+/// value and the PTY root process in the launch directory while spawning each tool beneath a
+/// temporary `cd x && …`; for those, a coalesced sample of the root's live descendants supplies
+/// the missing fact. The host therefore follows ordinary Git use without teaching the model a
+/// special spelling or parsing shell commands whose quoting and composition are unbounded.
 ///
 /// **Scaling.** These reports arrive on every turn boundary and every brokered tool call of
 /// every running session, which is the highest-frequency callback in the app that carries a
@@ -88,6 +89,11 @@ final class SessionExecutionLocusTracker {
     /// What each session last reported, verbatim and uninterpreted. The comparison that keeps
     /// this callback cheap happens against these strings, before anything is resolved.
     private var lastReportedPath: [SessionID: String] = [:]
+
+    /// The bounded descendant sample last considered for each terminal session. Kept separate
+    /// from `lastReportedPath`: a lifecycle report that repeats the launch directory after a
+    /// tool ran elsewhere says nothing new and must not erase that stronger execution evidence.
+    private var lastProcessPathSignature: [SessionID: String] = [:]
 
     private var drifts: [SessionID: SessionExecutionDrift] = [:]
 
@@ -160,6 +166,52 @@ final class SessionExecutionLocusTracker {
         }
     }
 
+    /// Records the working directories of a bounded set of live tool descendants.
+    ///
+    /// The process observer has already paid for one shared process-table walk and supplies at
+    /// most `SessionExecutionLocusDefaults.processCandidatesPerSession` paths. Only paths outside
+    /// the project's lexical root reach Git resolution. A project may itself be a subdirectory
+    /// of its checkout, so resolution still decides whether those paths are truly elsewhere.
+    func observeProcessWorkingDirectories(_ paths: [String], sessionID: SessionID) {
+        let unique = Array(Set(paths.filter { !$0.isEmpty })).sorted()
+        guard !unique.isEmpty,
+              let owned = ownedCheckoutPath(
+                forSessionID: sessionID,
+                requiresLifecycleCapability: false
+              ) else { return }
+
+        let signature = unique.joined(separator: "\u{0}")
+        guard lastProcessPathSignature[sessionID] != signature else { return }
+        lastProcessPathSignature[sessionID] = signature
+
+        let ownedRoot = URL(fileURLWithPath: owned, isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath().path
+        let candidates = unique.filter {
+            let path = URL(fileURLWithPath: $0, isDirectory: true)
+                .standardizedFileURL.resolvingSymlinksInPath().path
+            return path != ownedRoot && !path.hasPrefix(ownedRoot + "/")
+        }
+        if candidates.isEmpty {
+            classificationsApplied &+= 1
+            applyDrift(.none, sessionID: sessionID)
+            return
+        }
+
+        let resolver = self.resolver
+        resolutionQueue.async {
+            let reported = candidates.compactMap(resolver)
+            let ownedCheckout = resolver(owned)
+            Task { @MainActor [weak self] in
+                self?.applyProcessObservation(
+                    reported,
+                    against: ownedCheckout,
+                    signature: signature,
+                    sessionID: sessionID
+                )
+            }
+        }
+    }
+
     /// What the sidebar and the session inspector draw. `.none` for anything never observed,
     /// which is the same thing they drew before this existed.
     func drift(forSessionID sessionID: SessionID) -> SessionExecutionDrift {
@@ -174,6 +226,8 @@ final class SessionExecutionLocusTracker {
     /// just-repaired chat marked as drifting until its next turn.
     func forget(sessionID: SessionID) {
         lastReportedPath[sessionID] = nil
+        lastProcessPathSignature[sessionID] = nil
+        SessionExecutionProcessObserver.shared.forget(sessionID: sessionID)
         guard drifts.removeValue(forKey: sessionID) != nil else { return }
         NotificationCenter.default.post(SessionExecutionDriftDidChange(sessionID: sessionID))
     }
@@ -186,12 +240,46 @@ final class SessionExecutionLocusTracker {
     /// whole purpose is to run in a worktree of Threading's own making, so every report it ever
     /// sends would classify as drift, and the coordinator would refuse every one of them
     /// (`.managedWorkspace`) after paying for the git resolution first.
-    private func ownedCheckoutPath(forSessionID sessionID: SessionID) -> String? {
+    private func ownedCheckoutPath(
+        forSessionID sessionID: SessionID,
+        requiresLifecycleCapability: Bool = true
+    ) -> String? {
         guard let session = projects.session(withID: sessionID),
               session.managedWorkspace == nil,
-              session.kind.supports(.lifecycleReportedWorkingDirectory),
+              (!requiresLifecycleCapability
+                || session.kind.supports(.lifecycleReportedWorkingDirectory)),
               let project = projects.project(forSessionID: sessionID) else { return nil }
         return project.folderPath
+    }
+
+    /// Applies descendant evidence only when it names one unambiguous sibling checkout.
+    /// Incidental children in `/tmp` or another repository are not ownership evidence, and two
+    /// sibling roots active at once do not tell the host which one should own the chat.
+    private func applyProcessObservation(
+        _ reported: [ObservedCheckout],
+        against owned: ObservedCheckout?,
+        signature: String,
+        sessionID: SessionID
+    ) {
+        guard lastProcessPathSignature[sessionID] == signature,
+              let owned else { return }
+
+        var siblingsByIdentity: [String: ObservedCheckout] = [:]
+        for checkout in reported
+        where checkout.repositoryIdentity == owned.repositoryIdentity
+            && checkout.worktreeIdentity != owned.worktreeIdentity {
+            siblingsByIdentity[checkout.worktreeIdentity] = checkout
+        }
+        classificationsApplied &+= 1
+        if siblingsByIdentity.isEmpty,
+           reported.contains(where: { $0.worktreeIdentity == owned.worktreeIdentity }) {
+            applyDrift(.none, sessionID: sessionID)
+            return
+        }
+        guard siblingsByIdentity.count == 1,
+              let checkout = siblingsByIdentity.values.first else { return }
+
+        applyDrift(.siblingCheckout(checkout), sessionID: sessionID)
     }
 
     private func apply(
@@ -215,10 +303,13 @@ final class SessionExecutionLocusTracker {
         }
 
         classificationsApplied &+= 1
+        applyDrift(drift, sessionID: sessionID)
+    }
 
+    private func applyDrift(_ drift: SessionExecutionDrift, sessionID: SessionID) {
         // Absent *is* `.none`, so a chat that has only ever worked where it belongs — nearly all
-        // of them — stores nothing and announces nothing, however many directories it walks
-        // through inside its own checkout. Only a chat that leaves, or returns, is news.
+        // of them — stores nothing and announces nothing. Only a chat that leaves, or returns,
+        // is news.
         let previous = drifts[sessionID] ?? .none
         guard previous != drift else { return }
         drifts[sessionID] = drift == .none ? nil : drift
@@ -262,4 +353,186 @@ struct SessionExecutionDriftDidChange: AppEvent {
 
 enum SessionExecutionLocusDefaults {
     static let queueLabel = "com.threading.session-execution-locus"
+    static let processQueueLabel = "com.threading.session-execution-process"
+    static let processInitialDelay: TimeInterval = 0.12
+    static let processMinimumScanInterval: TimeInterval = 1.0
+    static let processCandidatesPerSession = 8
+}
+
+// MARK: - Descendant Process Observation
+
+/// One process-table snapshot shared by every session whose output arrived in the same burst.
+///
+/// Building parentage is O(system processes) once. Agent roots are disjoint, so walking their
+/// descendants is O(the descendants that actually exist), and the retained candidates are a
+/// fixed eight per session even for a build that fans out into thousands of workers.
+struct SessionExecutionProcessSnapshot {
+    private let table: [pid_t: ProcessSummary]
+    private let childrenByParent: [pid_t: [pid_t]]
+
+    init(table: [pid_t: ProcessSummary]) {
+        self.table = table
+        self.childrenByParent = Dictionary(grouping: table.values, by: \.parentPid)
+            .mapValues { $0.map(\.pid) }
+    }
+
+    func candidateProcessIDs(
+        below rootPID: pid_t,
+        limit: Int = SessionExecutionLocusDefaults.processCandidatesPerSession
+    ) -> [pid_t] {
+        guard rootPID > 0, limit > 0 else { return [] }
+
+        var visited: Set<pid_t> = [rootPID]
+        var pending = childrenByParent[rootPID] ?? []
+        var candidates: [ProcessSummary] = []
+        candidates.reserveCapacity(limit)
+
+        while let pid = pending.popLast() {
+            guard visited.insert(pid).inserted else { continue }
+            if let summary = table[pid] {
+                insertNewest(summary, into: &candidates, limit: limit)
+            }
+            pending.append(contentsOf: childrenByParent[pid] ?? [])
+        }
+
+        return candidates.map(\.pid)
+    }
+
+    private func insertNewest(
+        _ candidate: ProcessSummary,
+        into candidates: inout [ProcessSummary],
+        limit: Int
+    ) {
+        let insertion = candidates.firstIndex { isNewer(candidate, than: $0) }
+            ?? candidates.endIndex
+        candidates.insert(candidate, at: insertion)
+        if candidates.count > limit { candidates.removeLast() }
+    }
+
+    private func isNewer(_ lhs: ProcessSummary, than rhs: ProcessSummary) -> Bool {
+        switch (lhs.startTime, rhs.startTime) {
+        case let (left?, right?):
+            if left.seconds != right.seconds { return left.seconds > right.seconds }
+            if left.microseconds != right.microseconds {
+                return left.microseconds > right.microseconds
+            }
+        case (.some, .none): return true
+        case (.none, .some): return false
+        case (.none, .none): break
+        }
+        return lhs.pid > rhs.pid
+    }
+}
+
+/// Coalesces terminal-output edges into a bounded, background process sample.
+///
+/// Expected load is one to ten simultaneously working sessions on a machine with hundreds of
+/// processes; the stress boundary is every live session reporting output together. They share
+/// one process-table walk per second, and each contributes at most eight cwd syscalls. The output
+/// callback itself only replaces one dictionary value and schedules work on the main queue.
+@MainActor
+final class SessionExecutionProcessObserver: @unchecked Sendable {
+    static let shared = SessionExecutionProcessObserver()
+
+    typealias TableReader = @Sendable () -> [pid_t: ProcessSummary]
+    typealias WorkingDirectoryReader = @Sendable (pid_t) -> String?
+
+    private struct Request: Sendable {
+        let rootPID: pid_t
+        let generation: UInt64
+    }
+
+    private let scanQueue: DispatchQueue
+    private let tableReader: TableReader
+    private let workingDirectoryReader: WorkingDirectoryReader
+    private var pending: [SessionID: Request] = [:]
+    private var generations: [SessionID: UInt64] = [:]
+    private var scanScheduled = false
+    private var scanInFlight = false
+    private var lastScanAt: TimeInterval = 0
+
+    init(
+        scanQueue: DispatchQueue = DispatchQueue(
+            label: SessionExecutionLocusDefaults.processQueueLabel,
+            qos: .utility
+        ),
+        tableReader: @escaping TableReader = { ProcessUtility.processTable() },
+        workingDirectoryReader: @escaping WorkingDirectoryReader = {
+            ProcessUtility.workingDirectory(forPid: $0)?.path
+        }
+    ) {
+        self.scanQueue = scanQueue
+        self.tableReader = tableReader
+        self.workingDirectoryReader = workingDirectoryReader
+    }
+
+    func noteOutput(sessionID: SessionID, rootPID: pid_t) {
+        guard rootPID > 0 else { return }
+        pending[sessionID] = Request(
+            rootPID: rootPID,
+            generation: generations[sessionID, default: 0]
+        )
+        scheduleIfNeeded()
+    }
+
+    func forget(sessionID: SessionID) {
+        generations[sessionID, default: 0] &+= 1
+        pending[sessionID] = nil
+    }
+
+    private func scheduleIfNeeded() {
+        guard !pending.isEmpty, !scanScheduled, !scanInFlight else { return }
+        scanScheduled = true
+        let elapsed = ProcessInfo.processInfo.systemUptime - lastScanAt
+        let intervalDelay = max(
+            SessionExecutionLocusDefaults.processMinimumScanInterval - elapsed,
+            0
+        )
+        let delay = max(SessionExecutionLocusDefaults.processInitialDelay, intervalDelay)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            MainActor.assumeIsolated { self?.startScan() }
+        }
+    }
+
+    private func startScan() {
+        scanScheduled = false
+        guard !pending.isEmpty else { return }
+        let requests = pending
+        pending.removeAll(keepingCapacity: true)
+        scanInFlight = true
+        lastScanAt = ProcessInfo.processInfo.systemUptime
+        let tableReader = self.tableReader
+        let workingDirectoryReader = self.workingDirectoryReader
+
+        scanQueue.async { [self] in
+            let snapshot = SessionExecutionProcessSnapshot(table: tableReader())
+            var pathsBySession: [SessionID: (Request, [String])] = [:]
+            pathsBySession.reserveCapacity(requests.count)
+            for (sessionID, request) in requests {
+                var seen: Set<String> = []
+                let paths = snapshot.candidateProcessIDs(below: request.rootPID).compactMap {
+                    workingDirectoryReader($0)
+                }.filter { seen.insert($0).inserted }
+                pathsBySession[sessionID] = (request, paths)
+            }
+            let completed = pathsBySession
+            DispatchQueue.main.async { [self, completed] in
+                MainActor.assumeIsolated {
+                    finishScan(completed)
+                }
+            }
+        }
+    }
+
+    private func finishScan(_ observations: [SessionID: (Request, [String])]) {
+        scanInFlight = false
+        for (sessionID, observation) in observations
+        where generations[sessionID, default: 0] == observation.0.generation {
+            SessionExecutionLocusTracker.shared.observeProcessWorkingDirectories(
+                observation.1,
+                sessionID: sessionID
+            )
+        }
+        scheduleIfNeeded()
+    }
 }

@@ -63,7 +63,7 @@ final class NavigationSearchIndexStore {
             replaceSession(sessionID)
         case .sessionRemoved(let projectID, let sessionID):
             removeSession(sessionID, from: projectID)
-        case .terminalRow(let terminalID):
+        case .terminalAdded(_, let terminalID), .terminalRow(let terminalID):
             replaceTerminal(terminalID)
         }
     }

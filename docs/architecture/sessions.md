@@ -528,15 +528,18 @@ event replaces the calling session's runtime. A native outbox is handed across t
 the provider resume ID is unchanged. The just-finished checkpoint is marked `checkoutChanged`
 and cannot be presented as Last Turn because Threading cannot prove where every external command
 ran across the boundary. The next turn captures normally in the destination. Git Review, files,
-processes, relaunch and agent project scope all resolve through the moved `Project`. Standalone
-terminals retain their own checkout and working directory.
+processes, relaunch and agent project scope all resolve through the moved `Project`. The display
+pane retains its tab identities but reconstructs Review and Overview, the two controllers that
+capture a project root at construction; refreshing either old controller would re-read the source
+checkout and leave exactly the split view where the sidebar names one branch while Review names
+another. Standalone terminals retain their own checkout and working directory.
 
 The menu, MCP tools and Tools ▸ Project authority preference are host-owned work-organization
 controls. `explicit_user_request` is allowed without a second prompt under the default
-`allowExplicitRequests`; `agent_initiated` still requires confirmation. `alwaysAsk` confirms both,
-and `allowSameRepository` confirms neither after the same canonical validation. This is not an
-extension component: presentation cannot be allowed to contradict durable ownership, the turn
-fence or the audit decision.
+`allowExplicitRequests`; factual `observed_execution` follows too, while `agent_initiated` still
+requires confirmation. `alwaysAsk` confirms every basis, and `allowSameRepository` confirms none
+after the same canonical validation. This is not an extension component: presentation cannot be
+allowed to contradict durable ownership, the turn fence or the audit decision.
 
 ### Where a chat runs is not where its agent is
 
@@ -548,45 +551,35 @@ go on naming the checkout the chat launched from. Three chats of one repository 
 state at once, two of them because the user had asked in words for a worktree and the agent had
 made one with `git worktree add` — the only route available to it.
 
-**The provider's own report is the only sound source.** `TerminalSession.effectiveWorkingDirectory()`
+**Execution is observed, not parsed out of shell text.** `TerminalSession.effectiveWorkingDirectory()`
 reads OSC 7 or the PTY root process's real cwd, and neither moves for a runtime that prefixes each
-command with `cd`: one drifted chat's root process was still in its launch directory after three
-hours while the chat's own status line named the worktree. Both hook-capable runtimes state it
-outright — Claude CLI 2.1.251 builds every hook payload as `session_id` / `transcript_path` /
-`cwd`, and Codex 0.151.0 was captured sending `cwd` on `sessionStarted`, `turnStarted` and
-`turnFinished` — and Threading read the two neighbouring keys out of that dictionary for a long
-time while stepping over the one in the middle. `AgentCapabilities.lifecycleReportedWorkingDirectory`
-is the declaration; Grok, OpenCode and Cursor register no lifecycle hooks, so the question does not
-arise for them and silence from any runtime means *unknown*, never *unchanged*.
+command with `cd`: MARBLES' root process was still in its launch directory while its tool children
+built in the new worktree. Hook-capable runtimes also send `cwd`, but that field can describe the
+same durable runtime root rather than a tool-local `cd`; it remains the cheapest signal when it
+does move and unknown when absent. The complementary signal is the live descendant tree beneath
+the agent process. A child cwd is kernel state, so it covers raw `git worktree add` followed by
+ordinary commands without understanding the command language or requiring a Threading tool.
 
-`SessionExecutionLocusTracker` reconciles the two. It is on the highest-frequency callback in the
-app that carries a path, so the hot path is one dictionary read and one string comparison against
-what that session last reported; only a *changed* directory is resolved, that resolution runs off
-the main actor because `GitInfo.repositoryRoot` is a child process, and `GitInfo`'s memo absorbs
-the repeats from the subdirectories one agent walks through. A chat that has only ever worked where
-it belongs stores nothing and announces nothing. The reported directory is routinely several levels
-inside a checkout, so classification resolves it to that checkout's **root** before anything else:
-`validate` refuses any other path as `targetNotCheckoutRoot`. Managed workspaces are excluded
-before the resolution rather than refused after it, since every report one sends is drift by
-construction.
+`SessionExecutionLocusTracker` reconciles both sources. An unchanged lifecycle path still costs one
+dictionary comparison. Terminal output does no process work: `SessionExecutionProcessObserver`
+coalesces every working session into one utility-queue process-table walk at most once per second,
+then retains at most the newest eight descendants per session for cwd reads. Expected load is one
+to ten working sessions; even the stress case of every live session producing output keeps one
+shared table walk and eight syscalls per session. Roots are disjoint, parentage is built once, and
+the main actor only receives the bounded path values. Only changed external values are resolved to
+Git checkouts, and an observation acts only when every same-repository descendant names one unique
+sibling. The reported directory is routinely several levels inside a checkout, so classification
+resolves it to that checkout's **root** before anything else: `validate` refuses any other path as
+`targetNotCheckoutRoot`. Managed workspaces are excluded before resolution because their separate
+worktree is intentional.
 
 Drift reconciles through `SessionCheckoutCoordinator` like every other move, under a third
 authority basis. `observed_execution` is not a reuse of `agent_initiated`: an agent's move is a
 decision a model made and can be asked to justify, while this one is an inference Threading drew
 from a lifecycle report, and it is the only basis that can be granted with nobody having requested
-anything. Under the default `allowExplicitRequests` it is asked about, **except** when the move is
-a pure repair.
-
-**The repair case is a filesystem question and must not be inferred.** Claude is the one runtime
-whose conversations are checkout-scoped, and it sometimes re-files a conversation under the slug of
-the directory its agent moved to. When it has, the chat is *already* unresumable where Threading
-would launch it: `ClaudeTranscript.exists` stops finding the transcript and `AgentLauncher` falls
-through its `--resume` branch to minting an empty conversation under the same id. Both of the
-drifted chats reported the same kind of drift and only one had re-filed, so only reading both paths
-tells them apart — `conversationHasLeft` needs the transcript *gone from* the owned checkout and
-*present at* the destination, since either half alone means something else. Where it holds, the move
-copies nothing and refusing to act preserves a defect rather than preventing one, so it proceeds
-without asking. `alwaysAsk` still asks, because that is what it means.
+anything. Under the default `allowExplicitRequests`, an observed same-repository checkout follows
+automatically after the active turn's final checkpoint; `alwaysAsk` preserves a confirmation for
+someone who explicitly wants every ownership change confirmed.
 
 Everything that is *not* moved still has to stop lying, since some drift can never move — a chat
 working outside its own repository is refused as `differentRepository`, correctly — and an offer
@@ -600,19 +593,15 @@ a turn the user started a moment ago and answers a request a model made; this on
 of a dozen background chats the moment an agent runs `cd`, and a stack of sheets for something
 nobody asked for is the wrong trade.
 
-**The observer is the safety net, not the route.** The reason both drifted chats existed is that
-an agent asked for a worktree had exactly one way to make one. `New Worktree…` is in the composer,
-where no agent can reach it, and `set_session_checkout` moves only into a checkout that already
-exists — so `git worktree add` was the whole of the available answer, and it leaves ownership
-behind by construction. `create_session_worktree(branch, authority_basis, reason)` closes that:
-one call makes the checkout through `GitWorktree.create` and requests the move through the same
-coordinator, so the ordinary path leaves ownership correct and drift detection is left to catch
-the cases nothing routed. It takes no path — location is `GitWorktree.suggestedLocation`'s, so a
-repository's worktrees group on disk instead of landing wherever an agent thought of — and it
-carries `createsBranch`, because git spells "new branch" and "existing branch" differently and
-the composer's own route only ever needed the first. The worktree is **not** removed when the move
-is then refused: the checkout is work the user asked for, and deleting it because a policy said
-"ask first" would destroy the thing the call was told to make.
+**The integrated route is atomic, not required for correctness.**
+`create_session_worktree(branch, authority_basis, reason)` still creates through
+`GitWorktree.create` and queues ownership in one operation. It takes no path — location is
+`GitWorktree.suggestedLocation`'s, so a repository's worktrees group on disk — and carries
+`createsBranch`, because Git spells "new branch" and "existing branch" differently. But an agent
+or user may also create any ordinary worktree with Git. Once this chat actually executes there,
+the descendant observer discovers the checkout, the same coordinator fences and moves ownership,
+and the sidebar adopts it as an ordinary project. Instructions improve the atomic case; they are
+not the mechanism that keeps the model honest.
 
 The composer hangs from the pane's **bottom** edge — input below, room above, the shape every
 chat product has taught — and the room above holds a **hero**: the Threading mark over a

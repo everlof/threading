@@ -5,21 +5,25 @@ import AppKit
 /// The persisted spellings remain `.files` and `.info` so an older build can still restore a
 /// layout written by this one. In memory they are one durable surface, and this value records
 /// which part of it the user was reading.
+///
+/// Declaration order is the control's order: Info leads because it is the default section and
+/// the one a person opens the panel for — what the session is running now — and Activity, the
+/// account of where its work landed, follows.
 enum SessionOverviewSection: String, CaseIterable {
-    case activity
     case info
+    case activity
 
     var title: String {
         switch self {
-        case .activity: return L10n.string("Activity")
         case .info: return L10n.string("Info")
+        case .activity: return L10n.string("Activity")
         }
     }
 
     var accessibilityIdentifier: String {
         switch self {
-        case .activity: return "session-overview.section.activity"
         case .info: return "session-overview.section.info"
+        case .activity: return "session-overview.section.activity"
         }
     }
 }

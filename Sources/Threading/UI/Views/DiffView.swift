@@ -260,10 +260,33 @@ final class GitReviewDiffTextView: ThemedTextView {
     private var heightNotificationPending = false
     private var contextMenuSession: AnyObject?
     /// What was selected before a menu grew the selection to whole lines, so a cancelled menu
-    /// can give it back rather than leave a selection nobody made.
-    private var selectionBeforeMenu: NSRange?
+    /// can give it back rather than leave a selection nobody made. Every range, because a
+    /// selection with gaps is several.
+    private var selectionBeforeMenu: [NSValue]?
     private var menuChoiceMade = false
+    /// The line menu on screen, so a test can read its entries and choose one.
+    private var lineMenuPresentation: ThemedMenuPresentation?
     private var lineActionTrackingArea: NSTrackingArea?
+
+    /// A plate press that has not been released: the line it started on, the line the pointer
+    /// has reached since, and — for a ⌘-press — the runs already selected, which the drag adds
+    /// to rather than replaces. The selection follows, so the menu on release speaks for it
+    /// through the same rule a click uses.
+    private struct LineActionDrag {
+        let anchor: Int
+        var current: Int
+        /// The selection a ⌘-drag is adding to; nil for a plain drag, which replaces it.
+        let base: [ClosedRange<Int>]?
+
+        var span: ClosedRange<Int> { min(anchor, current)...max(anchor, current) }
+        var runs: [ClosedRange<Int>] { CodeContextPreview.mergedRuns((base ?? []) + [span]) }
+        var isAdditive: Bool { base != nil }
+    }
+
+    private var lineActionDrag: LineActionDrag?
+    /// The line the last plate press started on, so a shift-click on another plate reaches
+    /// back to it — the way to name a run longer than the pane without dragging past its edge.
+    private var lastLineActionAnchor: Int?
     /// The line whose action affordance is drawn, or nil. Readable so a test can ask what the
     /// pointer under a covering surface reached without sampling a pixel.
     private(set) var hoveredLineIndex: Int? {
@@ -275,7 +298,9 @@ final class GitReviewDiffTextView: ThemedTextView {
     }
 
     var onAddContextAttachment: ((ConversationContextAttachment) -> Void)?
-    var onRequestComment: ((ConversationContextAttachment, CodeContextPreview?) -> Void)?
+    /// One receipt per contiguous run of the lines a comment is about — several when the
+    /// selection has gaps — and the preview the sheet draws over all of them.
+    var onRequestComment: (([ConversationContextAttachment], CodeContextPreview?) -> Void)?
     var onPreferredHeightChange: (() -> Void)?
     private(set) var initialMeasuredSize = NSSize.zero
 
@@ -433,27 +458,79 @@ final class GitReviewDiffTextView: ThemedTextView {
         super.mouseExited(with: event)
     }
 
+    /// A press on the plate begins a line drag rather than opening the menu. The menu waits
+    /// for the release, so one gesture names a line or — dragged down the hunk — a run of
+    /// them, the way review tools choose the lines a comment is about. A ⌘-press adds to the
+    /// selection instead of replacing it, a ⌘-click on a selected line takes that line out,
+    /// and neither opens a menu: the set is being built, and a plain press inside it speaks
+    /// for all of it. A shift-click reaches back to the selection, or to the last plate
+    /// pressed, and opens at once.
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
-        // The plate answers for the selection when it sits inside one — the same rule the
-        // right-click follows. Answering for the hovered line alone threw a five-line selection
-        // away the moment the more discoverable of the two entry points was used.
-        if let hoveredLineIndex,
-           lineActionRect(for: hoveredLineIndex)?.contains(point) == true {
-            let span = targetSpan(forClickedLine: hoveredLineIndex)
-            if let reference = contextAttachment(spanningDisplayedLines: span),
-               let preview = contextPreview(spanningDisplayedLines: span) {
-                highlightLinesForMenu(span)
-                presentContextMenu(
-                    for: reference,
-                    preview: preview,
-                    spanning: span,
-                    at: event.locationInWindow
-                )
+        guard let hoveredLineIndex,
+              lineActionRect(for: hoveredLineIndex)?.contains(point) == true else {
+            super.mouseDown(with: event)
+            return
+        }
+        if event.modifierFlags.contains(.command) {
+            let selected = selectedLineRuns()
+            if selected.contains(where: { $0.contains(hoveredLineIndex) }) {
+                lastLineActionAnchor = hoveredLineIndex
+                highlightLineRuns(Self.lineRuns(selected, removing: hoveredLineIndex))
                 return
             }
+            lineActionDrag = LineActionDrag(
+                anchor: hoveredLineIndex, current: hoveredLineIndex, base: selected
+            )
+            return
         }
-        super.mouseDown(with: event)
+        if event.modifierFlags.contains(.shift),
+           let span = extendedSpan(toClickedLine: hoveredLineIndex) {
+            lastLineActionAnchor = hoveredLineIndex
+            presentLineMenu(spanning: [span], at: event.locationInWindow)
+            return
+        }
+        lineActionDrag = LineActionDrag(
+            anchor: hoveredLineIndex, current: hoveredLineIndex, base: nil
+        )
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard var drag = lineActionDrag else {
+            super.mouseDragged(with: event)
+            return
+        }
+        autoscroll(with: event)
+        let point = convert(event.locationInWindow, from: nil)
+        drag.current = nearestLineIndex(to: point) ?? drag.current
+        guard drag.current != lineActionDrag?.current else { return }
+        lineActionDrag = drag
+        // The selection is the run's indicator, as it is for the menu: what lights up whole is
+        // exactly what the menu will quote. Remembered once, so a cancelled menu gives back the
+        // selection the press found, not one of the drag's own intermediate runs.
+        if !drag.isAdditive, selectionBeforeMenu == nil { selectionBeforeMenu = selectedRanges }
+        highlightLineRuns(drag.runs)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let drag = lineActionDrag else {
+            super.mouseUp(with: event)
+            return
+        }
+        lineActionDrag = nil
+        lastLineActionAnchor = drag.anchor
+        if drag.isAdditive {
+            highlightLineRuns(drag.runs)
+            return
+        }
+        // The plate answers for the selection when it sits inside one — the same rule the
+        // right-click follows, and the one a drag has just built its run through. Answering
+        // for the hovered line alone threw a five-line selection away the moment the more
+        // discoverable of the two entry points was used.
+        presentLineMenu(
+            spanning: targetRuns(forClickedLine: drag.anchor),
+            at: event.locationInWindow
+        )
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -462,16 +539,33 @@ final class GitReviewDiffTextView: ThemedTextView {
             super.rightMouseDown(with: event)
             return
         }
-        let span = targetSpan(forClickedLine: lineIndex)
-        guard let reference = contextAttachment(spanningDisplayedLines: span),
-              let preview = contextPreview(spanningDisplayedLines: span) else { return }
-        highlightLinesForMenu(span)
-        presentContextMenu(
-            for: reference,
-            preview: preview,
-            spanning: span,
+        presentLineMenu(
+            spanning: targetRuns(forClickedLine: lineIndex),
             at: event.locationInWindow
         )
+    }
+
+    private func presentLineMenu(spanning runs: [ClosedRange<Int>], at windowPoint: NSPoint) {
+        let references = runs.compactMap { contextAttachment(spanningDisplayedLines: $0) }
+        guard !references.isEmpty, references.count == runs.count,
+              let preview = contextPreview(spanningRuns: runs) else { return }
+        highlightLinesForMenu(runs)
+        presentContextMenu(for: references, preview: preview, spanning: runs, at: windowPoint)
+    }
+
+    /// The runs with one line taken out — a ⌘-click on a selected line — splitting the run it
+    /// sat in.
+    private static func lineRuns(
+        _ runs: [ClosedRange<Int>],
+        removing index: Int
+    ) -> [ClosedRange<Int>] {
+        runs.flatMap { run -> [ClosedRange<Int>] in
+            guard run.contains(index) else { return [run] }
+            var pieces: [ClosedRange<Int>] = []
+            if index > run.lowerBound { pieces.append(run.lowerBound...(index - 1)) }
+            if index < run.upperBound { pieces.append((index + 1)...run.upperBound) }
+            return pieces
+        }
     }
 
     private func rebuildDocument() {
@@ -719,35 +813,45 @@ final class GitReviewDiffTextView: ThemedTextView {
         NSBezierPath(rect: rect.intersection(dirtyRect)).fill()
     }
 
-    /// The line action is drawn, not mounted, so a 400-line file still has one view. It covers
-    /// the hovered line number the same way review tools do: the location stays stable while
-    /// the affordance answers what a click there will do.
+    /// The line action is drawn, not mounted, so a 400-line file still has one view. It sits
+    /// in the gutter before the hovered line's number: the location stays stable while the
+    /// affordance answers what a press there will do.
+    ///
+    /// Everything it paints stays inside `lineActionRect`, which is what the hover invalidates.
+    /// The border used to be stroked centred on the rect's edge, so half of it lay outside,
+    /// and that half stayed on screen as a hairline in the gutter behind every line the
+    /// pointer had crossed.
     private func drawHoveredLineAction(in dirtyRect: NSRect) {
         guard let hoveredLineIndex,
               let rect = lineActionRect(for: hoveredLineIndex),
               rect.intersects(dirtyRect) else { return }
 
+        let border = Design.Radius.controlBorder
+        let radius = Design.Radius.control(fitting: rect.size)
         let plate = NSBezierPath(
-            roundedRect: rect,
-            xRadius: Design.Radius.control,
-            yRadius: Design.Radius.control
+            roundedRect: rect.insetBy(dx: border / 2, dy: border / 2),
+            xRadius: radius,
+            yRadius: radius
         )
         Design.Surface.controlHover.setFill()
         plate.fill()
         Design.Surface.border.setStroke()
-        plate.lineWidth = Design.Radius.controlBorder
+        plate.lineWidth = border
         plate.stroke()
 
-        Design.Text.label.setStroke()
-        let plus = NSBezierPath()
-        plus.lineWidth = max(Design.Radius.border, 1.5)
-        plus.lineCapStyle = .round
-        let arm: CGFloat = 5
-        plus.move(to: NSPoint(x: rect.midX - arm, y: rect.midY))
-        plus.line(to: NSPoint(x: rect.midX + arm, y: rect.midY))
-        plus.move(to: NSPoint(x: rect.midX, y: rect.midY - arm))
-        plus.line(to: NSPoint(x: rect.midX, y: rect.midY + arm))
-        plus.stroke()
+        // The plus is two filled bars, each a whole number of device pixels thick and on the
+        // grid. A round-capped stroke centred on the rect's fractional midpoint was two
+        // blurred rows on every display — the defect `GlyphView` fixed for symbols.
+        Design.Text.label.setFill()
+        let reach = LineActionPlus.reach
+        let stroke = max(Design.Radius.border, LineActionPlus.stroke)
+        let bars = [
+            NSRect(x: rect.midX - reach, y: rect.midY - stroke / 2, width: reach * 2, height: stroke),
+            NSRect(x: rect.midX - stroke / 2, y: rect.midY - reach, width: stroke, height: reach * 2),
+        ]
+        for bar in bars {
+            backingAlignedRect(bar, options: Self.pixelGridAlignment).fill()
+        }
     }
 
     private func invalidateLineHover(at index: Int?) {
@@ -797,6 +901,10 @@ final class GitReviewDiffTextView: ThemedTextView {
         return rect.isNull ? nil : rect
     }
 
+    /// The plate's rect, on the device pixel grid. TextKit's fragment centre is fractional,
+    /// and a plate placed straight from it had every edge — and the plus inside it —
+    /// straddling two pixel rows, which is what "the + looks blurry" was. The hit rect and
+    /// the painted rect are one value, so the plate pressed is the plate seen.
     private func lineActionRect(for index: Int) -> NSRect? {
         guard lineRanges.indices.contains(index),
               let layoutManager else { return nil }
@@ -810,13 +918,14 @@ final class GitReviewDiffTextView: ThemedTextView {
             effectiveRange: nil
         )
         let gutter = GitReviewDefaults.lineActionGutterWidth - Self.changedLineMarkerWidth
-        let size = min(max(fragment.height - 2, 18), gutter)
-        return NSRect(
+        let size = min(max(fragment.height - 2, LineActionPlus.minimumPlateSide), gutter)
+        let proposed = NSRect(
             x: Self.changedLineMarkerWidth + max((gutter - size) / 2, 0),
             y: fragment.midY + textContainerOrigin.y - size / 2,
             width: size,
             height: size
         )
+        return backingAlignedRect(proposed, options: Self.pixelGridAlignment)
     }
 
     /// Turn the TextKit fragments into a small ordered display list. Adjacent fragments of the
@@ -975,9 +1084,15 @@ final class GitReviewDiffTextView: ThemedTextView {
     func contextPreview(
         spanningDisplayedLines span: ClosedRange<Int>
     ) -> CodeContextPreview? {
+        contextPreview(spanningRuns: [span])
+    }
+
+    /// The sheet's preview over every run at once, each with its neighbours and the gaps
+    /// between them counted.
+    func contextPreview(spanningRuns runs: [ClosedRange<Int>]) -> CodeContextPreview? {
         CodeContextPreview.make(
             totalLineCount: renderedLines.count,
-            target: span
+            targets: runs
         ) { [renderedLines] index in
             let line = renderedLines[index].source
             return CodeContextPreview.SourceLine(
@@ -988,22 +1103,65 @@ final class GitReviewDiffTextView: ThemedTextView {
         }
     }
 
-    /// The lines a context action speaks about: the selection when the click lands inside it —
-    /// which is how more than one line is chosen — otherwise the line under the pointer alone.
-    func targetSpan(forClickedLine index: Int) -> ClosedRange<Int> {
-        guard let selected = selectedLineSpan(), selected.contains(index) else {
-            return index...index
-        }
+    /// The line level with the point, or the first or last line when the point is above or
+    /// below the document — a drag that leaves the hunk keeps naming its edge line.
+    private func nearestLineIndex(to point: NSPoint) -> Int? {
+        guard let textContainer, let layoutManager, !lineRanges.isEmpty else { return nil }
+        let used = layoutManager.usedRect(for: textContainer)
+        let y = point.y - textContainerOrigin.y
+        if y < used.minY { return 0 }
+        if y > used.maxY { return lineRanges.count - 1 }
+        return lineIndex(at: point)
+    }
+
+    /// The lines a context action speaks about: every selected run when the click lands inside
+    /// one of them — which is how more than one line, contiguous or not, is chosen — otherwise
+    /// the line under the pointer alone.
+    func targetRuns(forClickedLine index: Int) -> [ClosedRange<Int>] {
+        let selected = selectedLineRuns()
+        guard selected.contains(where: { $0.contains(index) }) else { return [index...index] }
         return selected
     }
 
-    private func selectedLineSpan() -> ClosedRange<Int>? {
-        let selection = selectedRange()
-        guard selection.length > 0 else { return nil }
-        let first = lineRanges.firstIndex { NSIntersectionRange(selection, $0).length > 0 }
-        let last = lineRanges.lastIndex { NSIntersectionRange(selection, $0).length > 0 }
-        guard let first, let last else { return nil }
-        return first...last
+    /// The hull of `targetRuns(forClickedLine:)`, first selected line to last: what a
+    /// shift-click extends from, and the shape callers that cannot use gaps ask for.
+    func targetSpan(forClickedLine index: Int) -> ClosedRange<Int> {
+        let runs = targetRuns(forClickedLine: index)
+        return runs[0].lowerBound...runs[runs.count - 1].upperBound
+    }
+
+    /// The run a shift-click on a plate speaks for: the selection's hull, or else the line the
+    /// last plate press began on, grown to reach the clicked line. Nil when there is nothing
+    /// to extend from, so the press is an ordinary one.
+    private func extendedSpan(toClickedLine index: Int) -> ClosedRange<Int>? {
+        let origin: ClosedRange<Int>
+        let selected = selectedLineRuns()
+        if let first = selected.first, let last = selected.last {
+            origin = first.lowerBound...last.upperBound
+        } else if let anchor = lastLineActionAnchor, lineRanges.indices.contains(anchor) {
+            origin = anchor...anchor
+        } else {
+            return nil
+        }
+        return min(origin.lowerBound, index)...max(origin.upperBound, index)
+    }
+
+    /// The runs of whole lines the selection touches, merged and in order. NSTextView holds a
+    /// selection with gaps as several ranges, which is how a ⌘-built set is kept.
+    func selectedLineRuns() -> [ClosedRange<Int>] {
+        var runs: [ClosedRange<Int>] = []
+        for value in selectedRanges {
+            let selection = value.rangeValue
+            guard selection.length > 0,
+                  let first = lineRanges.firstIndex(where: {
+                      NSIntersectionRange(selection, $0).length > 0
+                  }),
+                  let last = lineRanges.lastIndex(where: {
+                      NSIntersectionRange(selection, $0).length > 0
+                  }) else { continue }
+            runs.append(first...last)
+        }
+        return CodeContextPreview.mergedRuns(runs)
     }
 
     /// Selects the span's whole lines, so what the menu — and the comment sheet after it —
@@ -1013,9 +1171,24 @@ final class GitReviewDiffTextView: ThemedTextView {
     func highlightLines(_ span: ClosedRange<Int>) {
         guard lineRanges.indices.contains(span.lowerBound),
               lineRanges.indices.contains(span.upperBound) else { return }
-        let start = lineRanges[span.lowerBound].location
-        let end = NSMaxRange(lineRanges[span.upperBound])
-        setSelectedRange(NSRange(location: start, length: end - start))
+        highlightLineRuns([span])
+    }
+
+    /// The same for several runs at once — several ranges when there are gaps. Given none,
+    /// the selection collapses to a caret: the last selected line was just taken out.
+    func highlightLineRuns(_ runs: [ClosedRange<Int>]) {
+        let ranges = runs.compactMap { run -> NSValue? in
+            guard lineRanges.indices.contains(run.lowerBound),
+                  lineRanges.indices.contains(run.upperBound) else { return nil }
+            let start = lineRanges[run.lowerBound].location
+            let end = NSMaxRange(lineRanges[run.upperBound])
+            return NSValue(range: NSRange(location: start, length: end - start))
+        }
+        guard !ranges.isEmpty else {
+            setSelectedRange(NSRange(location: selectedRange().location, length: 0))
+            return
+        }
+        setSelectedRanges(ranges, affinity: .downstream, stillSelecting: false)
     }
 
     /// Reveals one indexed occurrence without taking first responder from the find field. The
@@ -1035,23 +1208,31 @@ final class GitReviewDiffTextView: ThemedTextView {
         scrollRangeToVisible(selection)
     }
 
-    /// Grows the selection to the span's whole lines for the menu, remembering what it was.
-    private func highlightLinesForMenu(_ span: ClosedRange<Int>) {
-        selectionBeforeMenu = selectedRange()
-        highlightLines(span)
+    /// Grows the selection to the runs' whole lines for the menu, remembering what it was —
+    /// once, because a drag remembers the selection it started from before its first run.
+    private func highlightLinesForMenu(_ runs: [ClosedRange<Int>]) {
+        if selectionBeforeMenu == nil { selectionBeforeMenu = selectedRanges }
+        highlightLineRuns(runs)
     }
 
     /// The text a copy of the selection should carry: the source lines, without the number and
     /// sign prefix the document draws in front of them. Partial first and last lines stay
-    /// partial; a line's placeholder space for an empty source line is not text.
+    /// partial; a line's placeholder space for an empty source line is not text. A selection
+    /// with gaps copies as its lines in order, the gaps closed.
     func selectedSourceText() -> String {
-        let selection = selectedRange()
-        guard selection.length > 0, let storage = textStorage else { return "" }
+        guard let storage = textStorage else { return "" }
         var pieces: [String] = []
-        for (index, range) in lineRanges.enumerated() where NSIntersectionRange(selection, range).length > 0 {
-            let text = lineTextRanges[index]
-            let visible = NSIntersectionRange(selection, text)
-            pieces.append(visible.length > 0 ? storage.mutableString.substring(with: visible) : "")
+        for value in selectedRanges {
+            let selection = value.rangeValue
+            guard selection.length > 0 else { continue }
+            for (index, range) in lineRanges.enumerated()
+            where NSIntersectionRange(selection, range).length > 0 {
+                let text = lineTextRanges[index]
+                let visible = NSIntersectionRange(selection, text)
+                pieces.append(
+                    visible.length > 0 ? storage.mutableString.substring(with: visible) : ""
+                )
+            }
         }
         return pieces.joined(separator: "\n")
     }
@@ -1071,22 +1252,33 @@ final class GitReviewDiffTextView: ThemedTextView {
         ThemedMenuPresenter.dismiss(contextMenuSession)
     }
 
+    var isLineMenuPresentedForTesting: Bool { contextMenuSession != nil }
+
+    /// The open line menu's entries, so a test can choose one the way a click would.
+    var lineMenuEntriesForTesting: [ThemedMenuEntry] { lineMenuPresentation?.entries ?? [] }
+
+    /// One receipt per run. The envelope carries a batch as it carries any batch, and each
+    /// receipt's line range stays exact — the alternative was one receipt whose range had to
+    /// lie about the gaps. The comment path takes the same batch and asks once.
     private func presentContextMenu(
-        for reference: ConversationContextAttachment,
+        for references: [ConversationContextAttachment],
         preview: CodeContextPreview,
-        spanning span: ClosedRange<Int>,
+        spanning runs: [ClosedRange<Int>],
         at windowPoint: NSPoint
     ) {
         guard contextMenuSession == nil else { return }
         menuChoiceMade = false
-        let plural = span.count > 1
+        let plural = runs.reduce(0) { $0 + $1.count } > 1
         var entries: [ThemedMenuEntry] = []
         if onAddContextAttachment != nil {
             entries.append(.item(ThemedMenuItem(
                 title: plural
                     ? L10n.string("Add lines to chat")
                     : L10n.string("Add line to chat"),
-                onChoose: { [weak self] in self?.onAddContextAttachment?(reference) }
+                onChoose: { [weak self] in
+                    guard let self else { return }
+                    for reference in references { self.onAddContextAttachment?(reference) }
+                }
             )))
         }
         if onRequestComment != nil {
@@ -1094,11 +1286,13 @@ final class GitReviewDiffTextView: ThemedTextView {
                 title: plural
                     ? L10n.string("Comment on lines…")
                     : L10n.string("Comment on line…"),
-                onChoose: { [weak self] in self?.onRequestComment?(reference, preview) }
+                onChoose: { [weak self] in self?.onRequestComment?(references, preview) }
             )))
         }
+        let presentation = ThemedMenuPresentation(entries: entries, minimumWidth: 180)
+        lineMenuPresentation = presentation
         contextMenuSession = ThemedMenuPresenter.present(
-            ThemedMenuPresentation(entries: entries, minimumWidth: 180),
+            presentation,
             from: self,
             anchor: .pointer(windowPoint),
             selectedEntryIndex: nil,
@@ -1109,8 +1303,10 @@ final class GitReviewDiffTextView: ThemedTextView {
             onDismiss: { [weak self] in
                 guard let self else { return }
                 self.contextMenuSession = nil
-                if !self.menuChoiceMade, let previous = self.selectionBeforeMenu {
-                    self.setSelectedRange(previous)
+                self.lineMenuPresentation = nil
+                if !self.menuChoiceMade,
+                   let previous = self.selectionBeforeMenu, !previous.isEmpty {
+                    self.setSelectedRanges(previous, affinity: .downstream, stillSelecting: false)
                 }
                 self.selectionBeforeMenu = nil
             }
@@ -1234,6 +1430,18 @@ final class GitReviewDiffTextView: ThemedTextView {
     private static let maximumContinuationIndentColumns = 16
     private static let noWrapContainerWidth: CGFloat = 1_000_000
     private static let changedLineMarkerWidth: CGFloat = 3
+    /// Origin and size snapped to device pixels independently, so an 18pt plate stays 18pt
+    /// rather than growing or losing a pixel with where its line happens to sit.
+    private static let pixelGridAlignment: AlignmentOptions = [
+        .alignMinXNearest, .alignMinYNearest, .alignWidthNearest, .alignHeightNearest,
+    ]
+
+    private enum LineActionPlus {
+        static let minimumPlateSide: CGFloat = 18
+        /// Half the length of each bar.
+        static let reach: CGFloat = 5
+        static let stroke: CGFloat = 1.5
+    }
 }
 
 /// A line-aligned old/new presentation. Pairing is value work over one bounded hunk; the two
@@ -1257,7 +1465,7 @@ final class GitReviewSplitDiffView: NSView {
             newView.onAddContextAttachment = onAddContextAttachment
         }
     }
-    var onRequestComment: ((ConversationContextAttachment, CodeContextPreview?) -> Void)? {
+    var onRequestComment: (([ConversationContextAttachment], CodeContextPreview?) -> Void)? {
         didSet {
             oldView.onRequestComment = onRequestComment
             newView.onRequestComment = onRequestComment

@@ -122,18 +122,10 @@ reshuffling it is a line move.
   lightweight, agent-readable HTTP(S) inspector in the existing bottom drawer while adding the
   isolated rich surface, live companion data plane and crash-safe system leases other ambitious
   extensions need. The largest platform investment here; nothing scheduled and no proxy engine
-  adopted.
-- [Native extension tier](native-extension-tier.md) — the rendering tier the traffic inspector
-  and the device logs are both waiting on: an in-process native plugin for first-party fidelity
-  and an ExtensionKit appex for isolated third-party richness, sharing one curated facade over an
-  extracted `ThreadingDesignKit`. A standalone spike under `Probes/NativePluginTier` loads a
-  bundle and hosts its table today; gated on deciding the tier against the web-surface answer in
-  Host gap 2, and on re-measuring library validation on a stock Mac.
-- [Device and simulator logs](device-and-simulator-logs.md) — show what an iOS app under
-  development is actually saying, from the simulator and from a real device, inside Threading.
-  The capture half is measured and works today, including a linked tap that makes `print()`
-  reachable at all; it is gated on the same rendering tier the traffic inspector needs, and should
-  adopt that rather than invent a second one.
+  adopted. **Its rendering gate is half answered**: a *first-party* inspector could be built on the
+  shipped [native plugin tier](../architecture/plugins.md) today, the way Device Logs was. Host gap
+  2 — the sandboxed web surface for untrusted code, and the only option that also renders on the
+  iPhone — is untouched, as are gaps 1, 3, 4 and 5, so the draft as written is still gated.
 - [Skin and Chrome Imports](skin-and-chrome-imports.md) — translate established declarative theme
   formats into Threading's existing theme and window-chrome model. Recorded for future
   evaluation; no format support committed.
@@ -156,6 +148,22 @@ reshuffling it is a line move.
 
 ### Shipped — pointers remain
 
+- [Native extension tier](native-extension-tier.md) — **Plan A shipped** 2026-09-02. Threading
+  `dlopen`s a signed code bundle, hosts its `NSView` in a pane, and hands it the host's whole theme
+  so it draws with the real components; `ThreadingPluginKit` is the contract both sides link and
+  `ThreadingDesignKit` compiles the design system a second time behind a symlinked source set. The
+  durable decisions — the trust policy the operating system does not enforce, the loader's
+  refusals, the encoded theme handoff, and the two build approaches that do not work — are in
+  [`plugins.md`](../architecture/plugins.md). The draft remains as the delivery plan and the
+  decision record, and keeps what is still open: no third-party install flow, no crash quarantine,
+  and **Plan B, the crash-isolated ExtensionKit appex, is proposed and not started**.
+- [Device and simulator logs](device-and-simulator-logs.md) — **shipped** 2026-09-02 as the plugin
+  tier's first tenant. Four sources (simulator NDJSON, the paired-device syslog relay, `devicectl`
+  console, and an app's own log file pulled off the device), a level and time reading for formats
+  we have never seen, and `DeviceRelayReclaim` for the single-client `os_trace_relay`. The pane
+  lives in `Plugins/DeviceLogsPlugin` and the user's route did not change. The draft stays as the
+  measurement record and the source matrix; **the opt-in tap is the remaining slice**, and its
+  consent and `DeviceLogTap` deliberately stay in the application.
 - [Orchestrator role and grants](orchestrator-role-and-grants.md) — **shipped** 2026-08-17;
   explicit grants, the project Manager role, bounded supervision operations and durable fleet
   state are recorded in [`control-plane.md`](../architecture/control-plane.md), with account,

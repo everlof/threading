@@ -1333,9 +1333,9 @@ extension GitReviewViewController: NSTableViewDataSource, NSTableViewDelegate {
             row.onAddContextAttachment = { attachment in
                 SessionContextHandoff.stage(attachment, for: sessionID)
             }
-            row.onRequestContextComment = { attachment, preview in
+            row.onRequestContextComment = { attachments, preview in
                 ContextCommentAlert.request(
-                    on: attachment,
+                    on: attachments,
                     preview: preview,
                     for: sessionID
                 )

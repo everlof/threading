@@ -11,6 +11,15 @@
       }
     },
     {
+      "identity" : "nativediffkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/everlof/NativeDiffKit.git",
+      "state" : {
+        "revision" : "363c6197d8e334fa0aaf30550fb0a0bcac540e71",
+        "version" : "0.1.1"
+      }
+    },
+    {
       "identity" : "sparkle",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sparkle-project/Sparkle",
@@ -60,8 +69,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/stasel/WebRTC.git",
       "state" : {
-        "revision" : "3e43fa9b8d149d2f8adb9bb1e53152cb955ec72b",
-        "version" : "151.0.0"
+        "revision" : "6ed87f05368632f71dc95c89c14c051561710925",
+        "version" : "150.0.0"
       }
     }
   ],

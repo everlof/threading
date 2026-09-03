@@ -90,7 +90,7 @@ final class NativePluginPaneViewController: NSViewController {
         ))
         label.alignment = .center
         label.textColor = Design.Text.secondary
-        label.font = Design.Typography.detail()
+        label.applyFont(.detail())
         label.preferredMaxLayoutWidth = Metrics.messageWidth
 
         let host = NSView()

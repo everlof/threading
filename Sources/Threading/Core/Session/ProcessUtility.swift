@@ -52,7 +52,7 @@ struct ProcessCommandLine: Equatable, Sendable {
 /// The cheap half of `ProcessDetails`: what one pass over the process table can answer without
 /// a further syscall per process. Enough to reconstruct parentage, name a process, and tell
 /// whether the pid still means the process it did.
-struct ProcessSummary {
+struct ProcessSummary: Sendable {
     let pid: pid_t
     let parentPid: pid_t
     let command: String

@@ -58,7 +58,7 @@ final class ACPStreamSession:
     private var process: AgentChildProcess?
     private var input: FileHandle?
     private var buffer = Data()
-    private var errorBuffer = Data()
+    private let errorCapture = ACPDiagnosticCapture(maximum: ACPDefaults.maximumErrorBytes)
     private var parseDiagnostics = StreamParseDiagnostics()
 
     private var requestSequence: Int64 = 0
@@ -156,11 +156,7 @@ final class ACPStreamSession:
         }
         // Kept apart from stdout: a diagnostic line landing inside the JSON-RPC stream would
         // corrupt the message it interrupted.
-        process.standardError.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            Task { @MainActor [weak self] in self?.receivedError(chunk) }
-        }
+        errorCapture.beginDraining(process.standardError)
 
         self.process = process
         input = process.standardInput
@@ -349,7 +345,7 @@ final class ACPStreamSession:
         cancelCommandCatalogDeadline()
         launchResumeState = resumeState
         buffer.removeAll(keepingCapacity: true)
-        errorBuffer.removeAll(keepingCapacity: true)
+        errorCapture.reset()
         parseDiagnostics.reset()
         requestSequence = 0
         pendingRequests.removeAll()
@@ -958,27 +954,33 @@ final class ACPStreamSession:
         onInteractionAvailabilityChange?()
     }
 
-    private func receivedError(_ chunk: Data) {
-        guard errorBuffer.count < ACPDefaults.maximumErrorBytes else { return }
-        let remaining = ACPDefaults.maximumErrorBytes - errorBuffer.count
-        errorBuffer.append(chunk.prefix(remaining))
-    }
-
     private func handleTermination(status: Int32) {
-        guard process != nil else { return }
+        guard let process else { return }
         cancelHandshakeDeadline()
         cancelCommandCatalogDeadline()
-        process?.standardOutput.readabilityHandler = nil
-        process?.standardError.readabilityHandler = nil
-        process = nil
+        process.standardOutput.readabilityHandler = nil
+        input = nil
+        onInteractionAvailabilityChange?()
+        // `Process` may report the exit before the diagnostic drain has observed EOF. Finish on
+        // main only after that background drain, so the final write is part of the user-facing
+        // failure without ever making the main actor wait on a pipe.
+        errorCapture.afterDraining { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.finishTermination(status: status)
+            }
+        }
+    }
+
+    private func finishTermination(status: Int32) {
+        guard process != nil else { return }
+        self.process = nil
         input = nil
 
         let wasTerminating = isTerminating
         isTerminating = false
         isRunning = false
         if !wasTerminating, isTurnInFlight, !receivedTurnFinished {
-            let diagnostics = String(decoding: errorBuffer, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let diagnostics = errorCapture.string
             finishTurnWithTransportError(
                 diagnostics.isEmpty
                     ? ACPTransportMessage.exited(
@@ -1022,6 +1024,54 @@ final class ACPStreamSession:
         cancelCommandCatalogDeadline()
         replaceComposerCapabilities(capabilities)
         if becameReady { onInteractionAvailabilityChange?() }
+    }
+}
+
+/// A process can exit before `FileHandle` delivers its last readability callback. Keeping the
+/// drain on one utility queue gives process termination an ordering point without ever waiting on
+/// the main actor, while the byte cap prevents a noisy CLI from growing the session without bound.
+private final class ACPDiagnosticCapture: @unchecked Sendable {
+    private let maximum: Int
+    private let queue = DispatchQueue(label: "codes.threading.agent.acp-diagnostics", qos: .utility)
+    private let lock = NSLock()
+    private var handle: FileHandle?
+    private var data = Data()
+
+    init(maximum: Int) {
+        self.maximum = maximum
+    }
+
+    func reset() {
+        lock.lock()
+        data.removeAll(keepingCapacity: true)
+        lock.unlock()
+    }
+
+    func beginDraining(_ handle: FileHandle) {
+        self.handle = handle
+        queue.async { [self] in
+            guard let handle = self.handle else { return }
+            defer { self.handle = nil }
+            while true {
+                let chunk = handle.availableData
+                guard !chunk.isEmpty else { return }
+                lock.lock()
+                let remaining = max(0, maximum - data.count)
+                data.append(chunk.prefix(remaining))
+                lock.unlock()
+            }
+        }
+    }
+
+    func afterDraining(_ completion: @escaping @Sendable () -> Void) {
+        queue.async(execute: completion)
+    }
+
+    var string: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(decoding: data, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

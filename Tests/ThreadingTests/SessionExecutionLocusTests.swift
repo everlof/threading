@@ -136,6 +136,78 @@ final class SessionExecutionLocusTests: XCTestCase {
         XCTAssertEqual(tracker.drift(forSessionID: session.id), .unrelated(path: "/tmp/scratch"))
     }
 
+    /// A terminal runtime need not implement lifecycle cwd hooks for the host to see the real
+    /// child process it spawned. This is the raw-Git safety net: the model can create and use an
+    /// ordinary worktree without knowing any Threading-specific command.
+    func testAChildProcessWorkingInASiblingCheckoutIsDriftWithoutLifecycleCapability() throws {
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .grok))
+        let sibling = siblingCheckout()
+        let tracker = makeTracker(resolving: [ownedPath: ownedCheckout, sibling.root: sibling])
+
+        tracker.observeProcessWorkingDirectories(
+            [ownedPath, sibling.root + "/Sources/Feature"],
+            sessionID: session.id
+        )
+
+        try waitForClassification(of: session.id, in: tracker)
+        XCTAssertEqual(tracker.drift(forSessionID: session.id), .siblingCheckout(sibling))
+
+        // A later tool back in the owned checkout is equally concrete process evidence. It must
+        // retire the old marker, especially under Always Ask where the user may leave the move
+        // offer unanswered while the agent comes home on its own.
+        tracker.observeProcessWorkingDirectories([ownedPath], sessionID: session.id)
+        XCTAssertEqual(tracker.drift(forSessionID: session.id), .none)
+    }
+
+    /// Two sibling checkouts active under one agent root are real evidence but not a unique
+    /// destination. Picking whichever process happened to be sampled first would move the chat
+    /// nondeterministically, so the observer leaves ownership alone.
+    func testChildProcessObservationRequiresOneUnambiguousSibling() throws {
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+        let first = siblingCheckout()
+        let secondRoot = root.appendingPathComponent("second-sibling").path
+        let second = ObservedCheckout(
+            root: secondRoot,
+            worktreeIdentity: ownedPath + "/.git/worktrees/second-sibling",
+            repositoryIdentity: ownedPath + "/.git",
+            branch: "feature/second",
+            displayName: "second-sibling"
+        )
+        let tracker = makeTracker(resolving: [
+            ownedPath: ownedCheckout,
+            first.root: first,
+            second.root: second
+        ])
+
+        tracker.observeProcessWorkingDirectories(
+            [first.root + "/one", second.root + "/two"],
+            sessionID: session.id
+        )
+
+        try waitForClassification(of: session.id, in: tracker)
+        XCTAssertEqual(tracker.drift(forSessionID: session.id), .none)
+    }
+
+    /// The process-table half has a fixed retained bound even when a build fans out. Newest
+    /// children win, and walking nested parentage neither loses grandchildren nor loops on a
+    /// malformed cycle.
+    func testProcessSnapshotKeepsOnlyTheNewestBoundedDescendants() {
+        let rootPID: pid_t = 100
+        var table: [pid_t: ProcessSummary] = [:]
+        for offset in 1...40 {
+            let pid = rootPID + pid_t(offset)
+            table[pid] = process(pid: pid, parent: rootPID, order: UInt64(offset))
+        }
+        table[500] = process(pid: 500, parent: 140, order: 50)
+        table[rootPID] = process(pid: rootPID, parent: 601, order: 0)
+        table[601] = process(pid: 601, parent: rootPID, order: 1)
+
+        let candidates = SessionExecutionProcessSnapshot(table: table)
+            .candidateProcessIDs(below: rootPID, limit: 4)
+
+        XCTAssertEqual(candidates, [500, 140, 139, 138])
+    }
+
     // MARK: - Cost
 
     /// The load-bearing property. These reports are the highest-frequency callback in the app
@@ -242,6 +314,20 @@ final class SessionExecutionLocusTests: XCTestCase {
             repositoryIdentity: ownedPath + "/.git",
             branch: "feature/elsewhere",
             displayName: "sibling"
+        )
+    }
+
+    private func process(
+        pid: pid_t,
+        parent: pid_t,
+        order: UInt64
+    ) -> ProcessSummary {
+        ProcessSummary(
+            pid: pid,
+            parentPid: parent,
+            command: "fixture",
+            state: .running,
+            startTime: ProcessStartTime(seconds: order, microseconds: 0)
         )
     }
 

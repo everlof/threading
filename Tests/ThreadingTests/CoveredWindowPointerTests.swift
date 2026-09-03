@@ -112,18 +112,24 @@ final class CoveredWindowPointerTests: XCTestCase {
         )!
     }
 
-    /// Puts the real pointer over `view` by moving the (unshown) window under it: the release
-    /// path re-derives "is the pointer still inside" from the window, which is the point of it,
-    /// so the test moves the one thing it can move.
-    private func placeWindow(_ window: NSWindow, soThePointerIsOver view: NSView) {
+    /// Runs one release/dismissal with the pointer deterministically over `view`. Moving an
+    /// unshown window under the hardware pointer is not stable near a screen edge because AppKit
+    /// may constrain its frame, and moving the hardware pointer would disturb the user.
+    private func withPointer(
+        over view: NSView,
+        in window: NSWindow,
+        perform: () -> Void
+    ) {
         let target = view.convert(NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil)
-        let pointer = NSEvent.mouseLocation
-        window.setFrameOrigin(NSPoint(x: pointer.x - target.x, y: pointer.y - target.y))
+        CoveredWindowPointer.withPointerLocationForTesting(target, in: window, perform: perform)
     }
 
-    private func placeWindowAwayFromThePointer(_ window: NSWindow) {
-        let pointer = NSEvent.mouseLocation
-        window.setFrameOrigin(NSPoint(x: pointer.x + 5_000, y: pointer.y + 5_000))
+    private func withPointerAway(from window: NSWindow, perform: () -> Void) {
+        CoveredWindowPointer.withPointerLocationForTesting(
+            NSPoint(x: -5_000, y: -5_000),
+            in: window,
+            perform: perform
+        )
     }
 
     @discardableResult
@@ -227,14 +233,15 @@ final class CoveredWindowPointerTests: XCTestCase {
     /// when the chip learns what it missed.
     func testAnOwedArrivalIsDeliveredWhenTheSurfaceGoesAndThePointerIsStillOnIt() {
         let f = makeFixture()
-        placeWindow(f.window, soThePointerIsOver: f.chip)
         CoveredWindowPointer.claim(f.surface, covering: f.window, cursor: .arrow)
         withhold(.mouseEntered, for: f.chip, in: f.window)
         withhold(.cursorUpdate, for: f.chip, in: f.window)
         XCTAssertEqual(f.chip.entered, 0)
 
         f.surface.removeFromSuperview()
-        CoveredWindowPointer.release(f.surface)
+        withPointer(over: f.chip, in: f.window) {
+            CoveredWindowPointer.release(f.surface)
+        }
 
         XCTAssertEqual(f.chip.entered, 1, "the chip the pointer rests on when the menu closes never lit")
         XCTAssertEqual(f.chip.cursorUpdates, 1, "the editor the pointer rests on when the menu closes never got its cursor back")
@@ -244,12 +251,13 @@ final class CoveredWindowPointerTests: XCTestCase {
 
     func testAnOwedArrivalThePointerHasLeftIsNotDelivered() {
         let f = makeFixture()
-        placeWindowAwayFromThePointer(f.window)
         CoveredWindowPointer.claim(f.surface, covering: f.window, cursor: .arrow)
         withhold(.mouseEntered, for: f.chip, in: f.window)
 
         f.surface.removeFromSuperview()
-        CoveredWindowPointer.release(f.surface)
+        withPointerAway(from: f.window) {
+            CoveredWindowPointer.release(f.surface)
+        }
 
         XCTAssertEqual(f.chip.entered, 0, "a chip the pointer is nowhere near was lit on the menu's way out")
     }
@@ -258,14 +266,15 @@ final class CoveredWindowPointerTests: XCTestCase {
     /// older one delivered as well would light the view twice.
     func testRepeatedArrivalsForOneAreaAreOwedOnce() {
         let f = makeFixture()
-        placeWindow(f.window, soThePointerIsOver: f.chip)
         CoveredWindowPointer.claim(f.surface, covering: f.window, cursor: .arrow)
         withhold(.mouseEntered, for: f.chip, in: f.window)
         withhold(.mouseEntered, for: f.chip, in: f.window)
         XCTAssertEqual(CoveredWindowPointer.owedArrivalCount(in: f.window), 1)
 
         f.surface.removeFromSuperview()
-        CoveredWindowPointer.release(f.surface)
+        withPointer(over: f.chip, in: f.window) {
+            CoveredWindowPointer.release(f.surface)
+        }
         XCTAssertEqual(f.chip.entered, 1)
     }
 
@@ -273,7 +282,6 @@ final class CoveredWindowPointerTests: XCTestCase {
     /// window, not to the control — the control is still under something.
     func testAnOwedArrivalMovesToTheSurfaceStillCoveringIt() {
         let f = makeFixture()
-        placeWindow(f.window, soThePointerIsOver: f.chip)
         let inner = NSView(frame: f.root.bounds)
         f.root.addSubview(inner)
         defer {
@@ -285,13 +293,17 @@ final class CoveredWindowPointerTests: XCTestCase {
         withhold(.mouseEntered, for: f.chip, in: f.window)
 
         inner.removeFromSuperview()
-        CoveredWindowPointer.release(inner)
+        withPointer(over: f.chip, in: f.window) {
+            CoveredWindowPointer.release(inner)
+        }
         XCTAssertEqual(f.chip.entered, 0, "the inner surface's release lit a chip the outer one still covers")
         XCTAssertEqual(CoveredWindowPointer.owedArrivalCount(in: f.window), 1, "the outer surface was not handed the debt")
         XCTAssertTrue(CoveredWindowPointer.isClaimed(f.window))
 
         f.surface.removeFromSuperview()
-        CoveredWindowPointer.release(f.surface)
+        withPointer(over: f.chip, in: f.window) {
+            CoveredWindowPointer.release(f.surface)
+        }
         XCTAssertEqual(f.chip.entered, 1)
         XCTAssertFalse(CoveredWindowPointer.isClaimed(f.window))
     }
@@ -391,7 +403,6 @@ final class CoveredWindowPointerTests: XCTestCase {
     func testAModalOnTheScrimClaimsThePointerAndPaysOnRemoval() throws {
         let f = makeFixture()
         f.surface.removeFromSuperview()
-        placeWindow(f.window, soThePointerIsOver: f.chip)
 
         let panel = NSView()
         let presentation = try XCTUnwrap(InWindowOverlay.install(panel, in: f.window, onDismiss: {}))
@@ -403,7 +414,9 @@ final class CoveredWindowPointerTests: XCTestCase {
         withhold(.mouseEntered, for: f.chip, in: f.window)
         XCTAssertEqual(f.chip.entered, 0, "the chip under the modal lit")
 
-        presentation.remove()
+        withPointer(over: f.chip, in: f.window) {
+            presentation.remove()
+        }
         XCTAssertFalse(CoveredWindowPointer.isClaimed(f.window))
         XCTAssertEqual(f.chip.entered, 1, "the chip under the pointer stayed dark after the modal closed")
         XCTAssertEqual(f.chip.wasCoveredOnArrival, false)
@@ -430,11 +443,12 @@ final class CoveredWindowPointerTests: XCTestCase {
         XCTAssertTrue(CoveredWindowCursor.isClaimed(f.window))
 
         // A crossing beneath the panel while it is up.
-        placeWindow(f.window, soThePointerIsOver: f.chip)
         withhold(.mouseEntered, for: f.chip, in: f.window)
         XCTAssertEqual(f.chip.entered, 0, "the chip behind the open dropdown lit")
 
-        ThemedMenuPresenter.dismiss(token)
+        withPointer(over: f.chip, in: f.window) {
+            ThemedMenuPresenter.dismiss(token)
+        }
         XCTAssertFalse(CoveredWindowPointer.isClaimed(f.window))
         XCTAssertFalse(CoveredWindowCursor.isClaimed(f.window))
         XCTAssertEqual(f.chip.entered, 1, "the chip under the pointer stayed dark after the dropdown closed")

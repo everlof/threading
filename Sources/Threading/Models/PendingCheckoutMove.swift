@@ -14,8 +14,8 @@ enum SessionCheckoutAuthorityBasis: String, Codable, Sendable, CaseIterable {
     /// A third case rather than a reuse of `agentInitiated`, because the provenance genuinely
     /// differs and the audit trail must not blur them. An agent-initiated move is a decision
     /// some model made and can be asked to justify; this one is an inference *Threading* made
-    /// from a lifecycle report, and it is the only basis that can be granted without a human or
-    /// a model having requested anything at all.
+    /// from observed runtime or descendant-process cwd, and it is the only basis that can be
+    /// granted without a human or a model having requested anything at all.
     case observedExecution = "observed_execution"
 }
 

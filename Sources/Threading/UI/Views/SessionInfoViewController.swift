@@ -34,7 +34,6 @@ final class SessionInfoViewController: NSViewController {
 
     private struct UsageRowPresentation {
         let id: UsageRowID
-        let symbolName: String
         let primary: String
         let secondary: String
         let values: [String]
@@ -88,6 +87,11 @@ final class SessionInfoViewController: NSViewController {
     private weak var remainingModelsNote: NSTextField?
     private weak var usageIndexNote: NSTextField?
 
+    /// The processes whose rows are unfolded. Kept here rather than only on the rows because a
+    /// rebuild replaces the rows: a person reading a launch command while a sibling process
+    /// exits must not have it fold under them.
+    private var expandedProcessIDs: Set<pid_t> = []
+
     private lazy var directoryLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
         label.applyFont(.compactCode)
@@ -104,9 +108,11 @@ final class SessionInfoViewController: NSViewController {
         )
         return label
     }()
+    /// The branch under the path, in the detail face: a qualifier of the line above it, not a
+    /// heading of its own — caption's semibold made the branch louder than the path.
     private lazy var metaLabel: NSTextField = {
         let label = NSTextField(labelWithString: "")
-        label.applyFont(.caption)
+        label.applyFont(.detail())
         label.textColor = Design.Text.tertiary
         label.lineBreakMode = .byTruncatingTail
         label.setContentCompressionResistancePriority(
@@ -115,25 +121,41 @@ final class SessionInfoViewController: NSViewController {
         )
         return label
     }()
-    private lazy var revealButton: ThemedButton = {
-        let button = ThemedButton(
-            title: L10n.string("Finder"),
-            target: self,
-            action: #selector(revealInFinder)
+
+    /// The two things to do with the directory, as quiet icon buttons trailing the path on its
+    /// own line. Two titled, bordered buttons on a row of their own were the loudest thing in a
+    /// panel whose content is a receipt and a process list, and cost a row that the receipt
+    /// below could use.
+    private lazy var revealButton: ThemedIconButton = {
+        let title = L10n.string("Show this folder in Finder")
+        let button = ThemedIconButton(
+            symbolName: SessionInfoSymbols.reveal,
+            accessibility: title,
+            target: .inline,
+            inkSource: .chrome
         )
-        button.toolTip = L10n.string("Show this folder in Finder")
+        button.toolTip = title
+        button.onPress = { [weak self] in self?.revealInFinder() }
         return button
     }()
-    private lazy var copyButton: ThemedButton = {
-        let button = ThemedButton(
-            title: L10n.string("Copy"),
-            target: self,
-            action: #selector(copyDirectory)
+    private lazy var copyButton: ThemedIconButton = {
+        let title = L10n.string("Copy the folder path")
+        let button = ThemedIconButton(
+            symbolName: SessionInfoSymbols.copy,
+            accessibility: title,
+            target: .inline,
+            inkSource: .chrome
         )
-        button.toolTip = L10n.string("Copy the folder path")
+        button.toolTip = title
+        button.onPress = { [weak self] in self?.copyDirectory() }
         return button
     }()
     private let list = PanelListView(rowSpacing: Design.Spacing.hairline)
+
+    /// The list hangs from the branch line when there is one and from the path when there is
+    /// not: a folder outside git has no second line, and an empty label still holds its height.
+    private var listBelowMeta: NSLayoutConstraint?
+    private var listBelowPath: NSLayoutConstraint?
 
     // MARK: - Initialization
 
@@ -190,30 +212,52 @@ final class SessionInfoViewController: NSViewController {
 
         NSLayoutConstraint.activate([
             // The toolbar insets the safe area; pinning to the view's own top slides the header
-            // underneath it.
+            // underneath it. The buttons' frames carry invisible padding, so the top and
+            // trailing margins are measured to their glyphs (`OpticalInsetProviding`), which
+            // keeps the copy glyph on the pane's trailing ink column and the path's line where
+            // the section headings under it start.
             directoryLabel.topAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.topAnchor,
-                constant: Design.Spacing.small
+                constant: Design.Spacing.medium
             ),
             directoryLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: inset),
-            directoryLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
+            directoryLabel.trailingAnchor.constraint(
+                equalTo: revealButton.leadingAnchor,
+                constant: -(Design.Spacing.small - revealButton.opticalHorizontalInset)
+            ),
+
+            revealButton.centerYAnchor.constraint(equalTo: directoryLabel.centerYAnchor),
+            copyButton.centerYAnchor.constraint(equalTo: directoryLabel.centerYAnchor),
+            copyButton.leadingAnchor.constraint(
+                equalTo: revealButton.trailingAnchor,
+                constant: Design.Spacing.tight - revealButton.opticalHorizontalInset
+                    - copyButton.opticalHorizontalInset
+            ),
+            copyButton.trailingAnchor.constraint(
+                equalTo: view.trailingAnchor,
+                constant: -(inset - copyButton.opticalHorizontalInset)
+            ),
 
             metaLabel.topAnchor.constraint(equalTo: directoryLabel.bottomAnchor, constant: Design.Spacing.hairline),
             metaLabel.leadingAnchor.constraint(equalTo: directoryLabel.leadingAnchor),
-            metaLabel.trailingAnchor.constraint(equalTo: directoryLabel.trailingAnchor),
+            metaLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -inset),
 
-            revealButton.topAnchor.constraint(equalTo: metaLabel.bottomAnchor, constant: Design.Spacing.small),
-            revealButton.leadingAnchor.constraint(equalTo: directoryLabel.leadingAnchor),
-
-            copyButton.centerYAnchor.constraint(equalTo: revealButton.centerYAnchor),
-            copyButton.leadingAnchor.constraint(equalTo: revealButton.trailingAnchor, constant: Design.Spacing.tight),
-            copyButton.trailingAnchor.constraint(lessThanOrEqualTo: directoryLabel.trailingAnchor),
-
-            list.topAnchor.constraint(equalTo: revealButton.bottomAnchor, constant: Design.Spacing.small),
             list.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             list.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             list.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+
+        let belowMeta = list.topAnchor.constraint(
+            equalTo: metaLabel.bottomAnchor,
+            constant: Design.Spacing.small
+        )
+        let belowPath = list.topAnchor.constraint(
+            equalTo: directoryLabel.bottomAnchor,
+            constant: Design.Spacing.small
+        )
+        listBelowMeta = belowMeta
+        listBelowPath = belowPath
+        belowMeta.isActive = true
     }
 
     // MARK: - Public Methods
@@ -283,11 +327,24 @@ final class SessionInfoViewController: NSViewController {
 
     // MARK: - Rendering
 
+    /// The path with the home directory folded to `~`: the forty characters every path on this
+    /// machine starts with are not what anyone reads it for. The tooltip and the Copy button
+    /// keep the real thing.
     private func updateHeader() {
         let directory = currentDirectory
-        directoryLabel.stringValue = directory.path
+        directoryLabel.stringValue = (directory.path as NSString).abbreviatingWithTildeInPath
         directoryLabel.toolTip = directory.path
-        metaLabel.stringValue = gitDescription(for: directory)
+
+        let description = gitDescription(for: directory)
+        metaLabel.stringValue = description
+        metaLabel.isHidden = description.isEmpty
+        if description.isEmpty {
+            listBelowMeta?.isActive = false
+            listBelowPath?.isActive = true
+        } else {
+            listBelowPath?.isActive = false
+            listBelowMeta?.isActive = true
+        }
     }
 
     /// Installs a known reading. Kept internal for behavior/render tests — live refreshes use
@@ -348,15 +405,30 @@ final class SessionInfoViewController: NSViewController {
         guard let snapshot else { return "u/indexing" }
         guard !snapshot.total.isEmpty else { return "u/empty" }
 
-        var rows = ["u/full", "total", "main"]
-        if !snapshot.children.isEmpty || !snapshot.subagents.isEmpty {
-            rows.append("subagents")
+        var rows = ["u/full", "total"]
+        if Self.hasDelegatedWork(snapshot) {
+            rows.append(contentsOf: ["main", "subagents"])
         }
         rows.append(contentsOf: ["input", "cache", "output", "cost"])
         if snapshot.total.unindexedTokens > 0 { rows.append("pending") }
-        rows.append(contentsOf: snapshot.total.models.map { "model:\($0.name)" })
-        rows.append("remaining:\(snapshot.total.remainingModelCount > 0)")
+        if Self.listsModels(snapshot) {
+            rows.append(contentsOf: snapshot.total.models.map { "model:\($0.name)" })
+            rows.append("remaining:\(snapshot.total.remainingModelCount > 0)")
+        }
         return rows.joined(separator: "/")
+    }
+
+    /// Whether the receipt has anything to split: without delegated work the main agent *is*
+    /// the total, and a row restating the same numbers under a different name reads as two
+    /// facts where there is one.
+    private static func hasDelegatedWork(_ snapshot: SessionUsageSnapshot) -> Bool {
+        !snapshot.children.isEmpty || !snapshot.subagents.isEmpty
+    }
+
+    /// A single model repeats the total's numbers as well, so it is named on the Total row
+    /// instead; the Models section exists for a session that used more than one.
+    private static func listsModels(_ snapshot: SessionUsageSnapshot) -> Bool {
+        snapshot.total.models.count > 1 || snapshot.total.remainingModelCount > 0
     }
 
     private func updateValues(_ snapshot: SessionInfoSnapshot) {
@@ -372,9 +444,6 @@ final class SessionInfoViewController: NSViewController {
         if process.state == .stopped {
             facts.append(L10n.string("Stopped"))
         }
-        if let path = process.executablePath {
-            facts.append(L10n.format("Program: %@", path))
-        }
         if let started = process.startDate {
             facts.append(L10n.format(
                 "Started %@",
@@ -382,7 +451,13 @@ final class SessionInfoViewController: NSViewController {
             ))
         }
         if let directory = process.workingDirectory {
-            facts.append(L10n.format("Working directory: %@", directory))
+            facts.append(L10n.format(
+                "Working directory: %@",
+                PathAbbreviation.abbreviatingHome(in: directory)
+            ))
+        }
+        if let path = process.executablePath {
+            facts.append(L10n.format("Program: %@", PathAbbreviation.abbreviatingHome(in: path)))
         }
 
         let readings = [process.formattedCPU, process.formattedMemory]
@@ -416,6 +491,8 @@ final class SessionInfoViewController: NSViewController {
         usageRows.removeAll()
         remainingModelsNote = nil
         usageIndexNote = nil
+        // A pid that left the tree is forgotten with it, so the set stays as small as the list.
+        expandedProcessIDs.formIntersection(snapshot.processes.map(\.pid))
 
         addUsage(usageSnapshot)
 
@@ -461,7 +538,7 @@ final class SessionInfoViewController: NSViewController {
         let total = snapshot.total
         guard !total.isEmpty else {
             list.addNote(L10n.string("No usage recorded yet"))
-            usageIndexNote = list.addNote(usageIndexText(snapshot))
+            usageIndexNote = list.addFootnote(usageIndexText(snapshot))
             return
         }
 
@@ -481,31 +558,38 @@ final class SessionInfoViewController: NSViewController {
                 ))
             }
         }
-        usageIndexNote = list.addNote(usageIndexText(snapshot))
+        usageIndexNote = list.addFootnote(usageIndexText(snapshot))
     }
 
+    /// The receipt says each thing once. A session without delegated work has one reading, so
+    /// Main agent and Subagents rows appear only when there is a split to show; a session on
+    /// one model names it beside the total instead of repeating the total under "Models".
     private func usagePresentation(for snapshot: SessionUsageSnapshot) -> UsagePresentation {
         let total = snapshot.total
+        let listsModels = Self.listsModels(snapshot)
+
+        var totalSecondary = SessionUsageFormat.responseCount(total.records)
+        if !listsModels, let model = total.models.first {
+            totalSecondary += SessionInfoLayout.detailSeparator + ModelName.display(for: model.name)
+        }
+
         var leading = [
             UsageRowPresentation(
                 id: .total,
-                symbolName: SessionInfoSymbols.usage,
                 primary: L10n.string("Total"),
-                secondary: SessionUsageFormat.responseCount(total.records),
+                secondary: totalSecondary,
                 values: usageValues(total)
-            ),
-            UsageRowPresentation(
+            )
+        ]
+        if Self.hasDelegatedWork(snapshot) {
+            leading.append(UsageRowPresentation(
                 id: .mainAgent,
-                symbolName: SessionInfoSymbols.mainAgent,
                 primary: L10n.string("Main agent"),
                 secondary: SessionUsageFormat.responseCount(snapshot.main.records),
                 values: usageValues(snapshot.main)
-            )
-        ]
-        if !snapshot.children.isEmpty || !snapshot.subagents.isEmpty {
+            ))
             leading.append(UsageRowPresentation(
                 id: .subagents,
-                symbolName: SessionInfoSymbols.subagents,
                 primary: L10n.string("Subagents"),
                 secondary: SessionUsageFormat.responseCount(snapshot.subagents.records),
                 values: usageValues(snapshot.subagents)
@@ -515,14 +599,12 @@ final class SessionInfoViewController: NSViewController {
         var breakdown = [
             UsageRowPresentation(
                 id: .input,
-                symbolName: SessionInfoSymbols.input,
                 primary: L10n.string("Input"),
                 secondary: L10n.string("Uncached input"),
                 values: [SessionUsageFormat.tokenCount(total.tokens.uncachedInput)]
             ),
             UsageRowPresentation(
                 id: .cache,
-                symbolName: SessionInfoSymbols.cache,
                 primary: L10n.string("Cache"),
                 secondary: L10n.format(
                     "%@ read · %@ written",
@@ -535,7 +617,6 @@ final class SessionInfoViewController: NSViewController {
             ),
             UsageRowPresentation(
                 id: .output,
-                symbolName: SessionInfoSymbols.output,
                 primary: L10n.string("Output"),
                 secondary: total.tokens.reasoning > 0
                     ? L10n.format("%@ reasoning", UsageFormat.tokens(total.tokens.reasoning))
@@ -544,28 +625,23 @@ final class SessionInfoViewController: NSViewController {
             ),
             UsageRowPresentation(
                 id: .cost,
-                symbolName: SessionInfoSymbols.cost,
                 primary: L10n.string("Cost"),
-                secondary: L10n.string(
-                    "Provider-reported cost where available; catalog estimate otherwise."
-                ),
-                values: [SessionUsageFormat.detailedCost(total)]
+                secondary: SessionUsageFormat.costProvenance(total),
+                values: [SessionUsageFormat.costAmount(total)]
             )
         ]
         if total.unindexedTokens > 0 {
             breakdown.append(UsageRowPresentation(
                 id: .pending,
-                symbolName: SessionInfoSymbols.pending,
                 primary: L10n.string("Awaiting index"),
                 secondary: L10n.string("Live child total; category and cost not available yet"),
                 values: [SessionUsageFormat.tokenCount(total.unindexedTokens)]
             ))
         }
 
-        let models = total.models.map { model in
+        let models = listsModels ? total.models.map { model in
             UsageRowPresentation(
                 id: .model(model.name),
-                symbolName: SessionInfoSymbols.model,
                 primary: ModelName.display(for: model.name),
                 secondary: SessionUsageFormat.responseCount(model.records),
                 values: usageValues(SessionUsageSnapshot.Reading(
@@ -574,12 +650,12 @@ final class SessionInfoViewController: NSViewController {
                     records: model.records
                 ))
             )
-        }
+        } : []
         return UsagePresentation(
             leading: leading,
             breakdown: breakdown,
             models: models,
-            remainingModelCount: total.remainingModelCount
+            remainingModelCount: listsModels ? total.remainingModelCount : 0
         )
     }
 
@@ -589,13 +665,17 @@ final class SessionInfoViewController: NSViewController {
         return values
     }
 
+    /// A receipt row: no glyph — a different little symbol beside every line of a receipt was
+    /// decoration the eye had to step over — but the glyph's slot kept, so the receipt's text
+    /// stands on the same column as the process names under it.
     private func addUsageRow(_ presentation: UsageRowPresentation) {
         let row = SessionInfoRowView(
-            symbolName: presentation.symbolName,
+            symbolName: nil,
             symbolColor: Design.Text.secondary,
             primary: presentation.primary,
             secondary: presentation.secondary,
             valueSegments: presentation.values,
+            face: .receipt,
             accessibilityLabel: presentation.accessibilityLabel
         )
         usageRows[presentation.id] = row
@@ -681,14 +761,27 @@ final class SessionInfoViewController: NSViewController {
             valueSegments: [process.formattedCPU, process.formattedMemory],
             indentLevel: process.depth,
             commandLine: commandLine(for: process),
+            isExpandable: true,
             accessibilityLabel: L10n.format("%@ · process %lld", process.command, Int64(process.pid))
         )
         row.update(reading(for: process))
+        row.setAccessibilityIdentifier(SessionInfoDefaults.processRowIdentifier(process.pid))
+
+        // The fold outlives the row: restored here after a rebuild, recorded when the user
+        // changes it.
+        let pid = process.pid
+        row.setExpanded(expandedProcessIDs.contains(pid))
+        row.onExpansionChange = { [weak self] expanded in
+            if expanded {
+                self?.expandedProcessIDs.insert(pid)
+            } else {
+                self?.expandedProcessIDs.remove(pid)
+            }
+        }
 
         // Never on a root — session teardown owns those — and never without the start identity
         // that authorises the signal: no identity, no kill.
         if !process.isRoot, let startTime = process.startTime {
-            let pid = process.pid
             let command = process.command
             row.offerStop(titled: L10n.format("Stop %@", command)) { [weak self] in
                 self?.requestStop(of: pid, command: command, startTime: startTime)
@@ -829,11 +922,11 @@ final class SessionInfoViewController: NSViewController {
 
     // MARK: - Actions
 
-    @objc private func revealInFinder() {
+    private func revealInFinder() {
         NSWorkspace.shared.activateFileViewerSelecting([currentDirectory])
     }
 
-    @objc private func copyDirectory() {
+    private func copyDirectory() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(currentDirectory.path, forType: .string)
@@ -842,16 +935,19 @@ final class SessionInfoViewController: NSViewController {
 
 // MARK: - Defaults
 
+extension SessionInfoDefaults {
+    /// The stable identity of a process row, for tests and assistive tooling. The spoken label
+    /// is localized and groups the pid's digits, which is right for a person and wrong for a
+    /// lookup.
+    static func processRowIdentifier(_ pid: pid_t) -> String {
+        "session-info.process.\(pid)"
+    }
+}
+
 enum SessionInfoSymbols {
-    static let usage = "chart.bar.xaxis"
-    static let mainAgent = "cpu"
-    static let subagents = "person.2"
-    static let input = "arrow.down"
-    static let cache = "internaldrive"
-    static let output = "arrow.up"
-    static let cost = "dollarsign.circle"
-    static let pending = "clock"
-    static let model = "cpu"
+    /// The header's two directory actions: the folder in Finder, the path on the pasteboard.
+    static let reveal = "folder"
+    static let copy = "doc.on.doc"
 
     /// A process is a running thing, not a file — the filled dot is the status vocabulary the
     /// sidebar already uses for "alive".

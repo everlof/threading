@@ -813,6 +813,63 @@ final class ThemedControlTests: HostedStoreTestCase {
         )
     }
 
+    /// A themed menu owns key-downs for its window. A shortcut printed beside a row must
+    /// therefore choose through the menu itself; otherwise the monitor swallows the chord,
+    /// performs no command, and leaves the menu standing over the window.
+    func testThemedMenuShortcutChoosesItsRowAndDismissesTheMenu() throws {
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
+        let source = ThemedButton(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
+        root.addSubview(source)
+
+        let window = NSWindow(
+            contentRect: root.bounds,
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.contentView = root
+        defer { window.close() }
+
+        var chosen: String?
+        var dismissals = 0
+        let token = try XCTUnwrap(ThemedMenuPresenter.present(
+            ThemedMenuPresentation(
+                entries: [
+                    .item(ThemedMenuItem(
+                        title: "New Chat…",
+                        shortcut: KeyboardShortcut(key: "n", modifiers: .command)
+                    )),
+                    .item(ThemedMenuItem(title: "New Terminal"))
+                ],
+                minimumWidth: source.bounds.width
+            ),
+            from: source,
+            selectedEntryIndex: nil,
+            onChoose: { _, item in chosen = item.title },
+            onDismiss: { dismissals += 1 }
+        ))
+        defer { ThemedMenuPresenter.dismiss(token) }
+
+        // Exercise the shipping event monitor, including its ownership of the key when
+        // responder bookkeeping has temporarily moved focus away from the overlay.
+        XCTAssertTrue(window.makeFirstResponder(source))
+        NSApp.sendEvent(try keyEvent(
+            "n",
+            keyCode: 45,
+            modifierFlags: .command,
+            in: window
+        ))
+
+        XCTAssertEqual(chosen, "New Chat…")
+        XCTAssertEqual(dismissals, 1)
+        XCTAssertFalse(ThemedMenuPresenter.isMenuOpen(in: window))
+        XCTAssertFalse(
+            descendants(in: root).contains { $0.accessibilityRole() == .menu },
+            "the shortcut chose its row but left the menu attached"
+        )
+    }
+
     func testThemedMenuExposesMenuRowsToAccessibility() throws {
         let root = NSView(frame: NSRect(x: 0, y: 0, width: 420, height: 260))
         let source = NSView(frame: NSRect(x: 24, y: 180, width: 140, height: 26))
@@ -8424,13 +8481,14 @@ final class ThemedControlTests: HostedStoreTestCase {
     private func keyEvent(
         _ characters: String,
         keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags = [],
         in window: NSWindow? = nil
     ) throws -> NSEvent {
         try XCTUnwrap(
             NSEvent.keyEvent(
                 with: .keyDown,
                 location: .zero,
-                modifierFlags: [],
+                modifierFlags: modifierFlags,
                 timestamp: 0,
                 windowNumber: window?.windowNumber ?? 0,
                 context: nil,

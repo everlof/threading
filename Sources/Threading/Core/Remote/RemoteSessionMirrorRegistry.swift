@@ -2789,7 +2789,7 @@ final class RemoteSessionMirrorRegistry {
             for connection in themeEventSubscribers.values {
                 connection.sendText(message)
             }
-        case let .terminalRow(terminalID):
+        case let .terminalAdded(_, terminalID), let .terminalRow(terminalID):
             let terminal = ProjectStore.shared.terminal(withID: terminalID)
             for connection in themeEventSubscribers.values {
                 guard let authorization = connection.authenticatedPeer?.authorization,

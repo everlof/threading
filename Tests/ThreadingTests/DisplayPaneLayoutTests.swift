@@ -12,6 +12,56 @@ import XCTest
 @MainActor
 final class DisplayPaneLayoutTests: HostedStoreTestCase {
 
+    /// Moving a chat keeps its tab strip, but the filesystem-backed controllers inside that
+    /// strip must be rebuilt against the destination checkout. The shipped failure left the
+    /// row under the new branch while Review still showed the source branch and its pull request.
+    func testCheckoutMoveRebindsRetainedReviewAndOverview() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("DisplayPaneCheckoutMove-\(UUID().uuidString)")
+        let source = root.appendingPathComponent("source")
+        let destination = root.appendingPathComponent("destination")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let store = ProjectStore.shared
+        let project = try XCTUnwrap(store.addProject(folderURL: source))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let pane = DisplayPaneController()
+        pane.showSession(session.id)
+
+        let oldReview = try XCTUnwrap(pane.activateReview(for: session.id))
+        let oldOverview = try XCTUnwrap(
+            pane.activateOverview(for: session.id, section: .activity)
+        )
+        let oldActivity = oldOverview.selectActivity()
+        XCTAssertEqual(oldReview.folderPath, source.path)
+        XCTAssertEqual(oldActivity.folderPath, source.path)
+
+        let move = store.moveSessionsToCheckout(
+            [session.id],
+            checkoutPath: destination.path,
+            repositoryIdentity: root.appendingPathComponent("repository.git").path,
+            worktreeIdentity: root.appendingPathComponent("destination.git").path,
+            branch: "feature/destination"
+        )
+        guard case .moved = move else { return XCTFail("fixture session did not move") }
+
+        pane.noteSessionCheckoutMoved(session.id)
+
+        let tabs = pane.loadedTabs(for: session.id)
+        let review = try XCTUnwrap(tabs.compactMap(\.review).first)
+        let overview = try XCTUnwrap(tabs.compactMap(\.overview).first)
+        let activity = overview.selectActivity()
+        XCTAssertFalse(review === oldReview)
+        XCTAssertFalse(overview === oldOverview)
+        XCTAssertEqual(review.folderPath, destination.path)
+        XCTAssertEqual(activity.folderPath, destination.path)
+        XCTAssertEqual(overview.selectedSection, .activity)
+        XCTAssertNil(oldReview.parent)
+        XCTAssertNil(oldOverview.parent)
+    }
+
     func testDisplayImagePixelGateBoundsDimensionsAndDecodedMemoryWithoutOverflow() {
         XCTAssertTrue(DisplayImageSafety.accepts(width: 1_440, height: 20_000))
         XCTAssertFalse(DisplayImageSafety.accepts(width: 0, height: 100))

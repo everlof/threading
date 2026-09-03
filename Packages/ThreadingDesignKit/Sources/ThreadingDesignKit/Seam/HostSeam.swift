@@ -12,7 +12,7 @@ import AppKit
 ///
 /// Deliberately the same shape as the application's `AppThemePalette`, because the design system's
 /// own sources are compiled against it unmodified. See
-/// [`native-extension-tier.md`](../../../../docs/feature-drafts/native-extension-tier.md).
+/// [`plugins.md`](../../../../../docs/architecture/plugins.md).
 public enum AppThemePalette {
 
     private static let storage = NSLock()

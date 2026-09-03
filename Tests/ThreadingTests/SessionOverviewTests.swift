@@ -62,11 +62,13 @@ final class SessionOverviewTests: XCTestCase {
         XCTAssertEqual(info.infoBuilds(), 1)
     }
 
-    func testInfoIsTheDefaultRightHandSection() throws {
+    /// Info leads the run: it is the default, and the reason the panel is opened. Activity,
+    /// the account of where the work landed, follows it.
+    func testInfoIsTheDefaultLeadingSection() throws {
         let fixture = try makeFixture()
         defer { fixture.remove() }
 
-        XCTAssertEqual(SessionOverviewSection.allCases, [.activity, .info])
+        XCTAssertEqual(SessionOverviewSection.allCases, [.info, .activity])
         XCTAssertEqual(fixture.controller.selectedSection, .info)
         _ = fixture.controller.view
         XCTAssertEqual(fixture.activityBuilds(), 0)

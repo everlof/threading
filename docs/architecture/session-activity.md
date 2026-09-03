@@ -463,13 +463,13 @@ empty array when there are none — measured against 2.1.220 by ending a turn on
 `sleep 45`. Codex 0.144.6 sends no such key, so its sessions read zero and behave as they did.
 
 **The same lesson, one key further over: every payload also carries `cwd`.** Claude builds each
-one as `session_id` / `transcript_path` / `cwd`, and Threading read the first and the third for a
-long time while stepping straight over the second. Codex 0.151.0 sends it too, captured through
-Threading's own installed hook on `sessionStarted`, `turnStarted` and `turnFinished`. It is the
-only sound answer to where an agent is actually working, because a runtime that prefixes each
-command with `cd` moves neither OSC 7 nor its own process's cwd — and reading it is what stops a
-chat building in a sibling worktree from being filed, grouped and labelled under the checkout it
-launched from. What is done with it belongs to
+one as `session_id` / `transcript_path` / `cwd`, and Threading read the neighbouring keys for a
+long time while stepping over it. Codex 0.151.0 sends it too, captured through Threading's own
+installed hook on `sessionStarted`, `turnStarted` and `turnFinished`. It is the cheapest answer
+when the provider updates it. MARBLES showed the remaining case: the reported/root cwd stayed in
+the launch checkout while temporary tool descendants ran beneath `cd` in another worktree. A
+coalesced descendant-process sample now complements the payload without parsing shell text. What
+is done with either source belongs to
 [sessions.md](sessions.md#where-a-chat-runs-is-not-where-its-agent-is); what belongs here is that
 it arrives on **every** event, that it is therefore on the highest-frequency callback in the app
 carrying a path, and that its consumer must do no work at all for an unchanged value.

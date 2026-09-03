@@ -39,6 +39,14 @@ final class KeyboardShortcutTests: XCTestCase {
         )
     }
 
+    func testAChordMatchesAnEventByKeyAndExactShortcutModifiers() throws {
+        let shortcut = KeyboardShortcut(key: "n", modifiers: [.command, .shift])
+
+        XCTAssertTrue(shortcut.matches(try keyEvent("N", modifiers: [.command, .shift])))
+        XCTAssertFalse(shortcut.matches(try keyEvent("n", modifiers: .command)))
+        XCTAssertFalse(shortcut.matches(try keyEvent("m", modifiers: [.command, .shift])))
+    }
+
     // MARK: - Validity
 
     /// A bare letter would fire while the user is typing, and typing is most of what this app is.
@@ -50,6 +58,24 @@ final class KeyboardShortcutTests: XCTestCase {
         XCTAssertTrue(KeyboardShortcut(key: "n", modifiers: .command).isValid)
         XCTAssertTrue(KeyboardShortcut(key: "`", modifiers: .control).isValid)
         XCTAssertTrue(KeyboardShortcut(key: "n", modifiers: .option).isValid)
+    }
+
+    private func keyEvent(
+        _ characters: String,
+        modifiers: NSEvent.ModifierFlags
+    ) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: 0,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: 0
+        ))
     }
 }
 

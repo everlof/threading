@@ -150,6 +150,7 @@ public enum CoveredWindowPointer {
 
     private static var claims: [Claim] = []
     private static var monitor: Any?
+    private static var pointerLocationOverride: ((NSWindow) -> NSPoint)?
 
     // MARK: - Public Methods
 
@@ -270,6 +271,22 @@ public enum CoveredWindowPointer {
         topClaim(for: window)?.owed.count ?? 0
     }
 
+    /// Gives a synchronous test a stable pointer without moving the user's hardware pointer or
+    /// relying on AppKit to leave an unshown test window outside its screen constraints.
+    static func withPointerLocationForTesting<Result>(
+        _ location: NSPoint,
+        in window: NSWindow,
+        perform: () throws -> Result
+    ) rethrows -> Result {
+        let previous = pointerLocationOverride
+        pointerLocationOverride = { candidate in
+            if candidate === window { return location }
+            return previous?(candidate) ?? candidate.mouseLocationOutsideOfEventStream
+        }
+        defer { pointerLocationOverride = previous }
+        return try perform()
+    }
+
     // MARK: - Private Methods
 
     /// Whether `surface` stands between the pointer and `view`: neither contains the other.
@@ -320,7 +337,8 @@ public enum CoveredWindowPointer {
         let rect = area.options.contains(.inVisibleRect)
             ? owner.bounds.intersection(owner.visibleRect)
             : area.rect
-        return rect.contains(owner.convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        let pointer = pointerLocationOverride?(window) ?? window.mouseLocationOutsideOfEventStream
+        return rect.contains(owner.convert(pointer, from: nil))
     }
 
     private static func installMonitorIfNeeded() {

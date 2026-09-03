@@ -853,7 +853,10 @@ The entry points use the same staged receipt rail:
   lines…** and speaks about every selected line, while a right-click outside it stays about the
   line under the pointer, macOS's own contextual-click convention. Either way the click selects
   the target lines whole, so the wash under them is the receipt's exact quote — the lines lit
-  are the lines the sheet and the excerpt will carry;
+  are the lines the sheet and the excerpt will carry. A selection with gaps (⌘-click on the
+  gutter's `+`) stages **one receipt per contiguous run**, and a comment on it is asked once and
+  staged on every run, since a receipt's line range is one contiguous span by design — see
+  [`git.md`](git.md);
 - a Git Review file, including an image comparison, can be referenced or commented on as a file;
 - the Attachments pane can stage or comment on its selected item, and a composer image thumbnail
   offers the comment action directly;

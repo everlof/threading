@@ -101,6 +101,63 @@ final class ProjectStoreMutationTests: XCTestCase {
         XCTAssertEqual(payload.text(0), sentinel)
     }
 
+    func testAddingTitledTerminalWritesOnlyItsOwningProject() throws {
+        let manager = StateManager(appSupportDirectory: directory)
+        let store = ProjectStore(stateManager: manager, refusesWrites: false)
+        let project = try XCTUnwrap(store.addProject(folderURL: directory))
+        let untouched = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
+
+        // A terminal launch must not encode or upsert retained conversations. The Update All
+        // incident had 696 of them, and the old whole-graph path rewrote every one before the
+        // updater PTY was even created.
+        let inspection = try SQLiteDatabase(
+            path: directory.appendingPathComponent("threading.db").path
+        )
+        defer { inspection.close() }
+        let sentinel = #"{"futureSessionFormat":true}"#
+        try inspection.prepare("UPDATE session SET data = ? WHERE id = ?")
+            .bind(1, sentinel)
+            .bind(2, untouched.id.uuidString)
+            .run()
+
+        let observations = AppEventObservations()
+        var additionImpact: ProjectsDidChange.SidebarImpact?
+        observations.observe(ProjectsDidChange.self) { additionImpact = $0.sidebarImpact }
+        let terminal = try XCTUnwrap(store.addTerminal(
+            to: project.id,
+            customTitle: "  Agent Updates  "
+        ))
+        guard case let .terminalAdded(addedProjectID, addedTerminalID) = additionImpact else {
+            return XCTFail("terminal creation must publish its exact owning identities")
+        }
+        XCTAssertEqual(addedProjectID, project.id)
+        XCTAssertEqual(addedTerminalID, terminal.id)
+        XCTAssertEqual(terminal.customTitle, "Agent Updates")
+        XCTAssertEqual(
+            store.project(withID: project.id)?.terminals.first { $0.id == terminal.id }?.customTitle,
+            "Agent Updates"
+        )
+
+        let sessionPayload = try inspection.prepare("SELECT data FROM session WHERE id = ?")
+        defer { sessionPayload.finalize() }
+        sessionPayload.bind(1, untouched.id.uuidString)
+        XCTAssertTrue(try sessionPayload.step())
+        XCTAssertEqual(sessionPayload.text(0), sentinel)
+
+        let projectPayload = try inspection.prepare("SELECT data FROM project WHERE id = ?")
+        defer { projectPayload.finalize() }
+        projectPayload.bind(1, project.id.uuidString)
+        XCTAssertTrue(try projectPayload.step())
+        let durableProject = try JSONDecoder().decode(
+            Project.self,
+            from: try XCTUnwrap(projectPayload.data(0))
+        )
+        XCTAssertEqual(
+            durableProject.terminals.first { $0.id == terminal.id }?.customTitle,
+            "Agent Updates"
+        )
+    }
+
     func testRenameDoesNotFlushUnrelatedCoalescedSessionWrites() throws {
         let manager = StateManager(appSupportDirectory: directory)
         let store = ProjectStore(stateManager: manager, refusesWrites: false)

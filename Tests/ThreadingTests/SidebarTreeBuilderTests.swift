@@ -527,6 +527,98 @@ final class SidebarTreeBuilderTests: XCTestCase {
         }
     }
 
+    /// Update All's ordinary shape is one terminal appended after the project's chats. It must
+    /// not rebuild those standing chat nodes just to discover the terminal's final index.
+    func testTerminalCreationInsertsOnePresentedLeaf() throws {
+        try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
+            try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
+                try withDefault(false, forKey: "groupsSessionsByBranch") {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                        "threading-sidebar-terminal-add-\(UUID().uuidString)",
+                        isDirectory: true
+                    )
+                    defer { try? FileManager.default.removeItem(at: directory) }
+
+                    let standing = session("Standing")
+                    let stored = project("Created", sessions: [standing])
+                    let manager = StateManager(appSupportDirectory: directory)
+                    defer { manager.closeDatabase() }
+                    XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
+                    let store = ProjectStore(stateManager: manager)
+                    let controller = ProjectSidebarViewController(projectStore: store)
+                    _ = controller.view
+
+                    let added = try XCTUnwrap(store.addTerminal(
+                        to: stored.id,
+                        customTitle: "Agent Updates"
+                    ))
+
+                    XCTAssertEqual(
+                        controller.presentedRowKeys,
+                        [.project(stored.id), .session(standing.id), .terminal(added.id)]
+                    )
+                    #if DEBUG
+                    XCTAssertEqual(controller.lastProjectStructurePerformance.treeNanoseconds, 0)
+                    XCTAssertEqual(controller.lastProjectStructurePerformance.shapeNanoseconds, 0)
+                    #endif
+                }
+            }
+        }
+    }
+
+    /// A terminal that becomes the second row on a branch creates a heading, so that uncommon
+    /// regrouping remains on the authoritative project-local builder.
+    func testTerminalCreationFallsBackWhenItsBranchEarnsAGroup() throws {
+        try withDefault(SidebarSessionOrder.manual.rawValue, forKey: "sidebarSessionOrder") {
+            try withDefault(false, forKey: "sidebarSessionOrderIsReversed") {
+                try withDefault(true, forKey: "groupsSessionsByBranch") {
+                    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                        "threading-sidebar-terminal-group-\(UUID().uuidString)",
+                        isDirectory: true
+                    )
+                    try FileManager.default.createDirectory(
+                        at: directory,
+                        withIntermediateDirectories: true
+                    )
+                    defer { try? FileManager.default.removeItem(at: directory) }
+                    _ = try GitProcess.run(["init", "--initial-branch=main"], in: directory)
+
+                    let standing = session("Standing", branch: "main")
+                    var stored = project("Grouped", sessions: [standing])
+                    stored.folderPath = directory.path
+                    let stateDirectory = directory.appendingPathComponent("state", isDirectory: true)
+                    let manager = StateManager(appSupportDirectory: stateDirectory)
+                    defer { manager.closeDatabase() }
+                    XCTAssertTrue(manager.saveProjectsState(ProjectsState(projects: [stored])))
+                    let store = ProjectStore(stateManager: manager)
+                    let controller = ProjectSidebarViewController(projectStore: store)
+                    _ = controller.view
+
+                    let added = try XCTUnwrap(store.addTerminal(
+                        to: stored.id,
+                        customTitle: "Agent Updates"
+                    ))
+
+                    XCTAssertEqual(
+                        controller.presentedRowKeys,
+                        [
+                            .project(stored.id),
+                            .branch(stored.id, "main"),
+                            .session(standing.id),
+                            .terminal(added.id)
+                        ]
+                    )
+                    #if DEBUG
+                    XCTAssertGreaterThan(
+                        controller.lastProjectStructurePerformance.treeNanoseconds,
+                        0
+                    )
+                    #endif
+                }
+            }
+        }
+    }
+
     /// The lazy branch still has to cross on the one state that needs it.
     func testAnEmptyInitialTreeMaterializesTheEmptyState() {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -1391,6 +1483,25 @@ final class SidebarTreeBuilderTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
         let additionFullReloadComparisonEnded = DispatchTime.now().uptimeNanoseconds
 
+        // Update All creates one titled standalone terminal. Measure its complete synchronous
+        // store + sidebar mutation while all retained session rows are still standing: its cost
+        // must follow only the selected project's small terminal payload, never this catalogue.
+        let terminalAdditionStarted = DispatchTime.now().uptimeNanoseconds
+        let addedTerminal = try XCTUnwrap(store.addTerminal(
+            to: fixture.deepProjectID,
+            customTitle: "Agent Updates"
+        ))
+        let terminalAdditionMutationEnded = DispatchTime.now().uptimeNanoseconds
+        #if DEBUG
+        let terminalAdditionSidebarUpdate = controller.lastProjectStructureNanoseconds
+        let terminalAdditionSidebarPhases = controller.lastProjectStructurePerformance
+        #endif
+        controller.view.layoutSubtreeIfNeeded()
+        let terminalAdditionLayoutEnded = DispatchTime.now().uptimeNanoseconds
+        XCTAssertTrue(controller.presentedRowKeys.contains(.terminal(addedTerminal.id)))
+        XCTAssertEqual(store.removeTerminal(id: addedTerminal.id), .applied)
+        controller.view.layoutSubtreeIfNeeded()
+
         // Archive used to route through the matched whole-graph comparison above for every
         // provider completion. Exercise archive and restore against the same populated store;
         // both should write one row and rebuild only their owning project's subtree.
@@ -1541,6 +1652,10 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + Self.milliseconds(
                     additionFullReloadComparisonEnded - additionFullReloadComparisonStarted
                 ) + " "
+                + "terminal_add_mutation_ms="
+                + Self.milliseconds(terminalAdditionMutationEnded - terminalAdditionStarted) + " "
+                + "terminal_add_layout_ms="
+                + Self.milliseconds(terminalAdditionLayoutEnded - terminalAdditionMutationEnded) + " "
                 + "archive_mutation_ms="
                 + Self.milliseconds(archiveMutationEnded - archiveStarted) + " "
                 + "archive_layout_ms="
@@ -1577,6 +1692,18 @@ final class SidebarTreeBuilderTests: XCTestCase {
                 + Self.milliseconds(additionSidebarPhases.indexingNanoseconds)
                 + " add_outline_ms="
                 + Self.milliseconds(additionSidebarPhases.outlineNanoseconds)
+                + " terminal_add_sidebar_ms="
+                + Self.milliseconds(terminalAdditionSidebarUpdate)
+                + " terminal_add_tree_ms="
+                + Self.milliseconds(terminalAdditionSidebarPhases.treeNanoseconds)
+                + " terminal_add_shape_ms="
+                + Self.milliseconds(terminalAdditionSidebarPhases.shapeNanoseconds)
+                + " terminal_add_adopt_ms="
+                + Self.milliseconds(terminalAdditionSidebarPhases.adoptionNanoseconds)
+                + " terminal_add_indexes_ms="
+                + Self.milliseconds(terminalAdditionSidebarPhases.indexingNanoseconds)
+                + " terminal_add_outline_ms="
+                + Self.milliseconds(terminalAdditionSidebarPhases.outlineNanoseconds)
                 + " archive_tree_ms="
                 + Self.milliseconds(archiveSidebarPhases.treeNanoseconds)
                 + " archive_shape_ms="

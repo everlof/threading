@@ -20,6 +20,8 @@ struct ProjectsDidChange: AppEvent {
         case projectRow(ProjectID)
         /// One session joined an otherwise standing project hierarchy.
         case sessionAdded(projectID: ProjectID, sessionID: SessionID)
+        /// One standalone terminal joined an otherwise standing project hierarchy.
+        case terminalAdded(projectID: ProjectID, terminalID: TerminalID)
         /// One durable session row left an otherwise standing project hierarchy.
         case sessionRemoved(projectID: ProjectID, sessionID: SessionID)
         /// One session changed where it appears without changing any neighbouring record.

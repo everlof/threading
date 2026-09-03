@@ -24,10 +24,6 @@ extension SessionCoordinator {
               let session = environment.projectStore.session(withID: sessionID) else { return }
 
         let checkoutCoordinator = SessionCheckoutCoordinator.shared
-        let repairs = checkoutCoordinator.conversationHasLeftOwnedCheckout(
-            sessionID: sessionID,
-            forDestination: checkout.root
-        )
 
         switch checkoutCoordinator.reconcileObservedExecution(
             sessionID: sessionID,
@@ -41,8 +37,7 @@ extension SessionCoordinator {
             guard move.worktreeIdentity == checkout.worktreeIdentity else { return }
             toastPresenter(Self.observedMoveToast(
                 for: session,
-                checkout: checkout,
-                repairedDetachedConversation: repairs
+                checkout: checkout
             ))
         case .approvalRequired:
             toastPresenter(Self.observedMoveOfferToast(
@@ -90,16 +85,14 @@ extension SessionCoordinator {
     ///
     /// It names the actor and the reason, because a chat that changed checkout while the user
     /// was reading something else is a window rearranging itself, and the first question that
-    /// raises is who did it. The repair case says the quiet part out loud: the conversation had
-    /// *already* gone, and this is Threading catching up with it rather than deciding anything.
+    /// raises is who did it.
     ///
     /// Keyed on the session so one chat holds one band. An agent that visits a worktree, moves on
     /// and comes back reports drift more than once, and a stack of bands about one conversation
     /// reads as several things having happened.
     static func observedMoveToast(
         for session: AgentSession,
-        checkout: ObservedCheckout,
-        repairedDetachedConversation: Bool
+        checkout: ObservedCheckout
     ) -> ToastRequest {
         ToastRequest(
             message: L10n.format(
@@ -107,12 +100,7 @@ extension SessionCoordinator {
                 session.displayTitle,
                 checkout.displayName
             ),
-            detail: repairedDetachedConversation
-                ? L10n.string(
-                    "Its conversation had already moved there, so resuming it here would have "
-                        + "started an empty one. Threading followed it."
-                )
-                : L10n.string("The agent has been working there."),
+            detail: L10n.string("The agent has been working there."),
             dwell: ToastDefaults.unattendedDwell,
             identifier: "sidebar.toast.execution-drift.moved",
             replacementID: "execution-drift.\(session.id.uuidString)"

@@ -57,7 +57,7 @@ a security boundary, misrepresent an explicit user-owned choice or break an esse
 | Permission card | `conversation.permission-card@1` | display-only protected hook | queue, context, decisions, remote mirroring | Implemented |
 | Display-pane header | `display.pane-header@1` | protected command/status hook | tab ownership, close/select/order, overflow, persistence, `+` menu | Implemented |
 | Display tab header | `display.tab-header@1` | display-only `after-title` slot | identity, active state, close/select, ordering, overflow | Implemented |
-| Session Overview body | — | host-only | Activity attribution and lazy tree, usage/accounting truth, Info polling/process controls/port routing, section lifecycle, persistence and empty-panel fallback | Host-only |
+| Session Overview body | — | host-only | Activity attribution and lazy tree, usage/accounting truth, Info polling/process controls and command-line disclosure/port routing, section lifecycle, persistence and empty-panel fallback | Host-only |
 | Subagents navigator and child transcript | — | host-only | child identity/hierarchy, lifecycle and transcript availability, bounded paging, provider progress and usage truth, selection/reveal routing | Host-only |
 | In-panel iOS Simulator body | — | host-only | CoreSimulator device identity, boot lease and ownership, agent consent/routing, framebuffer/input authority, visibility budget and fallback truth | Host-only |
 | Session corner card | `session.corner-card@1` | display-only placement slot, disclosure detail | card navigation, visibility, activity and usage truth, refresh, the whole reveal gesture | Implemented |

@@ -134,7 +134,7 @@ Components so far:
 | `ThemedActionPopoverViewController` | A bounded rich preview followed by a short menu-like command list. It takes structured action/separator entries, makes every action a full-cell `ThemedButton`, and applies `SeparatorView`'s visible-ink spacing. The caller constructs the optional preview only from the hover scheduler's presentation callback, never while mounting the anchor list. |
 | `ThemedTextField` | A drop-in editable `NSTextField`, bezel drawn rather than stock. `SurfacePresentation.persistent` is the ordinary standing well; `.onInteraction` keeps the same text inset, frame and hit target while drawing no plate at rest, raises `controlHover` under the pointer, and restores the ordinary well and focus ring for editing — the browser address bar's content-first grammar. `Design.Size.fieldHeight`, its own step: it borrowed `chipHeight` for as long as a field was "a chip you can type in", and a chip holds a word at rest where a field holds a caret. With a 2pt rule on each side, 26 left twenty points inside for a 13pt face — about three points of air — and the text read as wedged against the border. The two fields placed by frame rather than by intrinsic size (`TextPromptDefaults.fieldHeight`, `SidebarDefaults.renameFieldHeight`) restate the same token. **The cell is put on `wraps = false`, `isScrollable = true` in `setup()`**, which AppKit gives only through the `NSTextField(string:)` factory that `cellClass` rules out: a cell built by `init(frame:)` wraps, and a wrapping cell grows its *field editor* rather than scrolling it — 128pt of editor inside the `fieldHeight` well, unclipped by the control, so a sentence longer than the row drew its earlier lines through the field's own top border and over the row above. Settings' opening message shipped that way; multi-line editing is `ThemedTextView`, not a taller field. |
 | `ThemedSearchField` | The same field with a magnifier, replacing `NSSearchField`. Its trailing run rides *inside* the field: the ✕ every search field owes its reader, and an optional owner-installed action in front of it (Settings' Ask AI), both acting on what was typed the way the magnifier does. The query yields room for whatever is visible there, and so does the pointer — the field's I-beam stops where the run begins, since `NSTextField`'s own claim is its whole bounds and would otherwise promise text over a button. See the [2026-08-21 note](#2026-08-21--the-carets-cursor-claims-the-whole-field-buttons-and-all). |
-| `PanelListView` | The display panel's list vocabulary: a scrolling stack of full-width rows under quiet section headings, with wrapped notes for a section that has no rows. Extracted after the Info and Sharing panes each built the same scroll–clip–stack by hand with silently different insets, which is how one pane's headings stopped lining up with anything above them. The geometry is stated once — content ink at `Spacing.inset`, on the pane header's own column — and `rowSpacing` is the one density decision a pane keeps. A heading never carries the count of its rows: the rows make the count apparent, a decision the Sharing pane made first and the component keeps panes from re-deciding apart. |
+| `PanelListView` | The display panel's list vocabulary: a scrolling stack of full-width rows under quiet section headings, with wrapped notes for a section that has no rows. Extracted after the Info and Sharing panes each built the same scroll–clip–stack by hand with silently different insets, which is how one pane's headings stopped lining up with anything above them. The geometry is stated once — content ink at `Spacing.inset`, on the pane header's own column — and `rowSpacing` is the one density decision a pane keeps. A heading never carries the count of its rows: the rows make the count apparent, a decision the Sharing pane made first and the component keeps panes from re-deciding apart. Two quiet voices under a heading: a *note* speaks for a section with no rows (`addNote`, the subheading face), a *footnote* speaks about rows already there (`addFootnote`, the detail face) — provenance under a receipt, not a substitute for one. |
 | `SearchMatchLabel` | The other half of a search field: a line of text that says which of its own words the query accounts for. **Two signals, always both** — the matched run takes its role's `emphasized` weight *and* `Design.Surface.searchMatch`, an accent held at `Opacity.searchMatchGround` behind it. Weight alone vanishes in a list where several rows matched; a tint alone is the first thing Differentiate Without Colour takes away. It is a component rather than a call to `NSTextField.label(attributed:)` because an attributed string freezes its fonts and inks and `AppThemeRefresh`'s sweep re-resolves a *recorded role*, which it cannot reach inside — so this rebuilds on `AppThemeDidChange`, the same wiring `ThemedTextField`'s placeholder carries. `SearchTextMatch` is where "a query landed here" is decided, and filters may read its `comparisonOptions` so a result cannot be admitted by a more forgiving spelling than the mark uses. Its second rule is the one to know: **a token containing the whole line marks all of it**, which is what makes a row showing eight characters of a session id answer honestly to a pasted thirty-six-character one. |
 | `SearchResultRowView` | One destination a search turned up, with where it lives: a `SearchMatchLabel` title over a quiet caption path line — the settings sidebar's "Alert sound / Notifications" under the General row. A component of its own rather than a taller `ThemedTabItemView`: a tab names a *place* and holds one line forever, while a result names a thing the reader just asked for and owes them the path to it; what the two share (hover plate, press, keyboard activation, focus ring, ink source) they share through `BackdropThemedControl`. The host hands it the leading inset of the rows above so results align with the page row's title ink. Choosing one reports page **and** row, because the row is the answer — the settings sidebar routes that through `SettingsRowReveal`, which scrolls the built page to the anchored row (`SettingsRowAnchor`, the tag `SettingsUI` puts on every titled row) and stands the wash below on it. |
 | `RevealHighlightView` | The wash a search leaves on the row it just scrolled to: `Design.Surface.searchMatch` — the same ground `SearchMatchLabel` puts behind matched text, so "the query landed here" is one signal at both scales — fading in, standing `Design.Motion.revealHold`, and leaving. Decorative by contract: `hitTest` nil, not an accessibility element (the reveal posts its own announcement), drawn in `draw(_:)` so a live theme switch re-resolves it. The fades collapse under Reduce Motion; the hold does not, because a hold is not movement and being seen standing still is its whole job. |
@@ -337,7 +337,8 @@ what kind of thing it is precisely while it works.
 work has landed.** Sidebar rows
 carry status only: the former 3pt repository strip and its expanded hover card were too compressed
 for the information and duplicated a surface with more room. The display panel's single Overview
-tab has Activity and Info sections in a themed segmented control. Activity places the bounded
+tab has Info and Activity sections in a themed segmented control, Info leading because it is the
+default and the reason the panel is opened. Activity places the bounded
 repository atlas, recent action ribbon, and counts above the real filesystem tree. Every visible
 file row states exact reads and edits; a directory states the touched-file and read/edit totals
 below it. New paths retain one stable overflow cell in the summary rather than resorting the map
@@ -631,6 +632,13 @@ events through the overlay before ordinary responder dispatch; `finish` removes 
 with the focus observer and restores the source. The regression sends Escape through `NSApp` after
 deliberately moving first responder away, because calling `overlay.keyDown` directly would only
 prove the handler and a timed run-loop wait would make scheduler speed part of the contract.
+
+**A shortcut printed in that menu is an action, not a caption.** Because the monitor above owns
+the key-down, falling through to the application menu is neither available nor the right route:
+it would bypass the row's own choose-and-dismiss lifecycle. Before navigation, the overlay matches
+the complete `KeyboardShortcut` against enabled rows in the visible menu columns, deepest first,
+and activates the matching row through the same path as a click or Return. Thus pressing ⌘N while
+a project's creation menu is open chooses **New Chat…** and dismisses the menu synchronously.
 
 **Scrolling a menu moves the rows, not the hand, and the highlight belongs to the hand.** A
 row's hover *is* the menu's highlight, and hover is a tracking-area fact: wheel a clamped menu
@@ -1373,14 +1381,6 @@ The vocabulary these encode, which new work should follow:
   which keeps the buttons inside the slot they are sized into.
   `SidebarRowRenderTests.testEveryTrailingMarkLandsOnOneOpticalLine` asserts the one line.
 
-  **Only visible controls earn width.** A session row rests with one inline target reserved for
-  its 12pt status mark, then expands the trailing slot before the `...` and archive actions fade
-  in. On exit it collapses only after they have faded out, so a visible target never overhangs the
-  parent that hit-tests it. The title yielding while two controls are on screen is honest;
-  permanently truncating every title for an invisible second target was not. The hover transition
-  re-lays out only the recycled row under the pointer, so session cardinality never reaches that
-  path.
-
   The phone keeps the rule with the same arithmetic. `MobileDesign.Size.opticalInset(target:mark:)`
   is `(target − mark) / 2`, and the new-session draft's composer pulls its paperclip and its send
   disc out over the margin by exactly that, so the glyph's ink and the disc's edge stand on the
@@ -1393,6 +1393,14 @@ The vocabulary these encode, which new work should follow:
   edge, so the last one meets the margin whatever symbol it draws. Those symbols differ in width
   — the terminal is wider than it is tall — and a pull sized to the point size, exact to a third
   of a point for the paperclip, would have put the terminal two points past the line.
+
+  **Only visible controls earn width.** A session row rests with one inline target reserved for
+  its 12pt status mark, then expands the trailing slot before the `...` and archive actions fade
+  in. On exit it collapses only after they have faded out, so a visible target never overhangs the
+  parent that hit-tests it. The title yielding while two controls are on screen is honest;
+  permanently truncating every title for an invisible second target was not. The hover transition
+  re-lays out only the recycled row under the pointer, so session cardinality never reaches that
+  path.
 
   **The expansion is one geometry, not one per state — and the pair takes the edge.** The archive
   button sits in the very column the status mark occupies, and the two *crossfade in place*: the
@@ -1555,18 +1563,32 @@ facts read as a merged sentence even when Auto Layout had technically kept their
 The value column is a `CompoundValueLabel` — `12% · 248 MB` gives up whole segments, never
 characters — and the row speaks as one accessibility element: a pressable link where the row
 opens a port, a quiet group otherwise. Index scope gets its own line above update/catalog
-provenance for the same reason. Command lines render
-through `CommandLineRedactor` (secrets behind credential-shaped flags become `<redacted>`,
-shared vocabulary with the execution audit); the raw line is one right-click away, per row,
-forgotten on rebuild. Both text fields explicitly use AppKit's single-line mode: a truncating
-line-break mode alone still lets a paragraph-long launch command wrap outside the fixed-height
-row and paint through its siblings. The command presentation also collapses whitespace inside
-each argv element before it reaches a label: a startup prompt is one argument even when it
-contains paragraphs, and joining argv with spaces does not remove those embedded newlines. The
-hover plate belongs only to the port rows, whose whole
-surface is a click; a stoppable process row hovers by revealing its `✕` in the value's place — a
-`ThemedIconButton` that asks (`ConfirmationPrompt.stopSessionProcess`, `.irreversible`) and
-signals exactly one pid through `SessionProcessTerminator`'s identity-checked SIGTERM.
+provenance for the same reason, as a **footnote** (`PanelListView.addFootnote`): a note speaks
+*for* a section with nothing else to say, a footnote speaks *about* rows already there, and set
+in the note's face the provenance read louder than the section heading over it. Command lines
+render through `CommandLineRedactor` (secrets behind credential-shaped flags become
+`<redacted>`, shared vocabulary with the execution audit); the raw line is one right-click away,
+per row, forgotten on rebuild, and the same menu copies the line, quoted to run again with its
+real paths. What is *drawn* folds the home directory to `~` at every token boundary
+(`PathAbbreviation`): the forty characters every path on a machine starts with are not what a
+line is read for. Both compact text fields explicitly use AppKit's single-line mode: a
+truncating line-break mode alone still lets a paragraph-long launch command wrap outside the
+fixed-height band and paint through its siblings. The command presentation also collapses
+whitespace inside each argv element before it reaches a label: a startup prompt is one argument
+even when it contains paragraphs, and joining argv with spaces does not remove those embedded
+newlines. **A process row unfolds** (see
+[2026-09-03 below](#2026-09-03--a-launch-command-is-a-paragraph-and-a-row-is-a-line)): a click
+opens the command beneath the band, the program then one flag with its value per line, with the
+poll's facts above it. The hover plate belongs to the rows whose whole surface is a click — a
+port row that opens, a process row that unfolds; a stoppable process row also reveals its `✕`
+in the value's place — a `ThemedIconButton` that asks (`ConfirmationPrompt.stopSessionProcess`,
+`.irreversible`) and signals exactly one pid through `SessionProcessTerminator`'s
+identity-checked SIGTERM. The receipt rows above the processes speak the **receipt face**
+(`SessionInfoRowView.Face.receipt`): prose labels in the detail face and the value in
+fixed-width digits at the secondary tier (`CompoundValueLabel.Face.numeric`), no glyph but the
+glyph's slot kept so every row's text stands on one column. "Total", "Main agent" and "Input"
+set in the compact code face read as identifiers, and a different little symbol beside every
+line of a receipt was decoration the eye had to step over.
 
 `SessionComposerViewController` is the reference implementation, and **the only way a session
 is created**. Reading down its column: **two** chips above the box answer *where* and *who* —
@@ -3491,3 +3513,53 @@ its default its own way, is unchanged. `ModelEffortPickerRenderTests` renders th
 its detail and asserts the accessibility value; the words are phrases (*Account default*, *Last
 used*) rather than the menus' parenthesised suffixes, because a line under a name is not an
 aside.
+
+## 2026-09-03 — A launch command is a paragraph, and a row is a line
+
+The Info panel's process row gave a launch command one compact line, tail-truncated, with the
+whole line on a tooltip. For `node server.js --port 3000` that was the command. For an agent it
+was `73772 · --model opus --effort xhigh --settings /Users/david/Library/Application Support/Th…`
+— the pid, the two flags anyone can guess, and an ellipsis exactly where the settings file and
+the opening prompt began, which is what a person opening the panel wanted to read. A tooltip is
+not a place to read a paragraph from: it appears after a hold, disappears on a twitch, and cannot
+be selected.
+
+Three changes, in the order they were found to matter:
+
+- **Fold the home directory.** `/Users/david/Library/Application Support/Threading/settings/…`
+  is one path; forty of its characters say only "this Mac". `PathAbbreviation` folds the home
+  directory to `~` wherever it starts a path — at the head of an argument or after `=` — and
+  leaves `/Users/davidson` alone. Drawn lines, tooltips and the header path fold; the pasteboard
+  never does, because a shell does not expand `~` inside a quoted argument.
+- **Unfold on a click.** The row keeps its 30-point band and opens a detail block under it: the
+  poll's facts (started, working directory, program) on quiet detail lines, then the command as
+  a person writes it — the program, and one flag with the value that follows it per line,
+  continuation lines stepped in by `Spacing.medium`. `--key=value` and a positional argument
+  stand alone. The block is bounded twice, at `ProcessDetailDefaults.maximumLines` lines and
+  `maximumLineCharacters` a line, with the rest counted ("… 12 more arguments"), so a Codex
+  launch carrying its opening prompt costs the panel a paragraph rather than a page. The fold is
+  the row's state and the panel's memory: a poll writing new readings into an open row leaves it
+  open, and `SessionInfoViewController` keeps the open pids so a sibling process exiting — which
+  rebuilds the rows — does not fold the command under the reader. The row's click, like the
+  port row's, has its accessibility twin in `accessibilityPerformPress` and its help string;
+  neither row takes keyboard focus of its own, which is the panel's standing gap.
+- **Copy the line.** The row's menu, which used to appear only when a secret had been hidden,
+  now always offers *Copy Command Line* (the arguments as given, shell-quoted) and adds *Show
+  Full Command* only when something was redacted, so a menu never carries a no-op item.
+
+The receipt above the processes changed with it. It stated the same numbers three times — Total,
+Main agent and a single Opus row all reading `3.0M tokens · $2.99 est.` — because the split
+rows were unconditional. Main agent and Subagents now appear only when the session delegated
+work, and a session that used one model names it on the Total row (`38 requests · Opus 5`)
+instead of restating the total under "Models". The Cost row's second line was a sentence
+("Provider-reported cost where available; catalog estimate otherwise.") that truncated at every
+width the panel is shown at; it is a phrase now (*List-price estimate*, *Provider reported*,
+*Reported + estimated*) with the unpriced remainder after it. The header's two titled buttons
+became two `.inline` icon buttons trailing the path on its own line, aligned to the pane's ink
+by their optical insets, which returned a row to the receipt. Sections in a `PanelListView`
+now take a group's breath (`Spacing.medium`) above a second heading: with the row gap alone,
+"Ports" read as one more row of "Processes".
+
+`SessionInfoRenderTests` renders the unfolded rows in both appearances, and
+`SessionInfoRowTests` pins the grouping, the bounds, the `~` boundary, the copy text, the fold
+surviving a reading and a rebuild, and the receipt saying each thing once.

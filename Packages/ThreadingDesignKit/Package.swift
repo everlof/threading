@@ -31,7 +31,12 @@ let package = Package(
         .package(path: "../Vendor/ThinkingOrbs"),
         .package(path: "../Vendor/LabelMorph"),
         // The diff/syntax model the app links the same way; Design's syntax roles come from it.
-        .package(path: "../../../NativeDiffKit"),
+        // Keep this remote too: a sibling checkout makes clean clones non-reproducible and can
+        // silently override the app's pinned package during Xcode graph resolution.
+        .package(
+            url: "https://github.com/everlof/NativeDiffKit.git",
+            .upToNextMinor(from: "0.1.1")
+        ),
     ],
     targets: [
         .target(

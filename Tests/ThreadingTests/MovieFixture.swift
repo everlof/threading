@@ -72,8 +72,7 @@ enum MovieFixture {
                 do {
                     let buffer = try pixelBuffer(
                         gray: Double(progress.index) / Double(max(frames - 1, 1)),
-                        size: size,
-                        pool: adaptor.pixelBufferPool
+                        size: size
                     )
                     adaptor.append(
                         buffer,
@@ -109,23 +108,20 @@ enum MovieFixture {
 
     private static func pixelBuffer(
         gray: Double,
-        size: CGSize,
-        pool: CVPixelBufferPool?
+        size: CGSize
     ) throws -> CVPixelBuffer {
         var buffer: CVPixelBuffer?
-        if let pool {
-            CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
-        }
-        if buffer == nil {
-            CVPixelBufferCreate(
-                nil,
-                Int(size.width),
-                Int(size.height),
-                kCVPixelFormatType_32ARGB,
-                nil,
-                &buffer
-            )
-        }
+        // The adaptor's pool belongs to AVAssetWriter. Reading that borrowed object from the
+        // request-media callback can race the writer invalidating it while compression advances.
+        // These fixtures are tiny, so give each frame an independent lifetime instead.
+        CVPixelBufferCreate(
+            nil,
+            Int(size.width),
+            Int(size.height),
+            kCVPixelFormatType_32ARGB,
+            nil,
+            &buffer
+        )
         guard let pixels = buffer else { throw Failure.pixelBuffer }
         CVPixelBufferLockBaseAddress(pixels, [])
         defer { CVPixelBufferUnlockBaseAddress(pixels, []) }

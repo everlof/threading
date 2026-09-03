@@ -1539,6 +1539,10 @@ extension AgentSessionViewController: TerminalSessionDelegate {
     }
 
     func terminalSession(_ session: TerminalSession, didProduceOutputOf byteCount: Int) {
+        SessionExecutionProcessObserver.shared.noteOutput(
+            sessionID: sessionID,
+            rootPID: session.shellPid
+        )
         if let acceptedByteCount = activityTracker.recordOutput(byteCount: byteCount) {
             AgentWorkloadMonitor.shared.recordActivity(
                 sessionID: sessionID,

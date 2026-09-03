@@ -42,7 +42,12 @@ final class SessionInfoRenderTests: XCTestCase {
         static let size = NSSize(width: 420, height: 820)
         static let narrowSize = NSSize(width: 312, height: 760)
         static let multilineCommandSize = NSSize(width: 477, height: 559)
+        static let unfoldedSize = NSSize(width: 420, height: 940)
     }
+
+    /// The fixture paths live under the real home so the picture shows them folded to `~`,
+    /// which is how every path on a person's own machine will actually read.
+    private static let home = NSHomeDirectory()
 
     // MARK: - Stories
 
@@ -99,7 +104,26 @@ final class SessionInfoRenderTests: XCTestCase {
         )
         written += 1
 
-        XCTAssertEqual(written, Render.themes.count * Render.appearances.count + 2)
+        // The agent's row unfolded: the launch command one flag per line, with when it started
+        // and where it runs, under the compact band that still carries the reading.
+        for (appearanceName, appearanceID) in Render.appearances {
+            let unfolded = try XCTUnwrap(
+                panelImage(
+                    appearance: appearanceID,
+                    snapshot: Self.runningFixture,
+                    isRunning: true,
+                    size: Render.unfoldedSize,
+                    unfoldedProcessIDs: [50283, 60244]
+                ),
+                "Failed to render the unfolded process rows in \(appearanceName)"
+            )
+            try unfolded.write(
+                to: directory.appendingPathComponent("info-panel-system-\(appearanceName)-unfolded.png")
+            )
+            written += 1
+        }
+
+        XCTAssertEqual(written, Render.themes.count * Render.appearances.count + 4)
         print("Rendered info panel storybook to \(directory.path)")
     }
 
@@ -151,13 +175,20 @@ final class SessionInfoRenderTests: XCTestCase {
                         memoryBytes: 248 * 1024 * 1024,
                         cpuPercent: 12,
                         depth: 0,
-                        executablePath: "/Users/me/.local/share/claude/versions/2.1.218",
+                        startTime: ProcessStartTime(
+                            seconds: UInt64(Date().timeIntervalSince1970) - 11 * 60,
+                            microseconds: 0
+                        ),
+                        executablePath: "\(home)/.local/share/claude/versions/2.1.218/claude",
                         arguments: [
                             "claude",
+                            "--model", "opus",
+                            "--effort", "xhigh",
                             "--settings",
-                            "/Users/me/Library/Application Support/Claude/settings.json",
+                            "\(home)/Library/Application Support/Threading/settings/2AC51650-8C1E-4F0B-9E2B-7A1D3C5E9F00.json",
                             "We can still have terminals too, so keep the full launch context available."
-                        ]
+                        ],
+                        workingDirectory: "\(home)/repo/example"
                     ),
                     SessionProcess(
                         pid: 50301,
@@ -192,7 +223,12 @@ final class SessionInfoRenderTests: XCTestCase {
                         cpuPercent: 0,
                         depth: 1,
                         state: .stopped,
-                        arguments: ["python", "manage.py", "runserver"]
+                        startTime: ProcessStartTime(
+                            seconds: UInt64(Date().timeIntervalSince1970) - 3 * 60,
+                            microseconds: 0
+                        ),
+                        arguments: ["python", "manage.py", "runserver", "--settings=app.settings.dev"],
+                        workingDirectory: "\(home)/repo/example/backend"
                     )
                 ])
             ],
@@ -237,7 +273,7 @@ final class SessionInfoRenderTests: XCTestCase {
                         cpuPercent: 0,
                         depth: 0,
                         arguments: [
-                            "/Users/me/.npm-global/bin/codex",
+                            "\(home)/.npm-global/bin/codex",
                             "--config",
                             "check_for_update_on_startup=false",
                             "Investigate the session info panel.\n\nKeep the process tree readable."
@@ -250,7 +286,7 @@ final class SessionInfoRenderTests: XCTestCase {
                         cpuPercent: 4,
                         depth: 1,
                         arguments: [
-                            "/Users/me/.npm-global/bin/codex",
+                            "\(home)/.npm-global/bin/codex",
                             "--config",
                             "check_for_update_on_startup=false",
                             "First paragraph of the opening request.\nSecond paragraph of the opening request."
@@ -383,7 +419,8 @@ final class SessionInfoRenderTests: XCTestCase {
         snapshot: SessionInfoSnapshot,
         isRunning: Bool,
         size: NSSize = Render.size,
-        usageSnapshot: SessionUsageSnapshot? = nil
+        usageSnapshot: SessionUsageSnapshot? = nil,
+        unfoldedProcessIDs: Set<pid_t> = []
     ) -> Data? {
         let appearance = NSAppearance(named: name)
 
@@ -391,7 +428,7 @@ final class SessionInfoRenderTests: XCTestCase {
         let render: @MainActor () -> Void = {
             let controller = SessionInfoViewController(
                 sessionID: SessionID(),
-                folderPath: "/Users/me/repo/example"
+                folderPath: "\(Self.home)/repo/example"
             )
             // Installed before the view exists, so even `viewDidLoad`'s own refresh reads the
             // fixture rather than walking the machine.
@@ -410,6 +447,15 @@ final class SessionInfoRenderTests: XCTestCase {
             host.addSubview(view)
 
             controller.apply(snapshot, isRunning: isRunning)
+            var unfolded = 0
+            for process in snapshot.processes where unfoldedProcessIDs.contains(process.pid) {
+                let identifier = SessionInfoDefaults.processRowIdentifier(process.pid)
+                guard let row = Self.descendants(of: SessionInfoRowView.self, in: controller.view)
+                    .first(where: { $0.accessibilityIdentifier() == identifier }) else { continue }
+                row.setExpanded(true)
+                if row.isExpanded { unfolded += 1 }
+            }
+            XCTAssertEqual(unfolded, unfoldedProcessIDs.count, "a row asked to unfold did not")
 
             AppThemeRefresh.repaint(host)
             host.layoutSubtreeIfNeeded()
@@ -425,5 +471,12 @@ final class SessionInfoRenderTests: XCTestCase {
             }
         }
         return data
+    }
+
+    private static func descendants<T>(of type: T.Type, in view: NSView) -> [T] {
+        view.subviews.flatMap { subview -> [T] in
+            let match = (subview as? T).map { [$0] } ?? []
+            return match + descendants(of: type, in: subview)
+        }
     }
 }

@@ -10,7 +10,7 @@ import Foundation
 /// This is the first step of extracting `ThreadingDesignKit` so a native plugin can link the real
 /// components rather than approximate them. `AppSettings` is the only thing in `UI/Design/` that a
 /// framework could not take with it; see
-/// [`native-extension-tier.md`](../../../../docs/feature-drafts/native-extension-tier.md).
+/// [`plugins.md`](../../../../docs/architecture/plugins.md).
 @MainActor
 public protocol DesignSettingsReading {
     var appTextSize: AppTextSize { get }

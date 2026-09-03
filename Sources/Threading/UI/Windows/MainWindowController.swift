@@ -1168,7 +1168,8 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
                  .sessionStructure(_, let sessionID), .sessionTitle(let sessionID, _),
                  .sessionRow(let sessionID):
                 workspaceSidebarViewController.sessionDidChange(sessionID)
-            case .structure, .projectRemoved, .projectStructure, .projectRow, .terminalRow:
+            case .structure, .projectRemoved, .projectStructure, .projectRow,
+                 .terminalAdded, .terminalRow:
                 workspaceSidebarViewController.refreshDocument()
             }
         }
@@ -1451,6 +1452,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         }
         appEvents.observe(SessionCheckoutDidMove.self) { [weak self] event in
             guard let self else { return }
+            self.displayPaneController.noteSessionCheckoutMoved(event.sessionID)
             environment.agentRuntime.preserveCheckoutMoveOutbox(sessionID: event.sessionID)
             if self.containerViewController.currentSessionID == event.sessionID {
                 self.containerViewController.resumeCurrentSession()
@@ -3501,14 +3503,12 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
               ProjectScriptService.shared.activeCatalog?.repositoryRoot
               == invocation.repositoryRoot else { return nil }
 
+        let title = L10n.format("Script: %@", invocation.script.name)
         guard let terminal = environment.projectStore.addTerminal(
             to: projectID,
-            currentDirectory: invocation.workingDirectory.path
+            currentDirectory: invocation.workingDirectory.path,
+            customTitle: title
         ) else { return nil }
-        environment.projectStore.renameTerminal(
-            id: terminal.id,
-            to: L10n.format("Script: %@", invocation.script.name)
-        )
 
         let controller = ProjectTerminalRuntime.shared.makeController(for: terminal)
         guard let receipt = controller.prepareProjectScript(invocation) else {
@@ -3536,16 +3536,16 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         let project = currentProjectID
             .flatMap { environment.projectStore.project(withID: $0) }
             ?? environment.projectStore.projects.first
-        guard let project,
-              let terminal = environment.projectStore.addTerminal(
-                  to: project.id,
-                  currentDirectory: project.folderPath
-              ) else { return nil }
+        guard let project else { return nil }
 
         let title = updates.count == 1
             ? L10n.format("Update %@", updates[0].displayName)
             : L10n.string("Agent Updates")
-        environment.projectStore.renameTerminal(id: terminal.id, to: title)
+        guard let terminal = environment.projectStore.addTerminal(
+            to: project.id,
+            currentDirectory: project.folderPath,
+            customTitle: title
+        ) else { return nil }
 
         let plan = AgentCLIUpdateExecutionPlan(updates: updates)
         let controller = ProjectTerminalRuntime.shared.makeController(for: terminal)

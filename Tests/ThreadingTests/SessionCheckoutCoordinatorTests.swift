@@ -405,87 +405,22 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         ))
     }
 
-    /// The basis nobody requested, and the one condition that lowers its bar.
-    ///
-    /// An observation is not a request, so under the shipped default it is asked about like an
-    /// agent's own decision. The exception is the case where refusing to act preserves a defect
-    /// instead of preventing one: the conversation has already left, so the chat is *already*
-    /// unresumable where Threading would launch it, and the move copies nothing. `alwaysAsk`
-    /// still asks, because that is what it means.
+    /// Host-observed work follows automatically under the default policy. It has already passed
+    /// canonical same-repository validation and describes where execution happened, not a move a
+    /// model merely proposed. `alwaysAsk` remains the explicit opt-in confirmation boundary.
     func testObservedExecutionAuthorityMatrix() {
-        XCTAssertTrue(SessionCheckoutCoordinator.requiresApproval(
+        XCTAssertFalse(SessionCheckoutCoordinator.requiresApproval(
             policy: .allowExplicitRequests, authorityBasis: .observedExecution
         ))
-        XCTAssertFalse(SessionCheckoutCoordinator.requiresApproval(
-            policy: .allowExplicitRequests,
-            authorityBasis: .observedExecution,
-            repairsDetachedConversation: true
-        ))
         XCTAssertTrue(SessionCheckoutCoordinator.requiresApproval(
-            policy: .alwaysAsk,
-            authorityBasis: .observedExecution,
-            repairsDetachedConversation: true
+            policy: .alwaysAsk, authorityBasis: .observedExecution
         ))
         XCTAssertFalse(SessionCheckoutCoordinator.requiresApproval(
             policy: .allowSameRepository, authorityBasis: .observedExecution
         ))
 
-        // The repair condition belongs to the observed basis alone. A move an agent asked for
-        // is judged on the asking, and letting a filesystem coincidence quietly grant it would
-        // make the audited bases mean different things on different days.
         XCTAssertTrue(SessionCheckoutCoordinator.requiresApproval(
-            policy: .allowExplicitRequests,
-            authorityBasis: .agentInitiated,
-            repairsDetachedConversation: true
-        ))
-    }
-
-    /// The four states of the two transcript paths, and why only one of them is the repair.
-    ///
-    /// This is the condition that decides whether an observed move happens without asking, so
-    /// it is asserted directly rather than inferred from the drift that occasioned it. The real
-    /// defect it was written from: one chat's `.jsonl` had followed its agent into a sibling
-    /// worktree's slug and was no longer under the checkout Threading launches from, so the
-    /// `--resume` branch could no longer find it and the next launch would have minted an empty
-    /// conversation under the same id. A second chat of the same repository, reporting the same
-    /// kind of drift, had *not* re-filed and was in no danger at all.
-    func testConversationDetachmentNeedsBothHalves() throws {
-        let owned = root.appendingPathComponent("owned.jsonl")
-        let destination = root.appendingPathComponent("destination.jsonl")
-        let manager = FileManager.default
-        func detached() -> Bool {
-            SessionCheckoutCoordinator.conversationHasLeft(
-                owned: owned,
-                destination: destination,
-                fileManager: manager
-            )
-        }
-
-        // Neither: a chat that has not written a conversation yet.
-        XCTAssertFalse(detached())
-
-        // Owned only: the ordinary healthy chat, and the overwhelmingly common case.
-        try Data("conversation".utf8).write(to: owned)
-        XCTAssertFalse(detached())
-
-        // Both: a copy exists at the destination, but resume still works where it is filed.
-        try Data("copy".utf8).write(to: destination)
-        XCTAssertFalse(detached())
-
-        // Destination only: the conversation has left and resume is already broken.
-        try manager.removeItem(at: owned)
-        XCTAssertTrue(detached())
-    }
-
-    /// A runtime whose conversations are not checkout-scoped can never be in the repair case:
-    /// it resumes by a provider-owned id that no directory can invalidate.
-    func testConversationDetachmentIsFalseForNonCheckoutScopedRuntimes() throws {
-        let project = try XCTUnwrap(store.addProject(folderURL: main))
-        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
-
-        XCTAssertFalse(makeCoordinator().conversationHasLeftOwnedCheckout(
-            sessionID: session.id,
-            forDestination: sibling.path
+            policy: .allowExplicitRequests, authorityBasis: .agentInitiated
         ))
     }
 

@@ -365,10 +365,36 @@ line of numbers and signs. **The plate and the right-click answer alike**: both 
 through `targetSpan(forClickedLine:)`, so a plate pressed inside a five-line selection speaks for
 the five lines rather than throwing the selection away for the hovered one. Both grow the
 selection to whole lines for the menu, and a menu dismissed without a choice puts the selection
-back to what it was — otherwise cancelling left a selection nobody made. A one-pixel rule looked like a clipping seam and
-did not identify the line as the target. Moving the pointer invalidates only the old and new
-logical-line rectangles, including wrapped fragments; it neither mounts per-line views nor redraws
-the complete hunk.
+back to what it was — otherwise cancelling left a selection nobody made. **A press on the plate
+is the start of a drag, and the menu waits for the release**: dragging down the hunk selects
+every line the pointer crosses (`LineActionDrag`), the selection being the run's indicator for the
+same reason it is the menu's, and the release goes through the selection rule above, so a drag
+and a click are one gesture that names one line or a run. A drag past the hunk's edge keeps naming
+its first or last line, and the plate stays on the line the drag began on. A **shift-click on a
+plate** extends the selection, or the line the last plate press began on, to the clicked line — the
+way to name a run longer than the pane without dragging past its edge. **A ⌘-press builds a
+selection with gaps**: ⌘-click adds a line, ⌘-click on a selected line takes it out, ⌘-drag adds a
+run, and none of them opens the menu, since the set is being built; a plain press or right-click
+inside it then speaks for all of it. NSTextView holds the gaps as several `selectedRanges`, which is
+also what the selection wash draws and what a copy joins. The menu stages **one receipt per
+contiguous run** (`targetRuns(forClickedLine:)`, merged through `CodeContextPreview.mergedRuns`):
+the envelope carries a batch as it carries any batch, and each receipt's line range stays exact,
+where one receipt spanning the gaps would have to lie about them. The comment path takes the same
+batch: one sheet, titled `Foo.swift:3-5, 9, 12-14` (`ContextCommentAlert.headline`), whose preview
+shows every run with the gaps counted (`CodeContextPreview.make(totalLineCount:targets:lineAt:)`),
+and one answer staged on every run — sent rather than held, all but the last are staged and the last
+submits, so the runs still travel as one turn. Selecting text first and then pressing the plate or
+right-clicking still works; the drag exists because selecting first was not discovered. Moving the pointer invalidates only the old and new logical-line rectangles, including wrapped
+fragments; it neither mounts per-line views nor redraws the complete hunk. **What the plate paints
+stays inside the rect the hover invalidates, and that rect sits on the device pixel grid.** Its
+border was stroked centred on the rect's edge, so half of it lay outside, and that half stayed on
+screen as a hairline in the gutter behind every line the pointer had crossed; and TextKit's
+fragment centre is fractional, so the plate and the 1.5pt round-capped plus centred on it
+straddled pixel rows on every display — "the + looks blurry". `lineActionRect(for:)` is now
+`backingAlignedRect`ed with origin and size snapped independently (an 18pt plate stays 18pt), the
+border is stroked inside it, and the plus is two filled bars a whole number of device pixels
+thick. `GitReviewLineActionTests` repaints only what the view invalidated and checks the old
+plate's neighbourhood against a clean render, which is the on-screen failure reproduced offscreen.
 
 Both wash and base ink are frozen colours derived from the surface underneath, so a virtual row
 resolves them inside its own effective appearance and rebuilds the attributed document when it

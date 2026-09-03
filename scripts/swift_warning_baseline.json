@@ -2,13 +2,49 @@
   "schemaVersion": 1,
   "description": "Per-file ceilings for Swift compiler warnings emitted by the canonical cold CI builds. Lower counts are accepted; increases require an intentional baseline update.",
   "files": {
+    "Plugins/DeviceLogsPlugin/Sources/DeviceLogsPlugin/DeviceLogPaneViewController.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 4
+    },
+    "Plugins/DeviceLogsPlugin/Sources/DeviceLogsPlugin/DeviceLogRecorder.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 0
+    },
+    "Plugins/DeviceLogsPlugin/Sources/DeviceLogsPlugin/DeviceLogSources.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Plugins/DeviceLogsPlugin/Sources/DeviceLogsPlugin/DeviceLogsPluginEntry.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 4
+    },
     "Sources/Threading/Core/Agent/ClaudeKeychainCredentials.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/Core/Agent/ModelAliasResolutionStore.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Agent/SessionImporter.swift": {
       "warnings": 3,
       "swift6LanguageMode": 0
     },
     "Sources/Threading/Core/Agent/SettingsSearchResearch.swift": {
       "warnings": 2,
       "swift6LanguageMode": 0
+    },
+    "Sources/Threading/Core/Agent/TranscriptReplay.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/Core/Extensions/ExtensionFactRegistry.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Extensions/ExtensionManager.swift": {
+      "warnings": 7,
+      "swift6LanguageMode": 1
     },
     "Sources/Threading/Core/Extensions/ExtensionProjectFileBroker.swift": {
       "warnings": 4,
@@ -43,16 +79,108 @@
       "swift6LanguageMode": 0
     },
     "Sources/Threading/Core/Session/TerminalSession.swift": {
-      "warnings": 2,
+      "warnings": 1,
       "swift6LanguageMode": 0
     },
-    "Sources/Threading/UI/Design/Design.swift": {
-      "warnings": 2,
-      "swift6LanguageMode": 0
+    "Sources/Threading/Core/Settings/AppCommand.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 3
     },
-    "Sources/Threading/UI/Design/MediaInspector.swift": {
+    "Sources/Threading/Core/Settings/MotionPreferences.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Settings/SettingsEvents.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Theme/AppTheme.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 5
+    },
+    "Sources/Threading/Core/Theme/AppThemeLibrary.swift": {
       "warnings": 4,
       "swift6LanguageMode": 4
+    },
+    "Sources/Threading/Core/Theme/AppThemeRole.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+Amiga.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+BeOS.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+Christmas.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 3
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+ClassicPlayer.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+Expanded.swift": {
+      "warnings": 9,
+      "swift6LanguageMode": 9
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+IRIX.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+OpenStep.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+Palettes.swift": {
+      "warnings": 15,
+      "swift6LanguageMode": 15
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+Platinum.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 2
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+TUI.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 2
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+Tiger.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles+Win98.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Core/Theme/AppThemeStyles.swift": {
+      "warnings": 12,
+      "swift6LanguageMode": 12
+    },
+    "Sources/Threading/Core/Theme/ThemeColorKey.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 3
+    },
+    "Sources/Threading/Core/Theme/WindowChromeStyle.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Models/TerminalProfile.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/Models/TerminalTheme.swift": {
+      "warnings": 15,
+      "swift6LanguageMode": 15
+    },
+    "Sources/Threading/UI/Design/Design.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 3
+    },
+    "Sources/Threading/UI/Design/MediaInspector.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 2
     },
     "Sources/Threading/UI/Design/RevealHighlightView.swift": {
       "warnings": 4,
@@ -70,6 +198,22 @@
       "warnings": 2,
       "swift6LanguageMode": 1
     },
+    "Sources/Threading/UI/Feedback/ReportProblemViewController.swift": {
+      "warnings": 10,
+      "swift6LanguageMode": 1
+    },
+    "Sources/Threading/UI/Preferences/ExtensionsPreferencesViewController.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Views/AgentSessionViewController.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Views/BrowserViewController.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
     "Sources/Threading/UI/Views/ComposerHandoffAnimator.swift": {
       "warnings": 1,
       "swift6LanguageMode": 0
@@ -77,6 +221,10 @@
     "Sources/Threading/UI/Views/ConversationViewController.swift": {
       "warnings": 1,
       "swift6LanguageMode": 0
+    },
+    "Sources/Threading/UI/Views/MainThreadStallHUDView.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
     },
     "Sources/Threading/UI/Views/ProjectRowView.swift": {
       "warnings": 1,
@@ -86,25 +234,33 @@
       "warnings": 2,
       "swift6LanguageMode": 1
     },
-    "Sources/Threading/UI/Views/SessionAttachmentsViewController.swift": {
+    "Sources/Threading/UI/Views/SessionComposerViewController.swift": {
       "warnings": 1,
       "swift6LanguageMode": 1
     },
-    "Sources/Threading/UI/Windows/MainWindowController.swift": {
-      "warnings": 1,
-      "swift6LanguageMode": 0
+    "Sources/Threading/UI/Windows/AgentToolCoordinator+ExtensionCommands.swift": {
+      "warnings": 5,
+      "swift6LanguageMode": 5
     },
     "Sources/Threading/UI/Windows/MainWindowFrame.swift": {
       "warnings": 1,
       "swift6LanguageMode": 0
     },
-    "Sources/ThreadingMobile/RemoteConversationViewController.swift": {
-      "warnings": 12,
-      "swift6LanguageMode": 12
-    },
-    "Sources/ThreadingMobile/SessionWorkspaceDrawer.swift": {
+    "Sources/ThreadingMobile/MobileDraftChooser.swift": {
       "warnings": 2,
       "swift6LanguageMode": 0
+    },
+    "Sources/ThreadingMobile/RemoteSessionConnection.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
+    "Sources/ThreadingMobile/SessionDraftView.swift": {
+      "warnings": 6,
+      "swift6LanguageMode": 0
+    },
+    "Sources/ThreadingMobile/TerminalKeyBar.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
     },
     "Tests/ThreadingMobileTests/ComposerClipboardTests.swift": {
       "warnings": 2,
@@ -114,12 +270,20 @@
       "warnings": 2,
       "swift6LanguageMode": 0
     },
+    "Tests/ThreadingMobileTests/MobileNewSessionDefaultsStoreTests.swift": {
+      "warnings": 9,
+      "swift6LanguageMode": 0
+    },
     "Tests/ThreadingMobileTests/MobileSessionChromeTests.swift": {
-      "warnings": 12,
+      "warnings": 1,
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingMobileTests/MobileSessionNavigationTransitionTests.swift": {
       "warnings": 7,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingMobileTests/MobileThemeCacheStoreTests.swift": {
+      "warnings": 9,
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingMobileTests/RemoteAttachmentPreviewFailureTests.swift": {
@@ -146,6 +310,10 @@
       "warnings": 2,
       "swift6LanguageMode": 0
     },
+    "Tests/ThreadingMobileTests/SessionDashboardTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
     "Tests/ThreadingTests/AccountEnablementTests.swift": {
       "warnings": 8,
       "swift6LanguageMode": 0
@@ -155,8 +323,8 @@
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/ActiveTurnSleepInhibitorTests.swift": {
-      "warnings": 5,
-      "swift6LanguageMode": 5
+      "warnings": 4,
+      "swift6LanguageMode": 4
     },
     "Tests/ThreadingTests/AgentActivityBeamTests.swift": {
       "warnings": 1,
@@ -179,8 +347,8 @@
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/AgentWorkHydrationTests.swift": {
-      "warnings": 925,
-      "swift6LanguageMode": 925
+      "warnings": 37,
+      "swift6LanguageMode": 37
     },
     "Tests/ThreadingTests/AppDataResetTests.swift": {
       "warnings": 12,
@@ -259,8 +427,8 @@
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/ControlRowTests.swift": {
-      "warnings": 2,
-      "swift6LanguageMode": 2
+      "warnings": 1,
+      "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/ConversationMinimapMotionTests.swift": {
       "warnings": 4,
@@ -302,6 +470,10 @@
       "warnings": 5,
       "swift6LanguageMode": 0
     },
+    "Tests/ThreadingTests/ExecutionAuditRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
     "Tests/ThreadingTests/ExtensionAppearanceTests.swift": {
       "warnings": 21,
       "swift6LanguageMode": 0
@@ -313,6 +485,10 @@
     "Tests/ThreadingTests/ExtensionBundleLoaderTests.swift": {
       "warnings": 2,
       "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ExtensionFactRegistryTests.swift": {
+      "warnings": 9,
+      "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/ExtensionHostRouteTests.swift": {
       "warnings": 1,
@@ -350,6 +526,10 @@
       "warnings": 3,
       "swift6LanguageMode": 3
     },
+    "Tests/ThreadingTests/HostFactCatalogTests.swift": {
+      "warnings": 1,
+      "swift6LanguageMode": 1
+    },
     "Tests/ThreadingTests/HostedStoreTestCase.swift": {
       "warnings": 2,
       "swift6LanguageMode": 2
@@ -379,8 +559,8 @@
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/MCPBridgeLaunchIntegrationTests.swift": {
-      "warnings": 2,
-      "swift6LanguageMode": 2
+      "warnings": 1,
+      "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/MCPSessionRegistryTests.swift": {
       "warnings": 2,
@@ -402,6 +582,10 @@
       "warnings": 11,
       "swift6LanguageMode": 1
     },
+    "Tests/ThreadingTests/MediaTransportRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
     "Tests/ThreadingTests/ModelEffortPickerRenderTests.swift": {
       "warnings": 5,
       "swift6LanguageMode": 0
@@ -409,6 +593,22 @@
     "Tests/ThreadingTests/MotionPreviewTests.swift": {
       "warnings": 3,
       "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/MovieFixture.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/NativePluginCatalogTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/NativePluginParityTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/NativePluginToolRoutingTests.swift": {
+      "warnings": 4,
+      "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/OpeningMessageCoalescingTests.swift": {
       "warnings": 14,
@@ -450,6 +650,18 @@
       "warnings": 7,
       "swift6LanguageMode": 1
     },
+    "Tests/ThreadingTests/PaneFooterRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/PaneHeaderRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/PaneNoticeRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
     "Tests/ThreadingTests/PermissionBrokerTests.swift": {
       "warnings": 2,
       "swift6LanguageMode": 0
@@ -474,6 +686,10 @@
       "warnings": 9,
       "swift6LanguageMode": 0
     },
+    "Tests/ThreadingTests/RecoveryModeRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
     "Tests/ThreadingTests/RecoveryModeStartupTests.swift": {
       "warnings": 3,
       "swift6LanguageMode": 0
@@ -486,6 +702,10 @@
       "warnings": 1,
       "swift6LanguageMode": 1
     },
+    "Tests/ThreadingTests/RemoteHostedServiceEnvironmentTests.swift": {
+      "warnings": 9,
+      "swift6LanguageMode": 0
+    },
     "Tests/ThreadingTests/RemoteIdentityStoreTests.swift": {
       "warnings": 3,
       "swift6LanguageMode": 3
@@ -495,7 +715,7 @@
       "swift6LanguageMode": 22
     },
     "Tests/ThreadingTests/RemoteListenerTLSTests.swift": {
-      "warnings": 32,
+      "warnings": 31,
       "swift6LanguageMode": 3
     },
     "Tests/ThreadingTests/RemoteServerIntegrationTests.swift": {
@@ -535,8 +755,8 @@
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/SessionArchiveSchedulerTests.swift": {
-      "warnings": 13,
-      "swift6LanguageMode": 2
+      "warnings": 12,
+      "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/SessionAttachmentComparisonTests.swift": {
       "warnings": 12,
@@ -571,20 +791,28 @@
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/SessionCurfewCenterTests.swift": {
-      "warnings": 41,
-      "swift6LanguageMode": 0
+      "warnings": 44,
+      "swift6LanguageMode": 3
     },
     "Tests/ThreadingTests/SessionCurfewModelTests.swift": {
       "warnings": 7,
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/SessionCurfewStoreTests.swift": {
-      "warnings": 26,
-      "swift6LanguageMode": 0
+      "warnings": 28,
+      "swift6LanguageMode": 2
+    },
+    "Tests/ThreadingTests/SessionExecutionLocusTests.swift": {
+      "warnings": 18,
+      "swift6LanguageMode": 3
     },
     "Tests/ThreadingTests/SessionImportActivityTests.swift": {
       "warnings": 4,
       "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SessionInfoRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/SessionMessageDeliveryTests.swift": {
       "warnings": 5,
@@ -599,12 +827,12 @@
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/SessionRowActionsTests.swift": {
-      "warnings": 26,
-      "swift6LanguageMode": 0
+      "warnings": 28,
+      "swift6LanguageMode": 2
     },
     "Tests/ThreadingTests/SessionSnoozeTests.swift": {
-      "warnings": 24,
-      "swift6LanguageMode": 2
+      "warnings": 26,
+      "swift6LanguageMode": 4
     },
     "Tests/ThreadingTests/SessionWatchCenterTests.swift": {
       "warnings": 13,
@@ -612,6 +840,10 @@
     },
     "Tests/ThreadingTests/SettingsAnchorResolutionTests.swift": {
       "warnings": 2,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/SettingsDestinationTests.swift": {
+      "warnings": 4,
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/SidebarArrangementMenuTests.swift": {
@@ -635,8 +867,8 @@
       "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/SidebarStyleTests.swift": {
-      "warnings": 2,
-      "swift6LanguageMode": 2
+      "warnings": 4,
+      "swift6LanguageMode": 3
     },
     "Tests/ThreadingTests/SidebarWidthDensityTests.swift": {
       "warnings": 1,
@@ -682,6 +914,18 @@
       "warnings": 9,
       "swift6LanguageMode": 0
     },
+    "Tests/ThreadingTests/TabStripRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/TerminalAttachmentScanReuseTests.swift": {
+      "warnings": 3,
+      "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/TerminalBoldTextSweepTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
     "Tests/ThreadingTests/TerminalCopyOnSelectTests.swift": {
       "warnings": 20,
       "swift6LanguageMode": 0
@@ -715,20 +959,32 @@
       "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/ThemedMenuAccessoryTests.swift": {
-      "warnings": 4,
-      "swift6LanguageMode": 2
+      "warnings": 3,
+      "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/ThemedTabStripViewTests.swift": {
       "warnings": 1,
       "swift6LanguageMode": 0
     },
+    "Tests/ThreadingTests/ThemedToggleRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
+    },
     "Tests/ThreadingTests/TitlebarDoubleClickTests.swift": {
       "warnings": 14,
+      "swift6LanguageMode": 1
+    },
+    "Tests/ThreadingTests/ToastRenderTests.swift": {
+      "warnings": 2,
       "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/ToastTests.swift": {
       "warnings": 7,
       "swift6LanguageMode": 0
+    },
+    "Tests/ThreadingTests/UpdateSheetRenderTests.swift": {
+      "warnings": 2,
+      "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/UsageAlertLedgerTests.swift": {
       "warnings": 10,
@@ -739,16 +995,16 @@
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/UsageWindowSettingsRenderTests.swift": {
-      "warnings": 2,
-      "swift6LanguageMode": 0
+      "warnings": 4,
+      "swift6LanguageMode": 1
     },
     "Tests/ThreadingTests/WindowChromeComponentTests.swift": {
-      "warnings": 4,
+      "warnings": 3,
       "swift6LanguageMode": 0
     },
     "Tests/ThreadingTests/WindowChromeStyleTests.swift": {
-      "warnings": 2,
-      "swift6LanguageMode": 2
+      "warnings": 4,
+      "swift6LanguageMode": 3
     },
     "Tests/ThreadingTests/WindowChromeTakeoverTests.swift": {
       "warnings": 10,

@@ -11,7 +11,7 @@ let package = Package(
         .library(name: "ThreadingPeerTransport", targets: ["ThreadingPeerTransport"])
     ],
     dependencies: [
-        .package(url: "https://github.com/stasel/WebRTC.git", exact: "151.0.0")
+        .package(url: "https://github.com/stasel/WebRTC.git", exact: "150.0.0")
     ],
     targets: [
         .target(

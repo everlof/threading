@@ -262,7 +262,7 @@ final class SessionCurfewCenter {
                 evaluateSession(sessionID)
             case .sessionStructure(_, let sessionID):
                 sessionStructureChanged(sessionID)
-            case .projectRow, .sessionTitle, .terminalRow:
+            case .projectRow, .sessionTitle, .terminalAdded, .terminalRow:
                 break
             }
         }

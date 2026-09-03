@@ -1595,7 +1595,7 @@ final class ExtensionHostService {
                     projectID: previous.projectID
                 )
             }
-        case .terminalRow:
+        case .terminalAdded, .terminalRow:
             break
         }
     }

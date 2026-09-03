@@ -138,18 +138,9 @@ final class SessionCheckoutCoordinator {
                 reason: String(reason.prefix(2_000)),
                 requestedAt: Date()
             )
-            // Asked only for the basis that can be lowered by it, and only after validation has
-            // produced a canonical destination: the answer is about two exact transcript paths,
-            // and the reported directory is routinely a subdirectory of the checkout root.
-            let repairs = authorityBasis == .observedExecution
-                && conversationHasLeftOwnedCheckout(
-                    sessionID: sessionID,
-                    forDestination: checkout.path
-                )
             if Self.requiresApproval(
                 policy: policy,
-                authorityBasis: authorityBasis,
-                repairsDetachedConversation: repairs
+                authorityBasis: authorityBasis
             ) {
                 guard let approval else { return .approvalRequired(pending) }
                 guard approval else {
@@ -349,19 +340,18 @@ final class SessionCheckoutCoordinator {
 
     /// Whether one request needs a human answer before it may change durable ownership.
     ///
-    /// `repairsDetachedConversation` is the one condition that can *lower* the bar, and only for
-    /// `observedExecution`. It means the chat's provider conversation is already filed under the
-    /// checkout the agent moved to and is no longer under the one that owns it — so resume is
-    /// already broken, the move copies nothing, and refusing to act preserves a defect rather
-    /// than preventing one. Everywhere else the bar is unchanged: asking about a move that will
-    /// copy a transcript and replace a runtime is exactly what the policy is for.
+    /// Observed execution is a fact the host measured rather than a model's request. Under the
+    /// default policy it therefore follows the same-repository work automatically; treating it
+    /// like `agentInitiated` made an accurately detected worktree merely produce another prompt
+    /// while the sidebar and Review stayed wrong. Validation still confines the move to an
+    /// existing attached worktree of the same repository, and the turn fence still waits until
+    /// the work that supplied the evidence has finished.
     ///
     /// `alwaysAsk` still asks. It is the answer of someone who has said they want to be asked
     /// about every one of these, and a repair is still a change of ownership.
     static func requiresApproval(
         policy: SessionCheckoutAuthorityPolicy,
-        authorityBasis: SessionCheckoutAuthorityBasis,
-        repairsDetachedConversation: Bool = false
+        authorityBasis: SessionCheckoutAuthorityBasis
     ) -> Bool {
         switch policy {
         case .alwaysAsk: return true
@@ -369,74 +359,10 @@ final class SessionCheckoutCoordinator {
             switch authorityBasis {
             case .explicitUserRequest: return false
             case .agentInitiated: return true
-            case .observedExecution: return !repairsDetachedConversation
+            case .observedExecution: return false
             }
         case .allowSameRepository: return false
         }
-    }
-
-    /// Whether the chat's provider conversation has already followed the agent out of the
-    /// checkout that owns it, leaving the chat unresumable where Threading would launch it.
-    ///
-    /// This is a filesystem question and must not be inferred from the reported directory, which
-    /// was measured to disagree with it. Two chats of one repository both reported working in a
-    /// sibling worktree; one runtime had re-filed its conversation under that worktree's slug
-    /// and the other had not, and only reading both paths tells them apart. Where the answer is
-    /// true, `AgentLauncher` has already stopped finding the transcript and its `--resume`
-    /// branch has already fallen through to minting an empty conversation under the same id.
-    ///
-    /// False for every runtime whose conversation storage is not checkout-scoped, which is every
-    /// runtime but one — they resume by a provider-owned id no directory can invalidate.
-    func conversationHasLeftOwnedCheckout(
-        sessionID: SessionID,
-        forDestination destinationPath: String
-    ) -> Bool {
-        guard let session = projects.session(withID: sessionID),
-              session.kind.supports(.checkoutScopedConversationStorage),
-              let transcriptID = session.resumeState.transcriptID,
-              let ownedProject = projects.executionProject(forSessionID: sessionID),
-              let account = AgentAccountDiscovery.account(
-                for: session.kind,
-                handle: session.accountHandle
-              ),
-              let owned = ClaudeTranscript.url(
-                sessionID: transcriptID,
-                account: account,
-                in: ownedProject
-              ) else { return false }
-
-        var destinationProject = Project(
-            name: GitInfo.suggestedProjectName(for: URL(fileURLWithPath: destinationPath)),
-            folderURL: URL(fileURLWithPath: destinationPath, isDirectory: true)
-        )
-        destinationProject.folderPath = destinationPath
-        guard let destination = ClaudeTranscript.url(
-            sessionID: transcriptID,
-            account: account,
-            in: destinationProject
-        ) else { return false }
-
-        return Self.conversationHasLeft(
-            owned: owned,
-            destination: destination,
-            fileManager: fileManager
-        )
-    }
-
-    /// The rule itself, separated from finding the two paths.
-    ///
-    /// Both halves are load-bearing and neither alone is the condition. *Gone from the owned
-    /// checkout* on its own is a chat with no conversation yet, or one whose files a user moved;
-    /// *present at the destination* on its own is an unrelated conversation that happens to
-    /// share an id, or a copy left by an earlier move. Only both together mean the thing this
-    /// answers: the conversation is somewhere else and resume is already broken.
-    static func conversationHasLeft(
-        owned: URL,
-        destination: URL,
-        fileManager: FileManager
-    ) -> Bool {
-        !fileManager.fileExists(atPath: owned.path)
-            && fileManager.fileExists(atPath: destination.path)
     }
 
     private func completeStoreMove(

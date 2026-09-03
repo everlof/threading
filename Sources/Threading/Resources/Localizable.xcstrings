@@ -13003,6 +13003,17 @@
         }
       }
     },
+    "Copy Command Line" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera kommandorad"
+          }
+        }
+      }
+    },
     "Copy Details" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -22925,6 +22936,17 @@
         }
       }
     },
+    "List-price estimate" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uppskattning enligt listpris"
+          }
+        }
+      }
+    },
     "Listen to Claude FM" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29855,6 +29877,17 @@
         }
       }
     },
+    "Press to show or hide the command line, start time and working directory." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tryck för att visa eller dölja kommandoraden, starttiden och arbetskatalogen."
+          }
+        }
+      }
+    },
     "Pressed %@." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30698,6 +30731,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Tillhandtagareikoner"
+          }
+        }
+      }
+    },
+    "Provider reported" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rapporterat av leverantören"
           }
         }
       }
@@ -33107,6 +33151,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rapporten har sparats säkert och placeras i kö för nytt försök när Threading är aktivt."
+          }
+        }
+      }
+    },
+    "Reported + estimated" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rapporterat + uppskattat"
           }
         }
       }
@@ -55800,6 +55855,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "“%@” har kopierats till Threading och är inaktiverad tills du aktiverar den."
+          }
+        }
+      }
+    },
+    "… %lld more arguments" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "… %lld argument till"
           }
         }
       }

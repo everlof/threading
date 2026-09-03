@@ -901,14 +901,15 @@ final class BrowserBaselineStore {
     ///
     /// Removing a project takes its baselines with it, which is why the removal confirmation says
     /// so. A *session* leaving takes nothing: the library belongs to the project.
-    func retainOnly(projectIDs: Set<ProjectID>) {
+    @discardableResult
+    func retainOnly(projectIDs: Set<ProjectID>) -> Task<Void, Never> {
         baselinesByProject = baselinesByProject.filter { projectIDs.contains($0.key) }
         loadedProjects = loadedProjects.intersection(projectIDs)
         unsupportedCountByProject = unsupportedCountByProject.filter { projectIDs.contains($0.key) }
 
         let kept = Set(projectIDs.map(\.uuidString))
         let root = root
-        Task.detached(priority: .utility) {
+        return Task.detached(priority: .utility) {
             let fileManager = FileManager()
             let entries = (try? fileManager.contentsOfDirectory(
                 at: root,

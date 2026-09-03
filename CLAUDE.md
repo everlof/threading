@@ -213,6 +213,7 @@ to change — most of these rules were arrived at by getting the obvious thing w
 | Product-scope classification, application layers, upward dependencies, authoritative registries/projections and architecture health metrics | [`application-structure.md`](docs/architecture/application-structure.md) |
 | Application-level XCUITest journeys, recorded provider traffic and deterministic fixture agents | [`ui-scenario-testing.md`](docs/architecture/ui-scenario-testing.md) |
 | Any new or materially changed user-facing surface, popover, sidebar/composer/conversation component, or public extension seam | [`CUSTOMIZATION_SURFACE_AUDIT.md`](docs/extensions/CUSTOMIZATION_SURFACE_AUDIT.md) |
+| A native code bundle loaded into the app: the trust policy and the loader's refusals, the shared contract framework, `ThreadingDesignKit` and the encoded theme handoff, building and embedding a plugin | [`plugins.md`](docs/architecture/plugins.md) |
 | Any UI at all: the component vocabulary, themed controls, tabs, the composer, motion previews | [`design-system.md`](docs/architecture/design-system.md) |
 | The three forked packages and the seams that are ours | [`dependencies.md`](docs/architecture/dependencies.md) |
 
@@ -360,6 +361,13 @@ extension API from application internals, remove `ThreadingExtensionPolicyPlugin
 AppKit/SwiftUI in a safe extension. If the semantic UI model cannot express a requested
 interface, report the missing node as an SDK requirement rather than bypassing the host
 renderer.
+
+**A native plugin is a different tier, not a richer extension.** It is a code bundle Threading
+`dlopen`s into its own process, with full AppKit and no sandbox, and the operating system enforces
+nothing about it — read [`plugins.md`](docs/architecture/plugins.md) before touching
+`Packages/ThreadingPluginKit`, `Packages/ThreadingDesignKit` or anything under `Plugins/`. It is
+for code we sign; it does not replace the safe tier, and an install review has to say plainly which
+one a thing is.
 
 ## Code Style Guidelines
 

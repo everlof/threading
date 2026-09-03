@@ -110,6 +110,7 @@ final class GitReviewAuditFixTests: XCTestCase {
     // MARK: - Line actions
 
     /// R3: the plate answers for the selection it sits in, exactly as a right-click does.
+    /// The menu opens on the release, since a press may be the start of a line drag.
     func testPlateClickInsideASelectionKeepsTheWholeSpan() throws {
         let (view, _) = hostedDiffView()
         view.highlightLines(1...3)
@@ -118,6 +119,7 @@ final class GitReviewAuditFixTests: XCTestCase {
         view.mouseMoved(with: mouse(.mouseMoved, at: point, in: view))
         XCTAssertEqual(view.hoveredLineIndex, 2)
         view.mouseDown(with: mouse(.leftMouseDown, at: point, in: view))
+        view.mouseUp(with: mouse(.leftMouseUp, at: point, in: view))
 
         let selected = (view.string as NSString).substring(with: view.selectedRange())
         XCTAssertTrue(selected.contains("old line"))

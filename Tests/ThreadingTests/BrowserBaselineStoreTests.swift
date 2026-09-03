@@ -348,14 +348,15 @@ final class BrowserBaselineStoreTests: XCTestCase {
 
     // MARK: - Lifecycle
 
-    func testRemovingAProjectTakesItsBaselinesAndLeavesOthersAlone() throws {
+    func testRemovingAProjectTakesItsBaselinesAndLeavesOthersAlone() async throws {
         let png = try Self.png(width: 2, height: 2, red: 6)
         let other = ProjectID()
         _ = try store.createBaseline(Self.request(name: "Kept", png: png), in: projectID)
         _ = try store.createBaseline(Self.request(name: "Dropped", png: png), in: other)
 
-        store.retainOnly(projectIDs: [projectID])
+        let cleanup = store.retainOnly(projectIDs: [projectID])
         XCTAssertEqual(store.baselines(for: projectID).count, 1)
+        await cleanup.value
         XCTAssertTrue(BrowserBaselineStore(root: root).baselines(for: other).isEmpty)
     }
 

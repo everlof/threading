@@ -12,7 +12,8 @@ final class PeerRendezvousTests: XCTestCase {
         timeout.cancel()
         await timeout.value
 
-        XCTAssertFalse(await timeoutFired.didFire())
+        let didFire = await timeoutFired.didFire()
+        XCTAssertFalse(didFire)
     }
 
     func testReceiveTimeoutRunsItsExpiryActionAfterTheDeadline() async {
@@ -23,7 +24,8 @@ final class PeerRendezvousTests: XCTestCase {
 
         await timeout.value
 
-        XCTAssertTrue(await timeoutFired.didFire())
+        let didFire = await timeoutFired.didFire()
+        XCTAssertTrue(didFire)
     }
 
     func testReadyEnvelopeRoundTripsOnlyBoundedICEConfiguration() throws {

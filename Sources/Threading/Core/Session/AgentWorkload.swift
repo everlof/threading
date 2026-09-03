@@ -185,7 +185,7 @@ final class AgentWorkloadMonitor {
         // output; observing the change itself is what lets it stop.
         appEvents.observe(ProjectsDidChange.self) { [weak self] event in
             switch event.sidebarImpact {
-            case .projectRow, .sessionTitle, .terminalRow:
+            case .projectRow, .sessionTitle, .terminalAdded, .terminalRow:
                 break
             default:
                 self?.refresh()

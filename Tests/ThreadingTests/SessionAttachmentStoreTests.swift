@@ -1030,7 +1030,7 @@ final class SessionAttachmentStoreTests: XCTestCase {
 
     /// Bytes nobody else owns are the store's to remove: a row pushed out by the cap leaves
     /// nothing behind, and a referenced project file is never touched.
-    func testEvictedAndForgottenRowsTakeTheirCopiesWithThem() throws {
+    func testEvictedAndForgottenRowsTakeTheirCopiesWithThem() async throws {
         let store = makeStore()
         let session = SessionID()
 
@@ -1062,10 +1062,16 @@ final class SessionAttachmentStoreTests: XCTestCase {
         )
 
         store.retainOnly(sessionIDs: [])
+        let forgottenCopies = copies.appendingPathComponent(session.uuidString)
+        let deadline = Date().addingTimeInterval(2)
+        // Retention drops the rows synchronously, but their filesystem custody ends on the
+        // utility worker so pruning a project never stalls the main actor.
+        while FileManager.default.fileExists(atPath: forgottenCopies.path),
+              Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         XCTAssertFalse(
-            FileManager.default.fileExists(
-                atPath: copies.appendingPathComponent(session.uuidString).path
-            ),
+            FileManager.default.fileExists(atPath: forgottenCopies.path),
             "a forgotten session kept its copies"
         )
     }

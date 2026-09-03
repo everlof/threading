@@ -1601,6 +1601,12 @@ private final class ThemedMenuOverlayView: ThemedControl {
     }
 
     override func keyDown(with event: NSEvent) {
+        // The shortcut printed beside a row is the same route as choosing that row. The menu's
+        // window-local monitor owns every key-down while it is open, so leaving the chord as
+        // decoration would swallow the application command and leave the menu standing. Search
+        // the panels that are actually on screen, deepest first, before ordinary navigation.
+        if chooseShortcut(matching: event) { return }
+
         switch event.keyCode {
         case 53:
             escape()
@@ -1639,6 +1645,15 @@ private final class ThemedMenuOverlayView: ThemedControl {
                 super.keyDown(with: event)
             }
         }
+    }
+
+    /// Chooses the enabled visible row whose printed shortcut matches `event`.
+    private func chooseShortcut(matching event: NSEvent) -> Bool {
+        for column in columns.reversed() {
+            guard let row = column.surface.row(matchingShortcut: event) else { continue }
+            return row.performPrimaryAction()
+        }
+        return false
     }
 
     /// Escape backs out one layer at a time: first the filter, then the menu — clearing a
@@ -2933,6 +2948,19 @@ private final class ThemedMenuSurfaceView: NSView, ThemedComponent {
 
     func row(at index: Int?) -> ThemedMenuRowView? {
         index.flatMap { rows[$0] }
+    }
+
+    /// The enabled row whose shortcut is `event`, in stable menu order. A dictionary walk here
+    /// would make duplicate chords choose nondeterministically; menu order is the tie-breaker a
+    /// person can see.
+    func row(matchingShortcut event: NSEvent) -> ThemedMenuRowView? {
+        for index in selectableIndices {
+            guard let row = rows[index], row.item.resolvedShortcut?.matches(event) == true else {
+                continue
+            }
+            return row
+        }
+        return nil
     }
 
     /// The row under a point given in window coordinates — the press-drag-release lookup.

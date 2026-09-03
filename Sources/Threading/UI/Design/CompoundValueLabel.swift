@@ -11,10 +11,23 @@ import AppKit
 /// whatever tooltip the host set.
 ///
 /// The intrinsic width is always the **whole** line, which keeps the choice stable — a dropped
-/// segment comes back when the row widens. One ink and one face (`compactCode` at tertiary),
-/// because a compound reading is one quiet fact; a host needing per-segment emphasis has
-/// outgrown this component.
+/// segment comes back when the row widens. One ink and one face per reading, because a
+/// compound reading is one quiet fact; a host needing per-segment emphasis has outgrown this
+/// component.
 final class CompoundValueLabel: NSView {
+
+    // MARK: - Types
+
+    /// The face a whole reading is set in.
+    ///
+    /// A process reading (`12% · 248 MB`) is code-shaped and sits quietly in the compact code
+    /// face at the tertiary tier. A receipt (`3.0M tokens · $2.99 est.`) is a number in prose —
+    /// on a receipt the number *is* the content, not a fact beside it — so it takes fixed-width
+    /// digits at the secondary tier, the same digits the Activity card's counts use.
+    enum Face {
+        case code
+        case numeric
+    }
 
     // MARK: - Properties
 
@@ -22,6 +35,13 @@ final class CompoundValueLabel: NSView {
 
     /// The parts to state, in print order. Dropped only whole, from the tail.
     var segments: [String] = [] {
+        didSet {
+            invalidateIntrinsicContentSize()
+            needsDisplay = true
+        }
+    }
+
+    var face: Face = .code {
         didSet {
             invalidateIntrinsicContentSize()
             needsDisplay = true
@@ -92,12 +112,19 @@ final class CompoundValueLabel: NSView {
     }
 
     private func line(count: Int) -> NSAttributedString {
-        NSAttributedString(
+        let font: NSFont
+        let ink: NSColor
+        switch face {
+        case .code:
+            font = Design.Typography.compactCode()
+            ink = Design.Text.tertiary
+        case .numeric:
+            font = Design.Typography.numericDetail()
+            ink = Design.Text.secondary
+        }
+        return NSAttributedString(
             string: segments.prefix(count).joined(separator: CompoundValueDefaults.separator),
-            attributes: [
-                .font: Design.Typography.compactCode(),
-                .foregroundColor: Design.Text.tertiary
-            ]
+            attributes: [.font: font, .foregroundColor: ink]
         )
     }
 

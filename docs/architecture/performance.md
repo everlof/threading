@@ -3773,6 +3773,53 @@ agent workload, and the curfew engine does not re-evaluate unrelated sessions. A
 the event as an undifferentiated request for a whole-catalogue refresh puts this stall back.
 The final 5,000-session fixture measured the production exact title event at 6.22 ms.
 
+## Update All terminal creation is one exact leaf
+
+The 2026-09-03 report arrived with the action and its evidence: pressing **Update All** in the
+agent-tool update toast froze the UI. The installed build retained 17 projects and 696 sessions.
+Its stall monitor recorded consecutive main-thread stops of **9,612 ms** and **5,094 ms** at the
+press, with no owning semantic span. The sidebar work that followed was only 4.6–7.7 ms, and the
+PTY host log contained no updater child before the stalls. That orders the incident: the app was
+blocked while creating the durable terminal record, before it launched an update process.
+
+That installed revision still sent both `ProjectStore.addTerminal` and the immediately following
+`renameTerminal` through `save()`. Each call encoded and reconciled every retained session on the
+main actor. The current store had already acquired the project-record seam described above, but
+Update All still performed two project commits, terminal creation still rebuilt all store lookup
+indexes, and its broad `projectStructure` event made unrelated workload, curfew, transcript and
+extension consumers treat one terminal as a changed project catalogue.
+
+The title is now part of terminal creation, so the action takes one project-record commit and the
+returned value already matches what is durable. Appending installs the one terminal lookup entry
+directly; it changes no existing project or session position. The successful mutation publishes
+`terminalAdded(projectID:terminalID:)`. The sidebar inserts that exact leaf and updates its three
+identity maps, while consumers that do not model terminals ignore it and consumers that do update
+only the named terminal. Branch creation remains the deliberate project-local fallback because
+adding a second item on a branch genuinely changes more than one row. Project-script terminals use
+the same atomic titled-creation path.
+
+The update plan itself is bounded by the five-case `AgentKind` catalogue; the retained project and
+session graph is not. The expected incident shape is roughly 700 sessions and the stress shape is
+5,000. The success path must therefore be O(1) in retained sessions, one owning-project payload
+write, and one presented terminal leaf. `ProjectStoreMutationTests` plants a future-format sentinel
+in an unrelated session row and proves titled terminal creation neither encodes nor upserts it.
+The sidebar tests pin both the exact-leaf path and the real branch-regrouping fallback, and the
+existing full-plan test still launches every provider command through the complete argv transport.
+
+The project-sidebar fixture now times titled terminal creation separately. On 2026-09-03, Debug,
+Apple M1 Max, manual order:
+
+| Shape | Terminal mutation | Following layout | Sidebar delta | Whole-graph comparison |
+|---|---:|---:|---:|---:|
+| 17 projects × 41 sessions = 697 | **1.580 ms** | 0.962 ms | 1.055 ms | 37.742 ms |
+| 20 projects × 250 sessions = 5,000 | **3.907 ms** | 1.284 ms | 1.485 ms | 278.688 ms |
+
+Before the typed terminal delta, the same 5,000-session fixture measured 10.818 ms for the
+mutation and 8.851 ms inside the project-subtree sidebar update. Afterwards the tree, shape and
+adoption phases are all zero on the ordinary path. These synthetic whole-graph comparisons contain
+smaller payloads than the user's live transcripts and do not reinterpret the multi-second incident;
+their job is to make any return to catalogue-sized persistence conspicuous in a repeatable run.
+
 ## Project sidebar stress target
 
 `SidebarTreeBuilderTests.testStressProjectSidebarWhenEnabled` seeds a throwaway `ProjectStore`
@@ -4527,3 +4574,24 @@ the activity callback remains queued for the coalesced main delivery. This prove
 not a wall-clock latency number. The focused parsing and QoS tests, the fake-link host-session
 suite, and the real-daemon attach/detach/replay suites cover the shipping path. A fresh sample of
 the patched product shell remains the final measurement after the build is installed.
+
+
+## Worktree execution observation
+
+The terminal-output edge is unbounded in frequency and descendant process count comes from build
+tools, so detecting a tool-local `cd` cannot walk processes in that callback. The shipping path
+does one main-actor dictionary replacement, coalesces all sessions that produced output, and runs
+at most one system process-table walk per second on a utility queue. Parentage is built once for
+the batch. Each session retains only its newest eight descendants and therefore performs at most
+eight cwd syscalls per scan, even when a compiler or build system fans out into thousands of
+workers. The expected case is one to ten simultaneously working chats; the stress case is every
+live chat producing output together, which still pays one table walk plus eight bounded reads per
+chat and returns only path strings to main.
+
+`SessionExecutionProcessSnapshot` has the deterministic stress fixture: forty direct children, a
+grandchild and a reachable parent cycle produce the four newest candidates in order without
+growing the retained result or looping. `SessionExecutionLocusTests` separately prove that one
+same-repository checkout is actionable, two are ambiguous, and runtimes without lifecycle cwd
+hooks still reach the observer. A live product-shell sample remains unverified; the code path is
+rate- and cardinality-bounded rather than justified by an unmeasured claim that process trees are
+small.

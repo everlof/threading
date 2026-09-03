@@ -1392,31 +1392,29 @@ the audit trail.
 Asking an agent for a worktree goes through `create_session_worktree(branch, authority_basis,
 reason)`, which makes the checkout **and** moves the chat into it in one call. The branch may
 already exist or be new, and Threading chooses where the worktree lives so a repository's
-worktrees stay together on disk. Use this rather than letting an agent run `git worktree add`
-itself: a worktree Threading did not make is invisible to the sidebar, and the chat goes on being
-filed under the checkout it started in.
+worktrees stay together on disk. This is the atomic route, not a requirement: a worktree made with
+ordinary Git is detected when the chat starts executing there and is then adopted into the
+sidebar in exactly the same way.
 
 ### When a chat wanders
 
 An agent can change directory without anything durable moving, so a chat could spend hours
-building in another worktree while its row, its branch heading and its hover card all named the
-checkout it launched from. Threading now reads the working directory each agent reports and
-compares it with the checkout that owns the chat.
+building in another worktree while its row, its branch heading, Review and its hover card all
+named the checkout it launched from. Threading compares both the working directory the runtime
+reports and the real working directories of its active tool processes with the checkout that owns
+the chat. It does not parse prompts or shell commands, and the worktree does not have to be one
+Threading created.
 
 The hover card gains a **Working in** line, directly under the branch, whenever the two disagree.
 That line appears for any disagreement, including one that can never be resolved by moving, such
 as an agent working in a different repository altogether.
 
-When the agent is in another checkout of the **same** repository, Threading offers to move the
-chat there, as a band with a **Move Chat** button rather than a dialog that interrupts you. Your
-**Settings ▸ Tools ▸ Project** choice governs it: **Explicit Requests** and **Always Ask** both
-ask, **Same Repository** moves without asking.
-
-There is one exception, and it repairs real damage. Claude files each conversation under the
-folder it is running in, so a chat whose agent moved may have taken its conversation with it. When
-Threading finds the conversation is no longer under the checkout it would launch from, resuming
-that chat there would have started an empty conversation instead of the real one, so it follows
-the conversation without asking and reports what it did. **Always Ask** still asks.
+When the agent executes in one unambiguous checkout of the **same** repository, Threading waits for
+the active turn's final Git checkpoint, moves the chat, restarts the same conversation there and
+reports what it did. The checkout appears in the sidebar even when it was created with raw Git;
+an already-open Review or Overview tab is rebound to it too. **Always Ask** changes this into a
+band with a **Move Chat** button. **Same Repository** also permits moves proposed by the agent;
+the default still asks about those proposals while following work Threading directly observed.
 
 ### Copying identifiers and paths
 Everything about a chat that is needed *elsewhere* sits in the right-click menu's **Copy ▸**
@@ -3164,35 +3162,43 @@ browser keeps its page — and the new home survives a relaunch. The panel-only 
 
 ### Overview
 
-Overview combines the two ways to inspect a session in one tab. Its **Activity** section accounts
-for work in the checkout; its **Info** section shows what the session is running right now. Use
-the control at the top to switch between them. Info is the right-hand section and is focused when
-you open an otherwise empty panel or choose Overview from the **+** menu. **Cmd+P** focuses Activity and **View ▸ Session
-Info** (**⌘⇧I**) focuses Info without creating a second tab. The selected section survives a
-relaunch.
+Overview combines the two ways to inspect a session in one tab. Its **Info** section shows what
+the session is running right now; its **Activity** section accounts for work in the checkout.
+Use the control at the top to switch between them. Info is the left-hand section and is focused
+when you open an otherwise empty panel or choose Overview from the **+** menu. **Cmd+P** focuses
+Activity and **View ▸ Session Info** (**⌘⇧I**) focuses Info without creating a second tab. The
+selected section survives a relaunch.
 
 Info begins with the session's lifetime transcript receipt: processed tokens and cost for the
-whole session, its main agent and delegated work, followed by token categories and the leading
-models. Provider-reported and catalog-estimated dollars remain distinguished, and incomplete
-runtime coverage is stated instead of being folded into a plausible-looking total.
+whole session, followed by token categories and the cost's provenance. A session that delegated
+work also shows its main agent and subagents as separate lines, and a session that used more than
+one model lists them under **Models**; otherwise the one model is named beside the total, so the
+receipt says each figure once. Provider-reported and catalog-estimated dollars remain
+distinguished, and incomplete runtime coverage is stated instead of being folded into a
+plausible-looking total.
 
-The top also shows where the agent is working — its current directory and branch, with
-**Finder** and **Copy** buttons — and below it two lists that refresh every couple of seconds only
-while Info is visible.
+The top also shows where the agent is working — its current directory (your home folder shown
+as `~`) and branch, with a **folder** button that reveals it in Finder and a **copy** button that
+puts the full path on the pasteboard — and below it two lists that refresh every couple of
+seconds only while Info is visible.
 
 **Processes** is the session's process tree: the agent (and, when the shell drawer is open, your
 shell) with every process under it, children indented beneath the process that started them.
 Each row shows the command's name, its pid, its arguments, and its CPU and memory readings on
 the right. The dot before the name is the state: filled green for a live process, a hollow
-amber circle for one that is stopped (suspended) rather than running. Hover over a row for the
-full story — the complete command line, the program's path, when it started, and the directory
-it is running from.
+amber circle for one that is stopped (suspended) rather than running. **Click a row to unfold
+it**: when it started, the directory it is running from, the program's path, and the complete
+command line written out one flag per line — an agent's settings file or opening prompt is
+readable there instead of being cut off at the row's edge. Click again to fold it; an unfolded
+row stays open while the readings refresh and while other processes come and go. Hovering still
+shows the same story as a tooltip.
 
 **Arguments keep your secrets.** Command lines are where tokens and passwords travel
 (`--api-key …`, `-p …`), and this panel ends up in screenshots — so values behind
-credential-shaped flags are drawn as `<redacted>`. When you need the real thing,
-**right-click the row ▸ Show Full Command**; the reveal applies to that row only and is
-forgotten when the list rebuilds. Rows that hid nothing offer no menu.
+credential-shaped flags are drawn as `<redacted>`. **Right-click a row ▸ Copy Command Line**
+copies the command as shown, quoted so it runs again in a shell. When you need the real thing,
+choose **Show Full Command** from the same menu; the reveal applies to that row only and is
+forgotten when the list rebuilds. Rows that hid nothing do not offer it.
 
 **Stopping a process.** Hover over any process the session started — not the agent's own root;
 closing the session owns that — and a **✕** appears in place of its readings. It asks first
@@ -3881,8 +3887,8 @@ session has hundreds of attachments.
 The usage row gives the selected session's processed-token total and cost when the transcript can
 provide one. Cost is labelled provider reported, estimated from the built-in list-price catalog,
 or mixed; a `+` means some live or unpriced usage is not in that dollar figure. Click it for the
-full receipt in **Overview ▸ Info**: Total, Main agent and Subagents; input/cache/output/reasoning;
-requests, models, price-catalog version and coverage. A child counter that has moved ahead of the
+full receipt in **Overview ▸ Info**: Total, with Main agent and Subagents when work was delegated;
+input/cache/output/reasoning; requests, models, price-catalog version and coverage. A child counter that has moved ahead of the
 transcript index stays separately labelled **Awaiting index** instead of being assigned a guessed
 category or price.
 
@@ -3972,10 +3978,20 @@ highlighted** for the languages Threading recognises by file extension; a file i
 recognise renders plain rather than guessed at. A floating **↓** appears while you are away from
 the end of a long diff and returns you there; the redundant floating totals pill is not repeated.
 
-Secondary-click a rendered line to **Add line to chat** or **Comment on line…**. To speak about
-several lines at once, select them first — a secondary click inside the selection offers **Add
-lines to chat** and **Comment on lines…** for the whole run. Either way the targeted lines light
-up whole, so what is highlighted is exactly what the comment will quote. The staged receipt keeps
+Hover a rendered line and a **+** appears in the gutter before its number; press it, or
+secondary-click the line, to **Add line to chat** or **Comment on line…**. To speak about several
+lines at once, press the **+** and drag down (or up) the hunk: every line the pointer crosses
+lights up, and releasing offers **Add lines to chat** and **Comment on lines…** for the whole run.
+**Shift-click** another line's **+** to extend to it from the last **+** you pressed, or from the
+current selection, which is the way to reach a run longer than the pane. **⌘-click** a **+** to add
+a line that is not next to the others (⌘-click a selected line to take it out, ⌘-drag to add a
+run); no menu opens while you build the set, and a plain click on any **+** inside it, or a
+secondary click inside it, then offers the actions for all of it. Lines with gaps between them are
+added to the chat as one reference per run, and a comment on them is asked once and attached to
+every run. Selecting text first and
+then pressing the **+** inside it, or secondary-clicking inside it, speaks for the selection too.
+Either way the targeted lines light up whole, so what is highlighted is exactly what the comment
+will quote. The staged receipt keeps
 the file path, the line number or range, and the line text together. The file row's own
 secondary-click menu offers the same pair for the complete file. The comment box repeats the
 target as a small diff with surrounding lines, and highlights every selected line rather than

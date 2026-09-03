@@ -1911,6 +1911,61 @@ enum MobileSessionNavigationTransition {
     }
 }
 
+/// A session row as the long press lifts it.
+///
+/// A row on the shared plate paints no plate of its own, and the system's default preview would
+/// stand a transparent row on `systemBackground` — a white or black platter under an authored
+/// theme, the slab this app keeps off its screens. So the preview restates the plate the row
+/// came from — `ThemedRowGroup`'s panel, border and radius — at the width the row was drawn at.
+///
+/// **The preview is a presentation boundary, and it inherits nothing.** UIKit hosts it, as it
+/// hosts a sheet, and the row's own environment does not reach the views inside: the plate is
+/// the list's palette, because `theme` is read where the row builds this view, but the title,
+/// the caption's glyphs and the age each read `\.remoteTheme` afresh inside the preview and
+/// were answered with the built-in fallback — a dark palette. On Swiss Minimalist that stood the
+/// fallback's near-white label (#F3F4F6) on the theme's white panel, a title nobody could read,
+/// with the laptop in the fallback's grey. The theme is therefore restated here the way every
+/// sheet restates it (`mobileTheme(_:)`); see `docs/IOS_THEMED_DIALOGS.md`.
+///
+/// **The radius has to be told to the system, not only drawn.** UIKit clips a context-menu
+/// preview to its own large corner radius, so a square-cornered theme lifted its row as a
+/// borderless pill. `contextMenuPreview` is the one content shape the platter reads; it is
+/// stated on the preview here and on the row in the list, so the corners hold from the first
+/// frame of the press to the open menu. A radius of exactly zero is read as *no shape*, though,
+/// and gets the pill back — Editorial's five points came through, Swiss Minimalist's zero did
+/// not — so a square theme asks for `Metrics.smallestPlatterRadius`, which is square to the eye.
+struct MobileLiftedSessionRow: View {
+    private enum Metrics {
+        /// The smallest corner radius UIKit's platter honours: a zero-radius shape is treated
+        /// as none at all and replaced with the system's own pill.
+        static let smallestPlatterRadius: CGFloat = 1
+    }
+
+    let session: RemoteSessionSummaryDTO
+    /// The width the row was laid out at, so the lifted preview is the row and not a guess.
+    let width: CGFloat?
+    let theme: RemoteThemePalette
+
+    /// The outline the theme lifts a row in: the group plate's own corners, square — within a
+    /// point — when the theme's panels are square.
+    static func shape(for theme: RemoteThemePalette) -> RoundedRectangle {
+        RoundedRectangle(cornerRadius: max(theme.panelRadius, Metrics.smallestPlatterRadius))
+    }
+
+    var body: some View {
+        let shape = Self.shape(for: theme)
+        SessionRow(session: session)
+            .frame(width: width)
+            .background(theme.panel, in: shape)
+            .overlay {
+                shape.stroke(theme.border, lineWidth: theme.borderWidth)
+            }
+            .clipShape(shape)
+            .contentShape(.contextMenuPreview, shape)
+            .mobileTheme(theme)
+    }
+}
+
 private struct SessionListItem: View {
     let session: RemoteSessionSummaryDTO
     let isArchived: Bool
@@ -1930,6 +1985,7 @@ private struct SessionListItem: View {
                 } action: { width in
                     rowWidth = width
                 }
+                .contentShape(.contextMenuPreview, liftShape)
                 .contextMenu {
                     sessionActions
                 } preview: {
@@ -1941,14 +1997,15 @@ private struct SessionListItem: View {
         }
     }
 
-    /// The row as the long press lifts it. A row on the shared plate paints no plate of its own,
-    /// and the system's default preview would stand a transparent row on `systemBackground` — a
-    /// white or black platter under an authored theme, the slab this app keeps off its screens.
-    /// So the preview restates the panel the row came from, at the width it was drawn at.
+    /// The row as the long press lifts it: see `MobileLiftedSessionRow`.
     private var liftedRow: some View {
-        SessionRow(session: session)
-            .frame(width: rowWidth)
-            .background(theme.panel, in: RoundedRectangle(cornerRadius: theme.panelRadius))
+        MobileLiftedSessionRow(session: session, width: rowWidth, theme: theme)
+    }
+
+    /// The outline the theme lifts a row in — stated on the row itself too, so the lift UIKit
+    /// snapshots from the list has the theme's corners before the preview takes over.
+    private var liftShape: RoundedRectangle {
+        MobileLiftedSessionRow.shape(for: theme)
     }
 
     /// The row is deliberately not a `Button`: a swipeable row's tap belongs to the swipe seam,

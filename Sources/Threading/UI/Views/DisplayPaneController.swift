@@ -1108,6 +1108,70 @@ final class DisplayPaneController: NSViewController {
     activeTab(for: sessionID)?.review?.refreshModePresentation()
   }
 
+  /// Rebuilds the retained surfaces whose root was captured from the session's project.
+  ///
+  /// A checkout move preserves the session and therefore its tab strip, but Review and Overview
+  /// both close over the project folder that existed when their controllers were constructed.
+  /// Merely refreshing them re-runs Git and filesystem reads in that old folder — the exact
+  /// split-brain state where the sidebar names the destination while Review still shows the
+  /// source branch and its change request. Preserve each tab's identity and reading mode while
+  /// replacing only those checkout-scoped controllers. Browser, comparison, attachment and
+  /// standalone shell tabs keep their own explicit state and are intentionally untouched.
+  func noteSessionCheckoutMoved(_ sessionID: SessionID) {
+    guard let tabs = tabsBySession[sessionID] else { return }
+
+    var replaced = false
+    for tab in tabs {
+      if let review = tab.review,
+        let replacement = makeReview(for: sessionID, mode: review.mode)
+      {
+        // The outgoing controller may be mid-read. End its loading lease synchronously and
+        // detach the callback before deinit, so its deferred false cannot overtake the new
+        // controller's true and hide the selected row's spinner while the destination loads.
+        review.onLoadingChange = nil
+        onReviewLoadingChange?(sessionID, false)
+        teardownHosted(tab)
+        tab.body = .review(replacement)
+        replaced = true
+        continue
+      }
+
+      if let overview = tab.overview,
+        let replacement = makeOverview(
+          for: sessionID,
+          initialSection: overview.selectedSection
+        )
+      {
+        teardownHosted(tab)
+        tab.body = .overview(replacement)
+        replaced = true
+      }
+    }
+
+    if let syntheticOverview, syntheticOverview.sessionID == sessionID,
+      let replacement = makeOverview(
+        for: sessionID,
+        initialSection: syntheticOverview.tab.overview?.selectedSection ?? .info
+      )
+    {
+      let old = syntheticOverview.tab
+      teardownHosted(old)
+      self.syntheticOverview = (
+        sessionID,
+        DisplayTab(
+          id: old.id,
+          body: .overview(replacement),
+          owningSessionID: sessionID
+        )
+      )
+      replaced = true
+    }
+
+    guard replaced else { return }
+    persist(sessionID)
+    if sessionID == currentSessionID { render() }
+  }
+
   // MARK: - Public — Overview Tab
 
   /// Returns the session's Overview, creating and activating its one tab if needed.

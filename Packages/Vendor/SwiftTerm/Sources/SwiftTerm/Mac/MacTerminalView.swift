@@ -3935,8 +3935,10 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
     }
 
     /// Leftover fractional trackpad scroll (in points) carried between events so
-    /// sub-cell precise deltas accumulate instead of being dropped.
-    private var scrollAccumulator: CGFloat = 0
+    /// sub-cell precise deltas accumulate instead of being dropped. The bank belongs to one
+    /// route: travel that was reported to the application never scrolls locally when Option
+    /// arrives, and locally scrolled travel never becomes a report when Option lifts.
+    private var scrollAccumulator = WheelDistanceAccumulator<WheelRoute>()
     private var wheelReportBudget = WheelReportBudget()
 
     /// Why this wheel event belongs to SwiftTerm. Keeping bypass and alternate-scroll decisions
@@ -4017,7 +4019,7 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         // This includes Alternate Scroll Mode being reset and a local-handling modifier being
         // held over the alternate buffer, which has no local scrollback.
         if scrollRoute == .none {
-            scrollAccumulator = 0
+            scrollAccumulator.reset()
             return
         }
 
@@ -4031,11 +4033,12 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
         let scaledDelta = event.scrollingDeltaY * scrollSensitivity
         let lines: Int
         if event.hasPreciseScrollingDeltas {
-            scrollAccumulator += scaledDelta
-            lines = Int(scrollAccumulator / cellHeight)
-            scrollAccumulator -= CGFloat(lines) * cellHeight
+            lines = scrollAccumulator.takeWholeLines(
+                distance: scaledDelta,
+                cellHeight: cellHeight,
+                route: scrollRoute)
         } else {
-            scrollAccumulator = 0
+            scrollAccumulator.reset()
             // A non-precise wheel notch must always move at least one line, even
             // when a low sensitivity would otherwise round it away to zero.
             let rounded = Int(scaledDelta.rounded())
@@ -4047,7 +4050,7 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
                       event.deltaY, event.scrollingDeltaY,
                       event.hasPreciseScrollingDeltas.description,
                       event.isDirectionInvertedFromDevice.description,
-                      scrollAccumulator,
+                      scrollAccumulator.remainder,
                       scrollRoute.rawValue)
             }
             return
@@ -4068,7 +4071,7 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
                       event.deltaY, event.scrollingDeltaY,
                       event.hasPreciseScrollingDeltas.description,
                       event.isDirectionInvertedFromDevice.description,
-                      scrollAccumulator, lines, button)
+                      scrollAccumulator.remainder, lines, button)
             }
             let flags = event.modifierFlags
             withTerminal { terminal in
@@ -4091,7 +4094,7 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
                       event.deltaY, event.scrollingDeltaY,
                       event.hasPreciseScrollingDeltas.description,
                       event.isDirectionInvertedFromDevice.description,
-                      scrollAccumulator, lines, scrollingUp ? "up" : "down")
+                      scrollAccumulator.remainder, lines, scrollingUp ? "up" : "down")
             }
             // A full-screen application executes each arrow key on its own, so a flick that
             // banked a hundred lines must not become a hundred keystrokes in one event.
@@ -4110,7 +4113,7 @@ open class TerminalView: NSView, NSUserInterfaceValidations, TerminalDelegate {
                       event.deltaY, event.scrollingDeltaY,
                       event.hasPreciseScrollingDeltas.description,
                       event.isDirectionInvertedFromDevice.description,
-                      scrollAccumulator, lines, scrollingUp ? "up" : "down")
+                      scrollAccumulator.remainder, lines, scrollingUp ? "up" : "down")
             }
             if scrollingUp {
                 scrollUp(lines: magnitude)

@@ -1064,21 +1064,30 @@ final class ProjectStore {
     func addTerminal(
         to projectID: ProjectID,
         id: TerminalID = TerminalID(),
-        currentDirectory: String? = nil
+        currentDirectory: String? = nil,
+        customTitle: String? = nil
     ) -> ProjectTerminal? {
         guard let projectIndex = index(ofProject: projectID) else { return nil }
 
-        let terminal = ProjectTerminal(
+        var terminal = ProjectTerminal(
             currentDirectory: currentDirectory ?? projects[projectIndex].folderPath,
             id: id
         )
+        terminal.customTitle = Self.storedCustomTitle(customTitle)
+        let terminalIndex = projects[projectIndex].terminals.endIndex
         projects[projectIndex].terminals.append(terminal)
-        rebuildLookupIndexes()
+        // Terminal creation is an interactive path and the retained session catalogue is
+        // unbounded (696 in the incident, 5,000 in the stress fixture). Appending one terminal
+        // changes no project or session location, so indexing the new identity directly keeps
+        // this O(1) instead of rebuilding every retained lookup entry on the main actor.
+        if terminalLocationsByID[id] == nil {
+            terminalLocationsByID[id] = (projectIndex, terminalIndex)
+        }
         guard saveProjectRecord(at: projectIndex) else {
             notifyChanged(sidebarImpact: .projectStructure(projectID))
             return nil
         }
-        notifyChanged(sidebarImpact: .projectStructure(projectID))
+        notifyChanged(sidebarImpact: .terminalAdded(projectID: projectID, terminalID: id))
         return terminal
     }
 
@@ -1099,8 +1108,7 @@ final class ProjectStore {
     @discardableResult
     func renameTerminal(id terminalID: TerminalID, to title: String?) -> ProjectMutationResult {
         guard let location = locate(terminalID: terminalID) else { return .targetNotFound }
-        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let stored = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        let stored = Self.storedCustomTitle(title)
         guard projects[location.projectIndex].terminals[location.terminalIndex].customTitle != stored
         else { return .unchanged }
         projects[location.projectIndex].terminals[location.terminalIndex].customTitle = stored
@@ -1857,6 +1865,11 @@ final class ProjectStore {
               projects[location.projectIndex].terminals[location.terminalIndex].id == terminalID
         else { return nil }
         return location
+    }
+
+    private static func storedCustomTitle(_ title: String?) -> String? {
+        let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (trimmed?.isEmpty ?? true) ? nil : trimmed
     }
 
     private func rebuildLookupIndexes() {

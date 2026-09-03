@@ -166,6 +166,25 @@ from `layoutSubviews`: the anchor moves with the composer while its keyboard dis
 assignment starts a second implicit path animation that visibly trails the body. The background
 view draws only the themed fill, border and arrow.
 
+**A chooser keeps the keyboard when it has the room.** UIKit fits a popover into the container
+inside the safe area and its own ten-point layout margins, and *shrinks* one that asks for more,
+so the hosted content is laid out short and clipped. The draft's three choosers used to end the
+prompt's focus before presenting, unconditionally, for the height the model-by-effort matrix
+might need — and picking a model became a two-keyboard-animation detour on a phone that had the
+room. The presenter now measures: `MobileThemedPopoverRoom` compares the content's fitted height
+with the room on the arrow's side of the anchor, between the navigation bar's bottom (a popover
+over the bar would hide Back behind a modal surface) and the bottom safe area, and calls the
+host's `makeRoom` only when the answer is no. The draft ends focus there and nowhere else. The
+arrow is the only chrome counted between the body and the anchor; UIKit's ten-point layout
+margin is charged where UIKit charges it, at the safe-area edge, and charging it again at the
+bar made a full five-row page of the picker one point too tall for a phone with nine to spare.
+Read off the simulator: the matrix stands above the keyboard-riding composer on an iPhone 17
+Pro, its five-row page with the pager at 360 points under a 116-point bar with the action row
+at 497; an iPhone SE fits three rows and asks for the keyboard's room at five. The presentation
+itself is unchanged in the no-room case — the popover is presented while the keyboard is still
+leaving and UIKit lays it out again as the anchor rides down, exactly the order the
+unconditional drop always used.
+
 The new-session model-and-effort, speed and permission choosers are the first consumers. Keeping
 all three on this boundary matters for square themes in particular: SwiftUI's compact-popover
 mask otherwise rounds away their authored corners. This is a correction to existing host-only
@@ -264,6 +283,26 @@ Both halves of this were live. The issue report is reached only by a sheet from 
 no re-statement at all, so it drew the built-in fallback palette on a phone whose Mac was running
 Cyberpunk. The sheets that did re-state re-stated the *palette only*, which left each one with a
 system-tinted switch and a blue accent inside an otherwise themed screen.
+
+**A context-menu preview is the same boundary.** The `preview:` of `.contextMenu` is hosted by
+UIKit in a hosting controller of its own, and the environment the row was drawn in does not reach
+the views inside it. The dashboard's lifted row (`MobileLiftedSessionRow`) painted its plate in
+the list's palette — `theme` is read where the row *builds* the preview — while the title, the
+caption's glyphs and the age each read `\.remoteTheme` afresh inside the preview and were
+answered with the fallback. On Swiss Minimalist that was the fallback's near-white label on the
+theme's white panel: a lifted row whose name could not be read, reported from a screenshot. The
+preview restates the theme through `mobileTheme(_:)` like any sheet, and
+`MobileLiftedSessionRowTests` reads the title's ink off pixels with no environment above it.
+
+The preview's *shape* is a second thing UIKit decides on its own. The platter clips a preview to
+its own large corner radius whatever the content draws, so a square-cornered theme lifted its
+two-point-bordered row as a borderless pill. `contentShape(.contextMenuPreview, _:)` is the one
+content shape the platter reads; the lifted row states the theme's panel radius there, and the
+row in the list states the same shape so the lift UIKit snapshots before the preview arrives
+already has the theme's corners. A radius of exactly zero is read as no shape at all and gets
+the pill back — Editorial's five points came through, Swiss Minimalist's zero did not — so a
+square theme asks for one point, which is square to the eye and is the smallest radius the
+platter honours.
 
 ## The keyboard
 

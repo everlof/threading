@@ -384,9 +384,9 @@ discussed without pretending an app-wide document belongs to that conversation.
 native semantic scene and the `⋯` menu offers only the actions that fit — an image and a document
 share almost nothing worth acting on.
 
-**Overview is the session's two-part operational reading.** Activity and Info share one singleton
-tab and a host-owned segmented control. `view.files` and **⌘P** select Activity; `view.info` and
-**⌘⇧I** select Info. Only the selected child is attached, so Activity does not construct process
+**Overview is the session's two-part operational reading.** Info and Activity share one singleton
+tab and a host-owned segmented control, Info leading as the default section. `view.files` and
+**⌘P** select Activity; `view.info` and **⌘⇧I** select Info. Only the selected child is attached, so Activity does not construct process
 rows or start Info's polling, and Info does not expand the filesystem. The old persisted `.files`
 and `.info` kinds now encode the selected section; on restore, a legacy layout containing both
 singleton tabs is merged into one Overview, with the active legacy tab deciding the section and
@@ -395,11 +395,16 @@ Info-first Overview that is absent from persistence and the agent-facing tab lis
 surface explicitly materializes the ordinary persisted Overview.
 
 **Overview's Info section owns the detailed session receipt as well as live processes.** Its Usage
-section projects the provider-neutral transcript ledger into lifetime Total, Main agent and
-Subagents readings, token categories, cost provenance and a six-model maximum. The projection and
-machine-wide session index are prepared on a utility queue; the fixed form never receives raw
+section projects the provider-neutral transcript ledger into a lifetime Total reading, token
+categories, cost provenance and a six-model maximum; Main agent and Subagents readings appear
+only when the session delegated work, and a session that used one model names it on the Total
+row rather than listing it under Models, so the receipt states each figure once. The projection
+and machine-wide session index are prepared on a utility queue; the fixed form never receives raw
 response records. Info keeps its existing visibility boundary for process and port polling, while
-the usage snapshot can update from a completed transcript scan without starting that poll.
+the usage snapshot can update from a completed transcript scan without starting that poll. A
+process row unfolds on a click into the poll's facts and the launch command one flag per line,
+bounded, with the open rows remembered across the rebuild a changed process tree causes; see
+[`design-system.md`](design-system.md#2026-09-03--a-launch-command-is-a-paragraph-and-a-row-is-a-line).
 
 **Overview's Activity section is the filesystem-shaped account of agent work.**
 `AgentWorkSummaryView` supplies the bounded repository atlas and recent action overview above

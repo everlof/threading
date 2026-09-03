@@ -54,7 +54,7 @@ extension AgentRuntime: SessionContextDestinationQuerying {
 @MainActor
 enum SessionContextHandoff {
 
-    private static var liveDestinations: any SessionContextDestinationQuerying {
+    static var liveDestinations: any SessionContextDestinationQuerying {
         AgentRuntime.shared
     }
 

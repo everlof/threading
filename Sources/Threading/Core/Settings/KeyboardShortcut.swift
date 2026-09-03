@@ -13,6 +13,11 @@ import AppKit
 /// describe *which* shift key was pressed, which is not part of the shortcut.
 public struct KeyboardShortcut: Codable, Equatable, Hashable {
 
+    /// The modifier bits that distinguish one shortcut from another. Caps Lock, numeric-pad,
+    /// function-key, and device-side bits ride along on ordinary events without changing the
+    /// chord the user pressed.
+    static let eventModifierMask: NSEvent.ModifierFlags = [.command, .control, .option, .shift]
+
     /// The key equivalent character, as `NSMenuItem` wants it — lowercase for letters, since
     /// an uppercase one implies Shift and would double up with the modifier mask.
     public let key: String
@@ -28,6 +33,20 @@ public struct KeyboardShortcut: Codable, Equatable, Hashable {
         self.modifierRawValue = modifiers
             .intersection(.deviceIndependentFlagsMask)
             .rawValue
+    }
+
+    /// Whether a key-down is this chord.
+    ///
+    /// Letter key equivalents are stored lowercase, while holding Shift can make AppKit report
+    /// an uppercase character. Comparing case-insensitively keeps the value's matching semantics
+    /// aligned with the menu item semantics it models.
+    func matches(_ event: NSEvent) -> Bool {
+        guard !key.isEmpty, let typed = event.charactersIgnoringModifiers,
+              typed.compare(key, options: .caseInsensitive) == .orderedSame else {
+            return false
+        }
+        return event.modifierFlags.intersection(Self.eventModifierMask)
+            == modifiers.intersection(Self.eventModifierMask)
     }
 
     // MARK: - Display

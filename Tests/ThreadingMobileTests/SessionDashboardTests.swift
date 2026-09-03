@@ -525,6 +525,226 @@ final class SessionDashboardTests: XCTestCase {
     }
 }
 
+/// The row a long press lifts out of the dashboard, hosted the way UIKit hosts a context-menu
+/// preview: in a hosting controller of its own, with none of the list's environment.
+///
+/// Reported from a screenshot on Swiss Minimalist: the lifted row drew its title in a colour a
+/// shade off the white panel, and stood as a pill under a theme whose every panel is square with
+/// a two-point border. The first was the preview's nested views answering `\.remoteTheme` with
+/// the built-in fallback — a dark palette, whose label is #F3F4F6 — because a context-menu
+/// preview is a presentation boundary like a sheet and inherits nothing. The second was UIKit's
+/// own platter radius, which the preview has to be told about through `contextMenuPreview`.
+/// Both are read off pixels here, since both passed every assertion anyone had written.
+@MainActor
+final class MobileLiftedSessionRowTests: XCTestCase {
+    private enum Fixture {
+        static let width: CGFloat = 362
+        static let label = "#111111"
+        static let panel = "#FFFFFF"
+        static let border = "#000000"
+        static let borderWidth = 2.0
+        /// Where the platter shows through if the row does not cover its own corner.
+        static let backdrop = UIColor.red
+    }
+
+    func testTheLiftedRowDrawsItsTitleInTheThemeLabelWithoutTheListEnvironment() throws {
+        let fixture = try hosted(theme: theme(radius: 0))
+        let title = try XCTUnwrap(
+            first(MobileMorphingTitleLabel.self, in: fixture.window),
+            "the lifted row draws its title with the same morphing label as the list"
+        )
+        let titleFrame = title.convert(title.bounds, to: fixture.window)
+        let darkest = try darkestLuminance(in: titleFrame, of: fixture.image)
+
+        XCTAssertLessThan(
+            darkest,
+            0.4,
+            "the title is drawn in the theme's label (\(Fixture.label)), not the fallback " +
+                "palette's near-white; darkest ink measured \(darkest)"
+        )
+    }
+
+    /// Sampled on the top row, one pixel in: the two-point stroke is centred on the edge and
+    /// clipped to it, so the border is that one row, and a square theme lifts with the one-point
+    /// radius the platter needs to honour a shape at all, whose arc grazes the very corner.
+    func testASquareThemeLiftsASquareBorderedRow() throws {
+        let fixture = try hosted(theme: theme(radius: 0))
+        let corner = try rgb(at: CGPoint(x: 1, y: 0), in: fixture.image)
+
+        XCTAssertLessThan(
+            corner.red,
+            0.2,
+            "a square theme's lifted row reaches its own corner with the border, not the platter"
+        )
+        XCTAssertLessThan(corner.green, 0.2)
+        XCTAssertLessThan(corner.blue, 0.2)
+    }
+
+    func testARoundedThemeLiftsARoundedRow() throws {
+        let fixture = try hosted(theme: theme(radius: 20))
+        let corner = try rgb(at: CGPoint(x: 1, y: 0), in: fixture.image)
+        let pastTheArc = try rgb(at: CGPoint(x: 20, y: 0), in: fixture.image)
+
+        XCTAssertGreaterThan(
+            corner.red,
+            0.8,
+            "a rounded theme leaves its corner to the platter"
+        )
+        XCTAssertLessThan(corner.green, 0.2)
+        XCTAssertLessThan(
+            pastTheArc.red,
+            0.2,
+            "past the arc the top edge is the border again"
+        )
+    }
+
+    // MARK: - Fixture
+
+    private struct Hosted {
+        let window: UIWindow
+        let image: UIImage
+    }
+
+    /// The lifted row in a hosting controller with nothing above it — no `mobileTheme`, no
+    /// environment — pinned to the window's top-left corner so a pixel's address is the row's.
+    private func hosted(theme: RemoteThemeDTO) throws -> Hosted {
+        let session = RemoteSessionSummaryDTO(
+            id: "macos",
+            title: "MACOS",
+            agentKind: "claude",
+            surface: .terminal,
+            state: .idle,
+            projectName: "AnotherTerminal",
+            isAvailable: false,
+            lastActiveAt: Date().addingTimeInterval(-86_400).timeIntervalSince1970
+        )
+        let root = UIHostingController(
+            rootView: MobileLiftedSessionRow(
+                session: session,
+                width: Fixture.width,
+                theme: RemoteThemePalette(theme)
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .ignoresSafeArea()
+        )
+        root.view.backgroundColor = .clear
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first
+        let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow(frame: .zero)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.backgroundColor = Fixture.backdrop
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        window.layoutIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { context in
+            window.layer.render(in: context.cgContext)
+        }
+        let attachment = XCTAttachment(image: image)
+        attachment.name = "lifted-row-radius-\(Int(theme.material.panelRadius))"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        return Hosted(window: window, image: image)
+    }
+
+    private func theme(radius: Double) -> RemoteThemeDTO {
+        RemoteThemeDTO(
+            id: "lifted-row-test-\(Int(radius))",
+            name: "Lifted row test",
+            mode: .light,
+            colors: [
+                "ground": Fixture.panel,
+                "surface": "#F2F2F2",
+                "panel": Fixture.panel,
+                "elevated": Fixture.panel,
+                "border": Fixture.border,
+                "divider": Fixture.border,
+                "label": Fixture.label,
+                "secondary_label": "#666666",
+                "tertiary_label": "#999999",
+                "accent": "#FF3000",
+            ],
+            material: RemoteThemeDTO.Material(
+                panelRadius: radius,
+                controlRadius: radius / 2,
+                borderWidth: Fixture.borderWidth
+            )
+        )
+    }
+
+    private func first<T: UIView>(_ type: T.Type, in view: UIView) -> T? {
+        if let found = view as? T { return found }
+        for child in view.subviews {
+            if let found = first(type, in: child) { return found }
+        }
+        return nil
+    }
+
+    // MARK: - Pixels
+
+    private struct RGB {
+        let red: CGFloat
+        let green: CGFloat
+        let blue: CGFloat
+        var luminance: CGFloat { 0.2126 * red + 0.7152 * green + 0.0722 * blue }
+    }
+
+    private func rgb(at point: CGPoint, in image: UIImage) throws -> RGB {
+        let pixels = try pixels(of: image)
+        return pixels.rgb(x: Int(point.x), y: Int(point.y))
+    }
+
+    private func darkestLuminance(in rect: CGRect, of image: UIImage) throws -> CGFloat {
+        let pixels = try pixels(of: image)
+        var darkest: CGFloat = 1
+        for y in Int(rect.minY)..<Int(rect.maxY.rounded(.up)) {
+            for x in Int(rect.minX)..<Int(rect.maxX.rounded(.up)) {
+                darkest = min(darkest, pixels.rgb(x: x, y: y).luminance)
+            }
+        }
+        return darkest
+    }
+
+    private struct Pixels {
+        let width: Int
+        let bytes: [UInt8]
+
+        func rgb(x: Int, y: Int) -> RGB {
+            let offset = (y * width + x) * 4
+            return RGB(
+                red: CGFloat(bytes[offset]) / 255,
+                green: CGFloat(bytes[offset + 1]) / 255,
+                blue: CGFloat(bytes[offset + 2]) / 255
+            )
+        }
+    }
+
+    /// The image as one RGBA buffer at one byte per channel, whatever the source encoding.
+    private func pixels(of image: UIImage) throws -> Pixels {
+        let cgImage = try XCTUnwrap(image.cgImage)
+        let width = cgImage.width
+        let height = cgImage.height
+        var bytes = [UInt8](repeating: 0, count: width * height * 4)
+        let context = try XCTUnwrap(CGContext(
+            data: &bytes,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return Pixels(width: width, bytes: bytes)
+    }
+}
+
 #if DEBUG
 /// The demo router that decides which screen `THREADING_MOBILE_DEMO` opens.
 ///

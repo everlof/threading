@@ -423,6 +423,7 @@ final class MobileMorphingTitleTests: XCTestCase {
         XCTAssertFalse(title.isAnimatingTitleForTesting)
 
         configure(title, text: "Renamed chat", reducesMotion: false)
+        window.layoutIfNeeded()
 
         XCTAssertEqual(title.stringValue, "Renamed chat")
         XCTAssertEqual(title.accessibilityLabel, "Renamed chat")
@@ -458,6 +459,7 @@ final class MobileMorphingTitleTests: XCTestCase {
             reducesMotion: false,
             role: .connectionStatus
         )
+        window.layoutIfNeeded()
 
         XCTAssertEqual(title.stringValue, "David's MacBook Pro")
         XCTAssertTrue(title.isAnimatingLineScrollForTesting)
@@ -491,6 +493,7 @@ final class MobileMorphingTitleTests: XCTestCase {
             reducesMotion: false,
             role: .connectionStatus
         )
+        window.layoutIfNeeded()
 
         let fades = animations(
             in: title.layer,
@@ -535,6 +538,7 @@ final class MobileMorphingTitleTests: XCTestCase {
             textStyle: .caption2,
             weight: .regular
         )
+        window.layoutIfNeeded()
 
         let incomingMoves = animations(
             in: title.layer,
@@ -590,6 +594,7 @@ final class MobileMorphingTitleTests: XCTestCase {
         let oldFrame = line.indicator.frame
 
         update(line, status: "Trying LAN", color: .systemOrange)
+        window.layoutIfNeeded()
 
         let transition = try XCTUnwrap(line.indicator.transitionForTesting)
         let opacity = try XCTUnwrap(
@@ -690,9 +695,11 @@ final class MobileMorphingTitleTests: XCTestCase {
         defer { window.isHidden = true }
 
         update(line, status: "Opening chat…", color: .systemOrange)
+        window.layoutIfNeeded()
         let frame = line.label.frame
 
         update(line, status: "David's MacBook Pro", color: .systemGreen)
+        window.layoutIfNeeded()
 
         XCTAssertEqual(line.label.frame, frame)
         XCTAssertEqual(
@@ -861,6 +868,7 @@ final class MobileMorphingTitleTests: XCTestCase {
         configure(title, text: "I", reducesMotion: false)
         window.layoutIfNeeded()
         configure(title, text: "P", reducesMotion: false)
+        window.layoutIfNeeded()
 
         let path = try XCTUnwrap(shapeLayers(in: title.layer).compactMap(\.path).first)
         let box = path.boundingBoxOfPath
@@ -970,5 +978,132 @@ final class MobileMorphingTitleTests: XCTestCase {
         (layer.sublayers ?? []).flatMap { child in
             (child as? CAShapeLayer).map { [$0] } ?? shapeLayers(in: child)
         }
+    }
+}
+
+/// Whether an anchored popover has the room it asks for, which decides whether the draft's
+/// choosers keep the keyboard under them or ask for its height.
+@MainActor
+final class MobileThemedPopoverRoomTests: XCTestCase {
+    /// An iPhone 17 Pro with the keyboard up: the composer's action row stands at about 490
+    /// points, under a navigation bar whose bottom is at about 116.
+    private let anchorAboveTheKeyboard = CGRect(x: 16, y: 490, width: 160, height: 34)
+    private let barBottom: CGFloat = 116
+    private let screenBottom: CGFloat = 874 - 34
+
+    func testAPickerThatFitsAboveItsAnchorNeedsNoRoom() {
+        XCTAssertTrue(MobileThemedPopoverRoom.fits(
+            contentHeight: 330,
+            arrowEdge: .bottom,
+            anchor: anchorAboveTheKeyboard,
+            between: barBottom,
+            and: screenBottom
+        ))
+    }
+
+    /// A five-row page of the picker with its pager is 360 points; between a 116-point bar and
+    /// an action row at 497 that leaves nine to spare once the arrow is counted, and none if
+    /// UIKit's margin is charged a second time at the bar.
+    func testOnlyTheArrowStandsBetweenTheBodyAndTheAnchor() {
+        let bare = anchorAboveTheKeyboard.minY - barBottom
+        XCTAssertFalse(
+            MobileThemedPopoverRoom.fits(
+                contentHeight: bare,
+                arrowEdge: .bottom,
+                anchor: anchorAboveTheKeyboard,
+                between: barBottom,
+                and: screenBottom
+            ),
+            "the content is not the whole popover: the arrow stands in the same room"
+        )
+        XCTAssertTrue(MobileThemedPopoverRoom.fits(
+            contentHeight: bare - MobileThemedPopoverBackgroundView.arrowHeight(),
+            arrowEdge: .bottom,
+            anchor: anchorAboveTheKeyboard,
+            between: barBottom,
+            and: screenBottom
+        ))
+        XCTAssertTrue(MobileThemedPopoverRoom.fits(
+            contentHeight: 360,
+            arrowEdge: .bottom,
+            anchor: CGRect(x: 16, y: 497, width: 160, height: 34),
+            between: 116,
+            and: screenBottom
+        ))
+    }
+
+    /// An iPhone SE with the keyboard up leaves about 230 points between the bar and the row.
+    func testAPickerTallerThanTheRoomAboveItsAnchorAsksForRoom() {
+        let anchorOnASmallPhone = CGRect(x: 16, y: 300, width: 160, height: 34)
+        XCTAssertFalse(MobileThemedPopoverRoom.fits(
+            contentHeight: 330,
+            arrowEdge: .bottom,
+            anchor: anchorOnASmallPhone,
+            between: 72,
+            and: 667
+        ))
+    }
+
+    func testAPopoverBelowItsAnchorMeasuresTheRoomBelow() {
+        let anchorNearTheTop = CGRect(x: 16, y: 130, width: 160, height: 34)
+        XCTAssertTrue(MobileThemedPopoverRoom.fits(
+            contentHeight: 330,
+            arrowEdge: .top,
+            anchor: anchorNearTheTop,
+            between: barBottom,
+            and: screenBottom
+        ))
+        XCTAssertFalse(MobileThemedPopoverRoom.fits(
+            contentHeight: 330,
+            arrowEdge: .top,
+            anchor: anchorAboveTheKeyboard,
+            between: barBottom,
+            and: 874 - 336
+        ))
+    }
+
+    func testAPopoverBesideItsAnchorAlwaysHasRoom() {
+        for edge in [Edge.leading, .trailing] {
+            XCTAssertTrue(MobileThemedPopoverRoom.fits(
+                contentHeight: 10_000,
+                arrowEdge: edge,
+                anchor: anchorAboveTheKeyboard,
+                between: barBottom,
+                and: screenBottom
+            ))
+        }
+    }
+
+    @MainActor
+    func testTheContentTopIsTheNavigationBarsBottomWhenOneIsOnScreen() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        let navigation = UINavigationController(rootViewController: UIViewController())
+        window.rootViewController = navigation
+        window.isHidden = false
+        window.layoutIfNeeded()
+        let bar = navigation.navigationBar
+        let barBottom = bar.convert(bar.bounds, to: window).maxY
+
+        XCTAssertEqual(MobileThemedPopoverRoom.contentTop(of: window), barBottom, accuracy: 0.5)
+        XCTAssertGreaterThan(barBottom, window.safeAreaInsets.top)
+        window.isHidden = true
+    }
+
+    @MainActor
+    func testWithoutABarTheBoundsAreUIKitsSafeAreaPlusItsMargin() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
+        window.rootViewController = UIViewController()
+        window.isHidden = false
+        window.layoutIfNeeded()
+
+        XCTAssertEqual(
+            MobileThemedPopoverRoom.contentTop(of: window),
+            window.safeAreaInsets.top + MobileThemedPopoverRoom.layoutMargin
+        )
+        XCTAssertEqual(
+            MobileThemedPopoverRoom.contentBottom(of: window),
+            874 - window.safeAreaInsets.bottom - MobileThemedPopoverRoom.layoutMargin
+        )
+        window.isHidden = true
     }
 }

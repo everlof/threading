@@ -37,7 +37,10 @@ graph-reconciliation routes. Session creation appends its one row at the project
 removal deletes its row and shifts only later positions in that project. Generic single-session
 updates, project settings, embedded-terminal updates, side-chat creation and coalesced
 agent-title/turn metadata also retain the affected identifiers rather than converting a burst into
-a delayed whole-graph save. Coalesced project/session payloads share one transaction when their
+a delayed whole-graph save. A standalone terminal whose caller already knows its title is born with
+that title in the same project-row commit; Update All and project scripts never append an unnamed
+record and immediately rename it in a second transaction. Coalesced project/session payloads share
+one transaction when their
 timer expires; an immediate rename or other exact write removes only its own identity from that
 set and never drains unrelated pending rows on the caller's main-actor stack. Project add/remove
 changes one row plus the generation and later

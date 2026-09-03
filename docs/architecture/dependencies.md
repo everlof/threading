@@ -25,13 +25,17 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
 - **WebRTC** (remote, prebuilt): native ICE/STUN/TURN, DTLS/SCTP and ordered data channels for
   hosted Mac-to-iOS remote access.
-  - Location: exact SwiftPM version `151.0.0`, package revision
-    `19aa8c1fc7120d50df987b7111f42d5024df3d54`, wrapped only by
+  - Location: exact SwiftPM version `150.0.0`, package revision
+    `6ed87f05368632f71dc95c89c14c051561710925`, wrapped only by
     `Packages/ThreadingPeerTransport/`.
   - The binary archive is pinned by SwiftPM checksum
-    `64a218fad3d84a0d783321aa9a1eec58ca266ac7879123f86b0b44b703b7d8dc`. The upstream release
-    identifies WebRTC source commit `f20ebb8adbf4fa781830e4384c61f732bd28a217`; those values must
+    `f9890492b0016e4c88ab20f07867b8b420054caedc8a692b2ec6ac041f3cf6b2`. The upstream release
+    identifies WebRTC source commit `1f975dfd761af6e5d76d28333191973b258d82a8`; those values must
     be reviewed together on every update.
+  - Do not advance a pin from the repository manifest alone. Upstream's `151.0.0` tag referenced
+    a release archive that had not been published when it was pinned, so clean builds failed while
+    cached builds hid the problem. Confirm the exact release and archive both exist before changing
+    this pin.
   - **The bounded transport is ours.** Feature code never sees WebRTC objects. The package owns
     signaling frames, trickle candidate limits, channel and byte high-water marks, stream
     multiplexing, listener replacement, reconnect and shutdown. The Mac and iOS apps see only
