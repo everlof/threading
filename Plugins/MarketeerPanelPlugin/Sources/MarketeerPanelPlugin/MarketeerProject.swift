@@ -195,6 +195,31 @@ public struct MarketeerProject: Equatable, Sendable {
     public let localizations: [MarketeerLocalization]
     public let slides: [MarketeerSlide]
 
+    /// Exported pictures by slide `slotPosition`, empty until something has been rendered. A row
+    /// with an entry here shows the artwork; a row without shows the miniature drawn from the
+    /// document, which is every row of a project nobody has rendered yet.
+    public let exports: [Int: URL]
+
+    public init(
+        name: String,
+        projectID: String,
+        revision: Int? = nil,
+        changeReason: String? = nil,
+        appLink: MarketeerAppLink? = nil,
+        localizations: [MarketeerLocalization] = [],
+        slides: [MarketeerSlide] = [],
+        exports: [Int: URL] = [:]
+    ) {
+        self.name = name
+        self.projectID = projectID
+        self.revision = revision
+        self.changeReason = changeReason
+        self.appLink = appLink
+        self.localizations = localizations
+        self.slides = slides
+        self.exports = exports
+    }
+
     /// Slides ordered the way the App Store shows them, and capped before any view is built.
     ///
     /// A document is the user's, so its length is not ours to assume. The App Store's own cap is
@@ -275,7 +300,8 @@ public enum MarketeerProjectReader {
                 changeReason: state?.reason,
                 appLink: document.appStoreLink,
                 localizations: document.localizations ?? [],
-                slides: document.slides ?? []
+                slides: document.slides ?? [],
+                exports: MarketeerExports.index(forProjectID: projectID, root: root)
             ))
         } catch {
             return .failure(.unreadable(error.localizedDescription))

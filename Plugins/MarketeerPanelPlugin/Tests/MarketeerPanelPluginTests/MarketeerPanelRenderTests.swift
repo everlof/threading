@@ -50,6 +50,51 @@ final class MarketeerPanelRenderTests: XCTestCase {
         try write(try render(view), named: "marketeer-panel-unattached")
     }
 
+    /// The state a half-rendered project is in, which is most of them: some slots have artwork
+    /// and some have only the document. The two must be told apart at a glance, which is what the
+    /// "rendered / not rendered" word in the caption is for.
+    func testRendersArtworkBesideDrawingsForAHalfRenderedProject() throws {
+        let exports: [Int: URL] = [0: URL(fileURLWithPath: "/rendered/01.png"),
+                                   1: URL(fileURLWithPath: "/rendered/02.png")]
+        let project = MarketeerProject(
+            name: "Threading",
+            projectID: "threading",
+            revision: 9,
+            changeReason: "render",
+            appLink: MarketeerAppLink(appID: "1234567890", bundleID: "codes.threading", appName: "Threading"),
+            localizations: [MarketeerLocalization(localeCode: "en-US", displayName: "English (U.S.)")],
+            slides: (0..<4).map { Self.slide(slot: $0, start: (0.10, 0.25, 0.55), end: (0.04, 0.11, 0.19), uploaded: $0 == 0) },
+            exports: exports
+        )
+
+        let view = MarketeerPanelView(
+            state: .success(project),
+            thumbnails: [0: try Self.screenshot(hue: 0.58), 1: try Self.screenshot(hue: 0.08)],
+            onRefresh: {}
+        )
+        try write(try render(view), named: "marketeer-panel-half-rendered")
+    }
+
+    /// Stands in for an exported screenshot: a tall picture with an obvious subject, so the
+    /// difference between real artwork and our drawing is visible in the render rather than
+    /// something to take on trust.
+    private static func screenshot(hue: CGFloat) throws -> CGImage {
+        let size = NSSize(width: 120, height: 260)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor(hue: hue, saturation: 0.75, brightness: 0.55, alpha: 1).setFill()
+        NSRect(origin: .zero, size: size).fill()
+        NSColor.white.withAlphaComponent(0.9).setFill()
+        NSRect(x: 18, y: 40, width: 84, height: 170).fill()
+        NSColor.black.withAlphaComponent(0.75).setFill()
+        NSRect(x: 24, y: 46, width: 72, height: 158).fill()
+        image.unlockFocus()
+
+        let tiff = try XCTUnwrap(image.tiffRepresentation)
+        let representation = try XCTUnwrap(NSBitmapImageRep(data: tiff))
+        return try XCTUnwrap(representation.cgImage)
+    }
+
     // MARK: - Harness
 
     private func render(_ view: NSView) throws -> NSImage {

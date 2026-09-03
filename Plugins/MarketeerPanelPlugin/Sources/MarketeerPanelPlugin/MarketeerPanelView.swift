@@ -27,7 +27,19 @@ final class MarketeerPanelView: NSView {
     /// Held because ThemedButton speaks target/action, and the target has to outlive the button.
     private let onRefresh: () -> Void
 
-    init(state: Result<MarketeerProject, MarketeerReadFailure>, onRefresh: @escaping () -> Void) {
+    /// Decoded artwork by slide `slotPosition`.
+    ///
+    /// Handed in rather than loaded here, so the view is state in and pixels out: it renders the
+    /// same way every time, which is what makes the appearance testable at all. The decode is the
+    /// entry point's job because it is file reading, and that belongs off this actor.
+    private let thumbnails: [Int: CGImage]
+
+    init(
+        state: Result<MarketeerProject, MarketeerReadFailure>,
+        thumbnails: [Int: CGImage] = [:],
+        onRefresh: @escaping () -> Void
+    ) {
+        self.thumbnails = thumbnails
         self.onRefresh = onRefresh
         super.init(frame: .zero)
         wantsLayer = true
@@ -125,7 +137,13 @@ final class MarketeerPanelView: NSView {
         }
 
         column.addArrangedSubview(spacer())
-        for slide in slides { column.addArrangedSubview(row(for: slide)) }
+        for slide in slides {
+            column.addArrangedSubview(row(
+                for: slide,
+                hasExport: project.exports[slide.slotPosition] != nil,
+                artwork: thumbnails[slide.slotPosition]
+            ))
+        }
 
         if project.hiddenSlideCount > 0 {
             column.addArrangedSubview(label(
@@ -156,8 +174,8 @@ final class MarketeerPanelView: NSView {
         ))
     }
 
-    private func row(for slide: MarketeerSlide) -> NSView {
-        let swatch = SlideThumbnailView(slide: slide)
+    private func row(for slide: MarketeerSlide, hasExport: Bool, artwork: CGImage?) -> NSView {
+        let swatch = SlideThumbnailView(slide: slide, artwork: artwork)
         swatch.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             swatch.widthAnchor.constraint(equalToConstant: Metrics.swatchWidth),
@@ -182,8 +200,12 @@ final class MarketeerPanelView: NSView {
         }
 
         let state = slide.uploadedCount > 0 ? "uploaded ×\(slide.uploadedCount)" : "not uploaded"
+        // Whether the thumbnail is the artwork or a drawing of it. Worth one word, because the two
+        // look similar at row size and the difference decides whether what you are seeing has been
+        // through the renderer.
+        let source = hasExport ? "rendered" : "not rendered"
         lines.append(label(
-            "\(slide.elementSummary) · \(state)",
+            "\(slide.elementSummary) · \(state) · \(source)",
             font: Design.Typography.caption(),
             color: Design.Text.tertiary
         ))
@@ -250,9 +272,12 @@ private final class SlideThumbnailView: NSView {
     }
 
     private let slide: MarketeerSlide
+    /// The exported artwork, already decoded, or `nil` for a slide nobody has rendered.
+    private let artwork: CGImage?
 
-    init(slide: MarketeerSlide) {
+    init(slide: MarketeerSlide, artwork: CGImage?) {
         self.slide = slide
+        self.artwork = artwork
         super.init(frame: .zero)
         wantsLayer = true
     }
@@ -264,6 +289,14 @@ private final class SlideThumbnailView: NSView {
         let radius = Design.Radius.control
         let clip = NSBezierPath(roundedRect: bounds, xRadius: radius, yRadius: radius)
         clip.addClip()
+
+        // The artwork, once it is here. It replaces the drawing rather than sitting on top of it:
+        // an export *is* the slide, and compositing our approximation underneath would show
+        // through wherever the render is transparent.
+        if let artwork {
+            context.draw(artwork, in: aspectFilled(artwork))
+            return
+        }
 
         drawBackground(in: context)
         for element in slide.drawnElements {
@@ -322,6 +355,20 @@ private final class SlideThumbnailView: NSView {
         NSColor(white: 1, alpha: 0.28).setStroke()
         body.lineWidth = 1
         body.stroke()
+    }
+
+    /// A screenshot is taller than the row, so it fills the width and is centred vertically —
+    /// cropping the middle of a slide rather than letterboxing it, which is what a contact sheet
+    /// of phone screenshots wants.
+    private func aspectFilled(_ image: CGImage) -> CGRect {
+        let imageAspect = CGFloat(image.width) / CGFloat(image.height)
+        let boundsAspect = bounds.width / bounds.height
+        if imageAspect > boundsAspect {
+            let width = bounds.height * imageAspect
+            return CGRect(x: bounds.midX - width / 2, y: 0, width: width, height: bounds.height)
+        }
+        let height = bounds.width / imageAspect
+        return CGRect(x: 0, y: bounds.midY - height / 2, width: bounds.width, height: height)
     }
 
     /// The document measures `y` from the top; this view's origin is the bottom left.

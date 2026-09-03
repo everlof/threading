@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 import ThreadingDesignKit
 import ThreadingPluginKit
 
@@ -50,12 +51,48 @@ public final class MarketeerPanelPlugin: NSObject, ThreadingNativePlugin {
     /// Wholesale rather than incremental, and that is a considered bound rather than laziness: a
     /// document is capped at sixty rendered slides before any view exists, and a rebuild happens
     /// only when someone asks for one. See `MarketeerProject.renderedSlideCap`.
+    ///
+    /// Exactly twice, when there is artwork to decode. The pane goes up immediately with the
+    /// miniatures drawn from the document, then once more when the exports have been decoded off
+    /// the main actor — never once per picture, which is sixty layout passes for a folder of
+    /// screenshots.
     private func reload() {
+        let state = MarketeerProjectReader.read(projectID: projectID)
+        install(state, thumbnails: [:])
+
+        guard case .success(let project) = state, !project.exports.isEmpty else { return }
+        let exports = project.exports
+        Task.detached(priority: .userInitiated) {
+            // A screenshot is 1290×2796. ImageIO downsamples during the decode, so the full-size
+            // pixels are never materialized, and this stays off the main actor because file
+            // reading and image decoding both belong there.
+            var decoded: [Int: CGImage] = [:]
+            for (slot, url) in exports {
+                if let image = MarketeerExports.thumbnail(at: url) { decoded[slot] = image }
+            }
+            guard !decoded.isEmpty else { return }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.install(self.lastState ?? state, thumbnails: decoded)
+            }
+        }
+    }
+
+    /// The state the pane was last built from, so the second pass redraws the same project rather
+    /// than whatever is on disk by the time the decodes finish.
+    private var lastState: Result<MarketeerProject, MarketeerReadFailure>?
+
+    private func install(
+        _ state: Result<MarketeerProject, MarketeerReadFailure>,
+        thumbnails: [Int: CGImage]
+    ) {
         guard let container else { return }
+        lastState = state
         container.subviews.forEach { $0.removeFromSuperview() }
 
-        let state = MarketeerProjectReader.read(projectID: projectID)
-        let pane = MarketeerPanelView(state: state) { [weak self] in self?.reload() }
+        let pane = MarketeerPanelView(state: state, thumbnails: thumbnails) { [weak self] in
+            self?.reload()
+        }
         pane.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(pane)
         NSLayoutConstraint.activate([
