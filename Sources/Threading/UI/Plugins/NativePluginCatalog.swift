@@ -61,10 +61,28 @@ enum NativePluginCatalog {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
-    /// The one Threading's own Device Logs pane lives in.
-    static var deviceLogsBundle: URL? {
-        bundledPlugins().first { $0.deletingPathExtension().lastPathComponent == "DeviceLogsPlugin" }
+    /// A bundled plugin by its own identifier.
+    ///
+    /// By identifier rather than by file name, and general rather than one-per-plugin. The first
+    /// version of this matched the literal string `DeviceLogsPlugin`, which is the shape that rots:
+    /// today it resolves a URL, and the next thing hung off it is a behaviour only the first-party
+    /// plugin gets. A host that needs a particular plugin names it the way anyone would — by the
+    /// identifier in its `Info.plist`.
+    static func bundledPlugin(identifier: String) -> URL? {
+        bundledPlugins().first { url in
+            Bundle(url: url)?.bundleIdentifier == identifier
+        }
     }
+
+    /// The identifier of the Device Logs plugin Threading ships.
+    ///
+    /// The host still names one plugin, because `device_log_prepare` reveals *that* pane and a
+    /// tool has to mean something specific. That is the remaining first-party coupling in this
+    /// tier, and it is a constant rather than a mechanism: nothing here treats the plugin it names
+    /// differently from any other, and a third-party plugin reached the same way would work.
+    static let deviceLogsIdentifier = "codes.threading.plugin.devicelogs"
+
+    static var deviceLogsBundle: URL? { bundledPlugin(identifier: deviceLogsIdentifier) }
 
     /// Whether a bundle is one of ours, and so already covered by the app's signature.
     private static func isBundled(_ url: URL) -> Bool {

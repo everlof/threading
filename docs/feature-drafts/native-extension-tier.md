@@ -558,12 +558,46 @@ Device Logs offers five: `search` over everything recorded, `focus` to fold the 
 controls rather than holding a second invisible state, because the person watching has to be able to
 see what the agent did to their view and undo it.
 
-### Still open
+### Nothing the first party can do that a third party cannot
 
-The third-party path still has no install flow, and opening the allowlist to other teams needs a
-review surface and a crash-quarantine policy. A plugin's tools are also read once at load: a plugin
-whose tool list changed while running would be a tool that sometimes exists, so that is stated
-rather than supported.
+A tier only we can build on is not a platform. So the rule is that the first-party plugin uses the
+public contract and nothing else, and the parts where that is *not* true today are written down
+rather than left to be discovered.
+
+What is genuinely equal: the contract is one framework both sides link, Device Logs uses only public
+API (no `@testable`, no internal reach-through, its own SwiftPM package), and the tool provider has
+no idea which plugin is first-party — `plugin__devicelogs__search` is derived from the identifier
+like any other would be. `NativePluginCatalog.bundledPlugin(identifier:)` resolves by the identifier
+in a bundle's `Info.plist`; it used to match the literal file name `DeviceLogsPlugin`, which is the
+shape that rots.
+
+`NativePluginParityTests` is the guard, because a rule nobody runs is a rule that stops being true.
+It builds Device Logs with `scripts/build_plugin.sh`, signs it, installs it to Application Support,
+loads it **through the allowlist rather than by location**, and asserts it offers the same five
+tools as the shipped copy. Opt in with `TEST_RUNNER_THREADING_PLUGIN_PARITY=1` — `xcodebuild`
+forwards an environment variable to the test process only under that prefix, and the bare name looks
+like it worked while every case quietly skips. It builds once per class: the first test `dlopen`s
+the installed bundle, so a second build rewrites a mapped binary and fails as a script error rather
+than a verdict.
+
+### Two things a third party still cannot do
+
+**Load anything at all.** `allowedTeams` holds Threading's signing team and nothing else, and the
+app ships `disable-library-validation`, so the allowlist is the entire protection: a bundle in the
+plugins folder runs in this process with AppKit, the user's files, and every TCC grant Threading
+holds. Removing the check is not opening the platform, it is a delivery path. The right shape is to
+change *what* it permits — signature still required, but the gate becomes a recorded, revocable
+per-plugin decision by the user, which is the pattern `ConfirmationPrompt` already uses for the
+device-log tap. That is the next slice, and it is a security review rather than a refactor.
+
+**Get the design system.** `ThreadingPluginKit` and `ThreadingDesignKit` are `path:` packages inside
+this repository, so an outsider can write a plugin but cannot compile against the contract, let
+alone make it look like Threading. Publishing the plugin kit is small and clearly right: it is the
+contract, it is versioned, and it is what the tier means. Publishing the design kit is a much larger
+decision — it is 80 files of the app's own UI layer with vendored dependencies behind it, and
+shipping it is an API-stability commitment. Until that is decided, `PluginTheme`'s tokens are the
+third-party route to looking right and `ThreadingDesignKit` is a first-party luxury. That asymmetry
+should be a decision on the record, not a thing that quietly became true.
 
 ## Reopen / revisit triggers
 

@@ -1306,10 +1306,10 @@ final class MCPWireTests: XCTestCase {
   @MainActor
   func testExternalToolRegistryRoutesWithoutKnowingTheProviderImplementation() {
     let registry = MCPExternalToolRegistry.shared
-    let previous = registry.provider
+    let previous = registry.providers
     let provider = StubExternalToolProvider()
-    registry.provider = provider
-    defer { registry.provider = previous }
+    registry.replaceProviders(with: [provider])
+    defer { registry.replaceProviders(with: previous) }
 
     var response: MCPExternalToolResponse?
     let routed = registry.invokeTool(

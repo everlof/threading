@@ -125,6 +125,12 @@ final class MCPExternalToolRegistry {
         providers.append(provider)
     }
 
+    /// Replaces the whole list. For a test that wants one known provider and its own teardown; the
+    /// application registers rather than assigns, because each tier owns its own.
+    func replaceProviders(with replacement: [any MCPExternalToolProvider]) {
+        providers = replacement
+    }
+
     /// Announces that a provider's tools changed without changing the list itself — a plugin
     /// loading brings tools with it.
     func toolsDidChange() {
