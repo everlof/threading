@@ -418,7 +418,11 @@ final class AppSettingDefinitionTests: XCTestCase {
     @MainActor
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
+#if DEBUG || THREADING_INTERNAL
+        XCTAssertEqual(authoredRows.count, 84)
+#else
         XCTAssertEqual(authoredRows.count, 83)
+#endif
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
             authoredRows.count
@@ -492,16 +496,21 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Files & Folders", "Notifications", "Accessibility", "Screen Recording",
             "Live usage from your Claude login"
         ])
-        // The background host's rows are last on the page and are ordered after Start Over
+        // The background host's rows are ordered after Start Over
         // deliberately: the page reads as "where things are, how to start over, and what is still
         // running when Threading is not". The two command-line-tool rows close it out, because
-        // reaching the daemon from a terminal is the last thing in that sentence.
-        XCTAssertEqual(actual["advanced"], [
+        // reaching the daemon from a terminal is the last thing in that sentence. Internal builds
+        // then append the deliberately secluded developer-only service identity.
+        var expectedAdvanced = [
             "Allow paired-iPhone checkups", "Settings", "Projects, sessions and caches",
             "First-launch walkthrough", "Run at next launch", "Reset settings",
             "Reset everything", "Background host", "Turn off the background host",
             "Command line tool", "Tools in Threading's terminals"
-        ])
+        ]
+#if DEBUG || THREADING_INTERNAL
+        expectedAdvanced.append("Hosted service")
+#endif
+        XCTAssertEqual(actual["advanced"], expectedAdvanced)
     }
 
     @MainActor

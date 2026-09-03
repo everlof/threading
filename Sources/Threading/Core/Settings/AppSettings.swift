@@ -1129,13 +1129,13 @@ final class AppSettings {
         }
     }
 
-    /// The first-party hosted service selected by a development build.
+    /// The first-party hosted service selected by a developer-enabled build.
     ///
-    /// A release installed over a development build shares its defaults domain, so the release
-    /// getter deliberately refuses to inherit a stored development endpoint.
+    /// A public release installed over an internal build shares its defaults domain, so the
+    /// public getter deliberately refuses to inherit a stored development endpoint.
     var remoteHostedServiceEnvironment: RemoteHostedServiceEnvironment {
         get {
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
             let stored = AppSettingDefinitions.remoteHostedServiceEnvironment.read(from: defaults)
             return stored.flatMap(RemoteHostedServiceEnvironment.init(rawValue:)) ?? .production
 #else
@@ -1143,7 +1143,7 @@ final class AppSettings {
 #endif
         }
         set {
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
             AppSettingDefinitions.remoteHostedServiceEnvironment.write(
                 newValue.rawValue,
                 to: defaults

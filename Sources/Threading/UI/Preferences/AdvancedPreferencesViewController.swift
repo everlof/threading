@@ -38,6 +38,13 @@ final class AdvancedPreferencesViewController: NSViewController {
     /// specific to a machine, and a hosted test must not be able to write into a real home.
     private let commandLineTools: CommandLineToolsSurface
 
+#if DEBUG || THREADING_INTERNAL
+    /// Deliberately lives on Advanced rather than beside Hosted Direct: this changes which
+    /// first-party service owns the account and push registration, not how Remote Access is
+    /// connected. The compile condition keeps the whole surface out of public releases.
+    private let hostedEnvironmentPopUp = ThemedPopUp()
+#endif
+
     // MARK: - Initialization
 
     init(
@@ -67,6 +74,9 @@ final class AdvancedPreferencesViewController: NSViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+#if DEBUG || THREADING_INTERNAL
+        configureDeveloperSettings()
+#endif
         rebuild()
         // The list is updated in place rather than by rebuilding the page: the survey's answer is
         // a value model, and the sessions in it are sized by another process.
@@ -89,7 +99,7 @@ final class AdvancedPreferencesViewController: NSViewController {
     private func rebuild() {
         view.subviews.forEach { $0.removeFromSuperview() }
 
-        let page = SettingsUI.page(title: "Advanced", sections: [
+        var sections: [NSView] = [
             SettingsUI.note(AdvancedStrings.explanation),
             SettingsUI.section(
                 AdvancedStrings.localDiagnosticsSection,
@@ -134,17 +144,26 @@ final class AdvancedPreferencesViewController: NSViewController {
                     action: #selector(resetEverything)
                 )
             ])),
-            // Last, and in the order the catalogue reports it. A settings row's order is a wire
-            // fact — `AppSettingDefinitionTests` pins it — so a section appended to the
-            // definitions is a section appended to the page, rather than two orders to keep in
-            // step. It also reads correctly: this is the page about what Threading keeps, and
-            // this is the part of it that keeps running when Threading does not.
+            // Last in the ordinary page, and in the order the catalogue reports it. A settings
+            // row's order is a wire fact — `AppSettingDefinitionTests` pins it — so a section
+            // appended to the definitions is a section appended to the page, rather than two
+            // orders to keep in step. It also reads correctly: this is the page about what
+            // Threading keeps, and this is the part of it that keeps running when Threading does
+            // not. Internal builds append their deliberately secluded developer section below.
             SettingsUI.section(
                 AdvancedStrings.backgroundSessionsSection,
                 backgroundSessionsSection()
             ),
             SettingsUI.note(AdvancedStrings.keptNote)
-        ])
+        ]
+#if DEBUG || THREADING_INTERNAL
+        sections.append(SettingsUI.section(
+            AdvancedStrings.developerSettingsSection,
+            SettingsCard(rows: developerSettingsRows())
+        ))
+#endif
+
+        let page = SettingsUI.page(title: "Advanced", sections: sections)
 
         page.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(page)
@@ -186,6 +205,51 @@ final class AdvancedPreferencesViewController: NSViewController {
             ),
         ]
     }
+
+#if DEBUG || THREADING_INTERNAL
+    private func configureDeveloperSettings() {
+        for environment in RemoteHostedServiceEnvironment.allCases {
+            let title: String
+            switch environment {
+            case .production: title = L10n.string("Production")
+            case .development: title = L10n.string("Development")
+            }
+            hostedEnvironmentPopUp.addItem(
+                ThemedMenuItem(title: title, representedValue: environment)
+            )
+        }
+        hostedEnvironmentPopUp.target = self
+        hostedEnvironmentPopUp.action = #selector(hostedServiceEnvironmentChanged)
+        hostedEnvironmentPopUp.setAccessibilityIdentifier(Identifier.hostedEnvironment)
+    }
+
+    private func developerSettingsRows() -> [NSView] {
+        hostedEnvironmentPopUp.selectItem(
+            at: RemoteHostedServiceEnvironment.allCases.firstIndex(
+                of: AppSettings.shared.remoteHostedServiceEnvironment
+            ) ?? 0
+        )
+        hostedEnvironmentPopUp.isEnabled = !RemoteHostedServiceController
+            .hasConfiguredEndpointOverride()
+
+        return [SettingsUI.row(
+            title: AdvancedStrings.hostedServiceTitle,
+            subtitle: AdvancedStrings.hostedServiceDetail,
+            control: hostedEnvironmentPopUp
+        )]
+    }
+
+    @objc private func hostedServiceEnvironmentChanged() {
+        guard let environment = hostedEnvironmentPopUp.selectedItem?.representedValue
+                as? RemoteHostedServiceEnvironment else { return }
+        RemoteAccessCoordinator.shared.setHostedServiceEnvironment(environment)
+        hostedEnvironmentPopUp.selectItem(
+            at: RemoteHostedServiceEnvironment.allCases.firstIndex(
+                of: AppSettings.shared.remoteHostedServiceEnvironment
+            ) ?? 0
+        )
+    }
+#endif
 
     /// What has no window: the sessions `threading-ptyd` is holding, and the two controls that
     /// decide whether it holds any.
@@ -627,6 +691,12 @@ final class AdvancedPreferencesViewController: NSViewController {
             alert.runModal()
         }
     }
+
+    enum Identifier {
+#if DEBUG || THREADING_INTERNAL
+        static let hostedEnvironment = "settings.advanced.hosted-environment"
+#endif
+    }
 }
 
 // MARK: - Strings
@@ -659,6 +729,15 @@ enum AdvancedStrings {
         }
     }
     static var clearDiagnosticsButton: String { L10n.string("Clear Evidence") }
+
+    static var developerSettingsSection: String { L10n.string("Developer Settings") }
+    static var hostedServiceTitle: String { L10n.string("Hosted service") }
+    static var hostedServiceDetail: String {
+        L10n.string(
+            "Chooses which Threading service Hosted Direct uses. Development keeps accounts "
+                + "and push registrations separate from Production; a launch URL override wins."
+        )
+    }
 
     static var locationsSection: String { L10n.string("Locations") }
     static var outboxLocationTitle: String { L10n.string("Report Outbox") }

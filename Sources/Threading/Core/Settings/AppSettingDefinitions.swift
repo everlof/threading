@@ -1116,13 +1116,23 @@ enum AppSettingDefinitions {
         presentations: [row("remote-access", 0, "Connection", "Remote Access",
                             ["iPhone", "remote", "sharing"])]
     )
-    /// Debug builds may select the isolated hosted service without changing their launch
-    /// environment. Release reads production regardless of this persisted development value.
+    /// Developer-enabled builds may select the isolated hosted service without changing their
+    /// launch environment. Public Release reads production regardless of a persisted development
+    /// value, and has no presentation to disclose a control it does not contain.
+#if DEBUG || THREADING_INTERNAL
+    private static let remoteHostedServiceEnvironmentPresentations = [row(
+        "advanced", 11, "Developer Settings", "Hosted service",
+        ["development", "production", "push", "control plane", "Hosted Direct"]
+    )]
+#else
+    private static let remoteHostedServiceEnvironmentPresentations: [AppSettingPresentation] = []
+#endif
     static let remoteHostedServiceEnvironment = AppSettingDescriptor<String>(
         identity: .remoteHostedServiceEnvironment,
         persistenceKey: "remoteHostedServiceEnvironment",
         absence: .registered(RemoteHostedServiceEnvironment.production.rawValue),
-        validation: .allowedStrings(Set(RemoteHostedServiceEnvironment.allCases.map(\.rawValue)))
+        validation: .allowedStrings(Set(RemoteHostedServiceEnvironment.allCases.map(\.rawValue))),
+        presentations: remoteHostedServiceEnvironmentPresentations
     )
     /// Written once the retired connection mode has been carried over to the door switches.
     ///

@@ -10374,6 +10374,17 @@
         }
       }
     },
+    "Chooses which Threading service Hosted Direct uses. Development keeps accounts and push registrations separate from Production; a launch URL override wins." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väljer vilken Threading-tjänst Hosted Direct använder. Utveckling håller konton och pushregistreringar åtskilda från Produktion; en URL-åsidosättning vid start gäller i första hand."
+          }
+        }
+      }
+    },
     "Choose…" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -14708,17 +14719,6 @@
         }
       }
     },
-    "Debug only. Development uses isolated accounts and push registrations; a launch URL override wins." : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Endast felsökningsversion. Utveckling använder separata konton och pushregistreringar; en URL-åsidosättning vid start gäller i första hand."
-          }
-        }
-      }
-    },
     "Decides for itself when to ask." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15155,6 +15155,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Identifiering av filer som nämns i %@:s utdata är avstängd i Inställningar › Allmänt. Bilder du bifogar, och de som agenten visar i panelen, visas fortfarande här."
+          }
+        }
+      }
+    },
+    "Developer Settings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Utvecklarinställningar"
           }
         }
       }
@@ -19995,6 +20006,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Direktanslutning"
+          }
+        }
+      }
+    },
+    "Hosted service" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Värdtjänst"
           }
         }
       }
@@ -36363,17 +36385,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Serverfel (%lld): %@"
-          }
-        }
-      }
-    },
-    "Service environment" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "sv" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tjänstemiljö"
           }
         }
       }

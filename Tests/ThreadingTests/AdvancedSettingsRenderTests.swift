@@ -82,6 +82,80 @@ final class AdvancedSettingsRenderTests: XCTestCase {
         XCTAssertEqual(written, 4)
     }
 
+#if DEBUG || THREADING_INTERNAL
+    /// The internal Release is the app a developer actually leaves in `/Applications`, so the
+    /// service selector must be visible there without returning a production build to Debug.
+    @MainActor
+    func testRendersDeveloperHostedServiceSelection() throws {
+        let directory = Render.directory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let previousEnvironment = AppSettings.shared.remoteHostedServiceEnvironment
+        AppSettings.shared.remoteHostedServiceEnvironment = .development
+        defer { AppSettings.shared.remoteHostedServiceEnvironment = previousEnvironment }
+        let previousTheme = AppThemeLibrary.current
+        AppThemeLibrary.apply(.system)
+        defer { AppThemeLibrary.apply(previousTheme) }
+
+        var written = 0
+        for (appearanceName, appearance) in [
+            ("light", NSAppearance.Name.aqua),
+            ("dark", NSAppearance.Name.darkAqua),
+        ] {
+            let resolvedAppearance = try XCTUnwrap(NSAppearance(named: appearance))
+            var rendered: Data?
+            var selectedEnvironment: RemoteHostedServiceEnvironment?
+            var rowIsOnThePicture = false
+            var hasThemeBoundaryViolations = false
+            resolvedAppearance.performAsCurrentDrawingAppearance {
+                let controller = AdvancedPreferencesViewController()
+                let host = self.laidOut(
+                    controller.view,
+                    width: Render.width,
+                    height: Render.height
+                )
+                host.appearance = resolvedAppearance
+                controller.view.appearance = resolvedAppearance
+                AppThemeRefresh.repaint(host)
+                host.layoutSubtreeIfNeeded()
+
+                let row = SettingsRowAnchor.find(
+                    title: AdvancedStrings.hostedServiceTitle,
+                    in: controller.view
+                )
+                row?.scrollToVisible(row?.bounds ?? .zero)
+                host.layoutSubtreeIfNeeded()
+                rowIsOnThePicture = row.map {
+                    host.bounds.contains($0.convert($0.bounds, to: host))
+                } ?? false
+                selectedEnvironment = self.descendants(of: controller.view)
+                    .compactMap { $0 as? ThemedPopUp }
+                    .first {
+                        $0.accessibilityIdentifier()
+                            == AdvancedPreferencesViewController.Identifier.hostedEnvironment
+                    }?.selectedItem?.representedValue as? RemoteHostedServiceEnvironment
+                hasThemeBoundaryViolations = !ThemeBoundaryAudit.violations(
+                    in: controller.view
+                ).isEmpty
+                rendered = self.png(of: host)
+            }
+
+            XCTAssertEqual(selectedEnvironment, .development)
+            XCTAssertTrue(rowIsOnThePicture)
+            XCTAssertFalse(hasThemeBoundaryViolations)
+
+            let url = directory.appendingPathComponent(
+                "advanced-developer-settings-development-\(appearanceName).png"
+            )
+            try XCTUnwrap(rendered).write(to: url)
+            written += 1
+        }
+
+        print("Rendered \(written) Advanced developer-settings pages to \(directory.path)")
+        XCTAssertEqual(written, 2)
+    }
+#endif
+
     /// The two command-line-tool rows, in the two states that read differently.
     ///
     /// Not installed is the first thing anyone sees. Installed-but-not-on-`PATH` is the state

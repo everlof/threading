@@ -990,6 +990,27 @@
       }
     },
     {
+      "id": "advanced-developer-settings",
+      "kind": "surface",
+      "status": "implemented",
+      "priority": "critical",
+      "title": "Advanced developer settings",
+      "description": "The real internal-build Advanced Settings page with the Hosted service control visibly selecting the isolated Development account and push-registration authority.",
+      "states": ["Development service selected"],
+      "matrix": {
+        "themes": ["System"],
+        "appearances": ["Light", "Dark"],
+        "sizes": ["Shared settings width × 900 points"]
+      },
+      "source": {
+        "path": "Tests/ThreadingTests/AdvancedSettingsRenderTests.swift",
+        "test": "ThreadingTests/AdvancedSettingsRenderTests/testRendersDeveloperHostedServiceSelection"
+      },
+      "capture": {
+        "glob": "advanced-developer-settings-*.png"
+      }
+    },
+    {
       "id": "storage-settings",
       "kind": "surface",
       "status": "implemented",

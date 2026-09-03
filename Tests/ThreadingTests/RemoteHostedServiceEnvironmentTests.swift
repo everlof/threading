@@ -20,13 +20,13 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    func testDebugEnvironmentChoicePersistsAndDefaultsToProduction() {
+    func testDeveloperEnvironmentChoicePersistsAndDefaultsToProduction() {
         let settings = AppSettings(defaults: defaults, remoteAccessIsOffered: true)
 
         XCTAssertEqual(settings.remoteHostedServiceEnvironment, .production)
         settings.remoteHostedServiceEnvironment = .development
 
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
         XCTAssertEqual(settings.remoteHostedServiceEnvironment, .development)
         XCTAssertEqual(
             defaults.string(
@@ -45,7 +45,7 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
             environment: [:]
         ))
 
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
         XCTAssertEqual(
             endpoint.baseURL,
             RemoteHostedServiceEnvironment.developmentServiceURL
@@ -58,14 +58,14 @@ final class RemoteHostedServiceEnvironmentTests: XCTestCase {
 #endif
     }
 
-    func testExplicitLaunchOverrideStillWinsInDebugBuilds() throws {
+    func testExplicitLaunchOverrideStillWinsInDeveloperBuilds() throws {
         let override = try XCTUnwrap(URL(string: "https://override.example.test"))
         let endpoint = RemoteHostedServiceController.configuredEndpoint(
             preferredEnvironment: .development,
             environment: ["THREADING_CONTROL_PLANE_URL": override.absoluteString]
         )
 
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
         XCTAssertEqual(endpoint?.baseURL, override)
         XCTAssertTrue(RemoteHostedServiceController.hasConfiguredEndpointOverride(
             environment: ["THREADING_CONTROL_PLANE_URL": override.absoluteString]

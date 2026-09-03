@@ -130,6 +130,12 @@ builder passes that commit as `THREADING_SOURCE_REVISION`, reads `ThreadingSourc
 from the finished app, and refuses the product if the two differ. The stamp is empty in ordinary
 and shipping builds; it proves only the local convergence loop's source, never a public version.
 
+The auto-installed Release also receives the `THREADING_INTERNAL` Swift compilation condition.
+That is the narrow boundary which exposes **Advanced > Developer Settings** and lets the installed
+development tool select the isolated hosted service. A public Release/archive never receives the
+condition: it compiles out the developer surface and resolves production even when the shared
+defaults domain still contains a development selection.
+
 **Its submodules come from this tree, not from GitHub.** `prepare_checkout` points every
 submodule of the clone at the corresponding `.git/modules/<name>` of the repository that ran
 the script, so a pin bumped to a commit that exists only here still builds; the outer repository

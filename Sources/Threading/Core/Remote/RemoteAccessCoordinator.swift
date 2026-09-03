@@ -1698,7 +1698,7 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
     /// Switches only the hosted control-plane plumbing. The listener, active private-network
     /// connections, and the Threading process stay alive.
     func setHostedServiceEnvironment(_ environment: RemoteHostedServiceEnvironment) {
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
         guard !hostedServiceWasInjected,
               !RemoteHostedServiceController.hasConfiguredEndpointOverride(),
               appSettings.remoteHostedServiceEnvironment != environment else { return }

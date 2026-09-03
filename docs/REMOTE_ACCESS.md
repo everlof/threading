@@ -1649,22 +1649,23 @@ an authenticated Mac submits one bounded, sanitized event and opaque registratio
 delivery. Presence remains connection-derived rather than a database heartbeat.
 
 Physical-device development uses a separate `dev.remote.threading.codes` Worker and D1 database.
-A Debug Mac selects it under **Settings > Remote Access > Service environment**; changing the
-selection replaces only Hosted Direct, leaving the local listener, private-network connections
-and app process running. `THREADING_CONTROL_PLANE_URL` remains the higher-priority launch override
-for custom and local service work. Release builds always select production, even if installed over
-a Debug build whose shared defaults domain contains `development`.
+A Debug Mac or Threading's internal auto-installed Release selects it under **Settings > Advanced
+> Developer Settings > Hosted service**; changing the selection replaces only Hosted Direct,
+leaving the local listener, private-network connections and app process running.
+`THREADING_CONTROL_PLANE_URL` remains the higher-priority launch override for custom and local
+service work. Public Release builds compile the surface out and always select production, even if
+installed over a developer build whose shared defaults domain contains `development`.
 
-A Debug Mac pointed at the development origin starts a five-minute PKCE-style browser transaction
-and opens its Cloudflare Access-protected authorization path. Access allows exact configured email
-addresses—never Everyone, a whole email domain or the one-time-PIN login method as an allow rule—
-and the Worker independently validates the signed Access assertion, issuer, application audience
-and the same email allowlist. Only the initiating Mac holds both the verifier and high-entropy
-poll secret, and the transaction is host-bound and single-use. Development sessions and host
-credentials last 24 hours and live in a Keychain item separate from production. The development
-Worker exposes neither Sign in with Apple nor issue-report intake; its app-facing routes continue
-to use their scoped session, host and device bearer credentials rather than an Access browser
-cookie.
+A developer-enabled Mac pointed at the development origin starts a five-minute PKCE-style browser
+transaction and opens its Cloudflare Access-protected authorization path. Access allows exact
+configured email addresses—never Everyone, a whole email domain or the one-time-PIN login method
+as an allow rule—and the Worker independently validates the signed Access assertion, issuer,
+application audience and the same email allowlist. Only the initiating Mac holds both the verifier
+and high-entropy poll secret, and the transaction is host-bound and single-use. Development
+sessions and host credentials last 24 hours and live in a Keychain item separate from production.
+The development Worker exposes neither Sign in with Apple nor issue-report intake; its app-facing
+routes continue to use their scoped session, host and device bearer credentials rather than an
+Access browser cookie.
 
 Scheduled expiry cleanup keeps each D1 delete to a 1,000-row page, then immediately repeats only
 the statements that filled their page. An accumulated assertion, notification, rendezvous, or

@@ -27,6 +27,9 @@
 # Accessibility, notification and screen-recording grants to that requirement, so signing every
 # build with the same identity means the grants survive the swap. An ad-hoc or development
 # signature would be a different app to macOS and would ask for all of them again, every commit.
+# `THREADING_INTERNAL` is added to this Release build alone so the installed development tool can
+# select the isolated hosted service. The public archive does not receive that compile condition
+# and remains locked to production even when both builds share the same defaults domain.
 #
 # **Why an entitlement is dropped.** Any `com.apple.developer.*` app entitlement needs a
 # provisioning profile, which an ordinary local auto-install deliberately does not use. The app's
@@ -322,6 +325,7 @@ build_the_checkout() {
         CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
         PROVISIONING_PROFILE_SPECIFIER="" \
         CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
+        'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) THREADING_INTERNAL' \
         THREADING_SOURCE_REVISION="$sha" \
         build >>"$BUILD_LOG" 2>&1 &
     local build_pid=$!

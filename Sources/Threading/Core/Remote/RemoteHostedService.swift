@@ -6,11 +6,11 @@ import Security
 import ThreadingPeerTransport
 import ThreadingRemoteKit
 
-/// Which first-party hosted control plane a development build talks to.
+/// Which first-party hosted control plane a developer-enabled build talks to.
 ///
-/// Release builds ignore the persisted choice and always resolve the production endpoint. The
-/// two services have separate credentials and push registrations, so this is a service identity,
-/// not merely a different URL for the same account.
+/// Public Release builds ignore the persisted choice and always resolve the production endpoint.
+/// The two services have separate credentials and push registrations, so this is a service
+/// identity, not merely a different URL for the same account.
 enum RemoteHostedServiceEnvironment: String, CaseIterable, Sendable {
     case production
     case development
@@ -900,7 +900,7 @@ final class RemoteHostedServiceController {
         bundle: Bundle = .main,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> PeerControlPlaneServiceEndpoint? {
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
         if let override = environment["THREADING_CONTROL_PLANE_URL"],
            let url = URL(string: override) {
             return try? PeerControlPlaneServiceEndpoint(url)
@@ -919,7 +919,7 @@ final class RemoteHostedServiceController {
     static func hasConfiguredEndpointOverride(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
         guard let override = environment["THREADING_CONTROL_PLANE_URL"],
               let url = URL(string: override) else { return false }
         return (try? PeerControlPlaneServiceEndpoint(url)) != nil
@@ -931,7 +931,7 @@ final class RemoteHostedServiceController {
     private static func configuredLocalDevelopmentAuthentication(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> Bool {
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
         environment["THREADING_CONTROL_PLANE_LOCAL_AUTH"] == "1"
 #else
         false
@@ -941,7 +941,7 @@ final class RemoteHostedServiceController {
     private static func configuredDevelopmentBrowserAuthentication(
         endpoint: PeerControlPlaneServiceEndpoint?
     ) -> Bool {
-#if DEBUG
+#if DEBUG || THREADING_INTERNAL
         endpoint?.baseURL.host?.lowercased() == "dev.remote.threading.codes"
 #else
         false

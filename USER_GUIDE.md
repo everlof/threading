@@ -2534,10 +2534,11 @@ restart, and whether it works away from home.
     where it is serving, or which admin-console setting is missing, with the button that opens it.
 - **Threading Direct**. Future, and shown only when this Mac is signed in to Threading's service.
 
-In a Debug build, **Service environment** above the ways in selects **Production** or the isolated
-**Development** service. Switching it restarts only Hosted Direct; it does not quit Threading or
-close the local and Tailscale connections. Release builds always use Production. After switching,
-open Threading on the iPhone once so its hosted push registration is refreshed for that service.
+In a Debug build or Threading's internal `/Applications` build, **Advanced > Developer Settings >
+Hosted service** selects **Production** or the isolated **Development** service. Switching it
+restarts only Hosted Direct; it does not quit Threading or close the local and Tailscale
+connections. Public releases always use Production. After switching, open Threading on the iPhone
+once so its hosted push registration is refreshed for that service.
 
 A way in that cannot carry traffic says why on its own line, with the fix beside it. If the macOS
 firewall may be blocking the listener, the page says so and where to allow it; because a Mac cannot

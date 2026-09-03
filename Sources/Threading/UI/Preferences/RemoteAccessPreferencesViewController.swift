@@ -103,9 +103,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let hostedDeleteAccountButton = ThemedButton()
     private let hostedStatusLabel = NSTextField(labelWithString: "")
     private let hostedAccountControls = NSStackView()
-#if DEBUG
-    private let hostedEnvironmentPopUp = ThemedPopUp()
-#endif
     private let inputControlDefault = ThemedSegmentedControl()
     private let phoneReportWorkspacePopUp = ThemedPopUp()
     private let openLocallyButton = ThemedButton()
@@ -275,22 +272,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         hostedAccountControls.addArrangedSubview(hostedSignInButton)
         hostedAccountControls.addArrangedSubview(hostedSignOutButton)
         hostedAccountControls.addArrangedSubview(hostedDeleteAccountButton)
-
-#if DEBUG
-        for environment in RemoteHostedServiceEnvironment.allCases {
-            let title: String
-            switch environment {
-            case .production: title = L10n.string("Production")
-            case .development: title = L10n.string("Development")
-            }
-            hostedEnvironmentPopUp.addItem(
-                ThemedMenuItem(title: title, representedValue: environment)
-            )
-        }
-        hostedEnvironmentPopUp.target = self
-        hostedEnvironmentPopUp.action = #selector(hostedServiceEnvironmentChanged)
-        hostedEnvironmentPopUp.setAccessibilityIdentifier(Identifier.hostedEnvironment)
-#endif
 
         inputControlDefault.configure(
             titles: RemoteInputControlDefault.allCases.map(\.title),
@@ -568,7 +549,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     // MARK: - Connection
 
     private func connectionCard() -> SettingsCard {
-        var rows: [NSView] = [
+        SettingsCard(rows: [
             SettingsUI.row(
                 title: "Remote Access",
                 subtitle: "Turning it off closes every connection and shared-chat link.",
@@ -596,17 +577,8 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 ),
                 control: hostedAccountControls
             ),
-        ]
-#if DEBUG
-        rows.append(SettingsUI.row(
-            title: "Service environment",
-            subtitle: "Debug only. Development uses isolated accounts and push "
-                + "registrations; a launch URL override wins.",
-            control: hostedEnvironmentPopUp
-        ))
-#endif
-        rows.append(SettingsUI.fullRow(connectionStatusRow()))
-        return SettingsCard(rows: rows)
+            SettingsUI.fullRow(connectionStatusRow())
+        ])
     }
 
     private func connectionStatusRow() -> NSView {
@@ -1066,15 +1038,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         copiedReset = nil
 
         let coordinator = RemoteAccessCoordinator.shared
-#if DEBUG
-        hostedEnvironmentPopUp.selectItem(
-            at: RemoteHostedServiceEnvironment.allCases.firstIndex(
-                of: coordinator.hostedServiceEnvironment
-            ) ?? 0
-        )
-        hostedEnvironmentPopUp.isEnabled = hostedAccountTask == nil
-            && !coordinator.hostedServiceEnvironmentIsOverridden
-#endif
         let doors = doorsPresentation(coordinator)
         inputControlDefault.selectedIndex = RemoteInputControlDefault.allCases.firstIndex(
             of: AppSettings.shared.remoteInputControlDefault
@@ -1771,17 +1734,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         refresh()
     }
 
-#if DEBUG
-    @objc private func hostedServiceEnvironmentChanged() {
-        guard hostedAccountTask == nil,
-              let environment = hostedEnvironmentPopUp.selectedItem?.representedValue
-                as? RemoteHostedServiceEnvironment else { return }
-        hostedAccountError = nil
-        RemoteAccessCoordinator.shared.setHostedServiceEnvironment(environment)
-        refresh()
-    }
-#endif
-
     /// The `lan` door. `vpn` is deliberately not selected with it: a tunnel into this network
     /// hands the phone an address inside it, so the LAN listener is what answers, and the `vpn`
     /// door is for the day a listener binds the tunnel's own address.
@@ -1972,7 +1924,6 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     /// Accessibility identifiers, built once so a test and the page cannot spell them apart.
     enum Identifier {
-        static let hostedEnvironment = "settings.remote-access.hosted-environment"
         static let discoveryToggle = "settings.remote-access.discovery"
         static let announcedName = "settings.remote-access.announced-as"
         static let wakeOnDemand = "settings.remote-access.wake-on-demand"
