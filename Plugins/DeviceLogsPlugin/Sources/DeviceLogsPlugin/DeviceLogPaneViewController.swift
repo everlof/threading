@@ -80,6 +80,17 @@ public final class DeviceLogPaneViewController: NSViewController {
     private var entries: [LogDisplayEntry] = []
     /// Folds the reader has opened.
     private var expandedGaps: Set<Int> = []
+
+    /// What the agent last did here, in the pane's own words.
+    ///
+    /// An agent can search everything this pane recorded and fold the view down to what it cares
+    /// about. Doing that invisibly would mean the person watching sees a view that changed, or a
+    /// conclusion drawn from rows they were never shown, with nothing saying who did it. Folding
+    /// already moves the controls; this covers the reading, which otherwise leaves no trace at all.
+    private var agentNote: String?
+
+    /// Ring positions an agent's search matched, marked so its reading is something you can see.
+    private var agentHits: Set<Int> = []
     private var filter = ""
     private var minimumSeverity = 0
 
@@ -470,9 +481,48 @@ public final class DeviceLogPaneViewController: NSViewController {
         filterField.stringValue = pattern
         self.minimumSeverity = minimumSeverity
         expandedGaps.removeAll()
+        agentHits.removeAll()
         recomputeVisible()
         table.reloadData()
         updateStatus()
+    }
+
+    /// Records what the agent just did, and marks what its search found.
+    ///
+    /// `hits` are matched against the ring, so older matches that have scrolled out of memory are
+    /// counted in the note but cannot be marked — saying "and 340 older" is honest where marking
+    /// nothing would imply the search found only what is on screen.
+    public func noteAgentAction(_ note: String, searching pattern: String? = nil) {
+        agentNote = note
+        agentHits.removeAll()
+        if let pattern, !pattern.isEmpty {
+            let focus = LogFocus(pattern: pattern, minimumSeverity: 0, context: 0)
+            for (index, row) in rows.enumerated() where focus.matches(row) {
+                agentHits.insert(index)
+            }
+        }
+        table.reloadData()
+        updateStatus()
+    }
+
+    /// Clears the note when the person takes the view back.
+    public func clearAgentNote() {
+        guard agentNote != nil || !agentHits.isEmpty else { return }
+        agentNote = nil
+        agentHits.removeAll()
+        table.reloadData()
+        updateStatus()
+    }
+
+    /// What the pane is saying about the agent, for a test that has to see it.
+    public var agentNoteForTesting: String? { agentNote }
+    public var agentHitsForTesting: Set<Int> { agentHits }
+    public var statusTextForTesting: String { statusLabel.stringValue }
+
+    /// Drives the same path a keystroke in the filter field takes.
+    public func simulateUserFilterEditForTesting(_ text: String) {
+        filterField.stringValue = text
+        controlTextDidChange(Notification(name: NSControl.textDidChangeNotification))
     }
 
     /// What is on screen right now, for a tool that has to answer for it.
@@ -570,9 +620,21 @@ public final class DeviceLogPaneViewController: NSViewController {
             >= document.bounds.height - Metrics.bottomSlack
     }
 
+    /// Puts the agent's note after whatever the pane was going to say.
+    private func appending(_ text: String) -> String {
+        guard let agentNote else { return text }
+        return text + " · " + agentNote
+    }
+
     private func updateStatus() {
+        // The agent's note is appended to every state, including these two. It says what happened
+        // to what the person is looking at, and dropping it in exactly the states where the pane is
+        // otherwise uninformative is where it would be missed most: a search of recorded history
+        // works perfectly well while the current source is silent or absent.
         guard !options.isEmpty else {
-            statusLabel.stringValue = L10n.string("No booted simulator or paired iPhone found.")
+            statusLabel.stringValue = appending(
+                L10n.string("No booted simulator or paired iPhone found.")
+            )
             return
         }
         // Silence is a state, not an absence of one. A device whose relay accepts the connection
@@ -580,7 +642,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         // that exact case cost an afternoon: `os_trace_relay` connects, streams nothing, and the
         // archive route through the same service works fine.
         if received == 0, let startedAt, Date().timeIntervalSince(startedAt) > Metrics.silenceGrace {
-            statusLabel.stringValue = L10n.string("Connected, but no log lines yet.")
+            statusLabel.stringValue = appending(L10n.string("Connected, but no log lines yet."))
             statusLabel.textColor = Design.Status.warning
             return
         }
@@ -590,6 +652,7 @@ public final class DeviceLogPaneViewController: NSViewController {
         if folded > 0 { parts.append("\(folded) folded") }
         parts.append("\(rate)/s")
         if let dropped = source?.dropped, dropped > 0 { parts.append("⚠︎ \(dropped)") }
+        if let agentNote { parts.append(agentNote) }
         statusLabel.stringValue = parts.joined(separator: " · ")
     }
 }
@@ -598,6 +661,8 @@ public final class DeviceLogPaneViewController: NSViewController {
 
 extension DeviceLogPaneViewController: NSTextFieldDelegate {
     public func controlTextDidChange(_ notification: Notification) {
+        // The person is driving again, so the agent's note stops describing what they are seeing.
+        clearAgentNote()
         filter = filterField.stringValue.lowercased()
         recomputeVisible()
         table.reloadData()
@@ -643,6 +708,19 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
             let entry = rows[index]
             label.stringValue = text(for: entry, column: identifier)
             label.textColor = ink(for: entry, column: identifier)
+            // A row the agent's search matched, marked in the time column: a stripe down the left
+            // that does not collide with the message weight a focus match already carries.
+            //
+            // Weight as well as colour, because colour alone did not work — an error row already
+            // draws its clock in the accent, so a hit on an error was indistinguishable from the
+            // error, and only a rendered picture showed it.
+            if agentHits.contains(index), identifier == Columns.time {
+                label.textColor = AppThemePalette.color(.accent)
+                label.font = .monospacedSystemFont(
+                    ofSize: Design.Typography.compactCode().pointSize,
+                    weight: .bold
+                )
+            }
             // The match is why the fold opened around it, so it is what the eye should land on.
             if focus.isActive, focus.matches(entry), identifier == Columns.message {
                 // Same metrics as the rows around it, heavier ink: a bolder weight at the same size

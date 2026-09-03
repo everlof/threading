@@ -615,3 +615,29 @@ price per row to change that would cost focus its ability to stay on while a dev
 
 If focus-while-streaming ever feels heavy, the structural answer is an incremental layout — only the
 tail changes when rows are appended — rather than a faster scan.
+
+## What the agent did, where you can see it
+
+An agent can search everything this pane recorded and fold the view down to what it cares about.
+Doing either invisibly is the wrong default: a view changes, or a conclusion arrives about rows the
+person was never shown, with nothing saying who did it.
+
+So `focus` moves the pane's own filter field and level chooser — the user sees the pattern that was
+typed and can undo it — and every reading tool leaves a note in the status line saying what was
+asked and how much it found. A search also **marks the rows it matched**, in bold accent on the
+clock column, so its reading is something you can scroll through rather than a number in a tool row.
+The note clears the moment the person types in the filter themselves, because a stale note
+describing someone else's view is worse than none.
+
+Two things this cost, both found by rendering rather than by reading the code:
+
+The note was being **dropped in exactly the states where it matters most**. `updateStatus` returned
+early for "no device found" and "connected, but no lines yet", so a search of recorded history while
+the current source was silent said nothing at all. Every state appends the note now.
+
+And the first marking was invisible. Hits were drawn in the accent — which is what an error row
+already draws its clock in, so a hit on an error was indistinguishable from the error, and a hit was
+easy to mistake for one. The mark carries weight as well as colour now.
+
+`visible` is deliberately unnoted: it reports what is already on screen, so there is nothing hidden
+to disclose.

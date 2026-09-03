@@ -102,4 +102,53 @@ final class DeviceLogToolsTests: XCTestCase {
         XCTAssertTrue(answer.isError)
         XCTAssertTrue(answer.text.contains("ISO 8601"), answer.text)
     }
+
+    // MARK: What the pane shows about the agent
+
+    /// An agent reading the log used to leave no trace: it could search everything recorded and
+    /// the pane looked untouched, so a conclusion arrived about rows the person was never shown.
+    func testASearchSaysSoInThePaneAndMarksWhatItFound() throws {
+        let plugin = loadedPlugin()
+        let pane = try XCTUnwrap(plugin.paneForTesting)
+        pane.installRowsForTesting((0..<40).map { index in
+            DeviceLogRow(
+                time: "13:06:00.000",
+                level: "Debug",
+                process: "apsd",
+                subsystem: nil,
+                message: index % 10 == 0 ? "socket failed" : "routine " + String(index)
+            )
+        })
+        XCTAssertNil(pane.agentNoteForTesting)
+
+        pane.noteAgentAction("agent searched \u{201C}failed\u{201D} · 4 matches", searching: "failed")
+        XCTAssertEqual(pane.agentNoteForTesting, "agent searched \u{201C}failed\u{201D} · 4 matches")
+        XCTAssertEqual(pane.agentHitsForTesting.count, 4, "every matching row is marked")
+        XCTAssertTrue(pane.statusTextForTesting.contains("agent searched"), pane.statusTextForTesting)
+    }
+
+    /// The note describes what the person is looking at, so it stops as soon as they take the view
+    /// back — a stale note is worse than none.
+    func testTypingInTheFilterClearsTheAgentsNote() throws {
+        let plugin = loadedPlugin()
+        let pane = try XCTUnwrap(plugin.paneForTesting)
+        pane.noteAgentAction("agent searched something", searching: "x")
+        pane.simulateUserFilterEditForTesting("routine")
+        XCTAssertNil(pane.agentNoteForTesting)
+        XCTAssertTrue(pane.agentHitsForTesting.isEmpty)
+    }
+
+    /// Folding is already visible in the controls; it should say who did it too.
+    func testFocusingLeavesANoteAndClearingRemovesIt() throws {
+        let plugin = loadedPlugin()
+        let pane = try XCTUnwrap(plugin.paneForTesting)
+        pane.installRowsForTesting([
+            DeviceLogRow(time: "13:06:00.000", level: "Error", process: "apsd",
+                         subsystem: nil, message: "socket failed")
+        ])
+        _ = call(plugin, DeviceLogToolNames.focus, #"{"pattern":"failed"}"#)
+        XCTAssertEqual(pane.agentNoteForTesting, "agent focused on \u{201C}failed\u{201D}")
+        _ = call(plugin, DeviceLogToolNames.clearFocus)
+        XCTAssertNil(pane.agentNoteForTesting, "clearing the focus clears the note with it")
+    }
 }

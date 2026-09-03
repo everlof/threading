@@ -117,6 +117,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 }
                 pane.applyFocus(pattern: pattern, minimumSeverity: severity)
                 let summary = pane.focusSummary
+                pane.noteAgentAction(Self.note(focusing: pattern, severity: severity))
                 completion(
                     "Focused. \(summary.shown) of \(summary.total) rows shown, "
                         + "\(summary.folded) folded into markers the user can open.",
@@ -124,6 +125,7 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 )
             case DeviceLogToolNames.clearFocus:
                 pane.applyFocus(pattern: "", minimumSeverity: 0)
+                pane.clearAgentNote()
                 completion("Cleared. All \(pane.focusSummary.total) rows are shown.", false)
             case DeviceLogToolNames.visible:
                 let rows = pane.visibleRowsForTools(limit: DeviceLogToolLimits.rowsPerAnswer)
@@ -138,6 +140,21 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
                 completion("Device logs has no tool called \(name).", true)
             }
         }
+    }
+
+    /// What the footer says the agent did. Short, because it shares a line with the row count and
+    /// the rate, and a note nobody can read past is not visibility.
+    private static func note(searched text: String, matches: Int) -> String {
+        "agent searched \u{201C}\(text)\u{201D} · \(matches) \(matches == 1 ? "match" : "matches")"
+    }
+
+    private static func note(focusing pattern: String, severity: Int) -> String {
+        if pattern.isEmpty { return "agent focused on level" }
+        return "agent focused on \u{201C}\(pattern)\u{201D}"
+    }
+
+    private static func note(range total: Int) -> String {
+        "agent read a time range · \(total) \(total == 1 ? "row" : "rows")"
     }
 
     /// Both readers ask the store on the queue that owns it, so the reply arrives off the main
@@ -163,6 +180,15 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
         }) { result in
             switch result {
             case .success(let (total, rows)):
+                // The reply arrives on the queue that owns the store, and the pane is main-actor.
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        pane.noteAgentAction(
+                            Self.note(searched: text, matches: total),
+                            searching: text
+                        )
+                    }
+                }
                 completion(
                     DeviceLogToolFormatting.answer(
                         rows: rows, total: total, subject: "matching \"\(text)\""
@@ -204,6 +230,11 @@ public final class DeviceLogsPlugin: NSObject, ThreadingNativePlugin {
         }) { result in
             switch result {
             case .success(let (total, rows)):
+                DispatchQueue.main.async {
+                    MainActor.assumeIsolated {
+                        pane.noteAgentAction(Self.note(range: total))
+                    }
+                }
                 completion(
                     DeviceLogToolFormatting.answer(rows: rows, total: total, subject: "in that range"),
                     false

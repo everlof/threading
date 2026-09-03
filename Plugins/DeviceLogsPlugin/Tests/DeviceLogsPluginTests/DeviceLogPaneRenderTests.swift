@@ -212,4 +212,30 @@ final class DeviceLogPaneRenderTests: XCTestCase {
                 .appendingPathComponent("device-log-pane-focused.png"))
         }
     }
+
+    /// What an agent's search looks like from the outside: the marked rows it found, and a footer
+    /// saying what it asked for. Drawn, because "the agent did something invisible" is exactly the
+    /// failure this is meant to prevent and it is a visual claim.
+    @MainActor
+    func testRendersAPaneAnAgentHasSearched() throws {
+        let controller = DeviceLogPaneViewController(owningSessionID: UUID().uuidString)
+        controller.loadView()
+        controller.installRowsForTesting(fixtureRows())
+        // A pattern that hits ordinary rows as well as an error one: the mark has to be legible
+        // on both, and the first attempt at it was not.
+        controller.noteAgentAction("agent searched \u{201C}entry 1\u{201D} · 11 matches",
+                                   searching: "entry 1")
+        let host = laidOut(controller.view, width: 900, height: 460)
+        host.wantsLayer = true
+        host.layer?.backgroundColor = Design.Surface.ground.cgColor
+        let rep = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+        host.cacheDisplay(in: host.bounds, to: rep)
+        let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+        XCTAssertGreaterThan(png.count, 2_000, "the searched render came out blank")
+        if let directory = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
+           !directory.isEmpty {
+            try png.write(to: URL(fileURLWithPath: directory)
+                .appendingPathComponent("device-log-pane-agent-searched.png"))
+        }
+    }
 }
