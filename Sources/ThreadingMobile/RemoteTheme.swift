@@ -36,6 +36,22 @@ enum MobileDesign {
         /// The icon-only chrome control: the dashboard's toolbar circles and the plus that
         /// starts a chat in a project. One size keeps them reading as the same kind of thing.
         static let compactControl: CGFloat = 34
+        /// The mark inside a compact glyph control — the paperclip, the draft's one-glyph menus —
+        /// as the point size of the subheadline face they draw in. Read when asked rather than
+        /// stored: it follows the reader's text size.
+        static var compactControlGlyph: CGFloat { glyph(.subheadline) }
+        /// The mark inside a glyph control drawn in `textStyle`: that face's point size.
+        static func glyph(_ textStyle: UIFont.TextStyle) -> CGFloat {
+            UIFont.preferredFont(forTextStyle: textStyle).pointSize
+        }
+        /// The padding a control holds around its visible mark, `(target − mark) / 2` by
+        /// construction: the Mac's `ThemedIconButton.opticalHorizontalInset`, stated for the
+        /// phone. A container that stands the control on a margin pulls its frame outward by
+        /// this much, so the *ink* meets the margin a filled control's plate already stands on.
+        /// Equal frame margins are not equal visual margins.
+        static func opticalInset(target: CGFloat, mark: CGFloat) -> CGFloat {
+            max(0, (target - mark) / 2)
+        }
         /// The dashboard's floating bottom pills: the search field and the chat starter riding
         /// above the home indicator. Taller than the minimum tap target because they are the
         /// page's primary actions and float over content rather than sitting in a chrome row.

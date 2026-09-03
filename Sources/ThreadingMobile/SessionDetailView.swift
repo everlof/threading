@@ -2199,14 +2199,20 @@ private struct TerminalLineComposer: View {
                         .font(.body)
                         .foregroundStyle(theme.secondaryLabel)
                         .padding(.top, TerminalLinePromptMetrics.textInsets.top)
-                        .padding(.leading, MobileDesign.Size.minimumTapTarget)
+                        .padding(.leading, TerminalLinePromptMetrics.leadingAccessoryWidth)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
                 }
             }
             // Both controls retain their full 44-point targets. They occupy only the first line,
             // while the editor's text-container exclusions let every later line run beneath.
-            .overlay(alignment: .topLeading) { attachmentMenu }
+            // The paperclip stands on the margin by its glyph: the padding its target holds
+            // around the mark is pulled out over the composer's own inset, the way the Mac
+            // composer places its import button. The send plate's ink is its frame.
+            .overlay(alignment: .topLeading) {
+                attachmentMenu
+                    .padding(.leading, -TerminalLinePromptMetrics.attachmentOpticalInset)
+            }
             .overlay(alignment: .topTrailing) { sendButton }
             .padding(.horizontal, MobileDesign.Spacing.inset)
             .padding(.vertical, MobileDesign.Spacing.small)
@@ -2544,7 +2550,7 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
         view.accessibilityLabel = MobileL10n.string("Compose on this device…")
         view.minimumIntrinsicHeight = MobileDesign.Size.minimumTapTarget
         view.maximumIntrinsicHeight = TerminalLinePromptMetrics.maximumHeight
-        view.firstLineLeadingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineLeadingAccessoryWidth = TerminalLinePromptMetrics.leadingAccessoryWidth
         view.firstLineTrailingAccessoryWidth = MobileDesign.Size.minimumTapTarget
         view.firstLineAccessoryHeight = MobileDesign.Size.minimumTapTarget
         return view
@@ -2562,7 +2568,7 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
         view.tintColor = theme.uiAccent
         view.minimumIntrinsicHeight = MobileDesign.Size.minimumTapTarget
         view.maximumIntrinsicHeight = TerminalLinePromptMetrics.maximumHeight
-        view.firstLineLeadingAccessoryWidth = MobileDesign.Size.minimumTapTarget
+        view.firstLineLeadingAccessoryWidth = TerminalLinePromptMetrics.leadingAccessoryWidth
         view.firstLineTrailingAccessoryWidth = MobileDesign.Size.minimumTapTarget
         view.firstLineAccessoryHeight = MobileDesign.Size.minimumTapTarget
 
@@ -2639,6 +2645,20 @@ struct TerminalLinePromptEditor: UIViewRepresentable {
 private enum TerminalLinePromptMetrics {
     static let maximumLines: CGFloat = 5
     static var font: UIFont { .preferredFont(forTextStyle: .body) }
+
+    /// The paperclip is a headline glyph centred in the full target. The row stands it on the
+    /// composer's margin by the glyph, pulling the target out by the air it holds around the
+    /// mark, and the first line keeps clear of the target only as far as it reaches inboard.
+    static var attachmentOpticalInset: CGFloat {
+        MobileDesign.Size.opticalInset(
+            target: MobileDesign.Size.minimumTapTarget,
+            mark: MobileDesign.Size.glyph(.headline)
+        )
+    }
+
+    static var leadingAccessoryWidth: CGFloat {
+        MobileDesign.Size.minimumTapTarget - attachmentOpticalInset
+    }
     static var textInsets: UIEdgeInsets {
         let vertical = max(
             0,

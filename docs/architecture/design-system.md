@@ -1381,6 +1381,19 @@ The vocabulary these encode, which new work should follow:
   re-lays out only the recycled row under the pointer, so session cardinality never reaches that
   path.
 
+  The phone keeps the rule with the same arithmetic. `MobileDesign.Size.opticalInset(target:mark:)`
+  is `(target − mark) / 2`, and the new-session draft's composer pulls its paperclip and its send
+  disc out over the margin by exactly that, so the glyph's ink and the disc's edge stand on the
+  line the choice strip's first chip starts on beneath them — each inside a full 44pt target that
+  hangs past the compact row sideways and above, and below its mark only while the prompt is one
+  line, which is what made the disc, until then a 34pt target on its own, stop being easy to miss
+  without a target ever standing over the second line's words. The existing-session composer's
+  paperclip takes the same pull.
+  The strip's one-glyph menus align the other way round: the glyph sits on its frame's trailing
+  edge, so the last one meets the margin whatever symbol it draws. Those symbols differ in width
+  — the terminal is wider than it is tall — and a pull sized to the point size, exact to a third
+  of a point for the paperclip, would have put the terminal two points past the line.
+
   **The expansion is one geometry, not one per state — and the pair takes the edge.** The archive
   button sits in the very column the status mark occupies, and the two *crossfade in place*: the
   status fades out as the actions fade in, inside a geometry that holds still. This is the second

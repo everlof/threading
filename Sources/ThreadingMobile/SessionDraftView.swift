@@ -294,6 +294,9 @@ private struct SessionDraftComposerScreen: View {
     /// The first-line actions then need their own fixed row instead of remaining over the scroll
     /// viewport while the line whose exclusions they share disappears above it.
     @State private var promptIsOverflowing = false
+    /// Whether the prompt has wrapped to a second line, which is where the first-line targets
+    /// stop reaching below their marks; see `firstLineTarget(around:hangsBelow:)`.
+    @State private var promptWraps = false
 
     /// What the empty prompt suggests. One is drawn per draft, so the set has to be large
     /// enough that a person starting several chats in a sitting does not see the same line
@@ -738,8 +741,8 @@ private struct SessionDraftComposerScreen: View {
         ((promptIsFocused && !keyboardIsLeaving) || anyChooserIsPresented) && !isSubmitting
     }
 
-    /// A chooser drops the keyboard for the room it needs, but it is still the composer being
-    /// edited: the strip it was opened from stays unfolded beneath it, and the prompt takes the
+    /// A chooser is still the composer being edited: the strip it was opened from stays
+    /// unfolded beneath it whether or not the keyboard is standing, and the prompt takes the
     /// keyboard back when it closes, so choosing a model does not end the writing.
     private var showsFoldedSummary: Bool {
         !showsChoices && !isSubmitting
@@ -747,6 +750,17 @@ private struct SessionDraftComposerScreen: View {
 
     private var anyChooserIsPresented: Bool {
         runPickerIsPresented || speedChooserIsPresented || permissionChooserIsPresented
+    }
+
+    /// A chooser opens over the keyboard, where the writing is, and the keyboard stays: the
+    /// model-by-effort matrix stands above the composer on an iPhone 17 Pro with room to spare.
+    /// Every chooser used to drop the keyboard first, for the height it *might* need, which
+    /// made picking a model a two-keyboard-animation detour on a phone that had the room. The
+    /// popover now measures itself against the screen (`MobileThemedPopoverRoom`) and asks for
+    /// the keyboard's room only where there is none — an iPhone SE — by ending focus here; the
+    /// prompt takes the keyboard back when the chooser closes, as it always did.
+    private func makeRoomForChooser() {
+        promptIsFocused = false
     }
 
     /// What the folded composer says instead of nothing: the run it is set up for, in one
@@ -780,11 +794,11 @@ private struct SessionDraftComposerScreen: View {
             VStack(alignment: .leading, spacing: 0) {
                 if promptIsOverflowing {
                     HStack(spacing: MobileDesign.Spacing.small) {
-                        if attachmentTray != nil { attachmentButton }
+                        if attachmentTray != nil { attachmentButtonOnMargin(hangsBelow: true) }
                         Spacer(minLength: 0)
-                        sendButton
+                        sendButtonOnMargin(hangsBelow: true)
                     }
-                    .frame(height: MobileDesign.Size.compactControl)
+                    .frame(height: SessionDraftPromptMetrics.controlRow)
                     // The send disc sits over full-width text here; the editor's own top inset
                     // alone left the disc reading as resting on the first line.
                     .padding(.bottom, MobileDesign.Spacing.tight)
@@ -795,19 +809,24 @@ private struct SessionDraftComposerScreen: View {
             // whole draft. TextKit excludes their footprints from that line; every later line
             // reclaims the composer's full width beneath them.
             .overlay(alignment: .topLeading) {
-                if !promptIsOverflowing, attachmentTray != nil { attachmentButton }
+                if !promptIsOverflowing, attachmentTray != nil {
+                    attachmentButtonOnMargin(hangsBelow: !promptWraps)
+                }
             }
             .overlay(alignment: .topTrailing) {
-                if !promptIsOverflowing { sendButton }
+                if !promptIsOverflowing { sendButtonOnMargin(hangsBelow: !promptWraps) }
             }
             // Folded to nothing rather than removed: the chips are menus, and a menu that is
             // unmounted under a finger cannot finish what it was asked. Clipping keeps the
-            // folded row from painting over the prompt's last line.
+            // folded row from painting over the prompt's last line. The air above the strip
+            // comes after the clip: a clip is a hit shape as well, and with the padding inside
+            // it the strip's empty top eight points took the taps the send target reaches down
+            // for — a tap two points under the disc did nothing.
             choiceStrip
                 .frame(height: showsChoices ? MobileDesign.Size.compactControl : 0)
-                .padding(.top, showsChoices ? MobileDesign.Spacing.small : 0)
                 .opacity(showsChoices ? 1 : 0)
                 .clipped()
+                .padding(.top, showsChoices ? MobileDesign.Spacing.small : 0)
                 .allowsHitTesting(showsChoices)
                 .accessibilityHidden(!showsChoices)
             // The folded composer says what it is set up for rather than nothing. Not while
@@ -820,11 +839,12 @@ private struct SessionDraftComposerScreen: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: showsFoldedSummary ? SessionDraftMetrics.foldedSummaryHeight : 0)
-                .padding(.top, showsFoldedSummary ? MobileDesign.Spacing.tight : 0)
                 .opacity(showsFoldedSummary ? 1 : 0)
                 .clipped()
                 .contentShape(Rectangle())
                 .onTapGesture { promptIsFocused = true }
+                // The air above the line comes after its hit shape, for the strip's reason.
+                .padding(.top, showsFoldedSummary ? MobileDesign.Spacing.tight : 0)
                 .allowsHitTesting(showsFoldedSummary)
                 .accessibilityHidden(!showsFoldedSummary)
         }
@@ -863,7 +883,7 @@ private struct SessionDraftComposerScreen: View {
                 pasteFiles: stageClipboardFiles,
                 firstLineLeadingAccessoryWidth: promptFirstLineLeadingAccessoryWidth,
                 firstLineTrailingAccessoryWidth: promptFirstLineTrailingAccessoryWidth,
-                firstLineAccessoryHeight: MobileDesign.Size.compactControl,
+                firstLineAccessoryHeight: SessionDraftPromptMetrics.controlRow,
                 firstLineAccessoriesInline: !promptIsOverflowing
             )
             .mobileUIEvidenceKeyboardFocus($promptIsFocused)
@@ -887,7 +907,16 @@ private struct SessionDraftComposerScreen: View {
                     .accessibilityHidden(true)
             }
         }
-        .frame(minHeight: MobileDesign.Size.compactControl)
+        .frame(minHeight: SessionDraftPromptMetrics.controlRow)
+        // Whether the prompt has a second line, read from the height the editor took. The
+        // first-line targets stop hanging below their marks once it has.
+        .onGeometryChange(for: Bool.self) { proxy in
+            proxy.size.height > SessionDraftPromptMetrics.wrapThreshold(
+                for: UIFont.preferredFont(forTextStyle: .body)
+            )
+        } action: { wraps in
+            promptWraps = wraps
+        }
     }
 
     /// The inline actions' footprints, stated whether or not the actions are currently inline.
@@ -904,16 +933,58 @@ private struct SessionDraftComposerScreen: View {
         SessionDraftPromptMetrics.trailingAccessoryExclusionWidth
     }
 
-    private var attachmentButton: some View {
+    /// The two controls stood on the composer's margins by their marks, not their frames. Each
+    /// is the full iPhone target centred on what it shows — the paperclip's glyph, the send
+    /// disc — and the target's overhang past that mark is pulled out over the margin, where
+    /// nothing else stands. The first line's exclusions begin where the targets end, so a tap
+    /// on its words never lands on a control. The row subtracts what the control's own
+    /// geometry states rather than a number of its own, the way the Mac composer places its
+    /// import button by `ThemedIconButton.opticalHorizontalInset`: aligned by frame, the
+    /// paperclip's ink stood nine points inboard of the chip the strip starts with beneath it.
+    private func attachmentButtonOnMargin(hangsBelow: Bool) -> some View {
+        attachmentButton(hangsBelow: hangsBelow)
+            .padding(.leading, -SessionDraftPromptMetrics.attachmentOpticalInset)
+            .padding(.top, -SessionDraftPromptMetrics.targetOverhang)
+    }
+
+    private func sendButtonOnMargin(hangsBelow: Bool) -> some View {
+        sendButton(hangsBelow: hangsBelow)
+            .padding(.trailing, -SessionDraftPromptMetrics.sendOpticalInset)
+            .padding(.top, -SessionDraftPromptMetrics.targetOverhang)
+    }
+
+    /// The full iPhone target around a first-line mark the row lays out at its compact height.
+    /// Above the mark it hangs into the composer's own padding; below it, only while the prompt
+    /// is one line, because under a wrapped prompt that air is the second line, and a target
+    /// over words sends what a caret tap meant to edit. The disc alone was the target before,
+    /// and a tap a few points low fell into the icon menu the choice strip keeps beneath it.
+    private func firstLineTarget(around mark: some View, hangsBelow: Bool) -> some View {
+        let overhang = SessionDraftPromptMetrics.targetOverhang
+        return mark
+            .padding(.top, overhang)
+            .frame(
+                width: SessionDraftPromptMetrics.controlTarget,
+                height: SessionDraftPromptMetrics.controlRow + overhang
+                    + (hangsBelow ? overhang : 0),
+                alignment: .top
+            )
+            .contentShape(Rectangle())
+    }
+
+    /// The paperclip in its compact slot. The subheadline face is what
+    /// `MobileDesign.Size.compactControlGlyph` measures the mark by.
+    private func attachmentButton(hangsBelow: Bool) -> some View {
         Button(action: beginChoosingAttachmentSource) {
-            Image(systemName: "paperclip")
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(theme.secondaryLabel)
-                .frame(
-                    width: MobileDesign.Size.compactControl,
-                    height: MobileDesign.Size.compactControl
-                )
-                .contentShape(Rectangle())
+            firstLineTarget(
+                around: Image(systemName: "paperclip")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(theme.secondaryLabel)
+                    .frame(
+                        width: MobileDesign.Size.compactControl,
+                        height: MobileDesign.Size.compactControl
+                    ),
+                hangsBelow: hangsBelow
+            )
         }
         .buttonStyle(.plain)
         .disabled(isSubmitting || attachmentTray?.canAcceptMore != true)
@@ -961,32 +1032,36 @@ private struct SessionDraftComposerScreen: View {
         }
     }
 
-    private var sendButton: some View {
+    /// The toolbar circles' disc, in the first-line target.
+    private func sendButton(hangsBelow: Bool) -> some View {
         Button {
             submit()
         } label: {
-            ZStack {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 15, weight: .bold))
-                    .opacity(isSubmitting ? 0 : 1)
-                ProgressView()
-                    // The ink chosen against the accent itself, like the arrow it replaces.
-                    // `ground` was near-invisible on the accent disc: a dark theme's ground
-                    // over an orange accent is orange-on-orange.
-                    .tint(theme.accentForeground)
-                    .opacity(isSubmitting ? 1 : 0)
-            }
-            .frame(
-                width: MobileDesign.Size.compactControl,
-                height: MobileDesign.Size.compactControl
+            firstLineTarget(
+                around: ZStack {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 15, weight: .bold))
+                        .opacity(isSubmitting ? 0 : 1)
+                    ProgressView()
+                        // The ink chosen against the accent itself, like the arrow it
+                        // replaces. `ground` was near-invisible on the accent disc: a dark
+                        // theme's ground over an orange accent is orange-on-orange.
+                        .tint(theme.accentForeground)
+                        .opacity(isSubmitting ? 1 : 0)
+                }
+                .frame(
+                    width: MobileDesign.Size.compactControl,
+                    height: MobileDesign.Size.compactControl
+                )
+                .background(
+                    canSubmit || isSubmitting ? theme.accent : theme.controlResting,
+                    in: Circle()
+                ),
+                hangsBelow: hangsBelow
             )
         }
         .buttonStyle(.plain)
         .foregroundStyle(canSubmit || isSubmitting ? theme.accentForeground : theme.tertiaryLabel)
-        .background(
-            canSubmit || isSubmitting ? theme.accent : theme.controlResting,
-            in: Circle()
-        )
         .disabled(!canSubmit)
         .accessibilityLabel(MobileL10n.string("Start session"))
     }
@@ -1134,9 +1209,6 @@ private struct SessionDraftComposerScreen: View {
     /// choice beside it. All three draft choosers share the theme-owned popover chrome below.
     private var runMenu: some View {
         Button {
-            // A chooser needs the height the keyboard is standing on; the prompt regains focus
-            // as soon as the reader taps back into it.
-            promptIsFocused = false
             runPickerIsPresented = true
         } label: {
             DraftMenuLabel(symbol: "cpu", title: runSummary)
@@ -1149,7 +1221,8 @@ private struct SessionDraftComposerScreen: View {
         .mobileThemedPopover(
             isPresented: $runPickerIsPresented,
             theme: theme,
-            arrowEdge: .bottom
+            arrowEdge: .bottom,
+            makeRoom: makeRoomForChooser
         ) {
             MobileModelEffortPicker(
                 models: models,
@@ -1174,7 +1247,6 @@ private struct SessionDraftComposerScreen: View {
 
     private var speedMenu: some View {
         Button {
-            promptIsFocused = false
             speedChooserIsPresented = true
         } label: {
             DraftMenuLabel(
@@ -1191,7 +1263,8 @@ private struct SessionDraftComposerScreen: View {
         .mobileThemedPopover(
             isPresented: $speedChooserIsPresented,
             theme: theme,
-            arrowEdge: .bottom
+            arrowEdge: .bottom,
+            makeRoom: makeRoomForChooser
         ) {
             MobileDraftChooser(
                 title: MobileL10n.string("Speed"),
@@ -1251,7 +1324,6 @@ private struct SessionDraftComposerScreen: View {
 
     private var permissionMenu: some View {
         Button {
-            promptIsFocused = false
             permissionChooserIsPresented = true
         } label: {
             DraftIconMenuLabel(symbol: selectedPermissionSymbol, isSet: !permissionID.isEmpty)
@@ -1263,7 +1335,8 @@ private struct SessionDraftComposerScreen: View {
         .mobileThemedPopover(
             isPresented: $permissionChooserIsPresented,
             theme: theme,
-            arrowEdge: .bottom
+            arrowEdge: .bottom,
+            makeRoom: makeRoomForChooser
         ) {
             MobileDraftChooser(
                 title: MobileL10n.string("Permissions"),
@@ -1687,7 +1760,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         view.adjustsFontForContentSizeCategory = true
         view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         view.accessibilityLabel = MobileL10n.string("Prompt")
-        view.minimumIntrinsicHeight = MobileDesign.Size.compactControl
+        view.minimumIntrinsicHeight = SessionDraftPromptMetrics.controlRow
         view.maximumIntrinsicHeight = SessionDraftPromptMetrics.maximumHeight(for: font)
         view.firstLineLeadingAccessoryWidth = firstLineLeadingAccessoryWidth
         view.firstLineTrailingAccessoryWidth = firstLineTrailingAccessoryWidth
@@ -1711,7 +1784,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
         view.tintColor = theme.uiAccent
         view.isEditable = isEnabled
         view.isSelectable = true
-        view.minimumIntrinsicHeight = MobileDesign.Size.compactControl
+        view.minimumIntrinsicHeight = SessionDraftPromptMetrics.controlRow
         view.maximumIntrinsicHeight = SessionDraftPromptMetrics.maximumHeight(for: font)
         view.firstLineLeadingAccessoryWidth = firstLineLeadingAccessoryWidth
         view.firstLineTrailingAccessoryWidth = firstLineTrailingAccessoryWidth
@@ -1763,7 +1836,7 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
             CGSize(width: width, height: .greatestFiniteMagnitude)
         )
         let height = min(
-            max(measured.height, MobileDesign.Size.compactControl),
+            max(measured.height, SessionDraftPromptMetrics.controlRow),
             uiView.maximumIntrinsicHeight
         )
         context.coordinator.cachedMeasurement = (key, height)
@@ -1828,26 +1901,59 @@ struct SessionDraftPromptEditor: UIViewRepresentable {
 private enum SessionDraftPromptMetrics {
     static let maximumLines: CGFloat = 6
 
-    /// The compact control plus the gap the old horizontal stack held beside it. The exclusion
-    /// preserves that first-line air while allowing every later line to use those points.
-    static let accessoryExclusionWidth =
-        MobileDesign.Size.compactControl + MobileDesign.Spacing.small
+    /// The first line is the compact row the choice strip beneath it is, and its two controls
+    /// are the full iPhone target around a mark that row lays out — the paperclip's glyph, the
+    /// send disc. The row stands each on the composer's margin by that mark: the target's
+    /// overhang past the mark is its optical inset, pulled out over the margin. Vertically the
+    /// target hangs `targetOverhang` above the row, and below it only under a one-line prompt
+    /// (`firstLineTarget(around:hangsBelow:)`), so the second line starts where it always did.
+    static let controlRow = MobileDesign.Size.compactControl
+    static let controlTarget = MobileDesign.Size.minimumTapTarget
+    static let targetOverhang = MobileDesign.Size.opticalInset(
+        target: controlTarget,
+        mark: controlRow
+    )
+    /// The editor height above which the prompt has a second line. One line is not exactly the
+    /// row: TextKit's line fragment runs two points past the font's nominal line height, so a
+    /// one-line body editor stands 36 tall against a 34 row. A second line adds a whole line,
+    /// so half of one separates the two states whatever the reader's text size.
+    static func wrapThreshold(for font: UIFont) -> CGFloat {
+        controlRow + font.lineHeight / 2
+    }
+
+    /// Read when asked: the glyph follows the reader's text size.
+    static var attachmentOpticalInset: CGFloat {
+        MobileDesign.Size.opticalInset(
+            target: controlTarget,
+            mark: MobileDesign.Size.compactControlGlyph
+        )
+    }
+
+    static let sendOpticalInset = MobileDesign.Size.opticalInset(
+        target: controlTarget,
+        mark: MobileDesign.Size.compactControl
+    )
+
+    /// What the first line keeps clear of words: the control's target as far as it reaches into
+    /// the line — measured from the margin, so the overhang pulled out over it is not counted —
+    /// plus the gap the old horizontal stack held beside it. Every later line uses those points.
+    static var accessoryExclusionWidth: CGFloat {
+        controlTarget - attachmentOpticalInset + MobileDesign.Spacing.small
+    }
 
     /// The send control is a filled accent disc, not a bare glyph like the paperclip, and text
     /// running the standard gap up to a solid plate reads as touching it. Its exclusion holds
     /// wider air.
-    static let trailingAccessoryExclusionWidth =
-        MobileDesign.Size.compactControl + MobileDesign.Spacing.medium
+    static var trailingAccessoryExclusionWidth: CGFloat {
+        controlTarget - sendOpticalInset + MobileDesign.Spacing.medium
+    }
 
-    /// A compact editor shares its first row with two compact controls. `UITextView` otherwise
-    /// puts a zero-inset line against the row's top while both glyphs are centred, which is the
-    /// visual split in the issue report. Keep equal air around a single line; larger Dynamic Type
-    /// lines consume the row instead of gaining negative inset.
+    /// The editor shares its first row with the two marks. `UITextView` otherwise puts a
+    /// zero-inset line against the row's top while both marks are centred, which is the visual
+    /// split in the issue report. Keep equal air around a single line; larger Dynamic Type lines
+    /// consume the row instead of gaining negative inset.
     static func textInsets(for font: UIFont) -> UIEdgeInsets {
-        let vertical = max(
-            0,
-            (MobileDesign.Size.compactControl - font.lineHeight) / 2
-        )
+        let vertical = max(0, (controlRow - font.lineHeight) / 2)
         return UIEdgeInsets(top: vertical, left: 0, bottom: vertical, right: 0)
     }
 
@@ -1978,6 +2084,13 @@ private struct DraftMenuLabel: View {
 /// A menu that is one glyph, for the choices almost always left alone — permissions, the
 /// interface. The glyph takes the accent when the choice departs from the default, so a row
 /// of quiet icons still says which one has been touched.
+///
+/// The glyph sits on its frame's trailing edge, not in its middle. These menus stand at the
+/// row's trailing end, and the last one's ink then meets the margin the send disc stands on
+/// above it; centred in its target, it sat nine points inboard, whichever symbol it drew. The
+/// target keeps its full width, reaching inboard, where the finger comes from. Alignment
+/// rather than a pull sized to the point size because these symbols differ in width — the
+/// terminal is wider than it is tall — and a pull that puts one on the line puts another past it.
 private struct DraftIconMenuLabel: View {
     @Environment(\.remoteTheme) private var theme
     let symbol: String
@@ -1989,7 +2102,8 @@ private struct DraftIconMenuLabel: View {
             .foregroundStyle(isSet ? theme.accent : theme.secondaryLabel)
             .frame(
                 width: MobileDesign.Size.compactControl,
-                height: MobileDesign.Size.compactControl
+                height: MobileDesign.Size.compactControl,
+                alignment: .trailing
             )
             .contentShape(Rectangle())
     }
