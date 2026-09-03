@@ -427,6 +427,20 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
     never lands inside a surrogate pair. `intrinsicContentSize` still reports the whole
     text's width, so Auto Layout hears what the label wants and truncation only describes
     what it does once given less.
+  - **A glyph kept where the eye last saw it moves as a slot, not as a frame.** The morph is
+    built in the label's layout pass, against the bounds the new text settles in, and the
+    label may have moved in its window since the text changed — a row scrolled into view, a
+    title re-centred. So every old glyph is first shifted to stay where it was drawn, and the
+    morph travels the difference. That shift goes through `GlyphLayer.shift(by:)`, which moves
+    the slot with the frame, because `apply(_:)` decides it has nothing to do by comparing
+    slots. Offsetting the frame alone shipped as a sidebar row whose first letter sat a line
+    below the rest of its name indefinitely: "Precis contrast" was renamed "PREVIEW" in the
+    pass that moved the row, six characters were replaced and rebuilt on the line, and the P
+    — same character, same slot — was handed a slot equal to the one it held, kept the shift,
+    was asked for no animation, and gave no later pass a reason to touch it. The slot model
+    said the P was on the line the whole time; only the layer disagreed, which is why the
+    regression tests (`MorphingLabelMoveDuringMorphTests` in the package,
+    `SidebarTitleMorphTests` here) assert on the layers.
   - **Assigning the value already in force costs nothing** (`font`, `textColor`,
     `alignment` all guard on equality). Each rebuilds or repaints every glyph layer, and a
     sidebar row restates all three on every configure — which happens continuously while an

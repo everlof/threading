@@ -135,6 +135,57 @@ final class SidebarTitleMorphTests: XCTestCase {
         )
     }
 
+    /// A row renamed in the same pass that moves it. A session called "Precis contrast" was
+    /// renamed "PREVIEW" while its row moved up in the sidebar, and the P — the one character
+    /// both names share at that position — drew a line below the rest of its name and stayed
+    /// there. The package keeps the old glyphs where the eye last saw them and lets the morph
+    /// travel the difference; the kept character has to make that trip too, or the shift it
+    /// was given to start from is where it stays. Asserted on the tiles rather than the model:
+    /// the slot model said the P was on the line the whole time, and only the layer disagreed.
+    func testARowRenamedWhileItMovesKeepsEveryGlyphOnTheLine() throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 260, height: 80),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let row = SessionRowView(customizationLookup: { _ in .empty })
+        row.translatesAutoresizingMaskIntoConstraints = false
+        let content = window.contentView!
+        content.addSubview(row)
+        let top = row.topAnchor.constraint(equalTo: content.topAnchor, constant: 30)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            row.widthAnchor.constraint(equalToConstant: 220),
+            row.heightAnchor.constraint(equalToConstant: 24),
+            top
+        ])
+        var session = AgentSession(kind: .claude, title: "Precis contrast")
+        row.configure(with: session, activity: .idle)
+        window.layoutIfNeeded()
+
+        session.customTitle = "PREVIEW"
+        row.configure(with: session, activity: .idle)
+        top.constant -= 8
+        window.layoutIfNeeded()
+
+        let title = try label("sidebar.session.title", in: row)
+        let inner = try innerLabel(of: title)
+        let inks = inner.glyphInkFrames
+        XCTAssertEqual(inks.count, "PREVIEW".count)
+        // The tiles still drawn: not an effect's stand-in, not a glyph on its way out.
+        let tiles = try XCTUnwrap(inner.layer?.sublayers)
+            .compactMap { $0 as? CATextLayer }
+            .filter { $0.opacity == 1 }
+        XCTAssertEqual(tiles.count, inks.count, "one drawn tile per character on the line")
+        for ink in inks {
+            XCTAssertTrue(
+                tiles.contains { $0.frame.contains(ink) },
+                "no tile is drawn around the ink box \(ink); a glyph is off the line"
+            )
+        }
+    }
+
     // MARK: - Session rows
 
     func testSessionRowShowsItsTitle() throws {
