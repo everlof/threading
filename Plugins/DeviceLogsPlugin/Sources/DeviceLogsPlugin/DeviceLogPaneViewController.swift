@@ -93,9 +93,27 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// The session this tab belongs to, kept so a predicate could later be scoped to its project.
     public let owningSessionID: String?
 
+    /// Writes what arrives to disk, so search and a time range have something to look at once the
+    /// ring has moved on. One store per chat: two chats watching two devices are two histories.
+    public let recorder: DeviceLogRecorder?
+
     public init(owningSessionID: String?) {
         self.owningSessionID = owningSessionID
+        self.recorder = DeviceLogRecorder(
+            directory: Self.storeDirectory,
+            name: owningSessionID ?? "unattached"
+        )
         super.init(nibName: nil, bundle: nil)
+    }
+
+    /// Under Caches rather than Application Support: a log history is reconstructible by watching
+    /// again, and the system may reclaim it when the disk is tight without losing anything the
+    /// user authored.
+    static var storeDirectory: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        return caches
+            .appendingPathComponent("codes.threading", isDirectory: true)
+            .appendingPathComponent("DeviceLogs", isDirectory: true)
     }
 
     public required init?(coder: NSCoder) { nil }
@@ -445,6 +463,9 @@ public final class DeviceLogPaneViewController: NSViewController {
         let incoming = source.drain()
         guard !incoming.isEmpty else { return }
         received += incoming.count
+        // On disk as well as on screen: the ring is what the table can hold, the store is what a
+        // question can reach back through once the ring has moved on.
+        recorder?.record(incoming)
 
         rows.append(contentsOf: incoming)
         if rows.count > DeviceLogLimits.ringCapacity {

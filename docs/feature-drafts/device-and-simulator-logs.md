@@ -1,9 +1,15 @@
 # Device and Simulator Logs
 
-> **Draft.** Research complete and measured on 2026-09-01 against a real iPhone 16 Pro (iOS 26.6)
-> and an iPhone 17 Pro simulator (iOS 26.5). Nothing here is implemented. The host gap this needs
-> is the same one [`network-inspector-extension.md`](network-inspector-extension.md) already
-> names; read its "Host gap 2" before proposing a rendering tier.
+> **Shipped 2026-09-02**, as the first tenant of the native plugin tier. The pane lives in
+> `Plugins/DeviceLogsPlugin`; the tier's own decisions are in
+> [`docs/architecture/plugins.md`](../architecture/plugins.md). This file remains as the
+> measurement record and the source matrix — research done on 2026-09-01 against a real iPhone 16
+> Pro (iOS 26.6) and an iPhone 17 Pro simulator (iOS 26.5).
+>
+> **The opt-in tap is the remaining slice.** Its consent and `DeviceLogTap` stay in the application
+> deliberately, for the reasons under "Where the pane lives" at the end of this file. The rendering
+> gap this draft was written around is closed, so the "Open question: where it renders" section
+> below is history rather than an open question.
 
 ## The problem
 
@@ -539,3 +545,41 @@ The plugin is trusted by **location**: code inside the app bundle is sealed by t
 signature, so altering it invalidates the app the operating system already checked. That is a
 stronger guarantee than the team allowlist, which continues to govern everything installed outside
 the app. See [`native-extension-tier.md`](native-extension-tier.md).
+
+## The store
+
+The pane keeps a bounded ring so a firehose cannot grow memory, and that ring is why "what happened
+at 14:02" had no answer once 50,000 rows had gone by. `DeviceLogStore` is the other half: every row
+is written to SQLite as well as shown, so search, a time range, and hiding rows that can come back
+are **queries** rather than scans of whatever is still in memory.
+
+Its design is Timber's `LogDatabase` — WAL, `synchronous=NORMAL`, a reused prepared statement, one
+transaction per batch, and FTS5 with the **trigram** tokenizer. Trigram is the load-bearing choice:
+a log is searched for `0x16f95`, `fCli`, `com.apple.xpc` — fragments inside identifiers — and the
+default word tokenizer finds none of them. Two things differ from Timber. The RAG half (chunks,
+embeddings) is not here, because nothing asks for it yet. And the instant is stored in
+**milliseconds** rather than Timber's whole seconds, which would throw away exactly the sub-second
+ordering the relay's six fractional digits provide.
+
+`instant_ms` and `severity` carry their own indexes. An FTS5 table indexes its text and nothing
+else, so a range or level filter would otherwise be a table scan on the column the query actually
+filters by.
+
+**Measured before anything was built on it**, which was the point of doing this before the UI:
+
+| | Debug build | Against |
+|---|---|---|
+| Insert | **34,572 rows/sec** (batches of 580, the shape a 100 ms drain produces) | ~5,800 rows/sec from a paired device — 6× headroom |
+| Search | **0.5 ms** for 1,000 hits | over 100,000 rows |
+
+Release would be faster; Debug is the pessimistic case and it already clears the bar by six times.
+
+`DeviceLogRecorder` owns the store on a serial queue, because 580 rows is ~17 ms of SQLite and the
+drain runs on the main actor ten times a second. Recording is **best effort**: a store that will not
+open leaves the pane exactly as it was, since the rows are on screen either way and only history is
+lost. Nothing on that path throws at the caller, and there is a test that an unusable directory does
+not take the stream down.
+
+Retention is 500,000 rows, trimmed every 50,000 written rather than on every batch. The FTS index
+follows deletions through a trigger — an index row left behind would return an id whose row no
+longer exists, which is a test.
