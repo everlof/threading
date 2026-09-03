@@ -84,6 +84,12 @@ final class NativePluginParityTests: XCTestCase {
             "the parity check must exercise the installed path, not the bundled one"
         )
 
+        // The user's decision is what lets an installed plugin run at all, so the parity check
+        // records one — that *is* the third-party path, not a way around it.
+        let identity = try PluginLoader.acceptingAnyTeam().identity(of: bundle)
+        NativePluginApprovalStore.shared.remember(true, for: identity)
+        defer { NativePluginApprovalStore.shared.revoke(identifier: identity.bundleIdentifier) }
+
         let plugin: ThreadingNativePlugin
         switch NativePluginCatalog.load(bundle) {
         case .success(let loaded): plugin = loaded
@@ -110,20 +116,16 @@ final class NativePluginParityTests: XCTestCase {
         )
     }
 
-    /// The allowlist is what stands between the plugins folder and arbitrary code in this process,
-    /// so the third-party path must actually be subject to it.
-    func testTheInstalledCopyIsSubjectToTheAllowlist() throws {
+    /// The decision is what stands between the plugins folder and arbitrary code in this process,
+    /// so an installed plugin must be refused without one — including ours, signed by our own team.
+    func testTheInstalledCopyIsRefusedWithoutTheUsersDecision() throws {
         let bundle = try buildTheThirdPartyWay()
-        let trusted = NativePluginCatalog.allowedTeams
-        NativePluginCatalog.allowedTeams = ["NOTOURTEAM"]
-        defer { NativePluginCatalog.allowedTeams = trusted }
+        let identity = try PluginLoader.acceptingAnyTeam().identity(of: bundle)
+        NativePluginApprovalStore.shared.revoke(identifier: identity.bundleIdentifier)
         switch NativePluginCatalog.load(bundle) {
-        case .success: XCTFail("an installed plugin loaded with its team not allowlisted")
+        case .success: XCTFail("an installed plugin loaded with no decision recorded")
         case .failure(let failure):
-            XCTAssertTrue(
-                failure.code == "untrusted_team" || failure.code == "signature_invalid",
-                "refused for the wrong reason: \(failure.code)"
-            )
+            XCTAssertEqual(failure.code, "not_approved", "refused for the wrong reason")
         }
     }
 }

@@ -74,6 +74,7 @@ final class ConfirmationPromptTests: XCTestCase {
             "conferManagerRole",
             "controlSimulatorDevice",
             "linkDeviceLogTap",
+            "runNativePlugin",
             "installUpdate",
             "installUpdateAndRelaunch"
         ])

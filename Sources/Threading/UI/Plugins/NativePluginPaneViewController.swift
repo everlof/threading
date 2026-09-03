@@ -49,6 +49,10 @@ final class NativePluginPaneViewController: NSViewController {
 
     override func loadView() {
         view = NSView()
+        loadViewContents()
+    }
+
+    private func loadViewContents() {
         switch NativePluginCatalog.load(bundleURL) {
         case .success(let plugin):
             loaded = plugin
@@ -97,6 +101,45 @@ final class NativePluginPaneViewController: NSViewController {
             label.centerYAnchor.constraint(equalTo: host.centerYAnchor),
             label.widthAnchor.constraint(lessThanOrEqualToConstant: Metrics.messageWidth),
         ])
+
+        // A gate with nothing that opens it is a locked door. "Not approved" is the one refusal the
+        // user can answer, so it is the one that comes with a way to answer it — here, where they
+        // are already looking, rather than in a settings page they would have to be told about.
+        if case .notApproved = failure {
+            let allow = ThemedButton()
+            allow.title = L10n.string("Allow This Plugin…")
+            allow.emphasis = .primary
+            allow.target = self
+            allow.action = #selector(askAboutThisPlugin)
+            allow.translatesAutoresizingMaskIntoConstraints = false
+            host.addSubview(allow)
+            NSLayoutConstraint.activate([
+                allow.topAnchor.constraint(equalTo: label.bottomAnchor, constant: Design.Spacing.medium),
+                allow.centerXAnchor.constraint(equalTo: host.centerXAnchor),
+            ])
+        }
         return host
+    }
+
+    /// Asks, records, and reloads if the answer was yes.
+    ///
+    /// The question is asked against the *identity* the loader read, not the path: approving a
+    /// plugin has to mean the bytes that were described, or an update inherits an answer nobody
+    /// gave it.
+    @objc private func askAboutThisPlugin() {
+        guard let identity = try? PluginLoader.acceptingAnyTeam().identity(of: bundleURL) else {
+            return
+        }
+        NativePluginApprovalPrompt.ask(
+            about: identity,
+            named: displayName ?? identity.bundleIdentifier,
+            in: view.window
+        ) { [weak self] approved in
+            guard let self, approved else { return }
+            // Rebuild the pane the ordinary way rather than patching it: loading is what registers
+            // the plugin's tools, and half-loading it would advertise tools nothing can run.
+            self.view.subviews.forEach { $0.removeFromSuperview() }
+            self.loadViewContents()
+        }
     }
 }

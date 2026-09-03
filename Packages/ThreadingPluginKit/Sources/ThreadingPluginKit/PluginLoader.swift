@@ -15,6 +15,8 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
     case noPrincipalClass
     case wrongProtocol
     case apiVersionMismatch(found: Int, expected: Int)
+    /// Validly signed, but the user has not agreed to run this particular build of it.
+    case notApproved(identifier: String)
 
     public var description: String {
         switch self {
@@ -28,6 +30,8 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
             return "bundle declares no NSPrincipalClass"
         case .wrongProtocol:
             return "principal class does not conform to ThreadingNativePlugin"
+        case .notApproved(let identifier):
+            return "\(identifier) has not been approved to run inside Threading"
         case .apiVersionMismatch(let found, let expected):
             return "plugin speaks API \(found), host speaks \(expected)"
         }
@@ -42,6 +46,7 @@ public enum PluginLoadFailure: Error, Equatable, CustomStringConvertible {
         case .noPrincipalClass: return "no_principal_class"
         case .wrongProtocol: return "wrong_protocol"
         case .apiVersionMismatch: return "api_version_mismatch"
+        case .notApproved: return "not_approved"
         }
     }
 }
@@ -112,6 +117,55 @@ public struct PluginLoader {
             )
         }
         return type.init()
+    }
+
+    /// Who a bundle says it is, and exactly which build of it this is.
+    ///
+    /// The team alone is not an identity to record a decision against: approving "this plugin"
+    /// has to mean the bytes the user was shown, or an update — or a replacement dropped into the
+    /// same folder under the same name — inherits an approval nobody gave it. `cdHash` is the code
+    /// directory hash, so a changed binary is a different identity and asks again.
+    public struct PluginIdentity: Equatable, Sendable {
+        public let bundleIdentifier: String
+        public let team: String?
+        public let cdHash: String
+
+        public init(bundleIdentifier: String, team: String?, cdHash: String) {
+            self.bundleIdentifier = bundleIdentifier
+            self.team = team
+            self.cdHash = cdHash
+        }
+    }
+
+    /// Reads the identity, validating the signature on the way.
+    public func identity(of url: URL) throws -> PluginIdentity {
+        var staticCode: SecStaticCode?
+        let created = SecStaticCodeCreateWithPath(url as CFURL, [], &staticCode)
+        guard created == errSecSuccess, let staticCode else {
+            throw PluginLoadFailure.signatureInvalid(status: created)
+        }
+        let valid = SecStaticCodeCheckValidity(staticCode, [], nil)
+        guard valid == errSecSuccess else {
+            throw PluginLoadFailure.signatureInvalid(status: valid)
+        }
+        var information: CFDictionary?
+        let read = SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &information
+        )
+        guard read == errSecSuccess, let dictionary = information as? [String: Any] else {
+            throw PluginLoadFailure.signatureInvalid(status: read)
+        }
+        let hash = (dictionary[kSecCodeInfoUnique as String] as? Data)
+            .map { $0.map { String(format: "%02x", $0) }.joined() } ?? ""
+        let identifier = (dictionary[kSecCodeInfoIdentifier as String] as? String)
+            ?? Bundle(url: url)?.bundleIdentifier ?? url.lastPathComponent
+        return PluginIdentity(
+            bundleIdentifier: identifier,
+            team: dictionary[kSecCodeInfoTeamIdentifier as String] as? String,
+            cdHash: hash
+        )
     }
 
     /// The signing team of a bundle, or `nil` when it carries none (ad-hoc).

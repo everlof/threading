@@ -104,6 +104,7 @@ enum ConfirmationPrompt: String, CaseIterable {
     case conferManagerRole
     case controlSimulatorDevice
     case linkDeviceLogTap
+    case runNativePlugin
 
     // MARK: Software updates
 
@@ -289,6 +290,11 @@ enum ConfirmationPrompt: String, CaseIterable {
              // where it persists and leaves in a sysdiagnose or a log archive. Rebuilding without
              // the tap stops new lines; it cannot unwrite the ones already there.
              .linkDeviceLogTap,
+             // Approving a plugin is the moment arbitrary code gains the right to run inside
+             // Threading, unsandboxed, with the files and permissions the user granted the app.
+             // Nothing about it is reversible by removing a file afterwards, and it is the one
+             // grant where a suppressed prompt would mean a folder became an install path.
+             .runNativePlugin,
              // Storing a test credential is the moment an origin gains the right to be signed
              // in to unattended, so it belongs with the other grants rather than with the
              // reversible edits: removing the entry later does not un-ring whatever an agent

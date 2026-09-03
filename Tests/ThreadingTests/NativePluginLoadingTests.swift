@@ -57,14 +57,11 @@ final class NativePluginLoadingTests: XCTestCase {
         }
     }
 
-    /// A bundled plugin is trusted by *location*: it is sealed by the app's own signature, so the
-    /// team allowlist has nothing to add. Emptying the allowlist must not take Threading's own
-    /// pane away.
-    func testTheBundledPluginLoadsEvenWithNoTeamTrusted() throws {
+    /// A bundled plugin is trusted by *location*: altering it invalidates the signature the system
+    /// already checked, so there is nothing a user decision would add. It must not be gated behind
+    /// one — Threading's own pane cannot wait for permission to be itself.
+    func testTheBundledPluginNeedsNoApproval() throws {
         let bundle = try installed
-        let trusted = NativePluginCatalog.allowedTeams
-        NativePluginCatalog.allowedTeams = []
-        defer { NativePluginCatalog.allowedTeams = trusted }
         switch NativePluginCatalog.load(bundle) {
         case .success: break
         case .failure(let failure):
@@ -72,23 +69,20 @@ final class NativePluginLoadingTests: XCTestCase {
         }
     }
 
-    /// The allowlist still governs everything *outside* the app bundle, which is the whole policy
-    /// for the third-party tier.
-    func testAnInstalledBundleIsStillRefusedWhenNoTeamIsTrusted() throws {
+    /// Everything outside the app bundle waits for the user, whoever signed it. A plugin the user
+    /// has not agreed to is refused *by name*, so the pane can offer to ask rather than reporting
+    /// that nothing is there.
+    func testAnInstalledBundleIsRefusedUntilTheUserAgrees() throws {
         let installedByHand = NativePluginCatalog.directory
             .appendingPathComponent("DeviceLogsPlugin.bundle")
         try XCTSkipUnless(
             FileManager.default.fileExists(atPath: installedByHand.path),
-            "no hand-installed bundle to check the allowlist against"
+            "no hand-installed bundle to check the decision against"
         )
-        let trusted = NativePluginCatalog.allowedTeams
-        NativePluginCatalog.allowedTeams = []
-        defer { NativePluginCatalog.allowedTeams = trusted }
         switch NativePluginCatalog.load(installedByHand) {
-        case .success: XCTFail("an empty allowlist loaded a plugin from outside the app")
+        case .success: XCTFail("an unapproved plugin was loaded from outside the app")
         case .failure(let failure):
-            XCTAssertTrue(failure.code == "untrusted_team" || failure.code == "signature_invalid",
-                          "refused for the wrong reason: \(failure.code)")
+            XCTAssertEqual(failure.code, "not_approved", "refused for the wrong reason")
         }
     }
 }

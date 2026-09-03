@@ -580,24 +580,54 @@ like it worked while every case quietly skips. It builds once per class: the fir
 the installed bundle, so a second build rewrites a mapped binary and fails as a script error rather
 than a verdict.
 
-### Two things a third party still cannot do
+### What a third party actually needs
 
-**Load anything at all.** `allowedTeams` holds Threading's signing team and nothing else, and the
-app ships `disable-library-validation`, so the allowlist is the entire protection: a bundle in the
-plugins folder runs in this process with AppKit, the user's files, and every TCC grant Threading
-holds. Removing the check is not opening the platform, it is a delivery path. The right shape is to
-change *what* it permits — signature still required, but the gate becomes a recorded, revocable
-per-plugin decision by the user, which is the pattern `ConfirmationPrompt` already uses for the
-device-log tap. That is the next slice, and it is a security review rather than a refactor.
+**`ThreadingPluginKit`, and nothing else.** The probe plugin proves it: `import ThreadingPluginKit`
+plus AppKit, linked with `-lThreadingPluginKit -Xlinker -bundle`. Everything beyond that is
+optional. `ThreadingDesignKit` is how a plugin looks *identical* to Threading rather than merely
+native, and `PluginTheme`'s tokens are the route for one that does not link it. So publishing the
+plugin kit is the whole unblock; publishing the design kit is a separate and much larger decision,
+because it is the app's own UI layer with vendored dependencies behind it and shipping it is an
+API-stability commitment.
 
-**Get the design system.** `ThreadingPluginKit` and `ThreadingDesignKit` are `path:` packages inside
-this repository, so an outsider can write a plugin but cannot compile against the contract, let
-alone make it look like Threading. Publishing the plugin kit is small and clearly right: it is the
-contract, it is versioned, and it is what the tier means. Publishing the design kit is a much larger
-decision — it is 80 files of the app's own UI layer with vendored dependencies behind it, and
-shipping it is an API-stability commitment. Until that is decided, `PluginTheme`'s tokens are the
-third-party route to looking right and `ThreadingDesignKit` is a first-party luxury. That asymmetry
-should be a decision on the record, not a thing that quietly became true.
+### The gate is the user's decision, not a list of teams
+
+`allowedTeams` held Threading's signing team and nothing else, so the tier was closed by
+construction. Deleting the check was the other wrong answer: the app ships
+`disable-library-validation`, so a bundle in the plugins folder runs in this process with AppKit,
+the user's files and every TCC grant Threading holds — dropping a file would have *been* code
+execution.
+
+So the gate changed rather than went. An installed plugin must have a valid signature — from
+anyone, ad-hoc included — and then the user has to have agreed to run it. The agreement is recorded
+against the code directory hash, so **an approval is for a build, not for a name**: an update, or a
+replacement dropped into the same folder under the same identifier, is a different identity and asks
+again. A refusal is remembered too, because asking every launch is how someone learns to click
+through the question that protects them. Revoking forgets every build of that identifier, since the
+user is withdrawing trust from the plugin rather than from some bytes.
+
+There is no first-party exemption: the parity test installs Threading's *own* plugin, signed by
+Threading's own team, and it is refused until a decision is recorded. The only thing that skips the
+question is a plugin inside the app bundle, and that is not a privilege — altering it invalidates
+the signature the operating system already checked.
+
+The question is asked where the refusal is shown, in the pane, with a prompt that says plainly that
+the code is unsandboxed and gets what Threading gets. `ConfirmationPrompt.runNativePlugin` is
+`.alwaysAsks(.securityGrant)`, so it cannot be suppressed into a folder that silently becomes an
+install path.
+
+Two things this cost. The policy value type may not import the plugin SDK — the module boundary
+says `Application` takes only view-free contracts, and it is right, so `NativePluginApprovals` is a
+policy over two strings and `NativePluginApprovalStore` does the bridging in the UI layer. And
+readability has to be checked before the signature: asking the signing API first reported every
+*absent* plugin as `signature_invalid`, which is exactly the "the plugin did not appear" answer this
+tier's named refusals exist to prevent.
+
+### Still open
+
+Publishing `ThreadingPluginKit` so a third party can compile against the contract at all, and a
+Settings surface listing approved plugins with a way to revoke — the store supports it, nothing
+shows it yet.
 
 ## Reopen / revisit triggers
 

@@ -19,22 +19,20 @@ import ThreadingPluginKit
 @MainActor
 enum NativePluginCatalog {
 
-    /// The shipping policy, kept separate from the mutable test seam so a test can always restore
-    /// the real configuration instead of guessing what it was.
-    static let defaultAllowedTeams: Set<String> = ["SMQ3E8Y57T"]
-
-    /// Teams whose plugins may be loaded.
+    /// Whether an installed plugin may run, which is now the user's decision rather than a list
+    /// of teams we happen to trust.
     ///
-    /// A tier that runs unsandboxed code in this process opens by refusing, not by trusting, so
-    /// this is an allowlist and nothing else gets in. `PluginLoader` used to read an *empty* set as
-    /// "accept anything" — the opposite of what this comment claimed — which meant the shipping
-    /// default would have mapped any bundle dropped into the folder. It now refuses, and running
-    /// anything has to be asked for by name.
+    /// It was an allowlist holding Threading's own signing team and nothing else, which meant the
+    /// tier was closed by construction: we could ship plugins and nobody else could, and a platform
+    /// only its author can build on is not one. Removing the check outright was the other wrong
+    /// answer — the app ships `disable-library-validation`, so a bundle in the plugins folder runs
+    /// in this process with AppKit, the user's files and every TCC grant Threading holds. Dropping
+    /// a file would have been code execution.
     ///
-    /// The one entry is Threading's own signing team, which is what the first-party Device Logs
-    /// plugin is signed with. A third-party tier needs a review flow and its own decision; this is
-    /// not it.
-    static var allowedTeams = defaultAllowedTeams
+    /// So the gate changed rather than went: the signature must still validate, and then the user
+    /// has to have agreed to run *this build* of *this plugin*. The answer is recorded and
+    /// revocable, which is the same shape the device-log tap uses for the same reason.
+    static var approvals: NativePluginApprovalStore { .shared }
 
     /// `~/Library/Application Support/Threading/Plugins`. Bundles are dropped in by hand today;
     /// an install flow is a later slice and needs its own review copy.
@@ -119,11 +117,27 @@ enum NativePluginCatalog {
     /// because "the plugin did not appear" is not a diagnosis.
     static func load(_ bundle: URL) -> Result<ThreadingNativePlugin, PluginLoadFailure> {
         do {
-            // A bundled plugin is part of the app, so the allowlist has nothing to add: it was
-            // validated with the app itself. An installed one faces the full check.
-            let loader = isBundled(bundle)
-                ? PluginLoader.acceptingAnyTeam()
-                : PluginLoader(allowedTeams: allowedTeams)
+            // A bundled plugin is part of the app: altering it invalidates the signature the
+            // operating system already checked, so there is nothing left for a decision to add.
+            guard !isBundled(bundle) else {
+                return .success(try PluginLoader.acceptingAnyTeam().load(bundleAt: bundle))
+            }
+            // Anything else is somebody's code, and running it is the user's call. The signature
+            // has to validate first — not to prove who wrote it, but so the identity a decision is
+            // recorded against means the bytes that were shown.
+            //
+            // Readability is checked before any of that, because a bundle that is not there is
+            // *missing*, not badly signed. Asking the signing API first reported every absent
+            // plugin as `signature_invalid`, which is the failure this tier's named refusals exist
+            // to prevent: "the plugin did not appear" is not a diagnosis.
+            guard Bundle(url: bundle) != nil else {
+                return .failure(.unreadableBundle(path: bundle.path))
+            }
+            let loader = PluginLoader.acceptingAnyTeam()
+            let identity = try loader.identity(of: bundle)
+            guard approvals.decision(for: identity) == true else {
+                return .failure(.notApproved(identifier: identity.bundleIdentifier))
+            }
             return .success(try loader.load(bundleAt: bundle))
         } catch let failure as PluginLoadFailure {
             return .failure(failure)

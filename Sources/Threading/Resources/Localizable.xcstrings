@@ -6161,6 +6161,17 @@
         }
       }
     },
+    "Allow This Plugin…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt det här tillägget…"
+          }
+        }
+      }
+    },
     "Allow Threading to publish this private service, then retry." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -15452,6 +15463,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Dokument"
+          }
+        }
+      }
+    },
+    "Don't Allow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tillåt inte"
           }
         }
       }
@@ -34464,6 +34486,17 @@
         }
       }
     },
+    "Run “%@” inside Threading?" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kör ”%@” inuti Threading?"
+          }
+        }
+      }
+    },
     "Run “%@”?" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -45871,6 +45904,17 @@
         }
       }
     },
+    "This plugin is %@. Its code runs inside Threading, with access to your files, your network, and everything you have permitted Threading to do. It is not sandboxed.\n\nOnly allow a plugin you trust as much as you trust Threading itself. This answer applies to this exact build — an update will ask again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Det här tillägget är %@. Dess kod körs inuti Threading, med åtkomst till dina filer, ditt nätverk och allt du har gett Threading tillåtelse att göra. Det är inte sandlådeisolerat.\n\nTillåt bara ett tillägg som du litar på lika mycket som du litar på Threading självt. Svaret gäller exakt den här versionen — en uppdatering frågar igen."
+          }
+        }
+      }
+    },
     "This plugin was not loaded: %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -53593,6 +53637,17 @@
         }
       }
     },
+    "not signed by any identified developer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "inte signerat av någon identifierad utvecklare"
+          }
+        }
+      }
+    },
     "nothing" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -54645,6 +54700,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "sidofältets täthet"
+          }
+        }
+      }
+    },
+    "signed by team %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "signerat av teamet %@"
           }
         }
       }
