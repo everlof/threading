@@ -1146,6 +1146,21 @@ public class ThemedTableHeaderView: NSTableHeaderView, ThemedComponent {
     }
 
     public override func draw(_ dirtyRect: NSRect) {
+        // A header band has to *occlude* the rows sliding under it, and `controlResting` cannot do
+        // that on its own: it is deliberately below full opacity — its own documentation says so —
+        // which is right for a control sitting on an opaque panel and wrong for the one surface in
+        // a table whose whole job is to hide what is behind it.
+        //
+        // A scroll view that draws no background (the device-log pane sets `drawsBackground` to
+        // false so the theme's ground shows through) leaves nothing opaque underneath, and the
+        // first rows were legible straight through the column titles. Paint a ground, then the
+        // table's own background if it has one, and only then the resting tint.
+        Design.Surface.ground.setFill()
+        bounds.fill()
+        if let background = tableView?.backgroundColor, background != .clear {
+            background.setFill()
+            bounds.fill()
+        }
         Design.Surface.controlResting.setFill()
         bounds.fill()
 

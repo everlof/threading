@@ -58,6 +58,13 @@ public final class DeviceLogPaneViewController: NSViewController {
     private let levelPopUp = ThemedPopUp()
     private let filterField = ThemedTextField()
     private let statusLabel = NSTextField(labelWithString: "")
+    /// The opaque ground the Resume button stands on while it floats over the rows.
+    ///
+    /// A view rather than a layer colour on purpose: a theme colour baked into a `CGColor` is not
+    /// re-resolved when the theme changes, and this pane already redraws on that notification, so
+    /// drawing it is both simpler and correct under a live switch.
+    private let followPlate = FollowPlateView()
+
     private lazy var followButton = ThemedButton(
         title: L10n.string("Resume"),
         target: self,
@@ -187,9 +194,13 @@ public final class DeviceLogPaneViewController: NSViewController {
     public override func viewWillDisappear() {
         super.viewWillDisappear()
         // A hidden tab must not keep a child process reading a firehose.
+        //
+        // `runningSourceTitle` deliberately survives. It records *which* source the rows on screen
+        // came from, not whether a process is alive, and clearing it here made every re-appearance
+        // look like a source change — so switching tabs or sessions and coming back wiped the
+        // whole log. `source == nil` is what says "not currently reading".
         source?.stop()
         source = nil
-        runningSourceTitle = nil
         drainTimer?.invalidate()
         drainTimer = nil
         rateTimer?.invalidate()
@@ -351,16 +362,44 @@ public final class DeviceLogPaneViewController: NSViewController {
 
         // Over the rows rather than in the chrome: it belongs to the thing that stopped moving,
         // and it must not take a permanent slice of a bar that is already full.
+        //
+        // Floating over content means it has to bring its own ground. A plain themed button
+        // deliberately rests on nothing — that is right for a button on a panel and wrong for one
+        // standing on a moving log, where the rows were legible straight through the word
+        // "Resume". The plate is the pane's job, not the button's.
+        // Both, deliberately. Hiding only the container leaves the button reporting itself
+        // visible while nothing can reach it, which is what an accessibility client and a UI test
+        // both ask — and the identifier is on the button, because the button is the thing you
+        // press.
+        followPlate.isHidden = true
         followButton.isHidden = true
         followButton.setAccessibilityIdentifier("device-log-resume-follow")
         followButton.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(followButton)
+        followPlate.translatesAutoresizingMaskIntoConstraints = false
+        followPlate.addSubview(followButton)
+        view.addSubview(followPlate)
         NSLayoutConstraint.activate([
+            followButton.leadingAnchor.constraint(
+                equalTo: followPlate.leadingAnchor,
+                constant: Design.Spacing.small
+            ),
             followButton.trailingAnchor.constraint(
+                equalTo: followPlate.trailingAnchor,
+                constant: -Design.Spacing.small
+            ),
+            followButton.topAnchor.constraint(
+                equalTo: followPlate.topAnchor,
+                constant: Design.Spacing.tight
+            ),
+            followButton.bottomAnchor.constraint(
+                equalTo: followPlate.bottomAnchor,
+                constant: -Design.Spacing.tight
+            ),
+            followPlate.trailingAnchor.constraint(
                 equalTo: scroll.trailingAnchor,
                 constant: -Design.Spacing.large
             ),
-            followButton.bottomAnchor.constraint(
+            followPlate.bottomAnchor.constraint(
                 equalTo: scroll.bottomAnchor,
                 constant: -Design.Spacing.medium
             ),
@@ -406,18 +445,25 @@ public final class DeviceLogPaneViewController: NSViewController {
         if case .app = option.kind { isApp = true }
         routePopUp.isHidden = !isApp
         let identity = isApp ? "\(option.title)#\(route.rawValue)" : option.title
-        // Restarting the source already running would throw away every row read so far.
-        guard identity != runningSourceTitle else { return }
+        // Already reading this one: restarting would throw away every row read so far.
+        guard identity != runningSourceTitle || source == nil else { return }
+        // Resuming the same source after the pane was hidden keeps what is on screen. Only a
+        // genuine change of source discards it, because those rows are no longer about the thing
+        // being read. Resuming does leave a gap where the pane was not listening, which is honest
+        // for a live tail and better than an empty pane.
+        let isSameSource = identity == runningSourceTitle
         runningSourceTitle = identity
         Recents.remember(option.title)
 
         source?.stop()
-        rows.removeAll(keepingCapacity: true)
-        entries.removeAll(keepingCapacity: true)
-        expandedGaps.removeAll()
-        received = 0
-        lastCount = 0
-        table.reloadData()
+        if !isSameSource {
+            rows.removeAll(keepingCapacity: true)
+            entries.removeAll(keepingCapacity: true)
+            expandedGaps.removeAll()
+            received = 0
+            lastCount = 0
+            table.reloadData()
+        }
 
         source = option.makeSource(predicate: nil, route: route)
         source?.start()
@@ -515,6 +561,15 @@ public final class DeviceLogPaneViewController: NSViewController {
     }
 
     /// What the pane is saying about the agent, for a test that has to see it.
+    /// Which source the rows on screen came from, and whether one is being read.
+    ///
+    /// Two facts rather than one, because conflating them is what wiped the log: hiding the pane
+    /// stops the reader but does not change what the rows are *about*.
+    public var runningSourceTitleForTesting: String? { runningSourceTitle }
+    public var isReadingForTesting: Bool { source != nil }
+
+    public func setRunningSourceTitleForTesting(_ title: String?) { runningSourceTitle = title }
+
     public var agentNoteForTesting: String? { agentNote }
     public var agentHitsForTesting: Set<Int> { agentHits }
     public var statusTextForTesting: String { statusLabel.stringValue }
@@ -606,6 +661,7 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// The button is the only thing that says the view has stopped moving on purpose. Without it a
     /// reader who scrolled up sees a still list and cannot tell it from a source that went quiet.
     private func updateFollowAffordance() {
+        followPlate.isHidden = isFollowing
         followButton.isHidden = isFollowing
         let behind = max(0, entries.count - (table.rows(in: table.visibleRect).location
             + table.rows(in: table.visibleRect).length))
@@ -762,5 +818,37 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
         case Columns.process, Columns.message: return Design.Text.label
         default: return Design.Text.secondary
         }
+    }
+}
+
+/// The plate behind the floating Resume button.
+///
+/// It paints the theme's ground before its own elevated surface, because "elevated" describes a
+/// container above a panel and may itself carry transparency; the point of this view is that the
+/// log rows underneath do not show through the control standing on it.
+final class FollowPlateView: NSView {
+
+    override var isOpaque: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath(
+            roundedRect: bounds,
+            xRadius: Design.Radius.control,
+            yRadius: Design.Radius.control
+        )
+        path.addClip()
+        Design.Surface.ground.setFill()
+        bounds.fill()
+        Design.Surface.elevated.setFill()
+        bounds.fill()
+
+        Design.Surface.divider.setStroke()
+        let border = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: Design.Radius.border / 2, dy: Design.Radius.border / 2),
+            xRadius: Design.Radius.control,
+            yRadius: Design.Radius.control
+        )
+        border.lineWidth = Design.Radius.border
+        border.stroke()
     }
 }
