@@ -53,6 +53,7 @@ enum ClaudeSessionOrigin: Equatable {
 enum AgentSessionConfiguration: Equatable {
   case claude(
     remoteControl: Bool?,
+    fullscreenRenderer: Bool?,
     reasoningEffort: String?,
     origin: ClaudeSessionOrigin
   )
@@ -78,7 +79,12 @@ enum AgentSessionConfiguration: Equatable {
   static func original(for kind: AgentKind) -> AgentSessionConfiguration {
     switch kind {
     case .claude:
-      return .claude(remoteControl: nil, reasoningEffort: nil, origin: .original)
+      return .claude(
+        remoteControl: nil,
+        fullscreenRenderer: nil,
+        reasoningEffort: nil,
+        origin: .original
+      )
     case .codex: return .codex(reasoningEffort: nil)
     case .grok: return .grok
     case .openCode: return .openCode
@@ -116,6 +122,7 @@ enum AgentSessionConfiguration: Equatable {
     case .claude:
       self = .claude(
         remoteControl: nil,
+        fullscreenRenderer: nil,
         reasoningEffort: reasoningEffort,
         origin: .original
       )
@@ -131,7 +138,7 @@ enum AgentSessionConfiguration: Equatable {
 
   fileprivate var derivedSessionID: SessionID? {
     switch self {
-    case .claude(_, _, .forked(let source)):
+    case .claude(_, _, _, .forked(let source)):
       return source
     case .claude, .codex, .grok, .openCode, .cursor:
       return nil
@@ -487,7 +494,7 @@ struct AgentSession: Codable, Identifiable {
   /// is authoritative and may add levels without a Threading release.
   var reasoningEffort: String? {
     switch configuration {
-    case .claude(_, let value, _), .codex(let value): return value
+    case .claude(_, _, let value, _), .codex(let value): return value
     case .grok, .openCode, .cursor: return nil
     }
   }
@@ -517,7 +524,24 @@ struct AgentSession: Codable, Identifiable {
   /// merged settings ahead of its global config, so a value here wins. Claude only — Codex has
   /// no equivalent bridge.
   var remoteControl: Bool? {
-    guard case .claude(let value, _, _) = configuration else { return nil }
+    guard case .claude(let value, _, _, _) = configuration else { return nil }
+    return value
+  }
+
+  /// A per-conversation override for which screen this session's terminal UI starts on.
+  ///
+  /// True asks for the CLI's own alternate-screen renderer, which keeps a transcript of its
+  /// own and scrolls it itself. False asks for the main screen, where output lands in the
+  /// terminal emulator's scrollback and Threading's scroller — and the iPhone's — is the one
+  /// that moves it. Nil defers to `AppSettings.claudeTerminalRenderer`, whose own third
+  /// state defers further to the CLI.
+  ///
+  /// Applied through the launch environment rather than the settings file, because the CLI
+  /// keeps a machine-local record that outranks the settings key: see
+  /// `AgentCapabilities.selectableTerminalRenderer` for the measurement. Claude only — Codex
+  /// is fixed inline at launch and the others have no measured equivalent.
+  var fullscreenRenderer: Bool? {
+    guard case .claude(_, let value, _, _) = configuration else { return nil }
     return value
   }
 
@@ -571,7 +595,7 @@ struct AgentSession: Codable, Identifiable {
   /// the child first runs, and afterwards this is lineage rather than behaviour. See
   /// `AgentLauncher.claudeForkCommand`.
   var forkedFrom: SessionID? {
-    guard case .claude(_, _, .forked(let parent)) = configuration else { return nil }
+    guard case .claude(_, _, _, .forked(let parent)) = configuration else { return nil }
     return parent
   }
 
@@ -588,9 +612,10 @@ struct AgentSession: Codable, Identifiable {
   /// what its fork *is*. `AgentCapabilitiesTests` holds the two answers to each other.
   var forkedConfiguration: AgentSessionConfiguration? {
     switch configuration {
-    case .claude(_, let reasoningEffort, _):
+    case .claude(_, let fullscreenRenderer, let reasoningEffort, _):
       return .claude(
         remoteControl: nil,
+        fullscreenRenderer: fullscreenRenderer,
         reasoningEffort: reasoningEffort,
         origin: .forked(from: id)
       )
@@ -853,7 +878,8 @@ struct AgentSession: Codable, Identifiable {
     case agentTitleSource
     case agentSessionID, hasLaunched, lastExitCode, accountHandle, model, reasoningEffort, branch
     case lastLaunchFailure
-    case fastMode, remoteControl, permissionMode, archived, archivedAt, providerArchiveState
+    case fastMode, remoteControl, fullscreenRenderer, permissionMode, archived, archivedAt
+    case providerArchiveState
     case pinned, nativeUI
     case backgroundHost
     case snoozedAt, snoozedUntil, hadTurnInFlightWhenSnoozed, wake
@@ -914,6 +940,10 @@ struct AgentSession: Codable, Identifiable {
       Bool.self,
       forKey: .remoteControl
     )
+    let decodedFullscreenRenderer = try container.decodeIfPresent(
+      Bool.self,
+      forKey: .fullscreenRenderer
+    )
     // Through the raw string, for the reason `limitRecoveryPolicy` states below — and with more
     // at stake: a mode name a later build invented would otherwise throw away the whole session
     // record over one setting. It reads as "chose none" instead, which is the conservative
@@ -973,6 +1003,13 @@ struct AgentSession: Codable, Identifiable {
         forKey: .remoteControl,
         in: container,
         debugDescription: "Remote Control is only valid for Claude sessions"
+      )
+    }
+    if decodedFullscreenRenderer != nil, decodedKind != .claude {
+      throw DecodingError.dataCorruptedError(
+        forKey: .fullscreenRenderer,
+        in: container,
+        debugDescription: "A renderer choice is only valid for Claude sessions"
       )
     }
     if (decodedContinuationSource == nil) != (decodedContinuationKind == nil) {
@@ -1059,6 +1096,7 @@ struct AgentSession: Codable, Identifiable {
       }
       configuration = .claude(
         remoteControl: decodedRemoteControl,
+        fullscreenRenderer: decodedFullscreenRenderer,
         reasoningEffort: decodedReasoningEffort,
         origin: origin
       )
@@ -1252,6 +1290,7 @@ struct AgentSession: Codable, Identifiable {
     try container.encodeIfPresent(fastMode, forKey: .fastMode)
     try container.encodeIfPresent(backgroundHost, forKey: .backgroundHost)
     try container.encodeIfPresent(remoteControl, forKey: .remoteControl)
+    try container.encodeIfPresent(fullscreenRenderer, forKey: .fullscreenRenderer)
     try container.encodeIfPresent(permissionMode, forKey: .permissionMode)
     try container.encodeIfPresent(branch, forKey: .branch)
     try container.encode(isArchived, forKey: .archived)
@@ -1333,9 +1372,10 @@ struct AgentSession: Codable, Identifiable {
   @discardableResult
   mutating func setReasoningEffort(_ effort: String?) -> Bool {
     switch configuration {
-    case .claude(let remoteControl, _, let origin):
+    case .claude(let remoteControl, let fullscreenRenderer, _, let origin):
       configuration = .claude(
         remoteControl: remoteControl,
+        fullscreenRenderer: fullscreenRenderer,
         reasoningEffort: effort,
         origin: origin
       )
@@ -1351,9 +1391,26 @@ struct AgentSession: Codable, Identifiable {
   /// Changes a Claude-only option without admitting it into Codex's state space.
   @discardableResult
   mutating func setClaudeRemoteControl(_ remoteControl: Bool?) -> Bool {
-    guard case .claude(_, let reasoningEffort, let origin) = configuration else { return false }
+    guard case .claude(_, let fullscreenRenderer, let reasoningEffort, let origin) = configuration
+    else { return false }
     configuration = .claude(
       remoteControl: remoteControl,
+      fullscreenRenderer: fullscreenRenderer,
+      reasoningEffort: reasoningEffort,
+      origin: origin
+    )
+    return true
+  }
+
+  /// Changes which screen this conversation's terminal UI starts on, or clears the choice so it
+  /// inherits the app-wide default again. Claude-only for the same reason as the accessor.
+  @discardableResult
+  mutating func setClaudeFullscreenRenderer(_ fullscreenRenderer: Bool?) -> Bool {
+    guard case .claude(let remoteControl, _, let reasoningEffort, let origin) = configuration
+    else { return false }
+    configuration = .claude(
+      remoteControl: remoteControl,
+      fullscreenRenderer: fullscreenRenderer,
       reasoningEffort: reasoningEffort,
       origin: origin
     )

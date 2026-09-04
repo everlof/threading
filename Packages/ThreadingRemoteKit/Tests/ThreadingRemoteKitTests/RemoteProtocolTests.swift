@@ -74,7 +74,8 @@ final class RemoteProtocolTests: XCTestCase {
             title: "Needs permission",
             body: "Review the edit",
             destination: .attachment(id: "attachment-1"),
-            createdAt: 123
+            createdAt: 123,
+            turnGeneration: 7
         )
         XCTAssertEqual(
             try JSONDecoder().decode(
@@ -91,7 +92,9 @@ final class RemoteProtocolTests: XCTestCase {
                 .sharedSession, .permissionRequest, .agentQuestion, .turnCompleted,
                 .attentionRequest,
             ],
-            soundEnabledKinds: [.permissionRequest, .agentQuestion]
+            soundEnabledKinds: [.permissionRequest, .agentQuestion],
+            capabilities: [.turnCompletionPreview, .notificationRetraction],
+            includesResponsePreviews: true
         )
         XCTAssertEqual(
             try JSONDecoder().decode(
@@ -106,6 +109,22 @@ final class RemoteProtocolTests: XCTestCase {
             from: Data(#"{"deviceToken":"abcd","environment":"sandbox","enabledKinds":["permissionRequest"]}"#.utf8)
         )
         XCTAssertNil(legacy.soundEnabledKinds)
+        XCTAssertNil(legacy.capabilities)
+        XCTAssertNil(legacy.includesResponsePreviews)
+
+        let retraction = RemoteNotificationRetractionDTO(
+            hostID: "mac-1",
+            sessionID: "session-1",
+            eventID: "event-1",
+            kind: .turnCompleted
+        )
+        XCTAssertEqual(
+            try JSONDecoder().decode(
+                RemoteNotificationRetractionDTO.self,
+                from: JSONEncoder().encode(retraction)
+            ),
+            retraction
+        )
     }
 
     func testNotificationKindsKeepTheirWireVocabulary() {

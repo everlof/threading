@@ -18,6 +18,16 @@ saw the betas.
 
 ## [Unreleased]
 
+### Changed
+
+- On iPhone, the account button in a new session's navigation bar now opens one small panel
+  holding both choices: the agents as a row of their own marks, and each login as a row led by
+  its own disc, ringed by how much of its allowance is used and spelling that reading out
+  underneath. Choosing an agent leaves the panel open so the logins beneath can follow it, and
+  choosing a login closes it — where the old menu was a single scrolling list that closed after
+  the first choice, so picking an agent and then a login meant opening it twice. Your keyboard
+  stays up while you choose.
+
 ## [0.1.0]
 
 ### Added

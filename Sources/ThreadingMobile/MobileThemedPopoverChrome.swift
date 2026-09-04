@@ -3,13 +3,54 @@ import SwiftUI
 #if os(iOS)
 import UIKit
 
+/// The room a popover's content is measured in.
+private enum MobileThemedPopoverMetrics {
+    /// The widest content is measured at, whatever the window offers.
+    static let maximumContentWidth: CGFloat = 420
+    /// What the window keeps at its edges when it is narrower than that.
+    static let windowMargin: CGFloat = 24
+}
+
+/// The anchor a popover hangs from: a view that draws nothing and takes no touch, standing in
+/// the frame of whatever it decorates.
+///
+/// It reaches its presenting controller through the responder chain rather than being one. A
+/// `UIViewControllerRepresentable` needs containment in a parent controller, and inside a
+/// SwiftUI **toolbar item** there is none to be had: attaching the old presenter to the draft
+/// screen's account disc left the navigation bar standing over an empty screen — the ground, the
+/// project sentence and the whole composer never mounted, and the evidence run reported a window
+/// with no editable control in it. A view has no such requirement, and the responder chain is
+/// where UIKit itself looks for the controller a view belongs to.
+private final class MobileThemedPopoverAnchorView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    var presentingController: UIViewController? {
+        var responder: UIResponder? = next
+        while let current = responder {
+            if let controller = current as? UIViewController { return controller }
+            responder = current.next
+        }
+        return nil
+    }
+}
+
 /// Presents anchored app content through UIKit's public popover-background seam.
 ///
 /// SwiftUI forwards `presentationBackground` to a compact popover, but as of iOS 26 it ignores
 /// `presentationCornerRadius` there and keeps UIKit's large system mask. Owning the presentation
 /// lets the remote theme provide the one body-and-arrow outline instead of painting inside a
 /// silhouette that remains system-owned.
-private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControllerRepresentable {
+private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewRepresentable {
     @Binding var isPresented: Bool
     let theme: RemoteThemePalette
     let arrowEdge: Edge
@@ -20,15 +61,11 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
         Coordinator(isPresented: $isPresented)
     }
 
-    func makeUIViewController(context: Context) -> UIViewController {
-        let controller = UIViewController()
-        controller.view.backgroundColor = .clear
-        controller.view.isOpaque = false
-        controller.view.isUserInteractionEnabled = false
-        return controller
+    func makeUIView(context: Context) -> MobileThemedPopoverAnchorView {
+        MobileThemedPopoverAnchorView(frame: .zero)
     }
 
-    func updateUIViewController(_ presenter: UIViewController, context: Context) {
+    func updateUIView(_ anchor: MobileThemedPopoverAnchorView, context: Context) {
         context.coordinator.isPresented = $isPresented
         let style = MobileThemedPopoverBackgroundView.Style(
             fill: theme.uiFloatingSurface,
@@ -38,7 +75,7 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
         )
         let root = AnyView(content.mobileTheme(theme))
         context.coordinator.update(
-            presenter: presenter,
+            anchor: anchor,
             isPresented: isPresented,
             root: root,
             style: style,
@@ -49,7 +86,7 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
 
     final class Coordinator: NSObject, UIPopoverPresentationControllerDelegate {
         var isPresented: Binding<Bool>
-        private weak var presenter: UIViewController?
+        private weak var anchor: MobileThemedPopoverAnchorView?
         private var hostingController: UIHostingController<AnyView>?
         private var style: MobileThemedPopoverBackgroundView.Style?
         private var makeRoom: (() -> Void)?
@@ -60,20 +97,22 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
         }
 
         func update(
-            presenter: UIViewController,
+            anchor: MobileThemedPopoverAnchorView,
             isPresented: Bool,
             root: AnyView,
             style: MobileThemedPopoverBackgroundView.Style,
             arrowEdge: Edge,
             makeRoom: (() -> Void)?
         ) {
-            self.presenter = presenter
+            self.anchor = anchor
             self.style = style
             self.makeRoom = makeRoom
             if let hostingController {
                 hostingController.rootView = root
                 apply(style, to: hostingController)
-                if !isPresented {
+                if isPresented {
+                    refit(hostingController, from: anchor)
+                } else {
                     dismiss(hostingController)
                 }
                 return
@@ -81,43 +120,48 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
             guard isPresented else { return }
             guard !presentationIsScheduled else { return }
             presentationIsScheduled = true
-            DispatchQueue.main.async { [weak self, weak presenter] in
+            DispatchQueue.main.async { [weak self, weak anchor] in
                 guard let self else { return }
                 self.presentationIsScheduled = false
-                guard let presenter,
-                      presenter.viewIfLoaded?.window != nil,
+                guard let anchor,
+                      anchor.window != nil,
+                      let presenter = anchor.presentingController,
                       self.isPresented.wrappedValue,
                       self.hostingController == nil else { return }
-                self.present(root, from: presenter, style: style, arrowEdge: arrowEdge)
+                self.present(
+                    root,
+                    from: presenter,
+                    anchoredTo: anchor,
+                    style: style,
+                    arrowEdge: arrowEdge
+                )
             }
         }
 
         private func present(
             _ root: AnyView,
             from presenter: UIViewController,
+            anchoredTo anchor: MobileThemedPopoverAnchorView,
             style: MobileThemedPopoverBackgroundView.Style,
             arrowEdge: Edge
         ) {
             let hosting = UIHostingController(rootView: root)
             hosting.view.backgroundColor = .clear
             hosting.modalPresentationStyle = .popover
-            let width = min(420, max(1, presenter.view.window?.bounds.width ?? 420) - 24)
-            hosting.preferredContentSize = hosting.sizeThatFits(
-                in: CGSize(width: width, height: UIView.layoutFittingExpandedSize.height)
-            )
+            hosting.preferredContentSize = fittedSize(of: hosting, from: anchor)
             guard let popover = hosting.popoverPresentationController else { return }
-            if let makeRoom, let window = presenter.view.window,
+            if let makeRoom, let window = anchor.window,
                !MobileThemedPopoverRoom.fits(
                    contentHeight: hosting.preferredContentSize.height,
                    arrowEdge: arrowEdge,
-                   anchor: presenter.view.convert(presenter.view.bounds, to: window),
+                   anchor: anchor.convert(anchor.bounds, to: window),
                    between: MobileThemedPopoverRoom.contentTop(of: window),
                    and: MobileThemedPopoverRoom.contentBottom(of: window)
                ) {
                 makeRoom()
             }
-            popover.sourceView = presenter.view
-            popover.sourceRect = presenter.view.bounds
+            popover.sourceView = anchor
+            popover.sourceRect = anchor.bounds
             popover.permittedArrowDirections = permittedDirection(for: arrowEdge)
             popover.delegate = self
             popover.backgroundColor = style.fill
@@ -134,6 +178,37 @@ private struct MobileThemedPopoverPresenter<PopoverContent: View>: UIViewControl
                 guard let self, let hosting, let style = self.style else { return }
                 self.apply(style, to: hosting)
             }
+        }
+
+        /// The content's size at the width the window can give.
+        ///
+        /// Measured at presentation, and again whenever the root view changes: UIKit sizes a
+        /// popover from `preferredContentSize` once, so content whose height follows a choice
+        /// made inside it — the identity picker's login rows follow its runtime strip — was
+        /// otherwise clipped under the old height, or left standing over empty room. UIKit
+        /// animates the difference itself.
+        private func fittedSize(
+            of hosting: UIHostingController<AnyView>,
+            from anchor: MobileThemedPopoverAnchorView
+        ) -> CGSize {
+            let windowWidth = anchor.window?.bounds.width
+                ?? MobileThemedPopoverMetrics.maximumContentWidth
+            let width = min(
+                MobileThemedPopoverMetrics.maximumContentWidth,
+                max(1, windowWidth) - MobileThemedPopoverMetrics.windowMargin
+            )
+            return hosting.sizeThatFits(
+                in: CGSize(width: width, height: UIView.layoutFittingExpandedSize.height)
+            )
+        }
+
+        private func refit(
+            _ hosting: UIHostingController<AnyView>,
+            from anchor: MobileThemedPopoverAnchorView
+        ) {
+            let size = fittedSize(of: hosting, from: anchor)
+            guard size != hosting.preferredContentSize else { return }
+            hosting.preferredContentSize = size
         }
 
         private func dismiss(_ hosting: UIViewController) {

@@ -42,6 +42,7 @@ final class SidebarTreeBuilderTests: XCTestCase {
         var session = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                fullscreenRenderer: nil,
                 reasoningEffort: nil,
                 origin: origin
             ),

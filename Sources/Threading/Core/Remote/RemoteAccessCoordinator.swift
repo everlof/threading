@@ -2026,6 +2026,20 @@ final class RemoteAccessCoordinator: RemoteInvitationRedeeming, RemoteHostComman
                 )
             }
         )
+        notifications.configureHostedRetractionSender {
+            [weak service] retraction, registrationID in
+                guard let service else {
+                    return RemoteAPNSDeliveryResult(
+                        statusCode: nil,
+                        reason: "Hosted push service is unavailable.",
+                        apnsID: nil
+                    )
+                }
+                return await service.sendHostedRetraction(
+                    retraction: retraction,
+                    registrationID: registrationID
+                )
+        }
         service.onStateChange = { [weak self, weak service] in
             guard let self, let service, self.hostedService === service else { return }
             self.refreshHostedPairingLink()

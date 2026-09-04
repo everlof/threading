@@ -10,6 +10,15 @@
       }
     },
     {
+      "identity" : "nativediffkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/everlof/NativeDiffKit.git",
+      "state" : {
+        "revision" : "363c6197d8e334fa0aaf30550fb0a0bcac540e71",
+        "version" : "0.1.1"
+      }
+    },
+    {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-argument-parser",

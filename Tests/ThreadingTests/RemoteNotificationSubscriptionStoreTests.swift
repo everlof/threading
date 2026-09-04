@@ -207,11 +207,39 @@ final class RemoteNotificationSubscriptionStoreTests: XCTestCase {
         )
 
         XCTAssertNil(record.hostedServiceURL)
+        XCTAssertTrue(record.capabilities.isEmpty)
+        XCTAssertFalse(record.includesResponsePreviews)
         XCTAssertTrue(RemoteNotificationSubscriptionDefaults.isValid([record]))
         XCTAssertFalse(RemoteNotificationService.hostedRegistration(
             serviceURL: record.hostedServiceURL,
             belongsTo: developmentServiceURL.absoluteString
         ))
+    }
+
+    func testPreviewConsentRequiresAdvertisedCapability() {
+        var record = subscriptionRecord()
+        record = RemoteNotificationSubscriptionRecord(
+            shareID: record.shareID,
+            deviceID: record.deviceID,
+            deviceToken: record.deviceToken,
+            environment: record.environment,
+            enabledKinds: record.enabledKinds,
+            soundEnabledKinds: record.soundEnabledKinds,
+            includesResponsePreviews: true
+        )
+        XCTAssertFalse(RemoteNotificationSubscriptionDefaults.isValid([record]))
+
+        let capable = RemoteNotificationSubscriptionRecord(
+            shareID: record.shareID,
+            deviceID: record.deviceID,
+            deviceToken: record.deviceToken,
+            environment: record.environment,
+            enabledKinds: record.enabledKinds,
+            soundEnabledKinds: record.soundEnabledKinds,
+            capabilities: [.turnCompletionPreview, .notificationRetraction],
+            includesResponsePreviews: true
+        )
+        XCTAssertTrue(RemoteNotificationSubscriptionDefaults.isValid([capable]))
     }
 
     func testFailedSaveNeverActivatesCandidateAndCanBeRetried() {

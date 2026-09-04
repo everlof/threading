@@ -252,6 +252,7 @@ enum MobileDemoFixture: String, CaseIterable {
     case newSession = "new-session"
     case newSessionDraftMatrix = "new-session-draft-matrix"
     case newSessionModelEffortPicker = "new-session-model-effort-picker"
+    case newSessionIdentityPicker = "new-session-identity-picker"
     case newSessionMultiline = "new-session-multiline"
     case newSessionSingleCharacter = "new-session-single-character"
     case newSessionScrollOverflow = "new-session-scroll-overflow"

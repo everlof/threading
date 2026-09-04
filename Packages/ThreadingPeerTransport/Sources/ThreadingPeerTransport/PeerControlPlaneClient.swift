@@ -440,6 +440,20 @@ public struct PeerControlPlaneClient: Sendable {
         return try response.validated()
     }
 
+    /// Sends a content-free silent recall through the separately authenticated endpoint.
+    public func sendHostedPushRetraction<Payload: Encodable & Sendable>(
+        hostCredential: PeerControlPlaneBearer,
+        payload: Payload
+    ) async throws -> PeerPushDeliveryResult {
+        let response: PeerPushDeliveryResult = try await request(
+            method: "POST",
+            url: endpoint.route("v1", "push", "retractions"),
+            bearer: hostCredential,
+            body: payload
+        )
+        return try response.validated()
+    }
+
     /// Stores the APNs token under the paired phone's device credential and returns the only
     /// recipient identifier a host is allowed to use for subsequent sends.
     public func registerPushRecipient(

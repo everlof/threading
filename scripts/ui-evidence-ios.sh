@@ -10,6 +10,7 @@ derived_data_directory="${repository_directory}/.build/ui-evidence-ios-derived-d
 bundle_identifier="codes.threading.mobile"
 requested_output=""
 requested_simulator="booted"
+requested_template=""
 requested_app=""
 accept_new_baselines=0
 require_accepted=0
@@ -77,6 +78,7 @@ Capture the shipping iOS DEBUG fixtures on a real simulator and build a static H
 Options:
   --output PATH                 Use a new run directory instead of .build/ui-evidence-ios-reports/…
   --simulator UDID              Reuse this booted/bootable iOS simulator instead of an isolated one
+  --template UDID               Clone this shut-down iPhone as the isolated device instead of the booted one
   --app PATH                    Capture an already-built ThreadingMobile.app instead of rebuilding
   --only ID[,ID…]               Capture these image ids or coverage entries (ios- is optional)
   --theme ID                    Override every selected capture with one manifest theme
@@ -103,6 +105,14 @@ while (($#)); do
         exit 2
       fi
       requested_simulator="$2"
+      shift 2
+      ;;
+    --template)
+      if (($# < 2)); then
+        printf 'error: --template requires a UDID\n' >&2
+        exit 2
+      fi
+      requested_template="$2"
       shift 2
       ;;
     --app)
@@ -156,6 +166,11 @@ while (($#)); do
       ;;
   esac
 done
+
+if [[ -n "${requested_template}" && "${requested_simulator}" != "booted" ]]; then
+  printf 'error: --template clones a device and --simulator reuses one; pass only one of them\n' >&2
+  exit 2
+fi
 
 for command in jq lockf python3 xcodebuild xcrun; do
   command -v "${command}" >/dev/null || {
@@ -213,6 +228,61 @@ report_directory="${run_directory}/report"
 log_directory="${run_directory}/logs"
 mkdir -p "${current_directory}/ios" "${log_directory}"
 
+# idb's flattened tree can list a UIKit bar as one childless group. `describe-all` on the session
+# dashboard reports its navigation bar as a "Nav bar" group carrying the title as its identifier
+# and nothing beneath it, while `describe-point` at the same bar still answers "Choose Mac", the
+# title button and "Remote access options" (the session screen's bar enumerates normally, so this
+# is idb's traversal, not the app). Hit-testing along such a bar's centreline finds what
+# enumeration dropped: the pitch sits below any 44-point tap target, and only labelless groups no
+# taller than two tap targets are walked, so the cost is bounded by bar count × bar width.
+hit_test_pitch=12
+hit_test_bar_height=88
+hit_test_point_matches() {
+  local x="$1" y="$2" label="$3"
+  local point_json
+  point_json="$(
+    idb ui describe-point --json --udid "${simulator_udid}" "${x}" "${y}" 2>/dev/null || true
+  )"
+  jq -er --arg label "${label}" '
+    select((.AXLabel // "") | startswith($label)) | .frame
+    | select(.width > 0 and .height > 0)
+    | "\(.x + (.width / 2)) \(.y + (.height / 2))"
+  ' <<<"${point_json}" 2>/dev/null
+}
+
+hit_test_flattened_bars() {
+  local accessibility_json="$1" label="$2"
+  local left centre_y right step trailing leading found
+  while IFS=$'\t' read -r left centre_y right; do
+    [[ -n "${left}" ]] || continue
+    # Ends first, then inward: a bar keeps its items at its edges and its title in the middle,
+    # and each probe is one round trip to the simulator, so a trailing control is found in two
+    # or three probes instead of thirty. Every probe still costs the same bounded walk at most.
+    for ((step = 0; ; step += 1)); do
+      trailing=$((right - step * hit_test_pitch))
+      leading=$((left + step * hit_test_pitch))
+      ((trailing >= leading)) || break
+      if found="$(hit_test_point_matches "${trailing}" "${centre_y}" "${label}")"; then
+        printf '%s\n' "${found}"
+        return 0
+      fi
+      ((trailing != leading)) || continue
+      if found="$(hit_test_point_matches "${leading}" "${centre_y}" "${label}")"; then
+        printf '%s\n' "${found}"
+        return 0
+      fi
+    done
+  done < <(
+    jq -r --argjson height "${hit_test_bar_height}" '
+      .[]
+      | select(.type == "Group" and (.AXLabel // "") == "")
+      | select(.frame.height <= $height and .frame.width >= 44)
+      | "\(.frame.x + 6 | floor)\t\(.frame.y + (.frame.height / 2) | floor)\t\(.frame.x + .frame.width - 6 | floor)"
+    ' "${accessibility_json}"
+  )
+  return 1
+}
+
 resolve_simulator() {
   local selector="$1"
   if [[ "${selector}" != "booted" ]]; then
@@ -260,11 +330,27 @@ boot_simulator_if_needed() {
   xcrun simctl bootstatus "${udid}" -b >/dev/null
 }
 
-template_simulator_udid="$(resolve_simulator "${requested_simulator}")"
-device_name="$(
+if [[ -n "${requested_template}" ]]; then
+  # A named template is cloned exactly like the booted iPhone is, so a Mac whose booted iPhone
+  # is running another session's app can hand the runner a shut-down device instead. The booted
+  # path shuts its template down to clone it and boots it again afterwards, which kills whatever
+  # was running on it; a template chosen by UDID is never booted here at all.
+  template_simulator_udid="${requested_template}"
+else
+  template_simulator_udid="$(resolve_simulator "${requested_simulator}")"
+fi
+# The model, not the device's user-editable name: a template kept for cloning can be called
+# anything, and the report's `device=` label and the iPhone check should both still answer for
+# the hardware that drew the pixels.
+device_type_identifier="$(
   xcrun simctl list devices available -j \
     | jq -r --arg udid "${template_simulator_udid}" \
-      '[.devices[][] | select(.udid == $udid)][0].name // empty'
+      '[.devices[][] | select(.udid == $udid)][0].deviceTypeIdentifier // empty'
+)"
+device_name="$(
+  xcrun simctl list devicetypes -j \
+    | jq -r --arg identifier "${device_type_identifier}" \
+      '[.devicetypes[] | select(.identifier == $identifier)][0].name // empty'
 )"
 if [[ -z "${device_name}" || "${device_name}" != iPhone* ]]; then
   printf 'error: simulator %s is not an available iPhone\n' \
@@ -272,7 +358,7 @@ if [[ -z "${device_name}" || "${device_name}" != iPhone* ]]; then
   exit 1
 fi
 
-if [[ "${requested_simulator}" == "booted" ]]; then
+if [[ "${requested_simulator}" == "booted" || -n "${requested_template}" ]]; then
   template_state="$(
     xcrun simctl list devices available -j \
       | jq -r --arg udid "${template_simulator_udid}" \
@@ -314,12 +400,16 @@ if [[ "${requested_simulator}" == "booted" ]]; then
   # A cloned device can still consider the software keyboard's first-use lessons unseen. Those
   # system coachmarks sit above every app window and can cover half of an otherwise valid
   # keyboard-open capture. Seed only the disposable evidence device; an explicitly supplied
-  # developer simulator keeps its own onboarding state.
+  # developer simulator keeps its own onboarding state. `MultilingualKeyboardTip` is the
+  # "Type English and Swedish" sheet a bilingual keyboard raises on its first keystroke: a
+  # never-typed-on template inherits the host's two languages, and the sheet then swallowed the
+  # walkthrough's typing taps while every keyboard-open screenshot still looked fine.
   for tutorial_key in \
       DidShowContinuousPathIntroduction \
       KeyboardDidShowProductivityTutorial \
       DidShowGestureKeyboardIntroduction \
-      UIKeyboardDidShowInternationalInfoIntroduction; do
+      UIKeyboardDidShowInternationalInfoIntroduction \
+      MultilingualKeyboardTip; do
     xcrun simctl spawn "${simulator_udid}" defaults write \
       com.apple.keyboard.preferences "${tutorial_key}" 1
   done
@@ -619,6 +709,12 @@ capture_fixture() {
     fi
     accessibility_json="${log_directory}/${identifier}.accessibility.json"
     tap_point=""
+    # The app gives the host a bounded wait for this tap (`waitsForHostInteraction`), and one
+    # `describe-all` round trip is a few hundred milliseconds on its own, so the fallback is
+    # gated on the clock rather than on a poll count: one second of flattened polling is long
+    # enough for any control enumeration will ever list, then the bars it flattened are walked,
+    # and again every second after that.
+    local last_hit_test=${SECONDS}
     for ((interaction_poll = 0; interaction_poll < 200; interaction_poll += 1)); do
       idb ui describe-all --json --udid "${simulator_udid}" >"${accessibility_json}"
       tap_point="$(jq -er --arg label "${interaction_label}" '
@@ -627,6 +723,17 @@ capture_fixture() {
         | "\(.x + (.width / 2)) \(.y + (.height / 2))"
       ' "${accessibility_json}" 2>/dev/null || true)"
       [[ -n "${tap_point}" ]] && break
+      if ((SECONDS - last_hit_test >= 1)); then
+        last_hit_test=${SECONDS}
+        tap_point="$(
+          hit_test_flattened_bars "${accessibility_json}" "${interaction_label}" || true
+        )"
+        if [[ -n "${tap_point}" ]]; then
+          printf 'note: fixture %s found %s by hit-testing a bar idb had flattened\n' \
+            "${identifier}" "${interaction_label}" >&2
+          break
+        fi
+      fi
       sleep 0.05
     done
     if [[ -z "${tap_point}" ]]; then

@@ -26,10 +26,11 @@ final class ToolsPreferencesViewController: NSViewController {
     private let chromeAutomationProfile: ChromeAutomationProfile
     private var persistentOriginKeys: [String] = []
     private let credentialStore: BrowserCredentialStore
+    private let projects: ProjectStore
     private var credentialProvider: BrowserCredentialProvider = .fallback
     private var storedCredentials: [BrowserCredentialIdentity] = []
     private var onePasswordItems: [BrowserCredentialIdentity] = []
-    private var exemptSubmissionOrigins: [String] = []
+    private var exemptSubmissions: [BrowserSubmissionExemptions.Grant] = []
     private var extensionSections: [ExtensionSettingsSectionModel] = []
 
     /// The complete page ordering is cheap value state. AppKit owns only the cells around the
@@ -106,12 +107,14 @@ final class ToolsPreferencesViewController: NSViewController {
         groups: [MCPToolGroup]?,
         browserAccessStore: BrowserAccessStore,
         chromeAutomationProfile: ChromeAutomationProfile = .shared,
-        credentialStore: BrowserCredentialStore = BrowserCredentialStore()
+        credentialStore: BrowserCredentialStore = BrowserCredentialStore(),
+        projects: ProjectStore = .shared
     ) {
         groupOverride = groups
         self.browserAccessStore = browserAccessStore
         self.chromeAutomationProfile = chromeAutomationProfile
         self.credentialStore = credentialStore
+        self.projects = projects
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -160,7 +163,7 @@ final class ToolsPreferencesViewController: NSViewController {
         storedCredentials = credentialProvider == .threadingVault
             ? credentialStore.identities()
             : []
-        exemptSubmissionOrigins = BrowserSubmissionExemptions.shared.exemptOriginKeys
+        exemptSubmissions = BrowserSubmissionExemptions.shared.grants
         persistentOriginKeys = browserAccessStore.allowedOrigins.sorted()
         presentationRows = makePresentationRows()
         updateCardDecorations()
@@ -234,7 +237,7 @@ final class ToolsPreferencesViewController: NSViewController {
                 rows.append(.browserSignInVaultAdd)
             }
         }
-        rows.append(contentsOf: exemptSubmissionOrigins.indices.map(
+        rows.append(contentsOf: exemptSubmissions.indices.map(
             PresentationRow.browserSignInSubmissionExemption
         ))
         rows.append(contentsOf: [.chromeAutomation, .websiteAccessCaption])
@@ -674,7 +677,10 @@ final class ToolsPreferencesViewController: NSViewController {
     }
 
     private func browserSignInSubmissionExemptionRow(at index: Int) -> NSView {
-        guard exemptSubmissionOrigins.indices.contains(index) else { return NSView() }
+        guard exemptSubmissions.indices.contains(index) else { return NSView() }
+        let exemption = exemptSubmissions[index]
+        let sessionName = projects.session(withID: exemption.sessionID)?.displayTitle
+            ?? L10n.string("This session")
         let revoke = SettingsUI.button(
             "Ask Again",
             target: self,
@@ -682,7 +688,7 @@ final class ToolsPreferencesViewController: NSViewController {
         )
         revoke.tag = index
         return SettingsUI.row(
-            title: exemptSubmissionOrigins[index],
+            title: "\(sessionName) — \(exemption.originKey)",
             subtitle: L10n.string("""
                 Forms submit here without asking. This lasts until you quit Threading and is \
                 never written to disk.
@@ -1029,8 +1035,8 @@ final class ToolsPreferencesViewController: NSViewController {
     }
 
     @objc private func revokeSubmissionExemption(_ sender: ThemedButton) {
-        guard exemptSubmissionOrigins.indices.contains(sender.tag) else { return }
-        BrowserSubmissionExemptions.shared.revoke(key: exemptSubmissionOrigins[sender.tag])
+        guard exemptSubmissions.indices.contains(sender.tag) else { return }
+        BrowserSubmissionExemptions.shared.revoke(exemptSubmissions[sender.tag])
         render()
     }
 

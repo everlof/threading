@@ -105,13 +105,18 @@ final class DemoSessionScript {
         self.connection = connection
 #if DEBUG
         let marketingFixture = marketingProvider.flatMap {
-            try? MobileMarketingTerminalFixture.load($0)
+            try? MobileMarketingTerminalFixture.load(
+                $0,
+                mode: .matching(RemoteAppModel.demoRequestedMarketingTheme)
+            )
         }
         let helloTheme = marketingProvider == nil
             ? RemoteAppModel.demoTheme
-            : Self.requestedMarketingTheme
+            : RemoteAppModel.demoRequestedMarketingTheme
         let helloTerminalTheme = marketingProvider.map { _ in
-            RemoteAppModel.demoMarketingTerminalTheme(matching: Self.requestedMarketingTheme)
+            RemoteAppModel.demoMarketingTerminalTheme(
+                matching: RemoteAppModel.demoRequestedMarketingTheme
+            )
         } ?? RemoteAppModel.demoTerminalTheme
         let helloColumns = session.surface == .terminal ? marketingFixture?.columns ?? 80 : 0
         let helloRows = session.surface == .terminal ? marketingFixture?.rows ?? 24 : 0
@@ -398,20 +403,6 @@ final class DemoSessionScript {
     }
 
 #if DEBUG
-    private static var requestedMarketingTheme: RemoteThemeDTO {
-        let requested = ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"]
-        switch requested {
-        case "light": return RemoteAppModel.demoLightTheme
-        case "threading": return RemoteAppModel.demoThreadingTheme
-        case "system-remote": return RemoteAppModel.demoSystemRemoteTheme
-        case let requested?:
-            return RemoteAppModel.demoCatalogThemes.first(where: { $0.id == requested })
-                ?? RemoteAppModel.demoTheme
-        case nil:
-            return RemoteAppModel.demoTheme
-        }
-    }
-
     private static let ownerInputControl = RemoteInputControlStateDTO(
         mode: .collaborative,
         currentParticipantID: RemoteCollaborationParticipantDTO.ownerID,
@@ -446,7 +437,7 @@ final class DemoSessionScript {
         total: 3,
         steps: [
             .init(id: "0", title: "Build deterministic provider fixtures", status: .completed),
-            .init(id: "1", title: "Capture five marketing checkpoints", status: .completed),
+            .init(id: "1", title: "Capture six marketing checkpoints", status: .completed),
             .init(id: "2", title: "Render theme variants", status: .inProgress),
         ]
     )

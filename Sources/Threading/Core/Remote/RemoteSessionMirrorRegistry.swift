@@ -1098,7 +1098,15 @@ final class RemoteSessionMirrorRegistry {
     /// Subscribes a dashboard to app-chrome changes without binding it to a particular session.
     /// The first frame is authoritative too, closing the race between `/api/me` and socket auth.
     func attachThemeEvents(_ connection: RemoteConnection) {
-        themeEventSubscribers[ObjectIdentifier(connection)] = connection
+        let key = ObjectIdentifier(connection)
+        themeEventSubscribers[key] = connection
+        if let peer = connection.authenticatedPeer {
+            RemoteNotificationService.shared.foregroundDeviceAttached(
+                shareID: peer.authorization.shareID,
+                participantID: peer.authorization.member.map { .member($0.id) } ?? .owner,
+                deviceID: peer.deviceID ?? "socket-\(key.hashValue)"
+            )
+        }
         connection.sendText(encode(RemoteAppThemeUpdateDTO(
             theme: RemoteThemeBridge.appTheme()
         )))
@@ -1113,6 +1121,24 @@ final class RemoteSessionMirrorRegistry {
         matching predicate: (RemoteAuthorization, String?) -> Bool
     ) -> Int {
         let message = encode(event)
+        var count = 0
+        for connection in themeEventSubscribers.values {
+            guard let peer = connection.authenticatedPeer,
+                  predicate(peer.authorization, peer.deviceID) else { continue }
+            connection.sendText(message)
+            count += 1
+        }
+        return count
+    }
+
+    /// Retractions are a separate typed frame so an older client safely ignores them and a new
+    /// client never has to infer recall from alert copy or stringly-typed event comparisons.
+    @discardableResult
+    func broadcastNotificationRetraction(
+        _ retraction: RemoteNotificationRetractionDTO,
+        matching predicate: (RemoteAuthorization, String?) -> Bool
+    ) -> Int {
+        let message = encode(retraction)
         var count = 0
         for connection in themeEventSubscribers.values {
             guard let peer = connection.authenticatedPeer,
@@ -1394,7 +1420,14 @@ final class RemoteSessionMirrorRegistry {
             startingSessions[startupSessionID] = starting
         }
         cancelTerminalHydration(for: key)
-        themeEventSubscribers.removeValue(forKey: key)
+        if themeEventSubscribers.removeValue(forKey: key) != nil,
+           let peer = connection.authenticatedPeer {
+            RemoteNotificationService.shared.foregroundDeviceDetached(
+                shareID: peer.authorization.shareID,
+                participantID: peer.authorization.member.map { .member($0.id) } ?? .owner,
+                deviceID: peer.deviceID ?? "socket-\(key.hashValue)"
+            )
+        }
         if let terminalID = terminalByConnection.removeValue(forKey: key) {
             releaseViewport(
                 for: connection,
@@ -1612,6 +1645,14 @@ final class RemoteSessionMirrorRegistry {
         focusedControllerReleaseTasks.removeAll()
         inputControls.removeAll()
         sessionByConnection.removeAll()
+        for (key, connection) in themeEventSubscribers {
+            guard let peer = connection.authenticatedPeer else { continue }
+            RemoteNotificationService.shared.foregroundDeviceDetached(
+                shareID: peer.authorization.shareID,
+                participantID: peer.authorization.member.map { .member($0.id) } ?? .owner,
+                deviceID: peer.deviceID ?? "socket-\(key.hashValue)"
+            )
+        }
         themeEventSubscribers.removeAll()
     }
 

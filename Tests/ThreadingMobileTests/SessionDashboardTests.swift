@@ -788,42 +788,56 @@ final class MobileLiftedSessionRowTests: XCTestCase {
 /// the real app, which photographs cleanly and passes review while showing the wrong screen — so
 /// the mapping is worth spelling out rather than reading back from the code that performs it.
 final class MobileDemoSceneTests: XCTestCase {
+    @MainActor
     func testMarketingProviderFixturesAreBundledPrivatePTYRecordings() throws {
         for provider in MobileMarketingTerminalFixture.Provider.allCases {
-            let fixture = try MobileMarketingTerminalFixture.load(provider)
-            XCTAssertEqual(fixture.provider, provider.rawValue)
-            XCTAssertEqual(fixture.columns, 62)
-            XCTAssertEqual(fixture.rows, provider == .claude ? 49 : 55)
-            XCTAssertGreaterThan(fixture.payload.count, 1_500)
-            XCTAssertFalse(fixture.payload.isEmpty)
-            XCTAssertTrue(fixture.payload.contains(0x1B))
-            let transcriptMarker = provider == .claude ? "Completed:" : "Validation"
-            XCTAssertTrue(fixture.payload.contains(Data(transcriptMarker.utf8)))
-            if provider == .claude {
-                XCTAssertTrue(fixture.payload.contains(Data("capture-plan.md".utf8)))
-                XCTAssertTrue(fixture.payload.contains(Data("Added".utf8)))
-                XCTAssertTrue(fixture.payload.contains(Data("removed".utf8)))
-                XCTAssertTrue(
-                    fixture.payload.contains(Data("\u{1B}[91m".utf8)),
-                    "the installed Claude renderer must retain removed-line syntax color"
-                )
-                XCTAssertTrue(
-                    fixture.payload.contains(Data("\u{1B}[92m".utf8)),
-                    "the installed Claude renderer must retain added-line syntax color"
-                )
-            } else {
-                XCTAssertTrue(fixture.payload.contains(Data("Edited".utf8)))
-                XCTAssertTrue(fixture.payload.contains(Data("capture-notes.md".utf8)))
-                XCTAssertTrue(
-                    fixture.payload.contains(Data("\u{1B}[38;2;".utf8)),
-                    "the installed Codex renderer must contribute its real syntax palette"
-                )
+            for mode in MobileMarketingTerminalFixture.TerminalMode.allCases {
+                let fixture = try MobileMarketingTerminalFixture.load(provider, mode: mode)
+                XCTAssertEqual(fixture.provider, provider.rawValue)
+                // Each mode is its own recording against a terminal reporting that background, so a
+                // light app theme replays the providers' light palettes rather than dark blocks.
+                XCTAssertEqual(fixture.terminalMode, mode.rawValue)
+                XCTAssertEqual(fixture.columns, 62)
+                XCTAssertEqual(fixture.rows, provider == .claude ? 49 : 55)
+                XCTAssertGreaterThan(fixture.payload.count, 1_500)
+                XCTAssertFalse(fixture.payload.isEmpty)
+                XCTAssertTrue(fixture.payload.contains(0x1B))
+                let transcriptMarker = provider == .claude ? "Completed:" : "Validation"
+                XCTAssertTrue(fixture.payload.contains(Data(transcriptMarker.utf8)))
+                if provider == .claude {
+                    XCTAssertTrue(fixture.payload.contains(Data("capture-plan.md".utf8)))
+                    XCTAssertTrue(fixture.payload.contains(Data("Added".utf8)))
+                    XCTAssertTrue(fixture.payload.contains(Data("removed".utf8)))
+                    XCTAssertTrue(
+                        fixture.payload.contains(Data("\u{1B}[91m".utf8)),
+                        "the installed Claude renderer must retain removed-line syntax color"
+                    )
+                    XCTAssertTrue(
+                        fixture.payload.contains(Data("\u{1B}[92m".utf8)),
+                        "the installed Claude renderer must retain added-line syntax color"
+                    )
+                } else {
+                    XCTAssertTrue(fixture.payload.contains(Data("Edited".utf8)))
+                    XCTAssertTrue(fixture.payload.contains(Data("capture-notes.md".utf8)))
+                    XCTAssertTrue(
+                        fixture.payload.contains(Data("\u{1B}[38;2;".utf8)),
+                        "the installed Codex renderer must contribute its real syntax palette"
+                    )
+                }
+                XCTAssertFalse(fixture.payload.contains(Data("authentication rejected".utf8)))
+                XCTAssertFalse(fixture.payload.contains(Data("MCP client".utf8)))
+                XCTAssertFalse(fixture.payload.contains(Data("/Users/".utf8)))
+                XCTAssertFalse(fixture.payload.contains(Data("/home/".utf8)))
             }
-            XCTAssertFalse(fixture.payload.contains(Data("authentication rejected".utf8)))
-            XCTAssertFalse(fixture.payload.contains(Data("MCP client".utf8)))
-            XCTAssertFalse(fixture.payload.contains(Data("/Users/".utf8)))
-            XCTAssertFalse(fixture.payload.contains(Data("/home/".utf8)))
         }
+        XCTAssertEqual(
+            MobileMarketingTerminalFixture.TerminalMode.matching(RemoteAppModel.demoThreadingTheme),
+            .dark
+        )
+        XCTAssertEqual(
+            MobileMarketingTerminalFixture.TerminalMode.matching(RemoteAppModel.demoLightTheme),
+            .light
+        )
         XCTAssertEqual(
             MobileMarketingTerminalFixture.provider(
                 marketingSessionID: "marketing-claude-session"
@@ -867,7 +881,7 @@ final class MobileDemoSceneTests: XCTestCase {
         XCTAssertEqual(connection.runPlan?.activeTitle, "Render theme variants")
         XCTAssertEqual(connection.runPlanSteps.map(\.title), [
             "Build deterministic provider fixtures",
-            "Capture five marketing checkpoints",
+            "Capture six marketing checkpoints",
             "Render theme variants",
         ])
     }
@@ -897,16 +911,54 @@ final class MobileDemoSceneTests: XCTestCase {
     }
 
     @MainActor
-    func testMarketingTerminalPaletteMatchesEverySelectedAppTheme() {
+    func testMarketingResponseNamesTheAppThemeTheFrameIsDrawnIn() {
+        // The frame is painted in the theme `THREADING_MOBILE_THEME` asks for; the Settings
+        // capture's "Mac appearance" row reads `me.theme`, so the response has to carry the same
+        // record rather than the demo's own.
+        XCTAssertEqual(
+            RemoteAppModel.marketingResponse.theme?.id,
+            RemoteAppModel.demoRequestedMarketingTheme.id
+        )
+    }
+
+    @MainActor
+    func testMarketingTerminalPaletteMatchesEverySelectedAppTheme() throws {
         for appTheme in RemoteAppModel.demoCatalogThemes {
             let terminal = RemoteAppModel.demoMarketingTerminalTheme(matching: appTheme)
 
             XCTAssertEqual(terminal.id, "marketing-\(appTheme.id)-terminal")
             XCTAssertEqual(terminal.background, appTheme.colors["ground"])
-            XCTAssertEqual(terminal.foreground, appTheme.colors["label"])
-            XCTAssertEqual(terminal.cursor, appTheme.colors["accent"])
-            XCTAssertEqual(terminal.selection, appTheme.colors["selection"])
+            XCTAssertEqual(
+                terminal.foreground.uppercased(),
+                appTheme.colors["label"]?.uppercased()
+            )
+            XCTAssertEqual(terminal.cursor.uppercased(), appTheme.colors["accent"]?.uppercased())
             XCTAssertEqual(terminal.ansi.count, 16)
+
+            // A terminal cell is opaque: every entry is six-digit hex, so a label tint such as
+            // `tertiary_label` reaches SwiftTerm composited over the ground instead of as the
+            // label with its alpha dropped (Art Deco's cream prompt bar, Editorial's black one).
+            let opaque = try NSRegularExpression(pattern: "^#[0-9A-F]{6}$")
+            for value in terminal.ansi + [terminal.selection, terminal.foreground] {
+                XCTAssertNotNil(
+                    opaque.firstMatch(
+                        in: value, range: NSRange(value.startIndex..., in: value)
+                    ),
+                    "\(appTheme.id) yields a non-opaque terminal colour: \(value)"
+                )
+            }
+            // Bright black is the prompt-bar grey: never the ground and never the label.
+            let brightBlack = terminal.ansi[8].uppercased()
+            XCTAssertNotEqual(brightBlack, terminal.background.uppercased(), appTheme.id)
+            XCTAssertNotEqual(brightBlack, terminal.foreground.uppercased(), appTheme.id)
+            // And the greys sit where a TUI recorded for that background expects them.
+            if appTheme.mode == .light {
+                XCTAssertEqual(terminal.ansi[0], terminal.foreground, appTheme.id)
+                XCTAssertEqual(terminal.ansi[15], terminal.background, appTheme.id)
+            } else {
+                XCTAssertEqual(terminal.ansi[15], terminal.foreground, appTheme.id)
+                XCTAssertNotEqual(terminal.ansi[0], terminal.foreground, appTheme.id)
+            }
         }
     }
 
@@ -1012,6 +1064,8 @@ final class MobileDemoSceneTests: XCTestCase {
                 expected = ("new-session-draft-matrix", .newSession)
             case .newSessionModelEffortPicker:
                 expected = ("new-session-model-effort-picker", .newSession)
+            case .newSessionIdentityPicker:
+                expected = ("new-session-identity-picker", .newSession)
             case .newSessionMultiline: expected = ("new-session-multiline", .newSession)
             case .newSessionSingleCharacter:
                 expected = ("new-session-single-character", .newSession)

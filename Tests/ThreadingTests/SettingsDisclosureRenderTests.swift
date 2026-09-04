@@ -167,7 +167,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         }
         for index in 0..<80 {
             let url = try XCTUnwrap(URL(string: "https://virtual-\(index).example.test"))
-            exemptions.exempt(try XCTUnwrap(BrowserOrigin(url: url)))
+            exemptions.exempt(try XCTUnwrap(BrowserOrigin(url: url)), for: SessionID())
         }
         let suite = "BrowserSignInVirtualization-\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -190,7 +190,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         XCTAssertTrue(askAgain.performPrimaryAction())
         host.layoutSubtreeIfNeeded()
 
-        XCTAssertEqual(exemptions.exemptOriginKeys.count, 79)
+        XCTAssertEqual(exemptions.grants.count, 79)
         XCTAssertEqual(controller.virtualRowCount, 85)
         XCTAssertEqual(ThemeBoundaryAudit.violations(in: page), [])
         withExtendedLifetime(window) {}
@@ -998,7 +998,7 @@ final class SettingsDisclosureRenderTests: XCTestCase {
         }
         for index in 0..<originCount {
             let url = try XCTUnwrap(URL(string: "https://stress-\(index).example.test"))
-            exemptions.exempt(try XCTUnwrap(BrowserOrigin(url: url)))
+            exemptions.exempt(try XCTUnwrap(BrowserOrigin(url: url)), for: SessionID())
         }
 
         let memoryBefore = physicalFootprintBytes()

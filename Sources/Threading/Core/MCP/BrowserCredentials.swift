@@ -337,12 +337,13 @@ struct BrowserCredentialStore: Sendable {
 
 // MARK: - Submission Exemptions
 
-/// Origins the user has said may submit a form without being asked again — **for as long as this
-/// app run lasts, and no longer**.
+/// Session-and-origin pairs the user has said may submit a form without being asked again — **for
+/// as long as this app run lasts, and no longer**.
 ///
-/// Filling a sign-in and then still asking before the submit gets you about half the value the
-/// test-credential vault was built for, so this is the other half. It is also the piece that most
-/// deserved to be built last, because it relaxes a different guarantee than the fill does.
+/// A form submission remains a separate capability from reading or interacting with a page.
+/// Repeating the same scoped question for every submission makes an agent-driven development loop
+/// impractical, while remembering one session-and-origin pair removes that repetition without
+/// turning the answer into an app-wide browser grant.
 ///
 /// **Why this is process memory and not a preference.** The provider choice and
 /// `BrowserAccessStore`'s persistent grants live in `UserDefaults`, which an agent with shell
@@ -354,36 +355,51 @@ struct BrowserCredentialStore: Sendable {
 /// Quitting Threading is therefore a complete revocation, which is a property worth keeping even
 /// when someone later asks for it to be remembered.
 ///
-/// **Only origins that already hold a credential may be exempted.** The exemption is an extension
-/// of a decision the user already made in Settings for that exact origin; offering it anywhere
-/// else would turn one prompt into a general-purpose "stop asking me" for the whole browser.
+/// The session is part of the key. A grant to one agent on one exact origin therefore cannot let
+/// another chat submit there, and changing the scheme or port asks again. This is the same narrow
+/// memory as an "Allow for This Session" tool grant, applied to the separate form-submission
+/// boundary.
 @MainActor
 final class BrowserSubmissionExemptions {
 
+    struct Grant: Hashable {
+        let sessionID: SessionID
+        let originKey: String
+    }
+
     static let shared = BrowserSubmissionExemptions()
 
-    private var origins: Set<String> = []
+    private var originsBySession: [SessionID: Set<String>] = [:]
 
-    /// Whether this origin may submit without asking. Re-checked at every submission rather than
-    /// captured when the exemption was granted, so revoking it in Settings takes effect on the
-    /// next submit rather than the next launch.
-    func isExempt(_ origin: BrowserOrigin) -> Bool {
-        origins.contains(origin.key)
+    /// Whether this session may submit on this exact origin without asking. Re-checked at every
+    /// submission rather than captured when the exemption was granted, so revoking it in Settings
+    /// takes effect on the next submit rather than the next launch.
+    func isExempt(_ origin: BrowserOrigin, for sessionID: SessionID) -> Bool {
+        originsBySession[sessionID]?.contains(origin.key) == true
     }
 
-    func exempt(_ origin: BrowserOrigin) {
-        origins.insert(origin.key)
+    func exempt(_ origin: BrowserOrigin, for sessionID: SessionID) {
+        originsBySession[sessionID, default: []].insert(origin.key)
     }
 
-    func revoke(key: String) {
-        origins.remove(key)
+    func revoke(_ grant: Grant) {
+        originsBySession[grant.sessionID]?.remove(grant.originKey)
+        if originsBySession[grant.sessionID]?.isEmpty == true {
+            originsBySession.removeValue(forKey: grant.sessionID)
+        }
     }
 
     func revokeAll() {
-        origins.removeAll()
+        originsBySession.removeAll()
     }
 
-    var exemptOriginKeys: [String] {
-        origins.sorted()
+    var grants: [Grant] {
+        originsBySession.flatMap { sessionID, origins in
+            origins.map { Grant(sessionID: sessionID, originKey: $0) }
+        }
+        .sorted {
+            if $0.originKey != $1.originKey { return $0.originKey < $1.originKey }
+            return $0.sessionID.uuidString < $1.sessionID.uuidString
+        }
     }
 }

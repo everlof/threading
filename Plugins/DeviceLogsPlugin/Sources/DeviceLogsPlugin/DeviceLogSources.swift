@@ -175,11 +175,12 @@ public final class DeviceLogLineReader {
                 diagnostics.append(chunk, limit: Self.retainedErrorBytes)
             }
         }
+        let ending = onEnd.map(DeviceLogEndCallback.init)
         task.terminationHandler = { finished in
             errors.fileHandleForReading.readabilityHandler = nil
-            guard let onEnd else { return }
+            guard let ending else { return }
             let reason = diagnostics.text()
-            onEnd(reason.isEmpty
+            ending.call(reason.isEmpty
                 ? "the reader exited with status \(finished.terminationStatus)"
                 : reason)
         }
@@ -224,6 +225,21 @@ public final class DeviceLogLineReader {
     deinit {
         process?.terminationHandler = nil
         process?.terminate()
+    }
+}
+
+/// `Process` invokes its termination handler on an arbitrary queue. The reader's public contract
+/// already promises that `onEnd` runs off the main thread; this wrapper makes that established
+/// boundary explicit to Swift's concurrency checker without changing the callback's executor.
+private final class DeviceLogEndCallback: @unchecked Sendable {
+    private let body: (String) -> Void
+
+    init(_ body: @escaping (String) -> Void) {
+        self.body = body
+    }
+
+    func call(_ reason: String) {
+        body(reason)
     }
 }
 

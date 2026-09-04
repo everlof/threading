@@ -6,12 +6,26 @@ import UserNotifications
 
 enum RemoteNotificationBridge {
     static let eventNotification = Notification.Name("ThreadingRemoteNotificationEvent")
+    static let retractionNotification = Notification.Name(
+        "ThreadingRemoteNotificationRetraction"
+    )
     static let deviceTokenNotification = Notification.Name("ThreadingRemotePushToken")
 
     static func received(_ event: RemoteNotificationEventDTO, connectionID: String) {
         NotificationCenter.default.post(
             name: eventNotification,
             object: event,
+            userInfo: ["connectionID": connectionID]
+        )
+    }
+
+    static func received(
+        _ retraction: RemoteNotificationRetractionDTO,
+        connectionID: String
+    ) {
+        NotificationCenter.default.post(
+            name: retractionNotification,
+            object: retraction,
             userInfo: ["connectionID": connectionID]
         )
     }
@@ -35,7 +49,174 @@ enum RemoteNotificationPayloadDecoder {
               let data = try? JSONSerialization.data(withJSONObject: source) else {
             return nil
         }
-        return try? JSONDecoder().decode(RemoteNotificationEventDTO.self, from: data)
+        guard let event = try? JSONDecoder().decode(RemoteNotificationEventDTO.self, from: data),
+              RemoteNotificationPayloadValidation.accepts(event) else { return nil }
+        return event
+    }
+
+
+    static func retraction(
+        from userInfo: [AnyHashable: Any]
+    ) -> RemoteNotificationRetractionDTO? {
+        let source = userInfo["retraction"] ?? userInfo
+        guard JSONSerialization.isValidJSONObject(source),
+              let data = try? JSONSerialization.data(withJSONObject: source),
+              let retraction = try? JSONDecoder().decode(
+                  RemoteNotificationRetractionDTO.self,
+                  from: data
+              ),
+              RemoteNotificationPayloadValidation.accepts(retraction) else { return nil }
+        return retraction
+    }
+}
+
+/// Structural validation shared by APNs and the authenticated live socket. Codable proves only
+/// that fields have the expected Swift types; it does not enforce the bounds or discriminators
+/// that make those fields safe routing input.
+enum RemoteNotificationPayloadValidation {
+    private static let maximumIdentifierBytes = 128
+    private static let maximumDestinationIdentifierBytes = 512
+    private static let maximumTitleBytes = 160
+    private static let maximumBodyBytes = 1_500
+    private static let maximumLocalizationArguments = 8
+
+    static func accepts(_ event: RemoteNotificationEventDTO) -> Bool {
+        event.type == "notification"
+            && machineToken(event.id, maximumBytes: maximumIdentifierBytes)
+            && machineToken(event.hostID, maximumBytes: maximumIdentifierBytes)
+            && machineToken(event.sessionID, maximumBytes: maximumIdentifierBytes)
+            && safeText(event.title, maximumBytes: maximumTitleBytes)
+            && safeText(event.body, maximumBytes: maximumBodyBytes)
+            && event.createdAt.isFinite
+            && accepts(event.titleLocalization)
+            && accepts(event.bodyLocalization)
+            && accepts(event.destination)
+    }
+
+    static func accepts(_ retraction: RemoteNotificationRetractionDTO) -> Bool {
+        retraction.type == "notificationRetraction"
+            && retraction.kind == .turnCompleted
+            && machineToken(retraction.hostID, maximumBytes: maximumIdentifierBytes)
+            && machineToken(retraction.sessionID, maximumBytes: maximumIdentifierBytes)
+            && machineToken(retraction.eventID, maximumBytes: maximumIdentifierBytes)
+    }
+
+    private static func accepts(_ localization: RemoteLocalizedTextDTO?) -> Bool {
+        guard let localization else { return true }
+        return safeText(localization.key, maximumBytes: maximumTitleBytes)
+            && localization.arguments.count <= maximumLocalizationArguments
+            && localization.arguments.allSatisfy {
+                safeText($0, maximumBytes: maximumTitleBytes)
+            }
+    }
+
+    private static func accepts(_ destination: RemoteNotificationDestinationDTO) -> Bool {
+        guard destination.isValid else { return false }
+        return [
+            destination.attachmentID,
+            destination.browserTabID,
+            destination.extensionIdentifier,
+            destination.extensionPanelID,
+        ].compactMap { $0 }.allSatisfy {
+            machineToken($0, maximumBytes: maximumDestinationIdentifierBytes)
+        }
+    }
+
+    private static func machineToken(_ value: String, maximumBytes: Int) -> Bool {
+        !value.isEmpty
+            && value.utf8.count <= maximumBytes
+            && value.unicodeScalars.allSatisfy { scalar in
+                switch scalar.value {
+                case 45, 46, 48...58, 65...90, 95, 97...122: return true
+                default: return false
+                }
+            }
+    }
+
+    private static func safeText(_ value: String, maximumBytes: Int) -> Bool {
+        !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && value.utf8.count <= maximumBytes
+            && !value.unicodeScalars.contains {
+                CharacterSet.controlCharacters.contains($0)
+            }
+    }
+}
+
+/// A retraction is also a short-lived tombstone. Live socket callbacks and notification-center
+/// writes are asynchronous, so removal alone cannot prevent an older event arriving a moment
+/// later from recreating the alert.
+struct RemoteNotificationRetractionTombstones {
+    private struct Key: Hashable {
+        let hostID: String
+        let sessionID: String
+        let eventID: String
+        let kind: RemoteNotificationKind
+    }
+
+    static let maximumEntries = 256
+    static let lifetime: TimeInterval = 24 * 60 * 60
+
+    private var expirations: [Key: Date] = [:]
+
+    var count: Int { expirations.count }
+
+    mutating func insert(
+        _ retraction: RemoteNotificationRetractionDTO,
+        now: Date = Date()
+    ) {
+        prune(now: now)
+        let key = Key(
+            hostID: retraction.hostID,
+            sessionID: retraction.sessionID,
+            eventID: retraction.eventID,
+            kind: retraction.kind
+        )
+        if expirations[key] == nil, expirations.count >= Self.maximumEntries,
+           let oldest = expirations.min(by: { $0.value < $1.value })?.key {
+            expirations[oldest] = nil
+        }
+        expirations[key] = now.addingTimeInterval(Self.lifetime)
+    }
+
+    mutating func contains(
+        _ event: RemoteNotificationEventDTO,
+        now: Date = Date()
+    ) -> Bool {
+        prune(now: now)
+        return expirations[Key(
+            hostID: event.hostID,
+            sessionID: event.sessionID,
+            eventID: event.id,
+            kind: event.kind
+        )] != nil
+    }
+
+    private mutating func prune(now: Date) {
+        expirations = expirations.filter { $0.value > now }
+    }
+}
+
+enum RemoteNotificationRemovalPolicy {
+    static func matches(
+        _ event: RemoteNotificationEventDTO,
+        retraction: RemoteNotificationRetractionDTO
+    ) -> Bool {
+        event.hostID == retraction.hostID
+            && event.sessionID == retraction.sessionID
+            && event.id == retraction.eventID
+            && event.kind == retraction.kind
+    }
+
+    static func matchesSession(
+        _ event: RemoteNotificationEventDTO,
+        hostID: String,
+        sessionID: String
+    ) -> Bool {
+        event.hostID == hostID && event.sessionID == sessionID && event.kind == .turnCompleted
+    }
+
+    static func matchesApplicationActivation(_ event: RemoteNotificationEventDTO) -> Bool {
+        event.kind == .turnCompleted
     }
 }
 
@@ -117,6 +298,21 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
             ),
         ])
         return true
+    }
+
+    func application(
+        _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        guard let retraction = RemoteNotificationPayloadDecoder.retraction(from: userInfo) else {
+            completionHandler(.noData)
+            return
+        }
+        Task { @MainActor [notifications] in
+            let processed = await notifications.receiveRetraction(retraction, transport: "apns")
+            completionHandler(processed ? .newData : .noData)
+        }
     }
 
     func application(
@@ -233,27 +429,22 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        if let event = RemoteNotificationPayloadDecoder.event(
+        guard let event = RemoteNotificationPayloadDecoder.event(
             from: notification.request.content.userInfo
-        ) {
-            let suppressRoutineCompletion = await MainActor.run {
-                MobileDiagnostics.record(.notificationReceived, fields: [
+        ) else {
+            return []
+        }
+        let suppressionReason = await MainActor.run {
+            notifications.apnsSuppressionReason(for: event)
+        }
+        if let suppressionReason {
+            await MainActor.run {
+                MobileDiagnostics.record(.notificationSuppressed, fields: [
                     .trace: event.id,
-                    .kind: event.kind.rawValue,
-                    .transport: "apns",
+                    .reason: suppressionReason,
                 ])
-                return notifications.scenePhase == .active
-                    && !RemoteNotificationPresentationPolicy.presentsInForeground(event.kind)
             }
-            if suppressRoutineCompletion {
-                await MainActor.run {
-                    MobileDiagnostics.record(.notificationSuppressed, fields: [
-                        .trace: event.id,
-                        .reason: "foreground",
-                    ])
-                }
-                return []
-            }
+            return []
         }
         return [.banner, .list, .sound]
     }
@@ -1089,6 +1280,9 @@ final class RemoteNotificationManager: ObservableObject {
     @Published var turnCompletionsEnabled: Bool {
         didSet { defaults.set(turnCompletionsEnabled, forKey: Keys.turnCompletions) }
     }
+    @Published var includesResponsePreviews: Bool {
+        didSet { defaults.set(includesResponsePreviews, forKey: Keys.responsePreviews) }
+    }
     @Published var agentUpdatesEnabled: Bool {
         didSet { defaults.set(agentUpdatesEnabled, forKey: Keys.agentUpdates) }
     }
@@ -1126,10 +1320,11 @@ final class RemoteNotificationManager: ObservableObject {
     }
 
     private let center = UNUserNotificationCenter.current()
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
     private var observers: [NSObjectProtocol] = []
     private var registeredSignatures: Set<String> = []
     private var deliveredEventIDs: [String] = []
+    private var retractionTombstones = RemoteNotificationRetractionTombstones()
     private lazy var syncGate = RemoteNotificationSyncGate<[PairedRemoteHost]> {
         [weak self] hosts in
         await self?.performSync(hosts: hosts)
@@ -1141,6 +1336,7 @@ final class RemoteNotificationManager: ObservableObject {
         static let permissions = "remoteNotificationsPermissions"
         static let agentQuestions = "remoteNotificationsAgentQuestions"
         static let turnCompletions = "remoteNotificationsTurnCompletions"
+        static let responsePreviews = "remoteNotificationResponsePreviews"
         static let agentUpdates = "remoteNotificationsAgentUpdates"
         static let attentionRequests = "remoteNotificationsAttentionRequests"
         static let peoplePresence = "remoteCollaborationPeoplePresence"
@@ -1154,12 +1350,14 @@ final class RemoteNotificationManager: ObservableObject {
         static let sharedChatSounds = "remoteNotificationSharedChatSounds"
     }
 
-    init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         defaults.register(defaults: [
             Keys.sharedChats: true,
             Keys.permissions: true,
             Keys.agentQuestions: true,
             Keys.turnCompletions: true,
+            Keys.responsePreviews: false,
             Keys.agentUpdates: true,
             Keys.attentionRequests: true,
             Keys.peoplePresence: true,
@@ -1176,6 +1374,7 @@ final class RemoteNotificationManager: ObservableObject {
         permissionsEnabled = defaults.bool(forKey: Keys.permissions)
         agentQuestionsEnabled = defaults.bool(forKey: Keys.agentQuestions)
         turnCompletionsEnabled = defaults.bool(forKey: Keys.turnCompletions)
+        includesResponsePreviews = defaults.bool(forKey: Keys.responsePreviews)
         agentUpdatesEnabled = defaults.bool(forKey: Keys.agentUpdates)
         attentionRequestsEnabled = defaults.bool(forKey: Keys.attentionRequests)
         peoplePresenceEnabled = defaults.bool(forKey: Keys.peoplePresence)
@@ -1199,6 +1398,16 @@ final class RemoteNotificationManager: ObservableObject {
             Task { @MainActor in
                 self?.deviceToken = token?.isEmpty == false ? token : nil
                 self?.registeredSignatures.removeAll()
+            }
+        })
+        observers.append(NotificationCenter.default.addObserver(
+            forName: RemoteNotificationBridge.retractionNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let retraction = note.object as? RemoteNotificationRetractionDTO else { return }
+            Task { @MainActor in
+                _ = await self?.receiveRetraction(retraction, transport: "live")
             }
         })
         observers.append(NotificationCenter.default.addObserver(
@@ -1316,6 +1525,7 @@ final class RemoteNotificationManager: ObservableObject {
                 deviceToken,
                 kinds.map(\.rawValue).sorted().joined(separator: ","),
                 soundKinds.map(\.rawValue).sorted().joined(separator: ","),
+                includesResponsePreviews.description,
                 host.link.token,
                 host.hostedServiceURL?.absoluteString ?? "",
                 host.hostedCredential?.expiresAt.timeIntervalSince1970.description ?? "",
@@ -1375,7 +1585,9 @@ final class RemoteNotificationManager: ObservableObject {
                         hostedRegistrationID: hostedRegistrationID,
                         environment: pushEnvironment,
                         enabledKinds: kinds,
-                        soundEnabledKinds: soundKinds
+                        soundEnabledKinds: soundKinds,
+                        capabilities: [.turnCompletionPreview, .notificationRetraction],
+                        includesResponsePreviews: includesResponsePreviews
                     )
                     do {
                         result = try await registerNotifications(
@@ -1542,6 +1754,142 @@ final class RemoteNotificationManager: ObservableObject {
         UIApplication.shared.open(url)
     }
 
+    @discardableResult
+    func receiveRetraction(
+        _ retraction: RemoteNotificationRetractionDTO,
+        transport: String
+    ) async -> Bool {
+        guard RemoteNotificationPayloadValidation.accepts(retraction) else { return false }
+        retractionTombstones.insert(retraction)
+        MobileDiagnostics.record(.notificationRetractionReceived, fields: [
+            .trace: retraction.eventID,
+            .host: MobileDiagnostics.pseudonym(retraction.hostID, prefix: "peer"),
+            .peer: MobileDiagnostics.pseudonym(
+                RemoteDeviceIdentity.current,
+                prefix: "device"
+            ),
+            .kind: retraction.kind.rawValue,
+            .transport: transport,
+            .session: MobileDiagnostics.pseudonym(retraction.sessionID, prefix: "session"),
+        ])
+        let identifiers = await matchingNotificationIdentifiers {
+            RemoteNotificationRemovalPolicy.matches($0, retraction: retraction)
+        }
+        // Recording the tombstone is new data even when the alert has not reached
+        // UNUserNotificationCenter yet. Reporting `.noData` here invites iOS to deprioritize the
+        // background work that closes precisely that delivery race.
+        guard !identifiers.isEmpty else { return true }
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        deliveredEventIDs.removeAll { identifiers.contains($0) }
+        recordLocalClear(retraction, count: identifiers.count, reason: "retraction")
+        return true
+    }
+
+    func clearTurnCompletions(hostID: String, sessionID: String) async {
+        let identifiers = await matchingNotificationIdentifiers {
+            RemoteNotificationRemovalPolicy.matchesSession(
+                $0,
+                hostID: hostID,
+                sessionID: sessionID
+            )
+        }
+        guard !identifiers.isEmpty else { return }
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        deliveredEventIDs.removeAll { identifiers.contains($0) }
+        MobileDiagnostics.record(.notificationLocallyCleared, fields: [
+            .host: MobileDiagnostics.pseudonym(hostID, prefix: "peer"),
+            .peer: MobileDiagnostics.pseudonym(
+                RemoteDeviceIdentity.current,
+                prefix: "device"
+            ),
+            .session: MobileDiagnostics.pseudonym(sessionID, prefix: "session"),
+            .kind: RemoteNotificationKind.turnCompleted.rawValue,
+            .reason: "sessionOpened",
+            .total: String(identifiers.count),
+        ])
+    }
+
+    /// Becoming foreground means the participant is present again. Routine completions are now
+    /// represented in-app, so remove only those Threading notifications; permission, question,
+    /// requested-update and person-to-person alerts retain their independent urgency semantics.
+    func clearTurnCompletionsOnApplicationActivation() async {
+        await clearAllTurnCompletions(reason: "appActive")
+    }
+
+    /// These preferences are device-local authority. Clear existing routine alerts immediately
+    /// instead of waiting for the compatibility registration round-trip to reach the Mac.
+    func clearTurnCompletionsAfterPreferenceRevocation() async {
+        await clearAllTurnCompletions(reason: "preferenceChanged")
+    }
+
+    private func clearAllTurnCompletions(reason: String) async {
+        let delivered = await center.deliveredNotifications()
+        let pending = await center.pendingNotificationRequests()
+        var matches: [String: RemoteNotificationEventDTO] = [:]
+        for request in delivered.map(\.request) + pending {
+            guard let event = RemoteNotificationPayloadDecoder.event(
+                from: request.content.userInfo
+            ), RemoteNotificationRemovalPolicy.matchesApplicationActivation(event) else {
+                continue
+            }
+            matches[request.identifier] = event
+        }
+        guard !matches.isEmpty else { return }
+        let identifiers = Array(matches.keys)
+        center.removeDeliveredNotifications(withIdentifiers: identifiers)
+        center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        deliveredEventIDs.removeAll { matches[$0] != nil }
+        for event in matches.values {
+            MobileDiagnostics.record(.notificationLocallyCleared, fields: [
+                .trace: event.id,
+                .host: MobileDiagnostics.pseudonym(event.hostID, prefix: "peer"),
+                .peer: MobileDiagnostics.pseudonym(
+                    RemoteDeviceIdentity.current,
+                    prefix: "device"
+                ),
+                .session: MobileDiagnostics.pseudonym(event.sessionID, prefix: "session"),
+                .kind: event.kind.rawValue,
+                .reason: reason,
+                .total: String(matches.count),
+            ])
+        }
+    }
+
+    private func matchingNotificationIdentifiers(
+        _ predicate: @escaping (RemoteNotificationEventDTO) -> Bool
+    ) async -> [String] {
+        let delivered = await center.deliveredNotifications()
+        let pending = await center.pendingNotificationRequests()
+        let notifications = delivered.map(\.request) + pending
+        return Array(Set(notifications.compactMap { request in
+            guard let event = RemoteNotificationPayloadDecoder.event(
+                from: request.content.userInfo
+            ), predicate(event) else { return nil }
+            return request.identifier
+        }))
+    }
+
+    private func recordLocalClear(
+        _ retraction: RemoteNotificationRetractionDTO,
+        count: Int,
+        reason: String
+    ) {
+        MobileDiagnostics.record(.notificationLocallyCleared, fields: [
+            .trace: retraction.eventID,
+            .host: MobileDiagnostics.pseudonym(retraction.hostID, prefix: "peer"),
+            .peer: MobileDiagnostics.pseudonym(
+                RemoteDeviceIdentity.current,
+                prefix: "device"
+            ),
+            .session: MobileDiagnostics.pseudonym(retraction.sessionID, prefix: "session"),
+            .kind: retraction.kind.rawValue,
+            .reason: reason,
+            .total: String(count),
+        ])
+    }
+
     private var isAuthorized: Bool {
         authorizationStatus == .authorized || authorizationStatus == .provisional
     }
@@ -1559,6 +1907,13 @@ final class RemoteNotificationManager: ObservableObject {
             MobileDiagnostics.record(.notificationSuppressed, fields: [
                 .trace: event.id,
                 .reason: "preference",
+            ])
+            return
+        }
+        guard !retractionTombstones.contains(event) else {
+            MobileDiagnostics.record(.notificationSuppressed, fields: [
+                .trace: event.id,
+                .reason: "retracted",
             ])
             return
         }
@@ -1635,6 +1990,21 @@ final class RemoteNotificationManager: ObservableObject {
 
     private func playsSound(for kind: RemoteNotificationKind) -> Bool {
         notificationSoundsEnabled && soundEnabledKinds.contains(kind)
+    }
+
+    func apnsSuppressionReason(for event: RemoteNotificationEventDTO) -> String? {
+        MobileDiagnostics.record(.notificationReceived, fields: [
+            .trace: event.id,
+            .kind: event.kind.rawValue,
+            .transport: "apns",
+        ])
+        if retractionTombstones.contains(event) { return "retracted" }
+        if !isEnabled(event.kind) { return "preference" }
+        if scenePhase == .active
+            && !RemoteNotificationPresentationPolicy.presentsInForeground(event.kind) {
+            return "foreground"
+        }
+        return nil
     }
 
     private func remember(_ id: String) {
@@ -1734,6 +2104,28 @@ struct NotificationSettingsView: View {
             .disabled(notifications.authorizationStatus == .denied)
 
             ThemedSettingsSection {
+                Toggle(
+                    "Include response previews",
+                    isOn: $notifications.includesResponsePreviews
+                )
+                .disabled(
+                    !notifications.turnCompletionsEnabled
+                        || notifications.authorizationStatus == .denied
+                )
+            } header: {
+                Text("Turn completion")
+            } footer: {
+                Text(
+                    "When enabled, a short excerpt leaves your Mac through the selected "
+                        + "hosted service and Apple Push Notification service. It may appear "
+                        + "on your lock screen according to iOS settings. Obsolete completion "
+                        + "alerts are removed when possible, but iOS may delay removal, "
+                        + "especially after a force quit."
+                )
+            }
+            .disabled(notifications.authorizationStatus == .denied)
+
+            ThemedSettingsSection {
                 Toggle("Play notification sounds", isOn: $notifications.notificationSoundsEnabled)
                 if notifications.notificationSoundsEnabled {
                     Toggle("Permission requests", isOn: $notifications.permissionSoundsEnabled)
@@ -1824,7 +2216,14 @@ struct NotificationSettingsView: View {
         .onChange(of: notifications.sharedChatsEnabled) { _, _ in sync() }
         .onChange(of: notifications.permissionsEnabled) { _, _ in sync() }
         .onChange(of: notifications.agentQuestionsEnabled) { _, _ in sync() }
-        .onChange(of: notifications.turnCompletionsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.turnCompletionsEnabled) { _, enabled in
+            if !enabled { clearTurnCompletionsForRevokedPreference() }
+            sync()
+        }
+        .onChange(of: notifications.includesResponsePreviews) { _, enabled in
+            if !enabled { clearTurnCompletionsForRevokedPreference() }
+            sync()
+        }
         .onChange(of: notifications.agentUpdatesEnabled) { _, _ in sync() }
         .onChange(of: notifications.attentionRequestsEnabled) { _, _ in sync() }
         .onChange(of: notifications.notificationSoundsEnabled) { _, _ in sync() }
@@ -1872,5 +2271,11 @@ struct NotificationSettingsView: View {
 
     private func sync() {
         notifications.settingsChanged(hosts: model.hosts)
+    }
+
+    private func clearTurnCompletionsForRevokedPreference() {
+        Task {
+            await notifications.clearTurnCompletionsAfterPreferenceRevocation()
+        }
     }
 }

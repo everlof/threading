@@ -76,6 +76,10 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
     case notificationSuppressed
     case notificationPresented
     case notificationOpened
+    /// A content-free host delivery decision. phase carries the closed transition name.
+    case notificationDeliveryTransition
+    case notificationRetractionReceived
+    case notificationLocallyCleared
     case pushProviderAccepted
     case pushProviderRefused
     case issueReportOpened
@@ -105,10 +109,11 @@ public enum RemoteDiagnosticEvent: String, Codable, CaseIterable, Hashable, Send
         .apnsRegistrationFailed, .notificationRegistrationStarted,
         .notificationRegistrationSucceeded, .notificationRegistrationFailed,
         .notificationReceived, .notificationSuppressed, .notificationPresented,
-        .notificationOpened, .issueReportOpened, .issueReportExported,
-        .issueReportSubmissionStarted, .issueReportSubmissionSucceeded,
-        .issueReportSubmissionDeferred, .issueReportSubmissionFailed, .attachmentPreviewFailed,
-        .diagnosticSharingStarted, .diagnosticSharingStopped
+        .notificationOpened, .notificationRetractionReceived, .notificationLocallyCleared,
+        .issueReportOpened, .issueReportExported, .issueReportSubmissionStarted,
+        .issueReportSubmissionSucceeded, .issueReportSubmissionDeferred,
+        .issueReportSubmissionFailed, .attachmentPreviewFailed, .diagnosticSharingStarted,
+        .diagnosticSharingStopped
     ]
 
     private static let browserClientUploadEvents: Set<Self> = [
@@ -140,7 +145,9 @@ public enum RemoteDiagnosticFieldValidation: String, Codable, Hashable, Sendable
 public enum RemoteDiagnosticField: String, CaseIterable, Hashable, Sendable {
     case trace
     case providerTrace
+    case host
     case peer
+    case participant
     case session
     case kind
     case transport
@@ -159,6 +166,11 @@ public enum RemoteDiagnosticField: String, CaseIterable, Hashable, Sendable {
     case durationMS
     case timeoutMS
     case delayMS
+    case generation
+    case queueSize
+    case previewPresent
+    case previewBytes
+    case activitySource
     /// The coarse URL-loading phase reached by one bounded request.
     case networkStage
     case dnsMS
@@ -184,10 +196,10 @@ public enum RemoteDiagnosticField: String, CaseIterable, Hashable, Sendable {
     public var validation: RemoteDiagnosticFieldValidation {
         switch self {
         case .origin: .originDigest
-        case .peer: .peerPseudonym
+        case .host, .peer, .participant: .peerPseudonym
         case .session: .sessionPseudonym
-        case .trace, .providerTrace, .kind, .transport, .result, .code, .status, .environment, .capability, .surface, .phase, .networkStage, .networkProtocol, .networkPath, .connectionReused, .wave, .reason, .detail: .token
-        case .protocolVersion, .minimumProtocolVersion, .enabledKindCount, .recordCount, .durationMS, .timeoutMS, .delayMS, .dnsMS, .tcpMS, .tlsMS, .serverWaitMS, .responseMS, .attempt, .total: .unsignedInteger
+        case .trace, .providerTrace, .kind, .transport, .result, .code, .status, .environment, .capability, .surface, .phase, .previewPresent, .activitySource, .networkStage, .networkProtocol, .networkPath, .connectionReused, .wave, .reason, .detail: .token
+        case .protocolVersion, .minimumProtocolVersion, .enabledKindCount, .recordCount, .durationMS, .timeoutMS, .delayMS, .generation, .queueSize, .previewBytes, .dnsMS, .tcpMS, .tlsMS, .serverWaitMS, .responseMS, .attempt, .total: .unsignedInteger
         }
     }
 }
@@ -265,5 +277,5 @@ public enum RemoteDiagnosticExtraField: String, CaseIterable, Hashable, Sendable
 
 public enum RemoteDiagnosticContract {
     public static let schemaVersion = 1
-    public static let fingerprint = "9ffae11e3c5442caca28e713df815fc1c1ecab8195524d62c98ed68727e75cb0"
+    public static let fingerprint = "d9d6bc3483e1f1515a1d78bfe4f012412e39033bc5e4eddf8accc28bf459278a"
 }

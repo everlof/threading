@@ -593,6 +593,10 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         switch report.event {
         case .turnStarted: tracker.noteTurnStarted(turnID: report.turnID)
         case .turnFinished:
+            CompletedTurnSnapshotStore.shared.captureCompletedTurn(
+                sessionID: report.sessionID,
+                finalAssistantText: report.lastAssistantMessage
+            )
             if !report.backgroundWork.isEmpty {
                 // The one line that explains a session sitting at `working` with a quiet
                 // terminal: its agent is waiting on something it started, not on the user.

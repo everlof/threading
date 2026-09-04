@@ -1454,12 +1454,23 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
             guard let self else { return }
             self.displayPaneController.noteSessionCheckoutMoved(event.sessionID)
             environment.agentRuntime.preserveCheckoutMoveOutbox(sessionID: event.sessionID)
-            if self.containerViewController.currentSessionID == event.sessionID {
-                self.containerViewController.resumeCurrentSession()
-            } else {
-                environment.agentRuntime.discard(sessionID: event.sessionID)
-                self.containerViewController.launchInBackground(sessionID: event.sessionID)
+            // A move the user or the agent asked for leaves the process in the checkout it was
+            // launched in, so the runtime has to be replaced to reach the new one. An observed
+            // move is the reverse: ownership is catching up with a process that is *already*
+            // running there, and replacing it would kill a working agent to reinstate it where it
+            // already is — while the fresh `sessionStarted` that follows is a new observation,
+            // which is how one disagreement between the two locus signals became 88 moves and 89
+            // relaunches in four and a half minutes.
+            if event.authorityBasis != .observedExecution {
+                if self.containerViewController.currentSessionID == event.sessionID {
+                    self.containerViewController.resumeCurrentSession()
+                } else {
+                    environment.agentRuntime.discard(sessionID: event.sessionID)
+                    self.containerViewController.launchInBackground(sessionID: event.sessionID)
+                }
             }
+            // Unconditional: this is what releases the transient input fence, and a session whose
+            // runtime was deliberately left alone must not stay fenced for the rest of the run.
             SessionCheckoutCoordinator.shared.runtimeRelaunchDidStart(
                 sessionID: event.sessionID
             )

@@ -141,6 +141,21 @@ struct Project: Codable, Identifiable {
   /// unchanged and every ordinary checkout keeps encoding exactly what it did before.
   var isScratchpad: Bool?
 
+  /// Whether Threading made this row itself, to receive a chat whose agent had walked into a
+  /// checkout that was not a project yet — rather than the user adding the folder.
+  ///
+  /// The distinction has to be stored, because the two are otherwise identical and the question
+  /// only gets asked later: when the last chat leaves, an adopted row has nothing left to justify
+  /// it and is reclaimed, while a folder the user added stays whether or not it holds chats. It
+  /// shipped without this and left empty rows behind — and, worse than the row,
+  /// `CheckoutBranchFollower` keeps a live `HEAD` watcher on every project, so each dead row cost
+  /// a whole-sidebar reload every time anything wrote to that checkout.
+  ///
+  /// Cleared the moment the row earns its place another way (see
+  /// `ProjectStore.noteProjectEarnedItsPlace`), so a folder you go on to use deliberately stops
+  /// being disposable. Optional and absent-when-false, exactly like `isScratchpad`.
+  var isAdoptedForCheckoutMove: Bool?
+
   init(name: String, folderURL: URL, id: ProjectID = ProjectID()) {
     self.id = id
     self.name = name
@@ -156,12 +171,13 @@ struct Project: Codable, Identifiable {
     self.limitRecoveryPolicy = nil
     self.curfewRule = nil
     self.isScratchpad = nil
+    self.isAdoptedForCheckoutMove = nil
   }
 
   private enum CodingKeys: String, CodingKey {
     case id, name, folderPath, sessions, terminals, isExpanded, createdAt, icon, themeID, themeName
     case notificationsMuted, soundOverrides, limitRecoveryPolicy, isScratchpad
-    case curfewRule
+    case curfewRule, isAdoptedForCheckoutMove
   }
 
   init(from decoder: Decoder) throws {
@@ -218,6 +234,11 @@ struct Project: Codable, Identifiable {
     isScratchpad = try container.decodeIfPresent(Bool.self, forKey: .isScratchpad) == true
       ? true
       : nil
+    // Same normalisation, same reason: one encoding of "an ordinary row the user added".
+    isAdoptedForCheckoutMove = try container.decodeIfPresent(
+      Bool.self,
+      forKey: .isAdoptedForCheckoutMove
+    ) == true ? true : nil
   }
 
   func encode(to encoder: Encoder) throws {
@@ -236,6 +257,7 @@ struct Project: Codable, Identifiable {
     try container.encodeIfPresent(limitRecoveryPolicy, forKey: .limitRecoveryPolicy)
     try container.encodeIfPresent(curfewRule, forKey: .curfewRule)
     try container.encodeIfPresent(isScratchpad, forKey: .isScratchpad)
+    try container.encodeIfPresent(isAdoptedForCheckoutMove, forKey: .isAdoptedForCheckoutMove)
   }
 
   var folderURL: URL {
@@ -244,6 +266,12 @@ struct Project: Codable, Identifiable {
 
   /// Reads the flag without every call site having to spell the optional out.
   var isTheScratchpad: Bool { isScratchpad == true }
+
+  /// Reads the adoption flag without every call site spelling the optional out.
+  var wasAdoptedForCheckoutMove: Bool { isAdoptedForCheckoutMove == true }
+
+  /// Whether this row holds nothing at all, and so has nothing keeping it in the sidebar.
+  var holdsNothing: Bool { sessions.isEmpty && terminals.isEmpty }
 
   /// Looks up a session by identifier.
   func session(withID sessionID: SessionID) -> AgentSession? {

@@ -1399,6 +1399,17 @@
         }
       }
     },
+    "Agent and account" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agent och konto"
+          }
+        }
+      }
+    },
     "Agent finishes a turn" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4138,6 +4149,17 @@
         }
       }
     },
+    "Finished its turn." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avslutade sin tur."
+          }
+        }
+      }
+    },
     "First message" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -4563,6 +4585,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Samarbete i appen"
+          }
+        }
+      }
+    },
+    "Include response previews" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inkludera svarsförhandsvisningar"
           }
         }
       }
@@ -11310,6 +11343,17 @@
         }
       }
     },
+    "Turn completion" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slutförd tur"
+          }
+        }
+      }
+    },
     "Turn on" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11900,6 +11944,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "När funktionen är aktiverad på denna iPhone och dess parkopplade Mac kan Threading skicka begränsat anslutningsunderlag via det lokala nätverket. Om du stänger av den stoppas nya förfrågningar omedelbart."
+          }
+        }
+      }
+    },
+    "When enabled, a short excerpt leaves your Mac through the selected hosted service and Apple Push Notification service. It may appear on your lock screen according to iOS settings. Obsolete completion alerts are removed when possible, but iOS may delay removal, especially after a force quit." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "När detta är aktiverat lämnar ett kort utdrag din Mac via den valda värdtjänsten och Apple Push Notification service. Det kan visas på låsskärmen beroende på iOS-inställningarna. Inaktuella slutförandeaviseringar tas bort när det är möjligt, men iOS kan fördröja borttagningen, särskilt efter en tvångsavslutning."
           }
         }
       }

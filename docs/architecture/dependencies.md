@@ -160,12 +160,18 @@ Part of the [CLAUDE.md](../../CLAUDE.md) index.
   - **Selection survival is upstream; the iOS edit-menu surface is ours.** Upstream captures the
     selected content around each terminal feed and clears the range only when those cells changed,
     so ordinary output no longer erases a stable selection on either platform. The fork keeps the
-    phone's host integration: a long press selects the word under the finger and presents the
-    menu on lift through `UIEditMenuInteraction` (iOS 16+, the shared menu controller before
-    that), without taking first responder. `extraSelectionMenuActions` lets the host add actions
-    after Copy, `allowsPasteFromEditMenu` lets a view-only host drop Paste, and
-    `selectionHandleColor` takes the terminal theme's cursor colour. Keep those downstream hooks
-    when re-syncing; see [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md).
+    phone's host integration: a long press at UIKit's ordinary recognition duration selects the
+    word under the finger and presents the menu on lift through `UIEditMenuInteraction` (iOS 16+,
+    the shared menu controller before that), without taking first responder. A handle pan has a
+    44-point target around its drawn knob and judges that target at touch-down, before the pan's
+    recognition travel; it then moves the original endpoint by the finger's displacement, so the
+    range neither jumps under the grip nor inherits a stale pivot. That recognizer gets first
+    refusal over the local-scroll and mouse-reporting pans, but declines immediately away from a
+    handle and never makes the long press wait. All of that routing is constant-time per touch.
+    `extraSelectionMenuActions` lets the host add actions after Copy,
+    `allowsPasteFromEditMenu` lets a view-only host drop Paste, and `selectionHandleColor` takes
+    the terminal theme's cursor colour. Keep those downstream hooks when re-syncing; see
+    [`../REMOTE_ACCESS.md`](../REMOTE_ACCESS.md).
   - **iOS terminal font sizing is bounded at the host.** `RemoteTerminalView` converts a pinch
     into whole-point steps from 9 through 24 and persists only the final value on the device.
     That bounds a continuous gesture to at most fifteen renderer/grid updates instead of one per

@@ -7,17 +7,19 @@ manifest="${repository_directory}/Tests/UIEvidence/ios-coverage.json"
 theme="threading"
 requested_output=""
 simulator="booted"
+template=""
 
 usage() {
   cat <<'EOF'
 Usage: scripts/capture_marketing_ios.sh [options]
 
-Capture five iOS marketing checkpoints and record their fixed-clock product walkthrough.
+Capture six iOS marketing checkpoints and record their fixed-clock product walkthrough.
 
 Options:
   --theme ID          One ios-coverage.json theme for the complete flow (default: threading)
   --output PATH       New artifact directory (default: .build/marketing-ios/<theme>-<time>)
   --simulator UDID    Simulator template passed to ui-evidence-ios.sh (default: booted)
+  --template UDID     Clone this shut-down iPhone instead of the booted one
   -h, --help          Show this help
 EOF
 }
@@ -37,6 +39,11 @@ while (($#)); do
     --simulator)
       (($# >= 2)) || { printf 'error: --simulator needs a value\n' >&2; exit 2; }
       simulator="$2"
+      shift 2
+      ;;
+    --template)
+      (($# >= 2)) || { printf 'error: --template needs a value\n' >&2; exit 2; }
+      template="$2"
       shift 2
       ;;
     -h|--help)
@@ -86,10 +93,15 @@ capture() {
 
   evidence_directory="${output_directory}/evidence"
   video="${output_directory}/threading-ios-${theme}.mp4"
+  # Both are forwarded when both are given; the runner refuses that pairing with its own message.
+  simulator_arguments=(--simulator "${simulator}")
+  if [[ -n "${template}" ]]; then
+    simulator_arguments+=(--template "${template}")
+  fi
   "${script_directory}/ui-evidence-ios.sh" \
     --only ios-marketing-flow \
     --theme "${theme}" \
-    --simulator "${simulator}" \
+    "${simulator_arguments[@]}" \
     --output "${evidence_directory}" \
     --record-marketing-video "${video}"
 

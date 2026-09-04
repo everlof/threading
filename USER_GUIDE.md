@@ -1535,6 +1535,32 @@ default is Fast, because a speed preference must not silently replace an explici
 the status card follows, where a bolt appears in Fast mode and nothing marks Standard. A bolt
 means one speed everywhere in the app rather than naming the setting it belongs to.
 
+### Scrolling in a Claude terminal
+Claude Code can draw its interface two ways. On the **alternate screen** it keeps and scrolls
+its own transcript, and the terminal around it holds nothing: Threading's scrollbar, its find
+bar and a paired iPhone all have only the current page to look at. On the **main screen** the
+conversation lands in Threading's own scrollback, where all three can reach it.
+
+Claude's own default is the alternate screen. Threading's is the main screen:
+
+- **Settings ▸ General ▸ Claude Terminal ▸ Scrolling in new Claude terminals** sets what new
+  Claude terminals do. *Terminal's own scrolling* is the default. *Claude's fullscreen
+  renderer* asks for the alternate screen instead, and *Follow Claude's setting* states
+  nothing at all, leaving Claude's `/tui` choice — and anything it has decided for itself on
+  this machine — in force.
+- A single chat's **⋯** menu has a **Session Options ▸ Interface ▸ Terminal Scrolling**
+  submenu with the same two answers plus an inherit item that follows the setting above.
+
+Both apply the next time that session launches or resumes; a running one keeps the screen it
+started on. Natively rendered conversations are unaffected — they are not a terminal, and
+Threading draws and scrolls them itself.
+
+One thing worth knowing if you also use Claude outside Threading: when Claude's fullscreen
+renderer fails to start twice on a machine, Claude turns it off there and remembers, which its
+`tui` setting cannot override. Threading's two decided answers are stated in a way that outranks
+that record, so *Claude's fullscreen renderer* here means it, and *Follow Claude's setting*
+leaves it alone. Inside Claude, `/tui fullscreen` clears the record.
+
 ### Claude's Remote Control
 Claude Code can hand a session to claude.ai and the Claude mobile app so you can check on it
 or reply from your phone. That is Claude's own feature, not Threading's Remote Access below —
@@ -2956,9 +2982,14 @@ remains inside that session's checkout.
 
 The iPhone explains notifications in the dashboard before asking iOS for permission. They cover
 accepted shared chats, Native permission cards, a session that changes into waiting for your
-response, explicit human input requests, and updates you explicitly ask an agent to send when it
-finishes. Every category can be disabled independently, with a master sound switch and separate
-sound switches for each category. Opening one goes directly to its chat;
+response, routine completed turns, explicit human input requests, and updates you explicitly ask
+an agent to send when it finishes. Every category can be disabled independently, with a master
+sound switch and separate sound switches for each category. Under **Turn completion**, each phone
+also has its own **Include response previews** switch, off by default. Turning it on allows a
+plain-text excerpt of up to 320 UTF-8 bytes to leave the Mac through the selected hosted service
+and Apple Push Notification service and to appear on the lock screen according to iOS settings.
+Threading does not claim to detect secrets; leave it off for the generic **Finished its turn.**
+body. Opening one goes directly to its chat;
 permission details and Allow/Deny stay behind the authenticated chat rather than appearing on the
 lock screen. Terminal UI prompts are not parsed, so use the app's **@** control when a person
 needs attention. With APNs provider credentials the notification reaches a suspended phone;
@@ -2967,6 +2998,20 @@ whoever wrote the current turn; an explicit request can instead target the owner
 this chat, or a named member. Open sessions show the device-aware live roster and **Name is
 typing…** without locking anyone out of a composer; the iPhone exposes separate switches for
 both indicators.
+
+Routine completion alerts are activity-aware per participant. A foreground authenticated phone,
+a follow-up from any authorized device, or another accepted remote interaction suppresses or
+cancels that participant's obsolete completion across this Mac's shared chats without affecting
+anyone else. The owner can also choose **Settings → Remote Access → Notification Delivery → Mac
+activity window**: Off, 1, 2, 5 or 10 minutes, with 2 minutes as the default. Deliberate Mac
+clicking, typing or scrolling defers the owner's completion until that window expires; another
+interaction cancels it as already seen. Permission requests, questions, direct human requests and
+notifications explicitly requested from an agent or extension remain immediate.
+
+If a completion becomes obsolete after Apple accepted it, Threading attempts to retract it live
+and with a best-effort silent push. iOS may postpone or discard silent pushes, especially after a
+force-quit, so the phone also clears precisely matching Threading completion alerts when the app
+next activates or that chat opens.
 
 The iPhone obtains and registers its APNs token automatically after you enable notifications;
 there is no token to copy in ordinary use. The Mac keeps that registration with the pairing and
@@ -3269,7 +3314,8 @@ right-click in **Git Review**, where it opens the file *at the first line the di
 
 The **⋯** beside the page's name opens the same full menu as the session row's `⋯`: pinning,
 archiving, side chats, **Theme**, **Sounds**, **Permission Mode**, **Session Options**
-(Interface, Claude Remote Control, Mute Notifications, Attachments), rename, the **Copy ▸**
+(Interface — which for Claude also holds **Terminal Scrolling** — Claude Remote Control,
+Mute Notifications, Attachments), rename, the **Copy ▸**
 submenu, account moves, sharing, deletion, and any installed extension actions that apply. It
 sits with the name because it acts on the page named beside it, while everything at the other
 end of the header decides what is on screen.
@@ -3695,11 +3741,12 @@ Touch ID prompt, which is exactly what lets an agent sign in unattended. **Store
 would not mind losing.** Anything that is not on your own machine asks you to confirm it is a
 throwaway account first, and well-known providers like Google or GitHub are refused outright.
 
-Signing in is still not submitting: an agent that fills a form must still ask before it submits
-one. On an origin you keep a test credential for, that prompt offers **Allow Until I Quit** — the
-exemption lasts for the rest of the app run, is never written to disk, and is listed with an **Ask
-Again** button on the same settings page. Remove a stored account at any time from the same page, and **Reset Everything** removes them
-all.
+Signing in is still not submitting: an agent must ask before its first form submission. That prompt
+offers **Allow Once** and **Allow for This Session**. The session choice lets only that chat submit
+again on that exact origin (scheme, host and port); other chats and origins still ask. The exemption
+lasts for the rest of the app run, is never written to disk, and is listed by chat and origin with an
+**Ask Again** button on the same settings page. Remove a stored account at any time from the same
+page, and **Reset Everything** removes them all.
 
 ### Letting an agent use a signed-in Chrome
 

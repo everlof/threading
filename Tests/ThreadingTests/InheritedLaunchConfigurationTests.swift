@@ -18,6 +18,7 @@ final class InheritedLaunchConfigurationTests: XCTestCase {
         var newer = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                fullscreenRenderer: nil,
                 reasoningEffort: "high",
                 origin: .original
             ),

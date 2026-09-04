@@ -5,101 +5,40 @@ import AppKit
 /// The main conversation only carries a compact count in its corner status card. Navigation
 /// belongs here in the display pane, above rows built through `ConversationRowView`, so user
 /// messages, markdown, thinking, tool calls, results, and notices keep the parent's treatment.
+/// The rows sit in the same `ConversationTranscriptTable` as the parent's, so folding, spacing
+/// and recycling are one mechanism; this controller adds the navigator, the heading naming the
+/// child whose rows follow, and the block-level Markdown split a narrow pane wants.
 final class SubagentTranscriptViewController: NSViewController {
 
 #if DEBUG
     struct RenderPhaseDurations {
         var summaryNanoseconds: UInt64 = 0
-        var presentationNanoseconds: UInt64 = 0
-        var reloadNanoseconds: UInt64 = 0
+        /// Building the ordering and reloading the table, which the shared table does as one
+        /// step so live and rebuilt rows take the same shape.
+        var transcriptNanoseconds: UInt64 = 0
         var summaryRebuilds = 0
     }
-
-    struct RowMaterializationDurations {
-        var count = 0
-        var markdownCount = 0
-        var totalNanoseconds: UInt64 = 0
-        var hostNanoseconds: UInt64 = 0
-        var contentNanoseconds: UInt64 = 0
-        var markdownContentNanoseconds: UInt64 = 0
-        var installNanoseconds: UInt64 = 0
-    }
 #endif
+
+    /// The items only this pane presents beside the shared timeline, divider and tool-fold
+    /// identities: the navigator, the heading, and the notice standing in for a transcript that
+    /// is not there.
+    enum SurfaceItem: Hashable {
+        case summary
+        case transcriptHeading
+        case missingTranscript
+    }
 
     // MARK: - Properties
 
     private let summaryView = SubagentSummaryView()
     private let transcriptHeadingView = SubagentTranscriptHeadingView()
-    private lazy var tableView: ThemedTableView = {
-        let table = ThemedTableView()
-        let column = NSTableColumn(
-            identifier: NSUserInterfaceItemIdentifier("SubagentTranscriptContent")
-        )
-        column.resizingMask = .autoresizingMask
-        table.addTableColumn(column)
-        table.headerView = nil
-        table.selectionHighlightStyle = .none
-        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        table.intercellSpacing = .zero
-        table.rowHeight = ConversationDefaults.estimatedRowHeight
-        table.usesAutomaticRowHeights = true
-        table.autoresizingMask = [.width]
-        table.delegate = self
-        table.dataSource = self
-        return table
-    }()
-    private lazy var scrollView: ThemedScrollView = {
-        let clip = FlippedClipView()
-        clip.drawsBackground = false
-        let scroll = ThemedScrollView()
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.contentView = clip
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.documentView = tableView
-        return scroll
-    }()
-
-    private enum PresentationID: Hashable {
-        case summary
-        case transcriptHeading
-        case timeline(Int)
-        case markdown(row: Int, block: Int)
-        case divider(Int)
-        case toolFold(Int)
-    }
-
-    private struct PresentationItem {
-        enum Content {
-            case summary
-            case transcriptHeading
-            case timeline(Int)
-            case markdown(source: String)
-            case divider
-            case toolFold(indices: [Int])
-        }
-
-        let id: PresentationID
-        let content: Content
-    }
+    let transcript = ConversationTranscriptTable<SubagentTranscriptViewController>()
 
     private var agents: [SubagentTimeline.Agent] = []
     private var workingCount = 0
     private var doneCount = 0
     private var agent: SubagentTimeline.Agent?
-    private var presentationItems: [PresentationItem] = []
-    private var materializedPresentationIDs: Set<PresentationID> = []
-    private var expandedToolGroups: Set<Int> = []
-    private var expandedToolRows: Set<Int> = []
-    private var expandedUserRows: Set<Int> = []
-    private struct CachedMarkdownBlock {
-        let source: String
-        let block: MarkdownBlock
-    }
-    private static let markdownBlockCacheLimit = 64
-    private var markdownBlockCache: [PresentationID: CachedMarkdownBlock] = [:]
-    private var markdownBlockRecency: [PresentationID] = []
-    private var cachedMarkdownStyle: MarkdownStyle?
     private var hasRendered = false
     private let appEvents = AppEventObservations()
     private let sessionID: SessionID?
@@ -107,20 +46,26 @@ final class SubagentTranscriptViewController: NSViewController {
 
     private(set) var representedThreadID: String?
     private(set) var renderedRowCount = 0
-    var renderedPresentationCount: Int { presentationItems.count }
-    var materializedPresentationCount: Int { materializedPresentationIDs.count }
-    var cachedMarkdownBlockCount: Int { markdownBlockCache.count }
+    var renderedPresentationCount: Int { transcript.items.count }
+    var materializedPresentationCount: Int { transcript.materializedItemIDs.count }
+    var cachedMarkdownBlockCount: Int { transcript.cachedMarkdownBlockCount }
 #if DEBUG
     private(set) var lastRenderPhaseDurations = RenderPhaseDurations()
-    private(set) var rowMaterializationDurations = RowMaterializationDurations()
+    var rowMaterializationDurations: ConversationTranscriptMaterializationDurations {
+        transcript.rowMaterializationDurations
+    }
 #endif
-    var transcriptScrollView: ThemedScrollView { scrollView }
-    var transcriptTableView: ThemedTableView { tableView }
+    var transcriptScrollView: ThemedScrollView { transcript.scrollView }
+    var transcriptTableView: ThemedTableView { transcript.tableView }
     var onSelectAgent: ((String) -> Void)?
 
     init(sessionID: SessionID? = nil) {
         self.sessionID = sessionID
         super.init(nibName: nil, bundle: nil)
+        transcript.surface = self
+        // A child's answer is read in the display pane, which is routinely narrower than the
+        // conversation column; block rows keep a large report from attaching all at once.
+        transcript.splitsAssistantMarkdown = true
     }
 
     @available(*, unavailable)
@@ -147,8 +92,7 @@ final class SubagentTranscriptViewController: NSViewController {
         }
         appEvents.observe(AppThemeDidChange.self) { [weak self] _ in
             guard let self, let agent = self.agent else { return }
-            self.cachedMarkdownStyle = nil
-            self.clearMarkdownBlockCache()
+            self.transcript.invalidateStyleCaches()
             self.render(agent, shouldFollow: false)
         }
         appEvents.observe(SessionUsageDidChange.self) { [weak self] event in
@@ -160,6 +104,7 @@ final class SubagentTranscriptViewController: NSViewController {
             applyUsage(SessionUsageService.shared.snapshot(for: sessionID))
         }
 
+        let scrollView = transcript.scrollView
         view.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
@@ -168,6 +113,7 @@ final class SubagentTranscriptViewController: NSViewController {
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
+        transcript.activate()
 
         if let agent {
             render(agent, shouldFollow: true)
@@ -178,7 +124,7 @@ final class SubagentTranscriptViewController: NSViewController {
         super.viewDidLayout()
         // Rows here are the conversation's own, and are centred on a column they have to be
         // told the width of — see `ConversationVirtualRowHost.setColumnWidth`.
-        ConversationVirtualRowHost.stateColumnWidth(in: tableView)
+        transcript.layoutColumn()
     }
 
     // MARK: - Content
@@ -223,10 +169,7 @@ final class SubagentTranscriptViewController: NSViewController {
 
         let changedSelection = representedThreadID != selected?.descriptor.threadID
         if changedSelection {
-            expandedToolGroups.removeAll(keepingCapacity: true)
-            expandedToolRows.removeAll(keepingCapacity: true)
-            expandedUserRows.removeAll(keepingCapacity: true)
-            clearMarkdownBlockCache()
+            transcript.forgetDisclosures()
         }
         agent = selected
         representedThreadID = selected?.descriptor.threadID
@@ -250,7 +193,7 @@ final class SubagentTranscriptViewController: NSViewController {
         )
         defer {
             performanceSpan.end(metadata: [
-                "presented": "\(presentationItems.count)"
+                "presented": "\(transcript.items.count)"
             ])
         }
 
@@ -282,35 +225,20 @@ final class SubagentTranscriptViewController: NSViewController {
         let summaryEnded = DispatchTime.now().uptimeNanoseconds
 #endif
 
-        let presentationSpan = PerformanceRecorder.shared.begin(
+        let transcriptSpan = PerformanceRecorder.shared.begin(
             "subagent.transcript.build-presentation",
             category: "conversation"
         )
         rebuildPresentation(for: agent)
-        presentationSpan.end(metadata: [
+        transcriptSpan.end(metadata: [
             "rows": "\(agent.conversation.rows.count)",
-            "presented": "\(presentationItems.count)"
+            "presented": "\(transcript.items.count)"
         ])
 #if DEBUG
-        let presentationEnded = DispatchTime.now().uptimeNanoseconds
-#endif
-
-        let reloadSpan = PerformanceRecorder.shared.begin(
-            "subagent.transcript.reload-table",
-            category: "conversation"
-        )
-        materializedPresentationIDs.removeAll(keepingCapacity: true)
-#if DEBUG
-        rowMaterializationDurations = RowMaterializationDurations()
-#endif
-        tableView.reloadData()
-        reloadSpan.end(metadata: ["presented": "\(presentationItems.count)"])
-#if DEBUG
-        let reloadEnded = DispatchTime.now().uptimeNanoseconds
+        let transcriptEnded = DispatchTime.now().uptimeNanoseconds
         lastRenderPhaseDurations = RenderPhaseDurations(
             summaryNanoseconds: summaryEnded &- summaryStarted,
-            presentationNanoseconds: presentationEnded &- summaryEnded,
-            reloadNanoseconds: reloadEnded &- presentationEnded,
+            transcriptNanoseconds: transcriptEnded &- summaryEnded,
             summaryRebuilds: summaryView.rowRebuildCount - summaryRebuildsBefore
         )
 #endif
@@ -322,80 +250,20 @@ final class SubagentTranscriptViewController: NSViewController {
     private func rebuildPresentation(for agent: SubagentTimeline.Agent) {
         // The heading is the seam between the navigator and the rows: it names the child the
         // rows belong to, which a selected row a screen higher cannot do on its own.
-        presentationItems = [
-            PresentationItem(id: .summary, content: .summary),
-            PresentationItem(id: .transcriptHeading, content: .transcriptHeading)
+        let prefix = [
+            Item(id: .surface(.summary), content: .surface(.summary)),
+            Item(id: .surface(.transcriptHeading), content: .surface(.transcriptHeading))
         ]
         if agent.conversation.rows.isEmpty {
             // "Not arrived yet" is only true while there is still something to arrive. A child
             // that has finished without leaving a transcript never will, and saying otherwise
             // leaves the pane waiting on a file the provider is not going to write.
-            presentationItems.append(PresentationItem(
-                id: .timeline(0),
-                content: .timeline(0)
-            ))
+            transcript.replaceItems(prefix + [
+                Item(id: .surface(.missingTranscript), content: .surface(.missingTranscript))
+            ])
             return
         }
-
-        var pendingToolIndices: [Int] = []
-        var hasTranscriptRow = false
-
-        func appendRow(_ row: ConversationTimeline.Row, at index: Int) {
-            guard case .assistant(let markdown) = row else {
-                presentationItems.append(PresentationItem(
-                    id: .timeline(index),
-                    content: .timeline(index)
-                ))
-                return
-            }
-
-            let sources = Markdown.sourceBlocks(markdown)
-            if sources.isEmpty {
-                presentationItems.append(PresentationItem(
-                    id: .timeline(index),
-                    content: .timeline(index)
-                ))
-            } else {
-                presentationItems.append(contentsOf: sources.enumerated().map { blockIndex, source in
-                    PresentationItem(
-                        id: .markdown(row: index, block: blockIndex),
-                        content: .markdown(source: source)
-                    )
-                })
-            }
-        }
-
-        func flushTools() {
-            guard let first = pendingToolIndices.first else { return }
-            presentationItems.append(PresentationItem(
-                id: .toolFold(first),
-                content: .toolFold(indices: pendingToolIndices)
-            ))
-            if expandedToolGroups.contains(first) {
-                presentationItems.append(contentsOf: pendingToolIndices.map {
-                    PresentationItem(id: .timeline($0), content: .timeline($0))
-                })
-            }
-            pendingToolIndices.removeAll(keepingCapacity: true)
-            hasTranscriptRow = true
-        }
-
-        for (index, row) in agent.conversation.rows.enumerated() {
-            if case .toolCall = row {
-                pendingToolIndices.append(index)
-                continue
-            }
-            flushTools()
-            if case .userMessage = row, hasTranscriptRow {
-                presentationItems.append(PresentationItem(
-                    id: .divider(index),
-                    content: .divider
-                ))
-            }
-            appendRow(row, at: index)
-            hasTranscriptRow = true
-        }
-        flushTools()
+        transcript.rebuild(prefix: prefix)
     }
 
     private func select(_ threadID: String, notify: Bool) {
@@ -413,53 +281,15 @@ final class SubagentTranscriptViewController: NSViewController {
     }
 
     private func clear() {
-        presentationItems.removeAll(keepingCapacity: true)
-        materializedPresentationIDs.removeAll(keepingCapacity: true)
-        clearMarkdownBlockCache()
-        tableView.reloadData()
+        transcript.forgetDisclosures()
+        transcript.replaceItems([])
         hasRendered = false
-    }
-
-    private func markdownBlock(id: PresentationID, source: String) -> MarkdownBlock? {
-        if let cached = markdownBlockCache[id], cached.source == source {
-            touchMarkdownBlock(id)
-            return cached.block
-        }
-
-        guard let block = Markdown.parse(source, style: markdownStyle).first else { return nil }
-        markdownBlockCache[id] = CachedMarkdownBlock(source: source, block: block)
-        touchMarkdownBlock(id)
-        while markdownBlockRecency.count > Self.markdownBlockCacheLimit {
-            let evicted = markdownBlockRecency.removeFirst()
-            markdownBlockCache.removeValue(forKey: evicted)
-        }
-        return block
-    }
-
-    /// Font and colour resolution is pane state, not row state. A theme event invalidates this
-    /// snapshot together with the attributed-block cache; every row in one pass then shares the
-    /// same resolved palette instead of walking the typography/theme layers twice per block.
-    private var markdownStyle: MarkdownStyle {
-        if let cachedMarkdownStyle { return cachedMarkdownStyle }
-        let resolved = MarkdownStyle.assistant
-        cachedMarkdownStyle = resolved
-        return resolved
-    }
-
-    private func touchMarkdownBlock(_ id: PresentationID) {
-        if let existing = markdownBlockRecency.firstIndex(of: id) {
-            markdownBlockRecency.remove(at: existing)
-        }
-        markdownBlockRecency.append(id)
-    }
-
-    private func clearMarkdownBlockCache() {
-        markdownBlockCache.removeAll(keepingCapacity: true)
-        markdownBlockRecency.removeAll(keepingCapacity: true)
     }
 
     private var isNearBottom: Bool {
         guard isViewLoaded else { return true }
+        let tableView = transcript.tableView
+        let scrollView = transcript.scrollView
         let overflow = tableView.bounds.height - scrollView.contentSize.height
         return overflow <= 0 || scrollView.contentView.bounds.origin.y >= overflow - 40
     }
@@ -468,104 +298,10 @@ final class SubagentTranscriptViewController: NSViewController {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.view.layoutSubtreeIfNeeded()
-            let overflow = self.tableView.bounds.height - self.scrollView.contentSize.height
-            self.tableView.scroll(NSPoint(x: 0, y: max(0, overflow)))
+            let tableView = self.transcript.tableView
+            let overflow = tableView.bounds.height - self.transcript.scrollView.contentSize.height
+            tableView.scroll(NSPoint(x: 0, y: max(0, overflow)))
         }
-    }
-
-    private func rowView(at index: Int) -> NSView {
-        guard let agent, agent.conversation.rows.indices.contains(index) else {
-            return ConversationRowView.notice(
-                agent.map { transcriptAvailability(for: $0).isOpenable } ?? false
-                    ? L10n.string("The structured child transcript has not arrived yet.")
-                    : L10n.string("No transcript was recorded for this child."),
-                kind: .muted
-            )
-        }
-        let view = ConversationRowView.make(for: agent.conversation.rows[index]).view
-        configureDisclosureState(in: view, rowIndex: index)
-        return view
-    }
-
-    private func toolFold(indices: [Int]) -> TurnFoldView {
-        let count = indices.count
-        let label = count == 1
-            ? L10n.string("1 tool call")
-            : L10n.format("%lld tool calls", Int64(count))
-        let first = indices[0]
-        return TurnFoldView(
-            label: label,
-            folding: [],
-            expanded: expandedToolGroups.contains(first)
-        ) { [weak self] _, expanded in
-            self?.setToolGroup(indices, expanded: expanded)
-        }
-    }
-
-    private func setToolGroup(_ indices: [Int], expanded: Bool) {
-        guard let first = indices.first,
-              let foldRow = presentationItems.firstIndex(where: { $0.id == .toolFold(first) })
-        else { return }
-
-        if expanded {
-            guard expandedToolGroups.insert(first).inserted else { return }
-            let items = indices.map {
-                PresentationItem(id: .timeline($0), content: .timeline($0))
-            }
-            presentationItems.insert(contentsOf: items, at: foldRow + 1)
-            tableView.insertRows(
-                at: IndexSet(integersIn: foldRow + 1...foldRow + items.count),
-                withAnimation: []
-            )
-        } else {
-            guard expandedToolGroups.remove(first) != nil else { return }
-            let ids = Set(indices.map(PresentationID.timeline))
-            let rows = IndexSet(presentationItems.indices.filter { ids.contains(presentationItems[$0].id) })
-            for row in rows.reversed() { presentationItems.remove(at: row) }
-            tableView.removeRows(at: rows, withAnimation: [])
-        }
-    }
-
-    private func configureDisclosureState(in view: NSView, rowIndex: Int) {
-        if let tool = Self.firstDescendant(ToolCallView.self, in: view) {
-            tool.onExpansionChanged = { [weak self] expanded in
-                guard let self else { return }
-                if expanded {
-                    self.expandedToolRows.insert(rowIndex)
-                } else {
-                    self.expandedToolRows.remove(rowIndex)
-                }
-                self.noteHeightChanged(rowIndex)
-            }
-            tool.setExpanded(expandedToolRows.contains(rowIndex), notifying: false)
-        }
-
-        if let bubble = Self.firstDescendant(UserMessageBubbleView.self, in: view) {
-            bubble.onExpansionChanged = { [weak self] expanded in
-                guard let self else { return }
-                if expanded {
-                    self.expandedUserRows.insert(rowIndex)
-                } else {
-                    self.expandedUserRows.remove(rowIndex)
-                }
-                self.noteHeightChanged(rowIndex)
-            }
-            bubble.setExpanded(expandedUserRows.contains(rowIndex), notifying: false)
-        }
-    }
-
-    private func noteHeightChanged(_ timelineIndex: Int) {
-        guard let row = presentationItems.firstIndex(where: { $0.id == .timeline(timelineIndex) })
-        else { return }
-        tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
-    }
-
-    private static func firstDescendant<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
-        if let match = root as? T { return match }
-        for child in root.subviews {
-            if let match = firstDescendant(type, in: child) { return match }
-        }
-        return nil
     }
 
     private func summaryState(_ status: SubagentStatus) -> SubagentSummaryItem.State {
@@ -643,106 +379,41 @@ final class SubagentTranscriptViewController: NSViewController {
     }
 }
 
-extension SubagentTranscriptViewController: NSTableViewDataSource, NSTableViewDelegate {
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        presentationItems.count
+// MARK: - Transcript Surface
+
+extension SubagentTranscriptViewController: ConversationTranscriptSurface {
+    typealias SurfaceItemID = SurfaceItem
+    typealias SurfaceItemContent = SurfaceItem
+    typealias Item = ConversationTranscriptTable<SubagentTranscriptViewController>.Item
+
+    var transcriptRows: [ConversationTimeline.Row] {
+        agent?.conversation.rows ?? []
     }
 
-    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        false
-    }
-
-    func tableView(
-        _ tableView: NSTableView,
-        viewFor tableColumn: NSTableColumn?,
-        row tableRow: Int
-    ) -> NSView? {
-        guard presentationItems.indices.contains(tableRow) else { return nil }
-        let item = presentationItems[tableRow]
-#if DEBUG
-        let mountStarted = DispatchTime.now().uptimeNanoseconds
-#endif
-        let identifier = NSUserInterfaceItemIdentifier("SubagentTranscriptVirtualRow")
-        let host = tableView.makeView(
-            withIdentifier: identifier,
-            owner: self
-        ) as? ConversationVirtualRowHost ?? ConversationVirtualRowHost()
-        host.identifier = identifier
-        host.setColumnWidth(ConversationVirtualRowHost.columnWidth(of: tableView))
-#if DEBUG
-        let hostEnded = DispatchTime.now().uptimeNanoseconds
-#endif
-
-        let content: NSView
-        switch item.content {
+    func transcriptView(for content: SurfaceItem, id: SurfaceItem) -> NSView {
+        switch content {
         case .summary:
-            content = summaryView
+            return summaryView
         case .transcriptHeading:
-            content = transcriptHeadingView
-        case .timeline(let index):
-            content = rowView(at: index)
-        case .markdown(let source):
-            if let block = markdownBlock(id: item.id, source: source) {
-                let availableWidth = min(
-                    Design.Size.readableWidth,
-                    max(
-                        1,
-                        ConversationVirtualRowHost.columnWidth(of: tableView)
-                            - Design.Spacing.inset * 2
-                    )
-                )
-                content = MarkdownView.blockView(
-                    for: block,
-                    style: markdownStyle,
-                    availableWidth: availableWidth
-                )
-            } else {
-                content = MarkdownView(markdown: source)
-            }
-        case .divider:
-            content = ConversationRowView.turnDivider()
-        case .toolFold(let indices):
-            content = toolFold(indices: indices)
+            return transcriptHeadingView
+        case .missingTranscript:
+            let stillArriving = agent.map { transcriptAvailability(for: $0).isOpenable } ?? false
+            return ConversationRowView.notice(
+                stillArriving
+                    ? L10n.string("The structured child transcript has not arrived yet.")
+                    : L10n.string("No transcript was recorded for this child."),
+                kind: .muted
+            )
         }
-#if DEBUG
-        let contentEnded = DispatchTime.now().uptimeNanoseconds
-#endif
-
-        materializedPresentationIDs.insert(item.id)
-        let bottomInset = tableRow == presentationItems.count - 1
-            ? Design.Spacing.inset
-            : 0
-        host.install(
-            content,
-            topInset: topInset(for: item, at: tableRow),
-            bottomInset: bottomInset,
-            onRelease: { [weak self] in
-                self?.materializedPresentationIDs.remove(item.id)
-            }
-        )
-#if DEBUG
-        let installEnded = DispatchTime.now().uptimeNanoseconds
-        rowMaterializationDurations.count += 1
-        rowMaterializationDurations.totalNanoseconds += installEnded &- mountStarted
-        rowMaterializationDurations.hostNanoseconds += hostEnded &- mountStarted
-        rowMaterializationDurations.contentNanoseconds += contentEnded &- hostEnded
-        rowMaterializationDurations.installNanoseconds += installEnded &- contentEnded
-        if case .markdown = item.content {
-            rowMaterializationDurations.markdownCount += 1
-            rowMaterializationDurations.markdownContentNanoseconds += contentEnded &- hostEnded
-        }
-#endif
-        return host
     }
 
-    private func topInset(for item: PresentationItem, at row: Int) -> CGFloat {
-        if row == 0 { return Design.Spacing.inset }
-        if case .markdown(let timelineRow, let block) = item.id, block > 0,
-           presentationItems.indices.contains(row - 1),
-           case .markdown(let previousRow, _) = presentationItems[row - 1].id,
-           previousRow == timelineRow {
-            return MarkdownDefaults.blockSpacing
+    func transcriptRhythm(for content: SurfaceItem, id: SurfaceItem) -> Design.Chat.Rhythm {
+        switch content {
+        case .summary, .missingTranscript:
+            return .chrome
+        case .transcriptHeading:
+            // The seam between the navigator and the rows: the transcript opens under it.
+            return .seam
         }
-        return Design.Spacing.medium
     }
 }

@@ -135,6 +135,148 @@ describe("hosted APNs broker", () => {
     });
   });
 
+  it("never writes preview text or raw routing identifiers to provider logs", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+    const log = vi.spyOn(console, "info").mockImplementation(() => {});
+    const body = pushBody(hostID, crypto.randomUUID().toLowerCase(), registrationID);
+    const event = body.event as Record<string, unknown>;
+    const preview = "assistant preview body must stay out of diagnostics";
+    const sessionID = String(event.sessionID);
+    event.kind = NotificationKind.turnCompleted;
+    event.body = preview;
+    event.turnGeneration = 7;
+
+    const response = await sendPush(hostCredential, body);
+
+    expect(response.status).toBe(200);
+    const encodedLog = JSON.stringify(log.mock.calls);
+    expect(encodedLog).not.toContain(preview);
+    expect(encodedLog).not.toContain("ab".repeat(32));
+    expect(encodedLog).not.toContain(hostID);
+    expect(encodedLog).not.toContain(sessionID);
+    expect(encodedLog).toContain('"previewPresent":true');
+    expect(encodedLog).toContain('"previewBytes":51');
+  });
+
+  it("sends turn-completion retractions as short-lived background pushes", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const apnsID = crypto.randomUUID();
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, {
+      status: 200,
+      headers: { "apns-id": apnsID },
+    }));
+    const eventID = crypto.randomUUID().toLowerCase();
+    const sessionID = crypto.randomUUID().toLowerCase();
+
+    const before = Math.floor(Date.now() / 1_000);
+    const response = await sendRetraction(hostCredential, {
+      registrationID,
+      retraction: {
+        type: "notificationRetraction",
+        hostID,
+        sessionID,
+        eventID,
+        kind: NotificationKind.turnCompleted,
+      },
+    });
+    const after = Math.floor(Date.now() / 1_000);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      accepted: true,
+      statusCode: 200,
+      apnsID,
+    });
+    expect(upstream).toHaveBeenCalledOnce();
+    const [, options] = upstream.mock.calls[0] ?? [];
+    const headers = new Headers(options?.headers);
+    expect(headers.get("apns-push-type")).toBe("background");
+    expect(headers.get("apns-priority")).toBe("5");
+    const expiration = Number(headers.get("apns-expiration"));
+    expect(expiration).toBeGreaterThanOrEqual(before + 300);
+    expect(expiration).toBeLessThanOrEqual(after + 300);
+    expect(headers.get("apns-collapse-id")).toMatch(/^[0-9a-f]{64}$/u);
+    const payload = JSON.parse(new TextDecoder().decode(options?.body as Uint8Array));
+    expect(payload).toEqual({
+      aps: { "content-available": 1 },
+      retraction: {
+        type: "notificationRetraction",
+        hostID,
+        sessionID,
+        eventID,
+        kind: "turnCompleted",
+      },
+    });
+    expect(payload.aps.alert).toBeUndefined();
+    expect(payload.aps.sound).toBeUndefined();
+  });
+
+  it("uses the completion collapse id for its retraction", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 200 }),
+    );
+    const eventID = crypto.randomUUID().toLowerCase();
+    const sessionID = crypto.randomUUID().toLowerCase();
+    const body = pushBody(hostID, eventID, registrationID);
+    const event = body.event as Record<string, unknown>;
+    event.kind = NotificationKind.turnCompleted;
+    event.sessionID = sessionID;
+
+    await sendPush(hostCredential, body);
+    await sendRetraction(hostCredential, {
+      registrationID,
+      retraction: {
+        type: "notificationRetraction",
+        hostID,
+        sessionID,
+        eventID,
+        kind: NotificationKind.turnCompleted,
+      },
+    });
+
+    expect(upstream).toHaveBeenCalledTimes(2);
+    const firstHeaders = new Headers(upstream.mock.calls[0]?.[1]?.headers);
+    const secondHeaders = new Headers(upstream.mock.calls[1]?.[1]?.headers);
+    expect(secondHeaders.get("apns-collapse-id")).toBe(
+      firstHeaders.get("apns-collapse-id"),
+    );
+  });
+
+  it("refuses cross-host and malformed retractions before contacting APNs", async () => {
+    const hostID = `host-${crypto.randomUUID()}`;
+    const { hostCredential, registrationID } = await enrollPushRecipient(hostID);
+    const upstream = vi.spyOn(globalThis, "fetch");
+    const base = {
+      registrationID,
+      retraction: {
+        type: "notificationRetraction",
+        hostID: `host-${crypto.randomUUID()}`,
+        sessionID: crypto.randomUUID().toLowerCase(),
+        eventID: crypto.randomUUID().toLowerCase(),
+        kind: NotificationKind.turnCompleted,
+      },
+    };
+
+    const crossHost = await sendRetraction(hostCredential, base);
+    expect(crossHost.status).toBe(403);
+
+    const malformed = await sendRetraction(hostCredential, {
+      ...base,
+      retraction: {
+        ...base.retraction,
+        hostID,
+        extra: "not-allowed",
+      },
+    });
+    expect(malformed.status).toBe(400);
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
   it("does not accept a raw APNs token from a host credential", async () => {
     const hostID = `host-${crypto.randomUUID()}`;
     const { hostCredential } = await enrollPushRecipient(hostID);
@@ -200,7 +342,32 @@ async function enrollPushRecipient(
 }
 
 async function sendPush(credential: string, body: Record<string, unknown>): Promise<Response> {
-  const configured = new Proxy(testEnv, {
+  return worker.fetch(new Request("https://service.test/v1/push", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${credential}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  }), configuredEnv());
+}
+
+async function sendRetraction(
+  credential: string,
+  body: Record<string, unknown>,
+): Promise<Response> {
+  return worker.fetch(new Request("https://service.test/v1/push/retractions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${credential}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  }), configuredEnv());
+}
+
+function configuredEnv(): Env {
+  return new Proxy(testEnv, {
     get(target, property, receiver) {
       const values: Record<PropertyKey, unknown> = {
         APNS_TEAM_ID: "TESTTEAM01",
@@ -211,15 +378,7 @@ async function sendPush(credential: string, body: Record<string, unknown>): Prom
         ? values[property]
         : Reflect.get(target, property, receiver);
     },
-  });
-  return worker.fetch(new Request("https://service.test/v1/push", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${credential}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  }), configured as Env);
+  }) as Env;
 }
 
 function pushBody(

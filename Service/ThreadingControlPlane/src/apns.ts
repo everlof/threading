@@ -11,7 +11,10 @@ const requestKeys = ["registrationID", "playsSound", "event"];
 const eventKeys = [
   "type", "id", "kind", "hostID", "sessionID", "title", "body",
   "titleLocalization", "bodyLocalization", "destination", "createdAt",
+  "turnGeneration",
 ];
+const retractionRequestKeys = ["registrationID", "retraction"];
+const retractionKeys = ["type", "hostID", "sessionID", "eventID", "kind"];
 const localizationKeys = ["key", "arguments"];
 const destinationKeys = [
   "kind", "attachmentID", "browserTabID", "extensionIdentifier", "extensionPanelID",
@@ -48,6 +51,15 @@ interface NotificationEvent {
     extensionPanelID?: string;
   };
   createdAt: number;
+  turnGeneration?: number;
+}
+
+interface NotificationRetraction {
+  type: "notificationRetraction";
+  hostID: string;
+  sessionID: string;
+  eventID: string;
+  kind: NotificationKind.turnCompleted;
 }
 
 export async function handleAPNSPush(request: Request, env: Env): Promise<Response> {
@@ -85,7 +97,7 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
       "apns-expiration": String(Math.floor(event.createdAt + (
         event.kind === "permissionRequest" ? 3_600 : 86_400
       ))),
-      "apns-collapse-id": await collapseID(event),
+      "apns-collapse-id": await eventCollapseID(event),
     },
     body: apnsBody,
     signal: AbortSignal.timeout(5_000),
@@ -98,8 +110,80 @@ export async function handleAPNSPush(request: Request, env: Env): Promise<Respon
   console.info(response.ok ? "push_provider_accepted" : "push_provider_refused", {
     eventID: event.id,
     kind: event.kind,
+    host: `host-${(await sha256Hex(event.hostID)).slice(0, 12)}`,
+    session: `session-${(await sha256Hex(event.sessionID)).slice(0, 12)}`,
     device: `device-${registration.deviceTokenDigest.slice(0, 12)}`,
     environment: registration.environment,
+    transport: "apns",
+    attempt: 1,
+    status: response.status,
+    previewPresent: event.kind === NotificationKind.turnCompleted && !event.bodyLocalization,
+    previewBytes: event.kind === NotificationKind.turnCompleted && !event.bodyLocalization
+      ? new TextEncoder().encode(event.body).byteLength : 0,
+    ...(apnsID ? { providerTrace: apnsID } : {}),
+  });
+  return json({
+    accepted: response.status === 200,
+    statusCode: response.status,
+    reason: reason ?? (response.status === 200 ? "Accepted" : "Refused"),
+    apnsID,
+  });
+}
+
+export async function handleAPNSRetraction(request: Request, env: Env): Promise<Response> {
+  if (env.LOCAL_DEVELOPMENT_MODE === "1") {
+    throw new HttpError(503, "pushUnavailable", "Hosted push is unavailable in local development");
+  }
+  const principal = await authorizeRendezvousCredential(bearerToken(request), "host", env);
+  if (principal.kind !== "host") throw new HttpError(403, "forbidden", "Host credential required");
+  const body = await readJSON(request, 4 * 1024);
+  assertExactKeys(body, retractionRequestKeys);
+  const retraction = normalizedRetraction(requiredObject(body.retraction, "retraction"));
+  if (retraction.hostID !== principal.hostID) {
+    throw new HttpError(403, "forbidden", "Retraction host does not match credential");
+  }
+  const registration = await registeredPushRecipient(
+    body.registrationID,
+    principal.hostID,
+    principal.accountID,
+    env,
+  );
+  const encoded = new TextEncoder().encode(JSON.stringify({
+    aps: { "content-available": 1 },
+    retraction,
+  }));
+  const host = registration.environment === "sandbox"
+    ? "api.sandbox.push.apple.com" : "api.push.apple.com";
+  const response = await fetch(`https://${host}/3/device/${registration.deviceToken}`, {
+    method: "POST",
+    headers: {
+      Authorization: `bearer ${await apnsAuthorizationToken(env)}`,
+      "Content-Type": "application/json",
+      "apns-topic": configuredAPNSTopic(env),
+      "apns-push-type": "background",
+      "apns-priority": "5",
+      "apns-expiration": String(Math.floor(Date.now() / 1_000 + 5 * 60)),
+      // The background retraction replaces an alert APNs has accepted but not yet delivered.
+      // If the alert already reached the phone, the payload instead removes it locally.
+      "apns-collapse-id": await retractionCollapseID(retraction),
+    },
+    body: encoded,
+    signal: AbortSignal.timeout(5_000),
+  });
+  const reason = await apnsResponseReason(response);
+  const apnsID = normalizedAPNSID(response.headers.get("apns-id"));
+  if (response.status === 410 || reason === "BadDeviceToken" || reason === "DeviceTokenNotForTopic") {
+    await revokePushRegistration(body.registrationID as string, env);
+  }
+  console.info(response.ok ? "push_retraction_accepted" : "push_retraction_refused", {
+    eventID: retraction.eventID,
+    kind: retraction.kind,
+    host: `host-${(await sha256Hex(retraction.hostID)).slice(0, 12)}`,
+    session: `session-${(await sha256Hex(retraction.sessionID)).slice(0, 12)}`,
+    device: `device-${registration.deviceTokenDigest.slice(0, 12)}`,
+    environment: registration.environment,
+    transport: "apns",
+    attempt: 1,
     status: response.status,
     ...(apnsID ? { providerTrace: apnsID } : {}),
   });
@@ -135,6 +219,14 @@ function normalizedEvent(value: Record<string, unknown>): NotificationEvent {
   if (typeof value.createdAt !== "number" || !Number.isFinite(value.createdAt)) {
     invalid("event.createdAt is invalid");
   }
+  const turnGeneration = value.turnGeneration;
+  if (turnGeneration !== undefined && (
+    typeof turnGeneration !== "number"
+      || !Number.isSafeInteger(turnGeneration)
+      || turnGeneration < 0
+  )) {
+    invalid("event.turnGeneration is invalid");
+  }
   const now = Date.now() / 1_000;
   if (value.createdAt < now - 2 * 24 * 60 * 60 || value.createdAt > now + 5 * 60) {
     invalid("event.createdAt is outside the accepted window");
@@ -151,7 +243,20 @@ function normalizedEvent(value: Record<string, unknown>): NotificationEvent {
     ...(bodyLocalization ? { bodyLocalization } : {}),
     destination,
     createdAt: value.createdAt,
+    ...(typeof turnGeneration === "number" ? { turnGeneration } : {}),
   };
+}
+
+function normalizedRetraction(value: Record<string, unknown>): NotificationRetraction {
+  assertExactKeys(value, retractionKeys);
+  if (value.type !== "notificationRetraction") invalid("retraction.type is invalid");
+  const hostID = machineToken(value.hostID, "retraction.hostID", 128);
+  const sessionID = machineToken(value.sessionID, "retraction.sessionID", 128);
+  const eventID = machineToken(value.eventID, "retraction.eventID", 128);
+  const kind = boundedEnum(value.kind, kinds);
+  if (!validateIdentifier(hostID) || !validateIdentifier(sessionID)
+    || kind !== NotificationKind.turnCompleted) invalid("retraction is invalid");
+  return { type: "notificationRetraction", hostID, sessionID, eventID, kind };
 }
 
 function normalizedDestination(value: Record<string, unknown>): NotificationEvent["destination"] {
@@ -271,11 +376,15 @@ function configuredAPNSTopic(env: Env): string {
   return topic;
 }
 
-async function collapseID(event: NotificationEvent): Promise<string> {
+async function eventCollapseID(event: NotificationEvent): Promise<string> {
   const source = event.kind === "agentMessage"
     ? `event:${event.id}`
     : `session:${event.kind}:${event.sessionID}`;
   return (await sha256Hex(source)).slice(0, 64);
+}
+
+async function retractionCollapseID(retraction: NotificationRetraction): Promise<string> {
+  return (await sha256Hex(`session:${retraction.kind}:${retraction.sessionID}`)).slice(0, 64);
 }
 
 async function apnsResponseReason(response: Response): Promise<string | undefined> {

@@ -483,9 +483,13 @@ final class SessionRowActionsTests: XCTestCase {
         )
         XCTAssertEqual(
             interface.compactMap { $0.item?.title },
-            [SessionSurfaceTogglePresentation.nativeTitle, AgentKind.claude.originalUITitle]
+            [
+                SessionSurfaceTogglePresentation.nativeTitle,
+                AgentKind.claude.originalUITitle,
+                L10n.string("Terminal Scrolling")
+            ]
         )
-        XCTAssertEqual(interface.compactMap { $0.item?.isSelected }, [false, true])
+        XCTAssertEqual(interface.compactMap { $0.item?.isSelected }, [false, true, false])
 
         let nativeEntries = sidebar.sessionActionEntries(
             for: AgentSession(kind: .claude, title: "Native", usesNativeUI: true)
@@ -494,7 +498,7 @@ final class SessionRowActionsTests: XCTestCase {
             try sessionOptions(in: nativeEntries)
                 .compactMap(\.item).first { $0.title == "Interface" }?.submenu
         )
-        XCTAssertEqual(nativeInterface.compactMap { $0.item?.isSelected }, [true, false])
+        XCTAssertEqual(nativeInterface.compactMap { $0.item?.isSelected }, [true, false, false])
     }
 
     /// The menu reads in groups — it had grown to seventeen top-level items with a twelve-item

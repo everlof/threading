@@ -94,6 +94,41 @@ final class ConfirmationAlertTests: XCTestCase {
         )
     }
 
+    /// A form submission is the repetitive browser grant that still has to retain both pieces of
+    /// its scope on screen: this calling session and this exact origin. The first answer remains
+    /// one-shot; the second is the explicit remembered answer the user asked for.
+    func testBrowserSubmissionOffersAnExactOriginSessionGrant() throws {
+        let origin = try XCTUnwrap(BrowserOrigin(url: XCTUnwrap(
+            URL(string: "http://127.0.0.1:3000/generate")
+        )))
+        let target = BrowserTargetDescription(
+            ok: true,
+            message: "",
+            ref: "e7",
+            tag: "button",
+            role: "button",
+            name: "Generate development code",
+            inputType: nil,
+            isSubmit: true,
+            isInForm: true,
+            isPassword: false
+        )
+        let request = AgentToolCoordinator.sensitiveBrowserActionChoice(
+            "Submit a form",
+            target: target,
+            origin: origin
+        )
+        let alert = ConfirmationAlert.makeAlert(request)
+
+        XCTAssertEqual(request.title, "Submit a form on 127.0.0.1:3000?")
+        XCTAssertTrue(request.message.contains("Control: Generate development code"))
+        XCTAssertEqual(
+            alert.buttons.map(\.title),
+            ["Allow Once", "Allow for This Session", "Deny"]
+        )
+        XCTAssertFalse(alert.showsSuppressionButton)
+    }
+
     /// A choice that does not apply is disabled rather than dropped, so the indices the caller
     /// reads back keep meaning the same thing.
     func testADisabledOptionKeepsItsPlace() {

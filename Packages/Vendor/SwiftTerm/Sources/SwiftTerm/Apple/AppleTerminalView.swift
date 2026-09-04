@@ -3738,7 +3738,7 @@ extension TerminalView {
                 
                 context.move(to: end)
                 context.addLine(to: start)
-                let size = 12.0
+                let size = Self.selectionHandleDiameter
                 let location = drawStart ? end : start
                 
                 let rect = CGRect (origin:

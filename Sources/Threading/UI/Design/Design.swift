@@ -1861,6 +1861,73 @@ public enum Design {
         /// this only needs to be one large step rather than a second oversized separator.
         public static let turnSpacing: CGFloat = Design.Spacing.large
 
+        /// Between the blocks of one document, and between an answer and whatever stands beside
+        /// it: one value, so an answer split into rows reads exactly like one document.
+        public static let blockSpacing: CGFloat = Design.Spacing.small
+
+        /// A row's vertical rhythm: what it asks for above and below itself.
+        ///
+        /// Two neighbouring rows collapse their facing margins to the larger one, the way a
+        /// document's paragraphs do, so a row never has to know what stands next to it and no
+        /// list of pairs decides a gap. The pairwise rule this replaced put a user's bubble a
+        /// turn's step under the heading above it and four points above the thinking beneath,
+        /// because "either neighbour is work" beat everything the bubble might have wanted —
+        /// and the bubble had nothing to want, since only pairs had values. Now each kind of
+        /// row owns its two margins here, the table composes them with `gap(between:and:)`,
+        /// and the row views carry no outer margins of their own.
+        public struct Rhythm: Equatable, Sendable {
+            public let above: CGFloat
+            public let below: CGFloat
+
+            public init(above: CGFloat, below: CGFloat) {
+                self.above = above
+                self.below = below
+            }
+
+            /// The gap between two rows: the larger of the margins that face each other.
+            public static func gap(between upper: Rhythm, and lower: Rhythm) -> CGFloat {
+                max(upper.below, lower.above)
+            }
+
+            /// The rule that opens an exchange: a turn's step above it, the bubble close under.
+            public static let boundary = Rhythm(
+                above: Design.Chat.turnSpacing,
+                below: Design.Spacing.small
+            )
+
+            /// The user's turn: close under its rule, a clear step before what answers it.
+            public static let exchange = Rhythm(
+                above: Design.Spacing.small,
+                below: Design.Spacing.medium
+            )
+
+            /// The agent's answer, and each block of one when it is split into rows.
+            public static let answer = Rhythm(
+                above: Design.Chat.blockSpacing,
+                below: Design.Chat.blockSpacing
+            )
+
+            /// Thinking, a tool call, a run of them behind one disclosure: tight, so the work
+            /// reads as one strip and the sentences around it stand out.
+            public static let work = Rhythm(
+                above: Design.Spacing.tight,
+                below: Design.Spacing.tight
+            )
+
+            /// A card, a placeholder, a notice, a pane's own furniture.
+            public static let chrome = Rhythm(
+                above: Design.Spacing.small,
+                below: Design.Spacing.small
+            )
+
+            /// A seam the transcript starts under — a handoff banner, the child pane's
+            /// heading — so whatever follows it opens a turn.
+            public static let seam = Rhythm(
+                above: Design.Spacing.small,
+                below: Design.Chat.turnSpacing
+            )
+        }
+
         /// The fixed-width column a tool row's glyph sits in, so rows align down the edge.
         public static let toolIconWidth: CGFloat = 16
 

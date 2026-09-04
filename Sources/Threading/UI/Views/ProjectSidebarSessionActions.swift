@@ -1523,21 +1523,58 @@ extension ProjectSidebarViewController {
     /// relaunches where it left off rather than starting over. What it does cost is the live
     /// process, which is why a working session confirms first.
     private func interfaceEntry(for session: AgentSession) -> ThemedMenuEntry? {
-        guard SessionSurfaceTogglePresentation.canSwitchSurface(session.kind) else { return nil }
+        var rows: [ThemedMenuEntry] = []
 
-        let rows: [ThemedMenuEntry] = [true, false].map { usesNativeUI in
-            .item(ThemedMenuItem(
-                title: SessionSurfaceTogglePresentation.title(
-                    usesNativeUI: usesNativeUI,
-                    kind: session.kind
-                ),
-                isSelected: session.usesNativeUI == usesNativeUI,
-                onChoose: { [weak self] in self?.setSurface(usesNativeUI: usesNativeUI) }
-            ))
+        if SessionSurfaceTogglePresentation.canSwitchSurface(session.kind) {
+            let surfaces: [ThemedMenuEntry] = [true, false].map { usesNativeUI in
+                .item(ThemedMenuItem(
+                    title: SessionSurfaceTogglePresentation.title(
+                        usesNativeUI: usesNativeUI,
+                        kind: session.kind
+                    ),
+                    isSelected: session.usesNativeUI == usesNativeUI,
+                    onChoose: { [weak self] in self?.setSurface(usesNativeUI: usesNativeUI) }
+                ))
+            }
+            rows.append(contentsOf: surfaces)
         }
+
+        // A second axis, so a nested item rather than three more rows under the separator:
+        // which surface this conversation uses and which screen its terminal draws on are both
+        // marked selections, and two marked groups in one list read as one contradictory group.
+        if let scrolling = terminalScrollingEntry(for: session) {
+            if !rows.isEmpty { rows.append(.separator) }
+            rows.append(scrolling)
+        }
+
+        guard !rows.isEmpty else { return nil }
         return .item(ThemedMenuItem(
             title: L10n.string("Interface"),
             image: ThemedMenuIcon.symbol("macwindow"),
+            submenu: rows
+        ))
+    }
+
+    /// Which screen this conversation's terminal UI starts on — Claude's own alternate-screen
+    /// renderer, which scrolls its transcript itself, or the main screen, where the transcript
+    /// lands in this app's scrollback and its scroller, find bar and paired iPhone can reach it.
+    ///
+    /// Claude-only: Threading fixes every Codex launch inline already, and the others have no
+    /// measured equivalent. Unlike Remote Control's inherit row, this one can usually name what
+    /// it defers to, because the app-wide default is a stated value rather than deference — only
+    /// "follow" hands the question to a file this app does not read.
+    private func terminalScrollingEntry(for session: AgentSession) -> ThemedMenuEntry? {
+        guard session.kind.supports(.selectableTerminalRenderer) else { return nil }
+
+        let rows: [ThemedMenuEntry] = TerminalRendererChoice.allCases.map { choice in
+            .item(ThemedMenuItem(
+                title: choice.menuTitle,
+                isSelected: choice.sessionValue == session.fullscreenRenderer,
+                onChoose: { [weak self] in self?.setTerminalRenderer(choice) }
+            ))
+        }
+        return .item(ThemedMenuItem(
+            title: L10n.string("Terminal Scrolling"),
             submenu: rows
         ))
     }
@@ -1695,6 +1732,18 @@ extension ProjectSidebarViewController {
     private func setRemoteControl(_ choice: RemoteControlChoice) {
         guard let sessionID = actionSessionID else { return }
         guard projectStore.setRemoteControl(choice.sessionValue, for: sessionID).succeeded else {
+            reload()
+            presentProjectNotice(L10n.string("The project data could not be saved."))
+            return
+        }
+    }
+
+    /// Records the choice only. The CLI reads which screen to draw on once, while it starts, so
+    /// a running session keeps the one it launched with until it is relaunched.
+    private func setTerminalRenderer(_ choice: TerminalRendererChoice) {
+        guard let sessionID = actionSessionID else { return }
+        guard projectStore.setTerminalRenderer(choice.sessionValue, for: sessionID).succeeded
+        else {
             reload()
             presentProjectNotice(L10n.string("The project data could not be saved."))
             return
@@ -1901,6 +1950,35 @@ private enum RemoteControlChoice: CaseIterable {
         case .inherit: AppSettings.shared.claudeRemoteControl.inheritedMenuTitle
         case .on: L10n.string("Always On")
         case .off: L10n.string("Always Off")
+        }
+    }
+}
+
+/// The three answers a conversation can give about which screen its terminal UI draws on.
+///
+/// Title Case here against the pop-up's sentence case, which is the same split Remote Control's
+/// rows keep: a menu item is a command and a settings row is a description of one. The words
+/// themselves stay identical, because a setting that named itself differently in the menu that
+/// overrides it is exactly what `SessionSurfaceTogglePresentation` exists to prevent.
+private enum TerminalRendererChoice: CaseIterable {
+    case inherit
+    case terminalScrollback
+    case claudeFullscreen
+
+    var sessionValue: Bool? {
+        switch self {
+        case .inherit: nil
+        case .terminalScrollback: false
+        case .claudeFullscreen: true
+        }
+    }
+
+    @MainActor
+    var menuTitle: String {
+        switch self {
+        case .inherit: AppSettings.shared.claudeTerminalRenderer.inheritedMenuTitle
+        case .terminalScrollback: L10n.string("Terminal's Own Scrolling")
+        case .claudeFullscreen: L10n.string("Claude's Fullscreen Renderer")
         }
     }
 }

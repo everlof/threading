@@ -127,7 +127,15 @@ final class AgentSessionViewController: NSViewController {
         )
         super.init(nibName: nil, bundle: nil)
         session.delegate = self
-        session.terminalView.scrollbackEnd = agentSession.kind.supports(.inlineTerminalViewport)
+        // Follows the screen this session's agent will actually draw on, not the runtime alone.
+        // The capability is the fixed half — Codex is always launched inline — and the resolved
+        // renderer is the chosen half: a Claude session told to use the main screen leaves the
+        // same empty rows under a short conversation that pinning Codex inline was about, and a
+        // flick that settles on them looks like output that scrolled away. An unstated choice
+        // keeps the whole screen, because then the agent may still take the alternate one.
+        session.terminalView.scrollbackEnd =
+            agentSession.kind.supports(.inlineTerminalViewport)
+                || AgentLauncher.terminalRendererAtStartup(for: agentSession) == false
             ? .lastPopulatedRow
             : .screen
 

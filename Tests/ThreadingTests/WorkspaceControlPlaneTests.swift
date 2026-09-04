@@ -34,6 +34,7 @@ final class WorkspaceControlPlaneTests: XCTestCase {
         let sideChat = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                fullscreenRenderer: nil,
                 reasoningEffort: nil,
                 origin: .forked(from: caller.id)
             ),
@@ -921,13 +922,15 @@ final class SessionReportBackRequestTests: XCTestCase {
 
         let sideChat = AgentSession(
             configuration: .claude(
-                remoteControl: nil, reasoningEffort: nil, origin: .forked(from: parent.id)
+                remoteControl: nil, fullscreenRenderer: nil,
+                reasoningEffort: nil, origin: .forked(from: parent.id)
             ),
             title: "Side chat"
         )
         let orphan = AgentSession(
             configuration: .claude(
-                remoteControl: nil, reasoningEffort: nil, origin: .forked(from: SessionID())
+                remoteControl: nil, fullscreenRenderer: nil,
+                reasoningEffort: nil, origin: .forked(from: SessionID())
             ),
             title: "Orphaned side chat"
         )
@@ -945,8 +948,8 @@ final class SessionReportBackRequestTests: XCTestCase {
 
         let archivedLineage = AgentSession(
             configuration: .claude(
-                remoteControl: nil, reasoningEffort: nil,
-                origin: .forked(from: archivedParent.id)
+                remoteControl: nil, fullscreenRenderer: nil,
+                reasoningEffort: nil, origin: .forked(from: archivedParent.id)
             ),
             title: "Side chat of the archived"
         )

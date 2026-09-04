@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import ThreadingRemoteKit
 
 /// A privacy-reviewed PTY snapshot emitted by an installed provider TUI.
 ///
@@ -14,8 +15,25 @@ struct MobileMarketingTerminalFixture: Decodable, Equatable {
         fileprivate var resourceName: String { "marketing-\(rawValue)-tui" }
     }
 
+    /// The terminal background a recording was made against.
+    ///
+    /// A TUI picks its palette from what the terminal reports, so a light app theme replays the
+    /// recording made against a light terminal: Codex's own light diff backgrounds and Claude's
+    /// light ANSI theme, rather than the dark recording's truecolour blocks drawn on paper.
+    enum TerminalMode: String, CaseIterable {
+        case dark
+        case light
+
+        static func matching(_ theme: RemoteThemeDTO) -> TerminalMode {
+            theme.mode == .light ? .light : .dark
+        }
+
+        fileprivate var resourceSuffix: String { self == .dark ? "" : "-\(rawValue)" }
+    }
+
     enum FixtureError: Error, Equatable {
         case resourceMissing(String)
+        case terminalModeMismatch(expected: String, actual: String)
         case malformed
         case unsupportedSchema(Int)
         case providerMismatch(expected: String, actual: String)
@@ -31,6 +49,8 @@ struct MobileMarketingTerminalFixture: Decodable, Equatable {
     let columns: Int
     let rows: Int
     let provenance: String
+    /// Absent on a recording from before light-mode fixtures existed; such a file is dark.
+    let terminalMode: String?
     private let payloadBase64: String
 
     var payload: Data { Data(base64Encoded: payloadBase64) ?? Data() }
@@ -48,15 +68,23 @@ struct MobileMarketingTerminalFixture: Decodable, Equatable {
         }
     }
 
-    static func load(_ provider: Provider, bundle: Bundle = .main) throws -> Self {
-        let resourceName = provider.resourceName
+    static func load(
+        _ provider: Provider,
+        mode: TerminalMode = .dark,
+        bundle: Bundle = .main
+    ) throws -> Self {
+        let resourceName = provider.resourceName + mode.resourceSuffix
         let url = bundle.url(
             forResource: resourceName,
             withExtension: "json",
             subdirectory: "TerminalFixtures"
         ) ?? bundle.url(forResource: resourceName, withExtension: "json")
         guard let url else { throw FixtureError.resourceMissing(resourceName) }
-        return try decode(Data(contentsOf: url), expectedProvider: provider)
+        let fixture = try decode(Data(contentsOf: url), expectedProvider: provider)
+        if let recorded = fixture.terminalMode, recorded != mode.rawValue {
+            throw FixtureError.terminalModeMismatch(expected: mode.rawValue, actual: recorded)
+        }
+        return fixture
     }
 
     static func decode(_ data: Data, expectedProvider: Provider) throws -> Self {

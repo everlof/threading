@@ -3276,6 +3276,9 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
     public let bodyLocalization: RemoteLocalizedTextDTO?
     public let destination: RemoteNotificationDestinationDTO
     public let createdAt: Double
+    /// Stable within one host process and session. Absent for older senders and notification
+    /// kinds that are not produced by an agent-turn boundary.
+    public let turnGeneration: UInt64?
 
     public init(
         id: String = UUID().uuidString.lowercased(),
@@ -3287,7 +3290,8 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
         titleLocalization: RemoteLocalizedTextDTO? = nil,
         bodyLocalization: RemoteLocalizedTextDTO? = nil,
         destination: RemoteNotificationDestinationDTO = .session,
-        createdAt: Double = Date().timeIntervalSince1970
+        createdAt: Double = Date().timeIntervalSince1970,
+        turnGeneration: UInt64? = nil
     ) {
         type = "notification"
         self.id = id
@@ -3300,11 +3304,12 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
         self.bodyLocalization = bodyLocalization
         self.destination = destination
         self.createdAt = createdAt
+        self.turnGeneration = turnGeneration
     }
 
     private enum CodingKeys: String, CodingKey {
         case type, id, kind, hostID, sessionID, title, body
-        case titleLocalization, bodyLocalization, destination, createdAt
+        case titleLocalization, bodyLocalization, destination, createdAt, turnGeneration
     }
 
     public init(from decoder: Decoder) throws {
@@ -3329,6 +3334,7 @@ public struct RemoteNotificationEventDTO: Codable, Equatable, Identifiable, Send
             forKey: .destination
         ) ?? .session
         createdAt = try container.decode(Double.self, forKey: .createdAt)
+        turnGeneration = try container.decodeIfPresent(UInt64.self, forKey: .turnGeneration)
     }
 }
 
@@ -3342,19 +3348,50 @@ public struct RemoteNotificationRegistrationDTO: Codable, Equatable, Sendable {
     /// Kinds that may make sound on this device. Nil preserves the behavior of an older client;
     /// an empty array is an explicit request for quiet delivery.
     public let soundEnabledKinds: [RemoteNotificationKind]?
+    /// Optional by design: an older phone advertises no newer delivery behavior.
+    public let capabilities: [RemoteNotificationCapability]?
+    /// Per-device consent. Missing is always false, including for a capability-aware device.
+    public let includesResponsePreviews: Bool?
 
     public init(
         deviceToken: String,
         hostedRegistrationID: String? = nil,
         environment: RemoteNotificationEnvironment,
         enabledKinds: [RemoteNotificationKind],
-        soundEnabledKinds: [RemoteNotificationKind]? = nil
+        soundEnabledKinds: [RemoteNotificationKind]? = nil,
+        capabilities: [RemoteNotificationCapability]? = nil,
+        includesResponsePreviews: Bool? = nil
     ) {
         self.deviceToken = deviceToken
         self.hostedRegistrationID = hostedRegistrationID
         self.environment = environment
         self.enabledKinds = enabledKinds
         self.soundEnabledKinds = soundEnabledKinds
+        self.capabilities = capabilities
+        self.includesResponsePreviews = includesResponsePreviews
+    }
+}
+
+/// Removes one previously delivered Threading notification without carrying any notification
+/// copy. The event id is the `UNNotificationRequest` identifier on the receiving phone.
+public struct RemoteNotificationRetractionDTO: Codable, Equatable, Sendable {
+    public let type: String
+    public let hostID: String
+    public let sessionID: String
+    public let eventID: String
+    public let kind: RemoteNotificationKind
+
+    public init(
+        hostID: String,
+        sessionID: String,
+        eventID: String,
+        kind: RemoteNotificationKind
+    ) {
+        type = "notificationRetraction"
+        self.hostID = hostID
+        self.sessionID = sessionID
+        self.eventID = eventID
+        self.kind = kind
     }
 }
 

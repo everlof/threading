@@ -22,6 +22,7 @@ struct ThreadingMobileHostedRoot: View {
                 // so the first foreground is this one.
                 model.startDiscovery()
                 if !model.isEphemeralTerminalWireFixture {
+                    await notifications.clearTurnCompletionsOnApplicationActivation()
                     await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)
                     await notifications.prepare()
                     await notifications.sync(hosts: model.hosts)
@@ -36,6 +37,7 @@ struct ThreadingMobileHostedRoot: View {
                     // address it finds is only useful while somebody is looking at the app.
                     model.startDiscovery()
                     Task {
+                        await notifications.clearTurnCompletionsOnApplicationActivation()
                         await model.refresh()
                         if !model.isEphemeralTerminalWireFixture {
                             await MobileIssueReportOutbox.shared.setConnectivityRetryActive(true)

@@ -18,39 +18,17 @@ enum RemoteTurnCompletionNotificationPolicy {
     }
 }
 
-enum RemoteNotificationInteractionActor: Equatable {
+enum RemoteNotificationInteractionActor: Equatable, Hashable {
     case owner
     case member(id: String, name: String)
 }
 
-/// A routine completion is a fallback for an owner who has stepped away from Threading on the
-/// Mac. It is not an urgent alert, so an active Mac owns the presentation while the iPhone stays
-/// quiet. Guest completions cannot use the owner's Mac activity: that would let one participant
-/// accidentally silence another participant's notification.
-enum RemoteTurnCompletionDeviceActivityPolicy {
-    enum Decision: Equatable {
-        case deliverNow
-        case deferUntilMacInactive(deadlineUptime: TimeInterval)
-    }
-
-    /// Long enough for the ordinary pause between submitting a turn and reading its result, but
-    /// short enough that a Mac left frontmost becomes an inactive device without a setting.
-    static let recentMacInteractionSeconds: TimeInterval = 2 * 60
-
-    static func deliveryDecision(
-        actor: RemoteNotificationInteractionActor,
-        applicationIsActive: Bool,
-        lastInteractionUptime: TimeInterval?,
-        nowUptime: TimeInterval
-    ) -> Decision {
-        guard case .owner = actor,
-              applicationIsActive,
-              let lastInteractionUptime else { return .deliverNow }
-        let age = nowUptime - lastInteractionUptime
-        guard age >= 0, age < recentMacInteractionSeconds else { return .deliverNow }
-        return .deferUntilMacInactive(
-            deadlineUptime: lastInteractionUptime + recentMacInteractionSeconds
-        )
+extension RemoteNotificationInteractionActor {
+    var notificationParticipantID: RemoteNotificationParticipantID {
+        switch self {
+        case .owner: .owner
+        case .member(let id, _): .member(id)
+        }
     }
 }
 

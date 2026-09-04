@@ -368,7 +368,9 @@ enum MarkdownDefaults {
     static let headingBump: CGFloat = 3
     static let codePadding: CGFloat = 8
     static let listIndent: CGFloat = 18
-    static let blockSpacing: CGFloat = 6
+    /// The conversation's answer rhythm, so a document's blocks and an answer split into rows
+    /// are spaced by one token — see `Design.Chat.Rhythm`.
+    @MainActor static var blockSpacing: CGFloat { Design.Chat.blockSpacing }
     static let quoteBarWidth: CGFloat = 2
     static let tableColumnWidth: CGFloat = 180
 

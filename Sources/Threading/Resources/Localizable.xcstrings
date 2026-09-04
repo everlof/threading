@@ -2982,6 +2982,17 @@
         }
       }
     },
+    "1 minute" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 minut"
+          }
+        }
+      }
+    },
     "1 more line is not shown." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3169,6 +3180,17 @@
         }
       }
     },
+    "10 minutes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "10 minuter"
+          }
+        }
+      }
+    },
     "100%" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -3264,6 +3286,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1Password svarade inte i tid."
+          }
+        }
+      }
+    },
+    "2 minutes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "2 minuter"
           }
         }
       }
@@ -3396,6 +3429,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "4K"
+          }
+        }
+      }
+    },
+    "5 minutes" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 minuter"
           }
         }
       }
@@ -5508,6 +5552,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Efter en omstart"
+          }
+        }
+      }
+    },
+    "After deliberate interaction, routine turn-completion alerts stay off your paired devices for this long. Off never uses Mac activity to suppress them." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Efter avsiktlig interaktion hålls vanliga aviseringar om slutförda turer borta från dina parkopplade enheter så här länge. Av använder aldrig Mac-aktivitet för att undertrycka dem."
           }
         }
       }
@@ -10506,6 +10561,17 @@
         }
       }
     },
+    "Claude Terminal" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude-terminal"
+          }
+        }
+      }
+    },
     "Claude and Codex publish authoritative windows" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10513,6 +10579,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claude och Codex publicerar auktoritativa fönster"
+          }
+        }
+      }
+    },
+    "Claude can draw its interface on the terminal's alternate screen and scroll its own transcript, or on the main screen so the transcript lands in Threading's scrollback — where this app's scrolling, find bar and a paired iPhone can reach it. Following leaves the choice to Claude, which defaults to its own. A single chat can still be set from its ⋯ menu, and the choice applies from that chat's next launch." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claude kan rita sitt gränssnitt på terminalens alternativa skärm och rulla sin egen transkribering, eller på huvudskärmen så att transkriberingen hamnar i Threadings rullningshistorik — där appens rullning, sökfält och en parkopplad iPhone kan nå den. Följ lämnar valet till Claude, som använder sin egen inställning som standard. En enskild chatt kan fortfarande ställas in från menyn ⋯, och valet gäller från chattens nästa start."
           }
         }
       }
@@ -10535,6 +10612,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claude · 10:43"
+          }
+        }
+      }
+    },
+    "Claude's Fullscreen Renderer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claudes helskärmsrenderare"
+          }
+        }
+      }
+    },
+    "Claude's fullscreen renderer" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Claudes helskärmsrenderare"
           }
         }
       }
@@ -18261,6 +18360,17 @@
         }
       }
     },
+    "Finished its turn." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Avslutade sin tur."
+          }
+        }
+      }
+    },
     "Finished or asked while you were away" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -21473,6 +21583,17 @@
         }
       }
     },
+    "Its agent kept moving between checkouts. Threading left the chat where it is; move it yourself from the chat's menu." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dess agent fortsatte flytta sig mellan utcheckningar. Threading lämnade chatten där den är; flytta den själv från chattens meny."
+          }
+        }
+      }
+    },
     "Its agent surface no longer has Threading session tools." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -23361,6 +23482,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "MCP"
+          }
+        }
+      }
+    },
+    "Mac activity window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivitetsfönster för Mac"
           }
         }
       }
@@ -26980,6 +27112,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inget att visa ännu."
+          }
+        }
+      }
+    },
+    "Notification Delivery" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aviseringsleverans"
           }
         }
       }
@@ -35520,6 +35663,17 @@
         }
       }
     },
+    "Scrolling in new Claude terminals" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rullning i nya Claude-terminaler"
+          }
+        }
+      }
+    },
     "Search" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -39810,6 +39964,17 @@
         }
       }
     },
+    "Stopped following “%@” between checkouts" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Slutade följa ”%@” mellan utcheckningar"
+          }
+        }
+      }
+    },
     "Stopped · usage limit reached" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40657,6 +40822,17 @@
         }
       }
     },
+    "Terminal Scrolling" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminalrullning"
+          }
+        }
+      }
+    },
     "Terminal actions" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -40686,6 +40862,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Terminal i %@"
+          }
+        }
+      }
+    },
+    "Terminal's Own Scrolling" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminalens egen rullning"
+          }
+        }
+      }
+    },
+    "Terminal's own scrolling" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Terminalens egen rullning"
           }
         }
       }
@@ -49028,6 +49226,17 @@
         }
       }
     },
+    "Use Default (Fullscreen)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd standard (helskärm)"
+          }
+        }
+      }
+    },
     "Use Default (Off)" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -49046,6 +49255,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Använd standard (På)"
+          }
+        }
+      }
+    },
+    "Use Default (Terminal Scrolling)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Använd standard (terminalrullning)"
           }
         }
       }

@@ -210,39 +210,55 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     var selectedSubagentThreadID: String? { subagentState.selectedThreadID }
 
     /// The transcript is a view-based table rather than one retained stack. AppKit therefore
-    /// owns a bounded set of row hosts near the viewport, while `presentationItems` remains the
-    /// complete, cheap ordering model for exact jumps and minimap navigation.
-    lazy var tableView: ThemedTableView = {
-        let table = ThemedTableView()
-        let column = NSTableColumn(
-            identifier: NSUserInterfaceItemIdentifier("ConversationContent")
-        )
-        column.resizingMask = .autoresizingMask
-        table.addTableColumn(column)
-        table.headerView = nil
-        table.selectionHighlightStyle = .none
-        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        table.intercellSpacing = .zero
-        table.rowHeight = ConversationDefaults.estimatedRowHeight
-        table.usesAutomaticRowHeights = true
-        table.autoresizingMask = [.width]
-        table.delegate = self
-        table.dataSource = self
-        return table
-    }()
+    /// owns a bounded set of row hosts near the viewport, while the table's items remain the
+    /// complete, cheap ordering model for exact jumps and minimap navigation. The mechanism is
+    /// shared with the child transcript; see `ConversationTranscriptTable`.
+    let transcript = ConversationTranscriptTable<ConversationViewController>()
 
+    var tableView: ThemedTableView { transcript.tableView }
+    var scrollView: ThemedScrollView { transcript.scrollView }
     private var documentView: NSView { tableView }
-    lazy var scrollView: ThemedScrollView = {
-        let clip = FlippedClipView()
-        clip.drawsBackground = false
-        let scroll = ThemedScrollView()
-        scroll.translatesAutoresizingMaskIntoConstraints = false
-        scroll.contentView = clip
-        scroll.hasVerticalScroller = true
-        scroll.drawsBackground = false
-        scroll.documentView = tableView
-        return scroll
-    }()
+
+    /// The items only this pane presents beside the shared timeline, divider and tool-fold
+    /// identities: the handoff banner, a settled turn's fold, a retained card, the streaming
+    /// placeholder.
+    enum SurfaceItemID: Hashable {
+        case handoff
+        case fold(turnStart: Int)
+        case retained(UUID)
+        case streaming
+    }
+
+    enum SurfaceItemContent {
+        case fold(
+            turnStart: Int,
+            hiddenIndices: [Int],
+            duration: TimeInterval?,
+            outcome: TurnOutcome
+        )
+        case retained(NSView)
+        case streaming(NSTextField)
+    }
+
+    typealias PresentationID = ConversationTranscriptTable<ConversationViewController>.ItemID
+    typealias PresentationItem = ConversationTranscriptTable<ConversationViewController>.Item
+
+    /// The complete ordering, read for navigation and by tests. Mutation goes through
+    /// `transcript`, which keeps AppKit and the identity index in step.
+    var presentationItems: [PresentationItem] { transcript.items }
+
+    /// Currently materialized timeline rows — viewport-sized by construction.
+    var rowViews: [Int: NSView] { transcript.rowViews }
+
+    var expandedToolGroups: Set<Int> { transcript.expandedToolGroups }
+
+    func presentationRow(forTimelineIndex index: Int) -> Int? {
+        transcript.row(forTimelineIndex: index)
+    }
+
+    func reloadConversationRows() {
+        transcript.reload()
+    }
 
     lazy var jumpToEndButton: ThemedButton = {
         let button = ThemedButton.floatingScrollToEnd(
@@ -751,7 +767,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     /// Batches replay-only UI work. Four hundred items must not each scroll, rebuild controls,
     /// publish a remote snapshot, or attach work that the completed turn will immediately fold.
-    var isReplaying = false
+    var isReplaying = false {
+        didSet { transcript.suspendsUpdates = isReplaying }
+    }
 
     /// Whether new content may move the view — see `ConversationAutoScroll`.
     var autoScroll = ConversationAutoScroll()
@@ -768,16 +786,6 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     private var legacyUserScrollEndWorkItem: DispatchWorkItem?
     private var viewportSaveWorkItem: DispatchWorkItem?
     private var didRestoreContinuityViewport = false
-
-    enum PresentationID: Hashable {
-        case handoff
-        case timeline(Int)
-        case divider(turnStart: Int)
-        case fold(turnStart: Int)
-        case toolFold(firstIndex: Int)
-        case retained(UUID)
-        case streaming
-    }
 
     struct ExactNavigationMeasurements {
         let geometryNanoseconds: UInt64
@@ -797,55 +805,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     private(set) var lastTerminationMeasurements = TerminationMeasurements()
     #endif
 
-    struct PresentationItem {
-        enum Content {
-            case timeline(Int)
-            case divider
-            case fold(
-                turnStart: Int,
-                hiddenIndices: [Int],
-                duration: TimeInterval?,
-                outcome: TurnOutcome
-            )
-            case toolFold(indices: [Int])
-            case retained(NSView)
-            case streaming(NSTextField)
-        }
-
-        let id: PresentationID
-        let content: Content
-        let opensTurn: Bool
-    }
-
-    /// Complete ordering without a complete view tree. Timeline rows carry only their stable
-    /// integer identity; expensive Markdown/tool views are constructed when the table requests
-    /// a viewport row and released when that host is reused.
-    var presentationItems: [PresentationItem] = []
-
-    /// Exact timeline identity → table row lookup. Replay leaves it empty while folding mutates
-    /// the presentation and builds it once at the final reload; live structural edits rebuild it
-    /// at their existing reload boundary.
-    var presentationRowsByTimelineIndex: [Int: Int] = [:]
-
-    /// Currently materialized timeline rows. This is intentionally viewport-sized; it exists
-    /// for live result delivery and diagnostics, not as the transcript's ownership graph.
-    var rowViews: [Int: NSView] = [:]
-
-    /// The readable width at which AppKit last owned valid automatic row heights. One scalar is
-    /// enough to invalidate its cache after wrapping changes; mirroring each measured identity
-    /// retained unbounded diagnostic state and added a dictionary write to every row layout.
-    var automaticHeightWidth: CGFloat = 0
-
-    /// Disclosure state belongs outside recyclable views, so scrolling a row away and back does
-    /// not collapse something the user opened.
+    /// Which settled turns the reader has opened. Tool and long-message disclosure state lives
+    /// on `transcript`; this is the one disclosure only the main conversation has.
     var expandedTurnStarts: Set<Int> = []
-    var expandedToolGroups: Set<Int> = []
-    var expandedToolRows: Set<Int> = []
-    var expandedUserRows: Set<Int> = []
-
-    /// The consecutive tool run at the presentation tail. Keeping this tiny bit of reduction
-    /// state makes extending a 500-call run O(1) instead of repeatedly walking its whole turn.
-    var activeToolGroupIndices: [Int] = []
 
     /// Turns already folded, by the row index of their opening user message, so a fold is
     /// never inserted twice.
@@ -898,11 +860,6 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     /// The newest turn's card — the only one whose View diff still describes what Git
     /// Review's Last Turn scope shows. Superseded cards lose the button.
     weak var latestChangedFilesCard: ChangedFilesCardView?
-
-    /// Visible native tool rows waiting for their asynchronous result. Offscreen calls need no
-    /// retained view: their result is already authoritative in `timeline` and is picked up when
-    /// the row next materializes.
-    var pendingToolViews: [Int: ToolCallView] = [:]
 
     /// The approval card on screen, if any. Only one is shown at a time.
     var activePermissionCard: PermissionRequestView?
@@ -1121,6 +1078,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
             return nil
         }
         super.init(nibName: nil, bundle: nil)
+        transcript.surface = self
         if let handoff = agentSession.handoff {
             let canOpenSource = handoff.source.flatMap {
                 currentSessionProjection.session(for: $0.sessionID)
@@ -1133,10 +1091,9 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                     self.delegate?.conversation(self, didRequestOpenSession: sessionID)
                 }
             )
-            presentationItems.append(PresentationItem(
-                id: .handoff,
-                content: .retained(handoffView),
-                opensTurn: false
+            transcript.append(PresentationItem(
+                id: .surface(.handoff),
+                content: .surface(.retained(handoffView))
             ))
         }
         appEvents.observe(ComponentCustomizationDidChange.self) { [weak self] event in
@@ -1162,6 +1119,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
     override func viewDidLoad() {
         super.viewDidLoad()
         setupViews()
+        transcript.activate()
         setupStream()
     }
 
@@ -1753,7 +1711,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        invalidateConversationHeightCacheIfNeeded()
+        transcript.layoutColumn()
         updateComposerColumnWidth()
         updateMinimapWidth()
         updateVisibleTurns()
@@ -1883,7 +1841,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         guard topRow != stickyStepTopRow else { return }
         stickyStepTopRow = topRow
 
-        guard case .timeline(let timelineIndex) = presentationItems[topRow].content else {
+        guard let timelineIndex = presentationItems[topRow].content.timelineIndex else {
             setStickyStep(nil)
             return
         }
@@ -1933,7 +1891,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
 
         for row in visibleRows.location..<(visibleRows.location + max(visibleRows.length, 1)) {
             guard presentationItems.indices.contains(row) else { break }
-            if case .timeline(let index) = presentationItems[row].content { return index }
+            if let index = presentationItems[row].content.timelineIndex { return index }
         }
         return nil
     }
@@ -1981,7 +1939,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
                 toolIndices = [index]
             case .toolFold(let indices):
                 toolIndices = forward ? indices : Array(indices.reversed())
-            case .timeline, .divider, .fold, .retained, .streaming:
+            case .markdown, .divider, .surface:
                 continue
             }
 
@@ -2011,7 +1969,7 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         _ index: Int,
         animated: Bool
     ) -> ExactNavigationMeasurements? {
-        revealToolGroup(containing: index)
+        transcript.revealToolGroup(containing: index)
         guard let tableRow = presentationRow(forTimelineIndex: index) else { return nil }
 
         // The user deliberately went somewhere; only their own gesture re-pins.
@@ -2969,6 +2927,13 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         // as a network fault and as the user's own Stop, and only the outcome tells them apart
         // — matching the words alone would stop a session for having written about limits.
         if case .turnFinished(let text, let outcome, _) = event {
+            if !isReplaying {
+                CompletedTurnSnapshotStore.shared.captureCompletedTurn(
+                    sessionID: sessionID,
+                    finalAssistantText: text,
+                    isReliable: outcome == .completed
+                )
+            }
             if outcome == .failed {
                 if !isReplaying {
                     SessionSnoozeCenter.shared.record(.failed, for: sessionID)

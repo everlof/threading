@@ -208,7 +208,8 @@ enum MobileKeyboardOverlap {
 /// stands in the middle of the ground as one sentence of two dropdowns under the role's glyph,
 /// with the branch beneath. *Who* — agent and account — is the disc at the navigation bar's
 /// trailing edge, the runtime's mark ringed by the account's usage, the way a profile control
-/// sits in a bar. *How* — model and effort as one line, speed as its own compact choice,
+/// sits in a bar; it opens the identity picker, both choices on one popover hanging from it.
+/// *How* — model and effort as one line, speed as its own compact choice,
 /// permissions and the interface as one glyph each — is the composer's action row under the
 /// prompt, and it fits every phone width without scrolling. None of them is a box on the ground. The
 /// composer is the screen's one surface: full-bleed,
@@ -274,6 +275,7 @@ private struct SessionDraftComposerScreen: View {
     /// screen in belongs to that transition, not to an interaction on a settled screen.
     @State private var appearedAt: Date?
     @State private var runPickerIsPresented = false
+    @State private var identityPickerIsPresented = false
     @State private var attachmentTray: ComposerAttachmentTray?
     @State private var attachmentItems: [ComposerAttachmentItem] = []
     @State private var attachmentNotice: String?
@@ -464,18 +466,19 @@ private struct SessionDraftComposerScreen: View {
         selectedAccount?.defaultModelID ?? selectedAgent?.defaultModelID
     }
 
+    /// The model the draft will start: the explicit choice, else the identity's default.
+    private var draftModelID: String? {
+        modelID.isEmpty ? defaultModelID : modelID
+    }
+
     private var selectedModel: RemoteModelChoiceDTO? {
-        let effectiveID = modelID.isEmpty ? defaultModelID : modelID
-        return models.first { $0.id == effectiveID }
+        models.first { $0.id == draftModelID }
     }
 
     /// The disc's rings follow the model the draft will start, so picking Fable rings its window
     /// before the chat exists.
     private var selectedUsageReading: MobileAccountUsageReading? {
-        MobileAccountUsageReading.resolve(
-            account: selectedAccount,
-            model: modelID.isEmpty ? defaultModelID : modelID
-        )
+        MobileAccountUsageReading.resolve(account: selectedAccount, model: draftModelID)
     }
 
     // MARK: - Body
@@ -542,6 +545,10 @@ private struct SessionDraftComposerScreen: View {
                     reasoningID = "ultra"
                 }
                 runPickerIsPresented = true
+            }
+            if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "new-session-identity-picker" {
+                identityPickerIsPresented = true
             }
             if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
                 == "new-session-structured-error" {
@@ -641,7 +648,7 @@ private struct SessionDraftComposerScreen: View {
         if showsNavigationChrome {
             content.toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    identityMenu
+                    identityControl
                 }
             }
         } else {
@@ -1118,45 +1125,61 @@ private struct SessionDraftComposerScreen: View {
         .accessibilityValue(role.title)
     }
 
-    private var identityMenu: some View {
-        Menu {
-            Section("Agent") {
-                ForEach(catalog?.agents ?? []) { agent in
-                    Button {
-                        agentID = agent.id
-                    } label: {
-                        Label(
-                            agent.name,
-                            systemImage: agent.id == agentID ? "checkmark" : "sparkles"
-                        )
-                    }
-                }
-            }
-            if !accounts.isEmpty {
-                Section("Account · Usage") {
-                    ForEach(accounts) { account in
-                        Button {
-                            accountID = account.id
-                        } label: {
-                            Label(
-                                accountMenuTitle(account),
-                                systemImage: account.id == accountID
-                                    ? "checkmark"
-                                    : "person.crop.circle"
-                            )
-                        }
-                    }
-                }
-            }
+    /// The bar's disc opens the identity picker: the runtime strip and the login rows on one
+    /// popover, hanging from the disc they change. A system menu here listed both decisions as
+    /// one scrolling column and closed on the first of them; see `MobileIdentityPicker`. Choosing
+    /// a runtime leaves the popover open — the rows beneath follow it — and choosing a login
+    /// closes it, so the common case is one opening.
+    private var identityControl: some View {
+        Button {
+            identityPickerIsPresented = true
         } label: {
             MobileAccountDisc(
                 identity: .resolve(agentID),
                 reading: selectedUsageReading
             )
         }
+        // Deliberately *not* `.plain`: a bar item's own plate is what the chat's disc wears,
+        // because that disc is a `Menu` there. The two bars show one control for one login, so
+        // the draft keeps the plate rather than becoming the one screen without it.
         .disabled(isSubmitting)
-        .accessibilityLabel(MobileL10n.string("Agent"))
+        // The control changes both halves of *who* now, so it is named for both.
+        .accessibilityLabel(MobileL10n.string("Agent and account"))
         .accessibilityValue(selectedIdentityAccessibilityValue)
+        .mobileThemedPopover(
+            isPresented: $identityPickerIsPresented,
+            theme: theme,
+            arrowEdge: .top,
+            // This panel hangs *down* from the bar, so the keyboard is the far edge of its room
+            // rather than the near one, and a phone with the height keeps it up — which the
+            // composer's own choosers cannot promise. A small phone is still a small phone: the
+            // login rows cap and scroll, and below that cap the presenter drops the keyboard
+            // rather than letting UIKit shrink the panel and clip the last login away.
+            makeRoom: makeRoomForChooser
+        ) {
+            MobileIdentityPicker(
+                agents: catalog?.agents ?? [],
+                selectedAgentID: agentID,
+                accounts: accounts,
+                selectedAccountID: accountID,
+                draftModelID: draftModelID,
+                onChooseAgent: { chosen in
+                    agentID = chosen
+                    // A runtime that routes no second login has nothing further to say, so it
+                    // closes the panel the way a login does. The catalogue is asked rather than
+                    // this screen's `accounts`, which still describes the runtime being left:
+                    // a state write is visible to the next update, not inside this closure.
+                    if catalog?.agents.first(where: { $0.id == chosen })?
+                        .accounts?.isEmpty != false {
+                        identityPickerIsPresented = false
+                    }
+                },
+                onChooseAccount: { chosen in
+                    accountID = chosen
+                    identityPickerIsPresented = false
+                }
+            )
+        }
     }
 
     private var surfaceMenu: some View {
@@ -1394,15 +1417,6 @@ private struct SessionDraftComposerScreen: View {
         guard selectedAccount != nil else { return selectedIdentityLabel }
         guard let usage = selectedUsageReading?.summary else { return selectedIdentityLabel }
         return "\(selectedIdentityLabel), \(usage)"
-    }
-
-    private func accountMenuTitle(_ account: RemoteAccountChoiceDTO) -> String {
-        let name = account.emoji.map { "\($0) \(account.name)" } ?? account.name
-        if let usage = account.usageSummary { return "\(name)   \(usage)" }
-        if account.usageError != nil {
-            return MobileL10n.string("%@   Usage unavailable", name)
-        }
-        return MobileL10n.string("%@   Loading usage…", name)
     }
 
     private func projectLabel(_ project: RemoteProjectChoiceDTO) -> String {

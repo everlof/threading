@@ -293,6 +293,32 @@ public enum RemoteNotificationDelivery: RemoteLosslessStringToken {
     }
 }
 
+/// Optional notification behavior a receiving device explicitly advertises.
+///
+/// Lossless decoding lets a newer phone register through an older-compatible Mac build without
+/// making an unrelated notification preference unreadable. A sender acts only on known cases.
+public enum RemoteNotificationCapability: RemoteLosslessStringToken {
+    case turnCompletionPreview
+    case notificationRetraction
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "turnCompletionPreview": self = .turnCompletionPreview
+        case "notificationRetraction": self = .notificationRetraction
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .turnCompletionPreview: return "turnCompletionPreview"
+        case .notificationRetraction: return "notificationRetraction"
+        case let .unknown(value): return value
+        }
+    }
+}
+
 // MARK: - Remote content
 
 public enum RemoteDiffLineKind: RemoteLosslessStringToken {

@@ -200,6 +200,10 @@ struct MobileSessionMark: View {
 /// drawing, so the same runtime looks the same in both places.
 struct MobileAgentMarkGlyph: View {
     let identity: MobileAgentIdentity
+    /// The ink for a mark that takes its slot's tint; nil is the secondary ink every slot draws
+    /// at rest. The identity picker lifts its chosen tile to `label` this way. A brand mark that
+    /// keeps its own colour ignores it, as it ignores every tint.
+    var tint: Color? = nil
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
@@ -215,11 +219,11 @@ struct MobileAgentMarkGlyph: View {
                     width: MobileDesign.Size.rowMarkGlyph,
                     height: MobileDesign.Size.rowMarkGlyph
                 )
-                .foregroundStyle(theme.secondaryLabel)
+                .foregroundStyle(tint ?? theme.secondaryLabel)
         case .symbol(let name):
             Image(systemName: name)
                 .font(.system(size: MobileDesign.Size.rowMarkGlyph, weight: .medium))
-                .foregroundStyle(theme.secondaryLabel)
+                .foregroundStyle(tint ?? theme.secondaryLabel)
         }
     }
 }

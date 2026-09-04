@@ -524,6 +524,41 @@ final class RemoteHostedServiceController {
         }
     }
 
+    func sendHostedRetraction(
+        retraction: RemoteNotificationRetractionDTO,
+        registrationID: String
+    ) async -> RemoteAPNSDeliveryResult {
+        guard let endpoint, !endpoint.isLoopback else {
+            return .init(
+                statusCode: nil,
+                reason: "Hosted push is unavailable for a loopback service.",
+                apnsID: nil
+            )
+        }
+        do {
+            let current = try await validRecord(client: PeerControlPlaneClient(endpoint: endpoint))
+            let result = try await PeerControlPlaneClient(endpoint: endpoint)
+                .sendHostedPushRetraction(
+                    hostCredential: current.hostCredential.credential,
+                    payload: RemoteHostedRetractionEnvelope(
+                        registrationID: registrationID,
+                        retraction: retraction
+                    )
+                )
+            return .init(
+                statusCode: result.statusCode,
+                reason: result.reason,
+                apnsID: result.apnsID
+            )
+        } catch {
+            return .init(
+                statusCode: nil,
+                reason: "Hosted retraction broker was unavailable.",
+                apnsID: nil
+            )
+        }
+    }
+
     func revokeDevice(deviceID: String) {
         Task { [weak self] in
             await self?.revokeDeviceNow(deviceID: deviceID)
@@ -989,4 +1024,9 @@ private struct RemoteHostedPushEnvelope: Encodable, Sendable {
     let registrationID: String
     let playsSound: Bool
     let event: RemoteNotificationEventDTO
+}
+
+private struct RemoteHostedRetractionEnvelope: Encodable, Sendable {
+    let registrationID: String
+    let retraction: RemoteNotificationRetractionDTO
 }

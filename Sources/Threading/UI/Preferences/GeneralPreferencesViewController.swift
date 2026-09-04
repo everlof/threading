@@ -67,6 +67,7 @@ final class GeneralPreferencesViewController: NSViewController {
     private let codexHookToggle = ThemedToggle()
     private let codexHookTrustToggle = ThemedToggle()
     private let remoteControlPopUp = ThemedPopUp()
+    private let terminalRendererPopUp = ThemedPopUp()
     private let permissionModePopUp = ThemedPopUp()
     private let shellField = ThemedTextField()
     /// The two halves of the opening message, either side of the task. One timer settles
@@ -255,6 +256,19 @@ final class GeneralPreferencesViewController: NSViewController {
         remoteControlPopUp.target = self
         remoteControlPopUp.action = #selector(remoteControlChanged)
         SettingsUI.preferControlWidth(remoteControlPopUp)
+
+        for value in ClaudeTerminalRenderer.allCases {
+            terminalRendererPopUp.addItem(
+                ThemedMenuItem(title: value.settingsTitle, representedValue: value)
+            )
+        }
+        terminalRendererPopUp.selectItem(
+            at: ClaudeTerminalRenderer.allCases
+                .firstIndex(of: AppSettings.shared.claudeTerminalRenderer) ?? 0
+        )
+        terminalRendererPopUp.target = self
+        terminalRendererPopUp.action = #selector(terminalRendererChanged)
+        SettingsUI.preferControlWidth(terminalRendererPopUp)
 
         shellField.applyFont(.body)
         shellField.placeholderString = TerminalDefaults.defaultShell
@@ -525,6 +539,7 @@ final class GeneralPreferencesViewController: NSViewController {
             SettingsUI.section("Permission Mode", permissionModeCard()),
             SettingsUI.section("Claude Remote Control", claudeRemoteControlCard()),
             SettingsUI.section("Claude Hooks", claudeHooksCard()),
+            SettingsUI.section("Claude Terminal", claudeTerminalCard()),
             SettingsUI.section("Codex Hooks", codexHooksCard()),
             SettingsUI.section("Software Updates", updatesCard()),
             SettingsUI.section("Power", SettingsCard(rows: [
@@ -670,6 +685,28 @@ final class GeneralPreferencesViewController: NSViewController {
     /// Two switches rather than one, because they are separate decisions and only the second
     /// has a security cost: installing writes entries to a file the user owns, while skipping
     /// review un-gates every hook in that folder rather than only ours.
+    /// Which screen Claude's terminal UI draws on.
+    ///
+    /// Named after the scroller rather than after Claude's word for the renderer, because that
+    /// is the difference a user is choosing: on the main screen the transcript lands in this
+    /// app's terminal, where its scrollbar, its find bar and a paired iPhone can all reach it;
+    /// on the alternate screen Claude keeps and scrolls its own, and the terminal has nothing
+    /// above the current page.
+    private func claudeTerminalCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Scrolling in new Claude terminals",
+                subtitle: "Claude can draw its interface on the terminal's alternate screen "
+                    + "and scroll its own transcript, or on the main screen so the transcript "
+                    + "lands in Threading's scrollback — where this app's scrolling, find bar "
+                    + "and a paired iPhone can reach it. Following leaves the choice to Claude, "
+                    + "which defaults to its own. A single chat can still be set from its ⋯ "
+                    + "menu, and the choice applies from that chat's next launch.",
+                control: terminalRendererPopUp
+            )
+        ])
+    }
+
     private func codexHooksCard() -> SettingsCard {
         SettingsCard(rows: [
             SettingsUI.row(
@@ -1480,6 +1517,14 @@ final class GeneralPreferencesViewController: NSViewController {
         guard let value = remoteControlPopUp.selectedItem?.representedValue
             as? ClaudeRemoteControl else { return }
         AppSettings.shared.claudeRemoteControl = value
+    }
+
+    /// Applies from each session's next launch, and to existing sessions only where they have
+    /// made no choice of their own. The CLI reads the answer once, while it starts.
+    @objc private func terminalRendererChanged() {
+        guard let value = terminalRendererPopUp.selectedItem?.representedValue
+            as? ClaudeTerminalRenderer else { return }
+        AppSettings.shared.claudeTerminalRenderer = value
     }
 
     /// Applies to sessions started from here on, and to existing ones only where they have made

@@ -9,7 +9,7 @@ export type DiagnosticFieldValidation =
   | "unsignedInteger"
 
 export const diagnosticContractSchemaVersion = 1 as const;
-export const diagnosticContractFingerprint = "9ffae11e3c5442caca28e713df815fc1c1ecab8195524d62c98ed68727e75cb0";
+export const diagnosticContractFingerprint = "d9d6bc3483e1f1515a1d78bfe4f012412e39033bc5e4eddf8accc28bf459278a";
 
 export const diagnosticEvents = new Set<string>([
   "appLaunched",
@@ -63,6 +63,9 @@ export const diagnosticEvents = new Set<string>([
   "notificationSuppressed",
   "notificationPresented",
   "notificationOpened",
+  "notificationDeliveryTransition",
+  "notificationRetractionReceived",
+  "notificationLocallyCleared",
   "pushProviderAccepted",
   "pushProviderRefused",
   "issueReportOpened",
@@ -117,6 +120,8 @@ const iOSClientDiagnosticEvents = new Set<string>([
   "notificationSuppressed",
   "notificationPresented",
   "notificationOpened",
+  "notificationRetractionReceived",
+  "notificationLocallyCleared",
   "issueReportOpened",
   "issueReportExported",
   "issueReportSubmissionStarted",
@@ -157,7 +162,9 @@ export const diagnosticEventsByRecordSource = new Map<string, ReadonlySet<string
 export const diagnosticFieldValidation = new Map<string, DiagnosticFieldValidation>([
   ["trace", "token"],
   ["providerTrace", "token"],
+  ["host", "peerPseudonym"],
   ["peer", "peerPseudonym"],
+  ["participant", "peerPseudonym"],
   ["session", "sessionPseudonym"],
   ["kind", "token"],
   ["transport", "token"],
@@ -175,6 +182,11 @@ export const diagnosticFieldValidation = new Map<string, DiagnosticFieldValidati
   ["durationMS", "unsignedInteger"],
   ["timeoutMS", "unsignedInteger"],
   ["delayMS", "unsignedInteger"],
+  ["generation", "unsignedInteger"],
+  ["queueSize", "unsignedInteger"],
+  ["previewPresent", "token"],
+  ["previewBytes", "unsignedInteger"],
+  ["activitySource", "token"],
   ["networkStage", "token"],
   ["dnsMS", "unsignedInteger"],
   ["tcpMS", "unsignedInteger"],

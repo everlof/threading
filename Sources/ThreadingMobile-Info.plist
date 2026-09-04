@@ -28,6 +28,10 @@
 	<array>
 		<string>_threading._tcp</string>
 	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<!--
 		The scheme an invitation is addressed to.
 

@@ -55,7 +55,8 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
             ("checkoutScopedConversationStorage", .checkoutScopedConversationStorage),
             ("lifecycleReportedTranscriptPath", .lifecycleReportedTranscriptPath),
             ("lifecycleReportedWorkingDirectory", .lifecycleReportedWorkingDirectory),
-            ("detectableExternalResume", .detectableExternalResume)
+            ("detectableExternalResume", .detectableExternalResume),
+            ("selectableTerminalRenderer", .selectableTerminalRenderer)
         ]
 
         var seen: [Int: String] = [:]
@@ -112,14 +113,37 @@ final class AgentCapabilitiesTests: HostedStoreTestCase {
     @MainActor
     func testAgentTerminalAppliesTheDeclaredScrollbackEnd() {
         for kind in AgentKind.allCases {
-            let controller = AgentSessionViewController(
-                agentSession: AgentSession(kind: kind, title: "scroll end")
-            )
+            let session = AgentSession(kind: kind, title: "scroll end")
+            let controller = AgentSessionViewController(agentSession: session)
+            let inline = kind.supports(.inlineTerminalViewport)
+                || AgentLauncher.terminalRendererAtStartup(for: session) == false
             XCTAssertEqual(
                 controller.session.terminalView.scrollbackEnd,
-                kind.supports(.inlineTerminalViewport) ? .lastPopulatedRow : .screen
+                inline ? .lastPopulatedRow : .screen
             )
         }
+    }
+
+    /// The chosen half of the rule above, stated on its own so a default that stopped reaching
+    /// the terminal cannot hide behind Codex's fixed one. A Claude session on the main screen
+    /// hands the transcript to this app's scrollback, which is exactly when the live viewport
+    /// should stop claiming the empty rows below it.
+    @MainActor
+    func testAClaudeTerminalOnTheMainScreenTrimsItsLiveViewport() {
+        var session = AgentSession(kind: .claude, title: "scroll end")
+        XCTAssertFalse(session.kind.supports(.inlineTerminalViewport))
+
+        session.setClaudeFullscreenRenderer(false)
+        XCTAssertEqual(
+            AgentSessionViewController(agentSession: session).session.terminalView.scrollbackEnd,
+            .lastPopulatedRow
+        )
+
+        session.setClaudeFullscreenRenderer(true)
+        XCTAssertEqual(
+            AgentSessionViewController(agentSession: session).session.terminalView.scrollbackEnd,
+            .screen
+        )
     }
 
     /// Only Codex exposes both halves of a reversible archive. Delete is not treated as archive

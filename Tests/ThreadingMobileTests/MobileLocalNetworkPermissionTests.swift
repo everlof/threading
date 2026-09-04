@@ -44,6 +44,11 @@ final class MobileLocalNetworkPermissionTests: XCTestCase {
             info["NSLocalNetworkUsageDescription"],
             "the file that carries NSBonjourServices must not have replaced the generated keys"
         )
+        XCTAssertEqual(
+            info["UIBackgroundModes"] as? [String],
+            ["remote-notification"],
+            "silent notification retractions need the remote-notification background mode"
+        )
     }
 
     /// A denial is a named state rather than a spinner, and it is reached from the address the

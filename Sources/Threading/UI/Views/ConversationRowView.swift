@@ -87,6 +87,25 @@ enum ConversationRowView {
         }
     }
 
+    /// A row's vertical rhythm, declared beside its view so the two cannot drift. The table
+    /// composes neighbouring rhythms with `Design.Chat.Rhythm.gap(between:and:)`.
+    static func rhythm(for row: ConversationTimeline.Row) -> Design.Chat.Rhythm {
+        switch row {
+        case .userMessage:
+            return .exchange
+        case .assistant:
+            return .answer
+        case .thinking:
+            return .work
+        case .toolCall(let call):
+            // A chart is part of the answer, and is drawn as one — see `make(for:)`.
+            if call.chart != nil, call.result?.outcome != .failed { return .answer }
+            return .work
+        case .turnOutcome, .notice:
+            return .chrome
+        }
+    }
+
     // MARK: - Rows
 
     /// The user's turn: a right-aligned bubble, capped so a short instruction is not a

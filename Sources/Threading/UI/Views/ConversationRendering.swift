@@ -6,9 +6,11 @@ import ThreadingExtensionKit
 /// Applying timeline changes to the view tree, split from the controller that drives it. Same
 /// type, separate file for length, so the private state these read stays private.
 ///
-/// What a row *is* now lives in `ConversationTimeline`, and what one *looks like* in
-/// `ConversationRowView`. What is left here is placement: which view goes where, what gets
-/// space above it, and which existing view a late-arriving tool result belongs to.
+/// What a row *is* lives in `ConversationTimeline`, what one *looks like* in
+/// `ConversationRowView`, and the placement every transcript shares — the cheap ordering, the
+/// tool-run disclosures, the recycled row hosts — in `ConversationTranscriptTable`. What is left
+/// here is the main conversation's own: turn folds, the changed-files and permission cards, the
+/// streaming placeholder, and the wrappers a row wears in this pane.
 extension ConversationViewController {
 
     // MARK: - Changes
@@ -29,26 +31,7 @@ extension ConversationViewController {
                 foldTurn(startingAt: pending.startIndex, outcome: pending.outcome)
             }
 
-            // Not before the first turn: a rule at the very top of the pane separates the
-            // conversation from nothing.
-            if startsTurn, timeline.rows.count > 1 {
-                appendPresentationItem(PresentationItem(
-                    id: .divider(turnStart: index),
-                    content: .divider,
-                    opensTurn: true
-                ))
-            }
-
-            if case .toolCall(let call) = row, call.chart == nil {
-                appendToolPresentation(index)
-            } else {
-                activeToolGroupIndices.removeAll(keepingCapacity: true)
-                appendPresentationItem(PresentationItem(
-                    id: .timeline(index),
-                    content: .timeline(index),
-                    opensTurn: startsTurn && timeline.rows.count == 1
-                ))
-            }
+            transcript.appendTimelineRow(at: index)
 
             // A live user row advances the rail by one; settlement later fills that mark's
             // answer and duration without rebuilding its historical prefix.
@@ -60,19 +43,13 @@ extension ConversationViewController {
             guard case .toolCall(let call) = timeline.rows[index],
                   let result = call.result else { return }
 
-            pendingToolViews[index]?.setResult(result.text, outcome: result.outcome)
-            // An interrupted row keeps its view reference: the real result can still arrive
-            // after the turn ends, and it should land on the row rather than be lost.
-            if result.outcome != .interrupted { pendingToolViews[index] = nil }
-            noteTimelineRowHeightChanged(index)
+            transcript.applyToolResult(at: index)
             // A chart row draws the chart, not a `ToolCallView`, so there is no pending view to
             // hand the result to. It only matters when the call failed: the row has to stop
             // showing a picture the panel refused and say what happened instead, which means
             // rebuilding it rather than updating it in place.
-            if case .toolCall(let failed) = timeline.rows[index],
-               failed.chart != nil,
-               result.outcome == .failed {
-                reloadConversationRows()
+            if call.chart != nil, result.outcome == .failed {
+                transcript.reload()
             }
             scrollToBottom()
 
@@ -159,9 +136,7 @@ extension ConversationViewController {
         guard !foldedTurnStarts.contains(startIndex),
               let turn = timeline.turn(startingAt: startIndex),
               turn.endIndex > turn.rowIndex,
-              let userPosition = presentationItems.lastIndex(where: {
-                  $0.id == .timeline(turn.rowIndex)
-              }) else { return }
+              let userPosition = transcript.index(of: .timeline(turn.rowIndex)) else { return }
 
         let turnIndices = turn.rowIndex + 1 ... turn.endIndex
         // A chart is not merely the record of work done on the way to the answer; it is part of
@@ -176,86 +151,49 @@ extension ConversationViewController {
 
         foldedTurnStarts.insert(startIndex)
 
+        // Only the entries after the turn's opening row are candidates, and a settling turn
+        // sits at the tail, so this walks the turn rather than the transcript. Rebuilding the
+        // whole ordering here made a 1,000-turn replay quadratic.
         let hiddenSet = Set(hiddenIndices)
-        let removalPositions = presentationItems.indices
-            .dropFirst(userPosition + 1)
-            .filter { position in
-                switch presentationItems[position].content {
-                case .timeline(let index):
-                    return hiddenSet.contains(index)
-                case .toolFold(let indices):
-                    return !hiddenSet.isDisjoint(with: indices)
-                case .divider, .fold, .retained, .streaming:
-                    return false
+        let items = transcript.items
+        var removed = IndexSet()
+        for position in (userPosition + 1)..<items.count {
+            switch items[position].content {
+            case .timeline, .markdown:
+                if let index = items[position].content.timelineIndex,
+                   hiddenSet.contains(index) {
+                    removed.insert(position)
                 }
+            case .toolFold(let indices):
+                if !hiddenSet.isDisjoint(with: indices) {
+                    if let first = indices.first { transcript.expandedToolGroups.remove(first) }
+                    removed.insert(position)
+                }
+            case .divider, .surface:
+                break
             }
-        for position in removalPositions.reversed() {
-            if case .toolFold(let indices) = presentationItems[position].content,
-               let first = indices.first {
-                expandedToolGroups.remove(first)
-            }
-            presentationItems.remove(at: position)
         }
-        activeToolGroupIndices.removeAll(keepingCapacity: true)
-        let insertion = min(userPosition + 1, presentationItems.count)
-        presentationItems.insert(PresentationItem(
-            id: .fold(turnStart: startIndex),
-            content: .fold(
-                turnStart: startIndex,
-                hiddenIndices: hiddenIndices,
-                duration: turn.duration,
-                outcome: outcome
-            ),
-            opensTurn: false
-        ), at: insertion)
-        reloadConversationRows()
+        transcript.remove(at: removed)
+        transcript.endToolRun()
+        transcript.insert(
+            [PresentationItem(
+                id: .surface(.fold(turnStart: startIndex)),
+                content: .surface(.fold(
+                    turnStart: startIndex,
+                    hiddenIndices: hiddenIndices,
+                    duration: turn.duration,
+                    outcome: outcome
+                ))
+            )],
+            at: userPosition + 1
+        )
     }
 
     /// Replay mutates only the presentation model. One reload at the end lets AppKit request the
     /// handful of rows that are actually visible instead of constructing every intermediate
     /// prefix while the transcript is being reduced.
     func finishReplayRendering() {
-        reloadConversationRows(force: true)
-    }
-
-    /// Creates one viewport instance. The timeline owns result data and the controller owns
-    /// disclosure state, so recycling and later reconstruction produce the same row without
-    /// retaining its constraint tree.
-    private func materializeRow(at index: Int) -> NSView {
-        let row = timeline.rows[index]
-        let (nativeView, _) = ConversationRowView.make(for: row)
-        configureDisclosureState(in: nativeView, rowIndex: index)
-        let customizedView: NSView
-        if let target = componentTarget(for: row) {
-            customizedView = customizeConversationRow(nativeView, target: target)
-        } else {
-            customizedView = nativeView
-        }
-        let view: NSView
-        switch row {
-        case .userMessage(let message):
-            view = ConversationMessageContextView(
-                content: customizedView,
-                speaker: .user,
-                context: message.context
-            )
-        case .assistant:
-            view = ConversationMessageContextView(
-                content: customizedView,
-                speaker: .agent
-            )
-        case .thinking, .turnOutcome, .notice, .toolCall:
-            view = customizedView
-        }
-        configureContextActions(in: view, row: row, rowIndex: index)
-        rowViews[index] = view
-
-        // A missing or interrupted result may still arrive while this instance is visible.
-        if case .toolCall(let call) = row,
-           call.result == nil || call.result?.outcome == .interrupted {
-            pendingToolViews[index] = nativeView as? ToolCallView
-        }
-        return view
+        transcript.reload(force: true)
     }
 
     private func setTurnWork(
@@ -263,137 +201,15 @@ extension ConversationViewController {
         expanded: Bool,
         turnStart: Int
     ) {
-        guard let foldPosition = presentationItems.firstIndex(where: {
-            $0.id == .fold(turnStart: turnStart)
-        }) else { return }
+        let foldID = PresentationID.surface(.fold(turnStart: turnStart))
+        guard transcript.index(of: foldID) != nil else { return }
 
         if expanded {
             expandedTurnStarts.insert(turnStart)
-            let rows = indices.map {
-                PresentationItem(
-                    id: .timeline($0),
-                    content: .timeline($0),
-                    opensTurn: false
-                )
-            }
-            presentationItems.insert(contentsOf: rows, at: foldPosition + 1)
         } else {
             expandedTurnStarts.remove(turnStart)
-            let hiddenSet = Set(indices)
-            presentationItems.removeAll { item in
-                guard case .timeline(let index) = item.content else { return false }
-                return hiddenSet.contains(index)
-            }
         }
-        reloadConversationRows()
-    }
-
-    /// Reduces a consecutive live tool run to one disclosure as it arrives. The canonical rows
-    /// remain in `timeline`; only the viewport-sized presentation changes. A lone call stays
-    /// visible, while the second turns the pair into a group and later calls extend it in O(1).
-    private func appendToolPresentation(_ index: Int) {
-        if activeToolGroupIndices.isEmpty {
-            guard index > 0,
-                  case .toolCall(let previousCall) = timeline.rows[index - 1],
-                  previousCall.chart == nil,
-                  presentationItems.last?.id == .timeline(index - 1)
-            else {
-                appendPresentationItem(PresentationItem(
-                    id: .timeline(index),
-                    content: .timeline(index),
-                    opensTurn: false
-                ))
-                return
-            }
-
-            let indices = [index - 1, index]
-            activeToolGroupIndices = indices
-            let position = presentationItems.count - 1
-            presentationItems[position] = PresentationItem(
-                id: .toolFold(firstIndex: index - 1),
-                content: .toolFold(indices: indices),
-                opensTurn: false
-            )
-            presentationRowsByTimelineIndex[index - 1] = nil
-            pendingToolViews[index - 1] = nil
-            reloadPresentationRow(at: position)
-            return
-        }
-
-        let previousCount = activeToolGroupIndices.count
-        guard activeToolGroupIndices.last == index - 1,
-              let first = activeToolGroupIndices.first else {
-            activeToolGroupIndices.removeAll(keepingCapacity: true)
-            appendPresentationItem(PresentationItem(
-                id: .timeline(index),
-                content: .timeline(index),
-                opensTurn: false
-            ))
-            return
-        }
-
-        let foldPosition = expandedToolGroups.contains(first)
-            ? presentationItems.count - previousCount - 1
-            : presentationItems.count - 1
-        guard presentationItems.indices.contains(foldPosition),
-              presentationItems[foldPosition].id == .toolFold(firstIndex: first) else {
-            activeToolGroupIndices.removeAll(keepingCapacity: true)
-            appendPresentationItem(PresentationItem(
-                id: .timeline(index),
-                content: .timeline(index),
-                opensTurn: false
-            ))
-            return
-        }
-
-        activeToolGroupIndices.append(index)
-        presentationItems[foldPosition] = PresentationItem(
-            id: .toolFold(firstIndex: first),
-            content: .toolFold(indices: activeToolGroupIndices),
-            opensTurn: false
-        )
-        reloadPresentationRow(at: foldPosition)
-
-        if expandedToolGroups.contains(first) {
-            appendPresentationItem(PresentationItem(
-                id: .timeline(index),
-                content: .timeline(index),
-                opensTurn: false
-            ))
-        }
-    }
-
-    private func setToolGroup(_ indices: [Int], expanded: Bool) {
-        guard let first = indices.first,
-              let foldPosition = presentationItems.firstIndex(where: {
-                  $0.id == .toolFold(firstIndex: first)
-              }) else { return }
-
-        if expanded {
-            guard expandedToolGroups.insert(first).inserted else { return }
-            presentationItems.insert(contentsOf: indices.map {
-                PresentationItem(id: .timeline($0), content: .timeline($0), opensTurn: false)
-            }, at: foldPosition + 1)
-        } else {
-            guard expandedToolGroups.remove(first) != nil else { return }
-            let hidden = Set(indices)
-            presentationItems.removeAll { item in
-                guard case .timeline(let index) = item.content else { return false }
-                return hidden.contains(index)
-            }
-        }
-        reloadConversationRows()
-    }
-
-    /// Makes an exact tool target addressable without giving up compact groups by default.
-    /// Keyboard navigation, minimap jumps and deep links all pass through the same reveal path.
-    func revealToolGroup(containing timelineIndex: Int) {
-        guard let item = presentationItems.first(where: {
-                  guard case .toolFold(let indices) = $0.content else { return false }
-                  return indices.contains(timelineIndex)
-              }),
-              case .toolFold(let indices) = item.content else { return }
-        setToolGroup(indices, expanded: true)
+        transcript.setRows(indices, expanded: expanded, after: foldID)
     }
 
     // MARK: - Changed Files Card
@@ -426,7 +242,7 @@ extension ConversationViewController {
                 tree,
                 previews: ChangedFileDiffPreview.previews(from: files),
                 checkpointID: nil,
-                after: presentationItems.last?.id,
+                after: transcript.items.last?.id,
                 offersViewDiff: false
             )
             return
@@ -443,7 +259,7 @@ extension ConversationViewController {
         // The insert position is remembered as a stable presentation id, not an index: by the
         // time the diff returns, the user may already have sent the next message, and the card
         // belongs to the turn that earned it, not to the bottom of the conversation.
-        let anchor = presentationItems.last?.id
+        let anchor = transcript.items.last?.id
 
         GitReviewReader.diff(.turnCheckpoint(checkpoint), in: root) { [weak self] result in
             guard let self, case .success(let files) = result, !files.isEmpty else { return }
@@ -470,7 +286,7 @@ extension ConversationViewController {
         after anchor: PresentationID?,
         offersViewDiff: Bool = true
     ) {
-        let cardID = PresentationID.retained(UUID())
+        let cardID = PresentationID.surface(.retained(UUID()))
         let card = ChangedFilesCardView(
             tree: tree,
             previews: previews,
@@ -484,7 +300,7 @@ extension ConversationViewController {
                 )
             },
             onHeightChange: { [weak self] in
-                self?.notePresentationHeightChanged(cardID)
+                self?.transcript.noteHeightChanged(of: cardID)
             }
         )
 
@@ -494,16 +310,10 @@ extension ConversationViewController {
         if !offersViewDiff || checkpointID == nil { card.hideViewDiff() }
         latestChangedFilesCard = card
 
-        let position = anchor
-            .flatMap { anchor in presentationItems.firstIndex { $0.id == anchor } }
-            .map { $0 + 1 }
-            ?? presentationItems.count
-        presentationItems.insert(PresentationItem(
-            id: cardID,
-            content: .retained(card),
-            opensTurn: false
-        ), at: position)
-        reloadConversationRows()
+        transcript.insert(
+            [PresentationItem(id: cardID, content: .surface(.retained(card)))],
+            after: anchor
+        )
         scrollToBottom()
     }
 
@@ -610,30 +420,24 @@ extension ConversationViewController {
     // MARK: - Streaming
 
     private func showStreaming(_ text: String) {
-        activeToolGroupIndices.removeAll(keepingCapacity: true)
         guard let streamingLabel else {
             let label = ConversationRowView.streaming(text)
-            presentationItems.append(PresentationItem(
-                id: .streaming,
-                content: .streaming(label),
-                opensTurn: false
+            transcript.append(PresentationItem(
+                id: .surface(.streaming),
+                content: .surface(.streaming(label))
             ))
-            notifyPresentationRowsInserted(at: IndexSet(integer: presentationItems.count - 1))
             self.streamingLabel = label
             return
         }
 
         streamingLabel.stringValue = text
-        notePresentationHeightChanged(.streaming)
+        transcript.noteHeightChanged(of: .surface(.streaming))
         scrollToBottom()
     }
 
     /// Drops the streaming placeholder, whose content the finished message repeats.
     func clearStreaming() {
-        if let position = presentationItems.firstIndex(where: { $0.id == .streaming }) {
-            presentationItems.remove(at: position)
-            notifyPresentationRowsRemoved(at: IndexSet(integer: position))
-        }
+        transcript.remove(.surface(.streaming))
         streamingLabel = nil
     }
 
@@ -699,165 +503,17 @@ extension ConversationViewController {
     }
 }
 
-// MARK: - Virtualized Transcript
+// MARK: - Transcript Surface
 
-extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate {
+/// What the main conversation adds to the shared transcript: its own folds, cards and streaming
+/// placeholder, and the wrappers — extension host, speaker context, contextual actions — a row
+/// wears only in this pane.
+extension ConversationViewController: ConversationTranscriptSurface {
 
-    func numberOfRows(in tableView: NSTableView) -> Int {
-        presentationItems.count
-    }
+    var transcriptRows: [ConversationTimeline.Row] { timeline.rows }
 
-    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        false
-    }
-
-    func tableView(
-        _ tableView: NSTableView,
-        viewFor tableColumn: NSTableColumn?,
-        row tableRow: Int
-    ) -> NSView? {
-        guard presentationItems.indices.contains(tableRow) else { return nil }
-        let item = presentationItems[tableRow]
-        let identifier = NSUserInterfaceItemIdentifier("ConversationVirtualRow")
-        let host = tableView.makeView(
-            withIdentifier: identifier,
-            owner: self
-        ) as? ConversationVirtualRowHost ?? ConversationVirtualRowHost()
-        host.identifier = identifier
-        host.setColumnWidth(conversationColumnWidth)
-
-        let content = makePresentationView(for: item)
-        let topInset = presentationTopInset(at: tableRow)
-        let bottomInset = tableRow == presentationItems.count - 1
-            ? Design.Spacing.inset
-            : 0
-
-        host.install(
-            content,
-            topInset: topInset,
-            bottomInset: bottomInset,
-            onRelease: releaseHandler(for: item, content: content)
-        )
-        return host
-    }
-
-    func presentationRow(forTimelineIndex index: Int) -> Int? {
-        if let row = presentationRowsByTimelineIndex[index],
-           presentationItems.indices.contains(row),
-           presentationItems[row].id == .timeline(index) {
-            return row
-        }
-        return presentationItems.firstIndex { $0.id == .timeline(index) }
-    }
-
-    var conversationColumnWidth: CGFloat {
-        ConversationVirtualRowHost.columnWidth(of: tableView)
-    }
-
-    func invalidateConversationHeightCacheIfNeeded() {
-        let column = ConversationVirtualRowHost.stateColumnWidth(in: tableView)
-
-        let width = min(
-            Design.Size.readableWidth,
-            max(0, column - Design.Spacing.inset * 2)
-        )
-        guard width > 0 else { return }
-        if automaticHeightWidth == 0 {
-            automaticHeightWidth = width
-            return
-        }
-        guard abs(width - automaticHeightWidth) > 0.5 else { return }
-        automaticHeightWidth = width
-        if tableView.numberOfRows > 0 {
-            tableView.noteHeightOfRows(
-                withIndexesChanged: IndexSet(integersIn: 0..<tableView.numberOfRows)
-            )
-        }
-    }
-
-    func appendPresentationItem(_ item: PresentationItem) {
-        let index = presentationItems.count
-        presentationItems.append(item)
-        if !isReplaying, case .timeline(let timelineIndex) = item.content {
-            presentationRowsByTimelineIndex[timelineIndex] = index
-        }
-        notifyPresentationRowsInserted(at: IndexSet(integer: index))
-    }
-
-    private func reloadPresentationRow(at row: Int) {
-        guard presentationItems.indices.contains(row) else { return }
-        guard isViewLoaded, !isReplaying, row < tableView.numberOfRows else { return }
-        tableView.reloadData(
-            forRowIndexes: IndexSet(integer: row),
-            columnIndexes: IndexSet(integer: 0)
-        )
-        tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
-    }
-
-    func notifyPresentationRowsInserted(at indexes: IndexSet) {
-        guard isViewLoaded, !isReplaying, !indexes.isEmpty else { return }
-        tableView.insertRows(at: indexes, withAnimation: [])
-    }
-
-    func notifyPresentationRowsRemoved(at indexes: IndexSet) {
-        guard isViewLoaded, !isReplaying, !indexes.isEmpty else { return }
-        tableView.removeRows(at: indexes, withAnimation: [])
-    }
-
-    func reloadConversationRows(force: Bool = false) {
-        guard isViewLoaded, force || !isReplaying else { return }
-        rebuildPresentationRowIndex()
-        rowViews.removeAll(keepingCapacity: true)
-        pendingToolViews.removeAll(keepingCapacity: true)
-        tableView.reloadData()
-    }
-
-    private func rebuildPresentationRowIndex() {
-        presentationRowsByTimelineIndex.removeAll(keepingCapacity: true)
-        presentationRowsByTimelineIndex.reserveCapacity(presentationItems.count)
-        for (row, item) in presentationItems.enumerated() {
-            if case .timeline(let timelineIndex) = item.content {
-                presentationRowsByTimelineIndex[timelineIndex] = row
-            }
-        }
-    }
-
-    func noteTimelineRowHeightChanged(_ index: Int) {
-        notePresentationHeightChanged(.timeline(index))
-    }
-
-    func notePresentationHeightChanged(_ id: PresentationID) {
-        // Replay has no materialized table row to invalidate and finishes with one full reload.
-        // Searching the growing presentation for every replayed tool result made transcript
-        // construction quadratic even though the virtualized AppKit working set stayed bounded.
-        guard !isReplaying else { return }
-
-        let row: Int?
-        switch id {
-        case .timeline(let index):
-            row = presentationRow(forTimelineIndex: index)
-        case .streaming where presentationItems.last?.id == .streaming:
-            // The streaming placeholder is appended at the tail and remains there until the
-            // authoritative completed message replaces it. Avoid walking the whole transcript
-            // for every token-sized update in a long conversation.
-            row = presentationItems.indices.last
-        default:
-            row = presentationItems.firstIndex(where: { $0.id == id })
-        }
-
-        guard let row,
-              row < tableView.numberOfRows else { return }
-        tableView.noteHeightOfRows(withIndexesChanged: IndexSet(integer: row))
-    }
-
-    private func makePresentationView(for item: PresentationItem) -> NSView {
-        switch item.content {
-        case .timeline(let index):
-            return materializeRow(at: index)
-
-        case .divider:
-            return ConversationRowView.turnDivider()
-
+    func transcriptView(for content: SurfaceItemContent, id: SurfaceItemID) -> NSView {
+        switch content {
         case .fold(let turnStart, let hiddenIndices, let duration, let outcome):
             return TurnFoldView(
                 duration: duration,
@@ -872,20 +528,6 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
                 )
             }
 
-        case .toolFold(let indices):
-            let count = indices.count
-            let label = count == 1
-                ? L10n.string("1 tool call")
-                : L10n.format("%lld tool calls", Int64(count))
-            let first = indices[0]
-            return TurnFoldView(
-                label: label,
-                folding: [],
-                expanded: expandedToolGroups.contains(first)
-            ) { [weak self] _, expanded in
-                self?.setToolGroup(indices, expanded: expanded)
-            }
-
         case .retained(let view):
             AppThemeRefresh.repaintIfNeeded(view)
             return view
@@ -895,208 +537,48 @@ extension ConversationViewController: NSTableViewDataSource, NSTableViewDelegate
         }
     }
 
-    private func presentationTopInset(at row: Int) -> CGFloat {
-        guard row > 0 else { return Design.Spacing.inset }
-        let item = presentationItems[row]
-        if item.opensTurn { return Design.Chat.turnSpacing }
-
-        let previous = presentationItems[row - 1]
-        if isWorkPresentation(item) || isWorkPresentation(previous) {
-            return Design.Spacing.tight
-        }
-        return Design.Spacing.small
-    }
-
-    private func isWorkPresentation(_ item: PresentationItem) -> Bool {
-        switch item.content {
-        case .toolFold:
-            return true
-        case .timeline(let index):
-            switch timeline.rows[index] {
-            case .toolCall, .thinking:
-                return true
-            case .userMessage, .assistant, .turnOutcome, .notice:
-                return false
-            }
-        case .divider, .fold, .retained, .streaming:
-            return false
+    func transcriptRhythm(for content: SurfaceItemContent, id: SurfaceItemID) -> Design.Chat.Rhythm {
+        switch content {
+        case .fold:
+            return .work
+        case .retained:
+            // The handoff banner is the seam the conversation starts under; a card is chrome.
+            if case .handoff = id { return .seam }
+            return .chrome
+        case .streaming:
+            return .answer
         }
     }
 
-    private func releaseHandler(
-        for item: PresentationItem,
-        content: NSView
-    ) -> (() -> Void)? {
-        guard case .timeline(let index) = item.content else { return nil }
-        return { [weak self, weak content] in
-            guard let self, let content else { return }
-            if self.rowViews[index] === content {
-                self.rowViews[index] = nil
-            }
-            if let tool = Self.firstDescendant(ToolCallView.self, in: content),
-               self.pendingToolViews[index] === tool {
-                self.pendingToolViews[index] = nil
-            }
+    func transcriptRowView(
+        _ view: NSView,
+        decorating row: ConversationTimeline.Row,
+        at index: Int
+    ) -> NSView {
+        let customizedView: NSView
+        if let target = componentTarget(for: row) {
+            customizedView = customizeConversationRow(view, target: target)
+        } else {
+            customizedView = view
         }
-    }
-
-    private func configureDisclosureState(in view: NSView, rowIndex: Int) {
-        if let tool = Self.firstDescendant(ToolCallView.self, in: view) {
-            tool.onExpansionChanged = { [weak self] expanded in
-                guard let self else { return }
-                if expanded {
-                    self.expandedToolRows.insert(rowIndex)
-                } else {
-                    self.expandedToolRows.remove(rowIndex)
-                }
-                self.noteTimelineRowHeightChanged(rowIndex)
-            }
-            tool.setExpanded(expandedToolRows.contains(rowIndex), notifying: false)
+        let wrapped: NSView
+        switch row {
+        case .userMessage(let message):
+            wrapped = ConversationMessageContextView(
+                content: customizedView,
+                speaker: .user,
+                context: message.context
+            )
+        case .assistant:
+            wrapped = ConversationMessageContextView(
+                content: customizedView,
+                speaker: .agent
+            )
+        case .thinking, .turnOutcome, .notice, .toolCall:
+            wrapped = customizedView
         }
-
-        if let bubble = Self.firstDescendant(UserMessageBubbleView.self, in: view) {
-            bubble.onExpansionChanged = { [weak self] expanded in
-                guard let self else { return }
-                if expanded {
-                    self.expandedUserRows.insert(rowIndex)
-                } else {
-                    self.expandedUserRows.remove(rowIndex)
-                }
-                self.noteTimelineRowHeightChanged(rowIndex)
-            }
-            bubble.setExpanded(expandedUserRows.contains(rowIndex), notifying: false)
-        }
-    }
-
-    private static func firstDescendant<T: NSView>(_ type: T.Type, in root: NSView) -> T? {
-        if let match = root as? T { return match }
-        for child in root.subviews {
-            if let match = firstDescendant(type, in: child) { return match }
-        }
-        return nil
-    }
-}
-
-/// Reusable shell around a conversation row. The host, not the content, is what AppKit recycles;
-/// replacing its child releases offscreen Markdown and tool constraint trees while AppKit keeps
-/// automatic height ownership for the presentation table.
-final class ConversationVirtualRowHost: NSTableCellView {
-    private var releaseContent: (() -> Void)?
-
-    /// The width of the column this cell sits in, which has to be *stated* — see
-    /// `setColumnWidth`. Held on the cell rather than the content so it survives recycling.
-    private lazy var columnWidth: NSLayoutConstraint = {
-        // Above the content's own compression resistance and below required: a row too narrow
-        // for what is in it gives way in the words, never by growing past the pane. Required
-        // would make the same choice by breaking someone else's required constraint and
-        // logging it as a failure.
-        let constraint = widthAnchor.constraint(equalToConstant: 0)
-        constraint.priority = ConversationDefaults.columnWidthPriority
-        return constraint
-    }()
-
-    /// States how wide the cell's column is, because AppKit does not.
-    ///
-    /// **A cell is not given its column's width.** Under `usesAutomaticRowHeights` the table
-    /// solves the cell from the constraints inside it, and a width nothing determines settles on
-    /// the smallest that satisfies them. So a row capped at the readable measure came out
-    /// `readableWidth` plus its insets — 644pt — sitting at the column's leading edge, and the
-    /// `centerXAnchor` below centred the content inside *that* rather than in the pane. The
-    /// column the whole pane is designed around was therefore flush left in every window wider
-    /// than 644, which is most of them: prose and bubbles hugged the sidebar with several
-    /// hundred points of empty pane beside them, and the turn rail — placed for a column that
-    /// is *centred* — landed on the first character of every paragraph.
-    ///
-    /// Stating the width is what makes `centerXAnchor` mean the pane's centre. It also closes
-    /// the older fault the other way round: with the cell pinned to its column it can no longer
-    /// grow past the clip in a pane narrower than the column.
-    func setColumnWidth(_ width: CGFloat) {
-        guard width > 0 else {
-            columnWidth.isActive = false
-            return
-        }
-        guard !columnWidth.isActive || abs(columnWidth.constant - width) > 0.5 else { return }
-        columnWidth.constant = width
-        columnWidth.isActive = true
-    }
-
-    /// The column a table's cells stand in — the table's own, not its pane's, because the table
-    /// insets the column and a cell centred on the pane's width would sit off that centre by
-    /// half the inset.
-    static func columnWidth(of tableView: NSTableView) -> CGFloat {
-        tableView.tableColumns.first?.width ?? tableView.bounds.width
-    }
-
-    /// Tells every cell currently on screen how wide its column is, and answers with it.
-    ///
-    /// Called from the host's `viewDidLayout`, because a cell AppKit does not rebuild would
-    /// otherwise go on centring itself in a column that no longer exists — the pane can be
-    /// dragged wider without a single row being recycled.
-    @discardableResult
-    static func stateColumnWidth(in tableView: NSTableView) -> CGFloat {
-        let width = columnWidth(of: tableView)
-        guard width > 0 else { return width }
-        tableView.enumerateAvailableRowViews { rowView, _ in
-            for cell in rowView.subviews {
-                (cell as? ConversationVirtualRowHost)?.setColumnWidth(width)
-            }
-        }
-        return width
-    }
-
-    func install(
-        _ content: NSView,
-        topInset: CGFloat,
-        bottomInset: CGFloat,
-        onRelease: (() -> Void)?
-    ) {
-        releaseInstalledContent()
-        releaseContent = onRelease
-
-        content.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(content)
-
-        let sideInset = Design.Spacing.inset
-
-        // The pane's width leads and the readable column is a cap, never the other way round.
-        //
-        // A cell is not pinned to its column: under automatic row heights the table solves the
-        // cell's own width from the constraints inside it, so a row that *asks* for the readable
-        // measure gets it even where there is no room — the cell grows past the clip, taking the
-        // words with it. Nothing announces that; the pane has no horizontal scroller, so the
-        // sentences are simply cut mid-word at its edge. This shipped as a child transcript in
-        // the display pane, which is routinely narrower than the column, rendering as clipped
-        // paragraphs with an untouched gutter of pane behind them. Ordering the two the other
-        // way had the same intent and only worked while the pane was wide enough to hide it.
-        //
-        // The cell's own width is stated by `setColumnWidth`; without it neither this nor the
-        // centring below has a column to be a fraction of.
-        let paneWidth = content.widthAnchor.constraint(
-            equalTo: widthAnchor,
-            constant: -sideInset * 2
-        )
-        paneWidth.priority = .defaultHigh
-
-        NSLayoutConstraint.activate([
-            content.topAnchor.constraint(equalTo: topAnchor, constant: topInset),
-            content.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -bottomInset),
-            content.centerXAnchor.constraint(equalTo: centerXAnchor),
-            content.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: sideInset),
-            content.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -sideInset),
-            content.widthAnchor.constraint(lessThanOrEqualToConstant: Design.Size.readableWidth),
-            paneWidth
-        ])
-    }
-
-    override func prepareForReuse() {
-        super.prepareForReuse()
-        releaseInstalledContent()
-    }
-
-    private func releaseInstalledContent() {
-        releaseContent?()
-        releaseContent = nil
-        subviews.forEach { $0.removeFromSuperview() }
+        configureContextActions(in: wrapped, row: row, rowIndex: index)
+        return wrapped
     }
 }
 
@@ -1146,13 +628,13 @@ extension ConversationViewController {
             return
         }
 
-        let cardID = PresentationID.retained(UUID())
+        let cardID = PresentationID.surface(.retained(UUID()))
 
         let card = PermissionRequestView(request: pending.request) { [weak self] decision in
             pending.decide(decision)
             guard let self else { return }
             self.activePermissionCard = nil
-            self.removePresentationItem(cardID)
+            self.transcript.remove(cardID)
             self.delegate?.conversationDidChangeActivity(self)
             self.showNextPermissionIfIdle()
             RemoteSessionMirrorRegistry.shared.sessionConversationChanged(self.sessionID)
@@ -1167,21 +649,11 @@ extension ConversationViewController {
         let target = ExtensionComponentTarget.conversationPermissionCard(
             sessionID: sessionID.uuidString.lowercased()
         )
-        activeToolGroupIndices.removeAll(keepingCapacity: true)
-        appendPresentationItem(PresentationItem(
+        transcript.append(PresentationItem(
             id: cardID,
-            content: .retained(customizeConversationRow(card, target: target)),
-            opensTurn: false
+            content: .surface(.retained(customizeConversationRow(card, target: target)))
         ))
         scrollToBottom()
         RemoteSessionMirrorRegistry.shared.sessionConversationChanged(sessionID)
-    }
-
-    private func removePresentationItem(_ id: PresentationID) {
-        guard let position = presentationItems.firstIndex(where: { $0.id == id }) else { return }
-        presentationItems.remove(at: position)
-        // A permission may have later timeline rows below it. Rebuild their index map once at
-        // this user-driven boundary instead of leaving navigation pointed one row too low.
-        reloadConversationRows()
     }
 }

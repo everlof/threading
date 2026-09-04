@@ -66,6 +66,8 @@ final class RemoteNotificationService {
         let authorization: RemoteAuthorization
         let enabledKinds: Set<RemoteNotificationKind>
         let soundEnabledKinds: Set<RemoteNotificationKind>
+        let capabilities: Set<RemoteNotificationCapability>
+        let includesResponsePreviews: Bool
     }
 
     private struct DeliverySummary {
@@ -96,15 +98,6 @@ final class RemoteNotificationService {
         }
     }
 
-    private struct DeferredOwnerTurnCompletion {
-        let event: RemoteNotificationEventDTO
-        let sessionID: SessionID
-    }
-
-    /// A deliberately hard ceiling: deferral is a two-minute convenience, never an unbounded
-    /// queue derived from the number of sessions. Reaching it fails open to immediate delivery.
-    private static let maximumDeferredOwnerTurnCompletions = 256
-
     private var subscriptions: [RemoteNotificationSubscriptionKey: Subscription] = [:]
     private var persistedSubscriptions: [
         RemoteNotificationSubscriptionKey: RemoteNotificationSubscriptionRecord
@@ -114,21 +107,63 @@ final class RemoteNotificationService {
         String,
         Bool
     ) async -> RemoteAPNSDeliveryResult
+    typealias HostedRetractionSender = @MainActor (
+        RemoteNotificationRetractionDTO,
+        String
+    ) async -> RemoteAPNSDeliveryResult
 
     private let subscriptionStore: RemoteNotificationSubscriptionPersisting
     private let localPushSender: RemoteAPNSPushSender?
     private let recordsPersistenceDiagnostics: Bool
     private var hostedPushSender: HostedPushSender?
+    private var hostedRetractionSender: HostedRetractionSender?
     private var hostedPushAvailability: (@MainActor () -> Bool)?
     private var hostedPushServiceURL: (@MainActor () -> URL?)?
     private let observations = AppEventObservations()
     private var announcedGuestShares: Set<String> = []
     private var currentActorBySession: [SessionID: RemoteNotificationInteractionActor] = [:]
+    private struct ForegroundConnectionState {
+        let participantID: RemoteNotificationParticipantID
+        var count: Int
+    }
+    private var foregroundConnections: [
+        RemoteNotificationSubscriptionKey: ForegroundConnectionState
+    ] = [:]
+    private var turnParticipantBySession: [
+        SessionID: (generation: UInt64, participantID: RemoteNotificationParticipantID)
+    ] = [:]
     private var lastActivityBySession: [SessionID: SessionActivity] = [:]
-    private var macApplicationIsActive = false
-    private var lastMacInteractionUptime: TimeInterval?
-    private var deferredOwnerTurnCompletions: [SessionID: DeferredOwnerTurnCompletion] = [:]
-    private var deferredOwnerTurnCompletionTask: Task<Void, Never>?
+    private lazy var notificationActivity = RemoteNotificationParticipantActivitySource {
+        AppSettings.shared.remoteNotificationMacActivityWindow.seconds
+    }
+    private lazy var turnDeliveryCoordinator = RemoteTurnNotificationDeliveryCoordinator(
+        clock: SystemRemoteTurnNotificationClock(),
+        scheduler: SystemRemoteTurnNotificationScheduler(),
+        activity: notificationActivity,
+        targetSource: { [weak self] sessionID, participantID in
+            self?.turnCompletionTargets(sessionID: sessionID, participantID: participantID) ?? []
+        },
+        generationSource: { sessionID in
+            CompletedTurnSnapshotStore.shared.currentGeneration(sessionID: sessionID)
+        },
+        liveSink: { [weak self] event, target in
+            self?.sendLiveTurnCompletion(event, to: target) ?? 0
+        },
+        pushSink: { [weak self] event, target, completion in
+            self?.sendTurnCompletionPush(event, to: target, completion: completion)
+        },
+        retractionSink: { [weak self] retraction, target, live, background in
+            self?.sendRetraction(retraction, to: target, live: live, background: background)
+        },
+        diagnosticSink: { [weak self] phase, context, target, fields in
+            self?.recordTurnDeliveryDiagnostic(
+                phase: phase,
+                context: context,
+                target: target,
+                fields: fields
+            )
+        }
+    )
     private(set) var persistenceError: String?
     private var persistenceWritesBlocked = false
 
@@ -166,6 +201,8 @@ final class RemoteNotificationService {
         observations.observe(TerminalSessionDidEnd.self) { [weak self] event in
             self?.lastActivityBySession[event.sessionID] = nil
             self?.currentActorBySession[event.sessionID] = nil
+            self?.turnParticipantBySession[event.sessionID] = nil
+            CompletedTurnSnapshotStore.shared.remove(sessionID: event.sessionID)
         }
     }
 
@@ -179,6 +216,7 @@ final class RemoteNotificationService {
     /// this Remote Access lifetime. Orphans remain inert even if their best-effort cleanup fails.
     @discardableResult
     func activate(authorizations: [RemoteAuthorization]) -> Int {
+        let previouslyActiveKeys = Set(subscriptions.keys)
         var current: [RemoteNotificationSubscriptionKey: RemoteAuthorization] = [:]
         for authorization in authorizations where !authorization.isExpired {
             guard let deviceID = authorization.boundDeviceID else { continue }
@@ -196,6 +234,10 @@ final class RemoteNotificationService {
                   ) else { return }
             result[entry.key] = subscription
         }
+        synchronizeForegroundActivity(
+            removed: previouslyActiveKeys.subtracting(subscriptions.keys),
+            added: Set(subscriptions.keys).subtracting(previouslyActiveKeys)
+        )
 
         let validPersisted = persistedSubscriptions.filter { current[$0.key] != nil }
         if validPersisted.count != persistedSubscriptions.count, !persistenceWritesBlocked {
@@ -223,26 +265,26 @@ final class RemoteNotificationService {
         hostedPushSender = send
     }
 
+    func configureHostedRetractionSender(_ send: @escaping HostedRetractionSender) {
+        hostedRetractionSender = send
+    }
+
     func recordOwnerInteraction(sessionID: SessionID) {
         currentActorBySession[sessionID] = .owner
+        turnDeliveryCoordinator.participantInteracted(.owner, source: "acceptedInteraction")
     }
 
     /// Application activity is process-local and deliberately ephemeral. It answers only whether
     /// a routine owner completion needs another device; it is not identity, authorization or a
     /// durable presence heartbeat.
     func setMacApplicationActive(_ isActive: Bool) {
-        macApplicationIsActive = isActive
-        if !isActive {
-            deliverDeferredOwnerTurnCompletions(reason: "Mac became inactive")
-        }
+        turnDeliveryCoordinator.setMacApplicationActive(isActive)
     }
 
     func recordMacInteraction(
         at uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
     ) {
-        macApplicationIsActive = true
-        lastMacInteractionUptime = uptime
-        discardDeferredOwnerTurnCompletionsAsSeen()
+        turnDeliveryCoordinator.macInteracted(at: uptime)
     }
 
     func recordInteraction(
@@ -256,6 +298,59 @@ final class RemoteNotificationService {
             )
         } else {
             currentActorBySession[sessionID] = .owner
+        }
+        let actor = currentActorBySession[sessionID] ?? .owner
+        turnDeliveryCoordinator.participantInteracted(
+            actor.notificationParticipantID,
+            source: "acceptedRemoteInteraction"
+        )
+    }
+
+    func foregroundDeviceAttached(
+        shareID: String,
+        participantID: RemoteNotificationParticipantID,
+        deviceID: String
+    ) {
+        let key = RemoteNotificationSubscriptionKey(
+            shareID: shareID,
+            deviceID: deviceID
+        )
+        let existing = foregroundConnections[key]
+        foregroundConnections[key] = ForegroundConnectionState(
+            participantID: participantID,
+            count: (existing?.count ?? 0) + 1
+        )
+        if existing == nil, subscriptions[key] != nil {
+            turnDeliveryCoordinator.foregroundDeviceAttached(
+                participantID: participantID,
+                deviceID: deviceID
+            )
+        }
+    }
+
+    func foregroundDeviceDetached(
+        shareID: String,
+        participantID: RemoteNotificationParticipantID,
+        deviceID: String
+    ) {
+        let key = RemoteNotificationSubscriptionKey(
+            shareID: shareID,
+            deviceID: deviceID
+        )
+        guard let existing = foregroundConnections[key] else { return }
+        if existing.count > 1 {
+            foregroundConnections[key] = ForegroundConnectionState(
+                participantID: existing.participantID,
+                count: existing.count - 1
+            )
+        } else {
+            foregroundConnections[key] = nil
+            if subscriptions[key] != nil {
+                turnDeliveryCoordinator.foregroundDeviceDetached(
+                    participantID: participantID,
+                    deviceID: deviceID
+                )
+            }
         }
     }
 
@@ -286,6 +381,8 @@ final class RemoteNotificationService {
         let soundEnabledKinds = Set(
             registration.soundEnabledKinds ?? registration.enabledKinds
         )
+        let capabilities = Set(registration.capabilities ?? [])
+        let includesResponsePreviews = registration.includesResponsePreviews ?? false
         guard let environment = RemoteAPNSPushSender.Environment(
             rawValue: registration.environment.rawValue
         ), !authorization.isExpired,
@@ -296,6 +393,8 @@ final class RemoteNotificationService {
                registration.hostedRegistrationID
            ),
            enabledKinds.count == registration.enabledKinds.count,
+           capabilities.count == (registration.capabilities ?? []).count,
+           !includesResponsePreviews || capabilities.contains(.turnCompletionPreview),
            soundEnabledKinds.isSubset(of: enabledKinds) else {
             return .invalid
         }
@@ -312,7 +411,9 @@ final class RemoteNotificationService {
                 ),
             environment: registration.environment,
             enabledKinds: enabledKinds.sorted { $0.rawValue < $1.rawValue },
-            soundEnabledKinds: soundEnabledKinds.sorted { $0.rawValue < $1.rawValue }
+            soundEnabledKinds: soundEnabledKinds.sorted { $0.rawValue < $1.rawValue },
+            capabilities: capabilities.sorted { $0.rawValue < $1.rawValue },
+            includesResponsePreviews: includesResponsePreviews
         )
         guard RemoteNotificationSubscriptionDefaults.isValid([record]),
               !persistenceWritesBlocked else {
@@ -333,8 +434,9 @@ final class RemoteNotificationService {
             return .persistenceUnavailable
         }
 
+        let wasRegistered = subscriptions[record.key] != nil
         persistedSubscriptions = candidate
-        subscriptions[record.key] = Subscription(
+        let activeSubscription = Subscription(
             deviceID: record.deviceID,
             deviceToken: record.deviceToken,
             hostedRegistrationID: record.hostedRegistrationID,
@@ -342,8 +444,17 @@ final class RemoteNotificationService {
             environment: environment,
             authorization: authorization,
             enabledKinds: enabledKinds,
-            soundEnabledKinds: soundEnabledKinds
+            soundEnabledKinds: soundEnabledKinds,
+            capabilities: capabilities,
+            includesResponsePreviews: includesResponsePreviews
         )
+        subscriptions[record.key] = activeSubscription
+        if !wasRegistered, let foreground = foregroundConnections[record.key] {
+            turnDeliveryCoordinator.foregroundDeviceAttached(
+                participantID: foreground.participantID,
+                deviceID: deviceID
+            )
+        }
 
         // A guest cannot be notified before accepting a capability: there is no account or
         // device identity to target yet. Registration is that acceptance boundary, so announce
@@ -423,38 +534,45 @@ final class RemoteNotificationService {
         lastActivityBySession[sessionID] = activity
         guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
 
+        if activity.hasTurnInFlight, !previous.hasTurnInFlight {
+            let generation = CompletedTurnSnapshotStore.shared.beginTurn(sessionID: sessionID)
+            turnParticipantBySession[sessionID] = (
+                generation,
+                (currentActorBySession[sessionID] ?? .owner).notificationParticipantID
+            )
+            turnDeliveryCoordinator.turnStarted(sessionID: sessionID, generation: generation)
+        }
+
         if RemoteTurnCompletionNotificationPolicy.shouldNotify(
             from: previous,
             to: activity,
             reportsOwnTurns: AgentRuntime.shared.reportsOwnTurns(sessionID: sessionID)
         ) {
-            let event = RemoteNotificationEventDTO(
-                kind: .turnCompleted,
+            var generation = CompletedTurnSnapshotStore.shared.currentGeneration(
+                sessionID: sessionID
+            )
+            if generation == 0 {
+                generation = CompletedTurnSnapshotStore.shared.beginTurn(sessionID: sessionID)
+            }
+            let participantID = turnParticipantBySession[sessionID].flatMap {
+                $0.generation == generation ? $0.participantID : nil
+            } ?? (currentActorBySession[sessionID] ?? .owner).notificationParticipantID
+            turnDeliveryCoordinator.completed(RemoteTurnNotificationCompletion(
+                eventID: UUID().uuidString,
                 hostID: RemoteHostIdentity.current.id,
-                sessionID: sessionID.uuidString,
+                sessionID: sessionID,
+                participantID: participantID,
+                generation: generation,
                 title: Self.safeText(
                     session.displayTitle,
                     bytes: RemoteAccessDefaults.maximumNotificationTitleBytes
                 ),
-                body: "Finished its turn",
-                bodyLocalization: .init(key: "Finished its turn")
-            )
-            let actor = currentActorBySession[sessionID] ?? .owner
-            switch RemoteTurnCompletionDeviceActivityPolicy.deliveryDecision(
-                actor: actor,
-                applicationIsActive: macApplicationIsActive,
-                lastInteractionUptime: lastMacInteractionUptime,
-                nowUptime: ProcessInfo.processInfo.systemUptime
-            ) {
-            case .deliverNow:
-                deliverTurnCompletion(event, sessionID: sessionID, actor: actor)
-            case .deferUntilMacInactive(let deadlineUptime):
-                deferOwnerTurnCompletion(
-                    event,
+                snapshot: CompletedTurnSnapshotStore.shared.snapshot(
                     sessionID: sessionID,
-                    deadlineUptime: deadlineUptime
-                )
-            }
+                    generation: generation
+                ),
+                createdAt: Date().timeIntervalSince1970
+            ))
         }
 
         guard activity == .awaitingUser, previous != .awaitingUser else { return }
@@ -490,6 +608,200 @@ final class RemoteNotificationService {
             )
         )
         deliver(event) { $0.authorization.scope.covers(sessionID) }
+    }
+
+    private func turnCompletionTargets(
+        sessionID: SessionID,
+        participantID: RemoteNotificationParticipantID
+    ) -> [RemoteTurnNotificationTarget] {
+        subscriptions.map { key, subscription in (key, subscription) }.compactMap {
+            key, subscription in
+            guard subscription.authorization.scope.covers(sessionID),
+                  Self.participantID(for: subscription.authorization) == participantID else {
+                return nil
+            }
+            return turnCompletionTarget(
+                key: key,
+                subscription: subscription
+            )
+        }
+    }
+
+    private func turnCompletionTarget(
+        key: RemoteNotificationSubscriptionKey,
+        subscription: Subscription
+    ) -> RemoteTurnNotificationTarget? {
+        guard !subscription.authorization.isExpired else { return nil }
+        return RemoteTurnNotificationTarget(
+            shareID: key.shareID,
+            deviceID: subscription.deviceID,
+            participantID: Self.participantID(for: subscription.authorization),
+            isTurnCompletionEnabled: subscription.enabledKinds.contains(.turnCompleted),
+            includesResponsePreviews: subscription.includesResponsePreviews,
+            supportsRetraction: subscription.capabilities.contains(.notificationRetraction)
+        )
+    }
+
+    private func sendLiveTurnCompletion(
+        _ event: RemoteNotificationEventDTO,
+        to target: RemoteTurnNotificationTarget
+    ) -> Int {
+        RemoteSessionMirrorRegistry.shared.broadcastNotification(event) { authorization, deviceID in
+            authorization.shareID == target.shareID && deviceID == target.deviceID
+        }
+    }
+
+    private func sendTurnCompletionPush(
+        _ event: RemoteNotificationEventDTO,
+        to target: RemoteTurnNotificationTarget,
+        completion: @escaping @MainActor (RemoteTurnNotificationPushResult) -> Void
+    ) {
+        let key = RemoteNotificationSubscriptionKey(
+            shareID: target.shareID,
+            deviceID: target.deviceID
+        )
+        guard let sessionID = SessionID(uuidString: event.sessionID) else {
+            completion(.init(accepted: false, statusCode: nil, providerTrace: nil))
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let subscription = self.subscriptions[key],
+                  target.isTurnCompletionEnabled,
+                  subscription.enabledKinds.contains(.turnCompleted),
+                  subscription.authorization.scope.covers(sessionID),
+                  Self.participantID(for: subscription.authorization)
+                    == target.participantID,
+                  subscription.includesResponsePreviews == target.includesResponsePreviews
+            else {
+                completion(.init(accepted: false, statusCode: nil, providerTrace: nil))
+                return
+            }
+            let hostedURL = RemoteNotificationSubscriptionDefaults.normalizedHostedServiceURL(
+                self.hostedPushServiceURL?()
+            )
+            let result: RemoteAPNSDeliveryResult
+            if let localPushSender = self.localPushSender {
+                result = await localPushSender.send(
+                    event,
+                    deviceToken: subscription.deviceToken,
+                    environment: subscription.environment,
+                    playsSound: subscription.soundEnabledKinds.contains(.turnCompleted)
+                )
+            } else if let hostedPushSender = self.hostedPushSender,
+                      let registrationID = subscription.hostedRegistrationID,
+                      Self.hostedRegistration(
+                          serviceURL: subscription.hostedServiceURL,
+                          belongsTo: hostedURL
+                      ) {
+                result = await hostedPushSender(
+                    event,
+                    registrationID,
+                    subscription.soundEnabledKinds.contains(.turnCompleted)
+                )
+            } else {
+                result = RemoteAPNSDeliveryResult(
+                    statusCode: nil,
+                    reason: "Push provider unavailable.",
+                    apnsID: nil
+                )
+            }
+            completion(.init(
+                accepted: result.accepted,
+                statusCode: result.statusCode,
+                providerTrace: result.apnsID
+            ))
+        }
+    }
+
+    private func sendRetraction(
+        _ retraction: RemoteNotificationRetractionDTO,
+        to target: RemoteTurnNotificationTarget,
+        live: Bool,
+        background: Bool
+    ) {
+        let key = RemoteNotificationSubscriptionKey(
+            shareID: target.shareID,
+            deviceID: target.deviceID
+        )
+        guard let subscription = subscriptions[key],
+              target.supportsRetraction,
+              subscription.capabilities.contains(.notificationRetraction) else { return }
+        if live {
+            _ = RemoteSessionMirrorRegistry.shared.broadcastNotificationRetraction(
+                retraction
+            ) { authorization, deviceID in
+                authorization.shareID == target.shareID && deviceID == target.deviceID
+            }
+        }
+        guard background else { return }
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let subscription = self.subscriptions[key],
+                  subscription.capabilities.contains(.notificationRetraction)
+            else { return }
+            let hostedURL = RemoteNotificationSubscriptionDefaults.normalizedHostedServiceURL(
+                self.hostedPushServiceURL?()
+            )
+            if let localPushSender = self.localPushSender {
+                _ = await localPushSender.sendRetraction(
+                    retraction,
+                    deviceToken: subscription.deviceToken,
+                    environment: subscription.environment
+                )
+            } else if let hostedRetractionSender = self.hostedRetractionSender,
+                      let registrationID = subscription.hostedRegistrationID,
+                      Self.hostedRegistration(
+                          serviceURL: subscription.hostedServiceURL,
+                          belongsTo: hostedURL
+                      ) {
+                _ = await hostedRetractionSender(retraction, registrationID)
+            }
+        }
+    }
+
+    private func recordTurnDeliveryDiagnostic(
+        phase: String,
+        context: RemoteTurnNotificationDiagnosticContext,
+        target: RemoteTurnNotificationTarget?,
+        fields: [RemoteDiagnosticField: String]
+    ) {
+        var safeFields = fields
+        safeFields[.trace] = context.eventID
+        safeFields[.host] = Self.diagnosticID(context.hostID, prefix: "peer")
+        safeFields[.kind] = RemoteNotificationKind.turnCompleted.rawValue
+        safeFields[.session] = Self.diagnosticID(
+            context.sessionID.uuidString,
+            prefix: "session"
+        )
+        safeFields[.participant] = Self.diagnosticID(
+            String(describing: context.participantID),
+            prefix: "peer"
+        )
+        safeFields[.peer] = Self.diagnosticID(
+            target?.deviceID ?? String(describing: context.participantID),
+            prefix: target == nil ? "participant" : "device"
+        )
+        MacRemoteDiagnostics.record(
+            .notificationDeliveryTransition,
+            level: phase == "refused" ? .warning : .info,
+            fields: safeFields
+        )
+        EventLog.shared.record(.remote, "Remote notification delivery", [
+            "notification": context.eventID,
+            "kind": RemoteNotificationKind.turnCompleted.rawValue,
+            "phase": phase,
+            "generation": String(context.generation),
+            "queue": fields[.queueSize] ?? "0",
+            "preview": fields[.previewPresent] ?? "false",
+            "previewBytes": fields[.previewBytes] ?? "0",
+        ])
+    }
+
+    private static func participantID(
+        for authorization: RemoteAuthorization
+    ) -> RemoteNotificationParticipantID {
+        authorization.member.map { .member($0.id) } ?? .owner
     }
 
     /// Sends an explicitly requested agent update to the current turn's author by default.
@@ -654,6 +966,8 @@ final class RemoteNotificationService {
     func revoke(shareID: String) {
         // Authorization was already revoked in its owning Keychain store. Drop live delivery
         // unconditionally; a secondary-store refusal may leave inert cleanup work, never access.
+        let removedKeys = Set(subscriptions.keys.filter { $0.shareID == shareID })
+        synchronizeForegroundActivity(removed: removedKeys, added: [])
         subscriptions = subscriptions.filter { $0.value.authorization.shareID != shareID }
         announcedGuestShares = announcedGuestShares.filter { !$0.hasPrefix("\(shareID):") }
         guard !persistenceWritesBlocked else { return }
@@ -670,9 +984,11 @@ final class RemoteNotificationService {
 
     func reset() {
         subscriptions.removeAll()
+        foregroundConnections.removeAll()
         announcedGuestShares.removeAll()
         currentActorBySession.removeAll()
-        cancelDeferredOwnerTurnCompletions()
+        turnParticipantBySession.removeAll()
+        turnDeliveryCoordinator.reset()
     }
 
     /// `Reset Everything` is explicit authority to erase even an unreadable Keychain item.
@@ -688,105 +1004,34 @@ final class RemoteNotificationService {
         }
         subscriptions.removeAll()
         persistedSubscriptions.removeAll()
+        foregroundConnections.removeAll()
         announcedGuestShares.removeAll()
-        cancelDeferredOwnerTurnCompletions()
+        currentActorBySession.removeAll()
+        turnParticipantBySession.removeAll()
+        turnDeliveryCoordinator.reset()
         persistenceError = nil
         persistenceWritesBlocked = false
         ThreadingLogger.remote.notice("Remote notification registrations deleted for app reset")
     }
 
-    private func deliverTurnCompletion(
-        _ event: RemoteNotificationEventDTO,
-        sessionID: SessionID,
-        actor: RemoteNotificationInteractionActor
+    private func synchronizeForegroundActivity(
+        removed: Set<RemoteNotificationSubscriptionKey>,
+        added: Set<RemoteNotificationSubscriptionKey>
     ) {
-        deliver(event) {
-            $0.authorization.scope.covers(sessionID)
-                && RemoteTurnCompletionRecipientPolicy.matches(
-                    actor,
-                    authorization: $0.authorization
-                )
-        }
-    }
-
-    private func deferOwnerTurnCompletion(
-        _ event: RemoteNotificationEventDTO,
-        sessionID: SessionID,
-        deadlineUptime: TimeInterval
-    ) {
-        if deferredOwnerTurnCompletions[sessionID] == nil,
-           deferredOwnerTurnCompletions.count
-            >= Self.maximumDeferredOwnerTurnCompletions {
-            ThreadingLogger.remote.warning(
-                "Remote turn completion deferral full; delivering immediately"
-            )
-            deliverTurnCompletion(event, sessionID: sessionID, actor: .owner)
-            return
-        }
-
-        deferredOwnerTurnCompletions[sessionID] = DeferredOwnerTurnCompletion(
-            event: event,
-            sessionID: sessionID
-        )
-        deferredOwnerTurnCompletionTask?.cancel()
-        let delay = max(0, deadlineUptime - ProcessInfo.processInfo.systemUptime)
-        let nanoseconds = UInt64((delay * 1_000_000_000).rounded(.up))
-        deferredOwnerTurnCompletionTask = Task { @MainActor [weak self] in
-            do {
-                try await Task<Never, Never>.sleep(nanoseconds: nanoseconds)
-            } catch {
-                return
-            }
-            guard let self else { return }
-            self.deferredOwnerTurnCompletionTask = nil
-            self.deliverDeferredOwnerTurnCompletions(reason: "Mac activity expired")
-        }
-        ThreadingLogger.remote.debug(
-            "Remote turn completion deferred while the owner's Mac is active"
-        )
-        EventLog.shared.record(.remote, "Remote notification deferred", [
-            "notification": event.id,
-            "kind": event.kind.rawValue,
-            "reason": "active Mac",
-        ])
-    }
-
-    private func deliverDeferredOwnerTurnCompletions(reason: String) {
-        guard !deferredOwnerTurnCompletions.isEmpty else { return }
-        deferredOwnerTurnCompletionTask?.cancel()
-        deferredOwnerTurnCompletionTask = nil
-        let completions = Array(deferredOwnerTurnCompletions.values)
-        deferredOwnerTurnCompletions.removeAll(keepingCapacity: true)
-        ThreadingLogger.remote.debug(
-            "Delivering deferred owner turn completions reason=\(reason, privacy: .public)"
-        )
-        for completion in completions {
-            deliverTurnCompletion(
-                completion.event,
-                sessionID: completion.sessionID,
-                actor: .owner
+        for key in removed {
+            guard let foreground = foregroundConnections[key] else { continue }
+            turnDeliveryCoordinator.foregroundDeviceDetached(
+                participantID: foreground.participantID,
+                deviceID: key.deviceID
             )
         }
-    }
-
-    private func discardDeferredOwnerTurnCompletionsAsSeen() {
-        guard !deferredOwnerTurnCompletions.isEmpty else { return }
-        let count = deferredOwnerTurnCompletions.count
-        cancelDeferredOwnerTurnCompletions()
-        ThreadingLogger.remote.debug(
-            "Deferred owner turn completions seen on Mac count=\(count, privacy: .public)"
-        )
-        EventLog.shared.record(.remote, "Remote notifications suppressed", [
-            "count": String(count),
-            "kind": RemoteNotificationKind.turnCompleted.rawValue,
-            "reason": "Mac interaction after completion",
-        ])
-    }
-
-    private func cancelDeferredOwnerTurnCompletions() {
-        deferredOwnerTurnCompletionTask?.cancel()
-        deferredOwnerTurnCompletionTask = nil
-        deferredOwnerTurnCompletions.removeAll(keepingCapacity: true)
+        for key in added {
+            guard let foreground = foregroundConnections[key] else { continue }
+            turnDeliveryCoordinator.foregroundDeviceAttached(
+                participantID: foreground.participantID,
+                deviceID: key.deviceID
+            )
+        }
     }
 
     @discardableResult
@@ -968,7 +1213,9 @@ final class RemoteNotificationService {
             environment: environment,
             authorization: authorization,
             enabledKinds: Set(record.enabledKinds),
-            soundEnabledKinds: Set(record.soundEnabledKinds)
+            soundEnabledKinds: Set(record.soundEnabledKinds),
+            capabilities: Set(record.capabilities),
+            includesResponsePreviews: record.includesResponsePreviews
         )
     }
 
@@ -1122,6 +1369,19 @@ actor RemoteAPNSPushSender {
         let event: RemoteNotificationEventDTO
     }
 
+    private struct RetractionEnvelope: Encodable {
+        struct APS: Encodable {
+            let contentAvailable = 1
+
+            private enum CodingKeys: String, CodingKey {
+                case contentAvailable = "content-available"
+            }
+        }
+
+        let aps = APS()
+        let retraction: RemoteNotificationRetractionDTO
+    }
+
     private let configuration: Configuration
     private var cachedJWT: (value: String, issuedAt: TimeInterval)?
 
@@ -1188,7 +1448,8 @@ actor RemoteAPNSPushSender {
                 titleLocalization: event.titleLocalization,
                 bodyLocalization: event.bodyLocalization,
                 destination: event.destination,
-                createdAt: event.createdAt
+                createdAt: event.createdAt,
+                turnGeneration: event.turnGeneration
             )
             body = try? JSONEncoder().encode(envelope(
                 for: deliveredEvent,
@@ -1224,10 +1485,10 @@ actor RemoteAPNSPushSender {
             String(Int(event.createdAt + retention)),
             forHTTPHeaderField: "apns-expiration"
         )
-        let collapseID = deliveredEvent.kind == .agentMessage
-            ? deliveredEvent.id
-            : "\(deliveredEvent.kind.rawValue)-\(deliveredEvent.sessionID)"
-        request.setValue(collapseID, forHTTPHeaderField: "apns-collapse-id")
+        request.setValue(
+            Self.collapseIdentifier(for: deliveredEvent),
+            forHTTPHeaderField: "apns-collapse-id"
+        )
 
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
@@ -1260,6 +1521,74 @@ actor RemoteAPNSPushSender {
                 apnsID: nil
             )
         }
+    }
+
+    @discardableResult
+    func sendRetraction(
+        _ retraction: RemoteNotificationRetractionDTO,
+        deviceToken: String,
+        environment: Environment
+    ) async -> RemoteAPNSDeliveryResult {
+        guard let url = URL(
+            string: "https://\(environment.host)/3/device/\(deviceToken)"
+        ), let body = try? JSONEncoder().encode(RetractionEnvelope(retraction: retraction)),
+        body.count <= 4_096 else {
+            return RemoteAPNSDeliveryResult(
+                statusCode: nil,
+                reason: "The retraction payload could not be encoded.",
+                apnsID: nil
+            )
+        }
+        guard let jwt = authorizationToken() else {
+            return RemoteAPNSDeliveryResult(
+                statusCode: nil,
+                reason: "The APNs provider token could not be signed.",
+                apnsID: nil
+            )
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = body
+        request.setValue("bearer \(jwt)", forHTTPHeaderField: "authorization")
+        request.setValue(configuration.topic, forHTTPHeaderField: "apns-topic")
+        request.setValue("background", forHTTPHeaderField: "apns-push-type")
+        request.setValue("5", forHTTPHeaderField: "apns-priority")
+        request.setValue(
+            String(Int(Date().timeIntervalSince1970 + 5 * 60)),
+            forHTTPHeaderField: "apns-expiration"
+        )
+        request.setValue(
+            Self.collapseIdentifier(for: retraction),
+            forHTTPHeaderField: "apns-collapse-id"
+        )
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                return .init(statusCode: nil, reason: "APNs returned a non-HTTP response.", apnsID: nil)
+            }
+            return .init(
+                statusCode: http.statusCode,
+                reason: Self.responseReason(from: data)
+                    ?? (http.statusCode == 200 ? "Accepted by APNs." : "APNs refused the retraction."),
+                apnsID: http.value(forHTTPHeaderField: "apns-id")
+            )
+        } catch {
+            return .init(statusCode: nil, reason: error.localizedDescription, apnsID: nil)
+        }
+    }
+
+    nonisolated static func collapseIdentifier(
+        for event: RemoteNotificationEventDTO
+    ) -> String {
+        event.kind == .agentMessage
+            ? event.id
+            : "\(event.kind.rawValue)-\(event.sessionID)"
+    }
+
+    nonisolated static func collapseIdentifier(
+        for retraction: RemoteNotificationRetractionDTO
+    ) -> String {
+        "\(retraction.kind.rawValue)-\(retraction.sessionID)"
     }
 
     private func envelope(

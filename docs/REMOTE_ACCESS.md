@@ -1431,17 +1431,38 @@ to a read or unread completed state. Generic shell quiet timers, refusals and pr
 cannot claim completion. Notification sounds have a master switch and an independent
 switch for every category, so a useful banner does not have to imply an audible interruption.
 
-Device activity is one delivery rule rather than another settings matrix. An iPhone already
-suppresses ordinary state notifications while its scene is active. On the Mac, activating
-Threading or deliberately clicking, typing or scrolling marks that Mac active for two minutes;
-leaving the app, locking the session or sleeping the display makes it inactive immediately. A
-recently active Mac defers only a routine `turnCompleted` notification for the owner. A later Mac
-interaction cancels that deferred notification as seen; otherwise it is delivered when the
-two-minute window expires or immediately when the app resigns active, the session locks or the
-display sleeps. This never delays a guest's completion, a permission request, a question, a
-person's explicit request for input or an agent update the user explicitly requested. Pointer
-movement alone is not activity, and the timestamp is process-local rather than a hosted presence
-heartbeat.
+Device activity is one delivery rule rather than another settings matrix. An authenticated
+iPhone foreground connection marks that participant active across every session on this Mac;
+attaching, sending a follow-up or another accepted remote interaction also invalidates an older
+pending completion. The live event and APNs decisions are independent: a foreground phone can
+consume the live event without leaving an APNs alert queued for later. Activity belonging to one
+participant never suppresses another participant, and activity on this Mac never becomes hosted
+presence for another Mac.
+
+For the owner, activating Threading or deliberately clicking, typing or scrolling also marks the
+Mac active. **Settings → Remote Access → Notification Delivery → Mac activity window** controls
+how long: Off, 1 minute, 2 minutes, 5 minutes or 10 minutes; 2 minutes is the default. Off means
+Mac input never suppresses paired-device notifications. Leaving the app, locking the session or
+sleeping the display makes it inactive immediately. A recently active Mac defers only a routine
+`turnCompleted` notification for the owner. A later Mac interaction cancels that completion as
+seen; otherwise the coordinator revalidates it at the deadline and delivers it if it is still
+current. This never delays a guest's completion, a permission request, a question, a person's
+explicit request for input, an explicit extension notification or an agent update the user asked
+for. Pointer movement alone is not activity, and deliberate-input handling is constant-time;
+queue work and diagnostics are coalesced off the AppKit event callback.
+
+Each iPhone has a device-local **Include response previews** switch under its turn-completion
+notification setting. It is off by default and is registered independently with every paired
+Mac. The phone explains that an enabled excerpt leaves the Mac through the selected hosted
+service and Apple Push Notification service and can appear on the lock screen according to iOS
+settings. Owners and guests can opt in only for sessions they are authorized to read. A terminal
+agent supplies its lifecycle report's final assistant message and Native chat supplies its
+completed assistant turn; delivery never scans a transcript, scrapes a terminal or asks a model
+to summarize. Threading chooses the first useful plain-text paragraph (or useful line), removes
+Markdown presentation plus control and bidirectional-formatting characters, collapses whitespace
+and stops at a word boundary within 320 UTF-8 bytes. It does not claim to detect secrets. With no
+consent or reliable snapshot the localized body is **Finished its turn.** Preview-bearing events
+omit body localization so iOS does not replace the supplied excerpt.
 
 The phone owns token acquisition: after notification permission and whenever APNs rotates the
 token, iOS first registers it directly with an operated hosted service using the scoped credential
@@ -1457,6 +1478,24 @@ separately from credentials and re-authorizes it against the current pairing/sha
 Remote Access starts. A Mac restart thus does not require waking or foregrounding the phone.
 The explicit Mac-local APNs provider remains a development/self-hosted override and retains its
 direct token-and-environment route; it is not used by the operated hosted service.
+
+Generation checks prevent an obsolete completion before delivery. For a push APNs has already
+accepted, the Mac keeps only a bounded process-local ledger of opaque event, participant, device
+and session identifiers, generation and time—never notification text—and attempts a retraction
+when a newer turn or participant interaction makes it stale. Capable foreground phones receive a
+typed retraction on the authenticated live connection; capable background phones receive a
+best-effort silent push from the separate `/v1/push/retractions` endpoint. That endpoint accepts
+only turn-completion identifiers, uses APNs background priority 5 with a short expiration, and
+contains no alert or sound. iOS removes only delivered Threading notifications whose host,
+session, event and kind all match. Silent pushes can be delayed or discarded, especially after a
+force-quit, so activation and opening the affected session perform the reliable local clearing
+fallback.
+
+Capabilities and preview consent are optional registration fields. Missing fields mean preview
+off and no retraction support, which keeps old registrations and old phones compatible. New Macs
+send retractions only to capable phones; the alert endpoint and event decoder remain backward
+compatible. Deployment therefore proceeds service support first, then the iPhone capability and
+handler, then the Mac coordinator.
 
 Opening a notification deep-links to the relevant chat. A requested agent update may additionally
 carry one closed, authenticated destination: an attachment id, a browser-tab id, or an extension

@@ -4,6 +4,47 @@ struct SessionCheckoutDidMove: AppEvent {
     static let name = Notification.Name("sessionCheckoutDidMove")
     let sessionID: SessionID
     let projectID: ProjectID
+    /// Why ownership moved, because the answer decides whether the runtime has to be replaced.
+    ///
+    /// A move the user or the agent *asked* for leaves the process running in the checkout it was
+    /// launched in, so it has to be replaced to reach the new one. An `observedExecution` move is
+    /// the opposite by construction: ownership is following a process that is **already** there,
+    /// and replacing it would kill a working agent to put it back where it already is.
+    let authorityBasis: SessionCheckoutAuthorityBasis
+}
+
+/// Bounds on how often ownership may follow an observation.
+enum SessionCheckoutDefaults {
+
+    /// How long after arriving somewhere a session refuses to be observed back out of it.
+    ///
+    /// Ownership following execution is a feedback loop: committing a move changes what the next
+    /// observation is measured against, and `SessionExecutionLocusTracker.forget` deliberately
+    /// clears the memo that would otherwise suppress a repeat. When an agent's own root and its
+    /// tool descendants genuinely sit in different checkouts the two signals disagree forever, and
+    /// without hysteresis ownership oscillates between them — measured at 88 committed moves in
+    /// 4m34s on a real machine. There is no "correct" checkout to pick in that situation; there is
+    /// only picking one and staying, which is what a dwell expresses.
+    static let reversalDwell: TimeInterval = 60
+
+    /// The window the ceiling below is counted over.
+    ///
+    /// Half an hour rather than a few minutes, and the two constants have to be read together:
+    /// the dwell already caps a straight reversal at one move a minute, so a window short enough
+    /// to expire between damped moves would make the ceiling unreachable for the very pattern it
+    /// exists to catch. At these numbers a damped oscillation still trips it inside ten minutes,
+    /// while an agent legitimately walking a few worktrees does not.
+    static let observedMoveWindow: TimeInterval = 1800
+
+    /// How many observed moves one session may commit inside `observedMoveWindow` before
+    /// Threading stops following its execution for the rest of the run.
+    ///
+    /// The dwell above stops the oscillation we found; this stops the one we did not — it is
+    /// reason-neutral, so a pattern nobody predicted (three checkouts in a cycle, two signals
+    /// disagreeing in a shape the dwell does not name) still terminates. A session that keeps
+    /// moving despite the dwell is reporting something Threading does not model, and guessing at
+    /// it repeatedly is worse than stopping once and saying so.
+    static let observedMoveCeiling = 6
 }
 
 enum SessionCheckoutValidationFailure: Error, Equatable, LocalizedError {
@@ -58,16 +99,36 @@ final class SessionCheckoutCoordinator {
     private let projects: ProjectStore
     private let fileManager: FileManager
     private let hasTurnInFlight: @MainActor (SessionID) -> Bool
+    private let now: @MainActor () -> Date
     private var inputFences: Set<SessionID> = []
+
+    /// The worktree each session most recently *left*, and when — the dwell's whole memory.
+    ///
+    /// Kept here rather than on `SessionExecutionLocusTracker` on purpose: the tracker's memory is
+    /// wiped by `forget` at every commit, which is correct for *classification* (the reading is
+    /// measured against ownership that just changed) and exactly wrong for *damping*, which needs
+    /// to remember the very commit that the wipe is reacting to.
+    private var departures: [SessionID: (worktreeIdentity: String, at: Date)] = [:]
+
+    /// Commit times of observed moves, newest last, trimmed to `observedMoveWindow` on each read.
+    private var observedMoveHistory: [SessionID: [Date]] = [:]
+
+    /// Sessions whose execution Threading has stopped following for the rest of this run.
+    private var abandonedFollowing: Set<SessionID> = []
+
+    /// The worktree a settling move is leaving, captured before the store transaction replaces it.
+    private var departingIdentities: [SessionID: String] = [:]
 
     init(
         projects: ProjectStore = .shared,
         runtime: AgentRuntime = .shared,
         fileManager: FileManager = .default,
-        hasTurnInFlight: (@MainActor (SessionID) -> Bool)? = nil
+        hasTurnInFlight: (@MainActor (SessionID) -> Bool)? = nil,
+        now: @escaping @MainActor () -> Date = Date.init
     ) {
         self.projects = projects
         self.fileManager = fileManager
+        self.now = now
         self.hasTurnInFlight = hasTurnInFlight ?? { sessionID in
             runtime.activity(sessionID: sessionID).hasTurnInFlight
         }
@@ -184,6 +245,22 @@ final class SessionCheckoutCoordinator {
         if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove {
             return .queued(pending)
         }
+
+        // Both guards below are deliberately *only* on this entry point. A move the user or the
+        // agent asked for is an instruction and is never rate-limited; these damp a signal
+        // Threading is inferring on its own.
+        if abandonedFollowing.contains(sessionID) { return .denied }
+
+        // Going straight back where we just came from is the oscillation's whole shape, and it is
+        // never information: the reading that produced it was taken against ownership that has
+        // since changed. A move onwards to a *third* checkout is left alone, because that is an
+        // agent genuinely walking the tree rather than two signals disagreeing.
+        if let departure = departures[sessionID],
+           departure.worktreeIdentity == checkout.worktreeIdentity,
+           now().timeIntervalSince(departure.at) < SessionCheckoutDefaults.reversalDwell {
+            return .denied
+        }
+
         return requestMove(
             sessionID: sessionID,
             checkoutPath: checkout.root,
@@ -255,6 +332,10 @@ final class SessionCheckoutCoordinator {
             }
             validated = checkout
         }
+
+        // Read before the store moves the session: afterwards the project this session points at
+        // *is* the destination, and the checkout it left is unrecoverable from the graph.
+        departingIdentities[sessionID] = currentWorktreeIdentity(forSessionID: sessionID)
 
         let movingIDs = dependencyClosure(for: sessionID)
         if allSessions(movingIDs, belongTo: validated) {
@@ -452,8 +533,21 @@ final class SessionCheckoutCoordinator {
             // working somewhere else until its next turn produced a fresh report.
             SessionExecutionLocusTracker.shared.forget(sessionID: id)
         }
+        recordDeparture(sessionIDs[0], pending: pending)
+
+        // The source may now be a row Threading adopted for an earlier move and that nothing is
+        // left in. Taking it back here rather than inside the store transaction is deliberate:
+        // this is ordinary project removal and wants `removeProject`'s auxiliary cleanup — the
+        // icon file, drafts, scheduled work, the audit — rather than a second, thinner copy of it
+        // inlined into a session-graph transaction.
+        projects.reclaimAdoptedEmptyProjects()
+
         if let projectID = projects.project(forSessionID: sessionIDs[0])?.id {
-            let event = SessionCheckoutDidMove(sessionID: sessionIDs[0], projectID: projectID)
+            let event = SessionCheckoutDidMove(
+                sessionID: sessionIDs[0],
+                projectID: projectID,
+                authorityBasis: pending.authorityBasis
+            )
             DispatchQueue.main.async { NotificationCenter.default.post(event) }
         }
         recordAudit("Checkout move committed", sessionID: sessionIDs[0], pending: pending)
@@ -473,6 +567,57 @@ final class SessionCheckoutCoordinator {
             return location.repositoryIdentity == checkout.repositoryIdentity
                 && location.worktreeIdentity == checkout.worktreeIdentity
         }
+    }
+
+    /// The canonical worktree identity the session stands in right now, or nil when it is not in
+    /// a checkout Threading can resolve. Same canonicalisation as `allSessions(_:belongTo:)`.
+    private func currentWorktreeIdentity(forSessionID sessionID: SessionID) -> String? {
+        guard let project = projects.project(forSessionID: sessionID) else { return nil }
+        let canonicalPath = URL(fileURLWithPath: project.folderPath, isDirectory: true)
+            .standardizedFileURL.resolvingSymlinksInPath().path
+        return GitInfo.worktreeLocation(for: canonicalPath)?.worktreeIdentity
+    }
+
+    /// Remembers a committed move so the dwell and the ceiling can see it.
+    ///
+    /// Only observed moves are counted. An explicit or agent-initiated move is an instruction and
+    /// must never spend a budget that would later refuse one — but it *does* record its departure,
+    /// because a chat the user moved by hand should not be dragged straight back by a reading
+    /// taken before they moved it.
+    private func recordDeparture(_ sessionID: SessionID, pending: PendingCheckoutMove) {
+        let moment = now()
+        if let departed = departingIdentities.removeValue(forKey: sessionID) {
+            departures[sessionID] = (worktreeIdentity: departed, at: moment)
+        }
+
+        guard pending.authorityBasis == .observedExecution else { return }
+
+        let recent = (observedMoveHistory[sessionID] ?? []).filter {
+            moment.timeIntervalSince($0) < SessionCheckoutDefaults.observedMoveWindow
+        } + [moment]
+        observedMoveHistory[sessionID] = recent
+
+        guard recent.count >= SessionCheckoutDefaults.observedMoveCeiling else { return }
+        abandonedFollowing.insert(sessionID)
+        observedMoveHistory[sessionID] = nil
+        EventLog.shared.record(.session, "Checkout move following abandoned", [
+            "session": sessionID.uuidString,
+            "moves": String(recent.count),
+            "window": String(Int(SessionCheckoutDefaults.observedMoveWindow))
+        ])
+    }
+
+    /// Whether Threading has stopped following this session's execution after too many moves.
+    func hasAbandonedFollowing(sessionID: SessionID) -> Bool {
+        abandonedFollowing.contains(sessionID)
+    }
+
+    /// Forgets a session's damping state. For tests and for a session leaving the store.
+    func forgetMoveHistory(sessionID: SessionID) {
+        departures[sessionID] = nil
+        observedMoveHistory[sessionID] = nil
+        departingIdentities[sessionID] = nil
+        abandonedFollowing.remove(sessionID)
     }
 
     func isHoldingInput(sessionID: SessionID) -> Bool {

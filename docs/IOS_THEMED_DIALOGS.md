@@ -192,6 +192,46 @@ surfaces, not a new extension component: Threading continues to own catalogue va
 inherited/default resolution and the choices submitted to the runtime. Themes own presentation
 material, while extensions do not replace those operational decision surfaces.
 
+**A popover follows its content's height.** UIKit sizes a popover from `preferredContentSize`
+once, at presentation, so content whose height follows a choice made *inside* it was either
+clipped under the old height or left standing over empty room. The presenter measures the root
+view again whenever it is replaced and hands UIKit the difference, which UIKit animates itself.
+
+**The anchor is a view, not a view controller.** A `UIViewControllerRepresentable` needs
+containment in a parent controller, and inside a SwiftUI **toolbar item** there is none to be
+had. The presenter began as one, and attaching it to the draft screen's account disc left the
+navigation bar standing over an empty screen: the ground, the project sentence and the whole
+composer never mounted, and the evidence run for the *existing* `new-session` fixture failed with
+a window that contained no editable control at all. The anchor is now a plain `UIView` that draws
+nothing, takes no touch, and finds its presenting controller through the responder chain — where
+UIKit itself looks for the controller a view belongs to. The three composer choosers render
+pixel-identically across that change; `new-session-model-effort-picker-custom-dark` is the proof.
+
+**A bar item keeps the plate its neighbours wear.** The draft's disc is a `Button` and the chat's
+is a `Menu`, and the two bars must show one control for one login, so the draft's does *not* take
+`.buttonStyle(.plain)` — that dropped the bar item's own plate and made the draft the one screen
+whose trailing control was a bare circle.
+
+**The draft's identity picker is the fourth consumer, and the first to hang from the bar.**
+`MobileIdentityPicker` replaced a system `Menu` on the navigation bar's account disc that listed
+the runtime and the login as one scrolling column: five identical sparkles for five runtimes,
+the chosen one's glyph replaced by a checkmark, and every login's usage folded into its title
+behind three spaces — "Default 5h 38% · 7d 36% · 7d Fable 33%" wrapped to three lines — with
+"Loading usage…" and "Usage unavailable" as wider names rather than states. It closed on the
+first choice, so "Codex on the work login" was two openings. The picker is the two decisions as
+the two things they are: the runtimes as a strip of their own marks at one width each (a sixth
+starts a second row, padded so no tile widens), and the logins as rows on one `ThemedRowGroup`
+plate, each led by the toolbar's own disc — the login's emoji or initial, ringed by that login's
+reading — so the picker is a row of the discs the bar might wear, and the words under each name
+are the exact reading those rings stand for. Tapping a runtime keeps the popover open and the
+rows beneath follow it, which is what the re-measure above exists for; tapping a login commits
+and closes. The chosen tile takes the accent as a *ring* on its disc rather than a fill: a brand
+mark keeps its own colour by design, and Claude's coral on an accent-filled disc is two brands
+arguing. It hangs *down* from the bar, so the keyboard bounds the far edge of its room rather than the
+near one and a phone with the height keeps it up, which the composer's own choosers cannot
+promise. It still asks `makeRoom` first: the login list caps and scrolls, and below that cap a
+small phone drops the keyboard rather than letting UIKit shrink the panel and clip a login away.
+
 ## Settings surfaces
 
 **A Settings row that leads to another Settings page stays in the same navigation stack.** The

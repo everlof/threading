@@ -103,6 +103,32 @@ final class AppSettingDefinitionTests: XCTestCase {
         XCTAssertEqual(AppSettingDefinitions.localDiagnosticsEnabled.read(from: defaults), true)
     }
 
+    @MainActor
+    func testMacNotificationActivityWindowDefaultsToTwoMinutesAndPersistsEveryChoice() throws {
+        let suiteName = "AppSettingDefinitionTests.notificationActivity.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = AppSettings(defaults: defaults)
+
+        XCTAssertNil(
+            defaults.persistentDomain(forName: suiteName)?[
+                "remoteNotificationMacActivityWindow"
+            ]
+        )
+        XCTAssertEqual(settings.remoteNotificationMacActivityWindow, .twoMinutes)
+        XCTAssertEqual(settings.remoteNotificationMacActivityWindow.seconds, 120)
+
+        let expected: [(MacNotificationActivityWindow, TimeInterval)] = [
+            (.off, 0), (.oneMinute, 60), (.twoMinutes, 120),
+            (.fiveMinutes, 300), (.tenMinutes, 600),
+        ]
+        for (choice, seconds) in expected {
+            settings.remoteNotificationMacActivityWindow = choice
+            XCTAssertEqual(settings.remoteNotificationMacActivityWindow, choice)
+            XCTAssertEqual(settings.remoteNotificationMacActivityWindow.seconds, seconds)
+        }
+    }
+
     func testEveryPersistedIdentityKeepsItsStableKeyAndValueType() {
         let expected: [AppSettingIdentity: PersistenceCompatibility] = [
             .defaultAgentKind: .init(key: "defaultAgentKind", valueType: .string),
@@ -218,6 +244,7 @@ final class AppSettingDefinitionTests: XCTestCase {
             ),
             .bypassesCodexHookTrust: .init(key: "bypassesCodexHookTrust", valueType: .boolean),
             .claudeRemoteControl: .init(key: "claudeRemoteControl", valueType: .string),
+            .claudeTerminalRenderer: .init(key: "claudeTerminalRenderer", valueType: .string),
             .claudeStartupSpeed: .init(key: "claudeStartupSpeed", valueType: .string),
             .codexStartupSpeed: .init(key: "codexStartupSpeed", valueType: .string),
             .defaultPermissionMode: .init(key: "defaultPermissionMode", valueType: .string),
@@ -226,6 +253,10 @@ final class AppSettingDefinitionTests: XCTestCase {
                 valueType: .boolean
             ),
             .remoteAccessEnabled: .init(key: "remoteAccessEnabled", valueType: .boolean),
+            .remoteNotificationMacActivityWindow: .init(
+                key: "remoteNotificationMacActivityWindow",
+                valueType: .string
+            ),
             .remoteAccessDoorMigration: .init(
                 key: "didMigrateRemoteAccessDoors",
                 valueType: .boolean
@@ -419,9 +450,9 @@ final class AppSettingDefinitionTests: XCTestCase {
     func testNavigationAndRemoteCatalogueRowsProjectFromDefinitions() {
         let authoredRows = AppSettingDefinitions.all.flatMap(\.presentations)
 #if DEBUG || THREADING_INTERNAL
-        XCTAssertEqual(authoredRows.count, 84)
+        XCTAssertEqual(authoredRows.count, 86)
 #else
-        XCTAssertEqual(authoredRows.count, 83)
+        XCTAssertEqual(authoredRows.count, 85)
 #endif
         XCTAssertEqual(
             SettingsPages.builtIn.flatMap(\.entries).count,
@@ -459,7 +490,8 @@ final class AppSettingDefinitionTests: XCTestCase {
             "Bell sound", "Sounds for each bell", "Silence every sound",
             "New sessions start in", "Remote Control for new Claude sessions",
             "Report Claude turn and subagent activity",
-            "Hide Claude's status line in Threading terminals", "Report Codex turn boundaries",
+            "Hide Claude's status line in Threading terminals",
+            "Scrolling in new Claude terminals", "Report Codex turn boundaries",
             "Skip Codex hook review", "Updates you receive",
             "Check for updates automatically",
             "Keep this Mac awake while agents work"
@@ -488,7 +520,7 @@ final class AppSettingDefinitionTests: XCTestCase {
         // setting, so it is surfaced rather than persisted and cannot be interleaved.
         XCTAssertEqual(actual["remote-access"], [
             "Remote Access", "This network", "Tailscale",
-            "Open in a browser on your tailnet", "New shared chats",
+            "Open in a browser on your tailnet", "Mac activity window", "New shared chats",
             "Reports from your phone", "Hosted Direct"
         ])
         XCTAssertEqual(actual["github"], ["Client ID", "gh CLI", "Git credential helper"])

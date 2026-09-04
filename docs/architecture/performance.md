@@ -3355,6 +3355,35 @@ table is a directly placed grid, not nested stacks. Disclosure state belongs to 
 and rows are inserted or removed from the cheap presentation model. Do not replace this with
 hidden stack children: hidden AppKit views still participate in the layout engine.
 
+## Shared transcript table
+
+The main conversation and the Subagents pane now present rows through one
+`ConversationTranscriptTable` (see [`native-conversations.md`](native-conversations.md)). The
+extraction was measured rather than assumed flat, because it moved the incremental tool-run
+reduction, the identity index and the row hosts out of two controllers into one generic type.
+Three passes each of the generated fixtures, Debug, same machine and build, HEAD's files rebuilt
+in the same DerivedData for the *before* column; medians:
+
+| Case | Before | After |
+|---|---|---|
+| 1,000-turn mixed replay, 6,000 rows / 4,999 presented: render | 1,450 ms | 1,215 ms |
+| Same replay: materialized rows / descendants / renderer growth | 6 / 307 / 64 MB | 6 / 307 / 64 MB |
+| Deep jump · incremental append · result + fold · 250 stream updates | 38.2 · 5.3 · 34.0 · 6.1 ms | 41.1 · 5.2 · 30.8 · 6.4 ms |
+| Active turn, 100 base turns + 100 tools: append p95 · middle jump · settle | 3.5 · 42.3 · 24.6 ms | 3.7 · 45.6 · 29.4 ms |
+| Same: materialized / collapsed / expanded presented | 23 / 502 / 602 | 23 / 502 / 602 |
+| Child transcript, 100 generated turns, 801 presented: render · initial paint · row mount p95 | 8.2 · 30.2 · 0.82 ms | 9.3 · 30.4 · 0.86 ms |
+| Same: materialized / descendants / renderer growth | 18 / 69 / 8.4 MB | 18 / 69 / 8.0 MB |
+
+The first cut was not flat, and only the matched run said so: `foldTurn` rebuilt the whole
+ordering for every settled turn, so the 1,000-turn replay went from 1,450 ms to 5,023 ms while
+every bounded-working-set assertion still passed. Folding now removes the turn's few entries in
+place and inserts one fold, and the table's identity lookups fall back to a scan from the tail —
+a settling turn is recent, and during replay the index is deliberately empty — which is also why
+replay ended up faster than before. The remaining differences are within the run-to-run spread of
+three Debug passes. Child render gained about a millisecond on 800 items because the rebuilt
+presentation now goes through the same per-row append as the live parent; that is the price of
+live and rebuilt rows taking one shape, and it sits well inside the bound above.
+
 ## Native conversation stress target
 
 `ConversationRenderTests.testStressNativeConversationWhenEnabled` generates prose, mixed and

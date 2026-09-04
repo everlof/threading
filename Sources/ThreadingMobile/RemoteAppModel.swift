@@ -3112,8 +3112,16 @@ final class RemoteAppModel: ObservableObject {
                     if let event = try? JSONDecoder().decode(
                         RemoteNotificationEventDTO.self,
                         from: data
-                    ) {
+                    ), RemoteNotificationPayloadValidation.accepts(event) {
                         RemoteNotificationBridge.received(event, connectionID: hostID)
+                    }
+                case "notificationRetraction":
+                    if let data = text.data(using: .utf8),
+                       let retraction = try? JSONDecoder().decode(
+                           RemoteNotificationRetractionDTO.self,
+                           from: data
+                       ), RemoteNotificationPayloadValidation.accepts(retraction) {
+                        RemoteNotificationBridge.received(retraction, connectionID: hostID)
                     }
                 case "mobileDiagnosticsCaptureRequest":
                     if let request = try? JSONDecoder().decode(
@@ -3662,6 +3670,28 @@ final class RemoteAppModel: ObservableObject {
         ]
     )
 
+    /// The app theme a marketing capture asked for through `THREADING_MOBILE_THEME`, else the
+    /// demo's own.
+    ///
+    /// One resolution for the hello's theme, the coordinated terminal palette and the fixture's
+    /// `me.theme`. The dashboard's frame was painted in the requested theme while the response
+    /// still carried the demo's Cyberpunk record, so the Settings capture named an appearance
+    /// the rest of the set was not drawn in.
+    static var demoRequestedMarketingTheme: RemoteThemeDTO {
+#if DEBUG
+        switch ProcessInfo.processInfo.environment["THREADING_MOBILE_THEME"] {
+        case "light": return demoLightTheme
+        case "threading": return demoThreadingTheme
+        case "system-remote": return demoSystemRemoteTheme
+        case let requested?:
+            return demoCatalogThemes.first(where: { $0.id == requested }) ?? demoTheme
+        case nil: return demoTheme
+        }
+#else
+        return demoTheme
+#endif
+    }
+
     /// A coordinated terminal palette for a marketing capture's selected app theme.
     ///
     /// Real sessions keep app and terminal themes independently assignable. The marketing flow is
@@ -3673,30 +3703,54 @@ final class RemoteAppModel: ObservableObject {
     ) -> RemoteTerminalThemeDTO {
         let colours = appTheme.colors
         let isLight = appTheme.mode == .light
-        let foreground = colours["label"] ?? (isLight ? "#111111" : "#F3F4F6")
-        let secondary = colours["secondary_label"] ?? (isLight ? "#555555" : "#A7ABB4")
-        let tertiary = colours["tertiary_label"] ?? (isLight ? "#777777" : "#747983")
-        let background = colours["ground"] ?? (isLight ? "#FFFFFF" : "#16181D")
-        let accent = colours["accent"] ?? (isLight ? "#155DB1" : "#64A8FF")
-        let positive = colours["status_positive"] ?? (isLight ? "#197149" : "#74C49A")
-        let warning = colours["status_warning"] ?? (isLight ? "#9A6700" : "#E6A35D")
-        let negative = colours["status_negative"] ?? (isLight ? "#B42318" : "#E06E65")
+        let ground = colours["ground"] ?? (isLight ? "#FFFFFF" : "#16181D")
+        // A terminal cell has no alpha: `TerminalViewRepresentable` hands SwiftTerm opaque RGB, so
+        // a role that is the label at some opacity (`tertiary_label`, `selection`) has to be
+        // composited over the ground here or it arrives as the label itself. That is how Art
+        // Deco drew Claude's prompt bar in cream and Editorial in near-black: both are `\e[100m`,
+        // ANSI bright black, mapped to the tertiary tint with its alpha thrown away.
+        func role(_ key: String, fallback: String) -> String {
+            DemoHexColour.composite(colours[key] ?? fallback, over: ground)
+        }
+        let foreground = role("label", fallback: isLight ? "#111111" : "#F3F4F6")
+        let secondary = role("secondary_label", fallback: isLight ? "#555555" : "#A7ABB4")
+        let tertiary = role("tertiary_label", fallback: isLight ? "#777777" : "#747983")
+        let accent = role("accent", fallback: isLight ? "#155DB1" : "#64A8FF")
+        let positive = role("status_positive", fallback: isLight ? "#197149" : "#74C49A")
+        let warning = role("status_warning", fallback: isLight ? "#9A6700" : "#E6A35D")
+        let negative = role("status_negative", fallback: isLight ? "#B42318" : "#E06E65")
+        let selection = DemoHexColour.composite(
+            colours["selection"] ?? colours["accent_muted"] ?? accent,
+            over: ground
+        )
         let blue = isLight ? "#2457A7" : "#6EA8D8"
         let magenta = isLight ? "#8F3F97" : "#C486B9"
         let cyan = isLight ? "#137C8B" : "#7DC9D2"
+        // The four greys follow terminal convention for the mode rather than the label roles: a
+        // TUI recorded against a light terminal writes its text in black and bright black and
+        // expects white and bright white to sit near the paper, and a dark one the reverse. The
+        // recording replayed for a light theme was made against a light terminal
+        // (`MobileMarketingTerminalFixture.TerminalMode`), so the two halves agree.
+        let black = isLight ? foreground : role("surface", fallback: "#1B1E24")
+        let brightBlack = isLight
+            ? DemoHexColour.blend(ground, foreground, fraction: 0.5)
+            : tertiary
+        let white = isLight
+            ? DemoHexColour.blend(ground, foreground, fraction: 0.2)
+            : secondary
+        let brightWhite = isLight ? ground : foreground
 
         return RemoteTerminalThemeDTO(
             id: "marketing-\(appTheme.id)-terminal",
             name: "\(appTheme.name) Marketing",
             foreground: foreground,
             boldForeground: foreground,
-            background: background,
+            background: ground,
             cursor: accent,
-            selection: colours["selection"] ?? colours["accent_muted"] ?? accent,
+            selection: selection,
             ansi: [
-                isLight ? foreground : (colours["surface"] ?? "#1B1E24"),
-                negative, positive, warning, blue, magenta, cyan, secondary,
-                tertiary, negative, positive, warning, accent, magenta, cyan, foreground,
+                black, negative, positive, warning, blue, magenta, cyan, white,
+                brightBlack, negative, positive, warning, accent, magenta, cyan, brightWhite,
             ]
         )
     }
@@ -3912,7 +3966,7 @@ final class RemoteAppModel: ObservableObject {
             sessions: sessions,
             terminals: [],
             host: RemoteHostDTO(id: "demo-mac", name: "David’s MacBook Pro"),
-            theme: base.theme,
+            theme: demoRequestedMarketingTheme,
             themeCatalog: base.themeCatalog,
             archivedSessions: [],
             newSessionCatalog: catalog,
@@ -4364,5 +4418,52 @@ private extension RemoteMeDTO {
             newSessionCatalog: newSessionCatalog,
             features: features
         )
+    }
+}
+
+/// Six-digit hex arithmetic for the derived marketing palette.
+///
+/// Theme colours arrive as `#RRGGBB` or `#RRGGBBAA`; every result is opaque `#RRGGBB`, because
+/// that is all a terminal cell can hold. Unparseable input passes through unchanged.
+enum DemoHexColour {
+    static func composite(_ hex: String, over ground: String) -> String {
+        guard let top = channels(hex), let base = channels(ground) else { return hex }
+        let alpha = top.alpha
+        return format(
+            red: top.red * alpha + base.red * (1 - alpha),
+            green: top.green * alpha + base.green * (1 - alpha),
+            blue: top.blue * alpha + base.blue * (1 - alpha)
+        )
+    }
+
+    static func blend(_ from: String, _ to: String, fraction: Double) -> String {
+        guard let start = channels(from), let end = channels(to) else { return from }
+        return format(
+            red: start.red + (end.red - start.red) * fraction,
+            green: start.green + (end.green - start.green) * fraction,
+            blue: start.blue + (end.blue - start.blue) * fraction
+        )
+    }
+
+    private static func channels(
+        _ hex: String
+    ) -> (red: Double, green: Double, blue: Double, alpha: Double)? {
+        var digits = Substring(hex.trimmingCharacters(in: .whitespacesAndNewlines))
+        if digits.hasPrefix("#") { digits = digits.dropFirst() }
+        guard digits.count == 6 || digits.count == 8,
+              let value = UInt64(digits, radix: 16) else { return nil }
+        let hasAlpha = digits.count == 8
+        let shift: UInt64 = hasAlpha ? 8 : 0
+        return (
+            Double((value >> (16 + shift)) & 0xFF) / 255,
+            Double((value >> (8 + shift)) & 0xFF) / 255,
+            Double((value >> shift) & 0xFF) / 255,
+            hasAlpha ? Double(value & 0xFF) / 255 : 1
+        )
+    }
+
+    private static func format(red: Double, green: Double, blue: Double) -> String {
+        func byte(_ value: Double) -> Int { Int((min(max(value, 0), 1) * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", byte(red), byte(green), byte(blue))
     }
 }

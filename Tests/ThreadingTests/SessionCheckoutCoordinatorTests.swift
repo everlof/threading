@@ -487,6 +487,296 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         XCTAssertEqual(first?.reason, "first")
     }
 
+    // MARK: - Reclaiming rows Threading adopted
+
+    /// The row the sidebar was left holding: a move creates a project for the destination, the
+    /// chat moves back out moments later, and the empty row stays forever. It also kept a live
+    /// `HEAD` watcher on that checkout, so it was not merely cosmetic.
+    func testAnAdoptedProjectIsReclaimedWhenItsLastChatLeaves() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+
+        _ = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: sibling.path,
+            authorityBasis: .explicitUserRequest,
+            reason: "into the worktree",
+            policy: .allowSameRepository
+        )
+        let adopted = try XCTUnwrap(store.project(forSessionID: session.id))
+        XCTAssertTrue(adopted.wasAdoptedForCheckoutMove)
+        XCTAssertNotEqual(adopted.id, project.id)
+
+        _ = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: main.path,
+            authorityBasis: .explicitUserRequest,
+            reason: "back out again",
+            policy: .allowSameRepository
+        )
+
+        XCTAssertNil(
+            store.projects.first(where: { $0.id == adopted.id }),
+            "an adopted row with nothing left in it is taken back"
+        )
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+    }
+
+    /// The flag is the whole safety margin: a folder the user added stays whether or not it
+    /// currently holds chats.
+    func testAUserAddedProjectSurvivesItsLastChatLeaving() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let destination = try XCTUnwrap(store.addProject(folderURL: sibling))
+        let session = try XCTUnwrap(store.addSession(to: destination.id, kind: .codex))
+        let coordinator = makeCoordinator()
+
+        XCTAssertFalse(destination.wasAdoptedForCheckoutMove)
+
+        _ = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: main.path,
+            authorityBasis: .explicitUserRequest,
+            reason: "leaving a folder the user added",
+            policy: .allowSameRepository
+        )
+
+        XCTAssertNotNil(
+            store.projects.first(where: { $0.id == destination.id }),
+            "a project the user added is never reclaimed"
+        )
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+    }
+
+    /// Adopted once does not mean disposable forever. Starting a chat in the row is the user
+    /// choosing that folder, and it stops being Threading's to take back.
+    func testAnAdoptedProjectThatEarnedItsPlaceIsNoLongerReclaimable() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+
+        _ = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: sibling.path,
+            authorityBasis: .explicitUserRequest,
+            reason: "into the worktree",
+            policy: .allowSameRepository
+        )
+        let adopted = try XCTUnwrap(store.project(forSessionID: session.id))
+
+        // The user starts their own chat there, then closes it again.
+        let ownChat = try XCTUnwrap(store.addSession(to: adopted.id, kind: .codex))
+        XCTAssertFalse(
+            try XCTUnwrap(store.projects.first(where: { $0.id == adopted.id }))
+                .wasAdoptedForCheckoutMove,
+            "using the row clears the flag"
+        )
+        _ = store.removeSession(id: ownChat.id)
+
+        _ = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: main.path,
+            authorityBasis: .explicitUserRequest,
+            reason: "back out again",
+            policy: .allowSameRepository
+        )
+
+        XCTAssertNotNil(
+            store.projects.first(where: { $0.id == adopted.id }),
+            "a row the user has used is theirs, even when it is empty again"
+        )
+    }
+
+    // MARK: - Damping observed execution
+
+    /// The oscillation, reproduced: ownership follows an agent into a sibling, and the reading
+    /// taken a moment earlier — against ownership that has since changed — names where it came
+    /// from. Measured at 88 committed moves and 89 agent relaunches in 4m34s before this guard.
+    func testAnObservedMoveStraightBackIsRefusedWithinTheDwell() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        var clock = Date()
+        let coordinator = makeCoordinator(clock: { clock })
+        let mainIdentity = try XCTUnwrap(GitInfo.worktreeIdentity(for: main.path))
+
+        // Idle, so this settles inline — which is exactly the production path.
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            policy: .allowSameRepository
+        )
+        XCTAssertEqual(
+            identity(ofProjectFor: session.id),
+            GitInfo.worktreeIdentity(for: sibling.path),
+            "the first observed move must still be followed"
+        )
+
+        clock = clock.addingTimeInterval(3)
+        let back = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(main, branch: "main", name: "main"),
+            policy: .allowSameRepository
+        )
+
+        XCTAssertEqual(back, .denied)
+        XCTAssertNotEqual(
+            identity(ofProjectFor: session.id),
+            mainIdentity,
+            "the chat must not be dragged back where it just came from"
+        )
+        XCTAssertNil(store.session(withID: session.id)?.pendingCheckoutMove)
+    }
+
+    /// The dwell is hysteresis, not a veto: once a chat has settled, a genuine later reading
+    /// still moves it.
+    func testTheDwellLapsesSoAChatCanStillFollowItsAgentBackLater() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        var clock = Date()
+        let coordinator = makeCoordinator(clock: { clock })
+
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            policy: .allowSameRepository
+        )
+        clock = clock.addingTimeInterval(SessionCheckoutDefaults.reversalDwell + 1)
+
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(main, branch: "main", name: "main"),
+            policy: .allowSameRepository
+        )
+
+        XCTAssertEqual(
+            identity(ofProjectFor: session.id),
+            GitInfo.worktreeIdentity(for: main.path)
+        )
+    }
+
+    /// Only a *reversal* is damped. An agent walking onwards to a third checkout is information,
+    /// not two signals disagreeing, so ownership still follows it immediately.
+    func testTheDwellDoesNotBlockAMoveOnwardsToAThirdCheckout() throws {
+        let third = root.appendingPathComponent("third")
+        try git(["worktree", "add", "-b", "feature/third", third.path], in: main)
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        var clock = Date()
+        let coordinator = makeCoordinator(clock: { clock })
+
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            policy: .allowSameRepository
+        )
+        clock = clock.addingTimeInterval(3)
+
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(third, branch: "feature/third", name: "third"),
+            policy: .allowSameRepository
+        )
+
+        XCTAssertEqual(
+            identity(ofProjectFor: session.id),
+            GitInfo.worktreeIdentity(for: third.path)
+        )
+    }
+
+    /// A move somebody asked for is an instruction, and is never rate-limited by a budget the
+    /// inferred signal spent.
+    func testAnExplicitMoveIsNeverDampedByTheDwell() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        var clock = Date()
+        let coordinator = makeCoordinator(clock: { clock })
+
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            policy: .allowSameRepository
+        )
+        clock = clock.addingTimeInterval(3)
+
+        let result = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: main.path,
+            authorityBasis: .explicitUserRequest,
+            reason: "the user moved it back",
+            policy: .allowExplicitRequests
+        )
+
+        guard case .queued = result else {
+            return XCTFail("an explicit move must not be damped, got \(result)")
+        }
+        XCTAssertEqual(
+            identity(ofProjectFor: session.id),
+            GitInfo.worktreeIdentity(for: main.path)
+        )
+    }
+
+    /// The ceiling is the terminator. The dwell slows an oscillation to one move a minute; a
+    /// chat that keeps moving anyway is reporting something Threading does not model, so it
+    /// stops guessing rather than following forever.
+    func testFollowingIsAbandonedOnceTheCeilingIsReached() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        var clock = Date()
+        let coordinator = makeCoordinator(clock: { clock })
+        let places = [
+            try observed(sibling, branch: "feature/move", name: "sibling"),
+            try observed(main, branch: "main", name: "main")
+        ]
+
+        for step in 0..<SessionCheckoutDefaults.observedMoveCeiling {
+            _ = coordinator.reconcileObservedExecution(
+                sessionID: session.id,
+                checkout: places[step % 2],
+                policy: .allowSameRepository
+            )
+            clock = clock.addingTimeInterval(SessionCheckoutDefaults.reversalDwell + 1)
+        }
+
+        XCTAssertTrue(coordinator.hasAbandonedFollowing(sessionID: session.id))
+        let settled = identity(ofProjectFor: session.id)
+
+        let after = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: places[0],
+            policy: .allowSameRepository
+        )
+
+        XCTAssertEqual(after, .denied)
+        XCTAssertEqual(
+            identity(ofProjectFor: session.id),
+            settled,
+            "an abandoned chat stays exactly where it was left"
+        )
+    }
+
+    /// The relaunch decision is made from this field, so it has to survive to the observer.
+    func testACommittedMoveNamesItsAuthorityBasisOnTheEvent() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+        let received = expectation(description: "SessionCheckoutDidMove")
+        var basis: SessionCheckoutAuthorityBasis?
+        let token = NotificationCenter.default.observe(SessionCheckoutDidMove.self) { event in
+            basis = event.authorityBasis
+            received.fulfill()
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+
+        _ = coordinator.reconcileObservedExecution(
+            sessionID: session.id,
+            checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
+            policy: .allowSameRepository
+        )
+
+        wait(for: [received], timeout: 2)
+        XCTAssertEqual(basis, .observedExecution)
+    }
+
     func testMCPArgumentsDecodeAbsolutePathAuthorityAndReason() throws {
         let arguments = try JSONDecoder().decode(
             SetSessionCheckoutArguments.self,
@@ -639,6 +929,32 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
             projects: store,
             runtime: AgentRuntime(currentSessionProjection: .projectStore(store))
         )
+    }
+
+    private func makeCoordinator(
+        clock: @escaping @MainActor () -> Date
+    ) -> SessionCheckoutCoordinator {
+        SessionCheckoutCoordinator(
+            projects: store,
+            runtime: AgentRuntime(currentSessionProjection: .projectStore(store)),
+            now: clock
+        )
+    }
+
+    private func observed(_ url: URL, branch: String, name: String) throws -> ObservedCheckout {
+        ObservedCheckout(
+            root: url.path,
+            worktreeIdentity: try XCTUnwrap(GitInfo.worktreeIdentity(for: url.path)),
+            repositoryIdentity: try XCTUnwrap(GitInfo.repositoryIdentity(for: url.path)),
+            branch: branch,
+            displayName: name
+        )
+    }
+
+    /// The canonical worktree identity of the checkout the session's project stands in.
+    private func identity(ofProjectFor sessionID: SessionID) -> String? {
+        guard let project = store.project(forSessionID: sessionID) else { return nil }
+        return GitInfo.worktreeIdentity(for: project.folderPath)
     }
 
     private func failure(

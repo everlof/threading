@@ -239,6 +239,7 @@ enum SessionDetailMetrics {
 
 struct SessionDetailView: View {
     @EnvironmentObject private var model: RemoteAppModel
+    @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var theme
     /// The menu's usage glyph is a rendered picture rather than a symbol, so it is rendered for
     /// the screen it will be shown on.
@@ -428,6 +429,13 @@ struct SessionDetailView: View {
             .mobileTheme(theme)
         }
         .task {
+            if let host = model.activeHost,
+               let hostID = host.hostID ?? model.activeHostID {
+                await notifications.clearTurnCompletions(
+                    hostID: hostID,
+                    sessionID: session.id
+                )
+            }
             await open()
             if initialWorkspaceDestination != nil, canOpenWorkspace {
                 initialWorkspaceEventID = "search-result"
@@ -437,6 +445,17 @@ struct SessionDetailView: View {
         }
         .onChange(of: model.notificationOpenRequest?.eventID) { _, _ in
             openPendingNotificationDestination()
+        }
+        .onChange(of: notifications.scenePhase) { _, phase in
+            guard phase == .active,
+                  let host = model.activeHost,
+                  let hostID = host.hostID ?? model.activeHostID else { return }
+            Task {
+                await notifications.clearTurnCompletions(
+                    hostID: hostID,
+                    sessionID: session.id
+                )
+            }
         }
         .onChange(of: model.routeIdentity) { _, _ in
             adoptRouteIfMoved()

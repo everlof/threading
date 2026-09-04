@@ -110,6 +110,12 @@ struct ShellCommand: Equatable, Sendable {
         components.append(Self.quote(word))
     }
 
+    mutating func append(words: [String]) {
+        for word in words {
+            append(word: word)
+        }
+    }
+
     mutating func append(flag: String) {
         precondition(flag.hasPrefix("-"), "A shell flag must start with '-'")
         append(word: flag)
@@ -211,7 +217,7 @@ enum AgentLauncher {
         }
 
         return launchPlan(
-            command: routed(command, for: session),
+            command: routed(command, for: session, rendersTerminalUI: true),
             in: executionProject.folderPath,
             resumeState: resumeState
         )
@@ -256,6 +262,51 @@ enum AgentLauncher {
     static func remoteControlAtStartup(for session: AgentSession) -> Bool? {
         guard session.kind.supports(.remoteControl) else { return nil }
         return session.remoteControl ?? AppSettings.shared.claudeRemoteControl.startupValue
+    }
+
+    /// Whether this launch pins the agent's terminal UI to its alternate screen, to the main
+    /// screen, or says nothing at all.
+    ///
+    /// Resolved the way every other three-state launch answer is: the conversation's own choice,
+    /// then the app-wide default, then nil. Unlike those, the shipped default is a *stated*
+    /// value rather than nil — Threading's terminal, and the iPhone mirroring it, can only
+    /// scroll what lands in the retained buffer, and the CLI's own default puts it somewhere
+    /// else. Nil still has to survive to the launch, because it is what "leave it to Claude"
+    /// means, including leaving the CLI's machine-local auto-disable in force.
+    ///
+    /// Terminal surfaces only, and by construction rather than by a check here: a native
+    /// conversation runs `--print` and draws no terminal UI, so `streamPlan` never asks.
+    static func terminalRendererAtStartup(for session: AgentSession) -> Bool? {
+        terminalRendererAtStartup(
+            for: session,
+            appDefault: AppSettings.shared.claudeTerminalRenderer
+        )
+    }
+
+    /// Pure resolution seam, for the reason `fastModeAtStartup` has one: a hosted test reads the
+    /// developer's own `UserDefaults`, so a case about the app-wide default has to hand one in
+    /// rather than write theirs.
+    static func terminalRendererAtStartup(
+        for session: AgentSession,
+        appDefault: ClaudeTerminalRenderer
+    ) -> Bool? {
+        guard session.kind.supports(.selectableTerminalRenderer) else { return nil }
+        return session.fullscreenRenderer ?? appDefault.startupValue
+    }
+
+    /// That answer as the `env` word a terminal launch carries, or nothing to state.
+    ///
+    /// The environment rather than the per-session settings file, and not for tidiness: the
+    /// settings key cannot turn the alternate screen back *on* against the CLI's own
+    /// machine-local auto-disable (measured, `AgentCapabilities.selectableTerminalRenderer`),
+    /// and stating a default in that file would force one onto every Claude terminal launch —
+    /// today a session that opted out of hooks and overrides gets no `--settings` file at all.
+    static func terminalRendererEnvironmentWords(fullscreen: Bool?) -> [String] {
+        guard let fullscreen else { return [] }
+        let value = fullscreen
+            ? AgentDefaults.claudeFullscreenRendererValue
+            : AgentDefaults.claudeMainScreenRendererValue
+        return ["\(AgentDefaults.claudeRendererEnvironmentKey)=\(value)"]
     }
 
     /// Whether this launch explicitly starts in Fast or Standard, or leaves speed to the CLI.
@@ -887,11 +938,19 @@ enum AgentLauncher {
     private static func routed(
         _ command: ShellCommand,
         for session: AgentSession,
-        brokersPermissions: Bool = false
+        brokersPermissions: Bool = false,
+        rendersTerminalUI: Bool = false
     ) -> ShellCommand {
         var routed = ShellCommand()
+        // Asked once here rather than inside each branch below: every path that states an
+        // environment states this one too, and the early return has to know whether there is
+        // anything to state before it decides there is no prefix to build.
+        let rendererWords = rendersTerminalUI
+            ? terminalRendererEnvironmentWords(fullscreen: terminalRendererAtStartup(for: session))
+            : []
 
-        if !session.kind.supportsAccounts && !session.kind.supportsThreadingBridge {
+        if !session.kind.supportsAccounts, !session.kind.supportsThreadingBridge,
+           rendererWords.isEmpty {
             return command
         }
 
@@ -902,6 +961,7 @@ enum AgentLauncher {
                 brokersPermissions: brokersPermissions,
                 to: &routed
             )
+            routed.append(words: rendererWords)
             routed.append(contentsOf: command)
             appendMCPFlags(for: session, to: &routed)
             return routed
@@ -917,6 +977,7 @@ enum AgentLauncher {
                 brokersPermissions: brokersPermissions,
                 to: &routed
             )
+            routed.append(words: rendererWords)
             routed.append(contentsOf: command)
             appendMCPFlags(for: session, to: &routed)
             return routed
@@ -928,6 +989,7 @@ enum AgentLauncher {
             brokersPermissions: brokersPermissions,
             to: &routed
         )
+        routed.append(words: rendererWords)
         routed.append(contentsOf: command)
         appendMCPFlags(for: session, to: &routed)
         return routed

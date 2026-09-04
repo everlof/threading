@@ -10,7 +10,7 @@ import {
   validateDueAppleSessions,
 } from "./auth";
 import { validateAppleConfiguration } from "./apple-tokens";
-import { handleAPNSPush, validateAPNSConfiguration } from "./apns";
+import { handleAPNSPush, handleAPNSRetraction, validateAPNSConfiguration } from "./apns";
 import {
   authorizeDevelopmentSignIn,
   redeemDevelopmentSignIn,
@@ -92,6 +92,9 @@ export default {
       }
       if (request.method === "POST" && url.pathname === "/v1/push") {
         return await handleAPNSPush(request, env);
+      }
+      if (request.method === "POST" && url.pathname === "/v1/push/retractions") {
+        return await handleAPNSRetraction(request, env);
       }
       if (request.method === "POST" && url.pathname === "/v1/push/registrations") {
         return await registerPushRecipient(request, env);
@@ -427,7 +430,8 @@ function rateLimitGroup(pathname: string): string {
   if (pathname.startsWith("/v1/auth/")) return "auth";
   if (pathname.startsWith("/v1/developer/reports")) return "developerReports";
   if (pathname === "/v1/reports") return "reports";
-  if (pathname === "/v1/push" || pathname === "/v1/push/registrations") return "push";
+  if (pathname === "/v1/push" || pathname === "/v1/push/registrations"
+    || pathname === "/v1/push/retractions") return "push";
   if (pathname === "/v1/account") return "account";
   return "unknown";
 }

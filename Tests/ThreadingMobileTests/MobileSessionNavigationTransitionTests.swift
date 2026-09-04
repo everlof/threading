@@ -172,7 +172,10 @@ final class MobileSessionOpeningTests: XCTestCase {
         let window = hostedWindow(rootViewController: controller)
         defer { window.isHidden = true }
 
-        XCTAssertEqual(accessibilityViews(labelled: MobileL10n.string("Agent"), in: window).count, 1)
+        XCTAssertEqual(
+            accessibilityViews(labelled: MobileL10n.string("Agent and account"), in: window).count,
+            1
+        )
         XCTAssertTrue(
             accessibilityViews(labelled: MobileL10n.string("Session actions"), in: window).isEmpty
         )
@@ -188,7 +191,10 @@ final class MobileSessionOpeningTests: XCTestCase {
         settle(window, for: 0.1)
 
         XCTAssertTrue(
-            accessibilityViews(labelled: MobileL10n.string("Agent"), in: window).isEmpty,
+            accessibilityViews(
+                labelled: MobileL10n.string("Agent and account"),
+                in: window
+            ).isEmpty,
             "the fading draft still owns a toolbar item"
         )
         XCTAssertEqual(

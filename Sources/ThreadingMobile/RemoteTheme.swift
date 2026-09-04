@@ -134,6 +134,9 @@ enum MobileDesign {
         static let accountChipGlyph: CGFloat = 9
         /// An emoji's glyph outgrows its point size, so it is set below the letter's.
         static let accountChipEmoji: CGFloat = 10
+        /// The same emoji on the identity picker's login disc, below the `rowMarkGlyph` initial
+        /// it stands in for, for the same reason.
+        static let accountDiscEmoji: CGFloat = 14
         static let accountChipRing: CGFloat = 1.5
         static let rowAttentionDot: CGFloat = 8
         /// The working orb at a row's trailing edge, standing where the age would be. Sized to

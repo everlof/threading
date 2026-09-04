@@ -23,6 +23,8 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
     let environment: RemoteNotificationEnvironment
     let enabledKinds: [RemoteNotificationKind]
     let soundEnabledKinds: [RemoteNotificationKind]
+    let capabilities: [RemoteNotificationCapability]
+    let includesResponsePreviews: Bool
 
     init(
         shareID: String,
@@ -32,7 +34,9 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
         hostedServiceURL: String? = nil,
         environment: RemoteNotificationEnvironment,
         enabledKinds: [RemoteNotificationKind],
-        soundEnabledKinds: [RemoteNotificationKind]
+        soundEnabledKinds: [RemoteNotificationKind],
+        capabilities: [RemoteNotificationCapability] = [],
+        includesResponsePreviews: Bool = false
     ) {
         self.shareID = shareID
         self.deviceID = deviceID
@@ -42,6 +46,40 @@ struct RemoteNotificationSubscriptionRecord: Codable, Equatable, Sendable {
         self.environment = environment
         self.enabledKinds = enabledKinds
         self.soundEnabledKinds = soundEnabledKinds
+        self.capabilities = capabilities
+        self.includesResponsePreviews = includesResponsePreviews
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case shareID, deviceID, deviceToken, hostedRegistrationID, hostedServiceURL
+        case environment, enabledKinds, soundEnabledKinds, capabilities
+        case includesResponsePreviews
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        shareID = try container.decode(String.self, forKey: .shareID)
+        deviceID = try container.decode(String.self, forKey: .deviceID)
+        deviceToken = try container.decode(String.self, forKey: .deviceToken)
+        hostedRegistrationID = try container.decodeIfPresent(
+            String.self,
+            forKey: .hostedRegistrationID
+        )
+        hostedServiceURL = try container.decodeIfPresent(String.self, forKey: .hostedServiceURL)
+        environment = try container.decode(RemoteNotificationEnvironment.self, forKey: .environment)
+        enabledKinds = try container.decode([RemoteNotificationKind].self, forKey: .enabledKinds)
+        soundEnabledKinds = try container.decode(
+            [RemoteNotificationKind].self,
+            forKey: .soundEnabledKinds
+        )
+        capabilities = try container.decodeIfPresent(
+            [RemoteNotificationCapability].self,
+            forKey: .capabilities
+        ) ?? []
+        includesResponsePreviews = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .includesResponsePreviews
+        ) ?? false
     }
 
     var key: RemoteNotificationSubscriptionKey {
@@ -217,6 +255,7 @@ enum RemoteNotificationSubscriptionDefaults {
     static let maximumSubscriptions = 288
     static let maximumEncodedBytes = 1_048_576
     static let maximumHostedServiceURLBytes = 2_048
+    static let maximumCapabilities = 16
 
     static func isValid(_ subscriptions: [RemoteNotificationSubscriptionRecord]) -> Bool {
         guard subscriptions.count <= maximumSubscriptions,
@@ -224,6 +263,7 @@ enum RemoteNotificationSubscriptionDefaults {
         return subscriptions.allSatisfy { subscription in
             let enabledKinds = Set(subscription.enabledKinds)
             let soundKinds = Set(subscription.soundEnabledKinds)
+            let capabilities = Set(subscription.capabilities)
             return RemoteInboundPolicy.acceptsAttentionRecipientID(subscription.shareID)
                 && RemoteInboundPolicy.normalizedDeviceID(subscription.deviceID)
                     == subscription.deviceID
@@ -235,6 +275,10 @@ enum RemoteNotificationSubscriptionDefaults {
                 && enabledKinds.count == subscription.enabledKinds.count
                 && soundKinds.count == subscription.soundEnabledKinds.count
                 && soundKinds.isSubset(of: enabledKinds)
+                && subscription.capabilities.count <= maximumCapabilities
+                && capabilities.count == subscription.capabilities.count
+                && (!subscription.includesResponsePreviews
+                    || capabilities.contains(.turnCompletionPreview))
         }
     }
 

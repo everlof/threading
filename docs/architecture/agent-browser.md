@@ -539,9 +539,11 @@ for what could be built on top, which is the next section.
 
 ### Submitting without being asked every time
 
-Filling a sign-in and then still asking before the submit is about half the value the vault exists
-for, so `BrowserSubmissionExemptions` is the other half — and the piece that most deserved to be
-built last, because it relaxes a different guarantee than the fill does.
+A form-submit prompt offers **Allow Once** and **Allow for This Session**. The remembered answer is
+one calling session on one exact `BrowserOrigin` — scheme, host and port — so the same agent can
+submit repeatedly to the same development host while every other chat, origin, scheme or port asks
+for its own decision. `BrowserSubmissionExemptions` owns those pairs independently of credentials;
+submission is its own boundary whether the page is signed in, anonymous or local.
 
 It is **process memory, deliberately not a preference.** The provider choice and the persistent
 origin grants live in `UserDefaults`, which an agent's shell can rewrite with `defaults write`; that
@@ -551,15 +553,14 @@ watching, which is unattended takeover of whatever that origin is. A store the s
 all is the only version worth having, so quitting Threading is a complete revocation. That property
 is worth keeping even when someone later asks for it to be remembered across launches.
 
-**Only an origin that already holds a credential may be exempted**, because the exemption extends a
-decision the user already made in Settings for that exact origin. Everywhere else the prompt stays
-the two-answer question it has always been: a "stop asking" that any page could earn is not a
-narrower prompt, it is a disabled one. The second affirmative is offered through `choose`, not a
-suppression box, for the reason the origin grant gives — a remembered answer scoped to one host is
-this prompt's own answer, while a checkbox would remember something about every host at once. The
-prompt stays `.alwaysAsks` in the register. Exemptions are listed and revocable in Settings ▸ Tools,
-and membership is re-checked at each submission rather than captured when granted, so revoking takes
-effect on the next submit.
+The second affirmative is offered through `choose`, not a suppression box, for the reason the origin
+grant gives: a remembered answer scoped to one session and one exact origin is this prompt's own
+answer, while a checkbox would carry neither scope. The prompt stays `.alwaysAsks` in the register.
+Exemptions are listed by session and origin and are individually revocable in Settings ▸ Tools;
+membership is re-checked at each submission rather than captured when granted, so revoking takes
+effect on the next submit. The browser-level navigation guard still admits at most one submission
+from each approved agent action. The standing grant removes repeated human questions; it does not
+let one click, key press or page handler submit twice.
 
 `browser_fill_credentials` never submits; submission keeps its own confirmation.
 `browser_run_isolated` does not get this tool at all — its checkable promise is that nothing

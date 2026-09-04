@@ -218,6 +218,7 @@ final class AgentLaunchQuotingTests: XCTestCase {
         let session = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                fullscreenRenderer: nil,
                 reasoningEffort: "xhigh",
                 origin: .original
             ),
@@ -301,6 +302,102 @@ final class AgentLaunchQuotingTests: XCTestCase {
             XCTUnwrap(try AgentLauncher.streamPlan(for: fresh, in: project).arguments.last)
         )
         XCTAssertFalse(nativeWords.contains(AgentDefaults.codexNoAlternateScreenFlag))
+    }
+
+    /// Claude's is a choice rather than Codex's fixed inline launch, so the launch line has to
+    /// carry the *decided* value both ways round — and carry nothing at all when the answer is
+    /// "leave it to Claude", since an unset variable is what lets the CLI's own default and its
+    /// machine-local auto-disable keep deciding.
+    func testAClaudeTerminalStatesWhichScreenItsInterfaceDrawsOn() throws {
+        let project = Project(name: "p", folderURL: URL(fileURLWithPath: "/tmp/p"))
+        let key = AgentDefaults.claudeRendererEnvironmentKey
+        let mainScreen = "\(key)=\(AgentDefaults.claudeMainScreenRendererValue)"
+        let fullscreen = "\(key)=\(AgentDefaults.claudeFullscreenRendererValue)"
+
+        var wantsTerminalScrollback = AgentSession(kind: .claude, title: "main screen")
+        wantsTerminalScrollback.setClaudeFullscreenRenderer(false)
+        var wantsFullscreen = AgentSession(kind: .claude, title: "alternate screen")
+        wantsFullscreen.setClaudeFullscreenRenderer(true)
+
+        for (session, expected) in [
+            (wantsTerminalScrollback, mainScreen),
+            (wantsFullscreen, fullscreen)
+        ] {
+            let words = try Self.tokenizing(
+                XCTUnwrap(try AgentLauncher.plan(for: session, in: project).arguments.last)
+            )
+            XCTAssertEqual(
+                words.filter { $0.hasPrefix("\(key)=") },
+                [expected],
+                "the launch line must state the screen exactly once: \(words)"
+            )
+        }
+
+        // A native conversation draws no terminal UI at all, so stating a renderer for it would
+        // be describing a screen that never exists.
+        let nativeWords = try Self.tokenizing(
+            XCTUnwrap(
+                try AgentLauncher.streamPlan(for: wantsFullscreen, in: project).arguments.last
+            )
+        )
+        XCTAssertTrue(nativeWords.allSatisfy { !$0.hasPrefix("\(key)=") }, "\(nativeWords)")
+
+        // And no other runtime reads this variable, whatever it was asked for.
+        for kind in AgentKind.allCases where kind != .claude && kind.supports(.terminalUI) {
+            let words = try Self.tokenizing(
+                XCTUnwrap(
+                    try AgentLauncher.plan(
+                        for: AgentSession(kind: kind, title: "other"),
+                        in: project
+                    ).arguments.last
+                )
+            )
+            XCTAssertTrue(
+                words.allSatisfy { !$0.hasPrefix("\(key)=") },
+                "\(kind) must not be told about Claude's renderer: \(words)"
+            )
+        }
+    }
+
+    /// The conversation's own answer first, then the app-wide default, then nothing — and the
+    /// shipped default is a stated value, so an ordinary Claude terminal launch is decided.
+    func testTheRendererChoiceReadsTheConversationBeforeTheAppDefault() {
+        var chose = AgentSession(kind: .claude, title: "chose")
+        chose.setClaudeFullscreenRenderer(true)
+        let inherits = AgentSession(kind: .claude, title: "inherits")
+
+        XCTAssertEqual(
+            AgentLauncher.terminalRendererAtStartup(for: chose, appDefault: .terminalScrollback),
+            true,
+            "a conversation that chose for itself outranks the app-wide default"
+        )
+        XCTAssertEqual(
+            AgentLauncher.terminalRendererAtStartup(
+                for: inherits,
+                appDefault: .terminalScrollback
+            ),
+            false
+        )
+        XCTAssertEqual(
+            AgentLauncher.terminalRendererAtStartup(for: inherits, appDefault: .claudeFullscreen),
+            true
+        )
+        XCTAssertNil(
+            AgentLauncher.terminalRendererAtStartup(for: inherits, appDefault: .followClaude),
+            "following states nothing, which is what leaves the CLI's own record deciding"
+        )
+        XCTAssertEqual(
+            AgentLauncher.terminalRendererAtStartup(
+                for: AgentSession(kind: .codex, title: "codex"),
+                appDefault: .terminalScrollback
+            ),
+            nil,
+            "a runtime Threading pins inline already has no choice to state"
+        )
+        XCTAssertEqual(ClaudeTerminalRenderer.terminalScrollback.startupValue, false)
+        XCTAssertTrue(
+            AgentLauncher.terminalRendererEnvironmentWords(fullscreen: nil).isEmpty
+        )
     }
 
     // MARK: - Against the CLI's own parser

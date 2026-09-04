@@ -483,19 +483,25 @@ session's display pane. `SubagentTranscriptViewController` owns the complete chi
 and the selected transcript together; switching its rows routes selection back through the
 session host. A live parent renderer owns provider transcript loading; after that renderer exits,
 the host selects in `AgentRuntime`'s retained state and uses the descriptor-backed loader, so the
-corner receipt and an open navigator do not become inert on the dormant screen. It uses
-`ConversationRowView`, so child markdown, thinking, tool calls, results, and notices use the
-same native rows as the parent rather than a log-shaped second renderer. Adjacent tool calls keep
-their chronological position but start behind one `N tool calls` disclosure; opening it reveals
-the ordinary individually-expandable tool rows. New events update that controller only while
-its tab exists; closing the tab is respected and later activity does not reopen it.
+corner receipt and an open navigator do not become inert on the dormant screen. It draws through
+the same `ConversationTranscriptTable` as the main conversation, so child markdown, thinking,
+tool calls, results and notices are the parent's native rows under the parent's placement rules
+rather than a log-shaped second renderer: a rule before every exchange but the first, a lone tool
+call as its own collapsed row, and a run of two or more adjacent calls keeping its chronological
+position behind one `N tool calls` disclosure that opens into the ordinary
+individually-expandable rows. New events update that controller only while its tab exists;
+closing the tab is respected and later activity does not reopen it.
 
-The selected child transcript is itself a view-based table. The navigator, cheap presentation
-identities and parsed Markdown block models remain addressable, while AppKit creates only the rows
-around the viewport. Collapsed tool disclosures do not hide prebuilt rows; they omit those row
-identities until expansion. Long assistant answers are also split at Markdown block boundaries,
+The selected child transcript is itself a view-based table — the same table type, with the
+navigator and the heading as the pane's own items ahead of the rows. The navigator, cheap
+presentation identities and parsed Markdown block models remain addressable, while AppKit creates
+only the rows around the viewport. Collapsed tool disclosures do not hide prebuilt rows; they omit
+those row identities until expansion. Long assistant answers are split at Markdown block
+boundaries here — the one placement option the child turns on and the main conversation does not,
+because its answer rows carry per-message wrappers and `MarkdownView` already pages inside them —
 so revealing a large report near the bottom does not attach one document-sized constraint tree.
-Selection and tool/user disclosure state live in the controller and survive row recycling.
+Selection state lives in the controller; tool/user disclosure state lives on the table and
+survives row recycling.
 
 A navigator row is a **selectable row**, and the row of the child on screen is drawn selected.
 The rows were buttons carrying a chevron, and the chevron lied twice: it promised detail under
@@ -955,8 +961,14 @@ of a row:
   more than usual here: with no fill, it is the only thing saying the row can be clicked.
 - **A rule separates turns** (`ConversationRowView.turnDivider`, above each user turn but not
   the first), so `turnSpacing` is one `large` step rather than an additional 30-point gulf.
-  Within a turn, ordinary rows use `small` and work-adjacent rows use `tight`; the row kind, not
-  one blanket gap, decides density.
+  Within a turn, the row kind, not one blanket gap, decides density — and it decides it for
+  itself. Each kind declares a `Design.Chat.Rhythm`, the margins it wants above and below,
+  beside its view in `ConversationRowView`; a surface declares the same for its own items; and
+  the shared table composes two neighbours by collapsing their facing margins to the larger one.
+  There is no list of pairs. The pairwise rule this replaced ("either neighbour is work: tight")
+  put a user's bubble a turn's step under the heading above it and four points above the
+  thinking beneath, because the bubble had no margin of its own for the rule to weigh.
+  `ConversationRhythmTests` pins the tokens, the declarations and the gaps the table lays out.
 - **Consecutive live tool calls reduce to one disclosure** as soon as the second arrives. A
   lone call remains readable, the group expands back to its canonical timeline rows, and the
   settled whole-turn fold still replaces it. This is the main transcript form of the work-group
@@ -974,13 +986,26 @@ merely setting `isHidden` kept every nested tool and Markdown constraint in the 
 engine, so scrolling a settled conversation still laid out work that was not on screen.
 
 The transcript is now a view-based `NSTableView`, not one retained `NSStackView` chain.
-`presentationItems` owns the complete cheap ordering as stable timeline, divider, fold, card and
-streaming identities; AppKit owns only reusable row hosts around the viewport. Timeline rows build
-their Markdown/tool view when a host requests them and release it when that host is recycled.
-Tool, long-user-message and turn disclosure state lives in controller sets rather than in a
-recyclable view, so returning to a row restores what the user opened. Permission and changed-files
-cards are the small deliberate exception: their live interaction state remains retained as a
-presentation item, but an off-screen card is outside the attached constraint graph.
+`ConversationTranscriptTable` owns the complete cheap ordering as stable timeline, divider, fold,
+card and streaming identities; AppKit owns only reusable row hosts around the viewport. Timeline
+rows build their Markdown/tool view when a host requests them and release it when that host is
+recycled. Tool and long-user-message disclosure state lives in the table's sets, and turn
+disclosure state in the controller's, rather than in a recyclable view, so returning to a row
+restores what the user opened. Permission and changed-files cards are the small deliberate
+exception: their live interaction state remains retained as a presentation item, but an
+off-screen card is outside the attached constraint graph.
+
+That table is one type for both transcripts. The mechanism — the ordering, the incremental
+tool-run reduction, the identity index, the disclosure sets, the recycled host and its stated
+column width, the spacing rule — was written twice, once here and once in the Subagents pane, and
+the two had drifted: the child had a block-level Markdown split the parent lacked, the parent had
+extension hosts and contextual actions the child could not reach, and a fold or spacing fix landed
+in whichever file the reporter had open. `ConversationTranscriptTable` is generic over a
+`ConversationTranscriptSurface`, which supplies the rows, the surface's own item kinds (here the
+handoff banner, turn folds, retained cards and the streaming placeholder; in the child the
+navigator, the heading and the missing-transcript notice) and a decorator that wraps a row in what
+that pane adds. What a fold, a jump or a recycled host does is therefore decided in one place, and
+a rendering improvement made in a row view or in the table reaches both panes.
 
 A collapsed turn removes its intermediate timeline identities from the presentation and inserts
 one fold identity; expansion puts those identities back and collapse removes them again. During

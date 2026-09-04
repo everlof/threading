@@ -252,44 +252,83 @@ final class BrowserSubmissionExemptionTests: XCTestCase {
     }
 
     func testNothingIsExemptUntilItIsGranted() throws {
+        let sessionID = SessionID()
         XCTAssertFalse(
-            BrowserSubmissionExemptions.shared.isExempt(try origin("http://localhost:3000"))
+            BrowserSubmissionExemptions.shared.isExempt(
+                try origin("http://localhost:3000"),
+                for: sessionID
+            )
         )
     }
 
-    /// The same exact-origin rule the vault keeps. An exemption that leaked across ports or hosts
-    /// would be a far worse bug here than a missing credential: it ends in a submitted form.
-    func testAnExemptionIsBoundToOneExactOrigin() throws {
+    /// The same exact-origin rule the browser grant keeps, plus the calling session. An exemption
+    /// that leaked across agents, ports, or hosts would end in a submitted form.
+    func testAnExemptionIsBoundToOneSessionAndExactOrigin() throws {
+        let sessionID = SessionID()
+        let otherSessionID = SessionID()
         let app = try origin("http://localhost:3000")
-        BrowserSubmissionExemptions.shared.exempt(app)
+        BrowserSubmissionExemptions.shared.exempt(app, for: sessionID)
 
-        XCTAssertTrue(BrowserSubmissionExemptions.shared.isExempt(app))
+        XCTAssertTrue(BrowserSubmissionExemptions.shared.isExempt(app, for: sessionID))
+        XCTAssertFalse(BrowserSubmissionExemptions.shared.isExempt(app, for: otherSessionID))
         XCTAssertFalse(
-            BrowserSubmissionExemptions.shared.isExempt(try origin("http://localhost:3001"))
+            BrowserSubmissionExemptions.shared.isExempt(
+                try origin("http://localhost:3001"),
+                for: sessionID
+            )
         )
         XCTAssertFalse(
-            BrowserSubmissionExemptions.shared.isExempt(try origin("https://localhost:3000"))
+            BrowserSubmissionExemptions.shared.isExempt(
+                try origin("https://localhost:3000"),
+                for: sessionID
+            )
         )
         XCTAssertFalse(
-            BrowserSubmissionExemptions.shared.isExempt(try origin("http://127.evil.com:3000"))
+            BrowserSubmissionExemptions.shared.isExempt(
+                try origin("http://127.evil.com:3000"),
+                for: sessionID
+            )
         )
     }
 
     /// Revoking takes effect at the next submission, not the next launch, because membership is
     /// asked rather than captured.
     func testRevokingRestoresTheQuestion() throws {
+        let sessionID = SessionID()
         let app = try origin("http://localhost:3000")
-        BrowserSubmissionExemptions.shared.exempt(app)
-        BrowserSubmissionExemptions.shared.revoke(key: app.key)
+        BrowserSubmissionExemptions.shared.exempt(app, for: sessionID)
+        let grant = try XCTUnwrap(BrowserSubmissionExemptions.shared.grants.first)
+        BrowserSubmissionExemptions.shared.revoke(grant)
 
-        XCTAssertFalse(BrowserSubmissionExemptions.shared.isExempt(app))
-        XCTAssertTrue(BrowserSubmissionExemptions.shared.exemptOriginKeys.isEmpty)
+        XCTAssertFalse(BrowserSubmissionExemptions.shared.isExempt(app, for: sessionID))
+        XCTAssertTrue(BrowserSubmissionExemptions.shared.grants.isEmpty)
+    }
+
+    func testRevokingOneSessionDoesNotRevokeAnotherSessionOnTheSameOrigin() throws {
+        let firstSessionID = SessionID()
+        let secondSessionID = SessionID()
+        let app = try origin("http://localhost:3000")
+        BrowserSubmissionExemptions.shared.exempt(app, for: firstSessionID)
+        BrowserSubmissionExemptions.shared.exempt(app, for: secondSessionID)
+
+        let firstGrant = try XCTUnwrap(
+            BrowserSubmissionExemptions.shared.grants.first {
+                $0.sessionID == firstSessionID
+            }
+        )
+        BrowserSubmissionExemptions.shared.revoke(firstGrant)
+
+        XCTAssertFalse(BrowserSubmissionExemptions.shared.isExempt(app, for: firstSessionID))
+        XCTAssertTrue(BrowserSubmissionExemptions.shared.isExempt(app, for: secondSessionID))
     }
 
     /// Nothing about an exemption reaches `UserDefaults`. This is the assertion that keeps the
     /// store out of reach of `defaults write`, which is the whole reason it is process memory.
     func testAnExemptionIsNeverWrittenToAnyDefaultsDomain() throws {
-        BrowserSubmissionExemptions.shared.exempt(try origin("http://localhost:3000"))
+        BrowserSubmissionExemptions.shared.exempt(
+            try origin("http://localhost:3000"),
+            for: SessionID()
+        )
 
         for defaults in [UserDefaults.standard, PreferenceStore.shared] {
             let representation = defaults.dictionaryRepresentation()

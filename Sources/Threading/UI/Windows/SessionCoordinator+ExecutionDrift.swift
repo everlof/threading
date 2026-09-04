@@ -48,8 +48,16 @@ extension SessionCoordinator {
         case .denied, .failed:
             // The row keeps its marker and the user keeps the row menu. A refusal here is
             // ordinary — a worktree removed between the report and the reconcile, a detached
-            // head — and none of them are worth a band.
-            break
+            // head, a reading taken before the last commit landed — and none of them are worth
+            // a band.
+            //
+            // Giving up on following a chat entirely is not ordinary: it is the one refusal that
+            // changes what Threading will do for the rest of the run, so it gets a band. It
+            // carries its **own** replacement key rather than the drift band's — that key exists
+            // to collapse repeated drift receipts into one row, and a permanent decision must not
+            // be overwritten by the next ordinary reading about the same chat.
+            guard checkoutCoordinator.hasAbandonedFollowing(sessionID: sessionID) else { break }
+            toastPresenter(Self.abandonedFollowingToast(for: session))
         }
     }
 
@@ -104,6 +112,29 @@ extension SessionCoordinator {
             dwell: ToastDefaults.unattendedDwell,
             identifier: "sidebar.toast.execution-drift.moved",
             replacementID: "execution-drift.\(session.id.uuidString)"
+        )
+    }
+
+    /// The receipt for a chat Threading has stopped following.
+    ///
+    /// Said plainly, because the alternative is what actually shipped: ownership moving over and
+    /// over while one coalesced band showed a single unremarkable sentence. Nothing is broken and
+    /// nothing is lost — the chat keeps running and the row menu still moves it by hand — so this
+    /// states the fact and the manual way forward rather than offering a retry that would walk
+    /// straight back into the loop.
+    static func abandonedFollowingToast(for session: AgentSession) -> ToastRequest {
+        ToastRequest(
+            message: L10n.format(
+                "Stopped following “%@” between checkouts",
+                session.displayTitle
+            ),
+            detail: L10n.string(
+                "Its agent kept moving between checkouts. Threading left the chat where it is; "
+                    + "move it yourself from the chat's menu."
+            ),
+            dwell: ToastDefaults.unattendedDwell,
+            identifier: "sidebar.toast.execution-drift.abandoned",
+            replacementID: "execution-drift-abandoned.\(session.id.uuidString)"
         )
     }
 

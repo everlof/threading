@@ -157,6 +157,21 @@ enum AgentDefaults {
     /// `--remote-control` only opts in.
     static let claudeRemoteControlKey = "remoteControlAtStartup"
 
+    /// Which screen Claude's terminal UI starts on, stated in the launch environment.
+    ///
+    /// The CLI's settings schema calls this key's effect `tui: "fullscreen"` and says the two
+    /// are equivalent, but only the environment decides in both directions: measured on 2.1.260,
+    /// a settings file asking for `fullscreen` lost to the machine-local record the CLI writes
+    /// after that renderer fails to start twice, while `1` here won against it. `0` is not
+    /// merely the absence of `1` — the CLI reads this as a tri-state, and an unset variable
+    /// leaves its own default (fullscreen) standing.
+    ///
+    /// It is also the variable the CLI's own message names when it tells a user their renderer
+    /// was turned off on this machine, which is the closest thing this has to documentation.
+    static let claudeRendererEnvironmentKey = "CLAUDE_CODE_NO_FLICKER"
+    static let claudeFullscreenRendererValue = "1"
+    static let claudeMainScreenRendererValue = "0"
+
     /// Codex writes the model catalog it receives for each account beside config.toml.
     static let codexConfigFile = "config.toml"
     static let codexModelsCacheFile = "models_cache.json"

@@ -340,6 +340,28 @@ struct AgentCapabilities: OptionSet {
   /// likewise not earned both halves of the claim. A visible argv without measured exclusivity
   /// is not enough to block a launch.
   static let detectableExternalResume = Self(rawValue: 1 << 35)
+
+  /// The runtime's terminal UI can be started onto either screen, and Threading decides which
+  /// at launch: the CLI's own alternate-screen renderer, which keeps a virtualized transcript
+  /// of its own, or the main screen, where the terminal emulator keeps the scrollback.
+  ///
+  /// Claude only, and measured on CLI 2.1.260 rather than read off a flag. The CLI calls the
+  /// two `fullscreen` and `default` in its `tui` settings key, and it decides between them in a
+  /// fixed order: an accessibility reading first, then the environment, then a *machine-local*
+  /// auto-disable it writes itself after the alternate-screen renderer fails to start twice,
+  /// and only then the settings key. Six runs in a pty against a scratch configuration pinned
+  /// the consequence — `"tui": "default"` in a settings file turned the alternate screen off,
+  /// but `"tui": "fullscreen"` could not turn it back *on* against that auto-disable, while
+  /// `CLAUDE_CODE_NO_FLICKER` decided both directions from the environment. So the capability
+  /// is granted on the environment lever, which is the one the CLI's own message names when it
+  /// says a renderer was turned off here.
+  ///
+  /// Codex is deliberately absent even though `--no-alt-screen` exists. Threading does not
+  /// *choose* for Codex; it fixes every Codex launch inline for a reason recorded at that flag
+  /// — the iPhone mirrors the terminal's retained buffer, which an alternate screen does not
+  /// have — so offering the choice for it would name a control that does not exist. Grok,
+  /// OpenCode and Cursor have no measured equivalent.
+  static let selectableTerminalRenderer = Self(rawValue: 1 << 37)
 }
 
 /// The kind of program a session hosts: an installed agent client/runtime, not the model
@@ -432,7 +454,7 @@ enum AgentKind: String, Codable, CaseIterable {
         .anchoredUsageWindow, .transcriptUsageLimitRecord, .transcriptRefusedTurnRecord,
         .transcriptInterruptedMessageRecord, .transcriptReplay, .escapeInterruptsTerminalTurn,
         .checkoutScopedConversationStorage, .lifecycleReportedWorkingDirectory,
-        .modelAliasResolution
+        .modelAliasResolution, .selectableTerminalRenderer
       ]
     case .codex:
       return [

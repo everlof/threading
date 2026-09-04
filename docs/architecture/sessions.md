@@ -524,8 +524,15 @@ Claude side chat, the coordinator moves the smallest connected closure of unlaun
 parents and children; a side chat that has already launched is independent.
 
 After commit, branch state is read again from the destination and one `SessionCheckoutDidMove`
-event replaces the calling session's runtime. A native outbox is handed across that replacement;
-the provider resume ID is unchanged. The just-finished checkpoint is marked `checkoutChanged`
+event carries the move's authority basis to the window. A move somebody **asked** for
+(`explicit_user_request`, `agent_initiated`) replaces the calling session's runtime, because the
+process is still running in the checkout it was launched in and has to be restarted to reach the
+new one. An `observed_execution` move replaces nothing: ownership is catching up with a process
+that is already executing in the destination, so replacing it would kill a working agent in order
+to reinstate it where it already is. The transient input fence is released either way — that
+release is what `runtimeRelaunchDidStart` exists for, and a session whose runtime was deliberately
+left alone must not stay fenced. A native outbox is handed across a replacement; the provider
+resume ID is unchanged. The just-finished checkpoint is marked `checkoutChanged`
 and cannot be presented as Last Turn because Threading cannot prove where every external command
 ran across the boundary. The next turn captures normally in the destination. Git Review, files,
 processes, relaunch and agent project scope all resolve through the moved `Project`. The display
@@ -592,6 +599,30 @@ The receipt is a band rather than the modal the agent-initiated path raises. Tha
 a turn the user started a moment ago and answers a request a model made; this one can fire for any
 of a dozen background chats the moment an agent runs `cd`, and a stack of sheets for something
 nobody asked for is the wrong trade.
+
+**Following execution is a feedback loop, and it needs damping.** Committing a move changes what
+the next observation is measured against, and `forget` deliberately clears the memo that would
+otherwise suppress a repeat — so the two signals can chase each other. They do: an agent whose own
+root and whose tool descendants sit in different checkouts produces readings that disagree
+permanently, and nothing in the classifier arbitrates between them. On 2026-09-04 one chat
+committed **88 moves and 89 agent relaunches in 4m34s**, alternating between two worktrees, while
+the coalesced drift band showed a single unremarkable sentence. Three rules, in
+`SessionCheckoutDefaults`, and all three apply **only** to `observed_execution` — a move somebody
+asked for is an instruction and is never rate-limited:
+
+- **No relaunch** (above) removes the amplifier: without a respawn there is no fresh
+  `sessionStarted`, so a settled chat stops generating new evidence about itself.
+- **A reversal dwell.** A chat that just left a checkout will not be observed straight back into
+  it. Only a reversal is damped; walking onwards to a third checkout is information, not two
+  signals disagreeing. `SessionCheckoutCoordinator` keeps this memory itself rather than the
+  tracker, precisely because `forget` wipes the tracker at the moment worth remembering.
+- **A ceiling.** Past `observedMoveCeiling` observed moves inside `observedMoveWindow`, Threading
+  stops following that chat for the rest of the run and says so once, in a band with its own
+  replacement key. The dwell stops the oscillation that was found; the ceiling is reason-neutral
+  and stops the one that was not. The two constants are read together: a window short enough to
+  expire between damped moves would make the ceiling unreachable for the pattern it exists to
+  catch. Nothing is lost when it trips — the chat keeps running and the row menu still moves it by
+  hand.
 
 **The integrated route is atomic, not required for correctness.**
 `create_session_worktree(branch, authority_basis, reason)` still creates through
@@ -1598,6 +1629,64 @@ Threading cannot display what "follow" resolves to — the value lives in the ac
 and an unset one resolves server-side — so the inherit menu item says *Use Claude's Setting*
 rather than naming a value it would be guessing.
 
+### Which screen Claude's terminal draws on, per conversation
+
+Claude Code ships two renderers, and its settings schema names both: `tui: "fullscreen"` takes
+the terminal's **alternate screen** and keeps a virtualized transcript it scrolls itself, and
+`tui: "default"` draws on the **main screen**, where output lands in the emulator's scrollback.
+Since 2.1.x the CLI's own default is the first one. That is the wrong default for this host, for
+exactly the reason `codexCommand` pins every Codex launch inline: Threading mirrors and remotely
+scrolls the terminal's retained buffer, and an alternate screen has no history for either this
+app's scroller or a paired iPhone to move.
+
+**The choice travels in the environment, not in the settings file.** The CLI decides in a fixed
+order — an accessibility reading, then the environment, then a *machine-local* record it writes
+itself after the alternate-screen renderer fails to start twice, and only then the settings key.
+Six runs in a pty against a scratch configuration (2.1.260) pinned what that order costs:
+
+| what the launch stated | alternate screen? |
+|---|---|
+| nothing, clean state | **yes** — the CLI's own default |
+| `--settings {"tui":"default"}` | no |
+| `--settings {"tui":"fullscreen"}`, with the auto-disable recorded | no |
+| the same, plus `CLAUDE_CODE_NO_FLICKER=1` | **yes** |
+| `CLAUDE_CODE_NO_FLICKER=0` | no |
+| `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` | no |
+
+So the settings key can turn the alternate screen off but cannot turn it back on against a
+record the user never sees — which is how this arrived: a machine whose `settings.json` said
+`fullscreen` had been quietly demoted hours earlier by `fullscreenAutoDisabled`, and it read as
+Anthropic having removed the feature. `CLAUDE_CODE_NO_FLICKER` decides both directions, and it
+is the variable the CLI's own message names when it reports that a renderer was turned off here.
+It is a tri-state, so `0` is not the absence of `1`: unset leaves the CLI's default standing.
+
+Using the environment also keeps a property the settings file has: with hooks off, no Remote
+Control override and no status-line override, a terminal launch still gets **no** `--settings`
+file at all. A stated default in that file would have forced one onto every Claude terminal
+launch.
+
+**Three states, twice, and one of them is a stated value.** `AppSettings.claudeTerminalRenderer`
+is the default for new sessions and `AgentSession.fullscreenRenderer` is one conversation's
+override; `AgentLauncher.terminalRendererAtStartup(for:)` resolves the pair, and
+`routed(_:for:brokersPermissions:rendersTerminalUI:)` puts the word in front of the command
+beside the account and hook environment. What differs from Remote Control above is which way the
+default falls. There, deferring is right because the answer belongs to the user's `/config`;
+here the shipped default *decides* (`.terminalScrollback`), because whether this app's terminal
+keeps the transcript is a property of this app rather than an opinion about their CLI. The third
+state is still reachable and still means the same thing — including leaving the auto-disable in
+force — and it is the only one whose inherit menu item cannot name a value.
+
+Native conversations are unaffected whatever any of it says: they run `--print` and draw no
+terminal UI, so `streamPlan` never states a renderer.
+
+**The scroll end follows the resolved answer, not the runtime.**
+`AgentCapabilities.inlineTerminalViewport` is a static fact — Codex, always — so Claude does not
+have it and must not: the answer here is chosen per session. `AgentSessionViewController` takes
+the union, so a Claude session on the main screen also trims its live viewport to the last
+populated row. Without that it inherits the empty-tail bug the Codex flag was introduced to fix:
+a flick settles on a mostly blank page under a short conversation. An unstated choice keeps the
+whole screen, because the agent may still take the alternate one.
+
 ### The background PTY host, per conversation
 
 An agent session's pty can live in `threading-ptyd` — a per-user daemon that owns the `forkpty`
@@ -1980,7 +2069,10 @@ intact. A standalone terminal carries the same fold — its `TerminalID` and the
 worktree path, resolved on the click so a project move cannot leave an already-open menu stale.
 Theme and Permission Mode stay top-level because
 they are reached for repeatedly; what folds behind **Session Options** is what is set once and
-left alone — Interface, Claude Remote Control, Mute Notifications, Attachments. Three details
+left alone — Interface, Claude Remote Control, Mute Notifications, Attachments. Interface holds
+two marked selections rather than one — which surface the conversation uses, and for Claude
+which screen its terminal draws on — so the second is a nested item rather than three more rows
+under a separator: two ticked groups in one list read as one contradictory group. Three details
 are load-bearing: the fold's members carry their own targets, because the builder's retarget
 loop walks only the top level; an absent group folds its separator away rather than leaving two
 in a row (`addGroupSeparator`); and the toolbar's Context button gave up its "Session Options"

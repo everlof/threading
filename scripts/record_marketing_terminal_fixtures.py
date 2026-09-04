@@ -36,6 +36,28 @@ CLAUDE_SESSION_ID = "7ee72d66-0e50-4e5d-912b-96104c5919bd"
 FIXED_TIMESTAMP = "2026-08-30T12:00:00.000Z"
 GRID_COLUMNS = 62
 
+# The terminal each recording believes it is drawing into. Both TUIs pick their palette from the
+# background the terminal reports (OSC 11 and `COLORFGBG`), and Claude also takes its theme as a
+# setting, so one recording per mode is what a light app theme honestly gets: Codex's own light
+# diff backgrounds rather than its dark truecolour ones on paper. The light answer is Editorial's
+# ground and label; only light-versus-dark matters to the providers.
+TERMINAL_MODES = {
+    "dark": {
+        "foreground": "d9d9/d1d1/c8c8",
+        "background": "0404/0a0a/1212",
+        "colorfgbg": "15;0",
+        "claude_theme": "dark-ansi",
+        "suffix": "",
+    },
+    "light": {
+        "foreground": "2a2a/2525/2020",
+        "background": "f2f2/eeee/e7e7",
+        "colorfgbg": "0;15",
+        "claude_theme": "light-ansi",
+        "suffix": "-light",
+    },
+}
+
 PROVIDERS = {
     "claude": {
         "binary": "claude",
@@ -92,7 +114,7 @@ CODEX_RESPONSE = """The capture contract is now implemented and repeatable.
 
 Validation
 
-✓ 5 product screenshots at native scale
+✓ 6 product screenshots at native scale
 ✓ 900 video frames at 30 fps
 ✓ Evidence assertions passed
 ✓ 0 provider calls during recapture
@@ -446,17 +468,25 @@ def require_binary(name: str) -> str:
     return value
 
 
-def _terminal_response(chunk: bytes) -> bytes:
+def _terminal_response(chunk: bytes, terminal_mode: str) -> bytes:
+    mode = TERMINAL_MODES[terminal_mode]
     response = bytearray()
     if b"\x1b]10;?" in chunk:
-        response.extend(b"\x1b]10;rgb:d9d9/d1d1/c8c8\x1b\\")
+        response.extend(f"\x1b]10;rgb:{mode['foreground']}\x1b\\".encode())
     if b"\x1b]11;?" in chunk:
-        response.extend(b"\x1b]11;rgb:0404/0a0a/1212\x1b\\")
+        response.extend(f"\x1b]11;rgb:{mode['background']}\x1b\\".encode())
     if b"\x1b[6n" in chunk:
         response.extend(b"\x1b[1;1R")
     if b"\x1b[c" in chunk:
         response.extend(b"\x1b[?1;2c")
     return bytes(response)
+
+
+def _echo_enabled(descriptor: int) -> bool:
+    try:
+        return bool(termios.tcgetattr(descriptor)[3] & termios.ECHO)
+    except termios.error:
+        return False
 
 
 def capture_pty(
@@ -466,6 +496,7 @@ def capture_pty(
     rows: int,
     environment: dict[str, str],
     settled_marker: bytes,
+    terminal_mode: str,
     timeout: float = 20,
 ) -> bytes:
     pid, descriptor = pty.fork()
@@ -481,6 +512,12 @@ def capture_pty(
     last_output = started
     marker_seen_at: float | None = None
     timed_out = False
+    # A capability reply written while the slave still echoes is typed back into the stream as
+    # caret text ("^[[?1;2c") ahead of the TUI's first frame. Hold replies until raw mode has
+    # cleared ECHO; a TUI that never does gets them after a bounded wait so it cannot stall on a
+    # query nothing answers.
+    pending_replies = bytearray()
+    pending_since: float | None = None
     theme_dialog_seen_at: float | None = None
     theme_acknowledgements = 0
     trust_dialog_seen_at: float | None = None
@@ -497,9 +534,11 @@ def capture_pty(
                     break
                 captured.extend(chunk)
                 last_output = time.monotonic()
-                reply = _terminal_response(chunk)
+                reply = _terminal_response(chunk, terminal_mode)
                 if reply:
-                    os.write(descriptor, reply)
+                    if not pending_replies:
+                        pending_since = time.monotonic()
+                    pending_replies.extend(reply)
                 if (
                     theme_dialog_seen_at is None
                     and b"Syntax" in captured
@@ -517,6 +556,13 @@ def capture_pty(
                 if settled_marker in captured and marker_seen_at is None:
                     marker_seen_at = time.monotonic()
             now = time.monotonic()
+            if pending_replies and (
+                not _echo_enabled(descriptor)
+                or (pending_since is not None and now - pending_since >= 1.0)
+            ):
+                os.write(descriptor, bytes(pending_replies))
+                pending_replies.clear()
+                pending_since = None
             if (
                 theme_dialog_seen_at is not None
                 and theme_acknowledgements < 3
@@ -583,11 +629,25 @@ def capture_pty(
     return bytes(captured)
 
 
-def record_claude() -> bytes:
+def _recording_environment() -> dict[str, str]:
+    """The host's environment without the coding agent that may be running this script.
+
+    A recording made from inside a Claude Code session inherits `CLAUDECODE` and
+    `CLAUDE_CODE_*`, and the child Claude then draws a "Transcript saving is off — inherited
+    CLAUDE_CODE_…" warning into its footer, which is not part of the product being photographed.
+    """
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("CLAUDECODE", "CLAUDE_CODE_", "CODEX_"))
+    }
+
+
+def record_claude(terminal_mode: str) -> bytes:
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     CLAUDE_EDIT_PATH.write_text(CLAUDE_OLD_CONTENT)
     session = _write_claude_session()
-    environment = os.environ.copy()
+    environment = _recording_environment()
     environment.update(
         {
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
@@ -596,6 +656,7 @@ def record_claude() -> bytes:
         }
     )
     environment.pop("NO_COLOR", None)
+    environment["COLORFGBG"] = TERMINAL_MODES[terminal_mode]["colorfgbg"]
     try:
         return capture_pty(
             [
@@ -604,7 +665,7 @@ def record_claude() -> bytes:
                 CLAUDE_SESSION_ID,
                 "--safe-mode",
                 "--settings",
-                '{"theme":"dark-ansi"}',
+                json.dumps({"theme": TERMINAL_MODES[terminal_mode]["claude_theme"]}),
                 "--permission-mode",
                 "acceptEdits",
             ],
@@ -612,13 +673,14 @@ def record_claude() -> bytes:
             rows=PROVIDERS["claude"]["rows"],
             environment=environment,
             settled_marker=PROVIDERS["claude"]["settled_marker"],
+            terminal_mode=terminal_mode,
         )
     finally:
         session.unlink(missing_ok=True)
         CLAUDE_EDIT_PATH.unlink(missing_ok=True)
 
 
-def record_codex() -> bytes:
+def record_codex(terminal_mode: str) -> bytes:
     (WORKSPACE / "evidence").mkdir(parents=True, exist_ok=True)
     (WORKSPACE / "capture-notes.md").write_text(
         "# App Store capture\n\n"
@@ -640,7 +702,7 @@ def record_codex() -> bytes:
             "wire_api = \"responses\", requires_openai_auth = false, "
             "request_max_retries = 0, stream_max_retries = 0 }"
         )
-        environment = os.environ.copy()
+        environment = _recording_environment()
         environment.update(
             {
                 "THREADING_MARKETING_FIXTURE_KEY": "local-fixture-only",
@@ -649,6 +711,7 @@ def record_codex() -> bytes:
             }
         )
         environment.pop("NO_COLOR", None)
+        environment["COLORFGBG"] = TERMINAL_MODES[terminal_mode]["colorfgbg"]
         payload = capture_pty(
             [
                 require_binary("codex"),
@@ -684,6 +747,7 @@ def record_codex() -> bytes:
             rows=PROVIDERS["codex"]["rows"],
             environment=environment,
             settled_marker=PROVIDERS["codex"]["settled_marker"],
+            terminal_mode=terminal_mode,
         )
         server.requests.get(timeout=1)
         second_request = server.requests.get(timeout=1)
@@ -701,28 +765,30 @@ def record_codex() -> bytes:
         thread.join(timeout=2)
 
 
-def fixture(provider: str, payload: bytes) -> dict[str, Any]:
+def fixture(provider: str, payload: bytes, terminal_mode: str) -> dict[str, Any]:
     version = provider_version(provider)
     if provider == "claude":
         provenance = (
             f"Installed Claude Code {version} rendering of a synthetic saved session at "
             f"{GRID_COLUMNS} × {PROVIDERS['claude']['rows']} in safe mode with its built-in "
-            "dark ANSI theme. The temporary session is "
+            f"{terminal_mode} ANSI theme. The temporary session is "
             "deleted immediately after recording. "
             "Screenshot capture only replays these bytes and cannot spend provider usage."
         )
     else:
         provenance = (
             f"Installed Codex {version} rendering a deterministic patch and response at "
-            f"{GRID_COLUMNS} × {PROVIDERS['codex']['rows']} from a localhost-only fixture "
-            "provider in an ephemeral MCP-free profile and disposable workspace. Screenshot "
-            "capture only replays these bytes and cannot spend provider usage."
+            f"{GRID_COLUMNS} × {PROVIDERS['codex']['rows']} into a terminal reporting a "
+            f"{terminal_mode} background, from a localhost-only fixture provider in an "
+            "ephemeral MCP-free profile and disposable workspace. Screenshot capture only "
+            "replays these bytes and cannot spend provider usage."
         )
     return {
         "schemaVersion": 1,
         "kind": "threading-mobile-terminal-pty-fixture",
         "provider": provider,
         "providerVersion": version,
+        "terminalMode": terminal_mode,
         "columns": GRID_COLUMNS,
         "rows": PROVIDERS[provider]["rows"],
         "provenance": provenance,
@@ -769,21 +835,41 @@ def parse_arguments() -> argparse.Namespace:
         default="all",
         help="Provider fixture to regenerate (default: all)",
     )
+    parser.add_argument(
+        "--terminal-mode",
+        choices=["all", *TERMINAL_MODES],
+        default="all",
+        help="Terminal background the recording is made for (default: all)",
+    )
     return parser.parse_args()
 
 
 def main() -> int:
     arguments = parse_arguments()
     selected = list(PROVIDERS) if arguments.provider == "all" else [arguments.provider]
+    modes = (
+        list(TERMINAL_MODES)
+        if arguments.terminal_mode == "all"
+        else [arguments.terminal_mode]
+    )
     WORKSPACE.mkdir(parents=True, exist_ok=True)
     for provider in selected:
-        payload = record_claude() if provider == "claude" else record_codex()
-        validate(provider, payload)
-        destination = FIXTURE_DIRECTORY / f"marketing-{provider}-tui.json"
-        destination.write_text(
-            json.dumps(fixture(provider, payload), indent=2, ensure_ascii=False) + "\n"
-        )
-        print(f"Recorded {provider}: {len(payload)} PTY bytes -> {destination}")
+        for terminal_mode in modes:
+            payload = (
+                record_claude(terminal_mode)
+                if provider == "claude"
+                else record_codex(terminal_mode)
+            )
+            validate(provider, payload)
+            suffix = TERMINAL_MODES[terminal_mode]["suffix"]
+            destination = FIXTURE_DIRECTORY / f"marketing-{provider}-tui{suffix}.json"
+            destination.write_text(
+                json.dumps(fixture(provider, payload, terminal_mode), indent=2, ensure_ascii=False)
+                + "\n"
+            )
+            print(
+                f"Recorded {provider} ({terminal_mode}): {len(payload)} PTY bytes -> {destination}"
+            )
     return 0
 
 

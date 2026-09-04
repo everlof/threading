@@ -208,7 +208,7 @@ class UIEvidenceToolsTests(unittest.TestCase):
         self.assertEqual(set(manifest["themeIDs"]), set(manifest["themeAppearances"]))
         flow = next(item for item in manifest["flows"] if item["id"] == "ios-marketing-flow")
         captures = {item["id"]: item for item in manifest["captures"]}
-        self.assertEqual(len(flow["shots"]), 5)
+        self.assertEqual(len(flow["shots"]), 6)
         self.assertEqual(
             [shot["captureID"] for shot in flow["shots"]],
             [
@@ -217,6 +217,7 @@ class UIEvidenceToolsTests(unittest.TestCase):
                 "marketing-claude-usage-menu",
                 "marketing-codex-tui",
                 "marketing-settings",
+                "marketing-usage",
             ],
         )
         for shot in flow["shots"]:
@@ -326,9 +327,48 @@ class UIEvidenceToolsTests(unittest.TestCase):
         self.assertIn("KeyboardDidShowProductivityTutorial", harness)
         self.assertIn("DidShowGestureKeyboardIntroduction", harness)
         self.assertIn("UIKeyboardDidShowInternationalInfoIntroduction", harness)
+        # The bilingual "Type English and Swedish" sheet: raised on the first keystroke, so a
+        # keyboard-open screenshot never showed it while the walkthrough's typing hit it.
+        self.assertIn("MultilingualKeyboardTip", harness)
         clone_seed = harness.index("DidShowContinuousPathIntroduction")
         explicit_simulator_branch = harness.index("else\n  simulator_udid=", clone_seed)
         self.assertLess(clone_seed, explicit_simulator_branch)
+
+    def test_ios_evidence_clones_a_named_template_without_booting_it(self) -> None:
+        harness = (REPOSITORY / "scripts/ui-evidence-ios.sh").read_text()
+        marketing = (REPOSITORY / "scripts/capture_marketing_ios.sh").read_text()
+        self.assertIn("--template UDID", harness)
+        self.assertIn("--template UDID", marketing)
+        # The named template takes the clone branch, with its keyboard seeding and app-data
+        # reset, rather than the reuse branch that installs over a developer's own device.
+        clone_branch = harness.index(
+            'if [[ "${requested_simulator}" == "booted" || -n "${requested_template}" ]]'
+        )
+        clone_seed = harness.index("DidShowContinuousPathIntroduction")
+        self.assertLess(clone_branch, clone_seed)
+        # A template chosen by UDID must not pass through `resolve_simulator`, whose explicit
+        # path boots the device it is handed; cloning needs the template shut down.
+        template_assignment = harness.index('template_simulator_udid="${requested_template}"')
+        resolver_call = harness.index(
+            'template_simulator_udid="$(resolve_simulator "${requested_simulator}")"'
+        )
+        self.assertLess(template_assignment, resolver_call)
+        self.assertIn("--template clones a device and --simulator reuses one", harness)
+
+    def test_ios_evidence_hit_tests_bars_idb_flattens(self) -> None:
+        harness = (REPOSITORY / "scripts/ui-evidence-ios.sh").read_text()
+        # The dashboard's navigation bar comes back from `idb ui describe-all` as one childless
+        # group; its items answer only to `describe-point`. The semantic lookup has to fall
+        # through to hit-testing before it can report the control missing.
+        self.assertIn("hit_test_flattened_bars()", harness)
+        self.assertIn("idb ui describe-point --json", harness)
+        flattened_poll = harness.index("idb ui describe-all --json --udid")
+        fallback = harness.index('hit_test_flattened_bars "${accessibility_json}"', flattened_poll)
+        missing = harness.index("has no accessible control beginning with", fallback)
+        self.assertLess(fallback, missing)
+        # Bounded: a pitch under one tap target, walked only along bar-shaped groups.
+        self.assertIn("hit_test_pitch=12", harness)
+        self.assertIn("hit_test_bar_height=88", harness)
 
 
 if __name__ == "__main__":

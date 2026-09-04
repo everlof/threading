@@ -36,6 +36,7 @@ final class SideChatTests: XCTestCase {
         let child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                fullscreenRenderer: nil,
                 reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),
@@ -54,6 +55,7 @@ final class SideChatTests: XCTestCase {
         var child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                fullscreenRenderer: nil,
                 reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),
@@ -74,6 +76,7 @@ final class SideChatTests: XCTestCase {
         let child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                fullscreenRenderer: nil,
                 reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),
@@ -120,6 +123,7 @@ final class SideChatTests: XCTestCase {
         let child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                fullscreenRenderer: nil,
                 reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),
@@ -150,6 +154,7 @@ final class SideChatTests: XCTestCase {
         let child = AgentSession(
             configuration: .claude(
                 remoteControl: nil,
+                fullscreenRenderer: nil,
                 reasoningEffort: nil,
                 origin: .forked(from: parent.id)
             ),

@@ -64,13 +64,14 @@ accepted.
 
 ## iOS marketing flow
 
-The five current iOS checkpoints are one entry in the canonical evidence manifest:
+The six current iOS checkpoints are one entry in the canonical evidence manifest:
 
 1. one connected Mac, one Threading project, and four mixed Claude/Codex chats;
 2. the installed Claude Code TUI recording with its structured task strip;
 3. the installed Codex TUI recording;
 4. Claude with the real software keyboard and complete shipping session menu open;
-5. the shipping Settings root.
+5. the shipping Settings root;
+6. the Usage dashboard's Totals tab, with the raw token cost and the daily cost chart.
 
 Run the complete story with one theme input:
 
@@ -85,6 +86,19 @@ installed provider version changes:
 ```bash
 python3 scripts/record_marketing_terminal_fixtures.py
 ```
+
+Each provider is recorded twice, once against a terminal reporting a dark background and once a
+light one (`--terminal-mode` selects one; the light files carry a `-light` suffix). A TUI picks
+its palette from what the terminal answers to its background query and `COLORFGBG`, and Claude
+also takes its theme as a setting: the dark Codex recording draws its diff rows with dark
+truecolour backgrounds no terminal palette can lighten, and Claude's dark theme writes its prompt
+bar in ANSI bright black. A light app theme therefore replays the light recording, and the
+derived marketing terminal palette composites every role to an opaque colour and places the
+four ANSI greys where a TUI recorded for that background expects them. The recorder also drops
+the recording host's own `CLAUDECODE`/`CLAUDE_CODE_*` variables, which otherwise put a
+"Transcript saving is off" warning into Claude's footer, and holds its capability replies until
+the TUI has switched echo off, because a reply typed into a cooked tty comes back as caret text
+ahead of the first frame.
 
 Claude resumes one temporary synthetic saved session under its built-in ANSI theme, including a
 real `Edit` tool record and structured patch result that its installed TUI renders as the native

@@ -236,11 +236,19 @@ Run it on the booted iPhone simulator with:
 scripts/ui-evidence-ios.sh
 # choose an already installed simulator explicitly when needed
 scripts/ui-evidence-ios.sh --simulator <UDID>
+# clone a named shut-down iPhone when the booted one belongs to another session
+scripts/ui-evidence-ios.sh --template <UDID>
 ```
 
 By default the script briefly clones the selected iPhone, restores the template to its prior
 boot state, clears the cloned app data, and deletes the clone on exit. That gives software-keyboard
 captures a clean Simulator menu state without changing a developer's persistent keyboard setting.
+Restoring the boot state does not restore what was running: cloning needs the template shut down,
+so an app another session was driving on the booted iPhone is gone when it comes back.
+`--template <UDID>` clones a named shut-down iPhone the same way, keyboard seeding and app-data
+reset included, and never boots that template itself. Keep one such device around on a Mac where
+the booted iPhone is usually someone else's; `--simulator` is the other tool, for reusing a device
+in place, and the two are refused together.
 Before reading the catalogue it takes the same host-wide advisory CoreSimulator lane as the signed
 Simulator dogfood matrix. Concurrent runs from another Threading worktree fail with the named lane
 owner rather than recycling the template underneath an adopted-panel compatibility run. The lane
@@ -253,6 +261,18 @@ system caret blink: the coordinator observes longer than one blink interval and 
 equal adjacent frames, rather than requiring the entire screen to stop owning time forever. A
 timeout or an unstabilized marker fails the run; it never becomes a screenshot with a successful
 label.
+
+A capture may declare an `interaction`: the runner taps the control whose accessibility label
+begins with `tapAccessibilityLabel` and waits until every `waitForAccessibilityLabels` entry is
+listed, so a system menu is opened by a real touch on the shipping control and photographed only
+once its rows exist. The lookup reads `idb ui describe-all`, which can flatten a UIKit bar into
+one childless group: the session dashboard's navigation bar comes back as a "Nav bar" group whose
+identifier is the title and whose children are empty, while `idb ui describe-point` at the same
+bar still answers with "Choose Mac", the title button and "Remote access options" (the session
+screen's bar enumerates normally). After two seconds without a listed match the runner hit-tests
+along the centreline of each labelless group no taller than two tap targets, at a 12-point pitch,
+and uses the first element whose label matches; the run log notes when that path found the
+control. It is a bounded walk over bar-shaped groups, not a screen scan.
 
 Text-entry captures may declare `keyboardState` as `closed`, `open`, or
 `dismissed-after-open`. The coordinator sends one semantic focus request through each real

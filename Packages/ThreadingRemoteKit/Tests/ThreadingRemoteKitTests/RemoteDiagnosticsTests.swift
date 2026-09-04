@@ -453,4 +453,18 @@ final class RemoteDiagnosticsTests: XCTestCase {
             )
         ))
     }
+
+    func testDeliveryDiagnosticsExposeOnlyStructuralPreviewMetadata() {
+        let fieldNames = Set(RemoteDiagnosticField.allCases.map(\.rawValue))
+        XCTAssertTrue(fieldNames.isSuperset(of: [
+            "host", "participant", "peer", "session", "generation", "queueSize",
+            "previewPresent", "previewBytes", "activitySource", "attempt", "status",
+            "providerTrace",
+        ]))
+        for forbidden in [
+            "prompt", "assistantText", "token", "deviceToken", "body", "previewBody",
+        ] {
+            XCTAssertFalse(fieldNames.contains(forbidden))
+        }
+    }
 }

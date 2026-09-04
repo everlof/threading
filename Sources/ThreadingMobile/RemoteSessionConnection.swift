@@ -2409,7 +2409,11 @@ final class RemoteSessionConnection: ObservableObject {
         if let marketingProvider {
             let fixture: MobileMarketingTerminalFixture
             do {
-                fixture = try MobileMarketingTerminalFixture.load(marketingProvider)
+                fixture = try MobileMarketingTerminalFixture.load(
+                    marketingProvider,
+                    mode: connection.theme.map(MobileMarketingTerminalFixture.TerminalMode.matching)
+                        ?? .dark
+                )
             } catch {
                 fatalError("Invalid marketing terminal fixture: \(error)")
             }
@@ -2427,7 +2431,7 @@ final class RemoteSessionConnection: ObservableObject {
                 )
                 connection.runPlanSteps = [
                     .init(id: "0", title: "Build deterministic provider fixtures", status: .completed),
-                    .init(id: "1", title: "Capture five marketing checkpoints", status: .completed),
+                    .init(id: "1", title: "Capture six marketing checkpoints", status: .completed),
                     .init(id: "2", title: "Render theme variants", status: .inProgress),
                 ]
             }

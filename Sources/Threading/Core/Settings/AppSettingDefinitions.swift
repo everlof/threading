@@ -55,11 +55,13 @@ enum AppSettingIdentity: String, CaseIterable, Sendable {
     case suppressesClaudeStatusLine
     case bypassesCodexHookTrust
     case claudeRemoteControl
+    case claudeTerminalRenderer
     case claudeStartupSpeed
     case codexStartupSpeed
     case defaultPermissionMode
     case localDiagnosticsEnabled
     case remoteAccessEnabled
+    case remoteNotificationMacActivityWindow
     case remoteHostedServiceEnvironment
     case remoteAccessDoorMigration
     case remoteAccessTailscaleEnabled
@@ -1042,7 +1044,7 @@ enum AppSettingDefinitions {
         identity: .installsCodexHooks,
         persistenceKey: "installsCodexHooks",
         absence: .falseValue,
-        presentations: [row("general", 28, "Codex Hooks", "Report Codex turn boundaries",
+        presentations: [row("general", 29, "Codex Hooks", "Report Codex turn boundaries",
                             ["Codex hooks", "hooks.json"])]
     )
     static let readsClaudeLoginFromKeychain = AppSettingDescriptor<Bool>(
@@ -1063,7 +1065,7 @@ enum AppSettingDefinitions {
         identity: .bypassesCodexHookTrust,
         persistenceKey: "bypassesCodexHookTrust",
         absence: .falseValue,
-        presentations: [row("general", 29, "Codex Hooks", "Skip Codex hook review", ["hooks"])]
+        presentations: [row("general", 30, "Codex Hooks", "Skip Codex hook review", ["hooks"])]
     )
     static let claudeRemoteControl = AppSettingDescriptor<String>(
         identity: .claudeRemoteControl,
@@ -1073,6 +1075,15 @@ enum AppSettingDefinitions {
         presentations: [row("general", 25, "Claude Remote Control",
                             "Remote Control for new Claude sessions",
                             ["Claude Remote Control", "claude.ai", "mobile"])]
+    )
+    static let claudeTerminalRenderer = AppSettingDescriptor<String>(
+        identity: .claudeTerminalRenderer,
+        persistenceKey: "claudeTerminalRenderer",
+        absence: .fallback("terminalScrollback"),
+        validation: .allowedStrings(Set(ClaudeTerminalRenderer.allCases.map(\.rawValue))),
+        presentations: [row("general", 28, "Claude Terminal",
+                            "Scrolling in new Claude terminals",
+                            ["fullscreen", "alternate screen", "scrollback", "virtual scroll"])]
     )
     static let claudeStartupSpeed = AppSettingDescriptor<String>(
         identity: .claudeStartupSpeed,
@@ -1115,6 +1126,16 @@ enum AppSettingDefinitions {
         absence: .falseValue,
         presentations: [row("remote-access", 0, "Connection", "Remote Access",
                             ["iPhone", "remote", "sharing"])]
+    )
+    static let remoteNotificationMacActivityWindow = AppSettingDescriptor<String>(
+        identity: .remoteNotificationMacActivityWindow,
+        persistenceKey: "remoteNotificationMacActivityWindow",
+        absence: .registered(MacNotificationActivityWindow.twoMinutes.rawValue),
+        validation: .allowedStrings(Set(MacNotificationActivityWindow.allCases.map(\.rawValue))),
+        presentations: [row(
+            "remote-access", 4, "Notification Delivery", "Mac activity window",
+            ["notifications", "active", "iPhone", "completion", "timeout"]
+        )]
     )
     /// Developer-enabled builds may select the isolated hosted service without changing their
     /// launch environment. Public Release reads production regardless of a persisted development
@@ -1255,7 +1276,7 @@ enum AppSettingDefinitions {
         persistenceKey: "phoneReportWorkspace",
         absence: .registered(PhoneReportWorkspacePolicy.sameCheckout.rawValue),
         validation: .allowedStrings(Set(PhoneReportWorkspacePolicy.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 5, "Sharing & Security", "Reports from your phone",
+        presentations: [row("remote-access", 6, "Sharing & Security", "Reports from your phone",
                             ["shake", "report", "worktree", "workspace", "isolated"])]
     )
     static let remoteInputControlDefault = AppSettingDescriptor<String>(
@@ -1263,7 +1284,7 @@ enum AppSettingDefinitions {
         persistenceKey: "remoteInputControlDefault",
         absence: .registered(RemoteInputControlDefault.collaborative.rawValue),
         validation: .allowedStrings(Set(RemoteInputControlDefault.allCases.map(\.rawValue))),
-        presentations: [row("remote-access", 4, "Sharing & Security", "New shared chats",
+        presentations: [row("remote-access", 5, "Sharing & Security", "New shared chats",
                             ["security", "collaborative", "focused", "share"])],
         remotePolicy: .ownerMutable
     )
@@ -1282,14 +1303,14 @@ enum AppSettingDefinitions {
         validation: .allowedStrings(
             Set(UpdateChannelSubscription.allCases.map(\.rawValue)).union([""])
         ),
-        presentations: [row("general", 30, "Software Updates", "Updates you receive",
+        presentations: [row("general", 31, "Software Updates", "Updates you receive",
                             ["beta", "channel", "prerelease", "nightly", "updates"])]
     )
     static let automaticUpdateChecksEnabled = AppSettingDescriptor<Bool>(
         identity: .automaticUpdateChecksEnabled,
         persistenceKey: "automaticUpdateChecksEnabled",
         absence: .registered(true),
-        presentations: [row("general", 31, "Software Updates",
+        presentations: [row("general", 32, "Software Updates",
                             "Check for updates automatically", [
                                 "updates", "Sparkle", "agent", "CLI", "Claude", "Codex",
                                 "Grok", "OpenCode", "Cursor"
@@ -1300,7 +1321,7 @@ enum AppSettingDefinitions {
         persistenceKey: "preventsIdleSystemSleepWhileAgentsWork",
         absence: .registered(false),
         presentations: [row(
-            "general", 32, "Power", "Keep this Mac awake while agents work",
+            "general", 33, "Power", "Keep this Mac awake while agents work",
             ["sleep", "awake", "lid", "battery", "energy", "active turn"]
         )]
     )
@@ -1375,7 +1396,8 @@ enum AppSettingDefinitions {
         .init(workspaceNavigatorSelection), .init(reportsClaudeLifecycleEvents),
         .init(installsCodexHooks), .init(readsClaudeLoginFromKeychain),
         .init(suppressesClaudeStatusLine), .init(bypassesCodexHookTrust),
-        .init(claudeRemoteControl), .init(claudeStartupSpeed), .init(codexStartupSpeed),
+        .init(claudeRemoteControl), .init(claudeTerminalRenderer),
+        .init(claudeStartupSpeed), .init(codexStartupSpeed),
         .init(defaultPermissionMode), .init(localDiagnosticsEnabled),
         .init(remoteAccessEnabled),
         .init(remoteHostedServiceEnvironment),
@@ -1387,6 +1409,7 @@ enum AppSettingDefinitions {
         // row above the one it names is how that projection goes wrong.
         .init(remoteAccessDoors), .init(remoteAccessTailscaleEnabled),
         .init(remoteAccessTailscaleServeEnabled),
+        .init(remoteNotificationMacActivityWindow),
         .init(remoteAccessAdvertisedHostname),
         .init(remoteAccessDiscoveryEnabled),
         .init(remoteInputControlDefault),
@@ -1432,7 +1455,7 @@ enum AppSettingDefinitions {
         // Sign-in rather than a stored setting, so it is surfaced instead of persisted. It used
         // to borrow the connection mode's second presentation, and that descriptor is now a
         // migration record with no row of its own.
-        surfaced("remoteAccess.hostedDirect", pageID: "remote-access", order: 6,
+        surfaced("remoteAccess.hostedDirect", pageID: "remote-access", order: 7,
                   section: "Connection", title: "Hosted Direct",
                   "direct", "introduce", "sign in", "Threading Direct"),
         surfaced("github.ghCLI", pageID: "github", order: 1,

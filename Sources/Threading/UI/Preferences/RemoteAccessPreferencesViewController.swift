@@ -105,6 +105,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
     private let hostedAccountControls = NSStackView()
     private let inputControlDefault = ThemedSegmentedControl()
     private let phoneReportWorkspacePopUp = ThemedPopUp()
+    private let macActivityWindowPopUp = ThemedPopUp()
     private let openLocallyButton = ThemedButton()
     private let pairingActionButton = ThemedButton()
     private let pairedDevicesStack = NSStackView()
@@ -313,6 +314,17 @@ final class RemoteAccessPreferencesViewController: NSViewController {
             "settings.remote-access.phone-report-workspace"
         )
 
+        for window in MacNotificationActivityWindow.allCases {
+            macActivityWindowPopUp.addItem(
+                ThemedMenuItem(title: window.settingsTitle, representedValue: window)
+            )
+        }
+        macActivityWindowPopUp.target = self
+        macActivityWindowPopUp.action = #selector(macActivityWindowChanged)
+        macActivityWindowPopUp.setAccessibilityIdentifier(
+            "settings.remote-access.mac-activity-window"
+        )
+
         openLocallyButton.title = L10n.string("Open in Browser")
         openLocallyButton.target = self
         openLocallyButton.action = #selector(openLocally)
@@ -381,6 +393,7 @@ final class RemoteAccessPreferencesViewController: NSViewController {
                 SettingsUI.section("Set Up Your iPhone", heroCard()),
                 SettingsUI.section("Connection", connectionCard()),
                 SettingsUI.section("Ways In", waysInSection()),
+                SettingsUI.section("Notification Delivery", notificationDeliveryCard()),
                 SettingsUI.section("Sharing & Security", securityCard()),
                 SettingsUI.note(
                     "Remote Access publishes only Threading’s authenticated remote surface. "
@@ -955,6 +968,18 @@ final class RemoteAccessPreferencesViewController: NSViewController {
 
     // MARK: - Sharing
 
+    private func notificationDeliveryCard() -> SettingsCard {
+        SettingsCard(rows: [
+            SettingsUI.row(
+                title: "Mac activity window",
+                subtitle: "After deliberate interaction, routine turn-completion alerts stay "
+                    + "off your paired devices for this long. Off never uses Mac activity to "
+                    + "suppress them.",
+                control: macActivityWindowPopUp
+            )
+        ])
+    }
+
     private func securityCard() -> SettingsCard {
         let credentialStorage = RemoteCredentialStoragePresentation.resolve(
             isShellReachable: credentialStorageIsShellReachable
@@ -1045,6 +1070,11 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         phoneReportWorkspacePopUp.selectItem(
             at: PhoneReportWorkspacePolicy.allCases
                 .firstIndex(of: AppSettings.shared.phoneReportWorkspace) ?? 0
+        )
+        macActivityWindowPopUp.selectItem(
+            at: MacNotificationActivityWindow.allCases.firstIndex(
+                of: AppSettings.shared.remoteNotificationMacActivityWindow
+            ) ?? 0
         )
         openLocallyButton.isHidden = coordinator.localURL == nil
         openLocallyButton.isEnabled = coordinator.localURL != nil
@@ -1832,6 +1862,12 @@ final class RemoteAccessPreferencesViewController: NSViewController {
         guard let value = phoneReportWorkspacePopUp.selectedItem?.representedValue
             as? PhoneReportWorkspacePolicy else { return }
         AppSettings.shared.phoneReportWorkspace = value
+    }
+
+    @objc private func macActivityWindowChanged() {
+        guard let value = macActivityWindowPopUp.selectedItem?.representedValue
+            as? MacNotificationActivityWindow else { return }
+        AppSettings.shared.remoteNotificationMacActivityWindow = value
     }
 
     @objc private func openLocally() {

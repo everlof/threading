@@ -645,41 +645,25 @@ extension AgentToolCoordinator {
         browser: BrowserViewController,
         for sessionID: SessionID
     ) async -> Bool {
-        let host = browser.currentURL?.host ?? L10n.string("this page")
-        let label = target.name.flatMap { name in
-            name.isEmpty ? nil : L10n.format("\nControl: %@", name)
-        } ?? ""
-
-        // An origin the user already trusted enough to store a credential for, and which they
-        // have already answered this question for during this run of the app.
         let origin = browser.currentURL.flatMap(BrowserOrigin.init(url:))
-        if let origin, BrowserSubmissionExemptions.shared.isExempt(origin) {
+        if let origin,
+           BrowserSubmissionExemptions.shared.isExempt(origin, for: sessionID) {
             return true
         }
 
-        // The second affirmative is offered only where an exemption could be granted: on an
-        // origin that already holds a stored credential. Everywhere else this stays the two-answer
-        // question it has always been, because a "stop asking" that any page could earn is not a
-        // narrower prompt, it is a disabled one.
-        let exemptable = origin.map { candidate -> Bool in
-            switch BrowserCredentialPreference.provider {
-            case .systemAutoFill: return false
-            case .threadingVault: return BrowserCredentialStore().hasIdentities(for: candidate)
-            case .onePassword: return !OnePasswordItemStore.identities(for: candidate).isEmpty
-            }
-        } ?? false
-
-        let message = L10n.format("""
-            This can change data outside Threading using the browser's signed-in session.%@
-
-            Approve only if this is part of the task you gave the agent.
-            """, label)
-
-        guard exemptable, let origin else {
+        guard let origin else {
+            let host = browser.currentURL?.host ?? L10n.string("this page")
+            let label = target.name.flatMap { name in
+                name.isEmpty ? nil : L10n.format("\nControl: %@", name)
+            } ?? ""
             let request = ConfirmationRequest(
                 prompt: .approveSensitiveBrowserAction,
                 title: L10n.format("%@ on %@?", L10n.string(action), host),
-                message: message,
+                message: L10n.format("""
+                    This can change data outside Threading using the browser's signed-in session.%@
+
+                    Approve only if this is part of the task you gave the agent.
+                    """, label),
                 confirmTitle: L10n.string("Allow"),
                 cancelTitle: L10n.string("Deny")
             )
@@ -693,26 +677,10 @@ extension AgentToolCoordinator {
             }
         }
 
-        // `choose` rather than a suppression box, for the reason the origin grant gives: a
-        // remembered answer scoped to one host is this prompt's own answer, while a "don't ask
-        // again" checkbox would remember something about every host at once. The register marks
-        // this prompt `.alwaysAsks`, and `choose` is what respects that while still offering a
-        // second affirmative.
-        let request = ChoiceRequest(
-            prompt: .approveSensitiveBrowserAction,
-            title: L10n.format("%@ on %@?", L10n.string(action), host),
-            message: L10n.format("""
-                %@
-
-                You keep a test credential for %@. Threading can stop asking about submissions \
-                there until you quit.
-                """, message, origin.displayName),
-            options: [
-                ConfirmationOption(title: L10n.string("Allow")),
-                ConfirmationOption(title: L10n.string("Allow Until I Quit"))
-            ],
-            cancelTitle: L10n.string("Deny"),
-            style: .informational
+        let request = Self.sensitiveBrowserActionChoice(
+            action,
+            target: target,
+            origin: origin
         )
 
         return await withCheckedContinuation { continuation in
@@ -724,13 +692,45 @@ extension AgentToolCoordinator {
                 case 0:
                     continuation.resume(returning: true)
                 case 1:
-                    BrowserSubmissionExemptions.shared.exempt(origin)
+                    BrowserSubmissionExemptions.shared.exempt(origin, for: sessionID)
                     continuation.resume(returning: true)
                 default:
                     continuation.resume(returning: false)
                 }
             }
         }
+    }
+
+    /// The remembered answer is one exact origin in one calling session. Keeping construction
+    /// pure lets tests inspect the security-relevant title and all three answers without putting
+    /// a sheet on screen.
+    static func sensitiveBrowserActionChoice(
+        _ action: String,
+        target: BrowserTargetDescription,
+        origin: BrowserOrigin
+    ) -> ChoiceRequest {
+        let label = target.name.flatMap { name in
+            name.isEmpty ? nil : L10n.format("\nControl: %@", name)
+        } ?? ""
+
+        // `choose` rather than a suppression box, for the reason the origin grant gives: a
+        // remembered answer scoped to one session and one exact origin is this prompt's own
+        // answer, while a "don't ask again" checkbox would carry neither scope.
+        return ChoiceRequest(
+            prompt: .approveSensitiveBrowserAction,
+            title: L10n.format("%@ on %@?", L10n.string(action), origin.displayName),
+            message: L10n.format("""
+                This can change data outside Threading using the browser's signed-in session.%@
+
+                Approve only if this is part of the task you gave the agent.
+                """, label),
+            options: [
+                ConfirmationOption(title: L10n.string("Allow Once")),
+                ConfirmationOption(title: L10n.string("Allow for This Session"))
+            ],
+            cancelTitle: L10n.string("Deny"),
+            style: .informational
+        )
     }
 
     // MARK: Browser Scripts

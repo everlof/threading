@@ -26,6 +26,7 @@ final class RemoteTerminalSelectionTests: XCTestCase {
         static let selectedWord = "line"
         static let blankColumn = 30
         static let quoteTitle = "Add to message"
+        static let selectionHandleRadius: CGFloat = 6
     }
 
     // MARK: - Tests
@@ -86,6 +87,169 @@ final class RemoteTerminalSelectionTests: XCTestCase {
         longPress(view, .changed, at: point(column: 6, row: 4, in: view))
 
         XCTAssertEqual(view.selectedText, "line 3\nline 4")
+    }
+
+    func testLongPressUsesThePlatformRecognitionDuration() {
+        let view = makeView()
+        let durations = view.gestureRecognizers?
+            .compactMap { $0 as? UILongPressGestureRecognizer }
+            .map(\.minimumPressDuration) ?? []
+
+        XCTAssertTrue(
+            durations.contains(UILongPressGestureRecognizer().minimumPressDuration),
+            "the terminal's selection press should use UIKit's ordinary recognition delay"
+        )
+        XCTAssertFalse(durations.contains(0.7), "the old extra delay made selection feel unresponsive")
+    }
+
+    func testHandlePanGetsFirstRefusalOverBothTerminalScrollRoutes() throws {
+        let view = makeView()
+        view.allowMouseReporting = true
+        view.feed(text: Fixture.enableSGRMouseTracking)
+        settleTerminalCallbacks(for: view)
+        let existingPans = Set(
+            (view.gestureRecognizers ?? [])
+                .compactMap { $0 as? UIPanGestureRecognizer }
+                .map(ObjectIdentifier.init)
+        )
+
+        longPress(view, .began, at: point(column: 1, row: 3, in: view))
+
+        let selectionPan = try XCTUnwrap(
+            view.gestureRecognizers?
+                .compactMap { $0 as? UIPanGestureRecognizer }
+                .first { !existingPans.contains(ObjectIdentifier($0)) }
+        )
+        let delegate = try XCTUnwrap(selectionPan.delegate)
+        let programPan = try XCTUnwrap(view.panMouseGesture)
+
+        XCTAssertEqual(selectionPan.maximumNumberOfTouches, 1)
+        XCTAssertTrue(
+            delegate.gestureRecognizer?(
+                selectionPan,
+                shouldBeRequiredToFailBy: view.panGestureRecognizer
+            ) ?? false
+        )
+        XCTAssertTrue(
+            delegate.gestureRecognizer?(
+                selectionPan,
+                shouldBeRequiredToFailBy: programPan
+            ) ?? false
+        )
+        XCTAssertFalse(
+            delegate.gestureRecognizer?(
+                selectionPan,
+                shouldBeRequiredToFailBy: UILongPressGestureRecognizer()
+            ) ?? false,
+            "a stationary selection press must not wait for a pan to fail"
+        )
+    }
+
+    func testGrabbingASelectionHandleDoesNotJumpAtPanRecognition() {
+        let view = makeView()
+        select(row: Fixture.selectedRow, in: view)
+        let selected = view.selectedText
+        let cell = view.cellSize
+        let touchOrigin = CGPoint(
+            x: 0,
+            y: CGFloat(Fixture.selectedRow) * cell.height - Fixture.selectionHandleRadius
+        )
+        let recognitionTravel = CGPoint(x: 0, y: cell.height * 0.8)
+
+        selectionPan(
+            view,
+            .began,
+            at: CGPoint(
+                x: touchOrigin.x + recognitionTravel.x,
+                y: touchOrigin.y + recognitionTravel.y
+            ),
+            translation: recognitionTravel
+        )
+
+        XCTAssertEqual(
+            view.selectedText,
+            selected,
+            "the pan recognizer's hysteresis is not movement of the selection endpoint"
+        )
+    }
+
+    func testDraggingTheEndHandleTracksMovementFromWhereItWasGrabbed() {
+        let view = makeView()
+        select(row: Fixture.selectedRow, in: view)
+        let cell = view.cellSize
+        let endColumn = "line \(Fixture.selectedRow)".count
+        let touchOrigin = CGPoint(
+            x: CGFloat(endColumn) * cell.width + 8,
+            y: CGFloat(Fixture.selectedRow + 1) * cell.height
+                + Fixture.selectionHandleRadius - 8
+        )
+        let recognitionTravel = CGPoint(x: -cell.width * 1.25, y: 0)
+
+        selectionPan(
+            view,
+            .began,
+            at: CGPoint(
+                x: touchOrigin.x + recognitionTravel.x,
+                y: touchOrigin.y + recognitionTravel.y
+            ),
+            translation: recognitionTravel
+        )
+        XCTAssertEqual(view.selectedText, "line \(Fixture.selectedRow)")
+
+        selectionPan(
+            view,
+            .changed,
+            at: CGPoint(x: touchOrigin.x - cell.width * 3, y: touchOrigin.y)
+        )
+
+        XCTAssertEqual(view.selectedText, "line")
+    }
+
+    func testAPanAwayFromTheHandlesLeavesTheSelectionAlone() {
+        let view = makeView()
+        select(row: Fixture.selectedRow, in: view)
+        let selected = view.selectedText
+        let origin = point(column: 20, row: Fixture.selectedRow, in: view)
+
+        selectionPan(
+            view,
+            .began,
+            at: CGPoint(x: origin.x + 12, y: origin.y),
+            translation: CGPoint(x: 12, y: 0)
+        )
+        selectionPan(
+            view,
+            .changed,
+            at: point(column: 24, row: Fixture.selectedRow, in: view)
+        )
+
+        XCTAssertEqual(
+            view.selectedText,
+            selected,
+            "a normal terminal pan must not reuse a stale selection pivot"
+        )
+    }
+
+    func testACancelledHandleDragKeepsTheSelection() {
+        let view = makeView()
+        select(row: Fixture.selectedRow, in: view)
+        let cell = view.cellSize
+        let endColumn = "line \(Fixture.selectedRow)".count
+        let origin = CGPoint(
+            x: CGFloat(endColumn) * cell.width,
+            y: CGFloat(Fixture.selectedRow + 1) * cell.height + Fixture.selectionHandleRadius
+        )
+
+        selectionPan(view, .began, at: origin)
+        selectionPan(
+            view,
+            .changed,
+            at: CGPoint(x: origin.x - cell.width * 3, y: origin.y)
+        )
+        selectionPan(view, .cancelled, at: origin)
+
+        XCTAssertTrue(view.hasActiveSelection)
+        XCTAssertEqual(view.selectedText, "line")
     }
 
     func testALongPressInsideTheSelectionKeepsIt() {
@@ -224,7 +388,23 @@ final class RemoteTerminalSelectionTests: XCTestCase {
         at point: CGPoint
     ) {
         let recognizer = ScriptedLongPress(state: state, at: point, on: view)
-        view.perform(Selector(("longPress:")), with: recognizer)
+        view.perform(NSSelectorFromString("longPress:"), with: recognizer)
+    }
+
+    private func selectionPan(
+        _ view: RemoteTerminalView,
+        _ state: UIGestureRecognizer.State,
+        at point: CGPoint,
+        translation: CGPoint = .zero
+    ) {
+        let recognizer = ScriptedPan(
+            state: state,
+            at: point,
+            translation: translation,
+            on: view
+        )
+        view.perform(NSSelectorFromString("panSelectionHandler:"), with: recognizer)
+        view.removeGestureRecognizer(recognizer)
     }
 
     private func titles(of elements: [UIMenuElement]) -> [String] {
@@ -251,4 +431,34 @@ private final class ScriptedLongPress: UILongPressGestureRecognizer {
     }
 
     override func location(in view: UIView?) -> CGPoint { point }
+}
+
+/// A pan frozen at a known location and cumulative translation. UIKit reports both only after
+/// the finger has crossed its recognition threshold, which is the distinction the handler needs
+/// in order to recover the original touch point.
+private final class ScriptedPan: UIPanGestureRecognizer {
+    private let scriptedState: UIGestureRecognizer.State
+    private let point: CGPoint
+    private let scriptedTranslation: CGPoint
+
+    init(
+        state: UIGestureRecognizer.State,
+        at point: CGPoint,
+        translation: CGPoint,
+        on view: UIView
+    ) {
+        scriptedState = state
+        self.point = point
+        scriptedTranslation = translation
+        super.init(target: nil, action: nil)
+        view.addGestureRecognizer(self)
+    }
+
+    override var state: UIGestureRecognizer.State {
+        get { scriptedState }
+        set { super.state = newValue }
+    }
+
+    override func location(in view: UIView?) -> CGPoint { point }
+    override func translation(in view: UIView?) -> CGPoint { scriptedTranslation }
 }

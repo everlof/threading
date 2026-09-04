@@ -1,5 +1,60 @@
 import Foundation
 
+enum MacNotificationActivityWindow: Equatable, CaseIterable, Sendable {
+    case off
+    case oneMinute
+    case twoMinutes
+    case fiveMinutes
+    case tenMinutes
+    case unknown(String)
+
+    static let allCases: [MacNotificationActivityWindow] = [
+        .off, .oneMinute, .twoMinutes, .fiveMinutes, .tenMinutes,
+    ]
+
+    init(rawValue: String) {
+        switch rawValue {
+        case "off": self = .off
+        case "oneMinute": self = .oneMinute
+        case "twoMinutes": self = .twoMinutes
+        case "fiveMinutes": self = .fiveMinutes
+        case "tenMinutes": self = .tenMinutes
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    var rawValue: String {
+        switch self {
+        case .off: "off"
+        case .oneMinute: "oneMinute"
+        case .twoMinutes: "twoMinutes"
+        case .fiveMinutes: "fiveMinutes"
+        case .tenMinutes: "tenMinutes"
+        case .unknown(let value): value
+        }
+    }
+
+    var seconds: TimeInterval {
+        switch self {
+        case .off, .unknown: 0
+        case .oneMinute: 60
+        case .twoMinutes: 120
+        case .fiveMinutes: 300
+        case .tenMinutes: 600
+        }
+    }
+
+    var settingsTitle: String {
+        switch self {
+        case .off, .unknown: L10n.string("Off")
+        case .oneMinute: L10n.string("1 minute")
+        case .twoMinutes: L10n.string("2 minutes")
+        case .fiveMinutes: L10n.string("5 minutes")
+        case .tenMinutes: L10n.string("10 minutes")
+        }
+    }
+}
+
 /// Application-wide preferences backed by `UserDefaults`.
 ///
 /// Terminal appearance lives in `TerminalProfile` and per-account customisation in
@@ -1050,6 +1105,33 @@ final class AppSettings {
         }
     }
 
+    /// Which screen new Claude *terminal* sessions draw their UI on.
+    ///
+    /// Defaults to `.terminalScrollback`, and that is a stated value rather than deference: this
+    /// app mirrors and remotely scrolls the terminal's retained buffer, and the CLI's
+    /// alternate-screen renderer keeps its transcript somewhere that buffer never sees. The CLI
+    /// defaults the other way, so leaving it unset would mean shipping a scrollbar that only
+    /// sometimes has anything to scroll — the same argument that pins every Codex launch inline.
+    ///
+    /// `.followClaude` states nothing and hands the question back, including to the CLI's own
+    /// machine-local auto-disable. The other two travel in the launch environment rather than
+    /// the settings file, because that record outranks the settings key; see
+    /// `AgentCapabilities.selectableTerminalRenderer`. Native conversations are unaffected
+    /// whatever this says: they run `--print` and draw no terminal UI at all.
+    ///
+    /// A session that has chosen for itself (`AgentSession.fullscreenRenderer`) ignores this.
+    var claudeTerminalRenderer: ClaudeTerminalRenderer {
+        get {
+            guard let raw = AppSettingDefinitions.claudeTerminalRenderer.read(from: defaults),
+                  let value = ClaudeTerminalRenderer(rawValue: raw)
+            else { return .terminalScrollback }
+            return value
+        }
+        set {
+            AppSettingDefinitions.claudeTerminalRenderer.write(newValue.rawValue, to: defaults)
+        }
+    }
+
     // MARK: - Conversation Speed
 
     /// How sessions for one runtime start before a conversation makes its own choice.
@@ -1199,6 +1281,23 @@ final class AppSettings {
         }
         set {
             AppSettingDefinitions.remoteAccessListenerPort.write(Int(newValue), to: defaults)
+        }
+    }
+
+    /// How long deliberate interaction keeps the owner's Mac present for routine completion
+    /// notifications. Off is an explicit choice and does not affect urgent notification kinds.
+    var remoteNotificationMacActivityWindow: MacNotificationActivityWindow {
+        get {
+            let raw = AppSettingDefinitions.remoteNotificationMacActivityWindow.read(
+                from: defaults
+            ) ?? MacNotificationActivityWindow.twoMinutes.rawValue
+            return MacNotificationActivityWindow(rawValue: raw)
+        }
+        set {
+            AppSettingDefinitions.remoteNotificationMacActivityWindow.write(
+                newValue.rawValue,
+                to: defaults
+            )
         }
     }
 
@@ -1789,6 +1888,55 @@ enum ClaudeRemoteControl: String, CaseIterable {
         case .followClaude: L10n.string("Use Claude's Setting")
         case .enabled: L10n.string("Use Default (On)")
         case .disabled: L10n.string("Use Default (Off)")
+        }
+    }
+}
+
+// MARK: - Claude Terminal Renderer
+
+/// Which screen a Claude terminal session's own UI starts on.
+///
+/// The CLI ships two renderers. Its `fullscreen` one takes the terminal's alternate screen and
+/// keeps a virtualized transcript that it scrolls itself; its `default` one draws on the main
+/// screen, so output lands in the emulator's scrollback and Threading's scroller — and the
+/// iPhone's, which mirrors that same retained buffer — is what moves it.
+///
+/// The third case exists for the reason `ClaudeRemoteControl`'s does: leaving a decision alone
+/// is not the same as deciding. What differs is which way the default falls. Remote Control
+/// defers because the answer belongs to the user's `claude /config`; this one states a value,
+/// because whether *this app's* terminal keeps the transcript is a property of this app.
+enum ClaudeTerminalRenderer: String, CaseIterable {
+    case terminalScrollback
+    case claudeFullscreen
+    case followClaude
+
+    /// Whether this launch asks for Claude's fullscreen renderer, refuses it, or says nothing.
+    var startupValue: Bool? {
+        switch self {
+        case .terminalScrollback: false
+        case .claudeFullscreen: true
+        case .followClaude: nil
+        }
+    }
+
+    /// The settings pop-up's wording. The first two name the scroller that ends up owning the
+    /// transcript, which is the difference being chosen between.
+    var settingsTitle: String {
+        switch self {
+        case .terminalScrollback: L10n.string("Terminal's own scrolling")
+        case .claudeFullscreen: L10n.string("Claude's fullscreen renderer")
+        case .followClaude: L10n.string("Follow Claude's setting")
+        }
+    }
+
+    /// What a session's "inherit" menu item says, given this as the app-wide default. Unlike
+    /// Remote Control's, two of the three can name the inherited answer outright — only
+    /// `.followClaude` hands the question to a file this app does not read.
+    var inheritedMenuTitle: String {
+        switch self {
+        case .terminalScrollback: L10n.string("Use Default (Terminal Scrolling)")
+        case .claudeFullscreen: L10n.string("Use Default (Fullscreen)")
+        case .followClaude: L10n.string("Use Claude's Setting")
         }
     }
 }

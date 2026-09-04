@@ -422,6 +422,8 @@ final class ProjectStore {
         managedWorkspace: ManagedWorkspace? = nil,
         id: SessionID = SessionID()
     ) -> AgentSession? {
+        // Starting a chat here is the user choosing this folder, whatever put the row on screen.
+        noteProjectEarnedItsPlace(projectID)
         let account = kind.supportsAccounts
             ? AgentAccountDiscovery.account(for: kind, handle: accountHandle)
             : nil
@@ -647,6 +649,10 @@ final class ProjectStore {
                 folderURL: URL(fileURLWithPath: checkoutPath, isDirectory: true)
             )
             project.folderPath = checkoutPath
+            // Marked as Threading's own so it can be taken back. Without this the row is
+            // indistinguishable from a folder the user added, and the only safe answer to "may
+            // I remove this?" later is no — which is how empty rows accumulated.
+            project.isAdoptedForCheckoutMove = true
             projects.append(project)
             targetIndex = projects.index(before: projects.endIndex)
         }
@@ -705,6 +711,40 @@ final class ProjectStore {
         return .moved(destination)
     }
 
+    /// Clears the adoption flag, because this row is now somewhere the user keeps things.
+    ///
+    /// Called from every route that puts content into a project other than a checkout move. A
+    /// folder Threading adopted on its own, that you then start using deliberately, is yours —
+    /// and must stop being reclaimable the moment it is, not stay disposable until the next time
+    /// it happens to be empty.
+    func noteProjectEarnedItsPlace(_ projectID: ProjectID) {
+        guard let index = index(ofProject: projectID),
+              projects[index].wasAdoptedForCheckoutMove else { return }
+        projects[index].isAdoptedForCheckoutMove = nil
+        _ = saveProjectRecord(at: index)
+    }
+
+    /// Removes rows Threading adopted for a checkout move that now hold nothing.
+    ///
+    /// Run after a move commits rather than inside its transaction: the transaction's job is to
+    /// keep the *session graph* consistent, while this is ordinary project removal and wants
+    /// `removeProject`'s auxiliary cleanup — icon file, drafts, scheduled work, audit — rather
+    /// than a second, thinner copy of it. Returns the rows it took back.
+    ///
+    /// Only ever touches rows with the flag, so a folder the user added stays whether or not it
+    /// holds chats. A crash between the commit and this leaves one empty row, which is what the
+    /// app did on every move before.
+    @discardableResult
+    func reclaimAdoptedEmptyProjects() -> [ProjectID] {
+        let reclaimable = projects
+            .filter { $0.wasAdoptedForCheckoutMove && $0.holdsNothing && !$0.isTheScratchpad }
+            .map(\.id)
+        for id in reclaimable {
+            _ = removeProject(id: id)
+        }
+        return reclaimable
+    }
+
     /// Adopts conversations found on disk, so they can be resumed like any other session.
     ///
     /// Each session is created already launched and carrying its identifier: it exists because
@@ -722,7 +762,9 @@ final class ProjectStore {
         _ found: [ImportableSession],
         into projectID: ProjectID
     ) -> [AgentSession] {
-        guard let index = index(ofProject: projectID), !found.isEmpty else { return [] }
+        guard index(ofProject: projectID) != nil, !found.isEmpty else { return [] }
+        noteProjectEarnedItsPlace(projectID)
+        guard let index = index(ofProject: projectID) else { return [] }
 
         let branch = GitInfo.currentBranch(for: projects[index].folderPath)
         var known = Set(projects[index].sessions.compactMap { $0.resumeState.transcriptID })
@@ -994,6 +1036,33 @@ final class ProjectStore {
         return .applied
     }
 
+    /// Records which screen this conversation's terminal UI starts on. Nil clears it, so the
+    /// session follows `AppSettings.claudeTerminalRenderer` again.
+    ///
+    /// Applied on the session's next launch, where the environment is stated. A running agent
+    /// keeps the screen it started on: the CLI reads this once, at startup, and switching it
+    /// from inside the session relaunches the process there rather than redrawing this one.
+    @discardableResult
+    func setTerminalRenderer(
+        _ fullscreenRenderer: Bool?,
+        for sessionID: SessionID
+    ) -> ProjectMutationResult {
+        guard let location = locate(sessionID: sessionID) else { return .targetNotFound }
+        guard projects[location.projectIndex].sessions[location.sessionIndex]
+            .kind.supports(.selectableTerminalRenderer)
+        else { return .unsupportedValue }
+        guard projects[location.projectIndex].sessions[location.sessionIndex].fullscreenRenderer
+            != fullscreenRenderer else { return .unchanged }
+        projects[location.projectIndex].sessions[location.sessionIndex]
+            .setClaudeFullscreenRenderer(fullscreenRenderer)
+        guard saveSessionRecord(at: location) else {
+            notifyChanged(sidebarImpact: .sessionRow(sessionID))
+            return .persistenceRefused
+        }
+        notifyChanged(sidebarImpact: .sessionRow(sessionID))
+        return .applied
+    }
+
     /// Records how much this conversation may do before it has to ask. Nil clears it, so the
     /// session follows `AppSettings.defaultPermissionMode` — and the CLI's own configuration
     /// beyond that — again.
@@ -1067,6 +1136,8 @@ final class ProjectStore {
         currentDirectory: String? = nil,
         customTitle: String? = nil
     ) -> ProjectTerminal? {
+        guard index(ofProject: projectID) != nil else { return nil }
+        noteProjectEarnedItsPlace(projectID)
         guard let projectIndex = index(ofProject: projectID) else { return nil }
 
         var terminal = ProjectTerminal(

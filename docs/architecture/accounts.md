@@ -372,6 +372,16 @@ is opened; the Fable ring appears inside them. Three rings fit around the mark a
 stroke and gap, so a fourth is not drawn, while the disc's spoken value names every window in
 the pill's order.
 
+The disc is also the control that changes the login. Tapping it opens the draft's identity
+picker (`MobileIdentityPicker`, see [`IOS_THEMED_DIALOGS.md`](../IOS_THEMED_DIALOGS.md)): the
+runtimes as a strip of their own marks, and the logins as rows each led by the same disc — the
+login's emoji or initial (the Mac's `AccountBadge.initial` order: address, then name), ringed by
+that login's reading. The chosen login is ringed for the model the draft will start, so its row
+and the bar agree; every other login is ringed for its own default, which is what the next turn
+would spend there — the draft's model belongs to the chosen identity and is re-resolved on a
+switch. Under each name, the reading in the pill's words, or "Usage unavailable" /
+"Loading usage…" as a state of its own rather than padding in the name.
+
 The scope match stays on the Mac. `RemoteAccountBridge.usageWindows` sends each scoped window
 with the ids among the account's model choices that `ModelName.scope` says it meters, and the
 phone matches the chat's model (`RemoteSessionSummaryDTO.model`, else the account's default, the

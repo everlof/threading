@@ -122,50 +122,40 @@ final class ConversationRenderTests: XCTestCase {
         }
         flushTools()
 
-        var previous: NSView?
-        var previousWasWork = false
+        var previous: (view: NSView, rhythm: Design.Chat.Rhythm)?
 
-        func add(_ view: NSView, opensTurn: Bool, isWork: Bool) {
+        // The same rhythm tokens and the same composition the shared table uses, so the images
+        // cannot be pictures of spacing the app never draws. Placement is shared; only the
+        // ordering is rebuilt here, and it mirrors `ConversationTranscriptTable.appendTimelineRow`.
+        func add(_ view: NSView, rhythm: Design.Chat.Rhythm) {
             if let previous {
-                let spacing = opensTurn
-                    ? Design.Chat.turnSpacing
-                    : (isWork || previousWasWork ? Design.Spacing.tight : Design.Spacing.small)
-                stack.setCustomSpacing(spacing, after: previous)
+                stack.setCustomSpacing(
+                    Design.Chat.Rhythm.gap(between: previous.rhythm, and: rhythm),
+                    after: previous.view
+                )
             }
             stack.addArrangedSubview(view)
             NSLayoutConstraint.activate([
                 view.leadingAnchor.constraint(equalTo: stack.leadingAnchor, constant: Design.Spacing.inset),
                 view.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -Design.Spacing.inset)
             ])
-            previous = view
-            previousWasWork = isWork
+            previous = (view, rhythm)
         }
 
-        // Mirrors `ConversationRendering.apply(_:)`. Divergence here would make the images
-        // pictures of something the app never draws, so any change to placement belongs in
-        // both — the row views themselves are already shared.
         for item in items {
             switch item {
             case .row(let row):
                 let (view, startsTurn) = ConversationRowView.make(for: row)
                 if startsTurn, previous != nil {
-                    add(ConversationRowView.turnDivider(), opensTurn: true, isWork: false)
+                    add(ConversationRowView.turnDivider(), rhythm: .boundary)
                 }
-                let isWork: Bool
-                switch row {
-                case .toolCall, .thinking:
-                    isWork = true
-                case .userMessage, .assistant, .turnOutcome, .notice:
-                    isWork = false
-                }
-                add(view, opensTurn: false, isWork: isWork)
+                add(view, rhythm: ConversationRowView.rhythm(for: row))
 
             case .toolFold(let calls):
                 let label = L10n.format("%lld tool calls", Int64(calls.count))
                 add(
                     TurnFoldView(label: label, folding: [], expanded: false) { _, _ in },
-                    opensTurn: false,
-                    isWork: true
+                    rhythm: .work
                 )
             }
         }
@@ -927,7 +917,7 @@ final class ConversationRenderTests: XCTestCase {
         let viewportRows = viewportStart..<table.numberOfRows
         let materializeStarted = DispatchTime.now().uptimeNanoseconds
         for row in viewportRows {
-            guard let rowView = controller.tableView(
+            guard let rowView = controller.transcript.tableView(
                 table,
                 viewFor: table.tableColumns.first,
                 row: row
@@ -972,7 +962,7 @@ final class ConversationRenderTests: XCTestCase {
         for row in 0..<table.numberOfRows {
             autoreleasepool {
                 let started = DispatchTime.now().uptimeNanoseconds
-                guard let rowView = controller.tableView(
+                guard let rowView = controller.transcript.tableView(
                     table,
                     viewFor: table.tableColumns.first,
                     row: row
@@ -990,10 +980,8 @@ final class ConversationRenderTests: XCTestCase {
         let renderPhases = controller.lastRenderPhaseDurations
         let renderPhaseMetrics = "summary_ms="
             + Self.milliseconds(renderPhases.summaryNanoseconds)
-            + " presentation_ms="
-            + Self.milliseconds(renderPhases.presentationNanoseconds)
-            + " reload_ms="
-            + Self.milliseconds(renderPhases.reloadNanoseconds)
+            + " transcript_ms="
+            + Self.milliseconds(renderPhases.transcriptNanoseconds)
             + " summary_rebuilds=\(renderPhases.summaryRebuilds)"
             + " appkit_mounts=\(initialRowMaterialization.count)"
             + " appkit_markdown_mounts=\(initialRowMaterialization.markdownCount)"
@@ -1200,7 +1188,7 @@ final class ConversationRenderTests: XCTestCase {
         controller.view.layoutSubtreeIfNeeded()
 
         let foldRow = try XCTUnwrap(
-            controller.presentationItems.firstIndex { $0.id == .fold(turnStart: 0) }
+            controller.presentationItems.firstIndex { $0.id == .surface(.fold(turnStart: 0)) }
         )
         let foldHost = try XCTUnwrap(
             controller.tableView.view(atColumn: 0, row: foldRow, makeIfNecessary: true)
@@ -1212,7 +1200,7 @@ final class ConversationRenderTests: XCTestCase {
         XCTAssertEqual(controller.presentationItems.count, 4)
         XCTAssertEqual(
             controller.presentationItems.filter {
-                if case .retained = $0.content { return true }
+                if case .surface(.retained) = $0.content { return true }
                 return false
             }.count,
             1,
@@ -1282,7 +1270,7 @@ final class ConversationRenderTests: XCTestCase {
         ], to: controller)
 
         let card = try XCTUnwrap(controller.presentationItems.compactMap { item -> ChangedFilesCardView? in
-            guard case .retained(let view) = item.content else { return nil }
+            guard case .surface(.retained(let view)) = item.content else { return nil }
             return view as? ChangedFilesCardView
         }.first)
         let preview = try XCTUnwrap(card.preview(forNodeAt: 0))
@@ -1290,7 +1278,7 @@ final class ConversationRenderTests: XCTestCase {
         XCTAssertEqual(preview.added, 1)
         XCTAssertEqual(preview.removed, 1)
         XCTAssertNotNil(
-            controller.presentationItems.first { $0.id == .fold(turnStart: 0) },
+            controller.presentationItems.first { $0.id == .surface(.fold(turnStart: 0)) },
             "the replayed work row was not restored as a disclosure"
         )
     }
@@ -3566,18 +3554,20 @@ final class SubagentSummaryViewTests: XCTestCase {
         let transcriptDescendants = descendants(of: controller.view)
         XCTAssertEqual(
             transcriptDescendants.compactMap { $0 as? TurnFoldView }.count,
-            2,
-            "The compact child transcript did not replace tool runs with disclosures"
+            1,
+            "The compact child transcript did not replace the two-call run with a disclosure"
         )
         XCTAssertEqual(
             transcriptDescendants.compactMap { $0 as? ToolCallView }.count,
-            0,
-            "Collapsed virtual tool rows should not be materialized behind their disclosure"
+            1,
+            "The lone third call is its own collapsed row, the same rule as the main "
+                + "conversation; the folded pair must not be materialized behind its disclosure"
         )
         XCTAssertEqual(
             controller.renderedPresentationCount,
             9,
-            "Markdown blocks should be separate virtual rows beside the heading and two tool folds"
+            "Markdown blocks should be separate virtual rows beside the heading, one tool fold "
+                + "and one lone tool row"
         )
         let summary = try XCTUnwrap(
             transcriptDescendants.compactMap { $0 as? SubagentSummaryView }.first
