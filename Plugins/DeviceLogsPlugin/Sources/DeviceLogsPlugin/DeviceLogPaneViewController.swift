@@ -63,6 +63,12 @@ public final class DeviceLogPaneViewController: NSViewController {
     /// A view rather than a layer colour on purpose: a theme colour baked into a `CGColor` is not
     /// re-resolved when the theme changes, and this pane already redraws on that notification, so
     /// drawing it is both simpler and correct under a live switch.
+    /// Why the reader stopped on its own, if it did.
+    ///
+    /// A dead reader and a quiet device look identical, and the pane could not tell them apart
+    /// because nothing told it. Cleared whenever a source is started.
+    private var endedReason: String?
+
     private let followPlate = FollowPlateView()
 
     private lazy var followButton = ThemedButton(
@@ -426,7 +432,16 @@ public final class DeviceLogPaneViewController: NSViewController {
                 let keep = self.runningSourceTitle.flatMap { title in
                     found.firstIndex { $0.title == title }
                 }
-                if !found.isEmpty { self.sourcePopUp.selectItem(at: keep ?? 0) }
+                if found.isEmpty {
+                    // An empty popup draws as a bare chevron, which does not read as a control at
+                    // all — the one place the pane most needs to look like somewhere you choose a
+                    // device is the case where it has not found one.
+                    self.sourcePopUp.addItem(withTitle: L10n.string("No log sources"))
+                    self.sourcePopUp.isEnabled = false
+                } else {
+                    self.sourcePopUp.isEnabled = true
+                    self.sourcePopUp.selectItem(at: keep ?? 0)
+                }
                 self.sourcePopUp.action = action
                 self.startSelectedSource()
             }
@@ -465,8 +480,26 @@ public final class DeviceLogPaneViewController: NSViewController {
             table.reloadData()
         }
 
-        source = option.makeSource(predicate: nil, route: route)
-        source?.start()
+        endedReason = nil
+        guard let started = option.makeSource(predicate: nil, route: route) else {
+            source = nil
+            endedReason = L10n.string("this source has no reader on this Mac")
+            updateStatus()
+            return
+        }
+        // Reported from the reader's own queue, so it comes back to the main actor before it
+        // touches the pane.
+        started.onStreamEnded = { [weak self] reason in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.endedReason = reason
+                    self.updateStatus()
+                }
+            }
+        }
+        source = started
+        started.start()
         startedAt = Date()
         updateStatus()
     }
@@ -691,6 +724,17 @@ public final class DeviceLogPaneViewController: NSViewController {
             statusLabel.stringValue = appending(
                 L10n.string("No booted simulator or paired iPhone found.")
             )
+            return
+        }
+        // Above every other state, because a reader that stopped makes the rest of them untrue:
+        // a row count and a rate describe a stream that is no longer running. The reason comes
+        // from the child's own diagnostics, which used to be discarded — "device is locked" and
+        // "application is not installed" both arrived as silence.
+        if let endedReason {
+            statusLabel.stringValue = appending(
+                L10n.format("The log reader stopped: %@ — press Rescan to start it again.", endedReason)
+            )
+            statusLabel.textColor = Design.Status.warning
             return
         }
         // Silence is a state, not an absence of one. A device whose relay accepts the connection

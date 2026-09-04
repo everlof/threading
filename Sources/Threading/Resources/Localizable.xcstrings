@@ -25961,6 +25961,17 @@
         }
       }
     },
+    "No log sources" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inga loggkällor"
+          }
+        }
+      }
+    },
     "No login was found on a runtime whose window can be opened this way." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42923,6 +42934,17 @@
         }
       }
     },
+    "The log reader stopped: %@ — press Rescan to start it again." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Loggläsaren stoppade: %@ — tryck på Sök igen för att starta om den."
+          }
+        }
+      }
+    },
     "The login this chat was set to continue on is not available." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -55360,6 +55382,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "det här projektet"
+          }
+        }
+      }
+    },
+    "this source has no reader on this Mac" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "den här källan har ingen läsare på den här datorn"
           }
         }
       }

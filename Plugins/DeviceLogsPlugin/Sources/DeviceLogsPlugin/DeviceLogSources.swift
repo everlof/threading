@@ -72,6 +72,11 @@ public protocol DeviceLogRowSource: AnyObject {
     /// Rows produced but never collected because the handoff was full. A drop is the honest signal
     /// that the consumer is behind; growing the buffer would only hide it in memory.
     var dropped: Int { get }
+    /// Called once, off the main thread, when the source stops producing on its own.
+    ///
+    /// A reader that has died looks exactly like a device that has gone quiet, and the pane cannot
+    /// tell them apart without being told. Not called for `stop()`, which the pane asked for.
+    var onStreamEnded: ((String) -> Void)? { get set }
 }
 
 /// Shared batching and bounded handoff. Every source is a producer on its own queue and the pane
@@ -82,6 +87,8 @@ public class BufferedDeviceLogSource: DeviceLogRowSource {
     private var pending: [DeviceLogRow] = []
     private let lock = NSLock()
     private var droppedCount = 0
+
+    public var onStreamEnded: ((String) -> Void)?
 
     public var dropped: Int {
         lock.lock()
@@ -131,19 +138,51 @@ public final class DeviceLogLineReader {
         queue = DispatchQueue(label: "codes.threading.devicelog.\(label)")
     }
 
+    /// The last of the child's diagnostics, kept so an exit can say why.
+    ///
+    /// Bounded, and deliberately small: this exists to carry one sentence such as "device is
+    /// locked" or "application is not installed" into the pane's status line, not to mirror a
+    /// second log stream into memory.
+    public static let retainedErrorBytes = 4096
+
     public func run(
         executable: String,
         arguments: [String],
-        onLine: @escaping (ArraySlice<UInt8>) -> Void
+        onLine: @escaping (ArraySlice<UInt8>) -> Void,
+        onEnd: ((String) -> Void)? = nil
     ) {
         stop()
-        guard FileManager.default.isExecutableFile(atPath: executable) else { return }
+        guard FileManager.default.isExecutableFile(atPath: executable) else {
+            onEnd?("\(executable) is not available on this Mac")
+            return
+        }
         let task = Process()
         task.executableURL = URL(fileURLWithPath: executable)
         task.arguments = arguments
         let pipe = Pipe()
         task.standardOutput = pipe
-        task.standardError = FileHandle.nullDevice
+        // Diagnostics used to go to /dev/null, so a device that was locked, an app that was not
+        // installed, or a launch that simply failed all produced the same thing: silence, and a
+        // pane that looked like it was listening.
+        let errors = Pipe()
+        task.standardError = errors
+        let diagnostics = DiagnosticsBuffer()
+        errors.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty {
+                handle.readabilityHandler = nil
+            } else {
+                diagnostics.append(chunk, limit: Self.retainedErrorBytes)
+            }
+        }
+        task.terminationHandler = { finished in
+            errors.fileHandleForReading.readabilityHandler = nil
+            guard let onEnd else { return }
+            let reason = diagnostics.text()
+            onEnd(reason.isEmpty
+                ? "the reader exited with status \(finished.terminationStatus)"
+                : reason)
+        }
         process = task
 
         queue.async {
@@ -163,17 +202,53 @@ public final class DeviceLogLineReader {
                 }
             }
         }
-        try? task.run()
+        do {
+            try task.run()
+        } catch {
+            task.terminationHandler = nil
+            errors.fileHandleForReading.readabilityHandler = nil
+            onEnd?("could not start the reader: \(error.localizedDescription)")
+        }
     }
 
     public func stop() {
+        // A stop the pane asked for is not an ending worth reporting; clearing the handler first
+        // is what keeps "you asked me to" out of the status line.
+        process?.terminationHandler = nil
         process?.terminate()
         process = nil
     }
 
     /// A reader released without `stop()` would otherwise leave its child running, and for the
     /// device relay that is not a tidy-up detail: see `DeviceRelayReclaim`.
-    deinit { process?.terminate() }
+    deinit {
+        process?.terminationHandler = nil
+        process?.terminate()
+    }
+}
+
+/// A small, locked tail of a child's diagnostics.
+private final class DiagnosticsBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func append(_ chunk: Data, limit: Int) {
+        lock.lock()
+        data.append(chunk)
+        if data.count > limit { data.removeFirst(data.count - limit) }
+        lock.unlock()
+    }
+
+    /// The last non-empty line, which is where a command-line tool puts the reason.
+    func text() -> String {
+        lock.lock()
+        let copy = data
+        lock.unlock()
+        return String(decoding: copy, as: UTF8.self)
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty } ?? ""
+    }
 }
 
 /// Reclaims log readers this Mac leaked onto a device.
@@ -286,9 +361,14 @@ public final class SimulatorLogRowSource: BufferedDeviceLogSource {
         if let predicate, !predicate.isEmpty {
             arguments.append(contentsOf: ["--predicate", predicate])
         }
-        reader.run(executable: "/usr/bin/xcrun", arguments: arguments) { [weak self] line in
-            if let row = DeviceLogDecoding.ndjson(line) { self?.enqueue(row) }
-        }
+        reader.run(
+            executable: "/usr/bin/xcrun",
+            arguments: arguments,
+            onLine: { [weak self] line in
+                if let row = DeviceLogDecoding.ndjson(line) { self?.enqueue(row) }
+            },
+            onEnd: { [weak self] reason in self?.onStreamEnded?(reason) }
+        )
     }
 
     public override func stop() { reader.stop() }
@@ -322,9 +402,14 @@ public final class PairedDeviceLogRowSource: BufferedDeviceLogSource {
         DeviceRelayReclaim.reclaimOrphanedReaders(udid: udid, toolPath: toolPath)
         var arguments = ["-u", udid, "--no-colors"]
         if overNetwork { arguments.append("-n") }
-        reader.run(executable: toolPath, arguments: arguments) { [weak self] line in
-            if let row = DeviceLogDecoding.syslog(line) { self?.enqueue(row) }
-        }
+        reader.run(
+            executable: toolPath,
+            arguments: arguments,
+            onLine: { [weak self] line in
+                if let row = DeviceLogDecoding.syslog(line) { self?.enqueue(row) }
+            },
+            onEnd: { [weak self] reason in self?.onStreamEnded?(reason) }
+        )
     }
 
     public override func stop() { reader.stop() }
@@ -368,13 +453,18 @@ public final class DeviceConsoleLogSource: BufferedDeviceLogSource {
     }
 
     public override func start() {
-        reader.run(executable: "/usr/bin/xcrun", arguments: [
-            "devicectl", "device", "process", "launch", "--device", deviceID,
-            "--console", "--terminate-existing", bundleID,
-        ]) { [weak self] line in
-            guard let self, let row = self.decode(line) else { return }
-            self.enqueue(row)
-        }
+        reader.run(
+            executable: "/usr/bin/xcrun",
+            arguments: [
+                "devicectl", "device", "process", "launch", "--device", deviceID,
+                "--console", "--terminate-existing", bundleID,
+            ],
+            onLine: { [weak self] line in
+                guard let self, let row = self.decode(line) else { return }
+                self.enqueue(row)
+            },
+            onEnd: { [weak self] reason in self?.onStreamEnded?(reason) }
+        )
     }
 
     public override func stop() { reader.stop() }
