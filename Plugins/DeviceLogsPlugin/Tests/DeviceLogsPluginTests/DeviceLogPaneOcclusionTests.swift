@@ -3,8 +3,8 @@ import XCTest
 import ThreadingDesignKit
 @testable import DeviceLogsPlugin
 
-/// The plate the Resume button stands on sits *over* moving content, and was see-through: a log
-/// row scrolling underneath composited straight into the word "Resume".
+/// Two surfaces in this pane stand over moving content: the column header, and the plate the
+/// Resume button sits on. Both showed the log through themselves.
 ///
 /// A plain themed button "rests on nothing" by design, which is right for a button on a panel and
 /// wrong for one floating over a log. The ground is the pane's job to provide, not the button's.
@@ -22,11 +22,59 @@ import ThreadingDesignKit
 @MainActor
 final class DeviceLogPaneOcclusionTests: XCTestCase {
 
+    // MARK: - The header
+
+    /// The reported defect, reproduced.
+    ///
+    /// It took a theme to see it. `Design.Surface.controlResting` is opaque under
+    /// `AppThemeStyles.threading`, which is the theme every plugin fixture gets by default
+    /// (`HostSeam.swift`), and 5% alpha under Swiss Minimalist and most of the palette themes. So
+    /// the first version of this test drew an opaque header no matter what the header did, passed
+    /// with the repair reverted, and proved nothing — which is why it was deleted rather than kept.
+    ///
+    /// Nothing opaque stands behind a themed table header anywhere in the app: `ThemedScrollView`
+    /// turns its own background off in `init`, and its `tile()` turns the header clip's off too.
+    /// The header's own fill is the only occluder there is.
+    func testTheHeaderDoesNotShowTheRowsScrollingUnderIt() throws {
+        installPaletteTheme()
+
+        let controller = DeviceLogPaneViewController(owningSessionID: UUID().uuidString)
+        controller.loadView()
+        controller.installRowsForTesting(Self.fixtureRows())
+        let host = laidOut(controller.view, width: 900, height: 420)
+
+        let scroll = try XCTUnwrap(
+            descendants(of: host).compactMap { $0 as? NSScrollView }.first,
+            "the pane should own a scroll view"
+        )
+        let header = try XCTUnwrap(try XCTUnwrap(scroll.documentView as? NSTableView).headerView)
+        let band = header.convert(header.bounds, to: host)
+
+        let before = try pixels(of: host, in: band)
+        // Far enough that different rows sit behind the header, and past the first screenful so
+        // there is certainly content there to leak through.
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 140))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        host.layoutSubtreeIfNeeded()
+        let after = try pixels(of: host, in: band)
+
+        XCTAssertEqual(
+            before, after,
+            "the header changed when the rows behind it moved, so it is not opaque"
+        )
+    }
+
     // MARK: - The Resume plate
 
     /// Asserted on the plate alone rather than through the pane, because making it appear needs a
     /// live scroll gesture. The property under test is the plate's, not the pane's.
     func testTheResumePlateHidesWhateverIsBehindIt() throws {
+        // What this bites against is a plate that paints *nothing*, which is the bug as reported:
+        // the button rested on nothing and the rows ran through it. It cannot bite against a
+        // translucent plate, because `elevated` is opaque under every theme that ships — the
+        // flattening in `FollowPlateView` guards an authored theme, which no fixture here has.
+        installPaletteTheme()
+
         let plate = FollowPlateView(frame: NSRect(x: 0, y: 0, width: 90, height: 26))
 
         // Inset past the corner radius: a rounded plate shows the ground at its corners by
@@ -42,6 +90,21 @@ final class DeviceLogPaneOcclusionTests: XCTestCase {
     }
 
     // MARK: - Harness
+
+    private var restoreTheme: AppTheme?
+
+    override func tearDown() {
+        if let restoreTheme { AppThemePalette.install(restoreTheme) }
+        restoreTheme = nil
+        super.tearDown()
+    }
+
+    /// A theme whose resting control fill is nearly transparent, which is the condition the
+    /// reported defect needs and the default plugin-test theme does not have.
+    private func installPaletteTheme() {
+        restoreTheme = AppThemePalette.current
+        AppThemePalette.install(AppThemeStyles.swissMinimalist)
+    }
 
     private static func fixtureRows() -> [DeviceLogRow] {
         (0..<40).map { index in

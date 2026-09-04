@@ -867,9 +867,14 @@ extension DeviceLogPaneViewController: NSTableViewDelegate {
 
 /// The plate behind the floating Resume button.
 ///
-/// It paints the theme's ground before its own elevated surface, because "elevated" describes a
-/// container above a panel and may itself carry transparency; the point of this view is that the
-/// log rows underneath do not show through the control standing on it.
+/// The plate exists because a plain `ThemedButton` rests on nothing, which is right for a button on
+/// a panel and wrong for one floating over a log: the rows were legible through the word "Resume".
+///
+/// Its fill is flattened over the ground — the floating-surface rule, the same one
+/// `ImageCompareView`'s handle and a lifted `ThemedTabItemView` follow. Measured, `elevated` is
+/// opaque under every theme that ships today, so the flattening changes nothing now; it is here
+/// because unlike `ground`, which `AppThemeEditing` refuses unless it is opaque, `elevated` carries
+/// no such guarantee, and an authored theme may make it translucent.
 final class FollowPlateView: NSView {
 
     override var isOpaque: Bool { false }
@@ -881,9 +886,7 @@ final class FollowPlateView: NSView {
             yRadius: Design.Radius.control
         )
         path.addClip()
-        Design.Surface.ground.setFill()
-        bounds.fill()
-        Design.Surface.elevated.setFill()
+        Design.Surface.elevated.composited(over: InkSource.chrome.ground).setFill()
         bounds.fill()
 
         Design.Surface.divider.setStroke()

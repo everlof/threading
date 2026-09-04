@@ -94,6 +94,16 @@ for package in ThreadingExtensionKit ThreadingPluginKit ThreadingRemoteKit Threa
     swift test --package-path "${repository_directory}/Packages/${package}"
 done
 
+# The plugins are their own packages under a different root, and until now their tests ran in no
+# lane at all: the Xcode plans build one target (ThreadingTests), and the loop above only walks
+# Packages/. Every test defending the device-log pane's behaviour was therefore only ever run by
+# hand. The app target does compile these same sources, so the warning ratchet already covered
+# them — it was the assertions that nothing ran.
+for plugin in DeviceLogsPlugin MarketeerPanelPlugin; do
+    say "Testing ${plugin}"
+    swift test --package-path "${repository_directory}/Plugins/${plugin}"
+done
+
 say "Checking generated component inventory"
 swift run \
     --package-path "${repository_directory}/Packages/ThreadingExtensionKit" \
