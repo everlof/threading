@@ -2942,7 +2942,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 guard let values = try? attachment.url.resourceValues(
                     forKeys: [.fileSizeKey, .contentModificationDateKey]
                 ), let size = values.fileSize,
-                size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
+                size >= 0,
+                attachment.kind == .video || size <= RemoteAccessDefaults.maximumAttachmentBytes else {
                     return nil
                 }
                 return RemoteAttachmentDTO(
@@ -3039,13 +3040,42 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 id: attachmentID
             ), let values = try? attachment.url.resourceValues(forKeys: [.fileSizeKey]),
             let size = values.fileSize,
-            size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
+            size >= 0 else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
 
             let url = attachment.url
             let contentType = Self.attachmentContentType(for: url)
+            if attachment.kind == .video, let rawRange = request.header("Range") {
+                guard let range = RemoteAttachmentByteRange.resolve(
+                    rawRange,
+                    fileSize: Int64(size)
+                ) else {
+                    respond(.respond(RemoteRouter.rangeNotSatisfiable(totalBytes: Int64(size))))
+                    return
+                }
+                DispatchQueue.global(qos: .userInitiated).async {
+                    guard let data = RemoteAttachmentByteRange.read(url, range: range) else {
+                        respond(.respond(RemoteRouter.error(404, "Not Found")))
+                        return
+                    }
+                    respond(.respond(RemoteRouter.byteRange(
+                        data,
+                        contentType: contentType,
+                        range: range,
+                        totalBytes: Int64(size)
+                    )))
+                }
+                return
+            }
+            guard size <= RemoteAccessDefaults.maximumAttachmentBytes else {
+                // A new phone always asks for ranges. Keeping the old whole-file answer bounded
+                // prevents an older client from turning a newly listed recording into one giant
+                // allocation if it reaches this route without the advertised feature.
+                respond(.respond(RemoteRouter.rangeNotSatisfiable(totalBytes: Int64(size))))
+                return
+            }
             DispatchQueue.global(qos: .userInitiated).async {
                 guard let data = try? BoundedFileReader.read(
                     url,
@@ -3092,14 +3122,16 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 id: attachmentID
             ), let values = try? attachment.url.resourceValues(forKeys: [.fileSizeKey]),
             let size = values.fileSize,
-            size >= 0, size <= RemoteAccessDefaults.maximumAttachmentBytes else {
+            size >= 0,
+            attachment.kind == .video || size <= RemoteAccessDefaults.maximumAttachmentBytes else {
                 respond(.respond(RemoteRouter.error(404, "Not Found")))
                 return
             }
 
             let url = attachment.url
-            DispatchQueue.global(qos: .userInitiated).async {
-                guard let data = RemoteAttachmentThumbnailRenderer.jpeg(at: url) else {
+            let kind = attachment.kind
+            Task.detached(priority: .userInitiated) {
+                guard let data = await RemoteAttachmentThumbnailRenderer.jpeg(at: url, kind: kind) else {
                     respond(.respond(RemoteRouter.error(404, "Not Found")))
                     return
                 }
@@ -3289,6 +3321,8 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
         case "heic", "heif": return "image/heic"
         case "tif", "tiff": return "image/tiff"
         case "bmp": return "image/bmp"
+        case "mov": return "video/quicktime"
+        case "mp4", "m4v": return "video/mp4"
         case "zip": return "application/zip"
         case "tar": return "application/x-tar"
         case "gz", "tgz": return "application/gzip"
@@ -4624,6 +4658,66 @@ extension RemoteAccessServer: RemoteConnection.Delegate {
                 "Remote server encoding failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             return #"{"type":"error","code":"encodingFailed"}"#
+        }
+    }
+}
+
+/// Resolves one HTTP byte-range request into the bounded piece this server will read.
+///
+/// A decoder commonly asks for `bytes=N-` (the rest of the movie). Returning at most one chunk
+/// is legal partial content; the iOS resource loader continues from the returned upper bound.
+/// Multiple ranges are refused because a multipart response would turn one bounded read into an
+/// externally sized list of them.
+struct RemoteAttachmentByteRange {
+    static func resolve(
+        _ header: String,
+        fileSize: Int64,
+        maximumLength: Int64 = Int64(RemoteAttachmentVideo.maximumChunkBytes)
+    ) -> Range<Int64>? {
+        guard fileSize > 0, maximumLength > 0 else { return nil }
+        let trimmed = header.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.lowercased().hasPrefix("bytes=") else { return nil }
+        let expression = String(trimmed.dropFirst("bytes=".count))
+        guard !expression.contains(",") else { return nil }
+        let halves = expression.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+        guard halves.count == 2 else { return nil }
+
+        let lower: Int64
+        let requestedLength: Int64
+        if halves[0].isEmpty {
+            guard let suffix = Int64(halves[1]), suffix > 0 else { return nil }
+            let length = min(min(suffix, fileSize), maximumLength)
+            lower = fileSize - length
+            requestedLength = length
+        } else {
+            guard let start = Int64(halves[0]), start >= 0, start < fileSize else { return nil }
+            lower = start
+            if halves[1].isEmpty {
+                requestedLength = fileSize - start
+            } else {
+                guard let inclusiveEnd = Int64(halves[1]), inclusiveEnd >= start else { return nil }
+                let cappedEnd = min(inclusiveEnd, fileSize - 1)
+                requestedLength = cappedEnd - start + 1
+            }
+        }
+        let length = min(requestedLength, maximumLength)
+        guard length > 0 else { return nil }
+        return lower ..< (lower + length)
+    }
+
+    static func read(_ url: URL, range: Range<Int64>) -> Data? {
+        guard range.lowerBound >= 0, range.upperBound > range.lowerBound,
+              range.upperBound - range.lowerBound <= Int64(RemoteAttachmentVideo.maximumChunkBytes),
+              let count = Int(exactly: range.upperBound - range.lowerBound),
+              let handle = try? FileHandle(forReadingFrom: url)
+        else { return nil }
+        defer { try? handle.close() }
+        do {
+            try handle.seek(toOffset: UInt64(range.lowerBound))
+            guard let data = try handle.read(upToCount: count), data.count == count else { return nil }
+            return data
+        } catch {
+            return nil
         }
     }
 }

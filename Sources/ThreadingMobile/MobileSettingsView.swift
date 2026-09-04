@@ -8,9 +8,6 @@ struct MobileSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage(MobileSessionAccountBadgePreference.key)
     private var showsAccountBadge = MobileSessionAccountBadgePreference.defaultValue
-    @State private var showsNotifications = false
-    @State private var showsDiagnostics = false
-
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -83,12 +80,12 @@ struct MobileSettingsView: View {
                         }
 
                         ThemedRowDivider()
-                        SettingsActionRow(
+                        SettingsNavigationRow(
                             symbol: "bell",
                             title: "Notifications",
                             detail: notificationStatus
                         ) {
-                            showsNotifications = true
+                            NotificationSettingsView()
                         }
 
                         ThemedRowDivider()
@@ -102,12 +99,12 @@ struct MobileSettingsView: View {
                     }
 
                     settingsSection("Support") {
-                        SettingsActionRow(
+                        SettingsNavigationRow(
                             symbol: "stethoscope",
                             title: "Diagnostics",
                             detail: model.activeHost.map { LocalizedStringKey($0.name) }
                         ) {
-                            showsDiagnostics = true
+                            RemoteDiagnosticsView()
                         }
                     }
 
@@ -148,18 +145,6 @@ struct MobileSettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
-        }
-        .sheet(isPresented: $showsNotifications) {
-            NotificationSettingsView()
-                .environmentObject(notifications)
-                .environmentObject(model)
-                .mobileTheme(theme)
-        }
-        .sheet(isPresented: $showsDiagnostics) {
-            RemoteDiagnosticsView()
-                .environmentObject(notifications)
-                .environmentObject(model)
-                .mobileTheme(theme)
         }
         .presentationDetents([.large])
     }
@@ -351,24 +336,6 @@ private struct SettingsNavigationRow<Destination: View>: View {
     }
 }
 
-private struct SettingsActionRow: View {
-    let symbol: String
-    let title: LocalizedStringKey
-    let detail: LocalizedStringKey?
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            SettingsRow(symbol: symbol, title: title, detail: detail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, MobileDesign.Spacing.inset)
-                .padding(.vertical, MobileDesign.Spacing.small)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 private struct SettingsToggleRow: View {
     @Environment(\.remoteTheme) private var theme
     let symbol: String
@@ -531,7 +498,6 @@ struct MobileAppIconSettingsView: View {
                                         .resizable()
                                         .scaledToFit()
                                         .frame(width: 76, height: 76)
-                                        .scaleEffect(choice.previewScale)
                                         .clipShape(RoundedRectangle(cornerRadius: 17))
                                         .shadow(color: .black.opacity(0.22), radius: 5, y: 3)
 
@@ -616,10 +582,6 @@ struct MobileAppIconChoice: Identifiable, Equatable {
     let alternateIconName: String?
     let previewAssetName: String
 
-    /// Alternate icon sources have different baked safe zones. A small authored presentation
-    /// scale normalises the visible mark while every choice retains the same 76-point cell.
-    var previewScale: CGFloat { alternateIconName == nil ? 0.86 : 1 }
-
     var id: String { alternateIconName ?? "default" }
 
     static let all: [MobileAppIconChoice] = [
@@ -647,6 +609,8 @@ struct MobileAppIconChoice: Identifiable, Equatable {
         themed("nord", "Nord", "Nord"),
         themed("dracula", "Dracula", "Dracula"),
         themed("platinum-9", "Mac OS 9 Platinum", "Platinum"),
+        themed("aqua-cheetah", "Mac OS X Aqua", "Aqua"),
+        themed("aqua-tiger", "Mac OS X 10.4 Tiger", "Tiger"),
         themed("beos-r5", "BeOS R5", "BeOS"),
         themed("openstep-42", "OPENSTEP 4.2", "OpenStep"),
         themed("irix-indigo-magic", "IRIX Indigo Magic", "IRIX"),

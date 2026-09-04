@@ -610,6 +610,7 @@ final class RemoteSessionMirrorRegistry {
         // The thumbnail route is gated exactly like the attachment route it shrinks, so it is
         // advertised to whoever may read attachments at all.
         features.append(RemoteRESTFeature.attachmentThumbnails.rawValue)
+        features.append(RemoteRESTFeature.attachmentVideoStreaming.rawValue)
         features.append(RemoteRESTFeature.sessionStartupHandshake.rawValue)
         if authorization.canManageHost {
             features.append(RemoteRESTFeature.reportSessionOpening.rawValue)

@@ -2481,11 +2481,14 @@ control does not produce a false confirmation. Photo, file and other system shee
 own feedback.
 
 **Attaching a photo or file from the phone.** The paperclip beside the plus attaches from your
-clipboard, photo library or Files — up to eight per message, images, PDFs, HTML, archives and the
-common document formats. You can also paste a copied picture directly into the text area. Each
+clipboard, photo library or Files — up to eight per message, images, MOV/MP4/M4V movies, PDFs,
+HTML, archives and the common document formats. You can also paste a copied picture directly into
+the text area. Each
 one starts travelling to your Mac the moment you pick it, so the wait
 usually happens while you are still typing; a thumbnail strip above the box shows what is
-attached, with a progress hairline under each and a tap target to remove one. Send stays held
+attached, with a progress hairline under each and a tap target to remove one. Pictures show their
+image; movies show a poster frame with a play mark. Tap either tile for a full-screen preview, where
+a movie can play before it is sent. Send stays held
 until every attachment has arrived. Large photos are re-encoded smaller before sending, since an
 agent reading a screenshot or a photo of a screen gains nothing from a 12-megapixel original.
 A picture on its own is a valid message — you do not have to type anything with it.
@@ -2627,11 +2630,19 @@ ended, and fixed timing buckets. These metrics stay on the iPhone and contain co
 not Mac names, chat names, prompts, or a connection history. Use **Reset connection metrics** to
 start a new comparison after changing the settings.
 
-When the iPhone has no session list yet, the dashboard shows only what it is doing now: checking
-saved connections, trying **Threading Direct**, **this network**, **VPN**, or **Tailscale**, or
-loading sessions after the Mac answers. The current words carry a short traveling fade; Reduce
-Motion keeps them still. If one route does not answer, Threading moves to the next saved route
-automatically; you do not need to restart the app or choose a connection manually.
+After the iPhone has loaded a session list once, it keeps a small last-good copy for that exact
+pairing. On a later launch the dashboard can show those saved chats and terminals while it checks
+the Mac, with an **Updated…** age beside the connection status. You can browse projects and open a
+saved row immediately; the chat or terminal then waits for the Mac and verifies that the row still
+exists before it resumes or connects. Current working/availability marks and actions such as New,
+Search, rename, archive and sharing appear only after the live list arrives. An expired or revoked
+pairing and **Forget Mac** remove its saved list.
+
+When the iPhone has no saved session list yet, the dashboard shows only what it is doing now:
+checking saved connections, trying **Threading Direct**, **this network**, **VPN**, or
+**Tailscale**, or loading sessions after the Mac answers. The current words carry a short traveling
+fade; Reduce Motion keeps them still. If one route does not answer, Threading moves to the next
+saved route automatically; you do not need to restart the app or choose a connection manually.
 
 Tap the title at the top of the chat list, a project's chat list, an open chat or a new-session
 draft to see how the phone is connected. The panel names the Mac and the way in that answered
@@ -2761,7 +2772,11 @@ and 90-day controls. Overview shows measured cost/tokens, provider composition, 
 and pricing provenance. Limit History shows one selected account/window's observations,
 projection, reset evidence and **Banked resets**. A positive number is current inventory, zero
 means none are available, and **Unavailable** means the provider did not report a count. A marker
-in the history is separate evidence that a banked reset was previously used. Each **Current
+in the history is separate evidence that a banked reset was previously used. A window that cycles
+too often for a line to be read — a five-hour window over a month — is drawn as one column per
+day (per window over a week, per three days over a quarter) at the highest reading it reached,
+with the columns that reached the limit in red; scheduled resets are counted in
+the rows beneath the chart rather than ruled through it. Each **Current
 capacity** bar also carries the thin time mark from the Mac: usage before it is under pace and
 usage beyond it is ahead of linearly elapsed window time. Usage is owner-only;
 a one-chat guest never sees the menu item or the whole-Mac data behind it.
@@ -2927,7 +2942,9 @@ as you pull it, leaving a sliver of the chat visible at the left edge; drag the 
 right, tap that sliver, or use its close button to put it away. An attachment opens in a gallery
 — swipe left and right between the session's attachments, read "3 of 27 · 1219 × 874 · 188 KB"
 under the name, and use the ledger of thumbnails along the bottom to jump to any of them (the
-Mac draws the thumbnails for images and PDFs; other kinds show their glyph). If an agent opens a
+Mac draws the thumbnails for images, PDFs and movies; other kinds show their glyph). Movies play
+in this gallery, streamed from the Mac in small authenticated pieces, so even a recording larger
+than the ordinary attachment download limit remains visible without loading the whole file. If an agent opens a
 page, Threading does not pull you away from the chat. The account
 disc takes one quiet breath and keeps a small dot until you open Browser. Browser is a
 read-only follow view of the Mac tab: the Mac still owns navigation and interaction, and private
@@ -3379,7 +3396,7 @@ Selecting another row stops it, as does looking away. Movie rows show a frame fr
 a small play mark on it, so a recording is not mistaken for a screenshot, and the size limit that
 refuses other large previews does not apply — a movie is played straight off disk rather than
 read into memory, so a multi-gigabyte recording opens as quickly as a short one. On the phone, a
-movie row says it plays on your Mac. If an extension is installed that draws a format
+movie gets the same poster-and-play treatment and streams in the attachment gallery. If an extension is installed that draws a format
 Threading does not carry itself, its preview takes the place of the built-in one; remove the
 extension and the built-in preview comes back.
 
@@ -4872,7 +4889,13 @@ exact-model catalog may estimate it. Unmatched tokens remain visibly unpriced, a
 that estimates are not an invoice.
 
 Limit History chooses one account/window and shows its current usage, scheduled reset, projection
-when enough history exists, recorded resets and restored pace. **Banked resets** is current
+when enough history exists, recorded resets and restored pace. A window that cycles too often for
+a line to be read — a five-hour window over a month — is drawn as one column per day (per window
+over a week, per three days over a quarter) at the highest reading it reached, with the columns
+that reached the limit in red; its scheduled resets are counted in **Recorded resets** rather than
+ruled through the chart. Once a window's scheduled reset has passed the **Current** card says the
+window ended, and a five-hour window's projection card says projection is for weekly windows only.
+**Banked resets** is current
 inventory for that account: a positive count includes the nearest known expiry, zero says none are
 available, and **Unavailable** means the provider reported no count. A banked marker on the chart
 is historical evidence that a credit count decreased across a proven early clear; it is not the

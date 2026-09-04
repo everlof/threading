@@ -4150,6 +4150,98 @@ final class RemoteServerIntegrationTests: HostedStoreTestCase {
         XCTAssertEqual(whole.body, png, "the preview must receive the file's exact bytes")
     }
 
+    func testMovieByteRangesAreBoundedAndRejectMalformedRequests() {
+        XCTAssertEqual(
+            RemoteAttachmentByteRange.resolve("bytes=10-19", fileSize: 100),
+            10 ..< 20
+        )
+        XCTAssertEqual(
+            RemoteAttachmentByteRange.resolve("bytes=-10", fileSize: 100),
+            90 ..< 100
+        )
+        XCTAssertEqual(
+            RemoteAttachmentByteRange.resolve(
+                "bytes=10-",
+                fileSize: Int64(RemoteAttachmentVideo.maximumChunkBytes * 2)
+            ),
+            10 ..< Int64(10 + RemoteAttachmentVideo.maximumChunkBytes)
+        )
+        XCTAssertEqual(
+            RemoteAttachmentByteRange.resolve("bytes=90-\(Int64.max)", fileSize: 100),
+            90 ..< 100,
+            "an untrusted inclusive upper bound must not overflow"
+        )
+        XCTAssertNil(RemoteAttachmentByteRange.resolve("bytes=100-", fileSize: 100))
+        XCTAssertNil(RemoteAttachmentByteRange.resolve("bytes=20-10", fileSize: 100))
+        XCTAssertNil(RemoteAttachmentByteRange.resolve("bytes=0-1,4-5", fileSize: 100))
+        XCTAssertNil(RemoteAttachmentByteRange.resolve("items=0-1", fileSize: 100))
+    }
+
+    func testListsAndStreamsAMovieLargerThanTheWholeFileCeiling() throws {
+        let me = try JSONDecoder().decode(
+            RemoteMeDTO.self,
+            from: try XCTUnwrap(get("/api/me", bearer: "goodtoken")).body
+        )
+        XCTAssertTrue(
+            me.features?.contains(RemoteRESTFeature.attachmentVideoStreaming.rawValue) == true
+        )
+
+        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "remote-attachment-video-range-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: temporary) }
+
+        let project = try XCTUnwrap(ProjectStore.shared.addProject(folderURL: temporary))
+        let session = try XCTUnwrap(ProjectStore.shared.addSession(
+            to: project.id,
+            kind: .claude,
+            title: "Movie range"
+        ))
+        let file = temporary.appendingPathComponent("recording.mov")
+        try MovieFixture.write(to: file)
+        let handle = try FileHandle(forWritingTo: file)
+        let byteCount = UInt64(RemoteAccessDefaults.maximumAttachmentBytes + 4_096)
+        try handle.truncate(atOffset: byteCount)
+        try handle.close()
+
+        let attachment = try XCTUnwrap(SessionAttachmentStore.shared.record(
+            url: file,
+            sessionID: session.id,
+            projectRoot: temporary
+        ))
+        XCTAssertEqual(attachment.kind, .video)
+
+        let listing = try XCTUnwrap(get(
+            "/api/session/\(session.id.uuidString)/attachments",
+            bearer: "goodtoken"
+        ))
+        let listed = try JSONDecoder().decode(RemoteAttachmentsDTO.self, from: listing.body)
+        XCTAssertEqual(listed.attachments.map(\.id), [attachment.id])
+        XCTAssertEqual(listed.attachments.first?.byteCount, Int64(byteCount))
+
+        let whole = try XCTUnwrap(get(
+            "/api/session/\(session.id.uuidString)/attachment?id=\(attachment.id)",
+            bearer: "goodtoken"
+        ))
+        XCTAssertEqual(whole.status, 416, "a large movie is never allocated as one response")
+
+        let partial = try XCTUnwrap(get(
+            "/api/session/\(session.id.uuidString)/attachment?id=\(attachment.id)",
+            bearer: "goodtoken",
+            headers: ["Range": "bytes=0-1023"]
+        ))
+        XCTAssertEqual(partial.status, 206)
+        XCTAssertEqual(partial.body.count, 1_024)
+        XCTAssertEqual(partial.headers["Accept-Ranges"] as? String, "bytes")
+        XCTAssertEqual(
+            partial.headers["Content-Range"] as? String,
+            "bytes 0-1023/\(byteCount)"
+        )
+        XCTAssertEqual(partial.headers["Content-Type"] as? String, "video/quicktime")
+    }
+
     func testAttachmentStoreDeduplicatesAndMovesLatestReferenceFirst() throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

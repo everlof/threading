@@ -1647,6 +1647,57 @@ public enum Design {
             self.rule = rule
         }
 
+        /// The same ink, with its label ladder held over every face a component paints between
+        /// it and its source ground.
+        ///
+        /// `Text.on(_:)` measures an overlay against the window backdrop, which is the right
+        /// source answer. A control can then paint `surface` or `surfaceHover` on that backdrop,
+        /// and those composites are new grounds: on Pure's black backdrop the hover face is
+        /// `#3D3D3D`, close enough to the quiet white tiers that a ring and caption calibrated
+        /// for black sink into the control. The host names those opaque faces here and the same
+        /// top-down ladder used by `LabelLegibility` gives back only enough transparency to read
+        /// on the hardest one.
+        ///
+        /// Surface, border and rule roles are preserved. This changes the foreground a component
+        /// draws on its own faces; it does not invent a second treatment for those faces.
+        public func legible(over grounds: [NSColor]) -> Ink {
+            guard !grounds.isEmpty else { return self }
+
+            let reading = LabelLegibility.Defaults.readingRatio
+            let glance = Design.Accessibility.increasesContrast
+                ? reading
+                : LabelLegibility.Defaults.glanceRatio
+
+            func strength(_ color: NSColor) -> CGFloat {
+                color.usingColorSpace(.sRGB)?.alphaComponent ?? 1
+            }
+
+            let heldLabel = LabelLegibility.held(
+                label, at: reading, over: grounds, ceiling: strength(base)
+            )
+            let heldSecondary = LabelLegibility.held(
+                secondary, at: reading, over: grounds, ceiling: strength(heldLabel)
+            )
+            let heldTertiary = LabelLegibility.held(
+                tertiary, at: reading, over: grounds, ceiling: strength(heldSecondary)
+            )
+            let heldQuaternary = LabelLegibility.held(
+                quaternary, at: glance, over: grounds, ceiling: strength(heldTertiary)
+            )
+
+            return Ink(
+                base: base,
+                label: heldLabel,
+                secondary: heldSecondary,
+                tertiary: heldTertiary,
+                quaternary: heldQuaternary,
+                surface: surface,
+                surfaceHover: surfaceHover,
+                border: border,
+                rule: rule
+            )
+        }
+
         /// The **emphasized selection's fill**, as an `Ink` — what a control nested inside a
         /// selected row draws from.
         ///

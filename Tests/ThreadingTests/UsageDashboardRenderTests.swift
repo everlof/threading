@@ -499,6 +499,141 @@ final class UsageDashboardRenderTests: XCTestCase {
         }
     }
 
+    /// A five-hour window over a month is a hundred and forty-four cycles, which as a line was
+    /// a block of near-vertical strokes under a picket fence of reset rules. It is drawn as one
+    /// column per day at the day's highest reading, the days that reached the limit in the
+    /// negative role, with the scheduled resets left to the card's count; over a week the
+    /// column is the window itself, and the weekly window beside it stays a line.
+    func testRendersADenseWindowAsPeakColumns() throws {
+        let directory = renderDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let previousTheme = AppThemePalette.current
+        defer { AppThemePalette.set(previousTheme) }
+        AppThemePalette.set(.system)
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+
+        let dense = denseLimitFixture()
+        let dashboard = UsageDashboardView()
+        dashboard.update(
+            report: reportFixture(),
+            limits: [dense],
+            isBuilding: false,
+            animated: false
+        )
+        dashboard.selectLimitRangeForTesting(days: 30)
+        dashboard.selectDashboardSectionForTesting(.limitHistory)
+        let host = laidOut(dashboard, appearance: appearance)
+        AppThemeRefresh.repaint(host)
+        host.layoutSubtreeIfNeeded()
+
+        let monthly = dashboard.limitChartModelForTesting
+        XCTAssertEqual(monthly.series.map(\.mark), [.bar, .bar])
+        XCTAssertEqual(monthly.series.map(\.barSpan), [86_400, 86_400])
+        XCTAssertEqual(monthly.series.map(\.title), [L10n.string("Peak per day"), L10n.string("Limit reached")])
+        XCTAssertEqual(monthly.series.map(\.style), [.primary, .negative])
+        let columns = monthly.series.reduce(0) { $0 + $1.points.count }
+        XCTAssertTrue((25...31).contains(columns), "\(columns) columns for thirty days")
+        XCTAssertTrue(
+            monthly.series[1].points.allSatisfy { $0.value >= UsageLimitChartForm.limitReachedFraction }
+        )
+        XCTAssertTrue(monthly.markers.allSatisfy { $0.kind != .reset }, "scheduled resets are not ruled")
+        XCTAssertGreaterThanOrEqual(dashboard.limitRenderedPointCountForTesting, 25)
+
+        var payload: Data?
+        appearance.performAsCurrentDrawingAppearance { payload = png(of: host) }
+        let url = directory.appendingPathComponent("usage-dashboard-limit-history-dense-system-dark.png")
+        try XCTUnwrap(payload, "No dense Limit history render").write(to: url)
+        print("Rendered dense Usage limit history to \(url.path)")
+
+        dashboard.selectLimitRangeForTesting(days: 7)
+        XCTAssertEqual(dashboard.limitChartModelForTesting.series.first?.barSpan, 5 * 3_600)
+        XCTAssertEqual(
+            dashboard.limitChartModelForTesting.series.first?.title,
+            L10n.string("Peak per window")
+        )
+
+        dashboard.update(
+            report: reportFixture(),
+            limits: limitFixtures(),
+            isBuilding: false,
+            animated: false
+        )
+        dashboard.selectLimitRangeForTesting(days: 30)
+        XCTAssertEqual(dashboard.limitChartModelForTesting.series.first?.mark, .line)
+        XCTAssertNil(dashboard.limitChartModelForTesting.series.first?.barSpan)
+    }
+
+    /// Thirty days of a five-hour window read every quarter hour: each window climbs from near
+    /// empty to its own peak, some of them to the limit, and the scheduled reset is recorded
+    /// between windows. The projector downsamples the 2,880 readings the way it does in
+    /// production.
+    private func denseLimitFixture() -> UsageLimitDashboardSeries {
+        let window: TimeInterval = 5 * 3_600
+        let interval: TimeInterval = 15 * 60
+        let start = now.addingTimeInterval(-30 * 86_400)
+        let readingsPerWindow = Int(window / interval)
+        var samples: [UsageSample] = []
+        var events: [UsageLimitResetEvent] = []
+        var index = 0
+        while true {
+            let at = start.addingTimeInterval(Double(index) * interval)
+            guard at <= now else { break }
+            let cycle = index / readingsPerWindow
+            let step = index % readingsPerWindow
+            let windowStart = start.addingTimeInterval(Double(cycle) * window)
+            let reset = windowStart.addingTimeInterval(window)
+            let peak = min(1, 0.18 + Double((cycle * 37) % 23) / 22 * 0.82)
+            samples.append(UsageSample(
+                at: at,
+                fraction: min(peak, 0.02 + peak * Double(step) / Double(readingsPerWindow - 1)),
+                resetsAt: reset,
+                runtimeID: AgentKind.claude.rawValue,
+                accountID: "claude:personal",
+                accountName: "Personal",
+                windowID: "session",
+                windowLabel: "5-hour",
+                windowDuration: window,
+                source: .claudeAPI,
+                nextResetCreditExpiresAt: nil,
+                resetCreditCount: nil
+            ))
+            if step == 0, cycle > 0 {
+                events.append(UsageLimitResetEvent(
+                    id: "dense-reset-\(cycle)",
+                    runtimeID: AgentKind.claude.rawValue,
+                    accountID: "claude:personal",
+                    accountName: "Personal",
+                    windowID: "session",
+                    windowLabel: "5-hour",
+                    previousObservedAt: at.addingTimeInterval(-interval),
+                    detectedAt: at,
+                    oldScheduledResetAt: windowStart,
+                    newScheduledResetAt: reset,
+                    restoredFraction: 0.8,
+                    elapsedFraction: 1,
+                    secondsEarly: 0,
+                    cause: .scheduled
+                ))
+            }
+            index += 1
+        }
+        let latest = samples[samples.count - 1]
+        return UsageLimitDashboardSeries(
+            id: "claude|personal|session",
+            runtimeName: "Claude Code",
+            accountName: "Personal",
+            windowLabel: "5-hour",
+            samples: samples,
+            resets: events,
+            projection: nil,
+            currentFraction: latest.fraction,
+            resetsAt: latest.resetsAt,
+            windowDuration: window,
+            resetCreditCount: nil,
+            nextResetCreditExpiresAt: nil
+        )
+    }
+
     private func limitFixtures() -> [UsageLimitDashboardSeries] {
         let start = now.addingTimeInterval(-30 * 86_400)
         let interval: TimeInterval = 6 * 3_600

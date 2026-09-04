@@ -517,6 +517,9 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         attachmentStrip.onRemove = { [weak self] id in
             self?.attachmentTray?.remove(id)
         }
+        attachmentStrip.onPreview = { [weak self] item in
+            self?.presentAttachmentPreview(item)
+        }
         attentionButton.addAction(UIAction { [weak self] _ in
             self?.presentAttentionRequest()
         }, for: .touchUpInside)
@@ -1016,6 +1019,15 @@ final class RemoteConversationViewController: UIViewController, UITextViewDelega
         }
         attachmentTray = tray
         return true
+    }
+
+    private func presentAttachmentPreview(_ item: ComposerAttachmentItem) {
+        guard presentedViewController == nil else { return }
+        let controller = UIHostingController(rootView:
+            ComposerAttachmentQuickView(item: item).mobileTheme(theme)
+        )
+        controller.modalPresentationStyle = .fullScreen
+        present(controller, animated: true)
     }
 
     /// Offers the two places a file can come from on a phone.

@@ -417,6 +417,13 @@ At most eight candidates are consulted for one presentation, because selecting a
 able to turn into unbounded process work as the user installs more extensions. See
 [`media-documents.md`](../architecture/media-documents.md).
 
+The iPhone attachment gallery and the draft's local Quick View do not add another extension
+surface. They are mirrors of the existing host-owned fallback: `attachments.preview@1` continues
+to customize the Mac preview body only. Threading retains remote authorization and range bounds,
+gallery selection, navigation, playback transport and visibility teardown; letting an extension
+replace any of those would either grant file authority the preview contract does not carry or put
+high-frequency playback across the extension boundary.
+
 ## Gate for every new surface
 
 Before adding a component:

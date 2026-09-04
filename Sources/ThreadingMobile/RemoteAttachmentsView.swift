@@ -1,7 +1,10 @@
+import AVFoundation
+import AVKit
 import PDFKit
 import ThreadingRemoteKit
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 import WebKit
 
 /// Durable artifacts from the selected session, fetched on demand from the paired Mac.
@@ -19,12 +22,15 @@ struct RemoteAttachmentsView: View {
     /// Whether the paired Mac draws thumbnails (`RemoteRESTFeature.attachmentThumbnails`);
     /// the gallery's ledger asks for none otherwise.
     private let offersThumbnails: Bool
+    /// Whether the paired Mac serves bounded authenticated byte ranges for movies.
+    private let offersVideoStreaming: Bool
 
     init(
         session: RemoteSessionSummaryDTO,
         client: RemoteClient,
         showsCloseButton: Bool = true,
         offersThumbnails: Bool = false,
+        offersVideoStreaming: Bool = false,
         initialAttachments: [RemoteAttachmentDTO]? = nil,
         loadsRemotely: Bool = true
     ) {
@@ -32,6 +38,7 @@ struct RemoteAttachmentsView: View {
         self.client = client
         self.showsCloseButton = showsCloseButton
         self.offersThumbnails = offersThumbnails
+        self.offersVideoStreaming = offersVideoStreaming
         self.loadsRemotely = loadsRemotely
         _attachments = State(initialValue: initialAttachments)
     }
@@ -67,7 +74,8 @@ struct RemoteAttachmentsView: View {
                             attachments: attachments ?? [],
                             initialID: attachment.id,
                             client: client,
-                            offersThumbnails: offersThumbnails
+                            offersThumbnails: offersThumbnails,
+                            offersVideoStreaming: offersVideoStreaming
                         )
                     } label: {
                         RemoteAttachmentRow(attachment: attachment)
@@ -186,6 +194,7 @@ struct RemoteAttachmentTargetView: View {
     let attachmentID: String
     let client: RemoteClient
     var offersThumbnails = false
+    var offersVideoStreaming = false
 
     @Environment(\.remoteTheme) private var theme
     @State private var attachment: RemoteAttachmentDTO?
@@ -202,7 +211,8 @@ struct RemoteAttachmentTargetView: View {
                     attachments: attachments.isEmpty ? [attachment] : attachments,
                     initialID: attachment.id,
                     client: client,
-                    offersThumbnails: offersThumbnails
+                    offersThumbnails: offersThumbnails,
+                    offersVideoStreaming: offersVideoStreaming
                 )
             } else if let errorMessage {
                 ContentUnavailableView {
@@ -255,6 +265,7 @@ struct RemoteAttachmentPreview: View {
     let client: RemoteClient
     private let initialData: Data?
     private let loadsRemotely: Bool
+    private let offersVideoStreaming: Bool
     @Environment(\.remoteTheme) private var theme
 
     init(
@@ -262,13 +273,15 @@ struct RemoteAttachmentPreview: View {
         attachment: RemoteAttachmentDTO,
         client: RemoteClient,
         initialData: Data? = nil,
-        loadsRemotely: Bool = true
+        loadsRemotely: Bool = true,
+        offersVideoStreaming: Bool = false
     ) {
         self.sessionID = sessionID
         self.attachment = attachment
         self.client = client
         self.initialData = initialData
         self.loadsRemotely = loadsRemotely
+        self.offersVideoStreaming = offersVideoStreaming
     }
 
     var body: some View {
@@ -277,7 +290,8 @@ struct RemoteAttachmentPreview: View {
             attachment: attachment,
             client: client,
             initialData: initialData,
-            loadsRemotely: loadsRemotely
+            loadsRemotely: loadsRemotely,
+            offersVideoStreaming: offersVideoStreaming
         )
         .navigationTitle(attachment.name)
         .navigationBarTitleDisplayMode(.inline)
@@ -298,6 +312,7 @@ struct RemoteAttachmentPreviewContent: View {
     @State private var didRecordUnavailablePreview = false
     @State private var loadGeneration = 0
     private let loadsRemotely: Bool
+    private let offersVideoStreaming: Bool
     /// Whether this page is the one the gallery is showing. A page that becomes current asks
     /// again if it still holds nothing, which is what gives the attachment a person is actually
     /// looking at a live attempt after a swipe cancelled its first one.
@@ -311,6 +326,7 @@ struct RemoteAttachmentPreviewContent: View {
         client: RemoteClient,
         initialData: Data? = nil,
         loadsRemotely: Bool = true,
+        offersVideoStreaming: Bool = false,
         isCurrentPage: Bool = true,
         onDecodedImageSize: ((CGSize) -> Void)? = nil
     ) {
@@ -318,6 +334,7 @@ struct RemoteAttachmentPreviewContent: View {
         self.attachment = attachment
         self.client = client
         self.loadsRemotely = loadsRemotely
+        self.offersVideoStreaming = offersVideoStreaming
         self.isCurrentPage = isCurrentPage
         self.onDecodedImageSize = onDecodedImageSize
         _data = State(initialValue: initialData)
@@ -330,18 +347,26 @@ struct RemoteAttachmentPreviewContent: View {
             // could not be decoded" spends the attachment byte cap on a file it was never
             // going to show.
             if attachment.kind == .video {
-                // The Mac streams a movie off disk into a compositor layer; the phone would have
-                // to be *sent* it first, and the attachment route has one whole-file ceiling that
-                // a recording passes before it has finished recording. A sentence is the honest
-                // v1, exactly as it was for an animation — and the endpoint that would change
-                // that is the same one: frames, not files.
-                unavailable("This movie plays on your Mac.")
+                if offersVideoStreaming, isCurrentPage {
+                    RemoteAttachmentVideoView(
+                        sessionID: sessionID,
+                        attachment: attachment,
+                        client: client
+                    )
+                } else if offersVideoStreaming {
+                    // Neighbour pages stay inert. AVPlayer probes as soon as it receives an item,
+                    // so constructing players for pages beside the viewport would turn one movie
+                    // the user chose into three active range streams.
+                    unavailable("Swipe here to play this movie.")
+                } else {
+                    unavailable("This movie plays on your Mac.")
+                }
             } else if attachment.kind == .media {
                 // The renderer is host-owned, so the mirror is achievable — but a live player on
                 // the phone needs a poster-frame or frame-stream endpoint the remote surface does
                 // not have yet, and a silent blank card would be worse than a sentence.
                 unavailable("This animation plays on your Mac.")
-            } else if RemoteAttachmentPreviewLoad.previewsOnMacOnly(attachment.kind) {
+            } else if RemoteAttachmentPreviewLoad.excludesFromWholeFileLoad(attachment.kind) {
                 unavailable("This file previews on your Mac.")
             } else if let data {
                 if attachment.kind == .pdf {
@@ -466,6 +491,271 @@ struct RemoteAttachmentPreviewContent: View {
     }
 }
 
+// MARK: - Movie playback
+
+/// A movie player backed by the paired Mac's authenticated byte-range route.
+///
+/// The player is created only for the gallery page on screen. `AVPlayer` decides which bytes it
+/// needs; `RemoteAttachmentVideoResourceLoader` turns each request into bounded authenticated
+/// pieces and never owns the whole recording.
+private struct RemoteAttachmentVideoView: View {
+    @StateObject private var model: RemoteAttachmentVideoPlayerModel
+    @Environment(\.remoteTheme) private var theme
+
+    init(sessionID: String, attachment: RemoteAttachmentDTO, client: RemoteClient) {
+        _model = StateObject(wrappedValue: RemoteAttachmentVideoPlayerModel(
+            sessionID: sessionID,
+            attachment: attachment,
+            client: client
+        ))
+    }
+
+    var body: some View {
+        VideoPlayer(player: model.player)
+            .background(theme.ground)
+            .onDisappear { model.player.pause() }
+            .accessibilityLabel(MobileL10n.string("Play %@", model.name))
+    }
+}
+
+/// The full-screen Quick View opened from a draft attachment tile. It keeps the unsent file on
+/// the phone: pictures use the staged pixels and movies use the tray's device-local AVAsset.
+struct ComposerAttachmentQuickView: View {
+    let item: ComposerAttachmentItem
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.remoteTheme) private var theme
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if item.isMovie, let url = item.previewURL {
+                    LocalAttachmentVideoView(url: url, name: item.name)
+                } else if let image = item.thumbnail {
+                    RemoteZoomableImageView(image: image, backgroundColor: theme.uiGround)
+                } else {
+                    ContentUnavailableView(
+                        MobileL10n.string("Preview Unavailable"),
+                        systemImage: item.systemImage
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(theme.ground)
+            .navigationTitle(item.name)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(theme.surface, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel(MobileL10n.string("Close"))
+                }
+            }
+        }
+    }
+}
+
+private struct LocalAttachmentVideoView: View {
+    let name: String
+    @State private var player: AVPlayer
+
+    init(url: URL, name: String) {
+        self.name = name
+        _player = State(initialValue: AVPlayer(url: url))
+    }
+
+    var body: some View {
+        VideoPlayer(player: player)
+            .onDisappear { player.pause() }
+            .accessibilityLabel(MobileL10n.string("Play %@", name))
+    }
+}
+
+@MainActor
+private final class RemoteAttachmentVideoPlayerModel: ObservableObject {
+    let player: AVPlayer
+    let name: String
+    private let resourceLoader: RemoteAttachmentVideoResourceLoader
+
+    init(sessionID: String, attachment: RemoteAttachmentDTO, client: RemoteClient) {
+        name = attachment.name
+        let loader = RemoteAttachmentVideoResourceLoader(
+            sessionID: sessionID,
+            attachment: attachment,
+            client: client
+        )
+        resourceLoader = loader
+        player = AVPlayer(playerItem: AVPlayerItem(asset: loader.asset()))
+        player.actionAtItemEnd = .pause
+    }
+
+    deinit {
+        player.pause()
+        resourceLoader.cancelAll()
+    }
+}
+
+/// Bridges AVFoundation's custom-scheme requests to the ordinary authenticated `RemoteClient`.
+/// A custom scheme is intentional: giving AVPlayer the HTTP URL directly would require putting
+/// the bearer in a URL or relying on private header options. Here every range travels through the
+/// same pinning delegate, protocol headers, device identity, and authorization path as REST.
+private final class RemoteAttachmentVideoResourceLoader: NSObject,
+    AVAssetResourceLoaderDelegate,
+    @unchecked Sendable
+{
+    private final class TaskBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: Task<Void, Never>?
+        private var isCancelled = false
+
+        func install(_ task: Task<Void, Never>) {
+            lock.lock()
+            self.task = task
+            let shouldCancel = isCancelled
+            lock.unlock()
+            if shouldCancel { task.cancel() }
+        }
+
+        func cancel() {
+            lock.lock()
+            isCancelled = true
+            let task = task
+            lock.unlock()
+            task?.cancel()
+        }
+    }
+
+    private static let errorDomain = "RemoteAttachmentVideo"
+    private let sessionID: String
+    private let attachment: RemoteAttachmentDTO
+    private let client: RemoteClient
+    private let delegateQueue = DispatchQueue(label: "codes.threading.remote-video-loader")
+    private let lock = NSLock()
+    private var tasks: [ObjectIdentifier: TaskBox] = [:]
+
+    init(sessionID: String, attachment: RemoteAttachmentDTO, client: RemoteClient) {
+        self.sessionID = sessionID
+        self.attachment = attachment
+        self.client = client
+    }
+
+    func asset() -> AVURLAsset {
+        let ext = URL(fileURLWithPath: attachment.name).pathExtension
+        let suffix = ext.isEmpty ? "mp4" : ext
+        let url = URL(string: "threading-attachment://movie/\(UUID().uuidString).\(suffix)")!
+        let asset = AVURLAsset(url: url)
+        asset.resourceLoader.setDelegate(self, queue: delegateQueue)
+        return asset
+    }
+
+    func cancelAll() {
+        lock.lock()
+        let values = Array(tasks.values)
+        tasks.removeAll()
+        lock.unlock()
+        values.forEach { $0.cancel() }
+    }
+
+    func resourceLoader(
+        _ resourceLoader: AVAssetResourceLoader,
+        shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest
+    ) -> Bool {
+        let identifier = ObjectIdentifier(loadingRequest)
+        let box = TaskBox()
+        lock.lock()
+        tasks[identifier] = box
+        lock.unlock()
+
+        let task = Task { [weak self, weak loadingRequest] in
+            guard let self, let loadingRequest else { return }
+            do {
+                try await fill(loadingRequest)
+                if !loadingRequest.isCancelled { loadingRequest.finishLoading() }
+            } catch is CancellationError {
+                // AVFoundation already owns cancellation; finishing a cancelled request is a
+                // second terminal event and produces spurious player failures.
+            } catch {
+                if !loadingRequest.isCancelled {
+                    loadingRequest.finishLoading(with: error)
+                }
+            }
+            removeTask(identifier)
+        }
+        box.install(task)
+        return true
+    }
+
+    func resourceLoader(
+        _ resourceLoader: AVAssetResourceLoader,
+        didCancel loadingRequest: AVAssetResourceLoadingRequest
+    ) {
+        let identifier = ObjectIdentifier(loadingRequest)
+        lock.lock()
+        let task = tasks.removeValue(forKey: identifier)
+        lock.unlock()
+        task?.cancel()
+    }
+
+    private func fill(_ request: AVAssetResourceLoadingRequest) async throws {
+        if let information = request.contentInformationRequest {
+            let ext = URL(fileURLWithPath: attachment.name).pathExtension
+            information.contentType = UTType(filenameExtension: ext)?.identifier
+                ?? UTType.movie.identifier
+            information.contentLength = attachment.byteCount
+            information.isByteRangeAccessSupported = true
+        }
+        guard let dataRequest = request.dataRequest else { return }
+
+        let start = dataRequest.requestedOffset
+        guard attachment.byteCount > 0, start >= 0, start < attachment.byteCount else {
+            throw NSError(domain: Self.errorDomain, code: 1)
+        }
+        var offset = max(start, dataRequest.currentOffset)
+        let requestedEnd: Int64
+        if dataRequest.requestsAllDataToEndOfResource {
+            requestedEnd = attachment.byteCount
+        } else {
+            let available = attachment.byteCount - start
+            let length = min(Int64(dataRequest.requestedLength), available)
+            requestedEnd = start + length
+        }
+        guard offset >= start, offset < requestedEnd else {
+            throw NSError(domain: Self.errorDomain, code: 1)
+        }
+
+        while offset < requestedEnd {
+            try Task.checkCancellation()
+            if request.isCancelled { throw CancellationError() }
+            let length = min(
+                requestedEnd - offset,
+                Int64(RemoteAttachmentVideo.maximumChunkBytes)
+            )
+            let upper = offset + length
+            let data = try await client.attachmentVideoData(
+                sessionID: sessionID,
+                id: attachment.id,
+                range: offset ..< upper,
+                totalBytes: attachment.byteCount
+            )
+            guard !data.isEmpty else {
+                throw NSError(domain: Self.errorDomain, code: 2)
+            }
+            dataRequest.respond(with: data)
+            offset += Int64(data.count)
+        }
+    }
+
+    private func removeTask(_ identifier: ObjectIdentifier) {
+        lock.lock()
+        tasks.removeValue(forKey: identifier)
+        lock.unlock()
+    }
+}
+
 #if DEBUG
 /// Deterministic detail fixtures exercise the app's real preview renderers without networking or
 /// exposing a developer-machine path to the simulator. Production attachment detail continues to
@@ -489,6 +779,7 @@ struct RemoteAttachmentPreviewDemo: View {
                 token: "attachment-preview"
             )!),
             offersThumbnails: false,
+            offersVideoStreaming: false,
             initialData: Dictionary(uniqueKeysWithValues: Self.kinds.compactMap { kind in
                 Self.previewData(for: kind).map { (Self.attachment(for: kind).id, $0) }
             }),

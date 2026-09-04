@@ -415,12 +415,21 @@ Two rules in the pane follow from the file never being read:
   are not. Pressing the tile opens the lightbox with the movie in the player, exactly as a
   selected row does, and a name the decoder refuses falls back to a path in the text.
 
-The phone shows a movie the way it shows an animation — a card saying it plays on the Mac, and no
-bytes are asked for. Note what the *listing* already does above it: `RemoteAccessServer` omits any
-attachment over `RemoteAccessDefaults.maximumAttachmentBytes` (24 MB) from the list entirely, which
-for movies is the common case rather than the exception. That is the existing whole-file rule
-rather than something movies introduced, and it is the same reason the follow-on is a frame-stream
-or poster endpoint rather than a larger download.
+The phone uses two bounded views of the same Mac-owned file. The thumbnail route asks
+`MoviePosterFrame` for one bounded JPEG, so a movie appears in the ledger with the same play mark as
+the Mac pane. The content route accepts one HTTP byte range at a time and caps its answer at
+`RemoteAttachmentVideo.maximumChunkBytes` (1 MiB). An `AVAssetResourceLoader` on iOS feeds those
+authenticated pieces to `AVPlayer`; it uses the ordinary pinned `RemoteClient`, never a bearer in
+the asset URL or AVFoundation's private HTTP-header options. Only the current gallery page creates
+a player, so paging past one recording does not leave neighbour decoders or range streams alive.
+
+Movies are therefore listed regardless of the whole-file limit. Every non-video attachment still
+obeys `RemoteAccessDefaults.maximumAttachmentBytes` (24 MB), and a large movie requested without a
+range is refused rather than allocated. The host advertises `attachment-video-streaming`; an older
+host keeps the honest “plays on your Mac” card. Phone uploads retain the 24 MB per-file ceiling,
+because upload custody is a separate bounded transfer. A picked movie is copied to device-local
+temporary storage off the main actor, gets one bounded poster there, and its draft tile opens the
+local player; removing or sending the draft removes that temporary copy.
 
 ### The attachment handle's scope
 
@@ -499,10 +508,10 @@ turn being latest.
   renderer is a real row in the pane and a rail slot the lightbox would have nothing to put in.
 - `Sources/ThreadingMobile/RemoteAttachmentsView.swift` mirrors attachments to iPhone.
   `RemoteAttachmentDTO.kind` is a string exactly so an older phone decodes a newer kind, and
-  nothing on the wire had to change. The honest v1 presentation is a card that says the animation
-  plays on the Mac: a live player needs a poster-frame or frame-stream endpoint the remote surface
-  does not have yet, and a silent blank card would be worse than a sentence. **That endpoint is the
-  follow-on**, and it is achievable precisely because the renderer is host-owned.
+  nothing on the wire had to change. Animations still use the honest card saying they play on the
+  Mac. Movies have a host poster and byte-range stream now; the distinction is first-class because
+  AVFoundation can consume movie ranges while an animation needs its renderer's semantic timeline,
+  not an arbitrary slice of its source archive.
 
 ### A Quick Look renderer lives no longer than its window
 
@@ -584,7 +593,10 @@ pushing. The general fix is recorded and deliberately not built:
   self-clocked engine runs its own clock under the same visibility gate.
 - **Bounded unit.** One canvas. The backing store is capped at 4,194,304 pixels and 4,096 on either
   axis; a larger canvas renders at a reduced internal scale rather than allocating an unbounded
-  frame.
+  frame. The iPhone movie mirror reads at most one 1 MiB range per request and never materializes
+  the complete recording; its gallery constructs one player only for the current page. Draft movie
+  poster extraction is one off-main task per picked file, within the composer's fixed eight-file
+  cap.
 - **Never queued.** The Lottie session holds at most one render in flight and *supersedes* the
   pending position rather than accumulating one. A display link asking for sixty positions a second
   while a frame takes twenty milliseconds would otherwise drift further behind real time the longer

@@ -23,6 +23,32 @@ final class AppIconRenderTests: XCTestCase {
         /// *outside* the rounded plate and reads its drop shadow.
         static let groundSample = CGPoint(x: 0.13, y: 0.5)
 
+        /// The phone's copy is written at the size iOS compiles, not at contact-sheet size: the
+        /// packager used to upscale a 256px Dock render four times, and the softness showed.
+        static let phoneSide = 1024
+
+        /// The outer band of a phone icon, per edge, that has to be the ground and nothing else.
+        /// Six percent is well outside the safe zone's margin the widest themed glow can reach
+        /// into, and well inside the ring the Dock's plate shadow used to leave.
+        static let phoneEdgeBandRatio: CGFloat = 0.06
+        /// How far a band pixel may drift from the ground, in summed sRGB channel difference: a
+        /// rounding trip through the raster's colour space, never a shadow.
+        static let flatGroundTolerance: CGFloat = 0.02
+
+        /// How far a theme icon's ink may stray, per edge, from where the primary icon's ink
+        /// lands — as a fraction of the tile. A printed lift or a halo moves an edge a few
+        /// pixels; the quarter-size mark the phone used to get moved it a hundred.
+        static let phoneMarkExtentTolerance: CGFloat = 0.03
+
+        /// Seven percent in from an edge, at half width: outside the plate, which ends ten
+        /// percent in, and inside the reach of its shadow's blur — so the margin below the plate
+        /// reads the shadow and the margin above it reads nothing.
+        static let plateShadowSample: CGFloat = 0.07
+
+        static var phoneDirectory: URL {
+            directory.appendingPathComponent("phone", isDirectory: true)
+        }
+
         static var directory: URL {
             if let override = ProcessInfo.processInfo.environment["THREADING_RENDER_OUT"],
                !override.isEmpty {
@@ -141,11 +167,13 @@ final class AppIconRenderTests: XCTestCase {
 
     /// A printed style's lift falls **down** and to the right, the way the chrome casts it.
     ///
-    /// Pinned because the two coordinate systems disagree and nothing else would notice.
+    /// Pinned because the sign has flipped twice and nothing else would notice.
     /// `Design.applyThemeGlow` hands the theme's `offsetY: -4` to `CALayer.shadowOffset`, whose
-    /// y is up, so the lift lands below the panel. `NSShadow` in this drawing context resolves
-    /// the same number the other way, and the first render put Bauhaus's black mark above
-    /// its red one — a picture that reads as two marks rather than one lifted off the page.
+    /// y is up, so the lift lands below the panel. An `NSImage` drawing handler resolved the
+    /// same number the other way — the first render put Bauhaus's black mark above its red one,
+    /// a picture that reads as two marks rather than one lifted off the page — so the renderer
+    /// negated it; then drawing into a bitmap context (see `GeneratedAppIcon.draw`) agreed with
+    /// the layer again and the negation put the lift back on top. This test caught both.
     func testAPrintedStyleCastsItsLiftDownAndRight() throws {
         let bauhaus = try XCTUnwrap(
             AppThemeLibrary.stock.first { $0.id == AppThemeID("bauhaus") }
@@ -176,6 +204,69 @@ final class AppIconRenderTests: XCTestCase {
         XCTAssertGreaterThan(
             liftCentre.y, inkCentre.y + 2, "the printed lift is above the mark, not below it"
         )
+    }
+
+    /// The plate's own shadow falls **below** the plate, where the Dock puts the one it draws
+    /// for a bundle icon.
+    ///
+    /// Pinned for the reason the printed lift is: the vertical sign of a shadow here depends on
+    /// how the icon is drawn, and the plate shadow was stated in the layer's sign while the
+    /// icon was an `NSImage` drawing handler, which cast it upward. Nothing noticed on the Mac,
+    /// where the margin is transparent; the phone's copy composited it over the ground and
+    /// showed a border darker along its top edge than its bottom.
+    func testThePlateShadowFallsBelowTheDockIcon() throws {
+        let theme = AppThemeStyles.pure
+        let appearance = try XCTUnwrap(NSAppearance(named: .aqua))
+        let image = try XCTUnwrap(GeneratedAppIcon.image(for: theme, appearance: appearance))
+        let raster = try XCTUnwrap(rasterize(image, side: Render.sheetSide))
+
+        // In the transparent margin outside the plate, the shadow is the only thing that
+        // paints, so its alpha is the measure.
+        let below = try XCTUnwrap(
+            sample(raster, at: CGPoint(x: 0.5, y: Render.plateShadowSample))
+        )
+        let above = try XCTUnwrap(
+            sample(raster, at: CGPoint(x: 0.5, y: 1 - Render.plateShadowSample))
+        )
+
+        XCTAssertGreaterThan(below.alphaComponent, 0.02, "no shadow below the plate")
+        XCTAssertGreaterThan(
+            below.alphaComponent, above.alphaComponent + 0.02,
+            "the plate's shadow is cast upward"
+        )
+    }
+
+    // MARK: - The Phone Grid
+
+    /// The phone's copy is the ground to every edge — no plate, no rounding, no shadow — with
+    /// the mark still on it.
+    ///
+    /// iOS masks the tile itself and draws nothing under it, so anything the renderer puts in
+    /// the margin ends up *inside* the squircle. The Dock form's drop shadow did exactly that:
+    /// composited over a white ground it was a grey ring around a smaller plate, which is not
+    /// what a theme called Pure looks like.
+    func testThePhoneIconIsItsGroundToEveryEdge() throws {
+        for theme in AppThemeLibrary.stock where theme.id != .system {
+            for appearance in try appearances(for: theme) {
+                let image = try XCTUnwrap(
+                    GeneratedAppIcon.phoneImage(for: theme, appearance: appearance),
+                    "\(theme.name) drew no phone icon"
+                )
+                let raster = try XCTUnwrap(rasterize(image, side: Render.sheetSide))
+
+                var ground = NSColor.black
+                appearance.performAsCurrentDrawingAppearance {
+                    ground = theme.resolved(.ground, appearance: appearance)
+                }
+
+                assertEdgeBandIsGround(raster, ground: ground, label: theme.name)
+                XCTAssertGreaterThanOrEqual(
+                    strongestContrast(in: raster, against: ground),
+                    ThemeContrast.minimumRatio,
+                    "\(theme.name)'s mark does not read on the phone"
+                )
+            }
+        }
     }
 
     // MARK: - A Contributed Mark
@@ -340,11 +431,22 @@ final class AppIconRenderTests: XCTestCase {
             "Threading.xcodeproj/project.pbxproj"
         ))
 
+        let picker = try String(contentsOf: repository.appendingPathComponent(
+            "Sources/ThreadingMobile/MobileSettingsView.swift"
+        ))
+
+        // Where the brand mark's ink lands on the primary icon; a theme's mark lands there too.
+        let primary = try XCTUnwrap(NSImage(contentsOf: assets
+            .appendingPathComponent("AppIcon.appiconset")
+            .appendingPathComponent("AppIcon-1024.png")))
+        let primaryRaster = try XCTUnwrap(rasterize(primary, side: Render.sheetSide))
+        let primaryGround = try XCTUnwrap(primaryRaster.colorAt(x: 0, y: 0))
+        let primaryInk = try XCTUnwrap(inkBounds(in: primaryRaster, against: primaryGround))
+
         for (themeID, suffix) in suffixByThemeID {
             let assetName = "AppIconTheme\(suffix)"
-            let icon = assets
-                .appendingPathComponent("\(assetName).appiconset")
-                .appendingPathComponent("AppIcon-1024.png")
+            let iconSet = assets.appendingPathComponent("\(assetName).appiconset")
+            let icon = iconSet.appendingPathComponent("AppIcon-1024.png")
             let preview = assets
                 .appendingPathComponent("AppIconPreview\(suffix).imageset")
                 .appendingPathComponent("AppIconPreview\(suffix)-256.png")
@@ -356,6 +458,43 @@ final class AppIconRenderTests: XCTestCase {
             XCTAssertEqual(previewRaster.pixelsWide, 256, themeID)
             XCTAssertEqual(previewRaster.pixelsHigh, 256, themeID)
             XCTAssertTrue(project.contains(assetName), "\(assetName) is not registered")
+            XCTAssertTrue(
+                picker.contains("themed(\"\(themeID)\""),
+                "\(themeID) is compiled into the phone but not offered by its icon picker"
+            )
+
+            // The shipped bytes, not the renderer: a regeneration from a regressed renderer,
+            // or a stale set nobody regenerated, fails here.
+            var variants = [icon]
+            let dark = iconSet.appendingPathComponent("AppIcon-1024-dark.png")
+            if FileManager.default.fileExists(atPath: dark.path) { variants.append(dark) }
+            for variant in variants {
+                let label = "\(themeID) \(variant.lastPathComponent)"
+                let image = try XCTUnwrap(NSImage(contentsOf: variant), label)
+                let raster = try XCTUnwrap(rasterize(image, side: Render.sheetSide))
+                let ground = try XCTUnwrap(raster.colorAt(x: 0, y: 0))
+
+                assertEdgeBandIsGround(raster, ground: ground, label: label)
+
+                let ink = try XCTUnwrap(inkBounds(in: raster, against: ground), "\(label) has no ink")
+                let tolerance = CGFloat(Render.sheetSide) * Render.phoneMarkExtentTolerance
+                XCTAssertLessThanOrEqual(
+                    abs(ink.minX - primaryInk.minX), tolerance,
+                    "\(label)'s mark is not the primary icon's size or place (left edge)"
+                )
+                XCTAssertLessThanOrEqual(
+                    abs(ink.maxX - primaryInk.maxX), tolerance,
+                    "\(label)'s mark is not the primary icon's size or place (right edge)"
+                )
+                XCTAssertLessThanOrEqual(
+                    abs(ink.minY - primaryInk.minY), tolerance,
+                    "\(label)'s mark is not the primary icon's size or place (top edge)"
+                )
+                XCTAssertLessThanOrEqual(
+                    abs(ink.maxY - primaryInk.maxY), tolerance,
+                    "\(label)'s mark is not the primary icon's size or place (bottom edge)"
+                )
+            }
         }
     }
 
@@ -383,6 +522,33 @@ final class AppIconRenderTests: XCTestCase {
         }
 
         print("Rendered \(written.count) app icons to \(directory.path)")
+        XCTAssertFalse(written.isEmpty)
+    }
+
+    /// The renders `scripts/generate_mobile_theme_icons.sh` packages into the phone's asset
+    /// catalogue: every stock style on the phone grid, at the size iOS compiles.
+    func testRendersThePhoneIconUnderEveryStockStyle() throws {
+        let directory = Render.phoneDirectory
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        var written: [String] = []
+        for theme in AppThemeLibrary.stock where theme.id != .system {
+            for (suffix, appearance) in try namedAppearances(for: theme) {
+                let image = try XCTUnwrap(
+                    GeneratedAppIcon.phoneImage(for: theme, appearance: appearance)
+                )
+                let raster = try XCTUnwrap(rasterize(image, side: Render.phoneSide))
+                let data = try XCTUnwrap(raster.representation(using: .png, properties: [:]))
+
+                let name = suffix.isEmpty
+                    ? "appicon-\(theme.id.rawValue).png"
+                    : "appicon-\(theme.id.rawValue)-\(suffix).png"
+                try data.write(to: directory.appendingPathComponent(name))
+                written.append(name)
+            }
+        }
+
+        print("Rendered \(written.count) phone app icons to \(directory.path)")
         XCTAssertFalse(written.isEmpty)
     }
 
@@ -432,6 +598,53 @@ final class AppIconRenderTests: XCTestCase {
         let y = Int(CGFloat(raster.pixelsHigh) * (1 - point.y))
         return raster.colorAt(x: min(x, raster.pixelsWide - 1), y: min(y, raster.pixelsHigh - 1))?
             .usingColorSpace(.sRGB)
+    }
+
+    /// Every pixel in the outer `phoneEdgeBandRatio` of the raster is `ground`, within a colour
+    /// space round trip.
+    private func assertEdgeBandIsGround(
+        _ raster: NSBitmapImageRep,
+        ground: NSColor,
+        label: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let band = Int((CGFloat(raster.pixelsWide) * Render.phoneEdgeBandRatio).rounded(.up))
+        var worst: (difference: CGFloat, x: Int, y: Int) = (0, 0, 0)
+        for y in 0..<raster.pixelsHigh {
+            for x in 0..<raster.pixelsWide {
+                let inBand = x < band || y < band
+                    || x >= raster.pixelsWide - band || y >= raster.pixelsHigh - band
+                guard inBand, let pixel = raster.colorAt(x: x, y: y) else { continue }
+                let drift = difference(pixel, ground)
+                if drift > worst.difference { worst = (drift, x, y) }
+            }
+        }
+        XCTAssertLessThan(
+            worst.difference, Render.flatGroundTolerance,
+            "\(label) is not its ground at its edge: (\(worst.x), \(worst.y)) drifts by "
+                + "\(worst.difference) — a plate shadow or a border inside the phone's mask",
+            file: file,
+            line: line
+        )
+    }
+
+    /// The bounding box of every pixel that reads as ink — `ThemeContrast.minimumRatio` or
+    /// more against `ground` — in raster coordinates, or nil where nothing does.
+    private func inkBounds(in raster: NSBitmapImageRep, against ground: NSColor) -> CGRect? {
+        var minX = Int.max, minY = Int.max, maxX = -1, maxY = -1
+        for y in 0..<raster.pixelsHigh {
+            for x in 0..<raster.pixelsWide {
+                guard let pixel = raster.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
+                      pixel.alphaComponent > 0.9,
+                      ThemeContrast.ratio(pixel, ground) >= ThemeContrast.minimumRatio
+                else { continue }
+                minX = min(minX, x); maxX = max(maxX, x)
+                minY = min(minY, y); maxY = max(maxY, y)
+            }
+        }
+        guard maxX >= 0 else { return nil }
+        return CGRect(x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1)
     }
 
     /// The highest contrast ratio any pixel in the icon reaches against its own plate — the

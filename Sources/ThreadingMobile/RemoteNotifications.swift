@@ -260,14 +260,23 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
-        didReceive response: UNNotificationResponse
-    ) async {
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
         guard let event = RemoteNotificationPayloadDecoder.event(
             from: response.notification.request.content.userInfo
         ) else {
+            completionHandler()
             return
         }
-        await MainActor.run {
+
+        // Finish UserNotifications' callback on the queue that invoked us. The async delegate
+        // bridge may resume on a cooperative executor; on iOS 26 UIKit then tries to update its
+        // scene-restoration archive from that executor and aborts. Navigation belongs to the
+        // main actor, but it does not need to hold the notification callback open.
+        completionHandler()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
             MobileDiagnostics.record(.notificationOpened, fields: [
                 .trace: event.id,
                 .kind: event.kind.rawValue,
@@ -1704,136 +1713,127 @@ struct NotificationSettingsView: View {
     @EnvironmentObject private var notifications: RemoteNotificationManager
     @EnvironmentObject private var model: RemoteAppModel
     @Environment(\.remoteTheme) private var theme
-    @Environment(\.dismiss) private var dismiss
     @State private var isRequesting = false
 
     var body: some View {
-        NavigationStack {
-            List {
-                ThemedSettingsSection {
-                    statusRow
-                }
+        List {
+            ThemedSettingsSection {
+                statusRow
+            }
 
-                ThemedSettingsSection {
-                    Toggle("Chats shared with me", isOn: $notifications.sharedChatsEnabled)
-                    Toggle("Permission requests", isOn: $notifications.permissionsEnabled)
-                    Toggle("Agent needs my response", isOn: $notifications.agentQuestionsEnabled)
-                    Toggle("Agent finishes a turn", isOn: $notifications.turnCompletionsEnabled)
-                    Toggle("Requests for my input", isOn: $notifications.attentionRequestsEnabled)
-                    Toggle("Agent updates I request", isOn: $notifications.agentUpdatesEnabled)
-                } header: {
-                    Text("Notify me about")
-                }
-                .disabled(notifications.authorizationStatus == .denied)
+            ThemedSettingsSection {
+                Toggle("Chats shared with me", isOn: $notifications.sharedChatsEnabled)
+                Toggle("Permission requests", isOn: $notifications.permissionsEnabled)
+                Toggle("Agent needs my response", isOn: $notifications.agentQuestionsEnabled)
+                Toggle("Agent finishes a turn", isOn: $notifications.turnCompletionsEnabled)
+                Toggle("Requests for my input", isOn: $notifications.attentionRequestsEnabled)
+                Toggle("Agent updates I request", isOn: $notifications.agentUpdatesEnabled)
+            } header: {
+                Text("Notify me about")
+            }
+            .disabled(notifications.authorizationStatus == .denied)
 
+            ThemedSettingsSection {
+                Toggle("Play notification sounds", isOn: $notifications.notificationSoundsEnabled)
+                if notifications.notificationSoundsEnabled {
+                    Toggle("Permission requests", isOn: $notifications.permissionSoundsEnabled)
+                        .disabled(!notifications.permissionsEnabled)
+                    Toggle("Agent needs my response", isOn: $notifications.questionSoundsEnabled)
+                        .disabled(!notifications.agentQuestionsEnabled)
+                    Toggle("Completed turns", isOn: $notifications.turnCompletionSoundsEnabled)
+                        .disabled(!notifications.turnCompletionsEnabled)
+                    Toggle("Requests from people", isOn: $notifications.attentionSoundsEnabled)
+                        .disabled(!notifications.attentionRequestsEnabled)
+                    Toggle("Requested agent updates", isOn: $notifications.updateSoundsEnabled)
+                        .disabled(!notifications.agentUpdatesEnabled)
+                    Toggle("Newly shared chats", isOn: $notifications.sharedChatSoundsEnabled)
+                        .disabled(!notifications.sharedChatsEnabled)
+                }
+            } header: {
+                Text("Sounds")
+            } footer: {
+                Text("Blocking questions and requests from people sound by default; routine updates stay quiet.")
+            }
+            .disabled(notifications.authorizationStatus == .denied)
+
+            ThemedSettingsSection {
+                Toggle(
+                    "People in open sessions",
+                    isOn: $notifications.peoplePresenceEnabled
+                )
+                Toggle(
+                    "Typing indicators",
+                    isOn: $notifications.typingIndicatorsEnabled
+                )
+            } header: {
+                Text("In-app collaboration")
+            } footer: {
+                Text(
+                    "Presence stays inside the live session and never creates push "
+                        + "notifications. A shared terminal uses its device composer so "
+                        + "two people cannot mix keystrokes in one TUI line."
+                )
+            }
+
+            if notifications.hasLiveOnlyConnections {
                 ThemedSettingsSection {
-                    Toggle("Play notification sounds", isOn: $notifications.notificationSoundsEnabled)
-                    if notifications.notificationSoundsEnabled {
-                        Toggle("Permission requests", isOn: $notifications.permissionSoundsEnabled)
-                            .disabled(!notifications.permissionsEnabled)
-                        Toggle("Agent needs my response", isOn: $notifications.questionSoundsEnabled)
-                            .disabled(!notifications.agentQuestionsEnabled)
-                        Toggle("Completed turns", isOn: $notifications.turnCompletionSoundsEnabled)
-                            .disabled(!notifications.turnCompletionsEnabled)
-                        Toggle("Requests from people", isOn: $notifications.attentionSoundsEnabled)
-                            .disabled(!notifications.attentionRequestsEnabled)
-                        Toggle("Requested agent updates", isOn: $notifications.updateSoundsEnabled)
-                            .disabled(!notifications.agentUpdatesEnabled)
-                        Toggle("Newly shared chats", isOn: $notifications.sharedChatSoundsEnabled)
-                            .disabled(!notifications.sharedChatsEnabled)
+                    Label(
+                        "This Mac can currently deliver while the live connection is open, "
+                            + "but APNs provider delivery is not configured.",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(theme.secondaryLabel)
+                }
+            }
+
+            #if DEBUG
+            if let deviceToken = notifications.deviceToken {
+                ThemedSettingsSection {
+                    Button {
+                        UIPasteboard.general.string = deviceToken
+                    } label: {
+                        HStack {
+                            Label("Copy APNs test token", systemImage: "doc.on.doc")
+                            Spacer()
+                            Text(String(deviceToken.suffix(8)))
+                                .font(.caption.monospaced())
+                                .foregroundStyle(theme.secondaryLabel)
+                        }
                     }
                 } header: {
-                    Text("Sounds")
-                } footer: {
-                    Text("Blocking questions and requests from people sound by default; routine updates stay quiet.")
-                }
-                .disabled(notifications.authorizationStatus == .denied)
-
-                ThemedSettingsSection {
-                    Toggle(
-                        "People in open sessions",
-                        isOn: $notifications.peoplePresenceEnabled
-                    )
-                    Toggle(
-                        "Typing indicators",
-                        isOn: $notifications.typingIndicatorsEnabled
-                    )
-                } header: {
-                    Text("In-app collaboration")
+                    Text("Development")
                 } footer: {
                     Text(
-                        "Presence stays inside the live session and never creates push "
-                            + "notifications. A shared terminal uses its device composer so "
-                            + "two people cannot mix keystrokes in one TUI line."
+                        "Available only in debug builds. Use this sandbox token with the "
+                            + "opt-in notification end-to-end tests."
                     )
                 }
-
-                if notifications.hasLiveOnlyConnections {
-                    ThemedSettingsSection {
-                        Label(
-                            "This Mac can currently deliver while the live connection is open, "
-                                + "but APNs provider delivery is not configured.",
-                            systemImage: "exclamationmark.triangle"
-                        )
-                        .font(.footnote)
-                        .foregroundStyle(theme.secondaryLabel)
-                    }
-                }
-
-                #if DEBUG
-                if let deviceToken = notifications.deviceToken {
-                    ThemedSettingsSection {
-                        Button {
-                            UIPasteboard.general.string = deviceToken
-                        } label: {
-                            HStack {
-                                Label("Copy APNs test token", systemImage: "doc.on.doc")
-                                Spacer()
-                                Text(String(deviceToken.suffix(8)))
-                                    .font(.caption.monospaced())
-                                    .foregroundStyle(theme.secondaryLabel)
-                            }
-                        }
-                    } header: {
-                        Text("Development")
-                    } footer: {
-                        Text(
-                            "Available only in debug builds. Use this sandbox token with the "
-                                + "opt-in notification end-to-end tests."
-                        )
-                    }
-                }
-                #endif
-
-                ThemedSettingsSection {
-                    Text("Permission notifications open the exact chat for review. They never put Allow or Deny on the lock screen.")
-                        .font(.footnote)
-                        .foregroundStyle(theme.secondaryLabel)
-                }
             }
-            .themedSettingsPage(theme)
-            .navigationTitle("Notifications")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
+            #endif
+
+            ThemedSettingsSection {
+                Text("Permission notifications open the exact chat for review. They never put Allow or Deny on the lock screen.")
+                    .font(.footnote)
+                    .foregroundStyle(theme.secondaryLabel)
             }
-            .onChange(of: notifications.sharedChatsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.permissionsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.agentQuestionsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.turnCompletionsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.agentUpdatesEnabled) { _, _ in sync() }
-            .onChange(of: notifications.attentionRequestsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.notificationSoundsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.permissionSoundsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.questionSoundsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.turnCompletionSoundsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.attentionSoundsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.updateSoundsEnabled) { _, _ in sync() }
-            .onChange(of: notifications.sharedChatSoundsEnabled) { _, _ in sync() }
         }
-        .presentationDetents([.medium, .large])
+        .themedSettingsPage(theme)
+        .navigationTitle("Notifications")
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: notifications.sharedChatsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.permissionsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.agentQuestionsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.turnCompletionsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.agentUpdatesEnabled) { _, _ in sync() }
+        .onChange(of: notifications.attentionRequestsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.notificationSoundsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.permissionSoundsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.questionSoundsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.turnCompletionSoundsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.attentionSoundsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.updateSoundsEnabled) { _, _ in sync() }
+        .onChange(of: notifications.sharedChatSoundsEnabled) { _, _ in sync() }
     }
 
     @ViewBuilder

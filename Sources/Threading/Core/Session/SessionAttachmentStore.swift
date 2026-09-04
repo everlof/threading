@@ -1987,10 +1987,15 @@ enum AttachmentReferenceDetector {
     }
 
     private static func clean(_ value: String) -> String {
-        value
+        let unescaped = value
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: #"\\ "#, with: " ")
-            .trimmingCharacters(in: CharacterSet(charactersIn: ".,;!?"))
+
+        return String(
+            unescaped.reversed()
+                .drop(while: { ".,;!?".contains($0) })
+                .reversed()
+        )
     }
 
     private static func expression(_ pattern: String) -> NSRegularExpression? {

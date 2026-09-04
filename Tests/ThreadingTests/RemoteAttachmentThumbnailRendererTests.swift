@@ -73,6 +73,25 @@ final class RemoteAttachmentThumbnailRendererTests: XCTestCase {
         XCTAssertNil(RemoteAttachmentThumbnailRenderer.jpeg(at: url))
     }
 
+    func testAMoviePosterIsAJPEGInsideTheLedgerBound() async throws {
+        let url = directory.appendingPathComponent("recording.mov")
+        try MovieFixture.write(to: url)
+
+        let rendered = await RemoteAttachmentThumbnailRenderer.jpeg(
+            at: url,
+            kind: .video
+        )
+        let data = try XCTUnwrap(rendered)
+        let image = try XCTUnwrap(NSImage(data: data))
+        let representation = try XCTUnwrap(image.representations.first)
+
+        XCTAssertEqual(Array(data.prefix(2)), [0xFF, 0xD8], "JPEG start-of-image marker")
+        XCTAssertLessThanOrEqual(
+            max(representation.pixelsWide, representation.pixelsHigh),
+            RemoteAttachmentThumbnail.maximumPixelDimension
+        )
+    }
+
     private func png(width: Int, height: Int) throws -> Data {
         let bitmap = try XCTUnwrap(NSBitmapImageRep(
             bitmapDataPlanes: nil,

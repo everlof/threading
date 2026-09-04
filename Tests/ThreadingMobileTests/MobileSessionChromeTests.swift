@@ -776,11 +776,12 @@ final class RemoteAttachmentGalleryTests: XCTestCase {
         )
     }
 
-    func testOnlyImagesAndPDFsAreAskedForAThumbnail() {
+    func testImagesPDFsAndMoviesAreAskedForAThumbnail() {
         XCTAssertTrue(RemoteAttachmentGalleryDetail.hasThumbnail(kind: .image))
         XCTAssertTrue(RemoteAttachmentGalleryDetail.hasThumbnail(kind: .pdf))
+        XCTAssertTrue(RemoteAttachmentGalleryDetail.hasThumbnail(kind: .video))
         let others: [RemoteAttachmentKind] = [
-            .html, .text, .archive, .document, .diagram, .media, .video, .unknown("hologram"),
+            .html, .text, .archive, .document, .diagram, .media, .unknown("hologram"),
         ]
         for kind in others {
             XCTAssertFalse(RemoteAttachmentGalleryDetail.hasThumbnail(kind: kind), "\(kind)")

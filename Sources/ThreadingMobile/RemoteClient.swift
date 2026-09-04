@@ -1218,6 +1218,39 @@ struct RemoteClient {
         return data
     }
 
+    /// One authenticated piece of a movie. The AVFoundation resource loader walks a larger
+    /// decoder request through these bounded calls and responds to the decoder after each one,
+    /// so a recording is never accumulated in this process.
+    func attachmentVideoData(
+        sessionID: String,
+        id: String,
+        range: Range<Int64>,
+        totalBytes: Int64
+    ) async throws -> Data {
+        let length = range.upperBound - range.lowerBound
+        guard range.lowerBound >= 0,
+              length > 0,
+              length <= Int64(RemoteAttachmentVideo.maximumChunkBytes),
+              totalBytes >= range.upperBound,
+              let url = link.attachmentURL(sessionID: sessionID, id: id) else {
+            throw RemoteClientError.invalidResponse
+        }
+        var request = request(url: url)
+        request.setValue(
+            "bytes=\(range.lowerBound)-\(range.upperBound - 1)",
+            forHTTPHeaderField: "Range"
+        )
+        let (data, response) = try await Self.session.data(for: request)
+        let http = try validate(data: data, response: response, accepted: 206 ... 206)
+        guard data.count == Int(length),
+              http.value(forHTTPHeaderField: "Accept-Ranges")?.lowercased() == "bytes",
+              http.value(forHTTPHeaderField: "Content-Range")
+                == "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(totalBytes)" else {
+            throw RemoteClientError.invalidResponse
+        }
+        return data
+    }
+
     /// A bounded raster of one attachment for the gallery's ledger. Ask only where
     /// `RemoteRESTFeature.attachmentThumbnails` was advertised; an older Mac answers 404.
     func attachmentThumbnail(sessionID: String, id: String) async throws -> Data {

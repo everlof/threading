@@ -290,6 +290,10 @@ enum MobileDemoFixture: String, CaseIterable {
     case usageLimit = "usage-limit"
     case usageLimitUnavailable = "usage-limit-unavailable"
     case usageLimitZero = "usage-limit-zero"
+    case usageLimitDense = "usage-limit-dense"
+    case usageLimitDenseWeek = "usage-limit-dense-week"
+    case usageLimitDenseQuarter = "usage-limit-dense-quarter"
+    case usageTotals = "usage-totals"
     case usageStale = "usage-stale"
 
     /// The session list, and one project's slice of it.
@@ -490,7 +494,9 @@ struct RootView: View {
                 MobileDiagnosticsView()
             }
         case .notificationSettings:
-            NotificationSettingsView()
+            NavigationStack {
+                NotificationSettingsView()
+            }
         case .terminalKeySettings:
             NavigationStack {
                 TerminalKeyboardAgentList()
@@ -517,7 +523,9 @@ struct RootView: View {
                 MacAppearanceSettingsView()
             }
         case .diagnostics:
-            RemoteDiagnosticsView()
+            NavigationStack {
+                RemoteDiagnosticsView()
+            }
         case .sharedLink:
             SharedSessionLinkDemoHost(link: ShareChatDemo.link)
         case .shareChatRoles:
@@ -937,9 +945,7 @@ struct RootView: View {
                         reportConnectionIssue: openConnectionRecoveryReport
                     )
                 case .session(let sessionID):
-                    if let session = model.me?.sessions.first(where: { $0.id == sessionID })
-                        ?? model.me?.archivedSessions?.first(where: { $0.id == sessionID })
-                    {
+                    if let session = model.dashboardSession(id: sessionID) {
                         SessionDetailView(session: session)
                     } else {
                         ContentUnavailableView(
@@ -949,7 +955,7 @@ struct RootView: View {
                         )
                     }
                 case let .sessionWorkspace(sessionID, destination):
-                    if let session = model.me?.sessions.first(where: { $0.id == sessionID }) {
+                    if let session = model.dashboardSession(id: sessionID) {
                         SessionDetailView(
                             session: session,
                             initialWorkspaceDestination: destination.remoteDestination
@@ -962,7 +968,7 @@ struct RootView: View {
                         )
                     }
                 case .terminal(let terminalID):
-                    if let terminal = model.me?.terminals?.first(where: { $0.id == terminalID }) {
+                    if let terminal = model.dashboardTerminal(id: terminalID) {
                         ProjectTerminalDetailView(terminal: terminal)
                     } else {
                         ContentUnavailableView(

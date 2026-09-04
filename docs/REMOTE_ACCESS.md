@@ -1431,6 +1431,18 @@ to a read or unread completed state. Generic shell quiet timers, refusals and pr
 cannot claim completion. Notification sounds have a master switch and an independent
 switch for every category, so a useful banner does not have to imply an audible interruption.
 
+Device activity is one delivery rule rather than another settings matrix. An iPhone already
+suppresses ordinary state notifications while its scene is active. On the Mac, activating
+Threading or deliberately clicking, typing or scrolling marks that Mac active for two minutes;
+leaving the app, locking the session or sleeping the display makes it inactive immediately. A
+recently active Mac defers only a routine `turnCompleted` notification for the owner. A later Mac
+interaction cancels that deferred notification as seen; otherwise it is delivered when the
+two-minute window expires or immediately when the app resigns active, the session locks or the
+display sleeps. This never delays a guest's completion, a permission request, a question, a
+person's explicit request for input or an agent update the user explicitly requested. Pointer
+movement alone is not activity, and the timestamp is process-local rather than a hosted presence
+heartbeat.
+
 The phone owns token acquisition: after notification permission and whenever APNs rotates the
 token, iOS first registers it directly with an operated hosted service using the scoped credential
 issued to that exact paired device. The service encrypts the token at rest, binds it to the

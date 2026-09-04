@@ -394,6 +394,27 @@ final class SessionAttachmentStoreTests: XCTestCase {
         XCTAssertEqual(store.attachments(for: session).map(\.origin), [.agent])
     }
 
+    /// Build and evidence tools conventionally write below `.build`. The leading period is part
+    /// of the relative path, not sentence punctuation, so cleaning terminal prose must retain it.
+    func testAScannedPathInsideADotDirectoryKeepsItsLeadingPeriod() throws {
+        let store = makeStore()
+        let session = SessionID()
+        let build = checkout.appendingPathComponent(".build/current", isDirectory: true)
+        try FileManager.default.createDirectory(at: build, withIntermediateDirectories: true)
+        try write([0x89], to: build.appendingPathComponent("settings-dark.png"))
+
+        store.recordReferences(
+            in: ".build/current/settings-dark.png",
+            sessionID: session,
+            projectRoot: checkout
+        )
+
+        XCTAssertEqual(
+            store.attachments(for: session).map(\.relativePath),
+            [".build/current/settings-dark.png"]
+        )
+    }
+
     // MARK: - The Scope The Scanned Door Is Held To
 
     /// The refusal is not silence: the pane has to be able to say what the rule cost, or the

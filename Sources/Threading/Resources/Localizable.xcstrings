@@ -19933,6 +19933,17 @@
         }
       }
     },
+    "Highest of %lld readings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Högst av %lld avläsningar"
+          }
+        }
+      }
+    },
     "Hold a Baseline Over This Page" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29239,6 +29250,39 @@
         }
       }
     },
+    "Peak per %lld days" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Topp per %lld dagar"
+          }
+        }
+      }
+    },
+    "Peak per day" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Topp per dag"
+          }
+        }
+      }
+    },
+    "Peak per window" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Topp per fönster"
+          }
+        }
+      }
+    },
     "Pending" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -30577,6 +30621,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Prognos vid planerad återställning"
+          }
+        }
+      }
+    },
+    "Projected for weekly windows only" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Prognos endast för veckofönster"
           }
         }
       }
@@ -50542,6 +50597,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Fönsterkrom"
+          }
+        }
+      }
+    },
+    "Window ended %@ · %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fönstret slutade %@ · %@"
           }
         }
       }

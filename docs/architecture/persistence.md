@@ -716,6 +716,23 @@ pairing identities against the hard 64-record ceiling, and a write occurs only w
 theme actually changes, never on a session or terminal hot callback. See
 [`themes.md`](themes.md#2026-08-30--the-iphone-keeps-the-last-resolved-mac-theme-through-reconnect).
 
+The iPhone dashboard's last-good catalogue is a second separate optional cache. It is keyed by
+the exact pairing id rather than the Mac's stable host id because `/api/me` is capability-filtered:
+two memberships on one Mac may expose different rows. The snapshot keeps only list identity and
+organization metadata. It deliberately drops activity, availability, wake state, sharing,
+account handles, launch choices and theme payloads, so a disconnected list cannot claim a live
+right or status. `MobileDashboardCacheStore` decodes, validates, projects and encodes on its actor;
+keeps at most eight pairings under a 4 MiB archive ceiling and explicit row/string limits; evicts
+least-recent records under aggregate pressure; quarantines corrupt bytes; and leaves a future
+version untouched with writes disabled during ordinary operation. A security purge that cannot
+rewrite an incompatible archive deletes the whole optional cache, including unreadable recovery
+copies that cannot be filtered by pairing. A live `/api/me` replaces the
+cached catalogue in one publication by stable ids. Forgetting the pairing, a known share
+expiration, or an authenticated 401/403 removes the cache. Ordinary route failure retains it.
+Cached navigation must rejoin the
+host refresh single-flight and resolve the id in a live catalogue before resume, attachment, socket
+or mutation work begins.
+
 The crash itself was in the SwiftTerm fork: `LocalProcess.processTerminated()` reaps the
 child with `waitpid`, which destroys the kernel event its `DispatchSourceProcess` is
 registered for. Left active, that knote is reported `EV_VANISHED` the next time the workloop

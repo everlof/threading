@@ -24,7 +24,7 @@ enum RemoteAttachmentGalleryDetail {
     /// Which kinds the Mac can draw a thumbnail of. Everything else keeps its glyph in the
     /// ledger and costs the link nothing.
     static func hasThumbnail(kind: RemoteAttachmentKind) -> Bool {
-        kind == .image || kind == .pdf
+        kind == .image || kind == .pdf || kind == .video
     }
 }
 
@@ -48,6 +48,7 @@ struct RemoteAttachmentGallery: View {
     @State private var pixelSizes: [String: CGSize] = [:]
     private let initialData: [String: Data]
     private let loadsRemotely: Bool
+    private let offersVideoStreaming: Bool
 
     init(
         sessionID: String,
@@ -55,6 +56,7 @@ struct RemoteAttachmentGallery: View {
         initialID: String,
         client: RemoteClient,
         offersThumbnails: Bool,
+        offersVideoStreaming: Bool = false,
         initialData: [String: Data] = [:],
         seedThumbnails: [String: UIImage] = [:],
         loadsRemotely: Bool = true
@@ -64,6 +66,7 @@ struct RemoteAttachmentGallery: View {
         self.client = client
         self.initialData = initialData
         self.loadsRemotely = loadsRemotely
+        self.offersVideoStreaming = offersVideoStreaming
         _currentID = State(initialValue: initialID)
         _thumbnails = StateObject(wrappedValue: RemoteAttachmentThumbnailStore(
             isOffered: offersThumbnails,
@@ -120,6 +123,7 @@ struct RemoteAttachmentGallery: View {
                         client: client,
                         initialData: initialData[attachment.id],
                         loadsRemotely: loadsRemotely,
+                        offersVideoStreaming: offersVideoStreaming,
                         isCurrentPage: attachment.id == current?.id,
                         onDecodedImageSize: { size in pixelSizes[attachment.id] = size }
                     )
@@ -244,6 +248,17 @@ private struct RemoteAttachmentLedgerCell: View {
                 Image(systemName: RemoteAttachmentGlyph.name(for: attachment.kind))
                     .font(.title3)
                     .foregroundStyle(theme.secondaryLabel)
+            }
+            if attachment.kind == .video, thumbnail != nil {
+                Image(systemName: "play.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(theme.label)
+                    .frame(
+                        width: MobileDesign.Size.minimumTapTarget / 2,
+                        height: MobileDesign.Size.minimumTapTarget / 2
+                    )
+                    .background(theme.controlResting.opacity(0.9))
+                    .clipShape(Circle())
             }
         }
         .frame(

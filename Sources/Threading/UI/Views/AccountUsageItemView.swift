@@ -65,6 +65,15 @@ final class AccountUsageItemView: BackdropThemedControl {
     /// The policy currently applied to the hover popover — read by tests asserting that it
     /// follows the content.
     var popoverPolicyForTesting: HoverPopoverScheduler.Policy { popoverScheduler.policy }
+
+    /// The rendered foregrounds and the two faces they promise to read on. Kept as the values
+    /// the real subviews hold, so the contrast regression test cannot pass by exercising only
+    /// the design helper while this component quietly stops using its answer.
+    var ringTrackColorForTesting: NSColor { ringView.trackColor }
+    var ringTintColorForTesting: NSColor { ringView.tint }
+    var summaryForTesting: NSAttributedString { summaryLabel.attributedStringValue }
+    var contentGroundsForTesting: [NSColor] { contentInk(from: ink).grounds }
+
     private let customizationLookup: ComponentCustomizationHost.Lookup
     private let usagePopoverContentProvider: UsagePopoverContentProvider
 
@@ -112,7 +121,6 @@ final class AccountUsageItemView: BackdropThemedControl {
     /// exactly how this pill disappeared under a light theme on a dark terminal.
     override func applyInk(_ ink: Design.Ink) {
         updateBackground()
-        ringView.trackColor = ink.quaternary
         // The summary is an attributed string built per window, so it carries its colours with
         // it — rebuilding is the only way to re-ink it.
         render()
@@ -262,6 +270,7 @@ final class AccountUsageItemView: BackdropThemedControl {
         limits rules: [CustomLimit],
         at now: Date = Date()
     ) {
+        let content = contentInk(from: ink)
         let metered = usage?.windows(metering: model) ?? []
         let binding = CustomLimitBounds.bindingWindow(among: metered, in: rules, at: now)
         let severity = CustomLimitBounds.severity(
@@ -276,7 +285,12 @@ final class AccountUsageItemView: BackdropThemedControl {
         // would be reporting a level the account never reached, on the one control whose whole
         // job is to say how much is left; what the line moves is the colour.
         ringView.fraction = binding?.fraction
-        ringView.tint = severity.glyphColor
+        ringView.trackColor = content.ink.quaternary
+        ringView.tint = UsageReadingLabel.valueColor(
+            for: severity,
+            ink: content.ink,
+            statusGrounds: content.grounds
+        )
 
         // `at: now` rather than the default: every other reading in this method is taken at the
         // moment the caller named, and a `readings` call that quietly used `Date()` instead
@@ -285,8 +299,18 @@ final class AccountUsageItemView: BackdropThemedControl {
         let readings = usage?.readings(at: now, metering: model) ?? []
         summaryLabel.attributedStringValue = Self.summary(
             readings: CustomLimitBounds.retinted(readings, of: metered, in: rules, at: now),
-            ink: ink
+            ink: content.ink,
+            statusGrounds: content.grounds
         )
+    }
+
+    /// Foreground ink is measured against the faces the pill can actually be wearing, not only
+    /// the terminal backdrop underneath them. Both are named because opening the hover popover
+    /// changes the resting face to the stronger one while the same reading remains on screen.
+    private func contentInk(from source: Design.Ink) -> (ink: Design.Ink, grounds: [NSColor]) {
+        let ground = (hostGround ?? inkSource).ground
+        let grounds = [source.surface, source.surfaceHover].map { $0.composited(over: ground) }
+        return (source.legible(over: grounds), grounds)
     }
 
     /// `5h 43% · 7d 73%`: each window as a quiet label and its value, the value tinted by
@@ -298,7 +322,11 @@ final class AccountUsageItemView: BackdropThemedControl {
     /// exists, and two implementations of one sentence is how a promise like that stops being
     /// true. What stays here is the empty case: a pill is a fixed slot in the chrome and says
     /// `—` when there is nothing to report, where a line on a control row leaves instead.
-    private static func summary(readings: [AccountUsage.Reading], ink: Design.Ink) -> NSAttributedString {
+    private static func summary(
+        readings: [AccountUsage.Reading],
+        ink: Design.Ink,
+        statusGrounds: [NSColor]
+    ) -> NSAttributedString {
         guard !readings.isEmpty else {
             return NSAttributedString(
                 string: AccountUsageItemDefaults.unknownValue,
@@ -308,7 +336,11 @@ final class AccountUsageItemView: BackdropThemedControl {
                 ]
             )
         }
-        return UsageReadingLabel.summary(readings: readings, ink: ink)
+        return UsageReadingLabel.summary(
+            readings: readings,
+            ink: ink,
+            statusGrounds: statusGrounds
+        )
     }
 
     // MARK: - Interaction

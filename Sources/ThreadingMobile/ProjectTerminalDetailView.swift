@@ -21,7 +21,7 @@ struct ProjectTerminalDetailView: View {
     @State private var isMutating = false
 
     private var currentTerminal: RemoteProjectTerminalSummaryDTO {
-        model.me?.terminals?.first(where: { $0.id == terminal.id }) ?? terminal
+        model.dashboardTerminal(id: terminal.id) ?? terminal
     }
 
     var body: some View {
@@ -133,9 +133,11 @@ struct ProjectTerminalDetailView: View {
                 throw RemoteClientError.invalidResponse
             }
             connectedHostID = hostID
-            try await model.makeTerminalReady(currentTerminal)
+            let authoritative = try await model.liveTerminalForOpening(id: terminal.id)
+            try await model.makeTerminalReady(authoritative)
             guard let client = model.client else { throw RemoteClientError.invalidResponse }
-            let latest = model.me?.terminals?.first(where: { $0.id == terminal.id }) ?? terminal
+            let latest = model.me?.terminals?.first(where: { $0.id == terminal.id })
+                ?? authoritative
             let presentation = RemoteSessionSummaryDTO(
                 id: latest.id,
                 title: latest.title,

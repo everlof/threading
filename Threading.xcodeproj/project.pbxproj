@@ -103,6 +103,7 @@
 		A71000010000000000000001 /* MobileNewSessionDefaultsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71000010000000000000002 /* MobileNewSessionDefaultsStoreTests.swift */; };
 		A71100010000000000000001 /* MobileThemeCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */; };
 		A71200010000000000000001 /* MobileButtonHapticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71200010000000000000002 /* MobileButtonHapticsTests.swift */; };
+		A71300010000000000000001 /* MobileDashboardCacheStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */; };
 		B20000010000000000000001 /* NotificationDeepLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000010000000000000004 /* NotificationDeepLinkTests.swift */; };
 		B20000010000000000000002 /* ThreadingRemoteKit in Frameworks */ = {isa = PBXBuildFile; productRef = A20000010000000000000011 /* ThreadingRemoteKit */; };
 		B20000010000000000000003 /* ThreadingExtensionKit in Frameworks */ = {isa = PBXBuildFile; productRef = F4000001000000000000007 /* ThreadingExtensionKit */; };
@@ -355,6 +356,7 @@
 		A71000010000000000000002 /* MobileNewSessionDefaultsStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileNewSessionDefaultsStoreTests.swift; sourceTree = "<group>"; };
 		A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileThemeCacheStoreTests.swift; sourceTree = "<group>"; };
 		A71200010000000000000002 /* MobileButtonHapticsTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileButtonHapticsTests.swift; sourceTree = "<group>"; };
+		A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MobileDashboardCacheStoreTests.swift; sourceTree = "<group>"; };
 		B0339D9A9A84C09D74842AEC /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B20000010000000000000004 /* NotificationDeepLinkTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NotificationDeepLinkTests.swift; sourceTree = "<group>"; };
 		B20000010000000000000005 /* ThreadingMobileTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ThreadingMobileTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -385,6 +387,7 @@
 				ThreadingMobile/MobileAgentIdentity.swift,
 				ThreadingMobile/MobileButtonHaptics.swift,
 				ThreadingMobile/MobileConnectionStatusPanel.swift,
+				ThreadingMobile/MobileDashboardCacheStore.swift,
 				ThreadingMobile/MobileDiagnosticsBridge.swift,
 				ThreadingMobile/MobileDraftChooser.swift,
 				ThreadingMobile/MobileFloatingScrollToEndButton.swift,
@@ -703,6 +706,7 @@
 				A71000010000000000000002 /* MobileNewSessionDefaultsStoreTests.swift */,
 				A71100010000000000000002 /* MobileThemeCacheStoreTests.swift */,
 				A71200010000000000000002 /* MobileButtonHapticsTests.swift */,
+				A71300010000000000000002 /* MobileDashboardCacheStoreTests.swift */,
 			);
 			name = "Mobile Tests";
 			path = Tests/ThreadingMobileTests;
@@ -1466,6 +1470,7 @@
 				A71000010000000000000001 /* MobileNewSessionDefaultsStoreTests.swift in Sources */,
 				A71100010000000000000001 /* MobileThemeCacheStoreTests.swift in Sources */,
 				A71200010000000000000001 /* MobileButtonHapticsTests.swift in Sources */,
+				A71300010000000000000001 /* MobileDashboardCacheStoreTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

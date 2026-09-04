@@ -93,6 +93,15 @@ public struct ThemedChartSeries: Equatable, Sendable, Identifiable {
     public let fillsArea: Bool
     public let curve: ThemedChartCurve
     public let mark: ThemedChartMark
+    /// How wide a bar is on a *time* axis, as the span of time it stands for; nil on a
+    /// categorical axis, where the band is the plot divided by the category count.
+    ///
+    /// A column over time is one reading of one bucket — the highest usage a five-hour window
+    /// reached on each day — so its width is that bucket's share of the range, its centre is the
+    /// bucket's middle, and it is never grouped: two span series sharing a bucket would be two
+    /// claims about the same interval, so each takes the whole band and they are expected to
+    /// own disjoint buckets.
+    public let barSpan: TimeInterval?
 
     public init(
         id: String,
@@ -101,7 +110,8 @@ public struct ThemedChartSeries: Equatable, Sendable, Identifiable {
         style: ThemedChartSeriesStyle = .primary,
         fillsArea: Bool = false,
         curve: ThemedChartCurve = .smooth,
-        mark: ThemedChartMark = .line
+        mark: ThemedChartMark = .line,
+        barSpan: TimeInterval? = nil
     ) {
         self.id = id
         self.title = title
@@ -110,6 +120,7 @@ public struct ThemedChartSeries: Equatable, Sendable, Identifiable {
         self.fillsArea = fillsArea
         self.curve = curve
         self.mark = mark
+        self.barSpan = barSpan
     }
 
     /// A bar series over category positions: value *i* belongs to category *i*.
@@ -1217,17 +1228,32 @@ public class ThemedTimeSeriesChartView: ThemedControl {
     /// independent series and the running total for a stacked band, so grouping and stacking are
     /// the *same* drawing code reading a different composition — no second layout pass, and a
     /// stacked total cannot disagree with the band boundary drawn beside it.
-    private func drawBars(
+    /// Every bar a series draws, with the source point each stands for, in paint order.
+    ///
+    /// A bar on a categorical axis takes its band from the category count and shares it with
+    /// the other bar series as a group. A bar that states its own `barSpan` takes the band from
+    /// the time axis instead — that span's share of the resolved range — and is never grouped.
+    /// A column whose bucket began before the range starts is clipped to the plot rather than
+    /// drawn into the value gutter.
+    private func barLayout(
         series: ThemedChartSeries,
         geometry: ThemedChartRenderedSeries,
         at index: Int,
         in plot: NSRect
-    ) {
-        let categories = model.xAxis.categories?.count ?? max(geometry.points.count, 1)
-        let band = bandExtent(count: categories, in: plot)
-        guard band > 0 else { return }
+    ) -> (bars: [(rect: NSRect, sourceIndex: Int)], thickness: CGFloat) {
+        let band: CGFloat
+        let grouped: [Int]
+        if let span = series.barSpan, model.xAxis.categories == nil, let range = resolvedXRange {
+            let total = range.upperBound.timeIntervalSince(range.lowerBound)
+            band = total > 0 ? plot.width * CGFloat(span / total) : 0
+            grouped = []
+        } else {
+            let categories = model.xAxis.categories?.count ?? max(geometry.points.count, 1)
+            band = bandExtent(count: categories, in: plot)
+            grouped = composition == .independent ? barSeriesIndices : []
+        }
+        guard band > 0 else { return ([], 0) }
 
-        let grouped = composition == .independent ? barSeriesIndices : []
         let members = max(1, grouped.count)
         let slot = Design.Chart.barGroupExtent(band: band, members: members) / CGFloat(members)
         let position = grouped.firstIndex(of: index) ?? 0
@@ -1235,12 +1261,39 @@ public class ThemedTimeSeriesChartView: ThemedControl {
             ? (CGFloat(position) - CGFloat(grouped.count - 1) / 2) * slot
             : 0
         let thickness = max(1, slot - Design.Chart.barGap)
+        let bars = geometry.points.compactMap { value -> (rect: NSRect, sourceIndex: Int)? in
+            var rect = barRect(for: value, thickness: thickness, offset: offset, in: plot)
+            if series.barSpan != nil { rect = rect.intersection(plot) }
+            guard rect.width > 0, rect.height > 0 else { return nil }
+            return (rect, value.sourceIndex)
+        }
+        return (bars, thickness)
+    }
+
+    /// The rectangles the bar series at `index` draws, for a test to measure.
+    public func barRectsForTesting(at index: Int) -> [NSRect] {
+        guard model.series.indices.contains(index),
+              displayedGeometry.indices.contains(index) else { return [] }
+        return barLayout(
+            series: model.series[index],
+            geometry: displayedGeometry[index],
+            at: index,
+            in: plotRect
+        ).bars.map(\.rect)
+    }
+
+    private func drawBars(
+        series: ThemedChartSeries,
+        geometry: ThemedChartRenderedSeries,
+        at index: Int,
+        in plot: NSRect
+    ) {
+        let layout = barLayout(series: series, geometry: geometry, at: index, in: plot)
+        let thickness = layout.thickness
         let fill = color(for: series.style)
         let isRanking = model.orientation == .horizontal
 
-        for value in geometry.points {
-            let rect = barRect(for: value, thickness: thickness, offset: offset, in: plot)
-            guard rect.width > 0, rect.height > 0 else { continue }
+        for (rect, sourceIndex) in layout.bars {
             fill.withAlphaComponent(Design.Chart.barFillOpacity).setFill()
             let path = barPath(rect, stacked: composition == .stackedBands)
             path.fill()
@@ -1255,8 +1308,8 @@ public class ThemedTimeSeriesChartView: ThemedControl {
             guard composition != .stackedBands,
                   thickness >= Design.Chart.barValueLabelThickness,
                   model.series.indices.contains(index),
-                  model.series[index].points.indices.contains(value.sourceIndex) else { continue }
-            let text = valueString(model.series[index].points[value.sourceIndex].value)
+                  model.series[index].points.indices.contains(sourceIndex) else { continue }
+            let text = valueString(model.series[index].points[sourceIndex].value)
             if isRanking {
                 drawBarValue(
                     text,

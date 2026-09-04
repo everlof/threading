@@ -135,6 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
     private var mainWindowController: MainWindowController?
     private let issueReportEvents = AppEventObservations()
     private let remoteSessionEvents = AppEventObservations()
+    private let macNotificationActivityMonitor = MacNotificationActivityMonitor()
     private var activeTurnSleepInhibitor: ActiveTurnSleepInhibitor?
     private var onboardingWindowController: OnboardingWindowController?
     /// True while first-launch onboarding is deferring the main window. Gates session restore
@@ -683,6 +684,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             activeTurnSleepInhibitor = inhibitor
         }
 
+        // One activity signal replaces a device-by-device settings matrix. The phone already
+        // suppresses routine foreground banners; this monitor lets the Mac withhold an owner's
+        // routine completion push while Threading itself is the recently used device.
+        macNotificationActivityMonitor.start()
+
         if plan.startsExtensions {
             let factPipeline = installHostFactPipeline()
             mainWindowController.installWorkspaceNavigatorFactRegistry(factPipeline.registry)
@@ -996,6 +1002,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
         AgentRuntime.shared.detachHostBackedSessions()
         AgentRuntime.shared.terminateAll()
         ExtensionManager.shared.terminateAll()
+        macNotificationActivityMonitor.stop()
         // Stops the tunnel child and closes remote sockets before the listeners go, so nothing
         // spawned for remote access outlives the app.
         RemoteAccessCoordinator.shared.stop()

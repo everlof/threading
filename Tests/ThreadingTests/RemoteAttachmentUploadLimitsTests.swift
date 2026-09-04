@@ -65,7 +65,7 @@ final class RemoteAttachmentUploadLimitsTests: XCTestCase {
     /// And the offered set may not quietly shrink to nothing through a typo: these are the kinds
     /// the feature exists for, so each has to still be reachable from a phone.
     func testTheOfferedSetStillCoversTheKindsPeopleActuallySend() {
-        for fileExtension in ["png", "jpg", "heic", "pdf", "zip", "docx"] {
+        for fileExtension in ["png", "jpg", "heic", "mov", "mp4", "m4v", "pdf", "zip", "docx"] {
             XCTAssertTrue(
                 RemoteAttachmentUploadLimits.offeredFileExtensions.contains(fileExtension),
                 ".\(fileExtension) must remain pickable"

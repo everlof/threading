@@ -50,7 +50,22 @@ final class ToolbarChromeRenderTests: HostedStoreTestCase {
         written += try write(story: "06-page-title") { Self.pageTitleRow() }
         written += try write(story: "07-titled-split-emphases") { Self.titledSplitEmphases() }
 
-        XCTAssertEqual(written, 14, "Every story should render on both backdrops")
+        // The reported state is Pure with the reading popover open, which means the pill is
+        // hovered. Keep rest beside it: the ink is one ladder promised over both faces, and the
+        // pair makes a stronger fix that accidentally washes out the resting state visible.
+        let originalTheme = AppThemePalette.current
+        defer { AppThemePalette.set(originalTheme) }
+        AppThemePalette.set(AppThemeStyles.pure)
+        written += try write(
+            story: "08-usage-pill-rest",
+            afterRepaint: { Self.prepareUsagePill(in: $0, hovered: false) }
+        ) { Self.usagePillStrip() }
+        written += try write(
+            story: "09-usage-pill-popover-open",
+            afterRepaint: { Self.prepareUsagePill(in: $0, hovered: true) }
+        ) { Self.usagePillStrip() }
+
+        XCTAssertEqual(written, 18, "Every story should render on both backdrops")
         print("Rendered toolbar chrome storybook to \(Render.directory.path)")
     }
 
@@ -541,6 +556,55 @@ final class ToolbarChromeRenderTests: HostedStoreTestCase {
         return strip([pageTab, newSession, openInControl, actions], spacing: Design.Spacing.medium)
     }
 
+    /// The production toolbar pill between the page it describes and the actions beside it.
+    /// Its synthetic reading is supplied again after the theme sweep by `prepareUsagePill`:
+    /// `applyInk` correctly re-asks its account and hides a fixture with none.
+    private static func usagePillStrip() -> NSView {
+        let pageTab = pageTab(title: "Chat", symbolName: "bubble.left.and.text.bubble.right")
+        let pill = AccountUsageItemView()
+        pill.show(usage: usageFixture(), limits: [], at: usageFixtureNow)
+        let action = ThemedIconButton(symbolName: "ellipsis", accessibility: "Session options")
+        return strip([pageTab, pill, action], spacing: Design.Spacing.medium)
+    }
+
+    private static let usageFixtureNow = Date(timeIntervalSince1970: 1_770_000_000)
+
+    private static func usageFixture() -> AccountUsage {
+        AccountUsage(
+            windows: [
+                AccountUsage.Window(
+                    id: UsageDefaults.fiveHourWindowID,
+                    label: UsageDefaults.fiveHourLabel,
+                    fraction: 0.04,
+                    resetsAt: usageFixtureNow.addingTimeInterval(4 * 3_600),
+                    windowDuration: UsageDefaults.fiveHourSeconds
+                ),
+                AccountUsage.Window(
+                    id: UsageDefaults.weeklyWindowID,
+                    label: UsageDefaults.weeklyLabel,
+                    fraction: 0.27,
+                    resetsAt: usageFixtureNow.addingTimeInterval(5 * 86_400),
+                    windowDuration: UsageDefaults.sevenDaySeconds
+                )
+            ],
+            planLabel: "Plus",
+            observedAt: usageFixtureNow,
+            source: .api
+        )
+    }
+
+    private static func prepareUsagePill(in root: NSView, hovered: Bool) {
+        guard let pill = firstUsagePill(in: root) else { return }
+        pill.isHidden = false
+        pill.show(usage: usageFixture(), limits: [], at: usageFixtureNow)
+        if hovered { pill.mouseEntered(with: hoverEvent()) }
+    }
+
+    private static func firstUsagePill(in root: NSView) -> AccountUsageItemView? {
+        if let pill = root as? AccountUsageItemView { return pill }
+        return root.subviews.lazy.compactMap { firstUsagePill(in: $0) }.first
+    }
+
     /// The Open In control at rest, with the press raised, and with the chevron raised.
     ///
     /// The three states are the story: they were two buttons in a group, so hovering one raised
@@ -942,7 +1006,11 @@ final class ToolbarChromeRenderTests: HostedStoreTestCase {
     /// Rendered inside a real window, not from a detached view: `BackdropOverlay` inks itself when
     /// it moves to one, so a view drawn without a window would report only what `draw(_:)` reads
     /// directly and leave every label at its default colour.
-    private func write(story: String, make: @escaping () -> NSView) throws -> Int {
+    private func write(
+        story: String,
+        afterRepaint: ((NSView) -> Void)? = nil,
+        make: @escaping () -> NSView
+    ) throws -> Int {
         let directory = Render.directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
@@ -980,6 +1048,7 @@ final class ToolbarChromeRenderTests: HostedStoreTestCase {
             host.frame = NSRect(origin: .zero, size: host.fittingSize)
             host.layer?.backgroundColor = backdrop.colour.cgColor
             AppThemeRefresh.repaint(host)
+            afterRepaint?(host)
             host.layoutSubtreeIfNeeded()
 
             guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {

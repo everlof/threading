@@ -191,7 +191,44 @@ identity and the raw history journal.
 
 `RemoteUsageDashboardView` uses a lazy vertical stack and adaptive metric grids. Overview range
 and metric changes are local because all three bounded ranges arrive together. Limit range changes
-fetch only the selected series. A build-state poll backs off from two to twelve seconds, preserves
+fetch only the selected series.
+
+The phone's two charts follow the Mac's chart vocabulary through `MobileDesign.Chart` and two
+Foundation-only projections, each with a test:
+
+- **The daily chart is bands standing on one another.** `MobileUsageStackProjection` builds each
+  band's lower and upper edge from the series in order, so a band's outline is drawn at its
+  cumulative height and the topmost edge is the day's total. It exists because Swift Charts
+  stacks an `AreaMark` by default and never stacks a `LineMark`: the chart used to draw each
+  provider's outline at that provider's own height, which for the smaller one ran through the
+  middle of the band above it. Series without one shared timestamp sequence stand on zero
+  independently, the same degradation `ThemedStackedBandChartView` makes.
+- **The limit chart's form follows the window's density**, decided by the shared
+  `UsageLimitChartForm` described under [Reset evidence and projection](#reset-evidence-and-projection);
+  `MobileUsageLimitChartProjection` only reads the wire values into it. The columns are Swift
+  Charts rectangles (a `BarMark` cannot span both axes), the ones that reached the limit in the
+  negative role, with scheduled resets left to the count in the rows beneath.
+- **Both charts place their own date ticks.** `MobileUsageAxisTicks` steps whole days (weeks
+  on the calendar's first weekday, months on their first) near the asked-for count and drops
+  any tick within twelve per cent of the span of either end. Swift Charts truncates a label
+  that runs past the plot's edge rather than moving it, so the weekly tick two days before a
+  projected reset read "18…", and padding the plot does not help — the cut is at the plot
+  however wide the card is.
+- **The fallback categorical palette is validated, not picked.** The Mac sends no series
+  colours, so `RemoteThemePalette.categorical` is what every theme's chart wears. Its previous
+  blue-purple-indigo opening put the two providers a phone most often shows in hues a protanope
+  could not separate at all (ΔE 0.8) and full vision only barely. The six hues now open blue,
+  orange, purple like `Design.Categorical`, with indigo between teal and pink, and both mode
+  lists pass the data-visualization validator's lightness, chroma, colour-blindness, normal-
+  vision and contrast gates on the panel and the ground.
+
+The Accounts scope's history is one card under one heading: the window and range choosers, the
+chart they control, and the selected window's readings as quiet rows beneath it. It was three
+blocks — a card of two pickers, a "Current window" grid of four tiles, and a second card titled
+Limit history — so the controls stood a screen from the chart they changed and the largest text
+on the page was "Unavailable", twice. A window whose scheduled reset has passed now says the
+window ended rather than "Resets 2 days ago", and a sub-day window says projection is for weekly
+windows rather than asking for more history it can never use. A build-state poll backs off from two to twelve seconds, preserves
 the last successful snapshot with its observation time, and stops when the sheet disappears.
 Structured load/detail work and explicit pagination work are all cancelled on dismissal. The
 deterministic `THREADING_MOBILE_DEMO=usage` family covers Overview plus positive, zero and
@@ -423,6 +460,23 @@ active projection or scheduled reset, but a later banked-reset expiry never sets
 inventory fact remains fully stated in the summary card and is drawn as a marker only when it
 already falls inside the active chart domain. The same rule applies on macOS and iPhone, so a
 credit expiring weeks later cannot compress a seven-day history into a sliver.
+
+**The chart's form follows the window's density, on both platforms.** `UsageLimitChartForm`
+in `ThreadingRemoteKit` counts how many of the selected window fit in the range. Up to sixteen
+it is the observed line with its resets ruled through it. Past that — a five-hour window over a
+month is a hundred and forty-four — it is one column per bucket at the highest reading observed
+in it (`UsageLimitChartForm.peaks`), the columns that reached the limit as a second series in
+the negative role so the legend keys them, and scheduled resets left to the Recorded resets
+card; banked-credit resets and a pending expiry stay ruled. The bucket is the window while that
+stays under forty-eight columns, then whole calendar days, then three-day spans. The Mac draws
+the columns through `ThemedChartSeries.barSpan` — a bar that states its own width as a span of
+the time axis — and the phone through Swift Charts rectangles; the decision and the peaks are
+one Foundation-only implementation with its own package tests, so the two screens cannot answer
+differently about the same downsampled observations. The thirty-day line this replaced was
+forty-eight dashed reset rules through a block of near-vertical two-point strokes. The Current
+card says a window *ended* once its scheduled reset has passed rather than "Resets 2 days ago",
+and a sub-day window's projection card says projection is for weekly windows rather than asking
+for observations it can never use.
 
 The limit chart offers 7, 30 and 90 days while storage retains 180. It keeps discontinuities as
 separate segments so a reset is not drawn as consumption in reverse. Downsampling preserves

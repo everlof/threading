@@ -137,12 +137,17 @@ final class UsageReadingLabel: NSView, InkSourced {
     /// promises to be *the same reading the pill will go on showing* once the session exists —
     /// and two compositions of one sentence is how a promise like that quietly stops being true.
     /// Consumes `AccountUsage.Reading`, so the stale-value and severity rules stay the model's.
-    static func summary(readings: [AccountUsage.Reading], ink: Design.Ink) -> NSAttributedString {
+    static func summary(
+        readings: [AccountUsage.Reading],
+        ink: Design.Ink,
+        statusGrounds: [NSColor] = []
+    ) -> NSAttributedString {
         let visible = Array(readings.prefix(maximumReadings))
         return summary(
             readings: visible,
             omittedCount: readings.count - visible.count,
-            ink: ink
+            ink: ink,
+            statusGrounds: statusGrounds
         )
     }
 
@@ -156,7 +161,8 @@ final class UsageReadingLabel: NSView, InkSourced {
     private static func summary(
         readings: [AccountUsage.Reading],
         omittedCount: Int,
-        ink: Design.Ink
+        ink: Design.Ink,
+        statusGrounds: [NSColor] = []
     ) -> NSAttributedString {
         let result = NSMutableAttributedString()
 
@@ -186,7 +192,11 @@ final class UsageReadingLabel: NSView, InkSourced {
             append(
                 reading.value,
                 font: Design.Typography.control(),
-                color: reading.severity == .normal ? ink.secondary : reading.severity.glyphColor
+                color: valueColor(
+                    for: reading.severity,
+                    ink: ink,
+                    statusGrounds: statusGrounds
+                )
             )
         }
 
@@ -206,6 +216,20 @@ final class UsageReadingLabel: NSView, InkSourced {
         }
 
         return result
+    }
+
+    /// The value and ring share one semantic tint. Normal usage stays in the supplied ink;
+    /// pressure keeps its status hue, adjusted only when a component names an additional face
+    /// that the ordinary chrome status role was not measured against.
+    static func valueColor(
+        for severity: UsageSeverity,
+        ink: Design.Ink,
+        statusGrounds: [NSColor] = []
+    ) -> NSColor {
+        guard severity != .normal else { return ink.secondary }
+        return statusGrounds.reduce(severity.glyphColor) { color, ground in
+            color.legible(on: ground, ratio: LabelLegibility.Defaults.readingRatio)
+        }
     }
 
     /// One space, set to the width the design system asked for rather than the width the font

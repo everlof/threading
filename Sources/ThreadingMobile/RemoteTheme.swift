@@ -193,6 +193,33 @@ enum MobileDesign {
         static let usageTimeMark: Double = 0.85
     }
 
+    /// The usage sheet's two charts, in the Mac's chart vocabulary: thin marks, a wash rather
+    /// than a block for anything large, and the data as the only loud thing on the card.
+    enum Chart {
+        static let dailyHeight: CGFloat = 180
+        static let limitHeight: CGFloat = 220
+        /// A stacked band is a filled shape that neighbours another, so it stays translucent
+        /// and its own outline says where it ends — the Mac's themed band opacity.
+        static let bandOpacity: Double = 0.5
+        static let bandEdgeWidth: CGFloat = 1.5
+        /// One observed series over its own zero baseline: a two-point line and a faint wash
+        /// beneath it, so the reading is the line and the fill only says which side is used.
+        static let lineWidth: CGFloat = 2
+        static let areaOpacity: Double = 0.12
+        static let projectionDash: [CGFloat] = [5, 4]
+        static let markerDash: [CGFloat] = [3, 3]
+        static let markerWidth: CGFloat = 1
+        static let emphasizedMarkerWidth: CGFloat = 2
+        /// A peak column is a small mark, so it may be nearly solid; the share of each bucket
+        /// left as ground between columns is what says they are separate readings rather than
+        /// one continuous fill, and it scales with the bucket so thirty columns and ninety keep
+        /// the same proportion.
+        static let columnOpacity: Double = 0.72
+        static let columnGapFraction: Double = 0.2
+        static let columnRadius: CGFloat = 2
+        static let legendSwatch: CGFloat = 7
+    }
+
     enum Typography {
         static let messageLineSpacing: CGFloat = 4
     }
@@ -746,14 +773,26 @@ struct RemoteThemePalette: Equatable {
     /// These deliberately do not use the theme's semantic positive, warning or negative roles:
     /// a provider is not a connection state, warning, or failure. Keeping the distinction in the
     /// palette makes charts legible under every authored chrome without weakening status colour.
+    ///
+    /// The order is the colour-blindness mechanism, not taste. Slots are handed out in sequence
+    /// and only neighbours touch in a stacked chart, so every adjacent pair was checked under
+    /// simulated protanopia and deuteranopia as well as full colour vision, on the panel and on
+    /// the ground, in each mode (`validate_palette.js` from the data-visualization method; both
+    /// lists pass every gate). The blue-purple-indigo opening this replaced put the two
+    /// providers a phone most often shows in hues a protanope could not tell apart at all
+    /// (ΔE 0.8) and full vision only barely (10.2 against a floor of 15) — the Mac's ramp has
+    /// always opened blue, orange, purple, so the first three slots now match it and a provider
+    /// wears the same family on both screens. The last three keep the Mac's hues in the one
+    /// order that clears the gates: teal beside pink fails deuteranopia, so indigo stands
+    /// between them.
     func categorical(_ index: Int) -> Color {
         let darkFallbacks = [
-            "#64A8FF", "#B69BFF", "#758BFD",
-            "#42C7D9", "#EA83C5", "#C5956B",
+            "#3987E5", "#D95926", "#9085E9",
+            "#199E70", "#5E5CE6", "#D55181",
         ]
         let lightFallbacks = [
-            "#155DB1", "#6F42C1", "#3F51B5",
-            "#087E8B", "#A93686", "#855A38",
+            "#2A78D6", "#D95926", "#7B52D6",
+            "#128F72", "#4F4FBE", "#D2407C",
         ]
         let resolvedIndex = ((index % darkFallbacks.count) + darkFallbacks.count)
             % darkFallbacks.count

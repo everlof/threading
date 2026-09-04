@@ -27,15 +27,14 @@ enum RemoteAttachmentPreviewLoad {
         case previewUnavailable
     }
 
-    /// Kinds the phone has no renderer for. Decided before any bytes move: downloading an
-    /// archive or an office document only to say "no preview" spends the attachment byte cap on
-    /// a file that was never going to be drawn.
-    static let previewsOnMacOnly: Set<RemoteAttachmentKind> = [
+    /// Kinds that never use the ordinary whole-file GET. Archives and documents have no phone
+    /// renderer; movies use their separate bounded range loader instead.
+    static let excludesFromWholeFileLoad: Set<RemoteAttachmentKind> = [
         .archive, .document, .diagram, .media, .video,
     ]
 
-    static func previewsOnMacOnly(_ kind: RemoteAttachmentKind) -> Bool {
-        previewsOnMacOnly.contains(kind)
+    static func excludesFromWholeFileLoad(_ kind: RemoteAttachmentKind) -> Bool {
+        excludesFromWholeFileLoad.contains(kind)
     }
 
     /// Why this invocation will or will not ask. Keeping the early-return reasons distinct is
@@ -48,7 +47,7 @@ enum RemoteAttachmentPreviewLoad {
     ) -> Decision {
         guard loadsRemotely else { return .localFixture }
         guard !hasData else { return .alreadyLoaded }
-        guard !previewsOnMacOnly(kind) else { return .previewUnavailable }
+        guard !excludesFromWholeFileLoad(kind) else { return .previewUnavailable }
         return .requestBytes
     }
 

@@ -229,6 +229,69 @@ final class ThemedTimeSeriesChartTests: XCTestCase {
         )
     }
 
+    /// A bar that states its own span takes its width from the time axis and is never grouped:
+    /// two span series over one range each draw full-band columns in their own buckets, and a
+    /// column whose bucket began before the range is clipped to the plot rather than drawn into
+    /// the value gutter.
+    func testSpanBarsTakeTheirWidthFromTheTimeAxisAndAreNotGrouped() {
+        let chart = ThemedTimeSeriesChartView(frame: NSRect(x: 0, y: 0, width: 560, height: 300))
+        let day = 86_400.0
+        let origin = Date(timeIntervalSinceReferenceDate: 0)
+        // The range starts a twentieth of a day before the first bucket's centre, so that
+        // column would reach past the plot's leading edge: a column is at most
+        // `Design.Chart.maximumBarThickness` wide, and a larger lead would leave it whole.
+        let rangeStart = origin.addingTimeInterval(0.45 * day)
+        let rangeEnd = origin.addingTimeInterval(4 * day)
+        let ordinary = ThemedChartSeries(
+            id: "peaks",
+            title: "Peak per day",
+            points: [
+                ThemedChartPoint(at: origin.addingTimeInterval(0.5 * day), value: 0.4),
+                ThemedChartPoint(at: origin.addingTimeInterval(2.5 * day), value: 0.6)
+            ],
+            mark: .bar,
+            barSpan: day
+        )
+        let limited = ThemedChartSeries(
+            id: "limit",
+            title: "Limit reached",
+            points: [ThemedChartPoint(at: origin.addingTimeInterval(1.5 * day), value: 1)],
+            style: .negative,
+            mark: .bar,
+            barSpan: day
+        )
+        chart.setModel(ThemedChartModel(
+            title: "Dense",
+            accessibilitySummary: "Dense",
+            series: [ordinary, limited],
+            xRange: rangeStart...rangeEnd,
+            yRange: 0...1,
+            valueFormat: .percent,
+            showsLegend: true
+        ), animated: false)
+
+        let plot = chart.plotRectForTesting
+        let span = rangeEnd.timeIntervalSince(rangeStart)
+        let band = plot.width * CGFloat(day / span)
+        let fullThickness = Design.Chart.barGroupExtent(band: band, members: 1) - Design.Chart.barGap
+        let ordinaryRects = chart.barRectsForTesting(at: 0)
+        let limitedRects = chart.barRectsForTesting(at: 1)
+
+        XCTAssertEqual(ordinaryRects.count, 2)
+        XCTAssertEqual(limitedRects.count, 1)
+        XCTAssertEqual(limitedRects[0].width, fullThickness, accuracy: 0.5, "not halved for a second bar series")
+        XCTAssertEqual(ordinaryRects[1].width, fullThickness, accuracy: 0.5)
+        XCTAssertEqual(
+            limitedRects[0].midX,
+            plot.minX + plot.width * CGFloat(1.05 * day / span),
+            accuracy: 0.5,
+            "centred on the bucket's middle"
+        )
+        XCTAssertEqual(limitedRects[0].height, plot.height, accuracy: 0.5)
+        XCTAssertLessThan(ordinaryRects[0].width, fullThickness, "the first bucket began before the range")
+        XCTAssertGreaterThanOrEqual(ordinaryRects[0].minX, plot.minX)
+    }
+
     /// The band and its name are one target: pointing at the bar answers with the same lines the
     /// name does, so a reader who found the entry either way reads the same thing.
     func testPointingAtTheBarAndAtItsNameAnswerAlike() {

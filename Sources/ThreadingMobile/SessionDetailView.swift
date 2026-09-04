@@ -276,7 +276,7 @@ struct SessionDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     private var currentSession: RemoteSessionSummaryDTO {
-        MobileSessionChrome.currentSession(session, in: model.me)
+        model.dashboardSession(id: session.id) ?? session
     }
 
     init(
@@ -387,6 +387,9 @@ struct SessionDetailView: View {
                     initialDestination: initialWorkspaceDestination,
                     offersAttachmentThumbnails: model.me?.features?.contains(
                         RemoteRESTFeature.attachmentThumbnails.rawValue
+                    ) == true,
+                    offersAttachmentVideoStreaming: model.me?.features?.contains(
+                        RemoteRESTFeature.attachmentVideoStreaming.rawValue
                     ) == true
                 )
                 // A second milestone may be opened while Workspace is already presented. Give
@@ -866,28 +869,30 @@ struct SessionDetailView: View {
             return
         }
         connectedHostID = hostID
-        let pool = MobileSessionConnectionPool.shared
-        pool.discardEntries(exceptHostID: hostID)
-        let key = MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
-        if let warmed = pool.take(key) as? RemoteSessionConnection {
-            warmed.onWorkspaceChanged = { [weak workspaceActivity] event in
-                workspaceActivity?.receive(event)
-            }
-            connection = warmed
-            return
-        }
         do {
             // A UI switch deliberately tears down the old process. Always ask readiness from
-            // the newest catalogue row rather than the immutable navigation value, which may
-            // still say that the pre-switch surface was available.
-            let latest = model.me?.sessions.first(where: { $0.id == session.id }) ?? session
+            // the newest authoritative catalogue row rather than the immutable navigation value.
+            // A cold-launch route may have been built from the presentation-only cache.
+            let latest = try await model.liveSessionForOpening(id: session.id)
+            // Even a previously authenticated warm socket must wait for that catalogue check:
+            // an offline launch can restore the same id after its membership or row was revoked.
+            let pool = MobileSessionConnectionPool.shared
+            pool.discardEntries(exceptHostID: hostID)
+            let key = MobileConnectionPoolKey(hostID: hostID, sessionID: session.id)
+            if let warmed = pool.take(key) as? RemoteSessionConnection {
+                warmed.onWorkspaceChanged = { [weak workspaceActivity] event in
+                    workspaceActivity?.receive(event)
+                }
+                connection = warmed
+                return
+            }
             if openingStrategy == .resumeIfNeeded {
                 try await model.makeSessionReady(latest)
             }
             guard let client = model.client else {
                 throw RemoteClientError.invalidResponse
             }
-            let current = model.me?.sessions.first(where: { $0.id == session.id }) ?? session
+            let current = model.me?.sessions.first(where: { $0.id == session.id }) ?? latest
             let made = RemoteSessionConnection(
                 session: current,
                 client: client,

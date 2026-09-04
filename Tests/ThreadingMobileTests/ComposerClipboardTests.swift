@@ -801,6 +801,20 @@ final class TerminalLineTextLayoutTests: XCTestCase {
 /// Once a submission has named an upload set, its chips are a frozen receipt until the host
 /// accepts or refuses it. Mutating that set in flight would either lie about what was sent or
 /// clear a newly staged file when the earlier submission is accepted.
+final class ComposerAttachmentPayloadTests: XCTestCase {
+    func testAQuickTimeMovieBecomesAPlayableAttachmentPayload() throws {
+        let payload = try XCTUnwrap(ComposerAttachmentPayload.prepared(
+            data: Data("fixture".utf8),
+            name: "Recording.mov",
+            type: .quickTimeMovie
+        ))
+
+        XCTAssertTrue(payload.isMovie)
+        XCTAssertEqual(payload.systemImage, "film")
+        XCTAssertNil(payload.thumbnail, "the poster is extracted asynchronously after staging")
+    }
+}
+
 @MainActor
 final class ComposerAttachmentStripTests: XCTestCase {
 
@@ -815,16 +829,48 @@ final class ComposerAttachmentStripTests: XCTestCase {
 
         strip.update(items: [item], theme: theme, isRemovalEnabled: false)
 
-        let removeButton = try XCTUnwrap(descendants(of: UIButton.self, in: strip).first)
+        let removeButton = try XCTUnwrap(descendants(of: UIButton.self, in: strip).first {
+            $0.accessibilityIdentifier == "composer.attachment.remove"
+        })
         XCTAssertFalse(removeButton.isEnabled)
         XCTAssertLessThan(removeButton.alpha, 1)
 
         // This deliberately changes only interactivity. The strip's bounded-render early return
         // must include that state or the button would remain frozen after a refusal.
         strip.update(items: [item], theme: theme, isRemovalEnabled: true)
-        let enabledButton = try XCTUnwrap(descendants(of: UIButton.self, in: strip).first)
+        let enabledButton = try XCTUnwrap(descendants(of: UIButton.self, in: strip).first {
+            $0.accessibilityIdentifier == "composer.attachment.remove"
+        })
         XCTAssertTrue(enabledButton.isEnabled)
         XCTAssertEqual(enabledButton.alpha, 1)
+    }
+
+    func testAMoviePosterCarriesAPlayMarkAndOpensQuickView() throws {
+        let strip = ComposerAttachmentStripView()
+        let poster = try XCTUnwrap(UIImage(systemName: "photo"))
+        let item = ComposerAttachmentItem(
+            name: "Recording.mov",
+            thumbnail: poster,
+            systemImage: "film",
+            isMovie: true
+        )
+        var previewed: ComposerAttachmentItem?
+        strip.onPreview = { previewed = $0 }
+
+        strip.update(items: [item], theme: RemoteThemePalette(nil))
+
+        let playMark = try XCTUnwrap(descendants(of: UIView.self, in: strip).first {
+            $0.accessibilityIdentifier == "composer.attachment.play-mark"
+        })
+        XCTAssertFalse(playMark.isHidden)
+        let previewButton = try XCTUnwrap(descendants(of: UIButton.self, in: strip).first {
+            $0.accessibilityIdentifier == "composer.attachment.preview"
+        })
+        XCTAssertTrue(previewButton.isEnabled)
+
+        previewButton.sendActions(for: .touchUpInside)
+
+        XCTAssertEqual(previewed, item)
     }
 
     func testSwiftUIBridgeKeepsTheStripToItsOwnedHeight() throws {

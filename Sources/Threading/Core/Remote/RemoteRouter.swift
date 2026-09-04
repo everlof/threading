@@ -412,6 +412,34 @@ struct RemoteRouter {
         return harden(response, isDocument: false)
     }
 
+    /// One bounded piece of a file-backed movie. The resource loader authenticates every request;
+    /// keeping the connection reusable avoids paying another TCP/TLS handshake for each piece.
+    static func byteRange(
+        _ body: Data,
+        contentType: String,
+        range: Range<Int64>,
+        totalBytes: Int64
+    ) -> HTTPResponse {
+        let response = HTTPResponse(
+            status: 206,
+            reason: "Partial Content",
+            contentType: contentType,
+            body: body,
+            extraHeaders: [
+                "Accept-Ranges": "bytes",
+                "Content-Range": "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(totalBytes)",
+            ]
+        )
+        return harden(response, isDocument: false)
+    }
+
+    static func rangeNotSatisfiable(totalBytes: Int64) -> HTTPResponse {
+        var response = error(416, "Range Not Satisfiable")
+        response.extraHeaders["Accept-Ranges"] = "bytes"
+        response.extraHeaders["Content-Range"] = "bytes */\(totalBytes)"
+        return response
+    }
+
     /// Every REST refusal has a bounded machine-readable body. HTTP reason phrases are not
     /// surfaced by URLSession, which used to reduce distinct host decisions to only "HTTP 422"
     /// on iPhone. Callers name business refusals; deliberately opaque failures use the generic

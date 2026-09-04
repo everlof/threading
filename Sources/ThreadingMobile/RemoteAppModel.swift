@@ -256,6 +256,7 @@ final class RemoteAppModel: ObservableObject {
         didSet {
             catalogueRevision &+= 1
             rememberCurrentTheme()
+            rememberCurrentDashboard()
         }
     }
 
@@ -318,6 +319,14 @@ final class RemoteAppModel: ObservableObject {
     private let newSessionDefaults: MobileNewSessionDefaultsStore
     /// A bounded per-Mac launch cache. The live `/api/me` response remains authoritative.
     private let themeCache: MobileThemeCacheStore
+    /// A bounded per-pairing list cache. Pairing identity is required because `/api/me` is
+    /// capability-filtered and two shares on one Mac may expose different sessions.
+    private let dashboardCache: MobileDashboardCacheStore
+    @Published private var cachedDashboardCatalogues: [String: MobileDashboardCatalogue]
+    /// Prevents the asynchronous launch read from republishing a pairing purged while that read
+    /// was in flight. A later authenticated catalogue clears its own tombstone after persistence.
+    private var discardedDashboardCacheIdentities: Set<String> = []
+    private var dashboardCacheWriteTask: Task<Void, Never>?
     /// True while the app is showing the canned Mac — entered from the welcome screen's Try
     /// the Demo, or by the DEBUG screenshot environment. Every mutation path short-circuits on
     /// it, so demo state changes locally and nothing ever reaches a network (`DemoExperience`).
@@ -378,11 +387,14 @@ final class RemoteAppModel: ObservableObject {
     init(
         continuity: MobileSessionContinuityStore = MobileSessionContinuityStore(),
         newSessionDefaults: MobileNewSessionDefaultsStore = MobileNewSessionDefaultsStore(),
-        themeCache: MobileThemeCacheStore = MobileThemeCacheStore()
+        themeCache: MobileThemeCacheStore = MobileThemeCacheStore(),
+        dashboardCache: MobileDashboardCacheStore = MobileDashboardCacheStore()
     ) {
         self.continuity = continuity
         self.newSessionDefaults = newSessionDefaults
         self.themeCache = themeCache
+        self.dashboardCache = dashboardCache
+        cachedDashboardCatalogues = [:]
         #if DEBUG
             if let wire = MobileTerminalWireFixtureConfiguration.current {
                 isEphemeralTerminalWireFixture = true
@@ -480,12 +492,20 @@ final class RemoteAppModel: ObservableObject {
                 activeHostID = host.id
                 continuity.setActiveHostID(host.id)
                 if demoMode == "sessions-offline" {
+                    cachedDashboardCatalogues[host.id] = MobileDashboardCacheSnapshot.make(
+                        from: Self.demoResponse,
+                        capturedAt: demoNow.addingTimeInterval(-7 * 60)
+                    ).flatMap { MobileDashboardCatalogue.current(live: nil, cached: $0) }
                     me = nil
                     phase = .offline(.transport(URLError(.timedOut), host: link.baseURL.host))
                     // This fixture is the settled recovery state, after automatic retries have had
                     // their chance. `isDemo` prevents another attempt from being scheduled.
                     connectionRecoveryAttempt = MobileConnectionRecoveryPolicy.settledFailureAttempt
                 } else if demoMode == "sessions-connecting" {
+                    cachedDashboardCatalogues[host.id] = MobileDashboardCacheSnapshot.make(
+                        from: Self.demoResponse,
+                        capturedAt: demoNow.addingTimeInterval(-7 * 60)
+                    ).flatMap { MobileDashboardCatalogue.current(live: nil, cached: $0) }
                     me = nil
                     phase = .connecting
                     connectionProgress = .tryingRoute(
@@ -525,6 +545,17 @@ final class RemoteAppModel: ObservableObject {
         activeHostID = restoredHostID ?? loaded.first?.id
         continuity.setActiveHostID(activeHostID)
         MobileDiagnosticsIncidentRecorder.shared.attach(self)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let loaded = await self.dashboardCache.loadCatalogues()
+            for (identity, catalogue) in loaded
+                where self.cachedDashboardCatalogues[identity] == nil
+                    && !self.discardedDashboardCacheIdentities.contains(identity)
+                    && self.hosts.contains(where: { $0.id == identity }) {
+                self.cachedDashboardCatalogues[identity] = catalogue
+            }
+            await self.dashboardCache.removeExpired()
+        }
     }
 
     // MARK: - The demo
@@ -594,6 +625,23 @@ final class RemoteAppModel: ObservableObject {
         return hosts.first { $0.id == activeHostID }
     }
 
+    /// Live rows when available, otherwise the last bounded list for this exact membership.
+    var dashboardCatalogue: MobileDashboardCatalogue? {
+        if let me { return MobileDashboardCatalogue.current(live: me, cached: nil) }
+        guard let activeHostID,
+              let cached = cachedDashboardCatalogues[activeHostID],
+              cached.isUsable() else { return nil }
+        return cached
+    }
+
+    func dashboardSession(id: String) -> RemoteSessionSummaryDTO? {
+        dashboardCatalogue?.session(id: id)
+    }
+
+    func dashboardTerminal(id: String) -> RemoteProjectTerminalSummaryDTO? {
+        dashboardCatalogue?.terminal(id: id)
+    }
+
     /// The palette to draw now. On a cold launch the paired-host record is available before the
     /// first authenticated catalogue, so its last resolved theme bridges that bounded interval.
     var appTheme: RemoteThemeDTO? {
@@ -619,6 +667,62 @@ final class RemoteAppModel: ObservableObject {
         for identity in activeThemeCacheIdentities {
             themeCache.remember(theme, for: identity)
         }
+    }
+
+    /// Coalesce hot event-stream updates without starving the cache. Snapshot projection and
+    /// JSON work happen away from the main actor; only the successful replacement is published.
+    private func rememberCurrentDashboard() {
+        guard !isDemo, !isEphemeralTerminalWireFixture, me != nil, activeHostID != nil else {
+            return
+        }
+        guard dashboardCacheWriteTask == nil else { return }
+        dashboardCacheWriteTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, let self else { return }
+            await self.flushCurrentDashboardCache()
+        }
+    }
+
+    private func flushCurrentDashboardCache() async {
+        let revision = catalogueRevision
+        defer {
+            dashboardCacheWriteTask = nil
+            if revision != catalogueRevision {
+                rememberCurrentDashboard()
+            }
+        }
+        guard !Task.isCancelled,
+              !isDemo,
+              !isEphemeralTerminalWireFixture,
+              let response = me,
+              let identity = activeHostID else { return }
+        let prepared: (MobileDashboardCacheSnapshot, MobileDashboardCatalogue)? = await Task.detached(
+            priority: .utility
+        ) { () -> (MobileDashboardCacheSnapshot, MobileDashboardCatalogue)? in
+            guard let snapshot = MobileDashboardCacheSnapshot.make(from: response),
+                  let catalogue = MobileDashboardCatalogue.current(
+                      live: nil,
+                      cached: snapshot
+                  ) else { return nil }
+            return (snapshot, catalogue)
+        }.value
+        guard !Task.isCancelled,
+              activeHostID == identity,
+              let prepared else { return }
+        if await dashboardCache.remember(prepared.0, for: identity) {
+            discardedDashboardCacheIdentities.remove(identity)
+            cachedDashboardCatalogues[identity] = prepared.1
+        }
+    }
+
+    private func discardDashboardSnapshot(for identity: String) {
+        if activeHostID == identity {
+            dashboardCacheWriteTask?.cancel()
+            dashboardCacheWriteTask = nil
+        }
+        discardedDashboardCacheIdentities.insert(identity)
+        cachedDashboardCatalogues[identity] = nil
+        Task { await dashboardCache.remove(identity: identity) }
     }
 
     var client: RemoteClient? {
@@ -999,6 +1103,7 @@ final class RemoteAppModel: ObservableObject {
             hosts = previousHosts
             return
         }
+        discardDashboardSnapshot(for: host.id)
         RemoteHostTrust.forget(host, remaining: hosts)
         invalidateRefreshes()
         if activeHostID == host.id {
@@ -1026,6 +1131,38 @@ final class RemoteAppModel: ObservableObject {
             guard let self, self.activeHostID == hostID else { return }
             await self.performRefresh(from: host)
         }
+    }
+
+    /// Resolves a cached navigation id against an authoritative catalogue before any resume or
+    /// socket is attempted. The detail screen can appear immediately, but it waits here while
+    /// the dashboard's single-flight reconnect does the network work.
+    func liveSessionForOpening(id: String) async throws -> RemoteSessionSummaryDTO {
+        if phase != .online || me == nil {
+            await refresh()
+        }
+        guard let response = me else {
+            if let failure = phase.failure { throw failure }
+            throw RemoteClientError.invalidResponse
+        }
+        guard let session = response.sessions.first(where: { $0.id == id })
+            ?? response.archivedSessions?.first(where: { $0.id == id }) else {
+            throw MobileDashboardItemError.sessionUnavailable
+        }
+        return session
+    }
+
+    func liveTerminalForOpening(id: String) async throws -> RemoteProjectTerminalSummaryDTO {
+        if phase != .online || me == nil {
+            await refresh()
+        }
+        guard let response = me else {
+            if let failure = phase.failure { throw failure }
+            throw RemoteClientError.invalidResponse
+        }
+        guard let terminal = response.terminals?.first(where: { $0.id == id }) else {
+            throw MobileDashboardItemError.terminalUnavailable
+        }
+        return terminal
     }
 
     /// Returns a route for a live-session reconnect without turning one refused session socket
@@ -1159,6 +1296,19 @@ final class RemoteAppModel: ObservableObject {
                     ]) { current, _ in current }
                 )
                 return
+            }
+            if MobileDashboardCachePolicy.discardsSnapshot(after: error) {
+                // A revoked or expired membership invalidates both the list and its live-looking
+                // predecessor. Ordinary transport failures keep the last-good presentation.
+                me = nil
+                if activeHostID == hostID {
+                    dashboardCacheWriteTask?.cancel()
+                    dashboardCacheWriteTask = nil
+                }
+                discardedDashboardCacheIdentities.insert(hostID)
+                cachedDashboardCatalogues[hostID] = nil
+                _ = await dashboardCache.remove(identity: hostID)
+                cachedDashboardCatalogues[hostID] = nil
             }
             forgetDiscovered(hostID: hostID)
             let failure = connectionFailure(for: host, error: error)

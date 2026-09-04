@@ -148,36 +148,62 @@ enum MobileDashboardChrome {
     static func connectionStatus(
         phase: RemoteAppModel.Phase,
         connectionLabel: String?,
-        progress: RemoteAppModel.ConnectionProgress? = nil
+        progress: RemoteAppModel.ConnectionProgress? = nil,
+        cachedAt: Date? = nil,
+        now: Date = Date()
     ) -> String {
-        switch phase {
+        let status: String = switch phase {
         case .idle:
-            return MobileL10n.string("Not connected")
+            MobileL10n.string("Not connected")
         case .offline:
             if case .waitingToRetry = progress {
-                return MobileL10n.string("Trying again…")
+                MobileL10n.string("Trying again…")
+            } else {
+                MobileL10n.string("Not connected")
             }
-            return MobileL10n.string("Not connected")
         case .connecting:
             switch progress {
             case let .tryingRoute(kind, _, _, _):
-                return MobileL10n.string(
+                MobileL10n.string(
                     "Trying %@",
                     PairedRemoteHost.connectionLabelInSentence(forEndpointKind: kind)
                 )
             case .loadingSessions:
-                return MobileL10n.string("Loading sessions")
+                MobileL10n.string("Loading sessions")
             case .waitingToRetry:
-                return MobileL10n.string("Trying again…")
+                MobileL10n.string("Trying again…")
             case .preparingRoutes, .none:
-                return MobileL10n.string("Checking saved connections")
+                MobileL10n.string("Checking saved connections")
             }
         case .online:
-            return MobileL10n.string(
+            MobileL10n.string(
                 "Connected · %@",
                 connectionLabel ?? MobileL10n.string("Direct")
             )
         }
+        guard let cachedAt else { return status }
+        // localization-ignore: separator between two independently localized status fragments
+        return status + " · " + MobileDashboardCacheAgeFormat.string(
+            capturedAt: cachedAt,
+            relativeTo: now
+        )
+    }
+}
+
+enum MobileDashboardCacheAgeFormat {
+    static func string(
+        capturedAt: Date,
+        relativeTo now: Date = Date(),
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        guard capturedAt < now else {
+            return MobileL10n.string("Updated %@", MobileL10n.string("now"))
+        }
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
+        formatter.unitsStyle = .abbreviated
+        let relative = formatter.localizedString(for: capturedAt, relativeTo: now)
+        return MobileL10n.string("Updated %@", relative)
     }
 }
 
@@ -698,8 +724,8 @@ struct SessionDashboard: View {
 
     private var sessions: [RemoteSessionSummaryDTO] {
         let all = showsArchived
-            ? model.me?.archivedSessions ?? []
-            : model.me?.sessions ?? []
+            ? model.dashboardCatalogue?.archivedSessions ?? []
+            : model.dashboardCatalogue?.sessions ?? []
         let scoped = showsArchived ? all : all.filter {
             showsSnoozed ? $0.isSnoozed() : !$0.isSnoozed()
         }
@@ -723,7 +749,7 @@ struct SessionDashboard: View {
 
     private var terminals: [RemoteProjectTerminalSummaryDTO] {
         guard !showsArchived, !showsSnoozed else { return [] }
-        let all = model.me?.terminals ?? []
+        let all = model.dashboardCatalogue?.terminals ?? []
         let scoped: [RemoteProjectTerminalSummaryDTO]
         if let projectID {
             scoped = all.filter {
@@ -791,7 +817,7 @@ struct SessionDashboard: View {
                     loadingCard
                 }
 
-                if model.me == nil {
+                if model.dashboardCatalogue == nil {
                     if !showsConnectionNotice {
                         loadingCard
                     }
@@ -812,6 +838,7 @@ struct SessionDashboard: View {
                             sessions: project.sessions,
                             terminals: project.terminals,
                             isArchived: showsArchived,
+                            isCatalogueLive: model.dashboardCatalogue?.isLive == true,
                             showsActions: model.canManageSessions,
                             action: perform,
                             startNewSession: model.canManageSessions && !showsArchived
@@ -829,15 +856,14 @@ struct SessionDashboard: View {
                         ),
                         showsProjectName: projectName == nil,
                         isArchived: showsArchived,
+                        isCatalogueLive: model.dashboardCatalogue?.isLive == true,
                         showsActions: model.canManageSessions,
                         action: perform
                     )
                 }
 
-                // Connection recovery owns the page until this Mac has answered. Asking about
-                // notifications underneath an unresolved route gives a first-run reader two
-                // unrelated setup stories at once, and notifications can be enabled just as
-                // safely after the catalogue arrives.
+                // Only the live catalogue can offer notification setup. Cached rows stay useful
+                // during recovery without implying that the Mac can accept configuration changes.
                 if projectName == nil, model.me != nil, shouldOfferNotificationOnboarding {
                     NotificationOnboardingCard()
                 }
@@ -876,6 +902,7 @@ struct SessionDashboard: View {
                     rows: rows,
                     showsProjectName: projectName == nil,
                     isArchived: showsArchived,
+                    isCatalogueLive: model.dashboardCatalogue?.isLive == true,
                     showsActions: model.canManageSessions,
                     action: perform
                 )
@@ -1087,11 +1114,21 @@ struct SessionDashboard: View {
             }
         }
         ToolbarItem(placement: .principal) {
-            MobileConnectionStatusButton(
-                title: navigationTitle,
-                status: statusText,
-                statusColor: statusColor
-            )
+            if model.dashboardCatalogue?.cachedAt != nil {
+                TimelineView(.periodic(from: .now, by: 60)) { context in
+                    MobileConnectionStatusButton(
+                        title: navigationTitle,
+                        status: statusText(at: context.date),
+                        statusColor: statusColor
+                    )
+                }
+            } else {
+                MobileConnectionStatusButton(
+                    title: navigationTitle,
+                    status: statusText(),
+                    statusColor: statusColor
+                )
+            }
         }
         if projectName == nil {
             ToolbarItem(placement: .topBarTrailing) {
@@ -1118,62 +1155,67 @@ struct SessionDashboard: View {
     /// own title and put the two most-used actions furthest from the thumb. The bar owns no
     /// plate: each pill stands on the theme's opaque floating surface (the chat starter on the
     /// accent), so rows scroll under them the way content passes under any floating control.
+    @ViewBuilder
     private var dashboardFloatingBar: some View {
-        HStack(spacing: MobileDesign.Spacing.small) {
-            if model.canUseUniversalSearch {
-                Button {
-                    showsUniversalSearch = true
-                } label: {
-                    HStack(spacing: MobileDesign.Spacing.small) {
-                        Image(systemName: "magnifyingglass")
-                        Text(MobileL10n.string("Search"))
-                        Spacer(minLength: 0)
-                    }
-                    .font(.body)
-                    .foregroundStyle(theme.secondaryLabel)
-                    .padding(.horizontal, MobileDesign.Spacing.large)
-                    .frame(
-                        maxWidth: .infinity,
-                        minHeight: MobileDesign.Size.floatingBarControl
-                    )
-                    .background(theme.floatingSurface, in: Capsule())
-                    .overlay(
-                        Capsule().strokeBorder(
-                            theme.border,
-                            lineWidth: max(theme.borderWidth, 1)
+        if model.canUseUniversalSearch || model.canManageSessions {
+            HStack(spacing: MobileDesign.Spacing.small) {
+                if model.canUseUniversalSearch {
+                    Button {
+                        showsUniversalSearch = true
+                    } label: {
+                        HStack(spacing: MobileDesign.Spacing.small) {
+                            Image(systemName: "magnifyingglass")
+                            Text(MobileL10n.string("Search"))
+                            Spacer(minLength: 0)
+                        }
+                        .font(.body)
+                        .foregroundStyle(theme.secondaryLabel)
+                        .padding(.horizontal, MobileDesign.Spacing.large)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: MobileDesign.Size.floatingBarControl
                         )
-                    )
-                    .contentShape(Capsule())
+                        .background(theme.floatingSurface, in: Capsule())
+                        .overlay(
+                            Capsule().strokeBorder(
+                                theme.border,
+                                lineWidth: max(theme.borderWidth, 1)
+                            )
+                        )
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut("f", modifiers: .command)
+                } else {
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(.plain)
-                .keyboardShortcut("f", modifiers: .command)
-            } else {
-                Spacer(minLength: 0)
-            }
 
-            Button {
-                startDraft(in: projectName)
-            } label: {
-                HStack(spacing: MobileDesign.Spacing.small) {
-                    Image(systemName: "plus")
-                    Text(MobileL10n.string("New"))
+                if model.canManageSessions {
+                    Button {
+                        startDraft(in: projectName)
+                    } label: {
+                        HStack(spacing: MobileDesign.Spacing.small) {
+                            Image(systemName: "plus")
+                            Text(MobileL10n.string("New"))
+                        }
+                        .font(.headline)
+                        .foregroundStyle(theme.accentForeground)
+                        .padding(.horizontal, MobileDesign.Spacing.large)
+                        .frame(minHeight: MobileDesign.Size.floatingBarControl)
+                        .background(theme.accent, in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(
+                        projectName.map { MobileL10n.string("New session in %@", $0) }
+                            ?? MobileL10n.string("New session")
+                    )
                 }
-                .font(.headline)
-                .foregroundStyle(theme.accentForeground)
-                .padding(.horizontal, MobileDesign.Spacing.large)
-                .frame(minHeight: MobileDesign.Size.floatingBarControl)
-                .background(theme.accent, in: Capsule())
-                .contentShape(Capsule())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(
-                projectName.map { MobileL10n.string("New session in %@", $0) }
-                    ?? MobileL10n.string("New session")
-            )
+            .padding(.horizontal, MobileDesign.Spacing.large)
+            .padding(.top, MobileDesign.Spacing.small)
+            .padding(.bottom, MobileDesign.Spacing.small)
         }
-        .padding(.horizontal, MobileDesign.Spacing.large)
-        .padding(.top, MobileDesign.Spacing.small)
-        .padding(.bottom, MobileDesign.Spacing.small)
     }
 
     private var dashboardMenuDestinations: [MobileDashboardMenuDestination] {
@@ -1412,11 +1454,13 @@ struct SessionDashboard: View {
         return theme.tertiaryLabel
     }
 
-    private var statusText: String {
+    private func statusText(at now: Date = Date()) -> String {
         MobileDashboardChrome.connectionStatus(
             phase: model.phase,
             connectionLabel: model.activeHost?.connectionLabel,
-            progress: model.connectionProgress
+            progress: model.connectionProgress,
+            cachedAt: model.dashboardCatalogue?.cachedAt,
+            now: now
         )
     }
 
@@ -1783,6 +1827,7 @@ private struct ProjectWorkGroup: View {
     let sessions: [RemoteSessionSummaryDTO]
     let terminals: [RemoteProjectTerminalSummaryDTO]
     let isArchived: Bool
+    let isCatalogueLive: Bool
     let showsActions: Bool
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
     /// Starts a chat in this project from its heading. `nil` for a share that may not manage
@@ -1832,6 +1877,7 @@ private struct ProjectWorkGroup: View {
                 ),
                 showsProjectName: false,
                 isArchived: isArchived,
+                isCatalogueLive: isCatalogueLive,
                 showsActions: showsActions,
                 action: action
             )
@@ -1855,6 +1901,7 @@ private struct DashboardRowGroup: View {
     let rows: [DashboardRowItem]
     let showsProjectName: Bool
     let isArchived: Bool
+    let isCatalogueLive: Bool
     let showsActions: Bool
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
 
@@ -1874,13 +1921,15 @@ private struct DashboardRowGroup: View {
                             SessionListItem(
                                 session: session,
                                 isArchived: isArchived,
+                                isCatalogueLive: isCatalogueLive,
                                 showsActions: showsActions,
                                 action: action
                             )
                         case let .terminal(terminal):
                             TerminalListItem(
                                 terminal: terminal,
-                                showsProjectName: showsProjectName
+                                showsProjectName: showsProjectName,
+                                isCatalogueLive: isCatalogueLive
                             )
                         }
                     }
@@ -1945,6 +1994,7 @@ struct MobileLiftedSessionRow: View {
     /// The width the row was laid out at, so the lifted preview is the row and not a guess.
     let width: CGFloat?
     let theme: RemoteThemePalette
+    var isCatalogueLive = true
 
     /// The outline the theme lifts a row in: the group plate's own corners, square — within a
     /// point — when the theme's panels are square.
@@ -1954,7 +2004,7 @@ struct MobileLiftedSessionRow: View {
 
     var body: some View {
         let shape = Self.shape(for: theme)
-        SessionRow(session: session)
+        SessionRow(session: session, isCatalogueLive: isCatalogueLive)
             .frame(width: width)
             .background(theme.panel, in: shape)
             .overlay {
@@ -1969,6 +2019,7 @@ struct MobileLiftedSessionRow: View {
 private struct SessionListItem: View {
     let session: RemoteSessionSummaryDTO
     let isArchived: Bool
+    let isCatalogueLive: Bool
     let showsActions: Bool
     let action: (DashboardSessionAction, RemoteSessionSummaryDTO) -> Void
     @EnvironmentObject private var model: RemoteAppModel
@@ -1999,7 +2050,12 @@ private struct SessionListItem: View {
 
     /// The row as the long press lifts it: see `MobileLiftedSessionRow`.
     private var liftedRow: some View {
-        MobileLiftedSessionRow(session: session, width: rowWidth, theme: theme)
+        MobileLiftedSessionRow(
+            session: session,
+            width: rowWidth,
+            theme: theme,
+            isCatalogueLive: isCatalogueLive
+        )
     }
 
     /// The outline the theme lifts a row in — stated on the row itself too, so the lift UIKit
@@ -2016,10 +2072,10 @@ private struct SessionListItem: View {
     private var sessionRow: some View {
         let row: AnyView
         if isArchived {
-            row = AnyView(SessionRow(session: session))
+            row = AnyView(SessionRow(session: session, isCatalogueLive: isCatalogueLive))
         } else {
             row = AnyView(
-                SessionRow(session: session)
+                SessionRow(session: session, isCatalogueLive: isCatalogueLive)
                     .accessibilityElement(children: .combine)
                     .accessibilityAddTraits(.isLink)
                     .accessibilityAction(.default) { openSession() }
@@ -2315,10 +2371,24 @@ struct MobileTerminalRowPresentation: Equatable {
     let isWorking: Bool
     /// Not running on the Mac: the tile dims and the laptop is slashed.
     let isDimmed: Bool
+    /// Whether a current availability glyph can be claimed at all.
+    let showsAvailability: Bool
     /// The whole state in words, for VoiceOver.
     let availabilityLabel: String
 
-    static func resolve(state: RemoteTerminalActivity, isAvailable: Bool) -> Self {
+    static func resolve(
+        state: RemoteTerminalActivity,
+        isAvailable: Bool,
+        isCatalogueLive: Bool = true
+    ) -> Self {
+        guard isCatalogueLive else {
+            return Self(
+                isWorking: false,
+                isDimmed: false,
+                showsAvailability: false,
+                availabilityLabel: ""
+            )
+        }
         let isWorking = isAvailable && state == .working
         let label: String
         if isWorking {
@@ -2328,7 +2398,12 @@ struct MobileTerminalRowPresentation: Equatable {
         } else {
             label = MobileL10n.string("Stopped")
         }
-        return Self(isWorking: isWorking, isDimmed: !isAvailable, availabilityLabel: label)
+        return Self(
+            isWorking: isWorking,
+            isDimmed: !isAvailable,
+            showsAvailability: true,
+            availabilityLabel: label
+        )
     }
 }
 
@@ -2339,20 +2414,27 @@ struct MobileTerminalRowPresentation: Equatable {
 private struct TerminalRow: View {
     let terminal: RemoteProjectTerminalSummaryDTO
     let showsProjectName: Bool
+    let isCatalogueLive: Bool
     @Environment(\.remoteTheme) private var theme
 
     private var presentation: MobileTerminalRowPresentation {
-        .resolve(state: terminal.state, isAvailable: terminal.isAvailable)
+        .resolve(
+            state: terminal.state,
+            isAvailable: terminal.isAvailable,
+            isCatalogueLive: isCatalogueLive
+        )
     }
 
     var body: some View {
         DashboardRow(title: terminal.title) {
             MobileTerminalMark(isDimmed: presentation.isDimmed)
         } caption: {
-            DashboardAvailabilityGlyph(
-                isAvailable: !presentation.isDimmed,
-                label: presentation.availabilityLabel
-            )
+            if presentation.showsAvailability {
+                DashboardAvailabilityGlyph(
+                    isAvailable: !presentation.isDimmed,
+                    label: presentation.availabilityLabel
+                )
+            }
             if showsProjectName {
                 Text(terminal.projectName)
                     .foregroundStyle(theme.secondaryLabel)
@@ -2370,11 +2452,16 @@ private struct TerminalRow: View {
 private struct TerminalListItem: View {
     let terminal: RemoteProjectTerminalSummaryDTO
     let showsProjectName: Bool
+    let isCatalogueLive: Bool
     @EnvironmentObject private var model: RemoteAppModel
 
     var body: some View {
         Button(action: openTerminal) {
-            TerminalRow(terminal: terminal, showsProjectName: showsProjectName)
+            TerminalRow(
+                terminal: terminal,
+                showsProjectName: showsProjectName,
+                isCatalogueLive: isCatalogueLive
+            )
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(.isLink)
@@ -2411,6 +2498,7 @@ private struct TerminalListItem: View {
 /// laptop carries the whole state for VoiceOver, so nothing a sighted reader sees is unsaid.
 private struct SessionRow: View {
     let session: RemoteSessionSummaryDTO
+    let isCatalogueLive: Bool
     @Environment(\.remoteTheme) private var theme
 
     var body: some View {
@@ -2418,13 +2506,13 @@ private struct SessionRow: View {
             MobileSessionMark(
                 agentKind: session.agentKind,
                 account: session.account,
-                isDimmed: !session.isAvailable || session.isArchived
+                isDimmed: (isCatalogueLive && !session.isAvailable) || session.isArchived
             )
             // On the tile's top-trailing corner, centred on its edge: the account chip owns the
             // other corner, and both facts belong to the tile they are badging. Hung on the tile
             // rather than on the row so the row's height never moves it.
             .overlay(alignment: .topTrailing) {
-                if session.state == .needsAttention {
+                if isCatalogueLive, session.state == .needsAttention {
                     Circle()
                         .fill(theme.warning)
                         .frame(
@@ -2438,10 +2526,12 @@ private struct SessionRow: View {
                 }
             }
         } caption: {
-            DashboardAvailabilityGlyph(
-                isAvailable: session.isAvailable && !session.isArchived,
-                label: availabilityLabel
-            )
+            if isCatalogueLive || session.isArchived {
+                DashboardAvailabilityGlyph(
+                    isAvailable: session.isAvailable && !session.isArchived,
+                    label: availabilityLabel
+                )
+            }
             // The surface is a glyph and the runtime is the mark, because spelling both in
             // words cost about ninety points and truncated the one fact the row gained: the
             // line read "Connected · Claude Code UI · Ver…" while the tile was already
@@ -2473,7 +2563,7 @@ private struct SessionRow: View {
     /// Mid-turn on a live surface. The Mac reports activity only for a session it is running, but
     /// an animation claims "moving right now", so it also asks that there is somewhere to attach.
     private var isWorking: Bool {
-        session.isAvailable && !session.isArchived && session.state == .working
+        isCatalogueLive && session.isAvailable && !session.isArchived && session.state == .working
     }
 
     /// The caption's words: the state only when no glyph carries it, then the login when it is
@@ -2518,6 +2608,7 @@ private struct SessionRow: View {
     /// The states worth a word in the caption: the ones no glyph on the row carries. Archived and
     /// snoozed rows live in lists whose header already says so.
     private var spelledStateLabel: String? {
+        guard isCatalogueLive else { return nil }
         if session.isArchived { return nil }
         if session.wokeAt != nil { return MobileL10n.string("Woke") }
         if session.isAvailable, session.state == .limitReached {

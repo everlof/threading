@@ -20,6 +20,26 @@ enum RemoteAttachmentThumbnailRenderer {
 
     static func jpeg(at url: URL) -> Data? {
         guard let frame = thumbnailFrame(at: url) else { return nil }
+        return jpeg(frame)
+    }
+
+    /// The attachment-kind-aware route. A movie is the one raster here whose decoder is async;
+    /// images and PDFs retain the synchronous path used by their focused tests.
+    static func jpeg(at url: URL, kind: SessionAttachment.Kind) async -> Data? {
+        let frame: CGImage?
+        if kind == .video {
+            frame = await MoviePosterFrame.extract(
+                from: url,
+                maximumPixels: CGFloat(RemoteAttachmentThumbnail.maximumPixelDimension)
+            )
+        } else {
+            frame = thumbnailFrame(at: url)
+        }
+        guard let frame else { return nil }
+        return jpeg(frame)
+    }
+
+    private static func jpeg(_ frame: CGImage) -> Data? {
         return NSBitmapImageRep(cgImage: frame).representation(
             using: .jpeg,
             properties: [.compressionFactor: jpegQuality]

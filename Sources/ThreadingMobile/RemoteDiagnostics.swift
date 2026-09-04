@@ -577,7 +577,6 @@ struct RemoteDiagnosticsView: View {
     @EnvironmentObject private var model: RemoteAppModel
     @EnvironmentObject private var notifications: RemoteNotificationManager
     @Environment(\.remoteTheme) private var theme
-    @Environment(\.dismiss) private var dismiss
     @State private var isRunningChecks = false
     @State private var sharePayload: DiagnosticsSharePayload?
     @State private var issueReportRequest: MobileIssueReportRequest?
@@ -587,169 +586,162 @@ struct RemoteDiagnosticsView: View {
     @ObservedObject private var diagnosticSharing = MobileDiagnostics.sharing
 
     var body: some View {
-        NavigationStack {
-            List {
-                ThemedSettingsSection {
-                    diagnosticRow(
-                        "Mac",
-                        value: model.activeHost?.name ?? MobileL10n.string("None")
+        List {
+            ThemedSettingsSection {
+                diagnosticRow(
+                    "Mac",
+                    value: model.activeHost?.name ?? MobileL10n.string("None")
+                )
+                diagnosticRow("Status", value: connectionStatus)
+                diagnosticRow(
+                    "Remote protocol",
+                    value: MobileL10n.string(
+                        "%lld · accepts %lld+",
+                        Int64(RemoteProtocol.current),
+                        Int64(RemoteProtocol.minimumSupported)
                     )
-                    diagnosticRow("Status", value: connectionStatus)
-                    diagnosticRow(
-                        "Remote protocol",
-                        value: MobileL10n.string(
-                            "%lld · accepts %lld+",
-                            Int64(RemoteProtocol.current),
-                            Int64(RemoteProtocol.minimumSupported)
-                        )
-                    )
-                } header: {
-                    Text("Connection")
-                }
+                )
+            } header: {
+                Text("Connection")
+            }
 
-                ThemedSettingsSection {
-                    diagnosticRow("Permission", value: authorizationStatus)
-                    diagnosticRow(
-                        "APNs device token",
-                        value: MobileL10n.string(
-                            notifications.deviceToken == nil ? "Waiting" : "Registered"
-                        )
+            ThemedSettingsSection {
+                diagnosticRow("Permission", value: authorizationStatus)
+                diagnosticRow(
+                    "APNs device token",
+                    value: MobileL10n.string(
+                        notifications.deviceToken == nil ? "Waiting" : "Registered"
                     )
-                    diagnosticRow("Delivery", value: deliveryStatus)
-                } header: {
-                    Text("Notifications")
-                }
+                )
+                diagnosticRow("Delivery", value: deliveryStatus)
+            } header: {
+                Text("Notifications")
+            }
 
-                if let host = model.activeHost, host.isOwnerDevice {
-                    ThemedSettingsSection {
-                        if diagnosticSharing.isSharing(with: host.link),
-                           let until = diagnosticSharing.sharingUntil {
-                            diagnosticRow(
-                                "Sharing",
-                                value: MobileL10n.string(
-                                    "Until %@",
-                                    until.formatted(date: .omitted, time: .shortened)
-                                )
+            if let host = model.activeHost, host.isOwnerDevice {
+                ThemedSettingsSection {
+                    if diagnosticSharing.isSharing(with: host.link),
+                       let until = diagnosticSharing.sharingUntil {
+                        diagnosticRow(
+                            "Sharing",
+                            value: MobileL10n.string(
+                                "Until %@",
+                                until.formatted(date: .omitted, time: .shortened)
                             )
-                            Button {
-                                isChangingSharing = true
-                                Task {
-                                    await diagnosticSharing.endSharing()
-                                    isChangingSharing = false
-                                }
-                            } label: {
-                                Label(
-                                    "Stop sharing diagnostics",
-                                    systemImage: "stop.circle"
-                                )
+                        )
+                        Button {
+                            isChangingSharing = true
+                            Task {
+                                await diagnosticSharing.endSharing()
+                                isChangingSharing = false
                             }
-                            .disabled(isChangingSharing)
-                        } else {
-                            Button {
-                                isChangingSharing = true
-                                Task {
-                                    do {
-                                        try await diagnosticSharing.beginSharing(
-                                            with: host.link
-                                        )
-                                    } catch {
-                                        sharingError = MobileL10n.string(
-                                            "The Mac could not accept diagnostics."
-                                        )
-                                    }
-                                    isChangingSharing = false
-                                }
-                            } label: {
-                                if isChangingSharing {
-                                    HStack {
-                                        ProgressView().controlSize(.small)
-                                        Text("Starting diagnostics sharing…")
-                                    }
-                                } else {
-                                    Label(
-                                        "Share diagnostics for 30 minutes",
-                                        systemImage: "wave.3.right.circle"
+                        } label: {
+                            Label(
+                                "Stop sharing diagnostics",
+                                systemImage: "stop.circle"
+                            )
+                        }
+                        .disabled(isChangingSharing)
+                    } else {
+                        Button {
+                            isChangingSharing = true
+                            Task {
+                                do {
+                                    try await diagnosticSharing.beginSharing(
+                                        with: host.link
+                                    )
+                                } catch {
+                                    sharingError = MobileL10n.string(
+                                        "The Mac could not accept diagnostics."
                                     )
                                 }
+                                isChangingSharing = false
                             }
-                            .disabled(isChangingSharing)
-                        }
-                    } header: {
-                        Text("Mac diagnostics")
-                    } footer: {
-                        Text(
-                            "Sends only the connection events listed in this report to your "
-                                + "paired Mac. Messages, prompts, terminal output, paths and "
-                                + "credentials are never sent."
-                        )
-                    }
-                }
-
-                ThemedSettingsSection {
-                    Button {
-                        isRunningChecks = true
-                        Task {
-                            await notifications.refreshAuthorization()
-                            await model.refresh()
-                            await notifications.sync(hosts: model.hosts)
-                            isRunningChecks = false
-                        }
-                    } label: {
-                        if isRunningChecks {
-                            HStack {
-                                ProgressView().controlSize(.small)
-                                Text("Checking…")
+                        } label: {
+                            if isChangingSharing {
+                                HStack {
+                                    ProgressView().controlSize(.small)
+                                    Text("Starting diagnostics sharing…")
+                                }
+                            } else {
+                                Label(
+                                    "Share diagnostics for 30 minutes",
+                                    systemImage: "wave.3.right.circle"
+                                )
                             }
-                        } else {
-                            Label("Run connection checks", systemImage: "stethoscope")
                         }
+                        .disabled(isChangingSharing)
                     }
-                    .disabled(isRunningChecks)
-
-                    Button {
-                        MobileDiagnostics.record(.issueReportOpened, fields: [
-                            .reason: "diagnostics"
-                        ])
-                        issueReportRequest = MobileIssueReportRequest(
-                            trigger: .diagnostics,
-                            screenshot: nil,
-                            screenshotWasRequested: false
-                        )
-                    } label: {
-                        Label("Report a problem", systemImage: "exclamationmark.bubble")
-                    }
-
-                    Button {
-                        do {
-                            MobileDiagnostics.record(.issueReportExported, fields: [
-                                .reason: "diagnostics-only",
-                            ])
-                            let url = try MobileDiagnostics.supportReport()
-                            sharePayload = DiagnosticsSharePayload(items: [url])
-                        } catch {
-                            exportError = MobileL10n.string(
-                                "The support report could not be prepared."
-                            )
-                        }
-                    } label: {
-                        Label("Share diagnostics only", systemImage: "square.and.arrow.up")
-                    }
+                } header: {
+                    Text("Mac diagnostics")
                 } footer: {
                     Text(
-                        "Reports contain build, protocol and connection events. They exclude "
-                            + "messages, prompts, file paths, notification text and credentials."
+                        "Sends only the connection events listed in this report to your "
+                            + "paired Mac. Messages, prompts, terminal output, paths and "
+                            + "credentials are never sent."
                     )
                 }
             }
-            .themedSettingsPage(theme)
-            .navigationTitle("Diagnostics")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+
+            ThemedSettingsSection {
+                Button {
+                    isRunningChecks = true
+                    Task {
+                        await notifications.refreshAuthorization()
+                        await model.refresh()
+                        await notifications.sync(hosts: model.hosts)
+                        isRunningChecks = false
+                    }
+                } label: {
+                    if isRunningChecks {
+                        HStack {
+                            ProgressView().controlSize(.small)
+                            Text("Checking…")
+                        }
+                    } else {
+                        Label("Run connection checks", systemImage: "stethoscope")
+                    }
                 }
+                .disabled(isRunningChecks)
+
+                Button {
+                    MobileDiagnostics.record(.issueReportOpened, fields: [
+                        .reason: "diagnostics"
+                    ])
+                    issueReportRequest = MobileIssueReportRequest(
+                        trigger: .diagnostics,
+                        screenshot: nil,
+                        screenshotWasRequested: false
+                    )
+                } label: {
+                    Label("Report a problem", systemImage: "exclamationmark.bubble")
+                }
+
+                Button {
+                    do {
+                        MobileDiagnostics.record(.issueReportExported, fields: [
+                            .reason: "diagnostics-only",
+                        ])
+                        let url = try MobileDiagnostics.supportReport()
+                        sharePayload = DiagnosticsSharePayload(items: [url])
+                    } catch {
+                        exportError = MobileL10n.string(
+                            "The support report could not be prepared."
+                        )
+                    }
+                } label: {
+                    Label("Share diagnostics only", systemImage: "square.and.arrow.up")
+                }
+            } footer: {
+                Text(
+                    "Reports contain build, protocol and connection events. They exclude "
+                        + "messages, prompts, file paths, notification text and credentials."
+                )
             }
         }
+        .themedSettingsPage(theme)
+        .navigationTitle("Diagnostics")
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $sharePayload) { payload in
             DiagnosticsActivityView(items: payload.items)
         }
@@ -775,7 +767,6 @@ struct RemoteDiagnosticsView: View {
             ),
             actions: [ThemedDialogAction("OK")]
         )
-        .presentationDetents([.medium, .large])
     }
 
     private func diagnosticRow(_ title: String, value: String) -> some View {

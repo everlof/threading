@@ -1188,6 +1188,10 @@ public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
     /// page, for the gallery's ledger. A phone paired with a Mac that does not say so draws the
     /// kind's glyph in each cell and asks for no bytes.
     case attachmentThumbnails = "attachment-thumbnails"
+    /// The ordinary attachment route accepts authenticated HTTP byte ranges for a movie, so the
+    /// phone can hand AVFoundation small pieces instead of downloading a recording into memory.
+    /// Older Macs omit large movies from the list and advertise no player.
+    case attachmentVideoStreaming = "attachment-video-streaming"
     /// A report sent from the paired iPhone can create a session with readable opening text and
     /// one bounded screenshot that the Mac takes into attachment custody before launch.
     case reportSessionOpening = "report-session-opening"
@@ -1208,6 +1212,15 @@ public enum RemoteRESTFeature: String, Codable, CaseIterable, Sendable {
 /// thumbnail route into a second full-size route.
 public enum RemoteAttachmentThumbnail {
     public static let maximumPixelDimension = 256
+}
+
+/// The largest piece of a movie one authenticated range request may return.
+///
+/// AVFoundation can ask for the rest of a file in one request. The resource loader walks that
+/// request through bounded pieces and responds to the decoder as each one arrives, so neither
+/// side ever turns "stream this movie" into "hold this movie".
+public enum RemoteAttachmentVideo {
+    public static let maximumChunkBytes = 1 * 1024 * 1024
 }
 
 /// A device-bound hosted rendezvous credential issued by the paired Mac. The ordinary remote
@@ -2375,6 +2388,8 @@ public enum RemoteAttachmentUploadLimits {
         "png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "tif", "tiff", "bmp",
         // Documents the pane previews natively
         "pdf", "html", "htm",
+        // Movies the host player opens natively
+        "mov", "mp4", "m4v",
         // Archives
         "zip", "tar", "gz", "tgz", "bz2", "tbz2", "xz", "txz", "7z", "rar",
         // Open document formats

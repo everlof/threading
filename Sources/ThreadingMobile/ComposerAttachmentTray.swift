@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import SwiftUI
 import ThreadingRemoteKit
@@ -24,15 +25,28 @@ struct ComposerAttachmentItem: Identifiable, Equatable {
     let name: String
     /// Drawn in the strip. Nil for a document, which gets its type's glyph instead — rendering a
     /// PDF's first page here would decode a whole document to fill a 52-point square.
-    let thumbnail: UIImage?
+    var thumbnail: UIImage?
     let systemImage: String
+    let isMovie: Bool
+    /// A device-local copy used only by Quick View. The upload still carries `data`; no path is
+    /// exposed to the Mac and no remote identity is inferred from this URL.
+    var previewURL: URL?
     var state: State = .uploading(fraction: 0)
 
-    init(id: UUID = UUID(), name: String, thumbnail: UIImage?, systemImage: String) {
+    init(
+        id: UUID = UUID(),
+        name: String,
+        thumbnail: UIImage?,
+        systemImage: String,
+        isMovie: Bool = false,
+        previewURL: URL? = nil
+    ) {
         self.id = id
         self.name = name
         self.thumbnail = thumbnail
         self.systemImage = systemImage
+        self.isMovie = isMovie
+        self.previewURL = previewURL
     }
 
     var uploadID: String? {
@@ -93,6 +107,8 @@ final class ComposerAttachmentTray {
     /// UUID, which the create request later proves again while atomically claiming the uploads.
     private let uploadScopeID: String
     private var uploads: [UUID: Task<Void, Never>] = [:]
+    private var previewTasks: [UUID: Task<Void, Never>] = [:]
+    private var previewFiles: [UUID: URL] = [:]
 
     // MARK: - Initialization
 
@@ -103,6 +119,8 @@ final class ComposerAttachmentTray {
 
     deinit {
         uploads.values.forEach { $0.cancel() }
+        previewTasks.values.forEach { $0.cancel() }
+        previewFiles.values.forEach { try? FileManager.default.removeItem(at: $0) }
     }
 
     // MARK: - Public Methods
@@ -129,17 +147,25 @@ final class ComposerAttachmentTray {
         let item = ComposerAttachmentItem(
             name: prepared.name,
             thumbnail: prepared.thumbnail,
-            systemImage: prepared.systemImage
+            systemImage: prepared.systemImage,
+            isMovie: prepared.isMovie
         )
         notice = nil
         items.append(item)
         upload(prepared, for: item.id)
+        if prepared.isMovie {
+            prepareMoviePreview(prepared, for: item.id)
+        }
     }
 
     /// Removes one staged file. A transfer still running is cancelled rather than waited on: the
     /// Mac reaps whatever arrived, so there is nothing on its side to undo.
     func remove(_ id: UUID) {
         uploads.removeValue(forKey: id)?.cancel()
+        previewTasks.removeValue(forKey: id)?.cancel()
+        if let url = previewFiles.removeValue(forKey: id) {
+            try? FileManager.default.removeItem(at: url)
+        }
         items.removeAll { $0.id == id }
     }
 
@@ -153,7 +179,13 @@ final class ComposerAttachmentTray {
     func removeFailed() {
         let failed = items.filter { $0.state == .failed }
         guard !failed.isEmpty else { return }
-        for item in failed { uploads.removeValue(forKey: item.id)?.cancel() }
+        for item in failed {
+            uploads.removeValue(forKey: item.id)?.cancel()
+            previewTasks.removeValue(forKey: item.id)?.cancel()
+            if let url = previewFiles.removeValue(forKey: item.id) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
         items.removeAll { $0.state == .failed }
     }
 
@@ -161,6 +193,10 @@ final class ComposerAttachmentTray {
     func clear() {
         uploads.values.forEach { $0.cancel() }
         uploads.removeAll()
+        previewTasks.values.forEach { $0.cancel() }
+        previewTasks.removeAll()
+        previewFiles.values.forEach { try? FileManager.default.removeItem(at: $0) }
+        previewFiles.removeAll()
         items.removeAll()
         notice = nil
     }
@@ -183,23 +219,34 @@ final class ComposerAttachmentTray {
         precondition((0...RemoteAttachmentUploadLimits.maximumPerMessage).contains(count))
         uploads.values.forEach { $0.cancel() }
         uploads.removeAll()
-        let fixtures: [(name: String, symbol: String)] = [
-            ("Screenshot.png", "photo"),
-            ("Notes.txt", "doc.text"),
-            ("Design.pdf", "doc.richtext"),
-            ("Logs.json", "curlybraces"),
+        let fixtures: [(name: String, symbol: String, thumbnail: UIImage?, isMovie: Bool)] = [
+            ("Screenshot.png", "photo", nil, false),
+            ("Recording.mov", "film", Self.evidencePoster(), true),
+            ("Design.pdf", "doc.richtext", nil, false),
+            ("Logs.json", "curlybraces", nil, false),
         ]
         items = fixtures.prefix(count).enumerated().map { index, fixture in
             var item = ComposerAttachmentItem(
                 id: UUID(uuidString: "00000000-0000-0000-0000-00000000000\(index + 1)")!,
                 name: fixture.name,
-                thumbnail: nil,
-                systemImage: fixture.symbol
+                thumbnail: fixture.thumbnail,
+                systemImage: fixture.symbol,
+                isMovie: fixture.isMovie
             )
             item.state = .ready(uploadID: "evidence-upload-\(index + 1)")
             return item
         }
         notice = nil
+    }
+
+    private static func evidencePoster() -> UIImage {
+        let size = CGSize(width: 160, height: 100)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            UIColor(red: 0.05, green: 0.16, blue: 0.20, alpha: 1).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor(red: 0.05, green: 0.82, blue: 0.60, alpha: 1).setFill()
+            context.fill(CGRect(x: size.width / 2, y: 0, width: size.width / 2, height: size.height))
+        }
     }
 #endif
 
@@ -239,6 +286,29 @@ final class ComposerAttachmentTray {
         if items[index].isSettled, case .uploading = state { return }
         items[index].state = state
     }
+
+    private func prepareMoviePreview(_ payload: ComposerAttachmentPayload, for id: UUID) {
+        previewTasks[id] = Task { [weak self] in
+            guard let url = await ComposerMoviePreview.write(
+                payload.data,
+                fileExtension: payload.type.preferredFilenameExtension ?? "mov",
+                id: id
+            ) else {
+                self?.previewTasks.removeValue(forKey: id)
+                return
+            }
+            let frame = await ComposerMoviePreview.poster(from: url)
+            guard !Task.isCancelled, let self,
+                  let index = items.firstIndex(where: { $0.id == id }) else {
+                try? FileManager.default.removeItem(at: url)
+                return
+            }
+            previewFiles[id] = url
+            items[index].previewURL = url
+            items[index].thumbnail = frame.map(UIImage.init(cgImage:))
+            previewTasks.removeValue(forKey: id)
+        }
+    }
 }
 
 // MARK: - Payload
@@ -250,6 +320,7 @@ struct ComposerAttachmentPayload {
     let type: UTType
     let thumbnail: UIImage?
     let systemImage: String
+    let isMovie: Bool
 
     /// Prepares one picked file, re-encoding a photo that is larger than an agent can use.
     ///
@@ -270,6 +341,17 @@ struct ComposerAttachmentPayload {
             return imagePayload(data: data, name: name, type: type, image: image)
         }
 
+        if type.conforms(to: .movie) {
+            return ComposerAttachmentPayload(
+                data: data,
+                name: name,
+                type: type,
+                thumbnail: nil,
+                systemImage: "film",
+                isMovie: true
+            )
+        }
+
         // The host re-derives the extension it will write from this type and then refuses
         // anything its attachments pane could not show. Asking the same question here means a
         // refusal is immediate and says something, instead of arriving as a failed transfer.
@@ -279,7 +361,8 @@ struct ComposerAttachmentPayload {
             name: name,
             type: type,
             thumbnail: nil,
-            systemImage: glyph(for: type)
+            systemImage: glyph(for: type),
+            isMovie: false
         )
     }
 
@@ -303,7 +386,8 @@ struct ComposerAttachmentPayload {
                 name: (name as NSString).deletingPathExtension + ".jpg",
                 type: .jpeg,
                 thumbnail: reduced,
-                systemImage: "photo"
+                systemImage: "photo",
+                isMovie: false
             )
         }
 
@@ -312,7 +396,8 @@ struct ComposerAttachmentPayload {
             name: name,
             type: type,
             thumbnail: image,
-            systemImage: "photo"
+            systemImage: "photo",
+            isMovie: false
         )
     }
 
@@ -321,6 +406,42 @@ struct ComposerAttachmentPayload {
         if type.conforms(to: .archive) { return "doc.zipper" }
         if type.conforms(to: .html) { return "chevron.left.forwardslash.chevron.right" }
         return "doc"
+    }
+}
+
+/// Creates the device-local file AVFoundation needs and extracts one bounded upright poster.
+/// Both operations stay off the main actor; the tray installs only the URL and final image.
+enum ComposerMoviePreview {
+    static let maximumPosterPixels: CGFloat = 512
+    static let tolerance = CMTime(seconds: 1, preferredTimescale: 600)
+
+    static func write(_ data: Data, fileExtension: String, id: UUID) async -> URL? {
+        await Task.detached(priority: .userInitiated) {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "ThreadingMobileDraftPreviews",
+                isDirectory: true
+            )
+            do {
+                try FileManager.default.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true
+                )
+                let url = directory.appendingPathComponent("\(id.uuidString).\(fileExtension)")
+                try data.write(to: url, options: .atomic)
+                return url
+            } catch {
+                return nil
+            }
+        }.value
+    }
+
+    static func poster(from url: URL) async -> CGImage? {
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = CGSize(width: maximumPosterPixels, height: maximumPosterPixels)
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = tolerance
+        return try? await generator.image(at: .zero).image
     }
 }
 
@@ -353,8 +474,8 @@ final class ComposerAttachmentStripView: UIView {
 
     // MARK: - Properties
 
-    /// Removing is the only thing a chip does, so the strip needs one callback and no delegate.
     var onRemove: ((UUID) -> Void)?
+    var onPreview: ((ComposerAttachmentItem) -> Void)?
 
     private let scrollView = UIScrollView()
     private let stack = UIStackView()
@@ -404,6 +525,7 @@ final class ComposerAttachmentStripView: UIView {
                 isRemovalEnabled: isRemovalEnabled
             )
             chip.onRemove = { [weak self] in self?.onRemove?(item.id) }
+            chip.onPreview = { [weak self] in self?.onPreview?(item) }
             stack.addArrangedSubview(chip)
         }
         isHidden = items.isEmpty
@@ -443,14 +565,17 @@ final class ComposerAttachmentStripView: UIView {
 private final class ComposerAttachmentChipView: UIView {
 
     var onRemove: (() -> Void)?
+    var onPreview: (() -> Void)?
 
-    private let plate = UIView()
+    private let plate = UIButton(type: .custom)
     /// The stroke is its own drawn view rather than `layer.borderColor`: a `CGColor` on a layer
     /// is frozen at assignment and stops following the theme, which is the rule the mobile
     /// boundary lint enforces.
     private let outline = MobileThemeOutlineView()
     private let imageView = UIImageView()
     private let glyphView = UIImageView()
+    private let playPlate = UIView()
+    private let playGlyph = UIImageView()
     private let progressTrack = UIView()
     private let progressFill = UIView()
     private let removeButton = UIButton(type: .system)
@@ -481,6 +606,11 @@ private final class ComposerAttachmentChipView: UIView {
         plate.layer.cornerRadius = theme.controlRadius
         plate.layer.cornerCurve = .continuous
         plate.clipsToBounds = true
+        plate.addAction(
+            UIAction { [weak self] _ in self?.onPreview?() },
+            for: .touchUpInside
+        )
+        plate.accessibilityIdentifier = "composer.attachment.preview"
         addSubview(plate)
 
         outline.translatesAutoresizingMaskIntoConstraints = false
@@ -497,6 +627,18 @@ private final class ComposerAttachmentChipView: UIView {
         glyphView.tintColor = theme.uiSecondaryLabel
         plate.addSubview(glyphView)
 
+        playPlate.translatesAutoresizingMaskIntoConstraints = false
+        playPlate.backgroundColor = theme.uiControlResting.withAlphaComponent(0.9)
+        playPlate.layer.cornerRadius = ComposerAttachmentMetrics.playMark / 2
+        playPlate.isUserInteractionEnabled = false
+        playPlate.accessibilityIdentifier = "composer.attachment.play-mark"
+        plate.addSubview(playPlate)
+        playGlyph.translatesAutoresizingMaskIntoConstraints = false
+        playGlyph.image = UIImage(systemName: "play.fill")
+        playGlyph.tintColor = theme.uiLabel
+        playGlyph.contentMode = .center
+        playPlate.addSubview(playGlyph)
+
         // A hairline the width of what has arrived, rather than a spinner over the picture: the
         // point of showing a thumbnail is recognising which file this is, and a spinner in front
         // of it takes that away for the whole transfer.
@@ -507,6 +649,7 @@ private final class ComposerAttachmentChipView: UIView {
         progressTrack.addSubview(progressFill)
 
         removeButton.translatesAutoresizingMaskIntoConstraints = false
+        removeButton.accessibilityIdentifier = "composer.attachment.remove"
         removeButton.setImage(
             UIImage(systemName: "xmark.circle.fill"),
             for: .normal
@@ -537,6 +680,13 @@ private final class ComposerAttachmentChipView: UIView {
             imageView.bottomAnchor.constraint(equalTo: plate.bottomAnchor),
             glyphView.centerXAnchor.constraint(equalTo: plate.centerXAnchor),
             glyphView.centerYAnchor.constraint(equalTo: plate.centerYAnchor),
+
+            playPlate.centerXAnchor.constraint(equalTo: plate.centerXAnchor),
+            playPlate.centerYAnchor.constraint(equalTo: plate.centerYAnchor),
+            playPlate.widthAnchor.constraint(equalToConstant: ComposerAttachmentMetrics.playMark),
+            playPlate.heightAnchor.constraint(equalToConstant: ComposerAttachmentMetrics.playMark),
+            playGlyph.centerXAnchor.constraint(equalTo: playPlate.centerXAnchor),
+            playGlyph.centerYAnchor.constraint(equalTo: playPlate.centerYAnchor),
 
             progressTrack.leadingAnchor.constraint(equalTo: plate.leadingAnchor),
             progressTrack.trailingAnchor.constraint(equalTo: plate.trailingAnchor),
@@ -574,6 +724,14 @@ private final class ComposerAttachmentChipView: UIView {
                 pointSize: ComposerAttachmentMetrics.documentGlyph
             )
         )
+        playPlate.isHidden = !(item.isMovie && item.thumbnail != nil)
+
+        let isPreviewable = item.thumbnail != nil || item.previewURL != nil
+        plate.isEnabled = isPreviewable
+        plate.isAccessibilityElement = isPreviewable
+        plate.accessibilityLabel = isPreviewable
+            ? MobileL10n.string("Preview %@", item.name)
+            : nil
 
         let strokeColor: UIColor
         switch item.state {
@@ -599,9 +757,8 @@ private final class ComposerAttachmentChipView: UIView {
             glow: nil
         )
 
-        // The remove control is the chip's only action. Keep it as the accessibility element so
-        // VoiceOver can perform that action instead of stopping on a descriptive parent with no
-        // way to remove the file.
+        // Preview and remove stay separate accessibility actions: the whole plate opens Quick
+        // View, while the target hanging off its corner removes the staged file.
         isAccessibilityElement = false
         removeButton.accessibilityLabel = MobileL10n.string(
             "Remove %@",
@@ -619,6 +776,7 @@ private final class ComposerAttachmentChipView: UIView {
             return MobileL10n.string("%@, couldn’t be sent", item.name)
         }
     }
+
 }
 
 // MARK: - Constants
@@ -630,6 +788,7 @@ enum ComposerAttachmentMetrics {
     static let progressHeight: CGFloat = 3
     static let documentGlyph: CGFloat = 20
     static let removeTarget: CGFloat = 28
+    static let playMark: CGFloat = 24
 }
 
 // MARK: - SwiftUI Bridge
@@ -637,11 +796,12 @@ enum ComposerAttachmentMetrics {
 /// The one attachment strip used by SwiftUI composers. The UIKit conversation composer hosts
 /// `ComposerAttachmentStripView` directly; this bridge keeps the draft and terminal composers on
 /// the same bounded chip, progress, removal, theme, and accessibility implementation.
-struct ComposerAttachmentStrip: UIViewRepresentable {
+struct ComposerAttachmentStrip: View {
     let items: [ComposerAttachmentItem]
     let theme: RemoteThemePalette
     let isRemovalEnabled: Bool
     let remove: (UUID) -> Void
+    @State private var previewItem: ComposerAttachmentItem?
 
     init(
         items: [ComposerAttachmentItem],
@@ -655,19 +815,41 @@ struct ComposerAttachmentStrip: UIViewRepresentable {
         self.remove = remove
     }
 
+    var body: some View {
+        ComposerAttachmentStripBridge(
+            items: items,
+            theme: theme,
+            isRemovalEnabled: isRemovalEnabled,
+            remove: remove,
+            preview: { previewItem = $0 }
+        )
+        .fullScreenCover(item: $previewItem) { item in
+            ComposerAttachmentQuickView(item: item)
+                // A cover is a separate hosting scene; restate the complete theme rather than
+                // leaving its navigation bar, tint, and controls on the fallback palette.
+                .mobileTheme(theme)
+        }
+    }
+}
+
+private struct ComposerAttachmentStripBridge: UIViewRepresentable {
+    let items: [ComposerAttachmentItem]
+    let theme: RemoteThemePalette
+    let isRemovalEnabled: Bool
+    let remove: (UUID) -> Void
+    let preview: (ComposerAttachmentItem) -> Void
+
     func makeUIView(context: Context) -> ComposerAttachmentStripView {
         let view = ComposerAttachmentStripView()
         view.onRemove = remove
+        view.onPreview = preview
         return view
     }
 
     func updateUIView(_ view: ComposerAttachmentStripView, context: Context) {
         view.onRemove = remove
-        view.update(
-            items: items,
-            theme: theme,
-            isRemovalEnabled: isRemovalEnabled
-        )
+        view.onPreview = preview
+        view.update(items: items, theme: theme, isRemovalEnabled: isRemovalEnabled)
     }
 
     func sizeThatFits(

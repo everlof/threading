@@ -96,6 +96,15 @@ final class RemoteNotificationService {
         }
     }
 
+    private struct DeferredOwnerTurnCompletion {
+        let event: RemoteNotificationEventDTO
+        let sessionID: SessionID
+    }
+
+    /// A deliberately hard ceiling: deferral is a two-minute convenience, never an unbounded
+    /// queue derived from the number of sessions. Reaching it fails open to immediate delivery.
+    private static let maximumDeferredOwnerTurnCompletions = 256
+
     private var subscriptions: [RemoteNotificationSubscriptionKey: Subscription] = [:]
     private var persistedSubscriptions: [
         RemoteNotificationSubscriptionKey: RemoteNotificationSubscriptionRecord
@@ -116,6 +125,10 @@ final class RemoteNotificationService {
     private var announcedGuestShares: Set<String> = []
     private var currentActorBySession: [SessionID: RemoteNotificationInteractionActor] = [:]
     private var lastActivityBySession: [SessionID: SessionActivity] = [:]
+    private var macApplicationIsActive = false
+    private var lastMacInteractionUptime: TimeInterval?
+    private var deferredOwnerTurnCompletions: [SessionID: DeferredOwnerTurnCompletion] = [:]
+    private var deferredOwnerTurnCompletionTask: Task<Void, Never>?
     private(set) var persistenceError: String?
     private var persistenceWritesBlocked = false
 
@@ -144,14 +157,15 @@ final class RemoteNotificationService {
             )
             recordPersistenceDiagnostic(stage: "load")
         }
+        // Preserve event order: a Mac interaction that follows a completion must see and cancel
+        // its deferral, never overtake completion classification through an extra unstructured
+        // task. AppEventObservations already delivers this handler on the main actor.
         observations.observe(SessionActivityDidChange.self) { [weak self] event in
-            Task { @MainActor in self?.activityChanged(sessionID: event.sessionID) }
+            self?.activityChanged(sessionID: event.sessionID)
         }
         observations.observe(TerminalSessionDidEnd.self) { [weak self] event in
-            Task { @MainActor in
-                self?.lastActivityBySession[event.sessionID] = nil
-                self?.currentActorBySession[event.sessionID] = nil
-            }
+            self?.lastActivityBySession[event.sessionID] = nil
+            self?.currentActorBySession[event.sessionID] = nil
         }
     }
 
@@ -211,6 +225,24 @@ final class RemoteNotificationService {
 
     func recordOwnerInteraction(sessionID: SessionID) {
         currentActorBySession[sessionID] = .owner
+    }
+
+    /// Application activity is process-local and deliberately ephemeral. It answers only whether
+    /// a routine owner completion needs another device; it is not identity, authorization or a
+    /// durable presence heartbeat.
+    func setMacApplicationActive(_ isActive: Bool) {
+        macApplicationIsActive = isActive
+        if !isActive {
+            deliverDeferredOwnerTurnCompletions(reason: "Mac became inactive")
+        }
+    }
+
+    func recordMacInteraction(
+        at uptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) {
+        macApplicationIsActive = true
+        lastMacInteractionUptime = uptime
+        discardDeferredOwnerTurnCompletionsAsSeen()
     }
 
     func recordInteraction(
@@ -408,12 +440,20 @@ final class RemoteNotificationService {
                 bodyLocalization: .init(key: "Finished its turn")
             )
             let actor = currentActorBySession[sessionID] ?? .owner
-            deliver(event) {
-                $0.authorization.scope.covers(sessionID)
-                    && RemoteTurnCompletionRecipientPolicy.matches(
-                        actor,
-                        authorization: $0.authorization
-                    )
+            switch RemoteTurnCompletionDeviceActivityPolicy.deliveryDecision(
+                actor: actor,
+                applicationIsActive: macApplicationIsActive,
+                lastInteractionUptime: lastMacInteractionUptime,
+                nowUptime: ProcessInfo.processInfo.systemUptime
+            ) {
+            case .deliverNow:
+                deliverTurnCompletion(event, sessionID: sessionID, actor: actor)
+            case .deferUntilMacInactive(let deadlineUptime):
+                deferOwnerTurnCompletion(
+                    event,
+                    sessionID: sessionID,
+                    deadlineUptime: deadlineUptime
+                )
             }
         }
 
@@ -632,6 +672,7 @@ final class RemoteNotificationService {
         subscriptions.removeAll()
         announcedGuestShares.removeAll()
         currentActorBySession.removeAll()
+        cancelDeferredOwnerTurnCompletions()
     }
 
     /// `Reset Everything` is explicit authority to erase even an unreadable Keychain item.
@@ -648,9 +689,104 @@ final class RemoteNotificationService {
         subscriptions.removeAll()
         persistedSubscriptions.removeAll()
         announcedGuestShares.removeAll()
+        cancelDeferredOwnerTurnCompletions()
         persistenceError = nil
         persistenceWritesBlocked = false
         ThreadingLogger.remote.notice("Remote notification registrations deleted for app reset")
+    }
+
+    private func deliverTurnCompletion(
+        _ event: RemoteNotificationEventDTO,
+        sessionID: SessionID,
+        actor: RemoteNotificationInteractionActor
+    ) {
+        deliver(event) {
+            $0.authorization.scope.covers(sessionID)
+                && RemoteTurnCompletionRecipientPolicy.matches(
+                    actor,
+                    authorization: $0.authorization
+                )
+        }
+    }
+
+    private func deferOwnerTurnCompletion(
+        _ event: RemoteNotificationEventDTO,
+        sessionID: SessionID,
+        deadlineUptime: TimeInterval
+    ) {
+        if deferredOwnerTurnCompletions[sessionID] == nil,
+           deferredOwnerTurnCompletions.count
+            >= Self.maximumDeferredOwnerTurnCompletions {
+            ThreadingLogger.remote.warning(
+                "Remote turn completion deferral full; delivering immediately"
+            )
+            deliverTurnCompletion(event, sessionID: sessionID, actor: .owner)
+            return
+        }
+
+        deferredOwnerTurnCompletions[sessionID] = DeferredOwnerTurnCompletion(
+            event: event,
+            sessionID: sessionID
+        )
+        deferredOwnerTurnCompletionTask?.cancel()
+        let delay = max(0, deadlineUptime - ProcessInfo.processInfo.systemUptime)
+        let nanoseconds = UInt64((delay * 1_000_000_000).rounded(.up))
+        deferredOwnerTurnCompletionTask = Task { @MainActor [weak self] in
+            do {
+                try await Task<Never, Never>.sleep(nanoseconds: nanoseconds)
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.deferredOwnerTurnCompletionTask = nil
+            self.deliverDeferredOwnerTurnCompletions(reason: "Mac activity expired")
+        }
+        ThreadingLogger.remote.debug(
+            "Remote turn completion deferred while the owner's Mac is active"
+        )
+        EventLog.shared.record(.remote, "Remote notification deferred", [
+            "notification": event.id,
+            "kind": event.kind.rawValue,
+            "reason": "active Mac",
+        ])
+    }
+
+    private func deliverDeferredOwnerTurnCompletions(reason: String) {
+        guard !deferredOwnerTurnCompletions.isEmpty else { return }
+        deferredOwnerTurnCompletionTask?.cancel()
+        deferredOwnerTurnCompletionTask = nil
+        let completions = Array(deferredOwnerTurnCompletions.values)
+        deferredOwnerTurnCompletions.removeAll(keepingCapacity: true)
+        ThreadingLogger.remote.debug(
+            "Delivering deferred owner turn completions reason=\(reason, privacy: .public)"
+        )
+        for completion in completions {
+            deliverTurnCompletion(
+                completion.event,
+                sessionID: completion.sessionID,
+                actor: .owner
+            )
+        }
+    }
+
+    private func discardDeferredOwnerTurnCompletionsAsSeen() {
+        guard !deferredOwnerTurnCompletions.isEmpty else { return }
+        let count = deferredOwnerTurnCompletions.count
+        cancelDeferredOwnerTurnCompletions()
+        ThreadingLogger.remote.debug(
+            "Deferred owner turn completions seen on Mac count=\(count, privacy: .public)"
+        )
+        EventLog.shared.record(.remote, "Remote notifications suppressed", [
+            "count": String(count),
+            "kind": RemoteNotificationKind.turnCompleted.rawValue,
+            "reason": "Mac interaction after completion",
+        ])
+    }
+
+    private func cancelDeferredOwnerTurnCompletions() {
+        deferredOwnerTurnCompletionTask?.cancel()
+        deferredOwnerTurnCompletionTask = nil
+        deferredOwnerTurnCompletions.removeAll(keepingCapacity: true)
     }
 
     @discardableResult

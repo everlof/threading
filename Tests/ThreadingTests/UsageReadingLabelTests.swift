@@ -155,4 +155,98 @@ final class UsageReadingLabelTests: XCTestCase {
 
         XCTAssertEqual(value.hexString, Design.Ink.chrome.secondary.hexString)
     }
+
+    /// The pill opens its popover on hover, so the reported state necessarily wears the
+    /// stronger of its two translucent faces. Pure's night ground is true black: that face
+    /// composites to `#3D3D3D`, while the ring track and window name used to remain calibrated
+    /// for black itself. The extra layer pulled both below their floors exactly while the user
+    /// was looking at them.
+    func testPureUsagePillInkReadsOnItsRestingAndHoverFaces() throws {
+        let previousTheme = AppThemePalette.current
+        let previousBackdrop = WindowBackdrop.ground
+        defer {
+            WindowBackdrop.set(previousBackdrop)
+            AppThemePalette.set(previousTheme)
+        }
+
+        let appearance = try XCTUnwrap(NSAppearance(named: .darkAqua))
+        let now = Date(timeIntervalSince1970: 1_770_000_000)
+        let usage = AccountUsage(
+            windows: [AccountUsage.Window(
+                id: UsageDefaults.weeklyWindowID,
+                label: UsageDefaults.weeklyLabel,
+                fraction: 0.27,
+                resetsAt: now.addingTimeInterval(UsageDefaults.sevenDaySeconds),
+                windowDuration: UsageDefaults.sevenDaySeconds
+            )],
+            planLabel: "Plus",
+            observedAt: now,
+            source: .api
+        )
+
+        appearance.performAsCurrentDrawingAppearance {
+            AppThemePalette.set(AppThemeStyles.pure)
+            WindowBackdrop.set(.terminal(.black))
+
+            let pill = AccountUsageItemView()
+            pill.show(usage: usage, limits: [], at: now)
+
+            let summary = pill.summaryForTesting
+            let name = summary.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+            let value = summary.attribute(
+                .foregroundColor,
+                at: summary.length - 1,
+                effectiveRange: nil
+            ) as? NSColor
+
+            for ground in pill.contentGroundsForTesting {
+                assertContrast(
+                    pill.ringTrackColorForTesting,
+                    on: ground,
+                    floor: LabelLegibility.Defaults.glanceRatio,
+                    role: "ring track"
+                )
+                assertContrast(
+                    pill.ringTintColorForTesting,
+                    on: ground,
+                    floor: LabelLegibility.Defaults.readingRatio,
+                    role: "ring reading"
+                )
+                assertContrast(
+                    name,
+                    on: ground,
+                    floor: LabelLegibility.Defaults.readingRatio,
+                    role: "window name"
+                )
+                assertContrast(
+                    value,
+                    on: ground,
+                    floor: LabelLegibility.Defaults.readingRatio,
+                    role: "window value"
+                )
+            }
+        }
+    }
+
+    private func assertContrast(
+        _ color: NSColor?,
+        on ground: NSColor,
+        floor: CGFloat,
+        role: String,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        guard let color else {
+            XCTFail("The pill drew no \(role)", file: file, line: line)
+            return
+        }
+        let ratio = ThemeContrast.ratio(color.composited(over: ground), ground)
+        XCTAssertGreaterThanOrEqual(
+            ratio,
+            floor - 0.01,
+            "The \(role) reads at \(String(format: "%.2f", ratio)):1 on \(ground.hexString)",
+            file: file,
+            line: line
+        )
+    }
 }

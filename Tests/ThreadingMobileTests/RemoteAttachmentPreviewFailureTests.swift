@@ -60,17 +60,17 @@ final class RemoteAttachmentPreviewLoadTests: XCTestCase {
         }
     }
 
-    /// The phone has no renderer for these, so the whole-file route is never asked for them —
-    /// the byte cap is not spent on a file that was only ever going to say "no preview".
-    func testKindsThePhoneCannotDrawNeverAskForTheirBytes() {
-        for kind in RemoteAttachmentPreviewLoad.previewsOnMacOnly {
+    /// These kinds never use the whole-file route: movies stream through bounded ranges and the
+    /// others have no phone renderer, so none spends the byte cap on an unusable full response.
+    func testKindsExcludedFromWholeFileLoadingNeverAskForTheirBytes() {
+        for kind in RemoteAttachmentPreviewLoad.excludesFromWholeFileLoad {
             XCTAssertFalse(
                 RemoteAttachmentPreviewLoad.shouldRequestBytes(
                     kind: kind,
                     hasData: false,
                     loadsRemotely: true
                 ),
-                "\(kind.rawValue) previews on the Mac"
+                "\(kind.rawValue) must not use the whole-file route"
             )
         }
 

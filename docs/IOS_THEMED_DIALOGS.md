@@ -194,6 +194,13 @@ material, while extensions do not replace those operational decision surfaces.
 
 ## Settings surfaces
 
+**A Settings row that leads to another Settings page stays in the same navigation stack.** The
+top-level Settings surface is already the user's modal detour from the app; opening a second sheet
+inside it makes a destination look temporary, starts it at a partial-height detent, and replaces
+the established Back path with another Done button. Fixed Settings destinations use
+`SettingsNavigationRow` and supply page content without their own `NavigationStack`. Sheets inside
+those destinations remain appropriate for temporary system workflows such as sharing a report.
+
 A `List` or `Form` gets its *rows* from UIKit, not from the theme. Hiding the scroll background
 and painting the theme's ground behind it leaves every grouped row on
 `secondarySystemGroupedBackground` with `separator` hairlines between them, which is a slab of
@@ -258,6 +265,12 @@ offered, paints the ground itself, and tints the spinner with the theme's accent
 `ContentUnavailableView` needs none of this and is still the right answer for a failure or empty
 state: it already expands to the space it is given, which is why the failure state beside each of
 those placeholders was themed the whole time.
+
+The draft attachment Quick View is a full-screen `NavigationStack`, not a system Quick Look sheet:
+images reuse the themed zoom surface and movies use the native player against a device-local staged
+file. Because the cover creates a separate hosting scene, its caller reapplies the complete mobile
+theme; the navigation bar, close action, ground and player surround must not fall back to system
+chrome while the composer underneath uses a Mac-supplied palette.
 
 The three states of the session screen are in the iOS evidence catalogue, held still by a debug
 fixture because a real Mac passes through them in a moment:

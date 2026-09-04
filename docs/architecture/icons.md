@@ -225,21 +225,42 @@ Four decisions carry it:
 - **The silhouette never changes.** Only ground, ink and shadow follow the theme; the Threading mark's
   geometry is fixed. An icon's first job is to be found in ⌘-Tab by its shape, and a mark that
   redrew itself per theme would trade the whole point of an icon for a colour match. The only
-  geometry a theme moves is the stroke's cap and join, from `material.controlRadius` — a small
-  element follows the radius the theme gives its small elements.
+  geometry a theme moves is the outline's join, from `material.controlRadius` — a small element
+  follows the radius the theme gives its small elements. The join only, never the strands'
+  caps: the strands end round on every theme, because their ends meet in the knot, and a
+  square-cut end is a slanted cut whose corners poke out of the knot on one side and notch it
+  on the other. Eighteen themes are mitred, and all eighteen had that junction until 2026-09-04.
 - **The cache is keyed by the colours drawn, not by the theme's id.** A custom theme keeps its
   identity across an edit, so an id-keyed cache serves the palette the user just changed away
   from. `Recipe.cacheKey` is the resolved ground, ink, corner and shadow.
 
-Two things about that shadow were measured rather than reasoned, and both were wrong first.
+Four things about the shadows here were measured rather than reasoned, and all four were wrong first.
 Its **scale is matched to the weight of the mark, not to the canvas** — the mark's stroke
 against a chrome control's ink, about 4×. Scaling by canvas size instead (an 824pt plate against
 a ~96pt element, 8.6×) put Bauhaus's 4pt printed offset at 34pt behind a 115pt stroke, which
 stops reading as a lift and becomes a second silhouette; all four zero-radius styles failed the same
-way. And its **vertical offset is negated**: a theme states its shadow for `CALayer.shadowOffset`,
-which `Design.applyThemeGlow` passes through in the layer's y-up space, so `offsetY: -4` casts
-*downward* — and `NSShadow` in this drawing context resolves the same number the other way. The
-first render put every printed style's lift above its mark instead of below it.
+way. And its **vertical sign was measured twice**: a theme states its shadow for
+`CALayer.shadowOffset`, which `Design.applyThemeGlow` passes through in the layer's y-up space,
+so `offsetY: -4` casts *downward*. Drawn through an `NSImage` drawing handler, `NSShadow`
+resolved the same number the other way — the first render put every printed style's lift above
+its mark — so the renderer negated it. Drawn into a bitmap context (next paragraph but one),
+`NSShadow` agrees with the layer, and the negation had to go again;
+`testAPrintedStyleCastsItsLiftDownAndRight` caught it both times.
+
+**The plate's own shadow was stated in the layer's sign and never negated**, so through the
+handler it was cast upward, and nothing noticed, because on the Mac the margin it falls into is
+transparent. The phone's copy composited it over the ground and showed a ring darker along its
+top edge than its bottom — the Dock tile had been lit from below since it was first drawn.
+`testThePlateShadowFallsBelowTheDockIcon` reads the alpha in the margin above and below the
+plate.
+
+**And a Core Graphics shadow is stated in device space.** Drawn through an `NSImage` drawing
+handler into a 256px raster, a 40pt offset is still 40 pixels — four times the lift the same
+picture carries at 1024. Every rendered-state test here rasterizes at 256, so the contact sheet
+the shadow scale was judged on showed every lift and halo at four times its shipped size, and the
+first phone-grid edge test failed on Neo Brutalism's lift reaching an edge it does not reach at
+1024. `GeneratedAppIcon.draw` therefore rasterizes once, at the canvas size, into a bitmap the
+image carries; the Dock, the switcher, a preview and a test all scale the same pixels.
 
 The accent is floored through `NSColor.legible(on:)` rather than trusted: a theme whose accent
 sits near its own ground would draw an invisible mark. No stock theme is touched by it —
@@ -290,14 +311,30 @@ before writing both the app-icon and Settings-preview assets; `AppIconRenderTest
 opaque canonical ground at the safe-zone edges and the canonical ink at the centre. The runtime
 mark and web export remain the unmodified brand assets.
 
-The built-in Mac styles are also compiled as **manually selected alternate icons**. Run
-`scripts/generate_mobile_theme_icons.sh`: the existing `GeneratedAppIcon` render test draws every
-stock style, then `package_mobile_app_icons.swift` makes each theme ground full-bleed for the iOS
-mask and writes its app-icon and Settings-preview asset sets. The iOS target registers those names
-with `ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`; **Settings → App icon** calls
+The built-in Mac styles are also compiled as **manually selected alternate icons**, drawn by the
+same renderer on its **phone grid** (`GeneratedAppIcon.Grid.phone`): the theme's ground to every
+edge, no rounding and no shadow, and the mark on the 840pt safe zone the primary icon fits the
+brand mark into — so a theme's mark is the brand mark's size, and choosing an icon on the phone
+changes the paint and nothing else. Run `scripts/generate_mobile_theme_icons.sh`:
+`AppIconRenderTests.testRendersThePhoneIconUnderEveryStockStyle` writes every stock style at
+1024, and `package_mobile_app_icons.swift` copies those bytes into the app-icon sets and
+downsamples the Settings previews from them. The iOS target registers those names with
+`ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES`; **Settings → App icon** calls
 `setAlternateIconName` only when the user taps one. The picker can recommend the connected Mac's
 current stock style, but it never follows automatically because every change presents an
 unsuppressible system confirmation.
+
+The grid exists because the first version packaged the *Dock* render — plate, margin and drop
+shadow, at contact-sheet size — over a full-bleed fill of the ground, on the theory that iOS
+would supply the mask. It does, and it also draws nothing under the tile, so everything the Dock
+form puts in its margin ends up *inside* the squircle. On Pure's white ground the plate's shadow
+was a grey ring around a smaller plate; on every theme the mark was a quarter smaller than the
+primary icon's, which the picker was hiding by scaling the primary preview down to match; and
+the 256px render was being upscaled four times. `testThePhoneIconIsItsGroundToEveryEdge`
+measures the drawn form and `testEveryStockStyleHasASelectablePhoneIcon` the shipped bytes: the
+outer six percent of every tile is its ground within a colour-space round trip, the ink lands
+where the primary icon's does, and every compiled icon is offered by `MobileAppIconChoice` —
+Aqua and Tiger had been compiled and never listed.
 
 This intentionally covers only the stock library. A custom or extension-contributed Mac theme
 can contain arbitrary colours and marks that were not available when the phone bundle was built.

@@ -179,6 +179,31 @@ final class SessionDashboardTests: XCTestCase {
         )
     }
 
+    func testCachedNavigationStatusNamesItsAgeWhileReconnectContinues() {
+        let status = MobileDashboardChrome.connectionStatus(
+            phase: .connecting,
+            connectionLabel: nil,
+            progress: .preparingRoutes,
+            cachedAt: now.addingTimeInterval(-7 * 60),
+            now: now
+        )
+
+        XCTAssertTrue(status.contains(MobileL10n.string("Checking saved connections")), status)
+        XCTAssertTrue(status.contains("Updated"), status)
+        XCTAssertTrue(status.contains("7"), status)
+    }
+
+    func testCachedNavigationAgeClampsFutureClockSkewToNow() {
+        let age = MobileDashboardCacheAgeFormat.string(
+            capturedAt: now.addingTimeInterval(60 * 60),
+            relativeTo: now,
+            locale: Locale(identifier: "en_US")
+        )
+
+        XCTAssertTrue(age.localizedCaseInsensitiveContains("now"), age)
+        XCTAssertFalse(age.localizedCaseInsensitiveContains("in "), age)
+    }
+
     func testAnAutomaticallyRetriedFailureSaysWhatWillHappenNext() {
         XCTAssertEqual(
             MobileDashboardChrome.connectionStatus(
@@ -438,6 +463,7 @@ final class SessionDashboardTests: XCTestCase {
         let working = MobileTerminalRowPresentation.resolve(state: .working, isAvailable: true)
         XCTAssertTrue(working.isWorking)
         XCTAssertFalse(working.isDimmed)
+        XCTAssertTrue(working.showsAvailability)
         XCTAssertEqual(working.availabilityLabel, MobileL10n.string("Working"))
 
         let ready = MobileTerminalRowPresentation.resolve(state: .idle, isAvailable: true)
@@ -455,6 +481,15 @@ final class SessionDashboardTests: XCTestCase {
         let staleWorking = MobileTerminalRowPresentation.resolve(state: .working, isAvailable: false)
         XCTAssertFalse(staleWorking.isWorking)
         XCTAssertTrue(staleWorking.isDimmed)
+
+        let cached = MobileTerminalRowPresentation.resolve(
+            state: .working,
+            isAvailable: true,
+            isCatalogueLive: false
+        )
+        XCTAssertFalse(cached.isWorking)
+        XCTAssertFalse(cached.isDimmed)
+        XCTAssertFalse(cached.showsAvailability)
     }
 
     /// The by-type headings name each kind with the symbol its direction picker uses, so the
@@ -1013,6 +1048,10 @@ final class MobileDemoSceneTests: XCTestCase {
             case .usageLimit: expected = ("usage-limit", .shippingRoot)
             case .usageLimitUnavailable: expected = ("usage-limit-unavailable", .shippingRoot)
             case .usageLimitZero: expected = ("usage-limit-zero", .shippingRoot)
+            case .usageLimitDense: expected = ("usage-limit-dense", .shippingRoot)
+            case .usageLimitDenseWeek: expected = ("usage-limit-dense-week", .shippingRoot)
+            case .usageLimitDenseQuarter: expected = ("usage-limit-dense-quarter", .shippingRoot)
+            case .usageTotals: expected = ("usage-totals", .shippingRoot)
             case .usageStale: expected = ("usage-stale", .shippingRoot)
             case .sessions: expected = ("sessions", .shippingRoot)
             case .sessionsConnecting: expected = ("sessions-connecting", .shippingRoot)

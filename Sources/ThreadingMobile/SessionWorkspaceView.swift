@@ -76,6 +76,8 @@ struct SessionWorkspaceView: View {
     /// Whether the Mac advertised `RemoteRESTFeature.attachmentThumbnails`. Carried in rather
     /// than read from the model, because the drawer is hosted outside SwiftUI's environment.
     private let offersAttachmentThumbnails: Bool
+    /// Whether the Mac can serve file-backed movies without a whole-file download.
+    private let offersAttachmentVideoStreaming: Bool
 
     init(
         session: RemoteSessionSummaryDTO,
@@ -83,11 +85,13 @@ struct SessionWorkspaceView: View {
         activity: MobileWorkspaceActivity,
         initialWorkspace: RemoteWorkspaceDTO? = nil,
         initialDestination: RemoteNotificationDestinationDTO? = nil,
-        offersAttachmentThumbnails: Bool = false
+        offersAttachmentThumbnails: Bool = false,
+        offersAttachmentVideoStreaming: Bool = false
     ) {
         self.session = session
         self.client = client
         self.offersAttachmentThumbnails = offersAttachmentThumbnails
+        self.offersAttachmentVideoStreaming = offersAttachmentVideoStreaming
         _activity = ObservedObject(wrappedValue: activity)
         _workspace = State(initialValue: initialWorkspace)
         _path = State(initialValue: SessionWorkspaceRoute.notificationDestination(
@@ -162,14 +166,16 @@ struct SessionWorkspaceView: View {
                 session: session,
                 client: client,
                 showsCloseButton: false,
-                offersThumbnails: offersAttachmentThumbnails
+                offersThumbnails: offersAttachmentThumbnails,
+                offersVideoStreaming: offersAttachmentVideoStreaming
             )
         case .attachment(let id):
             RemoteAttachmentTargetView(
                 session: session,
                 attachmentID: id,
                 client: client,
-                offersThumbnails: offersAttachmentThumbnails
+                offersThumbnails: offersAttachmentThumbnails,
+                offersVideoStreaming: offersAttachmentVideoStreaming
             )
         case .extensionPanel(let extensionIdentifier, let panelID):
             RemoteExtensionPanelView(

@@ -25,8 +25,10 @@ final class RemoteUsageDashboardTests: XCTestCase {
             XCTAssertLessThanOrEqual(detail.observed.count, 280)
             XCTAssertLessThanOrEqual(detail.resets.count, 118)
             XCTAssertEqual(detail.series.bankedResetCount, summary.bankedResetCount)
-            XCTAssertEqual(detail.observed.last?.at, detail.projection?.observedAt)
-            XCTAssertEqual(detail.observed.last?.fraction, detail.projection?.observedFraction)
+            if let projection = detail.projection {
+                XCTAssertEqual(detail.observed.last?.at, projection.observedAt)
+                XCTAssertEqual(detail.observed.last?.fraction, projection.observedFraction)
+            }
             XCTAssertLessThanOrEqual(try JSONEncoder().encode(detail).count, 192 * 1_024)
 
             for (previous, current) in zip(detail.observed, detail.observed.dropFirst())
@@ -41,6 +43,216 @@ final class RemoteUsageDashboardTests: XCTestCase {
 
     func testLimitDemoRejectsUnknownSeriesWithoutBroadeningSelection() {
         XCTAssertThrowsError(try RemoteUsageDemo.limit(seriesID: "unknown", days: 30))
+    }
+
+    /// A weekly window is a line at every range. A five-hour window is a line at none of them,
+    /// and its column bucket grows with the range: the window itself over a week, whole days
+    /// over a month, three-day spans over a quarter. Without a stated window length the
+    /// observed discontinuities decide.
+    func testLimitChartFormFollowsWindowDensity() {
+        let day = 86_400.0
+        let hour = 3_600.0
+        XCTAssertEqual(
+            MobileUsageLimitChartProjection.form(for: limitDetail(windowDuration: 7 * day, days: 7)),
+            .line
+        )
+        XCTAssertEqual(
+            MobileUsageLimitChartProjection.form(for: limitDetail(windowDuration: 7 * day, days: 90)),
+            .line
+        )
+        XCTAssertEqual(
+            MobileUsageLimitChartProjection.form(for: limitDetail(windowDuration: 5 * hour, days: 7)),
+            .peaks(bucket: 5 * hour)
+        )
+        XCTAssertEqual(
+            MobileUsageLimitChartProjection.form(for: limitDetail(windowDuration: 5 * hour, days: 30)),
+            .peaks(bucket: day)
+        )
+        XCTAssertEqual(
+            MobileUsageLimitChartProjection.form(for: limitDetail(windowDuration: 5 * hour, days: 90)),
+            .peaks(bucket: 3 * day)
+        )
+        XCTAssertEqual(
+            MobileUsageLimitChartProjection.form(
+                for: limitDetail(windowDuration: nil, days: 30, segments: 40)
+            ),
+            .peaks(bucket: day)
+        )
+        XCTAssertEqual(
+            MobileUsageLimitChartProjection.form(
+                for: limitDetail(windowDuration: nil, days: 30, segments: 3)
+            ),
+            .line
+        )
+    }
+
+    /// A column is the highest reading inside its bucket, a day-sized bucket starts on the
+    /// calendar day rather than at the range's own hour, a reading at the ceiling names the
+    /// limit, and a point outside the range is not a column.
+    func testPeakColumnsKeepTheHighestReadingPerBucketAndNameTheLimit() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        let day = 86_400.0
+        let start = 1_800_000_000.0
+        let startOfDay = calendar.startOfDay(for: Date(timeIntervalSince1970: start)).timeIntervalSince1970
+        XCTAssertLessThan(startOfDay, start, "the fixture must begin inside a day, not on its edge")
+        let end = start + 3 * day
+        let detail = RemoteUsageLimitDTO(
+            series: series("dense", windowDuration: 5 * 3_600),
+            days: 3,
+            start: start,
+            end: end,
+            observed: [
+                .init(at: start, fraction: 0.2, segment: 0),
+                .init(at: start + 3_600, fraction: 0.9, segment: 0),
+                .init(at: start + 4 * 3_600, fraction: 0.05, segment: 1),
+                .init(at: start + day, fraction: 1, segment: 2),
+                .init(at: start + 2 * day + 3_600, fraction: 0.4, segment: 3),
+                .init(at: end + 10, fraction: 0.99, segment: 4),
+            ],
+            resets: [],
+            recordedResetCount: 4,
+            restoredPaceFraction: 0,
+            projection: nil,
+            preparedAt: end
+        )
+
+        let daily = MobileUsageLimitChartProjection.peaks(for: detail, bucket: day, calendar: calendar)
+        XCTAssertEqual(daily.map(\.start), [startOfDay, startOfDay + day, startOfDay + 2 * day])
+        XCTAssertEqual(daily.map(\.fraction), [0.9, 1, 0.4])
+        XCTAssertEqual(daily.map(\.observations), [3, 1, 1])
+        XCTAssertEqual(daily.map(\.reachedLimit), [false, true, false])
+
+        let perWindow = MobileUsageLimitChartProjection.peaks(
+            for: detail,
+            bucket: 5 * 3_600,
+            calendar: calendar
+        )
+        XCTAssertEqual(perWindow.first?.start, start, "a window-sized bucket starts with the range")
+        XCTAssertEqual(perWindow.first?.fraction, 0.9)
+    }
+
+    /// Ticks fall on whole days at an even step, near the asked-for count, and never so close
+    /// to either end of the domain that the label centred on them would be cut at the plot's
+    /// edge — the weekly tick two days before a projected reset is the one that read "18…".
+    func testAxisTicksKeepClearOfTheDomainEdges() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "UTC"))
+        calendar.firstWeekday = 2
+        let day = 86_400.0
+        // A Monday at noon, thirty days of history, and a projected reset two days past a Monday.
+        let monday = try XCTUnwrap(calendar.date(from: DateComponents(year: 2030, month: 2, day: 18, hour: 12)))
+        let start = monday.addingTimeInterval(-2 * day)
+        let end = monday.addingTimeInterval(30 * day)
+        let ticks = MobileUsageAxisTicks.dates(in: start...end, desiredCount: 4, calendar: calendar)
+
+        // Five Mondays fall inside the span; the first is two days after the start and the last
+        // two days before the end, and both are dropped for the same reason.
+        XCTAssertEqual(ticks.count, 3)
+        XCTAssertEqual(ticks.first, calendar.date(from: DateComponents(year: 2030, month: 2, day: 25)))
+        XCTAssertTrue(ticks.allSatisfy { calendar.component(.weekday, from: $0) == 2 })
+        XCTAssertTrue(ticks.allSatisfy { calendar.startOfDay(for: $0) == $0 })
+        let clearance = end.timeIntervalSince(start) * MobileUsageAxisTicks.edgeClearance
+        XCTAssertTrue(ticks.allSatisfy {
+            $0.timeIntervalSince(start) >= clearance && end.timeIntervalSince($0) >= clearance
+        })
+        XCTAssertLessThan(
+            try XCTUnwrap(ticks.last),
+            end.addingTimeInterval(-2 * day),
+            "the Monday two days before the end is the one that used to be cut"
+        )
+
+        let week = MobileUsageAxisTicks.dates(in: start...start.addingTimeInterval(7 * day), desiredCount: 4, calendar: calendar)
+        XCTAssertTrue((2...4).contains(week.count), "\(week.count) ticks over a week")
+        let quarter = MobileUsageAxisTicks.dates(in: start...start.addingTimeInterval(90 * day), desiredCount: 4, calendar: calendar)
+        XCTAssertTrue((2...4).contains(quarter.count), "\(quarter.count) ticks over a quarter")
+        XCTAssertTrue(quarter.allSatisfy { calendar.component(.day, from: $0) == 1 })
+        XCTAssertEqual(MobileUsageAxisTicks.dates(in: start...start, desiredCount: 4, calendar: calendar), [])
+    }
+
+    /// The daily chart's bands stand on one another only when every series shares one
+    /// timestamp sequence; otherwise each stands on zero, because summing unaligned points
+    /// draws a total nobody measured.
+    func testDailyBandsStandOnOneAnotherOnlyWhenAligned() {
+        let timestamps = [1.0, 2.0, 3.0]
+        func chartSeries(_ id: String, _ values: [Double], at: [Double] = timestamps) -> RemoteUsageChartSeriesDTO {
+            RemoteUsageChartSeriesDTO(
+                id: id,
+                title: id,
+                isOther: false,
+                styleIndex: 0,
+                points: zip(at, values).map { RemoteUsageChartPointDTO(at: $0, value: $1) }
+            )
+        }
+
+        let stacked = MobileUsageStackProjection.bands(for: [
+            chartSeries("a", [1, 2, 3]),
+            chartSeries("b", [4, 0, 1]),
+        ])
+        XCTAssertEqual(stacked.map(\.id), ["a", "b"])
+        XCTAssertEqual(stacked[0].edges.map(\.lower), [0, 0, 0])
+        XCTAssertEqual(stacked[0].edges.map(\.upper), [1, 2, 3])
+        XCTAssertEqual(stacked[1].edges.map(\.lower), [1, 2, 3])
+        XCTAssertEqual(stacked[1].edges.map(\.upper), [5, 2, 4])
+
+        let independent = MobileUsageStackProjection.bands(for: [
+            chartSeries("a", [1, 2, 3]),
+            chartSeries("c", [7], at: [2]),
+        ])
+        XCTAssertEqual(independent[1].edges.map(\.lower), [0])
+        XCTAssertEqual(independent[1].edges.map(\.upper), [7])
+    }
+
+    /// The demo's five-hour window is dense at every range, stays inside the wire's budgets,
+    /// carries no weekly projection, and reaches the limit somewhere so the evidence capture
+    /// shows a column in the negative role.
+    func testDenseDemoWindowDrawsPeakColumnsWithinWireBudgets() throws {
+        let summary = try XCTUnwrap(
+            RemoteUsageDemo.dashboard().limitSeries.first { ($0.windowDuration ?? .infinity) < 86_400 }
+        )
+        for days in [7, 30, 90] {
+            let detail = try RemoteUsageDemo.limit(seriesID: summary.id, days: days)
+            XCTAssertLessThanOrEqual(detail.observed.count, 280)
+            XCTAssertLessThanOrEqual(detail.resets.count, 118)
+            XCTAssertNil(detail.projection)
+            XCTAssertEqual(detail.recordedResetCount, detail.resets.count)
+            guard case .peaks(let bucket) = MobileUsageLimitChartProjection.form(for: detail) else {
+                XCTFail("the five-hour window over \(days) days should be drawn as columns")
+                continue
+            }
+            let peaks = MobileUsageLimitChartProjection.peaks(for: detail, bucket: bucket)
+            XCTAssertLessThanOrEqual(peaks.count, MobileUsageLimitChartProjection.maximumBuckets + 1)
+            XCTAssertGreaterThan(peaks.count, 1)
+            XCTAssertTrue(peaks.contains(where: \.reachedLimit))
+        }
+    }
+
+    private func limitDetail(
+        windowDuration: Double?,
+        days: Int,
+        segments: Int = 1
+    ) -> RemoteUsageLimitDTO {
+        let now = 1_800_000_000.0
+        let start = now - Double(days) * 86_400
+        let count = max(2, segments)
+        return RemoteUsageLimitDTO(
+            series: series("window", resetsAt: now + 3_600, windowDuration: windowDuration),
+            days: days,
+            start: start,
+            end: now,
+            observed: (0..<count).map { index in
+                RemoteUsageLimitPointDTO(
+                    at: start + Double(index) * 3_600,
+                    fraction: 0.3,
+                    segment: min(index, segments - 1)
+                )
+            },
+            resets: [],
+            recordedResetCount: 0,
+            restoredPaceFraction: 0,
+            projection: nil,
+            preparedAt: now
+        )
     }
 
     func testLimitChartDomainExcludesLaterBankedResetExpiry() throws {

@@ -480,6 +480,15 @@ organization materializes the same two groups in one of two persisted directions
 copying or eagerly interleaving their rows. Both paths remain O(catalogue) preparation and
 O(visible) row construction.
 
+Cold launch has the same bound. iOS asynchronously decodes one versioned, presentation-only
+last-good catalogue per pairing on a store actor, projects cached rows there, and publishes the
+finished value once; no catalogue-sized decode or projection runs in `RemoteAppModel.init` or a
+SwiftUI body. Live snapshots are projected and encoded off-main, coalesced to at most one write
+per second under a hot delta stream. The optional archive keeps at most eight pairings, at most
+2,000 active and 2,000 archived sessions plus 1,000 terminals per pairing, at most 5,000 rows in
+one snapshot, 2 MiB of aggregate strings and 4 MiB encoded. Size pressure evicts least-recent
+pairings; an individually invalid snapshot leaves the last-good archive untouched.
+
 The pre-catalogue connection card is invariant at one current-operation row. Its activity
 treatment keeps one two-second timer, plays one bounded 650 ms LabelMorph fade, and invalidates
 the timer when that row is replaced, unmounted, or subject to Reduce Motion. Route cardinality

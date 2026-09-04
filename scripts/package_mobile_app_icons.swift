@@ -1,4 +1,14 @@
 #!/usr/bin/env swift
+//
+// Packages the phone-grid renders `AppIconRenderTests.testRendersThePhoneIconUnderEveryStockStyle`
+// writes into ThreadingMobile's asset catalogue: one alternate app-icon set and one Settings
+// preview per stock style.
+//
+// The render is already the tile iOS compiles — the theme's ground to every edge, no rounding
+// and no shadow, the mark on the platform's safe zone — so nothing here recomposes it. The 1024
+// bytes are copied through untouched and the preview is the same picture at 256.
+//
+//   scripts/package_mobile_app_icons.swift <phone-render-directory> <asset-catalog>
 
 import AppKit
 
@@ -38,19 +48,27 @@ private let themes: [ThemeIcon] = [
     .init(id: "christmas", suffix: "Christmas"),
 ]
 
+/// The side iOS compiles an app icon from, and the side the render test writes.
+private let iconSide = 1024
+/// The Settings picker's preview.
+private let previewSide = 256
+
 private enum PackagingError: Error, CustomStringConvertible {
     case usage
     case invalidImage(String)
     case missingRender(String)
+    case wrongSize(String, Int, Int)
 
     var description: String {
         switch self {
         case .usage:
-            return "usage: package_mobile_app_icons.swift <render-directory> <asset-catalog>"
+            return "usage: package_mobile_app_icons.swift <phone-render-directory> <asset-catalog>"
         case .invalidImage(let path):
             return "could not decode rendered icon: \(path)"
         case .missingRender(let id):
-            return "missing rendered Mac icon for theme: \(id)"
+            return "missing rendered phone icon for theme: \(id)"
+        case .wrongSize(let path, let width, let height):
+            return "rendered phone icon is \(width)×\(height), not \(iconSide)×\(iconSide): \(path)"
         }
     }
 }
@@ -61,6 +79,18 @@ private func replaceDirectory(_ url: URL) throws {
         try manager.removeItem(at: url)
     }
     try manager.createDirectory(at: url, withIntermediateDirectories: true)
+}
+
+/// A phone render, decoded and held to the size iOS compiles.
+private func phoneRender(at url: URL) throws -> (bytes: Data, image: NSImage) {
+    let bytes = try Data(contentsOf: url)
+    guard let raster = NSBitmapImageRep(data: bytes), let image = NSImage(data: bytes) else {
+        throw PackagingError.invalidImage(url.path)
+    }
+    guard raster.pixelsWide == iconSide, raster.pixelsHigh == iconSide else {
+        throw PackagingError.wrongSize(url.path, raster.pixelsWide, raster.pixelsHigh)
+    }
+    return (bytes, image)
 }
 
 private func pngData(_ image: NSImage, side: Int) throws -> Data {
@@ -81,40 +111,13 @@ private func pngData(_ image: NSImage, side: Int) throws -> Data {
     raster.size = NSSize(width: side, height: side)
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: raster)
+    NSGraphicsContext.current?.imageInterpolation = .high
     image.draw(in: NSRect(x: 0, y: 0, width: side, height: side))
     NSGraphicsContext.restoreGraphicsState()
     guard let data = raster.representation(using: .png, properties: [:]) else {
         throw PackagingError.invalidImage("PNG \(side)")
     }
     return data
-}
-
-/// Makes the Dock renderer's theme ground full-bleed. The mark, corner treatment and themed
-/// glow remain byte-for-byte the Mac renderer's output; iOS then supplies the outer mask.
-private func fullBleedImage(at url: URL) throws -> NSImage {
-    let data = try Data(contentsOf: url)
-    guard let sourceRaster = NSBitmapImageRep(data: data),
-          let source = NSImage(data: data),
-          let ground = sourceRaster.colorAt(
-            x: Int(CGFloat(sourceRaster.pixelsWide) * 0.13),
-            y: sourceRaster.pixelsHigh / 2
-          ) else {
-        throw PackagingError.invalidImage(url.path)
-    }
-    let side: CGFloat = 1024
-    return NSImage(size: NSSize(width: side, height: side), flipped: false) { bounds in
-        ground.setFill()
-        bounds.fill()
-        source.draw(
-            in: bounds,
-            from: .zero,
-            operation: .sourceOver,
-            fraction: 1,
-            respectFlipped: true,
-            hints: [.interpolation: NSImageInterpolation.high.rawValue]
-        )
-        return true
-    }
 }
 
 private func writeContents(images: [[String: Any]], to directory: URL) throws {
@@ -154,35 +157,36 @@ for theme in themes {
     try replaceDirectory(iconSet)
     try replaceDirectory(previewSet)
 
-    let primary = try fullBleedImage(at: primaryURL)
-    try pngData(primary, side: 1024).write(
-        to: iconSet.appendingPathComponent("AppIcon-1024.png"),
+    let primary = try phoneRender(at: primaryURL)
+    try primary.bytes.write(
+        to: iconSet.appendingPathComponent("AppIcon-\(iconSide).png"),
         options: .atomic
     )
     var iconEntries: [[String: Any]] = [[
-        "filename": "AppIcon-1024.png",
+        "filename": "AppIcon-\(iconSide).png",
         "idiom": "universal",
         "platform": "ios",
-        "size": "1024x1024",
+        "size": "\(iconSide)x\(iconSide)",
     ]]
 
+    // An adaptive style ships both luminosities in one alternate set; iOS picks between them.
     if manager.fileExists(atPath: dark.path) {
-        try pngData(try fullBleedImage(at: dark), side: 1024).write(
-            to: iconSet.appendingPathComponent("AppIcon-1024-dark.png"),
+        try phoneRender(at: dark).bytes.write(
+            to: iconSet.appendingPathComponent("AppIcon-\(iconSide)-dark.png"),
             options: .atomic
         )
         iconEntries.append([
             "appearances": [["appearance": "luminosity", "value": "dark"]],
-            "filename": "AppIcon-1024-dark.png",
+            "filename": "AppIcon-\(iconSide)-dark.png",
             "idiom": "universal",
             "platform": "ios",
-            "size": "1024x1024",
+            "size": "\(iconSide)x\(iconSide)",
         ])
     }
     try writeContents(images: iconEntries, to: iconSet)
 
-    let previewFilename = "AppIconPreview\(theme.suffix)-256.png"
-    try pngData(primary, side: 256).write(
+    let previewFilename = "AppIconPreview\(theme.suffix)-\(previewSide).png"
+    try pngData(primary.image, side: previewSide).write(
         to: previewSet.appendingPathComponent(previewFilename),
         options: .atomic
     )

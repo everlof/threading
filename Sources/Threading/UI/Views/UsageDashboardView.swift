@@ -1,4 +1,5 @@
 import AppKit
+import ThreadingRemoteKit
 
 private extension UsageDashboardMetric {
     var title: String {
@@ -181,6 +182,7 @@ final class UsageDashboardView: NSView, ThemedComponent {
     var limitChartXRangeForTesting: ClosedRange<Date>? { limitChart.resolvedXRangeForTesting }
     var usageChartCompositionForTesting: ThemedChartComposition { usageChart.composition }
     var limitChartCompositionForTesting: ThemedChartComposition { limitChart.composition }
+    var limitChartModelForTesting: ThemedChartModel { limitChart.model }
     var breakdownVisibleSubviewCountForTesting: Int { breakdownTable.visibleCellCount }
     /// What the Overview chart is saying instead of series, or `nil` when it has some.
     var usagePlaceholderForTesting: ThemedChartPlaceholder? {
@@ -786,36 +788,54 @@ final class UsageDashboardView: NSView, ThemedComponent {
         guard let range = selected.range(days: selectedLimitDays) else { return }
         let now = range.end
         let start = range.start
-        var chartSeries = [ThemedChartSeries(
-            id: selected.id,
-            title: selected.windowLabel,
-            points: range.observed.map {
-                ThemedChartPoint(
-                    at: $0.sample.at,
-                    value: $0.sample.fraction,
-                    label: "\(Int(($0.sample.fraction * 100).rounded()))%",
-                    detail: selected.accountName,
-                    segment: $0.segment
-                )
-            },
-            style: .primary,
-            fillsArea: true
-        )]
-
-        if let projection = selected.projection {
+        // The same decision the phone makes over the same observations: a line while the window
+        // cycles seldom enough to be read as one, columns of the highest reading per bucket once
+        // it does not. A five-hour window over a month was a block of near-vertical strokes
+        // under forty-eight dashed reset rules.
+        let form = UsageLimitChartForm.resolve(
+            span: now.timeIntervalSince(start),
+            windowDuration: selected.windowDuration,
+            observedCycles: max((range.observed.last?.segment ?? 0) + 1, range.resetCount + 1)
+        )
+        var chartSeries: [ThemedChartSeries] = []
+        var ruledResets = range.resetMarkers
+        switch form {
+        case .line:
             chartSeries.append(ThemedChartSeries(
-                id: selected.id + "|projection",
-                title: L10n.string("Projection"),
-                points: [
-                    ThemedChartPoint(at: projection.observedAt, value: projection.observedFraction),
-                    ThemedChartPoint(at: projection.endpointAt, value: projection.endpointFraction)
-                ],
-                style: .projection,
-                curve: .linear
+                id: selected.id,
+                title: selected.windowLabel,
+                points: range.observed.map {
+                    ThemedChartPoint(
+                        at: $0.sample.at,
+                        value: $0.sample.fraction,
+                        label: "\(Int(($0.sample.fraction * 100).rounded()))%",
+                        detail: selected.accountName,
+                        segment: $0.segment
+                    )
+                },
+                style: .primary,
+                fillsArea: true
             ))
+            if let projection = selected.projection {
+                chartSeries.append(ThemedChartSeries(
+                    id: selected.id + "|projection",
+                    title: L10n.string("Projection"),
+                    points: [
+                        ThemedChartPoint(at: projection.observedAt, value: projection.observedFraction),
+                        ThemedChartPoint(at: projection.endpointAt, value: projection.endpointFraction)
+                    ],
+                    style: .projection,
+                    curve: .linear
+                ))
+            }
+        case .peaks(let bucket):
+            chartSeries = peakSeries(for: selected, range: range, bucket: bucket)
+            // A window that resets every five hours resets every five hours: only the rarer
+            // banked-credit reset stays ruled, and the count stands in the card below.
+            ruledResets = range.resetMarkers.filter { $0.cause == .bankedCredit }
         }
 
-        var markers = range.resetMarkers.map {
+        var markers = ruledResets.map {
             ThemedChartMarker(
                 id: $0.id,
                 at: $0.detectedAt,
@@ -897,19 +917,35 @@ final class UsageDashboardView: NSView, ThemedComponent {
             projected = percent(fraction)
             projectedDetail = L10n.string("Projected at the scheduled reset")
         } else {
+            // Only a measured weekly window is projected; a five-hour window has no weekly pace
+            // to extrapolate, and asking its reader to wait for more observations would be
+            // promising a figure that never comes.
+            let isWeekly = selected.windowDuration.map { $0 >= UsageLimitHistoryDefaults.weeklyDurationRange.lowerBound } ?? true
             projectedTitle = L10n.string("Projection")
             projected = "—"
-            projectedDetail = L10n.string("More observations needed")
+            projectedDetail = isWeekly
+                ? L10n.string("More observations needed")
+                : L10n.string("Projected for weekly windows only")
         }
 
-        limitCards[0].show(
-            title: L10n.string("Current"),
-            value: selected.currentFraction.map(percent) ?? "—",
-            detail: selected.resetsAt.map {
-                L10n.format("Resets %@ · %@", relative($0), exactDateTime($0))
-            }
-                ?? L10n.string("Reset time unavailable")
-        )
+        // A reading whose scheduled reset has passed is not a current one: the window ended,
+        // and "Resets 2 days ago" was that date read after the window it belonged to was gone.
+        if let reset = selected.resetsAt, reset <= now {
+            limitCards[0].show(
+                title: L10n.string("Current"),
+                value: "—",
+                detail: L10n.format("Window ended %@ · %@", relative(reset), exactDateTime(reset))
+            )
+        } else {
+            limitCards[0].show(
+                title: L10n.string("Current"),
+                value: selected.currentFraction.map(percent) ?? "—",
+                detail: selected.resetsAt.map {
+                    L10n.format("Resets %@ · %@", relative($0), exactDateTime($0))
+                }
+                    ?? L10n.string("Reset time unavailable")
+            )
+        }
         limitCards[1].show(title: projectedTitle, value: projected, detail: projectedDetail)
         limitCards[2].show(
             title: L10n.string("Recorded resets"),
@@ -960,6 +996,72 @@ final class UsageDashboardView: NSView, ThemedComponent {
             L10n.string("Output"),
             L10n.string("Cache saved")
         ]
+    }
+
+    /// The dense form: one column per bucket at its highest reading, and a second series in
+    /// the negative role for the buckets that reached the limit, so the legend keys both. A
+    /// series with no columns is left out rather than keyed for nothing.
+    private func peakSeries(
+        for selected: UsageLimitDashboardSeries,
+        range: UsageLimitDashboardRangeProjection,
+        bucket: TimeInterval
+    ) -> [ThemedChartSeries] {
+        let peaks = UsageLimitChartForm.peaks(
+            range.observed.map {
+                UsageLimitChartObservation(
+                    at: $0.sample.at.timeIntervalSince1970,
+                    fraction: $0.sample.fraction
+                )
+            },
+            start: range.start.timeIntervalSince1970,
+            end: range.end.timeIntervalSince1970,
+            bucket: bucket
+        )
+        func points(_ peaks: [UsageLimitChartForm.Peak]) -> [ThemedChartPoint] {
+            peaks.map { peak in
+                ThemedChartPoint(
+                    at: Date(timeIntervalSince1970: (peak.start + peak.end) / 2),
+                    value: peak.fraction,
+                    label: percent(peak.fraction),
+                    detail: L10n.format("Highest of %lld readings", Int64(peak.observations))
+                )
+            }
+        }
+        let ordinary = peaks.filter { !$0.reachedLimit }
+        let limited = peaks.filter(\.reachedLimit)
+        var series: [ThemedChartSeries] = []
+        if !ordinary.isEmpty {
+            series.append(ThemedChartSeries(
+                id: selected.id + "|peaks",
+                title: peakTitle(bucket: bucket),
+                points: points(ordinary),
+                style: .primary,
+                mark: .bar,
+                barSpan: bucket
+            ))
+        }
+        if !limited.isEmpty {
+            series.append(ThemedChartSeries(
+                id: selected.id + "|limit",
+                title: L10n.string("Limit reached"),
+                points: points(limited),
+                style: .negative,
+                mark: .bar,
+                barSpan: bucket
+            ))
+        }
+        return series
+    }
+
+    /// What a column stands for, by the bucket it spans: the window itself, a day, or a span of
+    /// days.
+    private func peakTitle(bucket: TimeInterval) -> String {
+        guard let days = UsageLimitChartForm.bucketDays(bucket) else {
+            return L10n.string("Peak per window")
+        }
+        return days <= 1
+            ? L10n.string("Peak per day")
+            : L10n.format("Peak per %lld days", Int64(days))
     }
 
     private func percent(_ value: Double) -> String {
