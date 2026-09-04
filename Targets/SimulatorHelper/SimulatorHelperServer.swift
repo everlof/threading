@@ -35,6 +35,9 @@ final class SimulatorHelperServer: @unchecked Sendable {
     private var framesPerSecond = 30
     private var timer: DispatchSourceTimer?
     private var nextSequence: UInt64 = 1
+    /// One frame in the encoder at a time: the next capture waits for this one to come back.
+    /// That only works with an encoder that emits every frame immediately, which is why
+    /// `SimulatorH264FrameEncoder` verifies its zero frame delay instead of assuming it.
     private var isEncoding = false
     private var frameWindow = SimulatorLatestFrameWindow<SimulatorBridgeMediaFrame>()
     private var statistics = SimulatorBridgeStatistics(

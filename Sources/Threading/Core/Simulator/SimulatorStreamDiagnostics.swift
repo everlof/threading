@@ -95,6 +95,7 @@ final class SimulatorStreamDiagnostics: @unchecked Sendable {
         case .disconnected: return "disconnected"
         case .invalidFrame: return "invalid-frame"
         case .inputTimedOut: return "input-timeout"
+        case .stalled: return "stalled"
         }
     }
 }

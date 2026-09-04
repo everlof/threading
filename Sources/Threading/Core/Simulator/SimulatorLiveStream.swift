@@ -36,6 +36,9 @@ enum SimulatorLiveStreamError: LocalizedError, Equatable, Sendable {
     case disconnected
     case invalidFrame
     case inputTimedOut
+    /// The helper answered the handshake and stayed alive, but a visible stream delivered no
+    /// frame for the whole liveness deadline.
+    case stalled
 
     var errorDescription: String? {
         switch self {
@@ -47,6 +50,7 @@ enum SimulatorLiveStreamError: LocalizedError, Equatable, Sendable {
         case .disconnected: return "The direct Simulator helper disconnected."
         case .invalidFrame: return "The direct Simulator helper returned an invalid frame."
         case .inputTimedOut: return "The Simulator did not acknowledge the input request."
+        case .stalled: return "The direct Simulator helper stopped delivering frames."
         }
     }
 }

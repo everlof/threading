@@ -81,7 +81,7 @@ struct SimulatorCompatibilityProbeReport: Codable, Equatable, Sendable {
 ///
 /// This does not prepare, boot or control a device. The matrix runner supplies an already-booted
 /// UDID, then the normal live coordinator verifies the embedded helper, active Xcode frameworks,
-/// protocol handshake and first decoded frame before the app exits.
+/// protocol handshake and two decoded frames in sequence order before the app exits.
 enum SimulatorCompatibilityProbe {
     private struct Evidence: Sendable {
         let codec: SimulatorBridgeCodec
@@ -91,19 +91,24 @@ enum SimulatorCompatibilityProbe {
         let height: Int
     }
 
+    /// A stream proves it flows with two decoded frames in sequence order, not one. A helper
+    /// whose encoder holds frames delivers exactly one picture and then idles, which a
+    /// first-frame check reported as compatible.
+    static let requiredFrames = 2
+
     private enum ProbeError: LocalizedError {
-        case endedBeforeFrame
+        case endedBeforeFrames
         case failed(String)
         case timedOut
 
         var errorDescription: String? {
             switch self {
-            case .endedBeforeFrame:
-                return "The direct Simulator stream ended before its first frame."
+            case .endedBeforeFrames:
+                return "The direct Simulator stream ended before delivering \(requiredFrames) frames."
             case .failed(let detail):
                 return detail
             case .timedOut:
-                return "The direct Simulator stream did not produce a frame before its deadline."
+                return "The direct Simulator stream did not deliver \(requiredFrames) frames before its deadline."
             }
         }
     }
@@ -122,7 +127,7 @@ enum SimulatorCompatibilityProbe {
                 session.stop()
             }
             session.setVisible(true)
-            let evidence = try await firstFrame(from: session, timeout: timeout)
+            let evidence = try await flowingStream(from: session, timeout: timeout)
             return report(
                 bundle: bundle,
                 startedAt: startedAt,
@@ -156,7 +161,7 @@ enum SimulatorCompatibilityProbe {
         try encoder.encode(report).write(to: url, options: .atomic)
     }
 
-    private static func firstFrame(
+    private static func flowingStream(
         from session: any SimulatorLiveStreamSession,
         timeout: Duration
     ) async throws -> Evidence {
@@ -167,6 +172,9 @@ enum SimulatorCompatibilityProbe {
                     String?,
                     String?
                 )?
+                var evidence: Evidence?
+                var lastSequence: UInt64?
+                var frames = 0
                 for await event in session.events {
                     switch event {
                     case .ready(
@@ -179,22 +187,28 @@ enum SimulatorCompatibilityProbe {
                         ready = (codec, coreSimulatorVersion, simulatorKitVersion)
                     case .frame(let frame):
                         guard let ready else { continue }
-                        return Evidence(
-                            codec: ready.0,
-                            coreSimulatorVersion: ready.1,
-                            simulatorKitVersion: ready.2,
-                            width: frame.image.width,
-                            height: frame.image.height
-                        )
+                        if let lastSequence, frame.sequence <= lastSequence { continue }
+                        lastSequence = frame.sequence
+                        frames += 1
+                        if evidence == nil {
+                            evidence = Evidence(
+                                codec: ready.0,
+                                coreSimulatorVersion: ready.1,
+                                simulatorKitVersion: ready.2,
+                                width: frame.image.width,
+                                height: frame.image.height
+                            )
+                        }
+                        if frames >= requiredFrames, let evidence { return evidence }
                     case .failed(let detail):
                         throw ProbeError.failed(detail)
                     case .ended:
-                        throw ProbeError.endedBeforeFrame
+                        throw ProbeError.endedBeforeFrames
                     case .statistics:
                         continue
                     }
                 }
-                throw ProbeError.endedBeforeFrame
+                throw ProbeError.endedBeforeFrames
             }
             group.addTask {
                 try await Task.sleep(for: timeout)
@@ -202,7 +216,7 @@ enum SimulatorCompatibilityProbe {
             }
             defer { group.cancelAll() }
             guard let evidence = try await group.next() else {
-                throw ProbeError.endedBeforeFrame
+                throw ProbeError.endedBeforeFrames
             }
             return evidence
         }

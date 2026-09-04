@@ -39,6 +39,7 @@
 		7C000007000000000000A001 /* main.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B001 /* main.swift */; };
 		7C000007000000000000A002 /* SimulatorHelperServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B002 /* SimulatorHelperServer.swift */; };
 		7C000007000000000000A003 /* SimulatorFrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B003 /* SimulatorFrameEncoder.swift */; };
+		7C000007000000000000A013 /* SimulatorFrameEncoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B003 /* SimulatorFrameEncoder.swift */; };
 		7C000007000000000000A004 /* SimulatorInputSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B004 /* SimulatorInputSender.swift */; };
 		7C000007000000000000A005 /* SimulatorPrivateBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B005 /* SimulatorPrivateBridge.m */; };
 		7C000007000000000000A009 /* threading-simulator-helper in Embed Extension Helpers */ = {isa = PBXBuildFile; fileRef = 7C000007000000000000B011 /* threading-simulator-helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -1357,6 +1358,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7C000007000000000000A013 /* SimulatorFrameEncoder.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -81,6 +81,32 @@ invalidates the session, so a stream stop cannot race an in-flight decode or str
 frame context. The app admits at most four live helpers across all sessions, while the public
 one-frame-per-second screenshot fallback remains available for unsupported Xcode versions.
 
+**The encoder must emit every frame before it is handed the next one.** The helper keeps exactly
+one frame inside the encoder and captures again only when that frame's callback has returned.
+VideoToolbox's hardware H.264 encoder defaults to frame reordering for the Main profile and
+reports a frame delay of three, so left at its defaults it emits the IDR frame at once and then
+holds the second frame waiting for lookahead that never comes. That shipped: every direct stream
+delivered one picture and then idled, the pane kept showing it under a green "Live H.264" label,
+and every process involved sat at zero CPU. The stream restarted around each install, launch and
+screenshot, which advanced the picture by one frame and made it look intermittent. The encoder
+session now disables frame reordering, sets a maximum frame delay of zero, and reads both back
+after preparation; a session that would still hold frames is refused so codec negotiation falls
+through to JPEG rather than adopting an encoder the one-frame-in-flight helper cannot drive.
+`SimulatorFrameEncoderTests` drives the shipped encoder the way the helper does, one frame in
+flight, and fails on the frame that never comes back.
+
+**A visible stream that goes quiet is a failure, not a still screen.** The helper captures at a
+fixed rate whenever the tab is visible, so silence means the helper, its encoder or the
+framebuffer stopped. The ready state used to rest on the handshake alone, which is why a helper
+hanging after one frame kept the live label indefinitely. `SimulatorFrameLivenessMonitor` gives a
+visible stream four seconds to deliver a frame, re-armed by every decoded frame and disarmed by
+hiding the tab; a stall ends the stream through the same path as a lost helper, so the pane shows
+the reason, falls back to public screenshots and offers retry. The compatibility probe, the
+opt-in live integration test and the release matrix all require two decoded frames in sequence
+order rather than one, because one is exactly what a frozen stream produces. The client also
+counts the frames it decoded itself and logs that beside the helper's own statistics, which only
+arrive every few seconds of sent frames and never for a stream that froze early.
+
 ## Device and session ownership
 
 One simulator tab has one stable session-owned identity and one selected UDID. The initial product
@@ -176,15 +202,16 @@ Each increment ships as a coherent fallback-capable slice. The direct helper doe
 public lifecycle path, and the MCP tools do not create a second simulator state model beside the
 pane. All six increments are implemented. Deterministic tests cover protocol compatibility,
 framing bounds, 60 fps replacement pressure, hidden visibility, the four-stream budget, lease
-grace and refresh, input routing, backend recovery and content-free support diagnostics.
+grace and refresh, input routing, backend recovery, the encoder's immediate-output contract, the
+liveness deadline, the probe's two-frame evidence and content-free support diagnostics.
 
 `scripts/simulator_dogfood.sh` is the complete opt-in lane. For every selected Xcode it requires
 an already-booted available iOS device, builds `ThreadingMobile` for the exact UDID, and drives the
 shipping `AgentToolCoordinator` commands through one visible right-panel tab: prepare,
 install/launch, screenshot, a normalized tap, and a harmless Home-button input. It then launches
 the exact macOS app bundle in a pre-workspace, activation-prohibited probe that verifies the
-embedded helper handshake
-and first decoded frame using that Xcode's private frameworks. The probe is read-only; it cannot
+embedded helper handshake and two decoded frames in sequence order using that Xcode's private
+frameworks. The probe is read-only; it cannot
 prepare, boot, install into or control a device.
 
 The dogfood, connectivity-test and iOS UI-evidence runners take the same host-wide advisory

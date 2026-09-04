@@ -22,6 +22,7 @@ protocol SimulatorFrameEncoding: AnyObject {
 enum SimulatorFrameEncoderError: LocalizedError {
     case pixelBuffer(OSStatus)
     case compressionSession(OSStatus)
+    case holdsFrames(reportedDelay: Int?)
     case encode(OSStatus)
     case missingSample
     case missingFormat
@@ -32,6 +33,9 @@ enum SimulatorFrameEncoderError: LocalizedError {
         switch self {
         case .pixelBuffer(let status): return "The Simulator surface could not become a pixel buffer (\(status))."
         case .compressionSession(let status): return "The H.264 encoder is unavailable (\(status))."
+        case .holdsFrames(let reportedDelay):
+            let delay = reportedDelay.map(String.init) ?? "an unknown number of"
+            return "The H.264 encoder would hold \(delay) frames before emitting one."
         case .encode(let status): return "The H.264 encoder refused a frame (\(status))."
         case .missingSample: return "The H.264 encoder returned no sample."
         case .missingFormat: return "The H.264 key frame has no format description."
@@ -128,6 +132,13 @@ final class SimulatorH264FrameEncoder: SimulatorFrameEncoding, @unchecked Sendab
         }
     }
 
+    enum Configuration {
+        static let averageBitRate = 6_000_000
+        static let keyFrameIntervalSeconds = 2
+        /// Zero: every frame must be emitted before the next one is accepted.
+        static let maximumFrameDelay = 0
+    }
+
     private let width: Int32
     private let height: Int32
     private var session: VTCompressionSession?
@@ -159,17 +170,74 @@ final class SimulatorH264FrameEncoder: SimulatorFrameEncoding, @unchecked Sendab
             value: kVTProfileLevel_H264_Main_AutoLevel
         )
         let fps = framesPerSecond as CFNumber
-        let keyFrameInterval = max(1, framesPerSecond * 2) as CFNumber
-        let bitrate = 6_000_000 as CFNumber
+        let keyFrameInterval = max(1, framesPerSecond * Configuration.keyFrameIntervalSeconds) as CFNumber
+        let bitrate = Configuration.averageBitRate as CFNumber
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: keyFrameInterval)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: bitrate)
+        // The helper keeps exactly one frame inside the encoder and captures the next only after
+        // that one has come back. An encoder that is allowed to reorder frames holds the second
+        // frame for lookahead and never emits it, so the stream freezes on its first picture
+        // while every process involved sits idle. Immediate output is therefore part of this
+        // encoder's contract, and it is verified below rather than assumed.
+        VTSessionSetProperty(
+            session,
+            key: kVTCompressionPropertyKey_AllowFrameReordering,
+            value: kCFBooleanFalse
+        )
+        VTSessionSetProperty(
+            session,
+            key: kVTCompressionPropertyKey_MaxFrameDelayCount,
+            value: Configuration.maximumFrameDelay as CFNumber
+        )
         let prepare = VTCompressionSessionPrepareToEncodeFrames(session)
         guard prepare == noErr else {
             VTCompressionSessionInvalidate(session)
             self.session = nil
             throw SimulatorFrameEncoderError.compressionSession(prepare)
         }
+        do {
+            try Self.verifyImmediateOutput(of: session)
+        } catch {
+            VTCompressionSessionInvalidate(session)
+            self.session = nil
+            throw error
+        }
+    }
+
+    /// Refuses a session that would hold frames, so codec negotiation falls through to JPEG
+    /// instead of adopting an encoder the one-frame-in-flight helper cannot drive.
+    private static func verifyImmediateOutput(of session: VTCompressionSession) throws {
+        // CFBoolean and CFNumber both bridge to NSNumber, so one reading covers whichever
+        // representation VideoToolbox hands back.
+        guard let reordering = copyProperty(kVTCompressionPropertyKey_AllowFrameReordering, of: session)
+                as? NSNumber, !reordering.boolValue else {
+            throw SimulatorFrameEncoderError.holdsFrames(reportedDelay: nil)
+        }
+        guard let delay = copyProperty(kVTCompressionPropertyKey_MaxFrameDelayCount, of: session)
+                as? NSNumber else {
+            throw SimulatorFrameEncoderError.holdsFrames(reportedDelay: nil)
+        }
+        guard delay.intValue == Configuration.maximumFrameDelay else {
+            throw SimulatorFrameEncoderError.holdsFrames(reportedDelay: delay.intValue)
+        }
+    }
+
+    private static func copyProperty(_ key: CFString, of session: VTCompressionSession) -> CFTypeRef? {
+        let value = UnsafeMutablePointer<CFTypeRef?>.allocate(capacity: 1)
+        value.initialize(to: nil)
+        defer {
+            value.deinitialize(count: 1)
+            value.deallocate()
+        }
+        let status = VTSessionCopyProperty(
+            session,
+            key: key,
+            allocator: kCFAllocatorDefault,
+            valueOut: UnsafeMutableRawPointer(value)
+        )
+        guard status == noErr else { return nil }
+        return value.pointee
     }
 
     func encode(

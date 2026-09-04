@@ -3084,8 +3084,11 @@ clicks do not keep presenting the permission sheet.
 
 The device chip switches between available iPhones without creating another kind of window. A
 helper or Xcode compatibility failure stays in the tab, with a reason and retry; Threading never
-silently responds by launching Apple Simulator. The public screenshot fallback is view-only, so
-actual device input waits until the direct connection has recovered.
+silently responds by launching Apple Simulator. A live connection that stops delivering frames is
+treated the same way: a visible tab that goes a few seconds without a new picture shows why, drops
+to the screenshot preview and offers retry, rather than keeping a stale frame under a live label.
+The public screenshot fallback is view-only, so actual device input waits until the direct
+connection has recovered.
 
 **More tabs than fit scroll rather than shrink**, and the strip only answers what is meant for
 it. Swipe sideways over the tabs to move along them; a mouse wheel does the same, since sideways

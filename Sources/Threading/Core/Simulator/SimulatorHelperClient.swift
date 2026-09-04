@@ -32,12 +32,19 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
     private var didStop = false
     private var didCompleteHandshake = false
     private var didStartDiagnostics = false
+    private var isVisibleRequested = false
+    /// Frames this process decoded, counted here because the helper only reports its own
+    /// statistics every few seconds of sent frames; a stream that froze early never sends any.
+    private var receivedFrames: UInt64 = 0
     private var latestStatistics = SimulatorBridgeStatistics(
         capturedFrames: 0,
         sentFrames: 0,
         replacedFrames: 0,
         encodedBytes: 0
     )
+    private lazy var livenessMonitor = SimulatorFrameLivenessMonitor(queue: stateQueue) {
+        [weak self] in self?.handleStall()
+    }
 
     init(
         helperURL: URL,
@@ -98,7 +105,12 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
     }
 
     func setVisible(_ visible: Bool) {
-        stateQueue.async { [weak self] in self?.send(.setVisible(visible)) }
+        stateQueue.async { [weak self] in
+            guard let self else { return }
+            isVisibleRequested = visible
+            send(.setVisible(visible))
+            if didCompleteHandshake { livenessMonitor.setVisible(visible) }
+        }
     }
 
     func sendInput(_ input: SimulatorBridgeInput) async throws {
@@ -210,7 +222,10 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
                                 case .success(let frame):
                                     eventContinuation.yield(.frame(frame))
                                     stateQueue.async { [weak self] in
-                                        self?.send(.acknowledgeFrame(frame.sequence))
+                                        guard let self, !didStop else { return }
+                                        receivedFrames += 1
+                                        livenessMonitor.frameArrived()
+                                        send(.acknowledgeFrame(frame.sequence))
                                     }
                                 case .failure:
                                     stateQueue.async { [weak self] in
@@ -290,6 +305,7 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
                 coreSimulatorVersion: reply.coreSimulatorVersion,
                 simulatorKitVersion: reply.simulatorKitVersion
             ))
+            livenessMonitor.setVisible(isVisibleRequested)
 
         case .inputResult(let requestID, let error):
             guard let continuation = pendingInput.removeValue(forKey: requestID) else { return }
@@ -337,10 +353,25 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
         handshake.resume(throwing: error)
     }
 
+    /// A visible stream went quiet for the whole liveness deadline. That is a helper that is
+    /// alive but not delivering, so it ends the way a lost helper does: with a reason the pane
+    /// can show, a fallback and a retry, instead of a frozen picture under a live label.
+    private func handleStall() {
+        guard !didStop else { return }
+        let error = SimulatorLiveStreamError.stalled
+        ThreadingLogger.simulator.error(
+            "Direct stream stalled device=\(self.deviceID.rawValue, privacy: .public) received=\(self.receivedFrames, privacy: .public)"
+        )
+        SimulatorStreamDiagnostics.shared.recordedFailure(error)
+        eventContinuation.yield(.failed(error.localizedDescription))
+        stopLocked()
+    }
+
     private func stopLocked(terminateProcess: Bool = true) {
         guard !didStop else { return }
         if terminateProcess { send(.stop) }
         didStop = true
+        livenessMonitor.invalidate()
         frameDecoder.invalidate()
         failHandshake(SimulatorLiveStreamError.disconnected)
         for continuation in pendingInput.values {
@@ -362,7 +393,7 @@ final class SimulatorHelperClient: SimulatorLiveStreamSession, @unchecked Sendab
             SimulatorStreamDiagnostics.shared.ended(id: diagnosticID)
             let elapsedMilliseconds = (DispatchTime.now().uptimeNanoseconds - startedAt) / 1_000_000
             ThreadingLogger.simulator.info(
-                "Direct stream ended durationMS=\(elapsedMilliseconds, privacy: .public) sent=\(self.latestStatistics.sentFrames, privacy: .public) replaced=\(self.latestStatistics.replacedFrames, privacy: .public)"
+                "Direct stream ended durationMS=\(elapsedMilliseconds, privacy: .public) received=\(self.receivedFrames, privacy: .public) sent=\(self.latestStatistics.sentFrames, privacy: .public) replaced=\(self.latestStatistics.replacedFrames, privacy: .public)"
             )
             didStartDiagnostics = false
         }

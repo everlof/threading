@@ -29,7 +29,9 @@ final class SimulatorLiveIntegrationTests: XCTestCase {
         }
     }
 
-    func testDirectFramebufferDecodeAndHumanInputEnvelope() async throws {
+    private static let consecutiveFrameCount = 3
+
+    private func integrationDeviceID() throws -> SimulatorDeviceID {
         guard let rawDeviceID = ProcessInfo.processInfo.environment[
             "THREADING_SIMULATOR_INTEGRATION_UDID"
         ], !rawDeviceID.isEmpty else {
@@ -37,7 +39,55 @@ final class SimulatorLiveIntegrationTests: XCTestCase {
                 "Set THREADING_SIMULATOR_INTEGRATION_UDID to an already-booted iOS Simulator."
             )
         }
-        let deviceID = try XCTUnwrap(SimulatorDeviceID(rawDeviceID))
+        return try XCTUnwrap(SimulatorDeviceID(rawDeviceID))
+    }
+
+    /// Read-only: the stream must keep moving after its first picture. The shipped H.264
+    /// encoder once held the second frame for lookahead, which left every helper idle and the
+    /// pane frozen under a live label while the first-frame checks all passed.
+    func testDirectStreamDeliversConsecutiveFrames() async throws {
+        let deviceID = try integrationDeviceID()
+        let coordinator = SimulatorLiveStreamCoordinator(maximumStreams: 1)
+        let session = try await coordinator.openStream(for: deviceID)
+        defer {
+            session.setVisible(false)
+            session.stop()
+        }
+        session.setVisible(true)
+
+        let sequences = try await withThrowingTaskGroup(of: [UInt64].self) { group in
+            group.addTask {
+                var observed: [UInt64] = []
+                for await event in session.events {
+                    switch event {
+                    case .ready, .statistics:
+                        continue
+                    case .frame(let frame):
+                        observed.append(frame.sequence)
+                        if observed.count >= Self.consecutiveFrameCount { return observed }
+                    case .failed(let detail):
+                        throw IntegrationError.streamFailed(detail)
+                    case .ended:
+                        throw IntegrationError.endedBeforeFrame
+                    }
+                }
+                throw IntegrationError.endedBeforeFrame
+            }
+            group.addTask {
+                try await Task.sleep(for: .seconds(12))
+                throw IntegrationError.timedOut
+            }
+            defer { group.cancelAll() }
+            return try await group.next()!
+        }
+
+        XCTAssertEqual(sequences.count, Self.consecutiveFrameCount)
+        XCTAssertEqual(sequences, sequences.sorted())
+        XCTAssertEqual(Set(sequences).count, sequences.count, "Every frame carries a new sequence.")
+    }
+
+    func testDirectFramebufferDecodeAndHumanInputEnvelope() async throws {
+        let deviceID = try integrationDeviceID()
         let coordinator = SimulatorLiveStreamCoordinator(maximumStreams: 1)
         let session = try await coordinator.openStream(for: deviceID)
         defer {

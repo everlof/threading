@@ -43,7 +43,7 @@ final class SimulatorCompatibilityProbeTests: XCTestCase {
         XCTAssertEqual(request.reportURL.path, "/tmp/threading-simulator-report.json")
     }
 
-    func testProbeRecordsTheSignedHelperHandshakeAndFirstFrame() async throws {
+    func testProbeRecordsTheSignedHelperHandshakeAndAFlowingStream() async throws {
         let session = SimulatorCompatibilitySessionFake()
         let coordinator = SimulatorCompatibilityCoordinatorFake(session: session)
         let request = SimulatorCompatibilityProbeRequest(
@@ -69,6 +69,51 @@ final class SimulatorCompatibilityProbeTests: XCTestCase {
         XCTAssertNil(report.failure)
         XCTAssertEqual(session.visibilityChanges, [true, false])
         XCTAssertTrue(session.didStop)
+    }
+
+    /// The shipped encoder once froze after its first picture while the helper stayed alive;
+    /// a probe satisfied by one frame called that build compatible.
+    func testProbeRefusesAStreamThatStopsAfterItsFirstFrame() async throws {
+        let session = SimulatorCompatibilitySessionFake(frameCount: 1)
+        let coordinator = SimulatorCompatibilityCoordinatorFake(session: session)
+        let request = SimulatorCompatibilityProbeRequest(
+            deviceID: simulatorCompatibilityDeviceID,
+            reportURL: URL(fileURLWithPath: "/tmp/unused.json")
+        )
+
+        let report = await SimulatorCompatibilityProbe.run(
+            request: request,
+            bundle: Bundle(for: Self.self),
+            coordinator: coordinator,
+            timeout: .milliseconds(200)
+        )
+
+        XCTAssertEqual(report.outcome, "incompatible")
+        XCTAssertEqual(
+            report.failure,
+            "The direct Simulator stream did not deliver 2 frames before its deadline."
+        )
+        XCTAssertNil(report.frameWidth)
+        XCTAssertTrue(session.didStop)
+    }
+
+    /// A repeated sequence is the same picture again, not evidence that the stream moves.
+    func testProbeIgnoresARepeatedFrameSequence() async throws {
+        let session = SimulatorCompatibilitySessionFake(sequences: [1, 1])
+        let coordinator = SimulatorCompatibilityCoordinatorFake(session: session)
+        let request = SimulatorCompatibilityProbeRequest(
+            deviceID: simulatorCompatibilityDeviceID,
+            reportURL: URL(fileURLWithPath: "/tmp/unused.json")
+        )
+
+        let report = await SimulatorCompatibilityProbe.run(
+            request: request,
+            bundle: Bundle(for: Self.self),
+            coordinator: coordinator,
+            timeout: .milliseconds(200)
+        )
+
+        XCTAssertEqual(report.outcome, "incompatible")
     }
 
     func testProbeFailureProducesAReportAndWriterRequiresAnExistingParent() async throws {
@@ -149,7 +194,11 @@ private final class SimulatorCompatibilitySessionFake: SimulatorLiveStreamSessio
     private var visibility: [Bool] = []
     private var stopped = false
 
-    init() {
+    convenience init(frameCount: Int = SimulatorCompatibilityProbe.requiredFrames) {
+        self.init(sequences: (0..<frameCount).map { UInt64($0 + 1) })
+    }
+
+    init(sequences: [UInt64]) {
         let pair = AsyncStream<SimulatorLiveStreamEvent>.makeStream(
             bufferingPolicy: .bufferingNewest(4)
         )
@@ -167,12 +216,14 @@ private final class SimulatorCompatibilitySessionFake: SimulatorLiveStreamSessio
             coreSimulatorVersion: "CoreSimulator-1065",
             simulatorKitVersion: "SimulatorKit-1065"
         ))
-        continuation.yield(.frame(SimulatorLiveFrame(
-            sequence: 1,
-            image: Self.makeImage(),
-            codec: .h264,
-            presentationTimeNanoseconds: 1
-        )))
+        for sequence in sequences {
+            continuation.yield(.frame(SimulatorLiveFrame(
+                sequence: sequence,
+                image: Self.makeImage(),
+                codec: .h264,
+                presentationTimeNanoseconds: sequence
+            )))
+        }
     }
 
     var visibilityChanges: [Bool] {
