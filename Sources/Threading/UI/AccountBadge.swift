@@ -52,6 +52,11 @@ enum AccountBadge {
         let key = cacheKey(account: account, hasAvatar: avatar != nil, initial: initial)
 
         if let cached = cache.object(forKey: key) {
+            // Restamped rather than assumed. The name is what this chip *announces*, not what it
+            // draws — the initial comes from the login address — so it is deliberately not part
+            // of the key, and a cache hit after a rename would otherwise keep telling VoiceOver
+            // the old one for the life of the process.
+            cached.accessibilityDescription = account.displayName
             publishedCache.setObject(cached, forKey: account.id.rawValue as NSString)
             return cached
         }

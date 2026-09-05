@@ -83,9 +83,33 @@ final class AccountsPreferencesEditingPerformanceTests: XCTestCase {
                 name: NSControl.textDidEndEditingNotification,
                 object: field
             ))
-            host.layoutSubtreeIfNeeded()
         }
+        let commitLayout = elapsed { host.layoutSubtreeIfNeeded() }
         let commitDraw = elapsed { draw(host) }
+
+        // The durable write on its own, so the page's share of the commit is not the store's.
+        let store = AccountPreferencesStore.shared
+        let storeWrite = elapsed {
+            store.setDisplayNameOverride("Timing Probe", for: accounts[0].id)
+        }
+        store.clearPresentation(for: accounts[0].id)
+
+        // The same commit with no field editor installed. AppKit's text input session is the
+        // suspect for the difference: a row rebuild removes the field being edited, and
+        // activating or tearing down an input session is tens of milliseconds on this machine.
+        window.makeFirstResponder(nil)
+        let unfocusedField = try XCTUnwrap(
+            descendants(of: controller.view)
+                .compactMap { $0 as? ThemedTextField }
+                .first
+        )
+        unfocusedField.stringValue = "Unfocused Commit"
+        let unfocusedCommit = elapsed {
+            controller.controlTextDidEndEditing(Notification(
+                name: NSControl.textDidEndEditingNotification,
+                object: unfocusedField
+            ))
+        }
 
         let sorted = keystrokes.sorted()
         print("""
@@ -95,7 +119,10 @@ final class AccountsPreferencesEditingPerformanceTests: XCTestCase {
               keystroke max   \(milliseconds(sorted.last ?? 0))
               keystroke total \(milliseconds(keystrokes.reduce(0, +)))
               commit          \(milliseconds(commit))
+              commit layout   \(milliseconds(commitLayout))
               commit draw     \(milliseconds(commitDraw))
+              store write     \(milliseconds(storeWrite))
+              commit unfocused\(milliseconds(unfocusedCommit))
               virtual rows    \(controller.virtualRowCountForTesting)
               live cells      \(controller.materializedRowCountForTesting)
             """)

@@ -259,8 +259,8 @@ still the sole row background owner; the cell paints only row content, divider, 
 revealed action strip. SwiftUI continues to own the bounded surrounding chrome.
 
 Three optimized Debug simulator runs of the same 1,000-row down-and-back traversal measured
-5.458–5.911 ms p50 and 7.189–7.510 ms p95 main-thread work. Frame-gap p95 was
-16.693–16.696 ms, versus 166.677 ms before, and no run mounted more than 16 cells at once. Run the
+5.458–5.911 ms p50 and 7.189–7.600 ms p95 main-thread work. Frame-gap p95 was
+16.693–16.708 ms, versus 166.677 ms before, and no run mounted more than 16 cells at once. Run the
 reproducible clean metric plus diagnostic sample with:
 
 ```bash
@@ -310,6 +310,52 @@ predates it, and `enabledChanged` and the emoji picker take the same route.
 `AgentAccountDiscovery` (a home-directory scan plus the shell config reads behind
 `ShellAliasReader`) and then posts `ProjectsDidChange`, which reloads the sidebar — which is the
 shape of the 357 ms and 368 ms stalls the recorder captured either side of the report.
+
+### The owner was not the table
+
+Two structural repairs looked obvious and neither moved the number much, which is the part worth
+recording. Restamping only the affected rows instead of the page took the commit from 102 ms to
+67 ms. Replacing `NSTableView.reloadData(forRowIndexes:)` with an in-place `install` on the live
+cell — on the theory that a table with automatic row heights re-measures its viewport around a
+reloaded row — took it to 72 ms, which is to say nowhere.
+
+The experiment that named it was one line: run the identical commit with nothing focused.
+
+| Commit | Cost |
+|---|---|
+| with the name field holding the field editor | 84 ms |
+| with no first responder | 2.8 ms |
+
+Rebuilding the account row removes the `ThemedTextField` AppKit is editing in, and tearing that
+text input session down is the cost — the same HIToolbox/IMK activation behind the archive and
+switch stalls elsewhere in this document, arriving here as "renaming is slow" instead. **A view
+rebuild that happens to contain the first responder is not a cheap view rebuild.**
+
+So the row the edit came *from* is restamped by value — its field is handed the resolved name,
+covering trimming and the cleared-field case — and never rebuilt. Every other affected row is
+rebuilt in place as before.
+
+### Measured after, same fixture and build
+
+| Operation | Before | After |
+|---|---|---|
+| one keystroke, layout | 0.9 ms | 0.7 ms |
+| commit | 125 ms | **3.9 ms** |
+| commit, layout | — | 0.9 ms |
+| commit, draw | 23 ms | 15 ms |
+
+And the app-wide half, which the fixture cannot see: the page no longer posts `ProjectsDidChange`
+for a presentation edit. `AccountPreferencesStore` already posts `AccountPreferencesDidChange` on
+every write; the two surfaces that were relying on the structural event — the sidebar's account
+chip and the composer's identity chip — observe that instead and restamp their visible rows. The
+sidebar outline rebuild, the transcript and navigation search reindex, the extension fact
+republish, the curfew re-evaluation and the remote mirror reconcile no longer happen because
+somebody renamed a login.
+
+The regression boundary is `AccountPresentationPropagationTests`: the two page surfaces that print
+the name both follow the edit, the page is not rebuilt, a changed roster still rebuilds it, and the
+field the edit came from is still in the hierarchy afterwards. `THREADING_STRESS=1` keeps the
+timing fixture, whose `commit unfocused` line is what names the owner if this regresses.
 
 Not yet repaired, and the repair is not simply "reload one row": an account's name also appears in
 the limits cards below it, so the affected identities are the account row *and* the limit rows that

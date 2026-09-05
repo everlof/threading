@@ -599,6 +599,13 @@ private extension ProjectSidebarViewController {
         appEvents.observe(ScheduledMessagesDidChange.self) { [weak self] _ in
             self?.refreshRows()
         }
+        // An account's name or icon changes what a row's account chip announces and what its
+        // hover popover reads, and changes no tree geometry either. This used to arrive as
+        // `ProjectsDidChange(.structure)` posted by the Accounts settings page, which rebuilt
+        // the whole outline — for a rename.
+        appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
+            self?.refreshRows()
+        }
         // No theme observer for the ground: `SidebarBackdropView` re-decides what it shows on
         // every theme change itself, so the controller cannot forget to tell it.
         appEvents.observe(ExtensionIdentityResolversDidChange.self) { [weak self] _ in

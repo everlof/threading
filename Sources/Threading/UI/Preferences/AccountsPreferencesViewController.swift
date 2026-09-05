@@ -37,6 +37,10 @@ final class AccountsPreferencesViewController: NSViewController {
     /// The open icon picker, retained so it survives until dismissed.
     private var iconPopover: ThemedPopover?
 
+    /// How many times the whole page has been rebuilt. The contract a test holds this page to
+    /// is that a presentation edit does not advance it.
+    private var presentationRebuildCount = 0
+
     /// The limits half of the page. Retained across rebuilds because it holds which folds are
     /// open, and a fold that closed every time a rule was added would be the page arguing with
     /// the person using it.
@@ -102,11 +106,10 @@ final class AccountsPreferencesViewController: NSViewController {
     override func loadView() {
         view = NSView()
         addChild(setupController)
-        setupController.onAccountReady = { [weak self] _ in
-            self?.reload()
-            self?.notifyAccountsChanged()
-        }
-        limits.onChange = { [weak self] in self?.notifyAccountsChanged() }
+        // A verified login *is* a page-shaped change — a row appears — so this one rebuilds.
+        // It announces nothing of its own: `AgentAccountSetupCoordinator.complete` has already
+        // posted the structural event by the time this runs.
+        setupController.onAccountReady = { [weak self] _ in self?.reload() }
         limits.onPresentationChange = { [weak self] in self?.reloadPresentationRows() }
 
         let page = SettingsUI.listPage(
@@ -168,7 +171,15 @@ final class AccountsPreferencesViewController: NSViewController {
         reloadPresentationRows()
     }
 
+    /// Rebuilds the cheap row model and every live cell. A page-shaped change only: a login
+    /// appearing or leaving, a limit fold opening, an extension publishing a section.
+    ///
+    /// Deliberately *not* what a presentation edit calls. Recording one name used to come
+    /// through here, which discarded and remade every visible cell because one row's text had
+    /// changed — 125 ms before the page had even asked the filesystem anything. See
+    /// [`performance.md`](../../../../docs/architecture/performance.md).
     private func reloadPresentationRows() {
+        presentationRebuildCount += 1
         var rows: [PresentationRow] = [.setup, .accountCaption]
         if accounts.isEmpty {
             rows.append(.emptyAccount)
@@ -188,6 +199,67 @@ final class AccountsPreferencesViewController: NSViewController {
         presentationRows = rows
         updateCardDecorations()
         tableView.reloadData()
+    }
+
+    /// Restamps one login's own surfaces after a presentation edit, and nothing else.
+    ///
+    /// The affected identities are the account row and the limit card scoped to it, because the
+    /// card's header is the second place the page prints the name. Everything else on the page —
+    /// the setup card, the note, the other logins, the extension sections — is unchanged by a
+    /// rename, an icon, or a switch, and is left standing.
+    /// - Parameter settling: the name field the edit came *from*, when it came from one.
+    ///   That row is restamped by value rather than rebuilt, because rebuilding it removes the
+    ///   field AppKit is editing in and tearing down a text input session costs ~80 ms on this
+    ///   machine — measured, and the same activation cost behind the archive/switch stalls in
+    ///   [`performance.md`](../../../../docs/architecture/performance.md). Its text is already
+    ///   what the person typed; restating the resolved value is what covers trimming and the
+    ///   cleared field, where the automatic name comes back.
+    private func refreshAccountPresentation(
+        at index: Int,
+        settling editedField: ThemedTextField? = nil
+    ) {
+        guard let accountID = account(at: index)?.id else { return }
+        let previous = accounts.map(\.id)
+        accounts = accountsProvider()
+        limits.reload(accounts: accounts)
+
+        // Discovery answering with a different roster is a page-shaped change, not a
+        // presentation one: a login was added or removed while Settings stood open, and every
+        // row index below it has moved.
+        guard accounts.map(\.id) == previous else {
+            reloadPresentationRows()
+            return
+        }
+
+        var affected = IndexSet()
+        for (row, presentation) in presentationRows.enumerated() {
+            switch presentation {
+            case .account(let accountIndex) where accountIndex == index:
+                affected.insert(row)
+            case .limit(let limitRow) where limits.namesAccount(accountID, in: limitRow):
+                affected.insert(row)
+            default:
+                continue
+            }
+        }
+        for row in affected {
+            if let editedField, case .account(let edited) = presentationRows[row], edited == index {
+                editedField.stringValue = accounts[index].displayName
+                restampSwitchAnnouncement(inRowAt: row, for: accounts[index])
+                continue
+            }
+            // Re-installed rather than reloaded. `NSTableView.reloadData(forRowIndexes:)` on a
+            // table with automatic row heights invalidates geometry and rebuilds the viewport
+            // around it — measured at 67 ms for these two rows, barely cheaper than rebuilding
+            // the page. Nothing about a rename changes a row's height, so the cheap thing is
+            // also the correct one: hand the same cell its new content.
+            guard let host = tableView.view(
+                atColumn: 0,
+                row: row,
+                makeIfNecessary: false
+            ) as? ThemedVirtualTableCell else { continue }
+            install(rowAt: row, into: host)
+        }
     }
 
     // MARK: - Row Construction
@@ -359,8 +431,7 @@ final class AccountsPreferencesViewController: NSViewController {
             self.accountStore.setEmoji(emoji, for: account.id)
             self.iconPopover?.close()
             self.iconPopover = nil
-            self.reload()
-            self.notifyAccountsChanged()
+            self.refreshAccountPresentation(at: sender.tag)
         }
 
         let popover = HostPopoverFactory.make(.settingsAccountIconPicker)
@@ -378,8 +449,7 @@ final class AccountsPreferencesViewController: NSViewController {
         guard let account = account(at: sender.tag) else { return }
 
         accountStore.clearPresentation(for: account.id)
-        reload()
-        notifyAccountsChanged()
+        refreshAccountPresentation(at: sender.tag)
     }
 
     /// Runs the provider-owned browser login again under this account's existing config home.
@@ -400,8 +470,7 @@ final class AccountsPreferencesViewController: NSViewController {
         guard let account = account(at: sender.tag) else { return }
 
         accountStore.setEnabled(sender.state == .on, for: account.id)
-        reload()
-        notifyAccountsChanged()
+        refreshAccountPresentation(at: sender.tag)
     }
 
     // MARK: - Private Methods
@@ -423,11 +492,11 @@ final class AccountsPreferencesViewController: NSViewController {
 
         guard current != previous else { return }
         if reloadAfterCommit {
-            // Rebuild from discovery so clearing the field immediately restores its automatic
-            // name, and trimming is reflected in the standing value.
-            reload()
+            // Re-read from discovery so clearing the field immediately restores its automatic
+            // name, and trimming is reflected in the standing value — but restamp only the rows
+            // that print this login, not the page, and not the field it came from.
+            refreshAccountPresentation(at: field.tag, settling: field)
         }
-        notifyAccountsChanged()
     }
 
     private func abbreviated(_ path: String) -> String {
@@ -436,13 +505,11 @@ final class AccountsPreferencesViewController: NSViewController {
         return "~" + path.dropFirst(home.count)
     }
 
-    /// Sidebar rows show account icons and names, so they refresh alongside this pane.
-    private func notifyAccountsChanged() {
-        NotificationCenter.default.post(ProjectsDidChange())
-    }
-
     /// Stress-fixture observability: complete value rows versus live viewport cells.
     var virtualRowCountForTesting: Int { presentationRows.count }
+
+    /// How many whole-page rebuilds this controller has done.
+    var presentationRebuildCountForTesting: Int { presentationRebuildCount }
 
     var materializedRowCountForTesting: Int {
         var count = 0
@@ -491,14 +558,41 @@ extension AccountsPreferencesViewController: NSTableViewDataSource, NSTableViewD
             owner: self
         ) as? ThemedVirtualTableCell ?? ThemedVirtualTableCell()
         host.identifier = identifier
+        install(rowAt: tableRow, into: host)
+        return host
+    }
+
+    /// The row's other name-bearing surface. The switch says *which* login it switches, so a
+    /// row kept standing for its field editor's sake would otherwise keep announcing the old
+    /// name to VoiceOver — the same staleness `AccountBadge` avoids on its cache-hit path.
+    private func restampSwitchAnnouncement(inRowAt row: Int, for account: AgentAccount) {
+        guard let host = tableView.view(atColumn: 0, row: row, makeIfNecessary: false) else {
+            return
+        }
+        for toggle in Self.toggles(in: host) {
+            toggle.setAccessibilityLabel(
+                AccountsPreferencesStrings.enabledLabel(account.displayName)
+            )
+        }
+    }
+
+    private static func toggles(in view: NSView) -> [ThemedToggle] {
+        view.subviews.flatMap { subview -> [ThemedToggle] in
+            (subview as? ThemedToggle).map { [$0] } ?? toggles(in: subview)
+        }
+    }
+
+    /// Fills one virtual cell with a row's content. Shared by the data source and by the
+    /// targeted restamp, so a cell handed new content is inset exactly like a fresh one.
+    private func install(rowAt index: Int, into host: ThemedVirtualTableCell) {
+        guard presentationRows.indices.contains(index) else { return }
         host.install(
-            content(for: presentationRows[tableRow]),
+            content(for: presentationRows[index]),
             columnWidth: tableView.tableColumns.first?.width ?? tableView.bounds.width,
             horizontalInset: Design.Size.glowGutter,
-            topInset: topInset(forRowAt: tableRow),
-            bottomInset: bottomInset(forRowAt: tableRow)
+            topInset: topInset(forRowAt: index),
+            bottomInset: bottomInset(forRowAt: index)
         )
-        return host
     }
 
     private func content(for row: PresentationRow) -> NSView {

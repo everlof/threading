@@ -106,6 +106,27 @@ it — the account sticks to the session, switch or no switch. And the accounts 
 everything, since it is where a login is switched back on. `AccountName` also resolves against
 every sibling: a disabled login still owns the address that would make another one ambiguous.
 
+**A presentation edit is not a change to the project graph.** Renaming a login, choosing its
+icon, or switching it off writes to `AccountPreferencesStore`, which posts
+`AccountPreferencesDidChange` itself on every write. The Accounts page used to post
+`ProjectsDidChange` on top of that — the app's structural event, whose default `.structure` impact
+rebuilds the sidebar outline, reindexes transcript and navigation search, republishes every
+extension host fact, re-evaluates curfews and reconciles the remote mirror. For a rename.
+
+The two surfaces that were relying on it are the sidebar's account chip and the composer's
+identity chip, and both now observe the account event and restamp their visible rows: `refreshRows`
+and `refreshChips` respectively, each already the bounded restamp its owner used for other narrow
+events. Everything else that draws an account — the usage pages, the fleet popover, the extension
+snapshot journal, the remote mirror, onboarding — already observed `AccountPreferencesDidChange`.
+`AccountBadge` is the one place a rename could still be lost: its cache key is what the chip
+*draws*, and the name is not drawn (the initial comes from the login address), so the
+accessibility description is restamped on the cache-hit path rather than being part of the key.
+
+A new login is still structural — a row appears — and `AgentAccountSetupCoordinator.complete`
+posts that event itself. Limit edits announce themselves through `CustomLimitsDidChange`.
+The page's own repair, and the 80 ms hiding inside it, are in
+[`performance.md`](performance.md#renaming-a-login-in-settings-measured-2026-09-05).
+
 The presentation action on that row is deliberately **Restore Name & Icon**, not Reset. It
 clears only the display-name and emoji overrides and leaves enablement, credentials, sessions,
 and every usage reading untouched. “Reset” beside the Usage destinations made the last of those

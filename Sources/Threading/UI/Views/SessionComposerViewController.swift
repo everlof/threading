@@ -636,6 +636,7 @@ final class SessionComposerViewController: NSViewController {
 
         wireChips()
         observeUsage()
+        observeAccountPresentation()
         installActivityBeam()
         // Nothing has been discovered yet, so the offer starts absent rather than as an
         // untitled button holding a row open until the first scan comes back.
@@ -687,6 +688,15 @@ final class SessionComposerViewController: NSViewController {
     private func observeUsage() {
         appEvents.observe(AccountUsageDidChange.self) { [weak self] _ in
             self?.refreshUsage()
+        }
+    }
+
+    /// The identity chip names the login wherever there is a choice of one, so a rename or a new
+    /// icon chosen in Settings has to reach it. `refreshChips` is this composer's own bounded
+    /// restamp — the same one a model or effort choice uses — rather than a rebuild.
+    private func observeAccountPresentation() {
+        appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
+            self?.refreshChips()
         }
     }
 

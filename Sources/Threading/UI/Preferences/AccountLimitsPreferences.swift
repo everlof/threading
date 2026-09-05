@@ -26,10 +26,6 @@ final class AccountLimitsSectionController {
 
     // MARK: - Properties
 
-    /// Called after any edit, so the page that owns this can refresh anything of its own that
-    /// reads the same accounts.
-    var onChange: (() -> Void)?
-
     /// Called whenever expansion or an edit changes the cheap row model.
     var onPresentationChange: (() -> Void)?
 
@@ -135,6 +131,17 @@ final class AccountLimitsSectionController {
         }
         result.append(.note)
         return result
+    }
+
+    /// Whether this row is drawn from one account's presentation, and so has to be restamped
+    /// when that account is renamed or re-iconed.
+    ///
+    /// A limit scope carries the account's name on its header, which is why a rename is not
+    /// confined to the account row above it: the page's affected identities are the account row
+    /// *and* the card scoped to that account.
+    func namesAccount(_ accountID: AccountID, in row: PresentationRow) -> Bool {
+        guard let scopeIndex = cardScopeIndex(for: row) else { return false }
+        return scope(at: scopeIndex)?.account?.id == accountID
     }
 
     /// Identifies the rows whose shared card surface is painted by the owning virtual table.
@@ -557,9 +564,11 @@ final class AccountLimitsSectionController {
     /// What every edit does afterwards. One place, because the event is what wakes the alert
     /// centre and a rule created now has to be able to speak before the next reading arrives.
     private func edited() {
+        // `CustomLimitsDidChange` is the announcement, and account-scoped writes additionally
+        // post `AccountPreferencesDidChange` from the store. The owning page used to be told
+        // separately so it could post a third, heavier event of its own; it no longer does.
         NotificationCenter.default.post(CustomLimitsDidChange())
         onPresentationChange?()
-        onChange?()
     }
 }
 
