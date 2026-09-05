@@ -1942,6 +1942,17 @@ never receives or stores the credential. Existing `~/.claude-*` and `~/.codex-*`
 found automatically. Threading does not delete provider homes; switch a login off when you no
 longer want it offered.
 
+### Signing in somewhere other than your default browser
+While a login is running, the card shows **Sign-in link** — the same URL the agent printed when it
+opened your browser — with **Copy Link** and **Open**. Use it to finish the sign-in wherever you
+want: a private window, a second profile, or a browser that is not your default. The link takes a
+moment to appear, because it is the agent that prints it.
+
+Codex's link finishes on its own once you complete it, in any browser on this Mac. Claude Code's
+link ends on a page that shows you a **code** instead, so its card also has an **Authorization
+code** field: paste the code there and press **Send Code**. Threading passes it straight to Claude
+Code and keeps no copy. If the sign-in does not finish, paste it again.
+
 ### Switching an account off
 Each row carries a **switch**. Turning it off withdraws that login from everywhere an account
 is offered — the composer's identity chip, the new-session menus, the usage readings and the

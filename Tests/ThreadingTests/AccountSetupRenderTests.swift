@@ -93,12 +93,28 @@ final class AccountSetupRenderTests: XCTestCase {
             isReconnect: true
         )
 
+        // The moment the person can act on: the CLI has printed the link it also handed to a
+        // browser, and Claude Code's flow ends with a code coming back the other way.
+        let claudePrompt = AgentAccountSignInPrompt(
+            url: URL(string: "https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-e61b-44d9-88ed-5944d1962f5e&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&state=P1bhsNKBpbv78wuI2BrpJZ9tnICmoy")!,
+            acceptsPastedCode: true
+        )
+        let codexPrompt = AgentAccountSignInPrompt(
+            url: URL(string: "https://auth.openai.com/oauth/authorize?response_type=code&client_id=app_EMoamEEZ73f0CkXaXp7hrann&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback")!,
+            acceptsPastedCode: false
+        )
+
         let onboardingStories = [
             OnboardingStory(name: "empty-choice", accounts: [], state: .choice),
             OnboardingStory(name: "single-choice", accounts: [work], state: .choice),
             OnboardingStory(name: "multiple-choice", accounts: [work, personal], state: .choice),
             OnboardingStory(name: "naming", accounts: [], state: .naming(.claude)),
-            OnboardingStory(name: "running", accounts: [], state: .running(newContext)),
+            OnboardingStory(name: "running", accounts: [], state: .running(newContext, prompt: nil)),
+            OnboardingStory(
+                name: "running-with-link",
+                accounts: [],
+                state: .running(newContext, prompt: claudePrompt)
+            ),
             OnboardingStory(
                 name: "missing-cli",
                 accounts: [],
@@ -127,7 +143,12 @@ final class AccountSetupRenderTests: XCTestCase {
             SettingsStory(
                 name: "reconnect-running",
                 accounts: [work, personal],
-                state: .running(reconnectContext)
+                state: .running(reconnectContext, prompt: nil)
+            ),
+            SettingsStory(
+                name: "reconnect-running-with-link",
+                accounts: [work, personal],
+                state: .running(reconnectContext, prompt: codexPrompt)
             )
         ]
 

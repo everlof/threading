@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// The providers whose official CLI authentication flow Threading can safely orchestrate.
@@ -65,6 +66,21 @@ enum AgentAccountSetupProvider: String, CaseIterable, Sendable {
             return URL(string: "https://developers.openai.com/codex/cli")!
         }
     }
+
+    /// Whether this CLI's printed fallback URL finishes by reading a code back from its stdin.
+    ///
+    /// Measured from each CLI's own output rather than assumed. Codex prints the same
+    /// `http://localhost:<port>/…` redirect it handed the browser, so its link completes on its
+    /// own in any browser on this Mac. Claude Code keeps the loopback redirect for the browser it
+    /// launches and prints a *different* URL, one that redirects to a page displaying a code — so
+    /// its link is only usable if that code has somewhere to go. See
+    /// [`accounts.md`](../../../../docs/architecture/accounts.md).
+    var acceptsPastedSignInCode: Bool {
+        switch self {
+        case .claude: return true
+        case .codex: return false
+        }
+    }
 }
 
 struct AgentAccountSetupContext: Equatable, Sendable {
@@ -89,7 +105,9 @@ enum AgentAccountSetupFailure: Equatable, Sendable {
 enum AgentAccountSetupState: Equatable, Sendable {
     case choice
     case naming(AgentAccountSetupProvider)
-    case running(AgentAccountSetupContext)
+    /// A login in progress, plus the link it has printed for a browser of the person's choosing
+    /// once the CLI has printed one. Nil is the ordinary first moment, not a failure.
+    case running(AgentAccountSetupContext, prompt: AgentAccountSignInPrompt?)
     case failed(
         provider: AgentAccountSetupProvider,
         attemptedName: String,
@@ -126,6 +144,16 @@ final class AgentAccountSetupCoordinator {
     private var activeChild: SpawnedChildProcess?
     private var timeoutTask: Task<Void, Never>?
 
+    /// The login's own output, read only until it yields the sign-in URL and drained after that
+    /// so the CLI is never stopped by a pipe nobody is emptying.
+    private var activeOutput: ChildOutputStream?
+
+    /// The login's stdin, kept open for the one thing it is for: handing back the code the
+    /// provider's fallback page displays.
+    private var activeInput: AgentAccountSignInInput?
+
+    private var scanner = AgentAccountSignInScanner()
+
     init(initialState: AgentAccountSetupState = .choice) {
         self.state = initialState
     }
@@ -133,6 +161,8 @@ final class AgentAccountSetupCoordinator {
     deinit {
         activeChild?.terminate()
         timeoutTask?.cancel()
+        activeOutput?.cancel()
+        activeInput?.close()
     }
 
     func choose(_ provider: AgentAccountSetupProvider) {
@@ -195,10 +225,31 @@ final class AgentAccountSetupCoordinator {
         }
     }
 
+    /// Hands the code a provider's fallback page displayed back to the CLI waiting for it.
+    ///
+    /// The code is written straight through to the child and kept nowhere else: not logged, not
+    /// stored, not part of any state this object publishes. It is a single-use authorization
+    /// code, and the PKCE verifier that redeems it never leaves the CLI, so this remains a
+    /// keystroke relay rather than Threading holding a credential.
+    func submitPastedCode(_ code: String) {
+        let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard case let .running(context, prompt) = state,
+              let prompt, prompt.acceptsPastedCode,
+              !trimmed.isEmpty,
+              activeChild?.isRunning == true,
+              let input = activeInput else { return }
+
+        input.write(Data((trimmed + "\n").utf8))
+        var acknowledged = prompt
+        acknowledged.hasSentCode = true
+        state = .running(context, prompt: acknowledged)
+    }
+
     func cancel() {
         let child = activeChild
         activeAttemptID = nil
         activeChild = nil
+        endChildStreams()
         timeoutTask?.cancel()
         timeoutTask = nil
         state = .choice
@@ -263,7 +314,8 @@ final class AgentAccountSetupCoordinator {
         let attemptID = UUID()
         let shell = AgentLauncher.loginShellPath
         activeAttemptID = attemptID
-        state = .running(context)
+        scanner = AgentAccountSignInScanner()
+        state = .running(context, prompt: nil)
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let executable = AgentCLIProbe.locate(
@@ -314,6 +366,28 @@ final class AgentAccountSetupCoordinator {
         var environment = ProcessInfo.processInfo.environment
         environment[context.provider.environmentKey] = context.configPath
 
+        // Three `/dev/null`s used to be the whole point: a login Threading could not read was a
+        // login Threading could not leak. What it also meant was that the URL the CLI prints for
+        // "if the browser didn't open" went nowhere, so the only browser this flow could ever
+        // finish in was the one LaunchServices picked. The pipes below carry that one line and
+        // the code that answers it; nothing read here is stored, logged or kept past the attempt.
+        let inputPipe: ChildPipe
+        let outputPipe: ChildPipe
+        do {
+            inputPipe = try ChildPipe()
+            // A CLI that exits between the browser opening and a code being pasted must make the
+            // write an ordinary error, not a signal that ends Threading.
+            guard fcntl(inputPipe.writeEnd, F_SETNOSIGPIPE, 1) != -1 else {
+                inputPipe.closeBothEnds()
+                fail(context, attemptedName: context.displayName, .couldNotStart)
+                return
+            }
+            outputPipe = try ChildPipe(closingOnFailure: [inputPipe])
+        } catch {
+            fail(context, attemptedName: context.displayName, .couldNotStart)
+            return
+        }
+
         let child: SpawnedChildProcess
         do {
             child = try ChildProcessSpawn.spawn(
@@ -321,11 +395,36 @@ final class AgentAccountSetupCoordinator {
                 arguments: context.provider.loginArguments,
                 environment: environment,
                 workingDirectory: nil,
-                descriptors: [0: .nullDevice, 1: .nullDevice, 2: .nullDevice]
+                descriptors: [
+                    AgentChildProcessDefaults.standardInputDescriptor:
+                        .inherited(inputPipe.readEnd),
+                    AgentChildProcessDefaults.standardOutputDescriptor:
+                        .inherited(outputPipe.writeEnd),
+                    // The two adapters print their fallback URL on different streams — Claude on
+                    // stdout, Codex on stderr — and nothing here parses structured output, so
+                    // merging them is one reader instead of two and loses nothing.
+                    AgentChildProcessDefaults.standardErrorDescriptor:
+                        .inherited(outputPipe.writeEnd)
+                ]
             )
         } catch {
+            inputPipe.closeBothEnds()
+            outputPipe.closeBothEnds()
             fail(context, attemptedName: context.displayName, .couldNotStart)
             return
+        }
+
+        // The child owns its duplicated ends now. Keeping the parent's copy of the writer would
+        // hold the reader open past the child's exit and leave the stream armed forever.
+        inputPipe.closeReadEnd()
+        outputPipe.closeWriteEnd()
+        activeInput = AgentAccountSignInInput(writeEnd: inputPipe.takeWriteDescriptor())
+        activeOutput = ChildOutputStream(readEnd: outputPipe.takeReadDescriptor()) {
+            [weak self] data in
+            let text = String(decoding: data, as: UTF8.self)
+            Task { @MainActor in
+                self?.observeSignInOutput(text, attemptID: attemptID)
+            }
         }
 
         activeChild = child
@@ -357,6 +456,31 @@ final class AgentAccountSetupCoordinator {
         }
     }
 
+    /// Publishes the sign-in link the moment the CLI prints it, and ignores everything else the
+    /// login says. The scanner stops looking after the first URL, so this is O(1) per burst from
+    /// then on while the pipe keeps draining.
+    private func observeSignInOutput(_ text: String, attemptID: UUID) {
+        guard activeAttemptID == attemptID,
+              case let .running(context, prompt) = state,
+              prompt == nil,
+              let url = scanner.consume(text) else { return }
+
+        state = .running(context, prompt: AgentAccountSignInPrompt(
+            url: url,
+            acceptsPastedCode: context.provider.acceptsPastedSignInCode
+        ))
+    }
+
+    /// Ends this attempt's pipes. Safe to call more than once, and required on every path out:
+    /// a stream left armed owns a descriptor, and a writer left open is a login that never sees
+    /// end-of-file.
+    private func endChildStreams() {
+        activeOutput?.cancel()
+        activeOutput = nil
+        activeInput?.close()
+        activeInput = nil
+    }
+
     private func loginDidExit(
         status: Int32,
         executable: String,
@@ -366,6 +490,7 @@ final class AgentAccountSetupCoordinator {
     ) {
         guard activeAttemptID == attemptID else { return }
         activeChild = nil
+        endChildStreams()
         timeoutTask?.cancel()
         timeoutTask = nil
         guard status == 0 else {
@@ -407,6 +532,7 @@ final class AgentAccountSetupCoordinator {
 
     private func complete(_ context: AgentAccountSetupContext) {
         activeAttemptID = nil
+        endChildStreams()
         guard AgentAccountLocationRegistry.shared.register(
             provider: context.provider.kind,
             handle: context.handle,
@@ -441,6 +567,7 @@ final class AgentAccountSetupCoordinator {
     ) {
         activeAttemptID = nil
         activeChild = nil
+        endChildStreams()
         timeoutTask?.cancel()
         timeoutTask = nil
         state = .failed(

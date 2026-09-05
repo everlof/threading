@@ -21,12 +21,50 @@ Claude-shaped state but are not login slots; and aliases that set no config dire
 
 `AgentAccountSetupCoordinator` is the only writer of those records. It derives a bounded alternate
 home from a user-facing name, starts `claude auth login` or `codex login` under the corresponding
-environment variable, waits without capturing login output, then runs `claude auth status --json`
-or `codex login status` in the same environment. Codex setup requests its documented file
-credential store so separate `CODEX_HOME` values remain separate; Threading records the location,
-not `auth.json`. Failed, cancelled, timed-out or unverified attempts are never admitted. Settings'
-**Reconnect** repeats the provider-owned browser login against the same home and does not replace
-or delete anything on disk.
+environment variable, reads that login's output only for the link described below, then runs
+`claude auth status --json` or `codex login status` in the same environment. Codex setup requests
+its documented file credential store so separate `CODEX_HOME` values remain separate; Threading
+records the location, not `auth.json`. Failed, cancelled, timed-out or unverified attempts are
+never admitted. Settings' **Reconnect** repeats the provider-owned browser login against the same
+home and does not replace or delete anything on disk.
+
+### The sign-in link, and why the login's output is read at all
+
+The login child used to get `/dev/null` on all three descriptors, on the reasoning that a login
+Threading could not read was a login Threading could not leak. What that actually bought was a
+flow with exactly one browser in it: whichever one LaunchServices calls default, in whichever
+profile is signed in — no private window, no second work account, no other browser. Both CLIs
+already print the URL as a fallback for precisely this situation, and `/dev/null` was where that
+line went.
+
+So the login now runs with pipes, and `AgentAccountSignInScanner` reads its merged output for one
+thing: the first absolute `https` URL. It stops looking the moment it has one — every later byte
+is read and discarded, because the pipe still has to drain or the CLI blocks — and until then it
+carries only an unterminated candidate, bounded, since a 500-character URL does not arrive in one
+`read(2)`. The URL is published as `AgentAccountSignInPrompt` on the `.running` state and shown by
+`AccountSetupCardViewController` with Copy Link and Open. Nothing else from that output is kept,
+logged or shown.
+
+**The two adapters need different links, which is the whole reason `acceptsPastedSignInCode`
+exists.** Measured by running each CLI against a scratch home with a shim on `PATH` recording what
+it handed `open`:
+
+- **Codex** prints its loopback redirect (`redirect_uri=http://localhost:1455/auth/callback`) on
+  stderr — the same URL it opened. Finishing it in any browser on this Mac completes the login by
+  itself, so its row is a link and nothing else. The line above it names the loopback *server*
+  (`http://localhost:1455.`), which is why the scanner takes `https` only: that address is a
+  callback endpoint, not somewhere to send a person.
+- **Claude Code** keeps the loopback redirect for the browser it launches and prints a *different*
+  URL on stdout, one whose `redirect_uri` is `platform.claude.com/oauth/code/callback` — a page
+  that displays a code, with `Paste code here if prompted >` waiting on stdin. Its printed link is
+  therefore only usable if that code has somewhere to go, so its row also carries a field.
+
+That field is the one place Threading touches anything of the person's login, and it holds it for
+no longer than a write: `submitPastedCode` sends the line to the child through
+`AgentAccountSignInInput` — a queue-confined descriptor owner, so the syscall is not on the main
+actor — and stores nothing. It is a single-use authorization code, and the PKCE verifier that
+redeems it never leaves the CLI, so this stays a keystroke relay rather than Threading holding a
+credential. On a tty the printed URL is the same one; a PTY buys nothing here and was tried.
 
 **Where a login is *chosen*, it is named after the person** (`AccountName`), not after the
 alias. An alias is named after the agent — `claude-nhartley`, `claude-ikeller` — so a menu of

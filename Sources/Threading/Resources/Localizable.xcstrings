@@ -7591,6 +7591,17 @@
         }
       }
     },
+    "Authorization code" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auktoriseringskod"
+          }
+        }
+      }
+    },
     "Auto" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13355,6 +13366,17 @@
         }
       }
     },
+    "Copy Link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera länk"
+          }
+        }
+      }
+    },
     "Copy Pairing Link" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -13527,6 +13549,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Kopiera inbjudningslänken"
+          }
+        }
+      }
+    },
+    "Copy this sign-in link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kopiera den här inloggningslänken"
           }
         }
       }
@@ -28865,6 +28898,17 @@
         }
       }
     },
+    "Open this sign-in link in your browser" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öppna den här inloggningslänken i webbläsaren"
+          }
+        }
+      }
+    },
     "Open usage, limits, and banked resets" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29591,6 +29635,17 @@
         }
       }
     },
+    "Paste code" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klistra in kod"
+          }
+        }
+      }
+    },
     "Paste images here · ⌘Return sends · Return adds a line" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -29598,6 +29653,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Klistra in bilder här · ⌘Retur skickar · Retur lägger till en rad"
+          }
+        }
+      }
+    },
+    "Paste the code that page shows. Threading passes it straight to the agent." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Klistra in koden som sidan visar. Threading skickar den direkt till agenten."
           }
         }
       }
@@ -36543,6 +36609,17 @@
         }
       }
     },
+    "Send Code" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skicka kod"
+          }
+        }
+      }
+    },
     "Send Result to Parent" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -36836,6 +36913,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Skickas en gång före uppgiften och ramar in hur chatten ska arbetas med."
+          }
+        }
+      }
+    },
+    "Sent to the agent. Paste it again if the sign-in did not finish." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skickad till agenten. Klistra in den igen om inloggningen inte blev klar."
           }
         }
       }
@@ -38684,6 +38772,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Inloggningen slutfördes inte"
+          }
+        }
+      }
+    },
+    "Sign-in link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Inloggningslänk"
           }
         }
       }
@@ -44272,6 +44371,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Samma sak i radstorlek, för bilagornas kronologi — en nål och en siffra, avläst med en blick nedför en kolumn."
+          }
+        }
+      }
+    },
+    "The same link the agent opened. Use it in another browser, a private window, or a different profile." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Samma länk som agenten öppnade. Använd den i en annan webbläsare, ett privat fönster eller en annan profil."
           }
         }
       }
@@ -50476,6 +50586,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Väntar på navigatordata."
+          }
+        }
+      }
+    },
+    "Waiting for the agent to print its link…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Väntar på att agenten skriver ut sin länk…"
           }
         }
       }

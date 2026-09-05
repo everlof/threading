@@ -35,6 +35,10 @@
         "value" : "$(THREADING_EXTENSION_PACKAGE_UNDER_TEST)"
       },
       {
+        "key" : "THREADING_STRESS",
+        "value" : "$(THREADING_STRESS)"
+      },
+      {
         "key" : "THREADING_RENDER_OUT",
         "value" : "$(THREADING_RENDER_OUT)"
       },

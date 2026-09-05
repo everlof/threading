@@ -235,6 +235,86 @@ Package tests pin newest-record order, count and the oversized-journal tail. Mob
 1,000-row mount bound and both sides of deferred terminal detach. Appearance remains covered by
 the real iOS dashboard evidence rather than by the structural performance fixture.
 
+### Dashboard scrolling after the collection migration
+
+The collection fixed return-time whole-project measurement, but its repeated rows still used an
+estimated compositional height and `UIHostingConfiguration`. A deterministic 1,000-row fixture
+made the remaining interactive cost visible: the scroll driver measured 132.567 ms p50 and
+154.586 ms p95 synchronous main-thread work, with a 166.677 ms p95 frame gap. A 10-second sample
+put 1,965 main-thread samples in `UICollectionView.layoutSubviews`; 826 entered preferred-layout
+fitting, and the descendants repeatedly constructed SwiftUI hosts and measured
+`MobileMorphingTitle`.
+
+Dashboard rows already have a fixed two-line contract. Their compositional item height is now an
+absolute value derived from the same Dynamic Type title and caption fonts, vertical padding,
+divider width, and display scale. Preferred-content-size and display-scale changes replace the
+layout while preserving the visible anchor. Bounded chrome such as project headings and recovery
+cards remains self-sized because its content really is variable.
+
+Removing preferred-size invalidation cut p95 work to 82.732 ms but left visible-row hosting as the
+tail. Chat and terminal rows therefore share a native reusable collection cell. It retains the
+required `MobileMorphingTitleLabel`, provider/account marks, state glyphs, age and activity column,
+the one horizontal swipe recognizer, context menu, and accessibility actions. The themed plate is
+still the sole row background owner; the cell paints only row content, divider, and the currently
+revealed action strip. SwiftUI continues to own the bounded surrounding chrome.
+
+Three optimized Debug simulator runs of the same 1,000-row down-and-back traversal measured
+5.458–5.911 ms p50 and 7.189–7.510 ms p95 main-thread work. Frame-gap p95 was
+16.693–16.696 ms, versus 166.677 ms before, and no run mounted more than 16 cells at once. Run the
+reproducible clean metric plus diagnostic sample with:
+
+```bash
+scripts/profile_threading.sh ios-dashboard-scroll-stress 8 1000 booted
+```
+
+The structural regression test requires all 1,000 identities in the diffable snapshot, fewer than
+40 mounted cells, every mounted row to use the native reuse pool, and zero hosted row content.
+Rendered evidence covers the normal custom-theme dashboard, a partial archive swipe and close,
+vertical scrolling begun inside a row, and Accessibility Large expansion.
+
+## Renaming a login in Settings, measured 2026-09-05
+
+Reported as a feeling — "editing the name of an account is just SO SLOW; there must be something
+wrong there". The recorder had nothing to offer: the two stall incidents either side of the report
+(357 ms at 13:00, 368 ms at 13:08) both carry an empty `activeOperations`, which is the informative
+case — **the Accounts page is covered by no span at all.**
+
+`AccountsPreferencesEditingPerformanceTests` (opt-in, `THREADING_STRESS=1`) is the fixture that
+answers it: the shipping `AccountsPreferencesViewController` at the real 396-point Settings width,
+six fixture logins, in an unshown titled window so the name field can take the field editor —
+which is what makes a keystroke cost what it costs in the app. `accountsProvider` is a closure and
+no observer is registered, so **discovery and the sidebar's `ProjectsDidChange` reload are both
+outside these numbers**; whatever they add is on top.
+
+Debug, Apple silicon, 6 logins, 18 virtual rows, 12 live cells. Layout and draw are timed apart,
+because the fixture redraws the whole 396-point pane into a fresh bitmap where the app draws a
+dirty rect — a combined number charges the harness to the page, and the first run of this fixture
+did exactly that, reporting 15.5 ms per keystroke:
+
+| Operation | Cost |
+|---|---|
+| `viewWillAppear` reload | 0.2 ms |
+| one keystroke, layout | 0.9 ms median, 2.6 ms max |
+| commit (`controlTextDidEndEditing`), layout | 102 ms |
+| commit, draw | 23 ms |
+
+**Typing is not the problem; committing is.** 125 ms to record one name, with no filesystem and no
+notification observers in the fixture at all, is `commitNameEdit` → `reload()` →
+`reloadPresentationRows()` → `tableView.reloadData()`: the complete page model is rebuilt and every
+live cell discarded and remade because one row's text changed. That is the
+[scaling gate](#implementation-time-scaling-gate)'s own rule — a local status change updates the
+affected stable identities, it does not clear and rebuild a whole page — applied to a page that
+predates it, and `enabledChanged` and the emoji picker take the same route.
+
+125 ms is the floor rather than the reading. In the app that same `reload()` also runs
+`AgentAccountDiscovery` (a home-directory scan plus the shell config reads behind
+`ShellAliasReader`) and then posts `ProjectsDidChange`, which reloads the sidebar — which is the
+shape of the 357 ms and 368 ms stalls the recorder captured either side of the report.
+
+Not yet repaired, and the repair is not simply "reload one row": an account's name also appears in
+the limits cards below it, so the affected identities are the account row *and* the limit rows that
+name it. The fixture stays as the before-case and the regression boundary.
+
 ## The transcript index rewrote itself continuously, 2026-09-01
 
 Found in the same session as the typing lag above and unrelated to it: this one never touches the
