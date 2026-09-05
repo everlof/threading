@@ -624,7 +624,7 @@ struct AppSettingDescriptor<Value: AppSettingValue>: Sendable {
 
     private func postChangeIfNeeded(notifying: Bool) {
         guard notifying, notification == .appSettingsChanged else { return }
-        NotificationCenter.default.post(AppSettingsDidChange())
+        NotificationCenter.default.post(AppSettingsDidChange(changedSetting: identity.rawValue))
     }
 }
 

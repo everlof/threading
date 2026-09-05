@@ -7,6 +7,41 @@ import XCTest
 @testable import ThreadingMobile
 
 final class MobileSessionChromeTests: XCTestCase {
+    func testChangingASessionSurfacePreservesIndependentRuntimeAndRoutingFacts() throws {
+        let session = RemoteSessionSummaryDTO(
+            id: Fixture.sessionID,
+            title: "Background review",
+            agentKind: "claude",
+            surface: .terminal,
+            state: .idle,
+            continuation: .delegated,
+            projectName: "AnotherTerminal",
+            projectID: "project-id",
+            accountID: "work",
+            limitRecovery: .resumeOnBestAccount,
+            model: "claude-fable-5"
+        )
+        let response = RemoteMeDTO(
+            serverProtocol: RemoteProtocolInfo(),
+            share: Fixture.share,
+            sessions: [session]
+        )
+
+        let changed = try XCTUnwrap(
+            response.replacingSessionSurface(
+                sessionID: Fixture.sessionID,
+                surface: .conversation
+            ).sessions.first
+        )
+
+        XCTAssertEqual(changed.surface, .conversation)
+        XCTAssertEqual(changed.continuation, .delegated)
+        XCTAssertEqual(changed.projectID, "project-id")
+        XCTAssertEqual(changed.accountID, "work")
+        XCTAssertEqual(changed.limitRecovery, .resumeOnBestAccount)
+        XCTAssertEqual(changed.model, "claude-fable-5")
+    }
+
     func testRenamedCatalogueTitleReplacesTheStaleLiveDetailTitle() {
         XCTAssertEqual(
             MobileSessionChrome.navigationTitle(

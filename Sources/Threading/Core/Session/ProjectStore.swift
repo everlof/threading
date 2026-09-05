@@ -1543,7 +1543,7 @@ final class ProjectStore {
         GitTurnBaselineStore.shared.remove(sessionID: sessionID)
         AgentWorkTraceStore.shared.remove(sessionID: sessionID, projectID: projectID)
         ConversationHandoffStore.remove(for: sessionID)
-        ExecutionAuditStore.shared.remove(sessionID: sessionID)
+        ExecutionAuditStore.shared.removeInBackground(sessionIDs: [sessionID])
         // Here rather than in the sidebar's delete gesture: this is the one door every deletion
         // route passes through, and Settings ▸ Archived removes sessions without going near the
         // sidebar at all. A scheduled send left behind would keep naming a session that is gone.

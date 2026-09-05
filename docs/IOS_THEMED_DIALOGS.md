@@ -231,6 +231,26 @@ arguing. It hangs *down* from the bar, so the keyboard bounds the far edge of it
 near one and a phone with the height keeps it up, which the composer's own choosers cannot
 promise. It still asks `makeRoom` first: the login list caps and scrolls, and below that cap a
 small phone drops the keyboard rather than letting UIKit shrink the panel and clip a login away.
+Measured on an iPhone SE, at the cardinality a real Mac has rather than the demo's two runtimes:
+five agents and two logins stand between 71 and 339 points, so the keyboard is never asked for.
+
+**Each group is one scrub surface, not a stack of buttons.** Buttons were the first shape and the
+owner reported both ways they were wrong: *the hit area of the providers is only on the items it
+feels like*, and *I can't tap and drag to switch, that feels like a natural thing to do.* A button
+answers only the finger that lands and lifts inside its own drawn frame, so the group's margin and
+the gaps between plates swallowed touches that plainly pointed at a runtime, and a moving finger
+was answered by nothing at all. `MobileIdentityPickerHitTest` divides each surface by arithmetic
+the way `MobileModelEffortPicker` divides its matrix: every point inside a group belongs to exactly
+one item, including the padding around what is drawn, so the touch target is the whole cell while
+the plate stays inset. One `DragGesture(minimumDistance: 0)` per group then gives press, drag and
+lift one meaning — the item under the finger lights up, a selection tick fires at each crossing,
+and lifting commits with the impact the matrix uses. A tap is that gesture with no travel. While a
+finger is down the scrubbed item is the one that reads as chosen, and the committed login keeps
+its checkmark throughout, so the panel says both what is current and what lifting now would take.
+A point outside a surface resolves to nothing, so a drag that wanders off holds the last item it
+crossed rather than snapping to an edge the finger has left. Logins past what the cap can show
+scroll instead, and scroll only: a pan inside a scroll view belongs to the scroll view, and a
+surface that sometimes scrolls and sometimes scrubs would answer one drag two ways.
 
 ## Settings surfaces
 

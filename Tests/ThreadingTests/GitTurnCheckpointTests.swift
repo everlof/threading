@@ -276,8 +276,18 @@ final class GitTurnCheckpointTests: XCTestCase {
         let store = makeStore()
         _ = try prepare(store, session: session)
 
-        store.noteActivity(.working, sessionID: session, hasAuthoritativeReporting: true)
-        store.noteActivity(.idle, sessionID: session, hasAuthoritativeReporting: true)
+        store.noteRuntime(.test(activity: .working), sessionID: session)
+        store.noteRuntime(
+            SessionRuntimeSnapshot(
+                process: .dormant,
+                turn: .none,
+                continuation: .none,
+                blocker: .none,
+                activity: .dormant,
+                reportsOwnTurns: true
+            ),
+            sessionID: session
+        )
 
         let interrupted = try XCTUnwrap(store.latestCheckpoint(forSessionID: session))
         XCTAssertEqual(interrupted.status, .incomplete)

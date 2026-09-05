@@ -121,7 +121,7 @@ final class AgentSessionCommandServiceTests: XCTestCase {
         let session = try XCTUnwrap(store.addSession(to: project.id, kind: .claude))
         let scheduler = SessionArchiveScheduler(
             center: NotificationCenter(),
-            activity: { _ in .dormant },
+            runtime: { _ in .dormant },
             session: { store.session(withID: $0) }
         )
         let service = AgentSessionCommandService(

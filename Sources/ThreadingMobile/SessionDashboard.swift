@@ -2512,16 +2512,20 @@ private struct SessionRow: View {
             // other corner, and both facts belong to the tile they are badging. Hung on the tile
             // rather than on the row so the row's height never moves it.
             .overlay(alignment: .topTrailing) {
-                if isCatalogueLive, session.state == .needsAttention {
+                if isCatalogueLive,
+                   session.state == .needsAttention || session.continuation != nil {
+                    let diameter = session.state == .needsAttention
+                        ? MobileDesign.Size.rowFinishedDot
+                        : MobileDesign.Size.rowBackgroundDot
                     Circle()
-                        .fill(theme.warning)
+                        .fill(session.state == .needsAttention ? theme.warning : theme.accent)
                         .frame(
-                            width: MobileDesign.Size.rowAttentionDot,
-                            height: MobileDesign.Size.rowAttentionDot
+                            width: diameter,
+                            height: diameter
                         )
                         .offset(
-                            x: MobileDesign.Offset.rowAttentionDotOverhang,
-                            y: -MobileDesign.Offset.rowAttentionDotOverhang
+                            x: MobileDesign.Offset.rowStatusDotOverhang(diameter: diameter),
+                            y: -MobileDesign.Offset.rowStatusDotOverhang(diameter: diameter)
                         )
                 }
             }
@@ -2585,6 +2589,9 @@ private struct SessionRow: View {
     }
 
     private var stateLabel: String {
+        if session.continuation != nil {
+            return MobileL10n.string("Ready for input; background work running")
+        }
         switch session.state {
         case .working: return MobileL10n.string("Working")
         case .awaitingUser, .needsAttention: return MobileL10n.string("Needs attention")

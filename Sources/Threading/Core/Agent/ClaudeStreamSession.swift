@@ -67,12 +67,11 @@ final class ClaudeStreamSession:
     private(set) var isRunning = false
 
     private var process: AgentChildProcess?
-    private var input: FileHandle?
+    private var transport: AgentStreamTransport<ClaudeParsedLine>?
+    private var acceptsInput = false
 
     /// Partial line carried between reads: a chunk boundary lands mid-JSON far more often
     /// than not, so lines are only parsed once their newline has arrived.
-    private var buffer = Data()
-
     private var parseDiagnostics = StreamParseDiagnostics()
     var malformedLineCount: Int { parseDiagnostics.malformedLineCount }
 
@@ -94,7 +93,6 @@ final class ClaudeStreamSession:
     private var pendingPrompt: String?
 
     /// Diagnostic fallback for a child that exits before stream-json can explain why.
-    private var errorBuffer = Data()
     private var turnStartedAt: TimeInterval?
     private var isTurnInFlight = false
 
@@ -145,8 +143,8 @@ final class ClaudeStreamSession:
     func start() {
         guard !isRunning else { return }
 
-        buffer.removeAll(keepingCapacity: true)
-        errorBuffer.removeAll(keepingCapacity: true)
+        transport = nil
+        acceptsInput = false
         parseDiagnostics.reset()
         subagentAdapter.reset()
         pendingPrompt = nil
@@ -181,27 +179,24 @@ final class ClaudeStreamSession:
             return
         }
 
-        process.standardOutput.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            Task { @MainActor [weak self] in
-                self?.received(chunk)
-            }
-        }
-
-        // Merged into the same pipe would corrupt the JSON stream, so diagnostics are read
-        // separately and only surfaced when the process dies unexpectedly.
-        process.standardError.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            Task { @MainActor [weak self] in
-                self?.receivedError(chunk)
-            }
-        }
-
+        let transport = AgentStreamTransport(
+            label: "codes.threading.agent.claude-stream",
+            input: process.standardInput,
+            output: process.standardOutput,
+            error: process.standardError,
+            maximumErrorBytes: ClaudeStreamDefaults.maximumErrorBytes,
+            parser: { ClaudeParsedLine.parse($0) },
+            onLine: { [weak self] line in self?.received(line) },
+            onMalformedLine: { [weak self] in
+                self?.parseDiagnostics.recordMalformedLine(provider: "Claude")
+            },
+            onFailure: { [weak self] failure in self?.transportFailed(failure) }
+        )
         self.process = process
-        self.input = process.standardInput
+        self.transport = transport
+        acceptsInput = true
         self.isRunning = true
+        transport.start()
         onInteractionAvailabilityChange?()
         if onComposerCapabilitiesChange != nil {
             requestComposerCapabilities()
@@ -212,7 +207,7 @@ final class ClaudeStreamSession:
     ///
     /// The CLI accepts the same message envelope the API uses, one JSON object per line.
     var canSend: Bool {
-        isRunning && input != nil && !isTurnInFlight && pendingPrompt == nil
+        isRunning && acceptsInput && !isTurnInFlight && pendingPrompt == nil
     }
 
     /// The control channel accepts a request while a turn is active; it applies to the next
@@ -287,7 +282,7 @@ final class ClaudeStreamSession:
     /// value while it is still pending.
     @discardableResult
     private func writeUserMessage(_ text: String, identifiedBy id: ConversationMessageID) -> Bool {
-        guard let input else { return false }
+        guard acceptsInput, let transport else { return false }
 
         let message: [String: Any] = [
             "type": "user",
@@ -295,35 +290,17 @@ final class ClaudeStreamSession:
             "message": ["role": "user", "content": [["type": "text", "text": text]]]
         ]
 
-        guard var data = try? JSONSerialization.data(withJSONObject: message) else { return false }
-        data.append(0x0A)
-
-        // A write to a dead process raises SIGPIPE rather than returning an error, and the
-        // process may have exited between the check above and here.
-        do {
-            try input.write(contentsOf: data)
-            return true
-        } catch {
-            ThreadingLogger.agent.error(
-                "Stream session write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
-            onEvent?(.turnFinished(
-                text: error.localizedDescription,
-                outcome: .failed,
-                metrics: .empty
-            ))
-            return false
-        }
+        return transport.writeJSONObject(message)
     }
 
     // MARK: - Turn Control
 
-    var canInterrupt: Bool { isRunning && input != nil && isTurnInFlight }
+    var canInterrupt: Bool { isRunning && acceptsInput && isTurnInFlight }
 
     /// Claude names no non-steerable turn kinds, so the only refusal here is having nothing to
     /// steer.
     var steerAvailability: SteerAvailability {
-        guard isRunning, input != nil else { return .unavailable(.noActiveTurn) }
+        guard isRunning, acceptsInput else { return .unavailable(.noActiveTurn) }
         return isTurnInFlight ? .available : .unavailable(.noActiveTurn)
     }
 
@@ -433,8 +410,9 @@ final class ClaudeStreamSession:
     /// Ends the conversation. Closing stdin is the graceful route — the CLI finishes its
     /// current turn and exits on end-of-input.
     func finish() {
-        try? input?.close()
-        input = nil
+        guard acceptsInput, let transport else { return }
+        acceptsInput = false
+        transport.closeInput()
         onInteractionAvailabilityChange?()
     }
 
@@ -458,6 +436,9 @@ final class ClaudeStreamSession:
             return false
         }
         isRunning = false
+        transport?.detach()
+        transport = nil
+        acceptsInput = false
         onInteractionAvailabilityChange?()
         return true
     }
@@ -561,7 +542,7 @@ final class ClaudeStreamSession:
         body: [String: Any],
         completion: @escaping (Result<ControlResponse, Error>) -> Void
     ) {
-        guard isRunning, let input else {
+        guard isRunning, acceptsInput, let transport else {
             completion(.failure(ClaudeControlError.notRunning))
             return
         }
@@ -569,15 +550,12 @@ final class ClaudeStreamSession:
         controlRequestSequence += 1
         let requestID = "\(ClaudeControlRequest.requestIDPrefix)\(controlRequestSequence)"
 
-        guard let data = ClaudeControlRequest.line(subtype: subtype, requestID: requestID, body: body) else {
-            completion(.failure(ClaudeControlError.encodingFailed))
-            return
-        }
-
-        do {
-            try input.write(contentsOf: data)
-        } catch {
-            completion(.failure(ClaudeControlError.writeFailed(error.localizedDescription)))
+        guard transport.writeJSONObject(
+            ClaudeControlRequest.object(subtype: subtype, requestID: requestID, body: body)
+        ) else {
+            completion(.failure(ClaudeControlError.writeFailed(
+                AgentStreamTransportFailure.inputBackpressure.userFacingDescription
+            )))
             return
         }
 
@@ -610,58 +588,43 @@ final class ClaudeStreamSession:
 
     // MARK: - Private Methods
 
-    private func received(_ chunk: Data) {
-        buffer.append(chunk)
+    private func received(_ parsed: ClaudeParsedLine) {
+        // The control channel's replies share this stream. Route them to their pending request
+        // and keep them out of the conversation model — they are transport, not content.
+        if let response = parsed.controlResponse {
+            routeControlResponse(response)
+            return
+        }
 
-        // Complete lines only; whatever follows the last newline waits for the next read.
-        while let newline = buffer.firstIndex(of: 0x0A) {
-            let lineData = buffer[buffer.startIndex..<newline]
-            buffer = Data(buffer[buffer.index(after: newline)...])
+        // The provider's own answer about a message we named. Also transport rather than
+        // content: it says where a message has got to, not what was said.
+        if let lifecycle = parsed.lifecycle {
+            onMessageLifecycle?(lifecycle.id, lifecycle.state)
+            return
+        }
 
-            guard let line = String(data: lineData, encoding: .utf8) else {
-                parseDiagnostics.recordMalformedLine(provider: "Claude")
-                continue
+        updateAdvertisedCapabilities(from: parsed.line)
+        updateComposerCapabilities(from: parsed.line)
+
+        HookOutcomeLog.note(line: parsed.line, sessionID: sessionID)
+
+        // Audit parsing shares the transport worker with the conversation parse. Only the typed,
+        // immutable events cross main; display/state mutation remains actor-confined here.
+        for event in parsed.providerEvents { onProviderExecution?(event) }
+
+        if let route = subagentAdapter.route(parsed.line) {
+            for event in route.events { onSubagentEvent?(event) }
+            guard route.belongsToParent else { return }
+        }
+
+        switch parsed.streamResult {
+        case .events(let events):
+            for event in events {
+                noteBackgroundWork(in: event)
+                onEvent?(completingTurnMetrics(in: event))
             }
-
-            // The control channel's replies share this stream. Route them to their pending request
-            // and keep them out of the conversation model — they are transport, not content.
-            if let response = ControlResponse.parse(line) {
-                routeControlResponse(response)
-                continue
-            }
-
-            // The provider's own answer about a message we named. Also transport rather than
-            // content: it says where a message has got to, not what was said.
-            if let lifecycle = ClaudeMessageLifecycleRecord.parse(line) {
-                onMessageLifecycle?(lifecycle.id, lifecycle.state)
-                continue
-            }
-
-            updateAdvertisedCapabilities(from: line)
-            updateComposerCapabilities(from: line)
-
-            HookOutcomeLog.note(line: line, sessionID: sessionID)
-
-            // Audit the provider's complete tool objects before either the parent or subagent
-            // conversation adapter turns them into display rows.
-            for event in ClaudeProviderExecutionAdapter.events(line: line) {
-                onProviderExecution?(event)
-            }
-
-            if let route = subagentAdapter.route(line) {
-                for event in route.events { onSubagentEvent?(event) }
-                guard route.belongsToParent else { continue }
-            }
-
-            switch StreamEvent.parse(line) {
-            case .events(let events):
-                for event in events {
-                    noteBackgroundWork(in: event)
-                    onEvent?(completingTurnMetrics(in: event))
-                }
-            case .malformed:
-                parseDiagnostics.recordMalformedLine(provider: "Claude")
-            }
+        case .malformed:
+            parseDiagnostics.recordMalformedLine(provider: "Claude")
         }
     }
 
@@ -696,20 +659,24 @@ final class ClaudeStreamSession:
         advertisedCapabilities = Set(names)
     }
 
-    private func receivedError(_ chunk: Data) {
-        guard errorBuffer.count < ClaudeStreamDefaults.maximumErrorBytes else { return }
-        let remaining = ClaudeStreamDefaults.maximumErrorBytes - errorBuffer.count
-        errorBuffer.append(chunk.prefix(remaining))
-    }
-
     private func handleTermination(status: Int32) {
         guard isRunning else { return }
-
+        acceptsInput = false
         isRunning = false
-        process?.standardOutput.readabilityHandler = nil
-        process?.standardError.readabilityHandler = nil
+        let transport = self.transport
+        guard let transport else {
+            finishTermination(status: status, diagnostics: "")
+            return
+        }
+        transport.finish { [weak self] diagnostics in
+            self?.finishTermination(status: status, diagnostics: diagnostics)
+        }
+    }
+
+    private func finishTermination(status: Int32, diagnostics: String) {
+        guard process != nil else { return }
         process = nil
-        input = nil
+        transport = nil
         pendingPrompt = nil
         onInteractionAvailabilityChange?()
 
@@ -721,8 +688,6 @@ final class ClaudeStreamSession:
         }
 
         if status != 0 {
-            let diagnostics = String(decoding: errorBuffer, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
             if !diagnostics.isEmpty {
                 onEvent?(completingTurnMetrics(in: .turnFinished(
                     text: diagnostics,
@@ -733,6 +698,22 @@ final class ClaudeStreamSession:
         }
 
         onExit?(status)
+    }
+
+    private func transportFailed(_ failure: AgentStreamTransportFailure) {
+        guard process != nil else { return }
+        let reason = failure.userFacingDescription
+        ThreadingLogger.agent.error(
+            "Claude stream transport failed: \(reason, privacy: .private(mask: .hash))"
+        )
+        if isTurnInFlight {
+            onEvent?(completingTurnMetrics(in: .turnFinished(
+                text: reason,
+                outcome: .failed,
+                metrics: .empty
+            )))
+        }
+        terminate()
     }
 
     /// Claude supplies its own `duration_ms` on an ordinary result. The monotonic local clock
@@ -948,6 +929,28 @@ enum ClaudeComposerCommandPolicy {
     }
 }
 
+/// Everything expensive and stateless one stdout line can become. Stateful subagent correlation
+/// remains in the main-actor session, but JSON decoding for the visible stream and execution
+/// audit is complete before this value crosses the transport boundary.
+struct ClaudeParsedLine: Sendable {
+    let line: String
+    let controlResponse: ControlResponse?
+    let lifecycle: ClaudeMessageLifecycleRecord?
+    let providerEvents: [ProviderExecutionEvent]
+    let streamResult: StreamLineParseResult
+
+    static func parse(_ data: Data) -> ClaudeParsedLine? {
+        guard let line = String(data: data, encoding: .utf8) else { return nil }
+        return ClaudeParsedLine(
+            line: line,
+            controlResponse: ControlResponse.parse(line),
+            lifecycle: ClaudeMessageLifecycleRecord.parse(line),
+            providerEvents: ClaudeProviderExecutionAdapter.events(line: line),
+            streamResult: StreamEvent.parse(line)
+        )
+    }
+}
+
 enum ClaudeStreamDefaults {
     /// Stderr is diagnostic fallback only, so a broken child cannot grow memory without bound.
     static let maximumErrorBytes = 64 * 1024
@@ -973,7 +976,7 @@ enum ClaudeStreamDefaults {
 /// `{"type":"command_lifecycle","command_uuid":"…","state":"queued|started|completed",
 ///   "uuid":"…","session_id":"…"}`. `command_uuid` is the value *we* put on the user envelope;
 /// the sibling `uuid` is the CLI's own record id and is deliberately ignored.
-struct ClaudeMessageLifecycleRecord {
+struct ClaudeMessageLifecycleRecord: Sendable {
     let id: ConversationMessageID
     let state: MessageLifecycleState
 
@@ -1067,23 +1070,27 @@ enum ClaudeControlRequest {
     /// `{"type":"control_request","request_id":"…","request":{"subtype":"…", …body}}` plus a
     /// trailing newline, matching the one-object-per-line envelope the turns use.
     static func line(subtype: String, requestID: String, body: [String: Any]) -> Data? {
+        let envelope = object(subtype: subtype, requestID: requestID, body: body)
+        guard var data = try? JSONSerialization.data(withJSONObject: envelope) else { return nil }
+        data.append(0x0A)
+        return data
+    }
+
+    static func object(subtype: String, requestID: String, body: [String: Any]) -> [String: Any] {
         var request: [String: Any] = ["subtype": subtype]
         request.merge(body) { _, new in new }
-        let envelope: [String: Any] = [
+        return [
             "type": "control_request",
             "request_id": requestID,
             "request": request
         ]
-        guard var data = try? JSONSerialization.data(withJSONObject: envelope) else { return nil }
-        data.append(0x0A)
-        return data
     }
 }
 
 /// The parsed half of a `control_response` line. `request_id` lives inside `response`, as measured
 /// against CLI 2.1.220: `{"type":"control_response","response":{"subtype":"success","request_id":"…"}}`
 /// and, on failure, `{"…","response":{"subtype":"error","request_id":"…","error":"…"}}`.
-struct ControlResponse {
+struct ControlResponse: @unchecked Sendable {
     let requestID: String?
     let isError: Bool
     let error: String?

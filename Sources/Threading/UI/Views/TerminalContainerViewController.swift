@@ -2280,7 +2280,7 @@ private extension TerminalContainerViewController {
         guard gitChangeMonitor != nil else { return }
 
         let activity = currentConversation?.isTurnInFlight
-            ?? currentChild?.activity.hasTurnInFlight
+            ?? currentChild?.activityTracker.runtimeSnapshot.hasOpenTurn
             ?? false
         gitStatusOverlay.updateRunState(
             isActive: activity,
@@ -2778,8 +2778,6 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
         // Agents report progress through the terminal title, so this drives the sidebar
         // name as well as the window subtitle.
         ProjectStore.shared.updateAgentTitle(title, for: controller.sessionID)
-
-        delegate?.terminalContainer(self, sessionTitleChanged: title, for: controller.sessionID)
     }
 
     func agentSession(_ controller: AgentSessionViewController, didExitWithCode exitCode: Int32?) {
@@ -2813,9 +2811,7 @@ extension TerminalContainerViewController: AgentSessionViewControllerDelegate {
         if controller.sessionID == currentSessionID {
             refreshGitStatusOverlayRunState()
         }
-        NotificationCenter.default.post(
-            SessionActivityDidChange(sessionID: controller.sessionID)
-        )
+        AgentRuntime.shared.publishRuntimeChange(sessionID: controller.sessionID)
         RemoteSessionMirrorRegistry.shared.sessionRunProgressChanged(controller.sessionID)
         delegate?.terminalContainer(self, sessionStateDidChange: controller.sessionID)
     }
@@ -2874,11 +2870,6 @@ protocol TerminalContainerViewControllerDelegate: AnyObject {
     func terminalContainer(
         _ container: TerminalContainerViewController,
         visibleSessionDidChange sessionID: SessionID?
-    )
-    func terminalContainer(
-        _ container: TerminalContainerViewController,
-        sessionTitleChanged title: String,
-        for sessionID: SessionID
     )
     func terminalContainer(
         _ container: TerminalContainerViewController,
@@ -2986,9 +2977,7 @@ extension TerminalContainerViewController: ConversationViewControllerDelegate {
         }
         // Same channel a terminal session's activity uses, so the sidebar refreshes its row
         // and its attention dot the one way it already knows.
-        NotificationCenter.default.post(
-            SessionActivityDidChange(sessionID: controller.sessionID)
-        )
+        AgentRuntime.shared.publishRuntimeChange(sessionID: controller.sessionID)
         RemoteSessionMirrorRegistry.shared.sessionRunProgressChanged(controller.sessionID)
         delegate?.terminalContainer(self, sessionStateDidChange: controller.sessionID)
     }

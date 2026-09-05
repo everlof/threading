@@ -32,7 +32,7 @@ final class ACPStreamSession:
 
     private(set) var isRunning = false
     var canSend: Bool {
-        isRunning && input != nil && !isTurnInFlight && pendingPrompt == nil
+        isRunning && acceptsInput && !isTurnInFlight && pendingPrompt == nil
     }
 
     var rootProcessIdentifier: pid_t? {
@@ -56,9 +56,8 @@ final class ACPStreamSession:
     private let hostPlan: () -> PTYHostChildPlan?
 
     private var process: AgentChildProcess?
-    private var input: FileHandle?
-    private var buffer = Data()
-    private let errorCapture = ACPDiagnosticCapture(maximum: ACPDefaults.maximumErrorBytes)
+    private var transport: AgentStreamTransport<JSONRPCLineEnvelope>?
+    private var acceptsInput = false
     private var parseDiagnostics = StreamParseDiagnostics()
 
     private var requestSequence: Int64 = 0
@@ -149,18 +148,25 @@ final class ACPStreamSession:
             return
         }
 
-        process.standardOutput.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            Task { @MainActor [weak self] in self?.received(chunk) }
-        }
-        // Kept apart from stdout: a diagnostic line landing inside the JSON-RPC stream would
-        // corrupt the message it interrupted.
-        errorCapture.beginDraining(process.standardError)
-
+        let transport = AgentStreamTransport(
+            label: "codes.threading.agent.acp-stream",
+            input: process.standardInput,
+            output: process.standardOutput,
+            error: process.standardError,
+            maximumErrorBytes: ACPDefaults.maximumErrorBytes,
+            parser: { JSONRPCLineEnvelope.parse($0) },
+            onLine: { [weak self] envelope in self?.route(envelope) },
+            onMalformedLine: { [weak self] in
+                guard let self else { return }
+                self.parseDiagnostics.recordMalformedLine(provider: self.profile.diagnosticsLabel)
+            },
+            onFailure: { [weak self] failure in self?.transportFailed(failure) }
+        )
         self.process = process
-        input = process.standardInput
+        self.transport = transport
+        acceptsInput = true
         isRunning = true
+        transport.start()
         onInteractionAvailabilityChange?()
         sendInitialize()
     }
@@ -197,7 +203,7 @@ final class ACPStreamSession:
     // MARK: - Turn Control
 
     var canInterrupt: Bool {
-        isRunning && input != nil && isTurnInFlight && activeSessionID != nil
+        isRunning && acceptsInput && isTurnInFlight && activeSessionID != nil
     }
 
     /// ACP has no steering primitive: the specification allows one prompt turn per session at a
@@ -232,9 +238,9 @@ final class ACPStreamSession:
     }
 
     func finish() {
-        guard input != nil else { return }
-        try? input?.close()
-        input = nil
+        guard acceptsInput, let transport else { return }
+        acceptsInput = false
+        transport.closeInput()
         onInteractionAvailabilityChange?()
     }
 
@@ -243,6 +249,9 @@ final class ACPStreamSession:
 
         isTerminating = true
         isRunning = false
+        transport?.detach()
+        transport = nil
+        acceptsInput = false
         cancelHandshakeDeadline()
         cancelCommandCatalogDeadline()
         if isTurnInFlight, let activeSessionID {
@@ -344,8 +353,8 @@ final class ACPStreamSession:
         cancelHandshakeDeadline()
         cancelCommandCatalogDeadline()
         launchResumeState = resumeState
-        buffer.removeAll(keepingCapacity: true)
-        errorCapture.reset()
+        transport = nil
+        acceptsInput = false
         parseDiagnostics.reset()
         requestSequence = 0
         pendingRequests.removeAll()
@@ -487,41 +496,10 @@ final class ACPStreamSession:
     }
 
     private func writeLine(_ object: [String: Any]) -> Bool {
-        guard let input,
-              JSONSerialization.isValidJSONObject(object),
-              var data = try? JSONSerialization.data(withJSONObject: object)
-        else { return false }
-        data.append(0x0A)
-
-        do {
-            try input.write(contentsOf: data)
-            return true
-        } catch {
-            let label = profile.diagnosticsLabel
-            let reason = error.localizedDescription
-            ThreadingLogger.agent.error(
-                "\(label, privacy: .public) write failed: \(reason, privacy: .private(mask: .hash))"
-            )
-            return false
-        }
+        transport?.writeJSONObject(object) ?? false
     }
 
     // MARK: - Event Stream
-
-    private func received(_ chunk: Data) {
-        buffer.append(chunk)
-        while let newline = buffer.firstIndex(of: 0x0A) {
-            let lineData = buffer[buffer.startIndex..<newline]
-            buffer = Data(buffer[buffer.index(after: newline)...])
-
-            guard let line = String(data: lineData, encoding: .utf8),
-                  let envelope = JSONRPCLineEnvelope.parse(line) else {
-                parseDiagnostics.recordMalformedLine(provider: profile.diagnosticsLabel)
-                continue
-            }
-            route(envelope)
-        }
-    }
 
     private func route(_ envelope: JSONRPCLineEnvelope) {
         switch envelope {
@@ -955,32 +933,30 @@ final class ACPStreamSession:
     }
 
     private func handleTermination(status: Int32) {
-        guard let process else { return }
+        guard process != nil else { return }
         cancelHandshakeDeadline()
         cancelCommandCatalogDeadline()
-        process.standardOutput.readabilityHandler = nil
-        input = nil
+        let transport = self.transport
+        acceptsInput = false
         onInteractionAvailabilityChange?()
-        // `Process` may report the exit before the diagnostic drain has observed EOF. Finish on
-        // main only after that background drain, so the final write is part of the user-facing
-        // failure without ever making the main actor wait on a pipe.
-        errorCapture.afterDraining { [weak self] in
-            Task { @MainActor [weak self] in
-                self?.finishTermination(status: status)
-            }
+        guard let transport else {
+            finishTermination(status: status, diagnostics: "")
+            return
+        }
+        transport.finish { [weak self] diagnostics in
+            self?.finishTermination(status: status, diagnostics: diagnostics)
         }
     }
 
-    private func finishTermination(status: Int32) {
+    private func finishTermination(status: Int32, diagnostics: String) {
         guard process != nil else { return }
         self.process = nil
-        input = nil
+        transport = nil
 
         let wasTerminating = isTerminating
         isTerminating = false
         isRunning = false
         if !wasTerminating, isTurnInFlight, !receivedTurnFinished {
-            let diagnostics = errorCapture.string
             finishTurnWithTransportError(
                 diagnostics.isEmpty
                     ? ACPTransportMessage.exited(
@@ -992,6 +968,19 @@ final class ACPStreamSession:
         }
         onInteractionAvailabilityChange?()
         onExit?(status)
+    }
+
+    private func transportFailed(_ failure: AgentStreamTransportFailure) {
+        guard process != nil else { return }
+        let label = profile.diagnosticsLabel
+        let reason = failure.userFacingDescription
+        ThreadingLogger.agent.error(
+            "\(label, privacy: .public) transport failed: \(reason, privacy: .private(mask: .hash))"
+        )
+        if isTurnInFlight, !receivedTurnFinished {
+            finishTurnWithTransportError(reason)
+        }
+        terminate()
     }
 
     private func composerCapabilities(
@@ -1024,54 +1013,6 @@ final class ACPStreamSession:
         cancelCommandCatalogDeadline()
         replaceComposerCapabilities(capabilities)
         if becameReady { onInteractionAvailabilityChange?() }
-    }
-}
-
-/// A process can exit before `FileHandle` delivers its last readability callback. Keeping the
-/// drain on one utility queue gives process termination an ordering point without ever waiting on
-/// the main actor, while the byte cap prevents a noisy CLI from growing the session without bound.
-private final class ACPDiagnosticCapture: @unchecked Sendable {
-    private let maximum: Int
-    private let queue = DispatchQueue(label: "codes.threading.agent.acp-diagnostics", qos: .utility)
-    private let lock = NSLock()
-    private var handle: FileHandle?
-    private var data = Data()
-
-    init(maximum: Int) {
-        self.maximum = maximum
-    }
-
-    func reset() {
-        lock.lock()
-        data.removeAll(keepingCapacity: true)
-        lock.unlock()
-    }
-
-    func beginDraining(_ handle: FileHandle) {
-        self.handle = handle
-        queue.async { [self] in
-            guard let handle = self.handle else { return }
-            defer { self.handle = nil }
-            while true {
-                let chunk = handle.availableData
-                guard !chunk.isEmpty else { return }
-                lock.lock()
-                let remaining = max(0, maximum - data.count)
-                data.append(chunk.prefix(remaining))
-                lock.unlock()
-            }
-        }
-    }
-
-    func afterDraining(_ completion: @escaping @Sendable () -> Void) {
-        queue.async(execute: completion)
-    }
-
-    var string: String {
-        lock.lock()
-        defer { lock.unlock() }
-        return String(decoding: data, as: UTF8.self)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 

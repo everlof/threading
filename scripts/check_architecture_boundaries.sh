@@ -18,6 +18,16 @@ if ! python3 "${script_directory}/check_logging_boundaries.py" "${repository_dir
   failed=1
 fi
 
+if ! "${script_directory}/check_main_actor_latency.sh"; then
+  echo "architecture-boundary: main-actor code must coordinate bounded worker work, not perform it" >&2
+  failed=1
+fi
+
+if ! "${script_directory}/check_main_actor_latency.sh" --self-test; then
+  echo "architecture-boundary: main-actor latency checker regression tests failed" >&2
+  failed=1
+fi
+
 # `Sources/` is one synchronized folder, so a new file under `Sources/ThreadingMobile` joins the
 # Mac target unless the exception list says otherwise. Half the time that stops the Mac build
 # outright; the other half it ships — six Swift files, 58 iPhone app icons and two recorded

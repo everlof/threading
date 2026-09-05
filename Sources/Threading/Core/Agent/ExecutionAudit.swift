@@ -222,6 +222,20 @@ final class ExecutionAuditStore: @unchecked Sendable {
         let startedAt: Date
     }
 
+    private struct AppendPayload: Sendable {
+        let sessionID: SessionID
+        let source: ExecutionAuditRecord.Source
+        let provider: String?
+        let category: ExecutionAuditRecord.Category
+        let phase: ExecutionAuditRecord.Phase
+        let operation: String
+        let callID: String?
+        let input: JSONValue?
+        let output: JSONValue?
+        let durationMilliseconds: Int?
+        let fidelity: ExecutionAuditRecord.Fidelity
+    }
+
     private enum StorageFailure: Error {
         case directory(Error)
         case encoding(Error)
@@ -333,7 +347,7 @@ final class ExecutionAuditStore: @unchecked Sendable {
         case .initialised(_, let model):
             var input: [String: JSONValue] = [:]
             if let model { input["model"] = .string(model) }
-            append(
+            enqueueAppend(
                 sessionID: sessionID,
                 source: .providerStream,
                 provider: provider.rawValue,
@@ -345,7 +359,7 @@ final class ExecutionAuditStore: @unchecked Sendable {
             )
 
         case .backgroundWork(let inFlight):
-            append(
+            enqueueAppend(
                 sessionID: sessionID,
                 source: .providerStream,
                 provider: provider.rawValue,
@@ -373,7 +387,7 @@ final class ExecutionAuditStore: @unchecked Sendable {
             if let effort = metrics.effort { output["effort"] = .string(effort) }
             if let tokens = metrics.contextTokens { output["context_tokens"] = .integer(Int64(tokens)) }
             if let window = metrics.contextWindow { output["context_window"] = .integer(Int64(window)) }
-            append(
+            enqueueAppend(
                 sessionID: sessionID,
                 source: .providerStream,
                 provider: provider.rawValue,
@@ -401,44 +415,55 @@ final class ExecutionAuditStore: @unchecked Sendable {
         switch event.phase {
         case .requested:
             let category = event.category
-            queue.sync {
-                pendingTools[sessionID, default: [:]][pendingKey(
-                    source: .providerStream,
-                    callID: event.callID
-                )] = PendingTool(operation: operation, category: category, startedAt: Date())
-            }
-            append(
+            enqueueToolRequest(
                 sessionID: sessionID,
                 source: .providerStream,
                 provider: provider.rawValue,
-                category: category,
-                phase: .requested,
                 operation: operation,
                 callID: event.callID,
                 input: event.input,
                 output: event.output,
-                fidelity: event.fidelity
+                fidelity: event.fidelity,
+                category: category
             )
 
         case .progressed:
-            let pending: PendingTool? = queue.sync {
-                pendingTools[sessionID]?[pendingKey(
-                    source: .providerStream,
-                    callID: event.callID
-                )]
-            }
-            append(
+            let payload = AppendPayload(
                 sessionID: sessionID,
                 source: .providerStream,
                 provider: provider.rawValue,
-                category: pending?.category ?? event.category,
+                category: event.category,
                 phase: .progressed,
-                operation: pending?.operation ?? operation,
+                operation: operation,
                 callID: event.callID,
                 input: event.input,
                 output: event.output,
+                durationMilliseconds: nil,
                 fidelity: event.fidelity
             )
+            queue.async { [self] in
+                let pending = pendingTools[sessionID]?[pendingKey(
+                    source: .providerStream,
+                    callID: event.callID
+                )]
+                var resolved = payload
+                if let pending {
+                    resolved = AppendPayload(
+                        sessionID: payload.sessionID,
+                        source: payload.source,
+                        provider: payload.provider,
+                        category: pending.category,
+                        phase: payload.phase,
+                        operation: pending.operation,
+                        callID: payload.callID,
+                        input: payload.input,
+                        output: payload.output,
+                        durationMilliseconds: nil,
+                        fidelity: payload.fidelity
+                    )
+                }
+                publish(appendOnQueue(resolved), sessionID: sessionID)
+            }
 
         case .completed, .failed, .allowed, .denied, .interrupted:
             recordToolResult(
@@ -464,20 +489,16 @@ final class ExecutionAuditStore: @unchecked Sendable {
         fidelity: ExecutionAuditRecord.Fidelity
     ) {
         let category = Self.category(for: operation)
-        queue.sync {
-            pendingTools[sessionID, default: [:]][pendingKey(source: source, callID: callID)] =
-                PendingTool(operation: operation, category: category, startedAt: Date())
-        }
-        append(
+        enqueueToolRequest(
             sessionID: sessionID,
             source: source,
             provider: provider,
-            category: category,
-            phase: .requested,
             operation: operation,
             callID: callID,
             input: input,
-            fidelity: fidelity
+            output: nil,
+            fidelity: fidelity,
+            category: category
         )
     }
 
@@ -491,28 +512,32 @@ final class ExecutionAuditStore: @unchecked Sendable {
         isError: Bool,
         fidelity: ExecutionAuditRecord.Fidelity
     ) {
-        let pending: PendingTool? = queue.sync {
-            pendingTools[sessionID]?.removeValue(forKey: pendingKey(source: source, callID: callID))
+        queue.async { [self] in
+            let pending = pendingTools[sessionID]?.removeValue(
+                forKey: pendingKey(source: source, callID: callID)
+            )
+            let operation = suppliedOperation ?? pending?.operation ?? "tool.result"
+            let payload = AppendPayload(
+                sessionID: sessionID,
+                source: source,
+                provider: provider,
+                category: pending?.category ?? Self.category(for: operation),
+                phase: isError ? .failed : .completed,
+                operation: operation,
+                callID: callID,
+                input: nil,
+                output: output,
+                durationMilliseconds: pending.map {
+                    max(0, Int(Date().timeIntervalSince($0.startedAt) * 1_000))
+                },
+                fidelity: fidelity
+            )
+            publish(appendOnQueue(payload), sessionID: sessionID)
         }
-        let operation = suppliedOperation ?? pending?.operation ?? "tool.result"
-        append(
-            sessionID: sessionID,
-            source: source,
-            provider: provider,
-            category: pending?.category ?? Self.category(for: operation),
-            phase: isError ? .failed : .completed,
-            operation: operation,
-            callID: callID,
-            output: output,
-            durationMilliseconds: pending.map {
-                max(0, Int(Date().timeIntervalSince($0.startedAt) * 1_000))
-            },
-            fidelity: fidelity
-        )
     }
 
     func recordPermissionRequest(_ request: PermissionRequest) {
-        append(
+        enqueueAppend(
             sessionID: request.sessionID,
             source: .permissionBroker,
             provider: nil,
@@ -535,7 +560,7 @@ final class ExecutionAuditStore: @unchecked Sendable {
             phase = .denied
             reason = value
         }
-        append(
+        enqueueAppend(
             sessionID: request.sessionID,
             source: .permissionBroker,
             provider: nil,
@@ -561,13 +586,100 @@ final class ExecutionAuditStore: @unchecked Sendable {
         durationMilliseconds: Int? = nil,
         fidelity suppliedFidelity: ExecutionAuditRecord.Fidelity
     ) -> ExecutionAuditRecord? {
+        let payload = AppendPayload(
+            sessionID: sessionID,
+            source: source,
+            provider: provider,
+            category: category,
+            phase: phase,
+            operation: operation,
+            callID: callID,
+            input: input,
+            output: output,
+            durationMilliseconds: durationMilliseconds,
+            fidelity: suppliedFidelity
+        )
+        let record = queue.sync { appendOnQueue(payload) }
+        publish(record, sessionID: sessionID)
+        return record
+    }
+
+    /// Production streams never wait for sanitization, hashing, rotation or disk. The sync
+    /// `append` entry point remains for explicit tooling and tests that need the returned seal;
+    /// every live event source enters through this ordered writer lane.
+    private func enqueueAppend(
+        sessionID: SessionID,
+        source: ExecutionAuditRecord.Source,
+        provider: String?,
+        category: ExecutionAuditRecord.Category,
+        phase: ExecutionAuditRecord.Phase,
+        operation: String,
+        callID: String? = nil,
+        input: JSONValue? = nil,
+        output: JSONValue? = nil,
+        durationMilliseconds: Int? = nil,
+        fidelity: ExecutionAuditRecord.Fidelity
+    ) {
+        let payload = AppendPayload(
+            sessionID: sessionID,
+            source: source,
+            provider: provider,
+            category: category,
+            phase: phase,
+            operation: operation,
+            callID: callID,
+            input: input,
+            output: output,
+            durationMilliseconds: durationMilliseconds,
+            fidelity: fidelity
+        )
+        queue.async { [self] in
+            publish(appendOnQueue(payload), sessionID: sessionID)
+        }
+    }
+
+    private func enqueueToolRequest(
+        sessionID: SessionID,
+        source: ExecutionAuditRecord.Source,
+        provider: String?,
+        operation: String,
+        callID: String,
+        input: JSONValue?,
+        output: JSONValue?,
+        fidelity: ExecutionAuditRecord.Fidelity,
+        category: ExecutionAuditRecord.Category
+    ) {
+        let payload = AppendPayload(
+            sessionID: sessionID,
+            source: source,
+            provider: provider,
+            category: category,
+            phase: .requested,
+            operation: operation,
+            callID: callID,
+            input: input,
+            output: output,
+            durationMilliseconds: nil,
+            fidelity: fidelity
+        )
+        queue.async { [self] in
+            pendingTools[sessionID, default: [:]][pendingKey(source: source, callID: callID)] =
+                PendingTool(operation: operation, category: category, startedAt: Date())
+            publish(appendOnQueue(payload), sessionID: sessionID)
+        }
+    }
+
+    /// Queue-confined: this includes every operation whose cost grows with payload or history.
+    private func appendOnQueue(_ payload: AppendPayload) -> ExecutionAuditRecord? {
+        let sessionID = payload.sessionID
+        let operation = payload.operation
         let sanitized = ExecutionAuditSanitizer.sanitize(
             operation: operation,
-            input: input,
-            output: output
+            input: payload.input,
+            output: payload.output
         )
         let fidelity: ExecutionAuditRecord.Fidelity = sanitized.redactions.isEmpty
-            ? suppliedFidelity
+            ? payload.fidelity
             : .exactWithRedactions
 
         // A provider payload that would not convert is a defect somewhere upstream of the
@@ -584,79 +696,78 @@ final class ExecutionAuditStore: @unchecked Sendable {
             )
         }
 
-        let record: ExecutionAuditRecord? = queue.sync {
-            do {
-                try ensureDirectory()
-                var state = stateLocked(for: sessionID)
-                let timestamp = Date()
-                let id = UUID()
-                let sequence = state.sequence + 1
-                let summary = Self.summary(operation: operation, input: sanitized.input)
-                let placeholder = ExecutionAuditRecord(
-                    id: id,
-                    sessionID: sessionID,
-                    sequence: sequence,
-                    timestamp: timestamp,
-                    source: source,
-                    provider: provider,
-                    category: category,
-                    phase: phase,
-                    operation: operation,
-                    callID: callID,
-                    summary: summary,
-                    input: sanitized.input,
-                    output: sanitized.output,
-                    durationMilliseconds: durationMilliseconds,
-                    fidelity: fidelity,
-                    redactions: sanitized.redactions,
-                    previousDigest: state.digest,
-                    digest: ""
-                )
-                guard let digest = Self.digest(SealPayload(record: placeholder)) else {
-                    reportAppendFailure(.encoding(ExecutionAuditStoreError.seal), for: sessionID)
-                    return nil
-                }
-                let sealed = ExecutionAuditRecord(
-                    id: id,
-                    sessionID: sessionID,
-                    sequence: sequence,
-                    timestamp: timestamp,
-                    source: source,
-                    provider: provider,
-                    category: category,
-                    phase: phase,
-                    operation: operation,
-                    callID: callID,
-                    summary: summary,
-                    input: sanitized.input,
-                    output: sanitized.output,
-                    durationMilliseconds: durationMilliseconds,
-                    fidelity: fidelity,
-                    redactions: sanitized.redactions,
-                    previousDigest: state.digest,
-                    digest: digest
-                )
-                try appendLocked(sealed, sessionID: sessionID)
-                state.sequence = sequence
-                state.digest = digest
-                chainStates[sessionID] = state
-                reportAppendRecovery(for: sessionID)
-                return sealed
-            } catch let failure as StorageFailure {
-                reportAppendFailure(failure, for: sessionID)
-                return nil
-            } catch {
-                reportAppendFailure(.write(error), for: sessionID)
+        do {
+            try ensureDirectory()
+            var state = stateLocked(for: sessionID)
+            let timestamp = Date()
+            let id = UUID()
+            let sequence = state.sequence + 1
+            let summary = Self.summary(operation: operation, input: sanitized.input)
+            let placeholder = ExecutionAuditRecord(
+                id: id,
+                sessionID: sessionID,
+                sequence: sequence,
+                timestamp: timestamp,
+                source: payload.source,
+                provider: payload.provider,
+                category: payload.category,
+                phase: payload.phase,
+                operation: operation,
+                callID: payload.callID,
+                summary: summary,
+                input: sanitized.input,
+                output: sanitized.output,
+                durationMilliseconds: payload.durationMilliseconds,
+                fidelity: fidelity,
+                redactions: sanitized.redactions,
+                previousDigest: state.digest,
+                digest: ""
+            )
+            guard let digest = Self.digest(SealPayload(record: placeholder)) else {
+                reportAppendFailure(.encoding(ExecutionAuditStoreError.seal), for: sessionID)
                 return nil
             }
+            let sealed = ExecutionAuditRecord(
+                id: id,
+                sessionID: sessionID,
+                sequence: sequence,
+                timestamp: timestamp,
+                source: payload.source,
+                provider: payload.provider,
+                category: payload.category,
+                phase: payload.phase,
+                operation: operation,
+                callID: payload.callID,
+                summary: summary,
+                input: sanitized.input,
+                output: sanitized.output,
+                durationMilliseconds: payload.durationMilliseconds,
+                fidelity: fidelity,
+                redactions: sanitized.redactions,
+                previousDigest: state.digest,
+                digest: digest
+            )
+            try appendLocked(sealed, sessionID: sessionID)
+            state.sequence = sequence
+            state.digest = digest
+            chainStates[sessionID] = state
+            reportAppendRecovery(for: sessionID)
+            return sealed
+        } catch let failure as StorageFailure {
+            reportAppendFailure(failure, for: sessionID)
+            return nil
+        } catch {
+            reportAppendFailure(.write(error), for: sessionID)
+            return nil
         }
+    }
 
+    private func publish(_ record: ExecutionAuditRecord?, sessionID: SessionID) {
         if record != nil {
             DispatchQueue.main.async {
                 NotificationCenter.default.post(ExecutionAuditDidChange(sessionID: sessionID))
             }
         }
-        return record
     }
 
     func read(sessionID: SessionID) -> ExecutionAuditReadResult {

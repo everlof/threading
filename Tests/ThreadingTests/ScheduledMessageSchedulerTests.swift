@@ -57,10 +57,26 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
             center: center,
             workspaceCenter: workspaceCenter,
             now: { [unowned self] in self.clock },
-            activity: { [unowned self] in self.activities[$0] ?? .idle },
-            reportsOwnTurns: { [unowned self] in self.reportingSessions.contains($0) },
+            runtime: { [unowned self] id in
+                .test(
+                    activity: self.activities[id] ?? .idle,
+                    reportsOwnTurns: self.reportingSessions.contains(id)
+                )
+            },
             sessionExists: { [unowned self] in !self.missingSessions.contains($0) }
         )
+    }
+
+    private func postRuntimeChange(_ sessionID: SessionID) {
+        let current = SessionRuntimeSnapshot.test(
+            activity: activities[sessionID] ?? .idle,
+            reportsOwnTurns: reportingSessions.contains(sessionID)
+        )
+        center.post(SessionRuntimeDidChange(
+            sessionID: sessionID,
+            transition: SessionRuntimeTransition(previous: .dormant, current: current),
+            cause: nil
+        ))
     }
 
     /// Collects the ids the scheduler announces as due.
@@ -154,7 +170,7 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
 
         XCTAssertTrue(recorder.ids.isEmpty)
         activities[watched] = .needsAttention
-        center.post(SessionActivityDidChange(sessionID: watched))
+        postRuntimeChange(watched)
 
         XCTAssertEqual(recorder.ids, [message.id])
     }
@@ -169,7 +185,7 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         scheduler.start()
 
         activities[watched] = .awaitingUser
-        center.post(SessionActivityDidChange(sessionID: watched))
+        postRuntimeChange(watched)
 
         XCTAssertTrue(recorder.ids.isEmpty)
     }
@@ -183,7 +199,7 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         scheduler.start()
 
         activities[watched] = .idle
-        center.post(SessionActivityDidChange(sessionID: watched))
+        postRuntimeChange(watched)
 
         XCTAssertTrue(
             recorder.ids.isEmpty,
@@ -228,15 +244,15 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
 
         // SessionStart raises this even when the activity did not move. The scheduler did not
         // witness the old turn running, so an idle snapshot cannot prove that turn just ended.
-        center.post(SessionActivityDidChange(sessionID: watched))
+        postRuntimeChange(watched)
         XCTAssertTrue(recorder.ids.isEmpty)
         XCTAssertEqual(store[message.id]?.state, .armed)
 
         // A later turn is observed on both sides of the boundary and can satisfy the condition.
         activities[watched] = .working
-        center.post(SessionActivityDidChange(sessionID: watched))
+        postRuntimeChange(watched)
         activities[watched] = .idle
-        center.post(SessionActivityDidChange(sessionID: watched))
+        postRuntimeChange(watched)
 
         XCTAssertEqual(recorder.ids, [message.id])
     }
@@ -253,13 +269,13 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         scheduler.start()
 
         activities[watched] = .idle
-        center.post(SessionActivityDidChange(sessionID: watched))
+        postRuntimeChange(watched)
         scheduler.noteWaiting(message.id)
         store.setState(.waiting("Waiting for the destination"), for: message.id)
 
         activities[watched] = .working
         activities[target] = .idle
-        center.post(SessionActivityDidChange(sessionID: target))
+        postRuntimeChange(target)
 
         XCTAssertEqual(
             recorder.ids,
@@ -300,8 +316,12 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
 
         let candidates = ScheduledFinishCandidates.make(
             projects: [project],
-            activity: { id in id == idle.id ? .idle : .working },
-            reportsOwnTurns: { id in id != inferred.id }
+            runtime: { id in
+                .test(
+                    activity: id == idle.id ? .idle : .working,
+                    reportsOwnTurns: id != inferred.id
+                )
+            }
         )
 
         XCTAssertEqual(candidates.map(\.id), [exact.id])
@@ -329,8 +349,7 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
 
         let candidates = ScheduledFinishCandidates.make(
             projects: [project],
-            activity: { _ in .working },
-            reportsOwnTurns: { _ in true }
+            runtime: { _ in .test(activity: .working) }
         )
 
         // Driven from `allCases`, so a provider added later is covered without editing this.
@@ -349,23 +368,17 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
             AgentSession(kind: .claude, title: "Conversation \($0)")
         }
         let working = Set(project.sessions.suffix(3).map(\.id))
-        var activityReads = 0
-        var boundaryReads = 0
+        var runtimeReads = 0
 
         let candidates = ScheduledFinishCandidates.make(
             projects: [project],
-            activity: { id in
-                activityReads += 1
-                return working.contains(id) ? .working : .idle
-            },
-            reportsOwnTurns: { _ in
-                boundaryReads += 1
-                return true
+            runtime: { id in
+                runtimeReads += 1
+                return .test(activity: working.contains(id) ? .working : .idle)
             }
         )
 
-        XCTAssertEqual(activityReads, 5_000)
-        XCTAssertEqual(boundaryReads, 3, "idle sessions should not need a capability lookup")
+        XCTAssertEqual(runtimeReads, 5_000)
         XCTAssertEqual(candidates.map(\.id), Array(project.sessions.suffix(3).map(\.id)))
     }
 
@@ -461,7 +474,7 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         scheduler.noteWaiting(message.id)
         store.relinquish(message.id, waitingBecause: "Waiting for the session to be free")
 
-        center.post(SessionActivityDidChange(sessionID: session))
+        postRuntimeChange(session)
 
         XCTAssertEqual(
             recorder.ids,
@@ -484,7 +497,7 @@ final class ScheduledMessageSchedulerTests: XCTestCase {
         scheduler.noteWaiting(message.id)
         store.relinquish(message.id, waitingBecause: "Waiting for the session to be free")
 
-        center.post(SessionActivityDidChange(sessionID: session))
+        postRuntimeChange(session)
 
         XCTAssertEqual(
             recorder.ids,

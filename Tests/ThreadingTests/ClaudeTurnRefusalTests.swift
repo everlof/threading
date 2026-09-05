@@ -144,7 +144,7 @@ final class ClaudeTurnRefusalTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .working)
         XCTAssertTrue(tracker.noteTurnRefused(turn: tracker.turnGeneration))
         XCTAssertEqual(tracker.activity, .idle)
-        XCTAssertFalse(tracker.activity.hasTurnInFlight)
+        XCTAssertFalse(tracker.runtimeSnapshot.hasOpenTurn)
     }
 
     /// Off screen it takes the unread mark, which is the only thing that will tell the user their
@@ -175,7 +175,7 @@ final class ClaudeTurnRefusalTests: XCTestCase {
 
         XCTAssertFalse(tracker.noteTurnRefused(turn: refusedTurn))
         XCTAssertEqual(tracker.activity, .working)
-        XCTAssertTrue(tracker.activity.hasTurnInFlight)
+        XCTAssertTrue(tracker.runtimeSnapshot.hasOpenTurn)
     }
 
     /// A fallback, not a second activity source. A session whose hooks never arrived is driven by

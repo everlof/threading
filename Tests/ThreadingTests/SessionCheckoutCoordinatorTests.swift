@@ -219,11 +219,11 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
     func testActiveTurnKeepsDurableFenceUntilBarrierAndRelaunch() throws {
         let source = try XCTUnwrap(store.addProject(folderURL: main))
         let session = try XCTUnwrap(store.addSession(to: source.id, kind: .codex))
-        var hasTurnInFlight = true
+        var runtimeSnapshot = SessionRuntimeSnapshot.test(activity: .working)
         let coordinator = SessionCheckoutCoordinator(
             projects: store,
             runtime: AgentRuntime(currentSessionProjection: .projectStore(store)),
-            hasTurnInFlight: { _ in hasTurnInFlight }
+            runtimeSnapshot: { _ in runtimeSnapshot }
         )
 
         guard case .queued = coordinator.requestMove(
@@ -238,7 +238,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         XCTAssertNotNil(store.session(withID: session.id)?.pendingCheckoutMove)
         XCTAssertTrue(coordinator.isHoldingInput(sessionID: session.id))
 
-        hasTurnInFlight = false
+        runtimeSnapshot = .test(activity: .idle)
         var completed = false
         coordinator.finishPendingMove(sessionID: session.id) { succeeded in
             XCTAssertTrue(succeeded)
@@ -262,7 +262,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         let coordinator = SessionCheckoutCoordinator(
             projects: store,
             runtime: AgentRuntime(currentSessionProjection: .projectStore(store)),
-            hasTurnInFlight: { _ in false }
+            runtimeSnapshot: { _ in .test(activity: .idle) }
         )
 
         guard case .queued = coordinator.requestMove(
@@ -381,7 +381,7 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         let coordinator = SessionCheckoutCoordinator(
             projects: reloaded,
             runtime: AgentRuntime(currentSessionProjection: .projectStore(reloaded)),
-            hasTurnInFlight: { _ in false }
+            runtimeSnapshot: { _ in .test(activity: .idle) }
         )
         coordinator.resumePendingMovesAtLaunch()
 
@@ -477,14 +477,95 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         )
         let first = store.session(withID: session.id)?.pendingCheckoutMove
 
-        _ = coordinator.reconcileObservedExecution(
+        let repeated = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: checkout,
             policy: .allowSameRepository
         )
 
+        guard case .alreadyPending(let repeatedMove) = repeated else {
+            return XCTFail("the standing move must not be reported as newly queued: \(repeated)")
+        }
         XCTAssertEqual(store.session(withID: session.id)?.pendingCheckoutMove, first)
+        XCTAssertEqual(repeatedMove.requestID, first?.requestID)
         XCTAssertEqual(first?.reason, "first")
+    }
+
+    func testObservedMoveUsesOneRequestKeyFromPendingThroughCompletion() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let checkout = try observed(sibling, branch: "feature/move", name: "sibling")
+        let requestID = UUID()
+
+        let pending = SessionCoordinator.observedMovePendingToast(
+            for: session,
+            checkout: checkout,
+            requestID: requestID
+        )
+        let completed = SessionCoordinator.observedMoveCompletedToast(
+            for: session,
+            checkoutDisplayName: checkout.displayName,
+            requestID: requestID
+        )
+
+        XCTAssertEqual(pending.replacementID, completed.replacementID)
+        XCTAssertTrue(pending.persistsUntilDismissed)
+        XCTAssertFalse(completed.persistsUntilDismissed)
+        XCTAssertTrue(pending.message.contains("after this turn"))
+        XCTAssertFalse(pending.message.contains("now runs"))
+    }
+
+    func testSettlementFailureStaysDurableAndKeepsInputFencedUntilCancelled() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let coordinator = makeCoordinator()
+
+        _ = coordinator.requestMove(
+            sessionID: session.id,
+            checkoutPath: sibling.path,
+            authorityBasis: .observedExecution,
+            reason: "the agent worked there",
+            policy: .allowSameRepository,
+            waitForCurrentTurnBoundary: true
+        )
+        try git(["worktree", "remove", "--force", sibling.path], in: main)
+        GitInfo.invalidateCache(for: sibling.path)
+
+        var succeeded: Bool?
+        coordinator.finishPendingMove(sessionID: session.id) { succeeded = $0 }
+
+        XCTAssertEqual(succeeded, false)
+        let failed = try XCTUnwrap(store.session(withID: session.id)?.pendingCheckoutMove)
+        XCTAssertEqual(failed.phase, .failed)
+        XCTAssertNotNil(failed.failureDescription)
+        XCTAssertTrue(coordinator.isHoldingInput(sessionID: session.id))
+
+        XCTAssertTrue(coordinator.cancelPendingMove(sessionID: session.id))
+        XCTAssertFalse(coordinator.isHoldingInput(sessionID: session.id))
+    }
+
+    func testLaunchRecoveryLeavesFailedMoveForAnExplicitRetryOrCancel() throws {
+        let project = try XCTUnwrap(store.addProject(folderURL: main))
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .codex))
+        let target = try XCTUnwrap(GitInfo.worktreeLocation(for: sibling.path))
+        let failed = PendingCheckoutMove(
+            checkoutPath: sibling.path,
+            repositoryIdentity: target.repositoryIdentity,
+            worktreeIdentity: target.worktreeIdentity,
+            authorityBasis: .observedExecution,
+            reason: "failed once",
+            requestedAt: Date(),
+            phase: .failed,
+            failureDescription: "copy failed"
+        )
+        XCTAssertTrue(store.setPendingCheckoutMove(failed, forSessionID: session.id))
+
+        let coordinator = makeCoordinator()
+        coordinator.resumePendingMovesAtLaunch()
+
+        XCTAssertEqual(store.project(forSessionID: session.id)?.id, project.id)
+        XCTAssertEqual(store.session(withID: session.id)?.pendingCheckoutMove, failed)
+        XCTAssertTrue(coordinator.isHoldingInput(sessionID: session.id))
     }
 
     // MARK: - Reclaiming rows Threading adopted
@@ -761,20 +842,29 @@ final class SessionCheckoutCoordinatorTests: XCTestCase {
         let coordinator = makeCoordinator()
         let received = expectation(description: "SessionCheckoutDidMove")
         var basis: SessionCheckoutAuthorityBasis?
+        var receivedRequestID: UUID?
+        var checkoutDisplayName: String?
         let token = NotificationCenter.default.observe(SessionCheckoutDidMove.self) { event in
             basis = event.authorityBasis
+            receivedRequestID = event.requestID
+            checkoutDisplayName = event.checkoutDisplayName
             received.fulfill()
         }
         defer { NotificationCenter.default.removeObserver(token) }
 
-        _ = coordinator.reconcileObservedExecution(
+        let result = coordinator.reconcileObservedExecution(
             sessionID: session.id,
             checkout: try observed(sibling, branch: "feature/move", name: "sibling"),
             policy: .allowSameRepository
         )
+        guard case .queued(let move) = result else {
+            return XCTFail("expected a newly queued move, got \(result)")
+        }
 
         wait(for: [received], timeout: 2)
         XCTAssertEqual(basis, .observedExecution)
+        XCTAssertEqual(receivedRequestID, move.requestID)
+        XCTAssertEqual(checkoutDisplayName, sibling.lastPathComponent)
     }
 
     func testMCPArgumentsDecodeAbsolutePathAuthorityAndReason() throws {

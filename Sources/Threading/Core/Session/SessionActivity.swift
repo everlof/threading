@@ -4,17 +4,19 @@ import OSLog
 // MARK: - Session Activity
 
 /// What a session is currently doing, as shown in the sidebar.
-enum SessionActivity: Sendable {
+enum SessionActivity: Equatable, Sendable {
     /// No terminal allocated; the session can be resumed.
     case dormant
 
     /// Running but producing no output — an agent waiting at its prompt.
     case idle
 
-    /// Producing output, i.e. the agent is working — or paused on work it left running, which
-    /// will speak again with nobody having typed. Both are "not finished", and the sidebar has
-    /// no reason to draw them apart: what the user needs to know is that nothing is owed yet.
+    /// Producing output, i.e. the agent has an open turn.
     case working
+
+    /// The prompt can accept another message, while work left by an earlier turn can still
+    /// re-enter the conversation without anybody typing.
+    case readyWithBackgroundWork
 
     /// Asked something mid-turn and cannot go on until it is answered.
     ///
@@ -37,25 +39,6 @@ enum SessionActivity: Sendable {
     /// user noticed at 11:04 and asked what had happened.
     case limitReached
 
-    /// Whether a turn is unfinished: the agent is mid-answer, or stopped on a question it
-    /// cannot get past.
-    ///
-    /// This is the line an interruption costs something across. A session that is `idle` or
-    /// merely unread has already finished its turn and loses only its process, which resumes;
-    /// these two lose the answer being written. Copy that counts "running agents" counts both
-    /// sides of that line and reads as the worse one.
-    ///
-    /// A refused turn is *over*: the CLI is back at its prompt and the answer it was writing is
-    /// already lost, so there is nothing left for an interruption to cost.
-    var hasTurnInFlight: Bool {
-        switch self {
-        case .working, .awaitingUser:
-            return true
-        case .dormant, .idle, .needsAttention, .limitReached:
-            return false
-        }
-    }
-
     /// The name this state is written under in the log.
     ///
     /// Stated rather than reflected: a diagnostic trail is read months later beside the code
@@ -66,6 +49,7 @@ enum SessionActivity: Sendable {
         case .dormant: return "dormant"
         case .idle: return "idle"
         case .working: return "working"
+        case .readyWithBackgroundWork: return "readyWithBackgroundWork"
         case .awaitingUser: return "awaitingUser"
         case .needsAttention: return "needsAttention"
         case .limitReached: return "limitReached"
@@ -73,39 +57,98 @@ enum SessionActivity: Sendable {
     }
 }
 
-/// The semantic turn edges observed while activity presentations change.
-///
-/// `working` / `awaitingUser` are the two presentations of one unfinished turn. Moving between
-/// them is not a new turn and moving between two finished presentations is not a completion.
-/// Keeping this judgement next to `hasTurnInFlight` prevents UI callbacks from interpreting
-/// every non-working state as a fresh, expensive finish boundary.
-struct SessionActivityTransition {
-    let beganTurn: Bool
-    let completedTurn: Bool
+enum SessionProcessState: Equatable, Sendable {
+    case dormant
+    case starting
+    case ready
 }
 
-/// Remembers one scalar activity per session and derives semantic turn edges in O(1).
-///
-/// Session count is the bound: no per-output or per-turn history is retained. The first observed
-/// in-flight state is a beginning so a surface attached after its process started still receives
-/// the presentation edge; a first observed finished state is never invented into a completion.
-struct SessionActivityTransitionLedger {
-    private var lastActivity: [SessionID: SessionActivity] = [:]
+enum SessionTurnAuthority: Equatable, Sendable {
+    case inferred
+    case reported
+}
+
+enum SessionTurnState: Equatable, Sendable {
+    case none
+    case inFlight(SessionTurnAuthority)
+
+    var isInFlight: Bool {
+        if case .inFlight = self { return true }
+        return false
+    }
+}
+
+enum SessionContinuationState: String, Equatable, Sendable {
+    case none
+    case delegated
+    case standing
+
+    var isActive: Bool { self != .none }
+}
+
+enum SessionRuntimeBlocker: Equatable, Sendable {
+    case none
+    case awaitingUser
+    case usageLimit
+}
+
+/// Operational truth kept apart from the reader-specific activity projected into UI.
+struct SessionRuntimeSnapshot: Equatable, Sendable {
+    let process: SessionProcessState
+    let turn: SessionTurnState
+    let continuation: SessionContinuationState
+    let blocker: SessionRuntimeBlocker
+    let activity: SessionActivity
+    let reportsOwnTurns: Bool
+
+    static let dormant = SessionRuntimeSnapshot(
+        process: .dormant,
+        turn: .none,
+        continuation: .none,
+        blocker: .none,
+        activity: .dormant,
+        reportsOwnTurns: false
+    )
+
+    var hasOpenTurn: Bool { turn.isInFlight }
+    var hasPendingOutcome: Bool { hasOpenTurn || continuation.isActive }
+    var isPromptReady: Bool {
+        process == .ready && !hasOpenTurn && blocker == .none
+    }
+    var canInterrupt: Bool { process == .ready && hasOpenTurn }
+    var hasWorkAtRisk: Bool { hasPendingOutcome }
+}
+
+struct SessionRuntimeTransition: Equatable, Sendable {
+    let previous: SessionRuntimeSnapshot
+    let current: SessionRuntimeSnapshot
+
+    var beganTurn: Bool { !previous.hasOpenTurn && current.hasOpenTurn }
+    var endedTurn: Bool { previous.hasOpenTurn && !current.hasOpenTurn }
+    var beganPendingOutcome: Bool {
+        !previous.hasPendingOutcome && current.hasPendingOutcome
+    }
+    var completedPendingOutcome: Bool {
+        previous.hasPendingOutcome && !current.hasPendingOutcome
+    }
+    var becamePromptReady: Bool { !previous.isPromptReady && current.isPromptReady }
+    var becamePromptUnavailable: Bool { previous.isPromptReady && !current.isPromptReady }
+}
+
+/// O(1) transition memory for adapters that receive snapshots rather than lifecycle reports.
+struct SessionRuntimeTransitionLedger {
+    private var lastSnapshot: [SessionID: SessionRuntimeSnapshot] = [:]
 
     mutating func observe(
-        _ activity: SessionActivity,
+        _ snapshot: SessionRuntimeSnapshot,
         for sessionID: SessionID
-    ) -> SessionActivityTransition {
-        let previous = lastActivity.updateValue(activity, forKey: sessionID)
-        let previouslyHadTurn = previous?.hasTurnInFlight ?? false
-        return SessionActivityTransition(
-            beganTurn: !previouslyHadTurn && activity.hasTurnInFlight,
-            completedTurn: previous != nil && previouslyHadTurn && !activity.hasTurnInFlight
-        )
+    ) -> SessionRuntimeTransition {
+        let previous = lastSnapshot.updateValue(snapshot, forKey: sessionID) ?? .dormant
+        return SessionRuntimeTransition(previous: previous, current: snapshot)
     }
 
     mutating func remove(_ sessionID: SessionID) {
-        lastActivity.removeValue(forKey: sessionID)
+        lastSnapshot.removeValue(forKey: sessionID)
     }
 }
 
@@ -163,6 +206,7 @@ enum SessionActivityCause: String {
     /// The session lost its process, or gained one.
     case dormant
     case running
+    case sessionStarted
 
     /// Whether the agent said this, as against Threading inferring it from bytes, timers or the
     /// session's own transcript.
@@ -180,7 +224,7 @@ enum SessionActivityCause: String {
         // the same side of this line as `turnRefused`, which is read the same way.
         case .seen, .userInput, .output, .quiet, .turnStartedFromTranscript,
              .turnFinishedFromTranscript, .turnRefused, .limitParked, .limitCleared, .bell,
-             .dormant, .running:
+             .dormant, .running, .sessionStarted:
             return false
         }
     }
@@ -231,6 +275,11 @@ final class SessionActivityTracker {
 
     /// Called whenever the activity changes.
     var onChange: ((SessionActivity) -> Void)?
+
+    /// Operational changes, including turn boundaries hidden by a continuous presentation.
+    var onRuntimeChange: ((SessionRuntimeSnapshot) -> Void)?
+
+    private var lastPublishedRuntimeSnapshot: SessionRuntimeSnapshot = .dormant
 
     /// Called once for each new attention episode, independently of who is looking.
     /// Read state belongs to participant identities rather than this process-local tracker.
@@ -411,6 +460,36 @@ final class SessionActivityTracker {
 
     /// Whether the turn is paused at all, which is all `settle()` has ever needed to know.
     private var pausedOnOwnWork: Bool { pause != .none }
+
+    var runtimeSnapshot: SessionRuntimeSnapshot {
+        let process: SessionProcessState = if isDormant {
+            .dormant
+        } else if hasHeardFromProcess {
+            .ready
+        } else {
+            .starting
+        }
+        let continuation: SessionContinuationState = switch pause {
+        case .none: .none
+        case .delegated: .delegated
+        case .standing: .standing
+        }
+        let blocker: SessionRuntimeBlocker = if !openAsks.isEmpty || awaitsUser {
+            .awaitingUser
+        } else if limitPark == .flagged {
+            .usageLimit
+        } else {
+            .none
+        }
+        return SessionRuntimeSnapshot(
+            process: process,
+            turn: turnInFlight ? .inFlight(turnWasDeclared ? .reported : .inferred) : .none,
+            continuation: continuation,
+            blocker: blocker,
+            activity: activity,
+            reportsOwnTurns: reportsOwnActivity
+        )
+    }
 
     /// Claude commonly reports `Stop` and a later idle-prompt `Notification` for one result.
     /// They are one unread episode; new work opens the next one.
@@ -750,11 +829,19 @@ final class SessionActivityTracker {
         backgroundWork inFlight: [BackgroundTask] = [],
         continuationGrace: TimeInterval? = nil
     ) {
+        // A resumed CLI can already be mid-turn when Threading relaunches, so its start hook
+        // belonged to the previous app process. In that case `Stop` is the first boundary the
+        // new tracker sees. It is still proof that the unattended boot repaint is over: leaving
+        // the grace armed here discards every byte from a goal turn Codex opens immediately
+        // afterwards, and the row stays idle while the terminal says "Working".
+        let resumedWithoutObservedStart = launchedUnattended
+        launchedUnattended = false
         adoptOwnReports()
         finishReportedTurn(
             backgroundWork: inFlight,
             cause: .turnFinished,
-            continuationGrace: continuationGrace
+            continuationGrace: continuationGrace,
+            reconcileUnobservedContinuation: resumedWithoutObservedStart
         )
     }
 
@@ -854,7 +941,8 @@ final class SessionActivityTracker {
     private func finishReportedTurn(
         backgroundWork inFlight: [BackgroundTask],
         cause: SessionActivityCause,
-        continuationGrace: TimeInterval? = nil
+        continuationGrace: TimeInterval? = nil,
+        reconcileUnobservedContinuation: Bool = false
     ) {
         cancelPendingReportedTurnFinish()
         reportsTurnEnds = true
@@ -885,7 +973,7 @@ final class SessionActivityTracker {
         // stronger reason to settle immediately, and callers opt in only for Codex terminals.
         if let continuationGrace,
            continuationGrace > 0,
-           activity == .working,
+           (activity == .working || (reconcileUnobservedContinuation && activity == .idle)),
            !pausedOnOwnWork {
             pendingReportedTurnFinish = PendingReportedTurnFinish(cause: cause)
             pendingReportedTurnFinishTimer = Timer.scheduledTimer(
@@ -963,8 +1051,8 @@ final class SessionActivityTracker {
     /// - An **unattended launch**. A session relaunched in the background is precisely a prompt
     ///   sitting idle, so honouring the notice flagged every restored session a minute after
     ///   startup. A real ask arrives inside a turn, and the turn's start already ended the grace.
-    /// - A session **paused on delegated work**. The agent's turn ended on a subagent it is
-    ///   waiting for, so its prompt is idle *because* of that child — and 60s later
+    /// - A session **paused on work it left running**. The agent's turn ended while background
+    ///   work remained, so its prompt is idle *because* of that work — and 60s later
     ///   (`messageIdleNotifThresholdMs`) the CLI says so, which used to overwrite the one fact
     ///   that knew better. Measured on CLI 2.1.238 in a session whose child ran for 18 minutes:
     ///   the row went `working -> needsAttention` a minute after each turn, came back to
@@ -975,10 +1063,9 @@ final class SessionActivityTracker {
     /// Two narrowings, and both are the same instinct: refuse a notice only where refusing it
     /// cannot lose anything.
     ///
-    /// - **`.delegated` only, not every pause.** A subagent ends and reports back, so the row
-    ///   corrects itself with nobody typing. Standing work carries no such promise — a
-    ///   backgrounded dev server may outlive the day — and a session parked on one is exactly
-    ///   where a late "nothing is happening here" is worth having, so `.standing` keeps it.
+    /// - **Only while a continuation is explicitly reported.** Delegated and standing work have
+    ///   different lifetimes, but neither turns an idle prompt into evidence that the user is
+    ///   needed. The prompt remains ready and the continuation remains visible as its own fact.
     /// - **`.idlePrompt` only, not every notice.** The two failures are not symmetrical: a
     ///   spurious mark is noise, while a swallowed permission prompt is a session waiting for an
     ///   answer nobody knows it wants. A terminal session has no other signal for one —
@@ -992,7 +1079,7 @@ final class SessionActivityTracker {
     /// already says it is for — a *new* edge, not old state a relaunch happened to re-read.
     func honoursAwaitingUserNotice(_ notice: HookNotificationKind) -> Bool {
         if launchedUnattended { return false }
-        if notice == .idlePrompt, pause == .delegated { return false }
+        if notice == .idlePrompt, pausedOnOwnWork { return false }
         return true
     }
 
@@ -1079,6 +1166,7 @@ final class SessionActivityTracker {
     /// not yet a turn boundary, so the output heuristic stays on.
     func noteSessionStarted() {
         hasHeardFromProcess = true
+        settle(.sessionStarted)
     }
 
     /// Records that this session reports, the first time it reports anything.
@@ -1275,10 +1363,19 @@ final class SessionActivityTracker {
         } else if awaitsUser {
             activity = turnInFlight ? .awaitingUser : .needsAttention
         } else {
-            activity = turnInFlight || pausedOnOwnWork ? .working : .idle
+            activity = turnInFlight ? .working
+                : pausedOnOwnWork ? .readyWithBackgroundWork : .idle
         }
 
         record(cause, from: previous)
+        publishRuntimeChangeIfNeeded()
+    }
+
+    private func publishRuntimeChangeIfNeeded() {
+        let snapshot = runtimeSnapshot
+        guard snapshot != lastPublishedRuntimeSnapshot else { return }
+        lastPublishedRuntimeSnapshot = snapshot
+        onRuntimeChange?(snapshot)
     }
 
     /// The trail a row's state leaves behind.

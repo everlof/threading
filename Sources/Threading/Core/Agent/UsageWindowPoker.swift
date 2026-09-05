@@ -234,7 +234,7 @@ final class UsageWindowPoker {
                   )?.id == account.id
             else { return false }
 
-            return AgentRuntime.shared.activity(sessionID: sessionID) == .working
+            return AgentRuntime.shared.runtimeSnapshot(sessionID: sessionID).hasWorkAtRisk
         }
     }
 

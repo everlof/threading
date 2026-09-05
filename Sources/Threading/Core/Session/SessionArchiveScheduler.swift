@@ -70,11 +70,9 @@ enum SessionArchiveCancellation: Equatable {
 /// for the turn carrying the tool call to end. A manager-targeted archive is admitted only after
 /// the control plane has already found the child settled, so it begins the same settle grace from
 /// that current state instead of waiting for an activity edge that may never come. This watches
-/// `SessionActivityDidChange` and fires on the edge out of `hasTurnInFlight` — the same edge the
-/// attention notifications already treat as a finished turn. For a session whose agent reports
-/// its own turn boundaries that edge is the agent saying so; for one still on the output
-/// heuristic it is a good guess, and this is no better or worse than everything else built on
-/// it. The receipt's Undo is what covers the guess being wrong.
+/// `SessionRuntimeDidChange` and waits until the typed pending outcome is gone. That keeps a
+/// background continuation alive after its foreground turn closes, without asking presentation
+/// state to stand in for lifecycle.
 ///
 /// Nothing here knows what an archive looks like. It says when one is due
 /// (`SessionArchiveRequestDidBecomeDue`) and `SessionCoordinator`, which owns every other
@@ -100,7 +98,7 @@ final class SessionArchiveScheduler {
     private var settling: [SessionID: Timer] = [:]
 
     private let observations: AppEventObservations
-    private let activity: @MainActor (SessionID) -> SessionActivity
+    private let runtime: @MainActor (SessionID) -> SessionRuntimeSnapshot
     private let session: @MainActor (SessionID) -> AgentSession?
     private let center: NotificationCenter
 
@@ -110,19 +108,19 @@ final class SessionArchiveScheduler {
     /// agent, a store, or the running app's own event traffic.
     init(
         center: NotificationCenter = .default,
-        activity: @escaping @MainActor (SessionID) -> SessionActivity = {
-            AgentRuntime.shared.activity(sessionID: $0)
+        runtime: @escaping @MainActor (SessionID) -> SessionRuntimeSnapshot = {
+            AgentRuntime.shared.runtimeSnapshot(sessionID: $0)
         },
         session: @escaping @MainActor (SessionID) -> AgentSession? = {
             ProjectStore.shared.session(withID: $0)
         }
     ) {
         self.center = center
-        self.activity = activity
+        self.runtime = runtime
         self.session = session
         self.observations = AppEventObservations(center: center)
 
-        observations.observe(SessionActivityDidChange.self) { [weak self] event in
+        observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
             self?.reconcileActivity(for: event.sessionID)
         }
     }
@@ -190,7 +188,7 @@ final class SessionArchiveScheduler {
     private func reconcileActivity(for sessionID: SessionID) {
         guard let request = pending[sessionID] else { return }
 
-        guard !activity(sessionID).hasTurnInFlight else {
+        guard !runtime(sessionID).hasPendingOutcome else {
             disarm(sessionID)
             return
         }

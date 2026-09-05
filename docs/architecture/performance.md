@@ -4737,3 +4737,60 @@ same-repository checkout is actionable, two are ambiguous, and runtimes without 
 hooks still reach the observer. A live product-shell sample remains unverified; the code path is
 rate- and cardinality-bounded rather than justified by an unmeasured claim that process trees are
 small.
+
+
+## Main-actor latency audit (2026-09-04)
+
+Swift's concurrency checker answers isolation and transfer safety. It cannot know that
+`Data(contentsOf:)`, `JSONDecoder.decode`, a pipe `write`, symlink resolution, or an innocent
+looking store accessor can occupy the main actor for hundreds of milliseconds. The project uses
+Swift 5 language mode with complete strict-concurrency checking; switching the whole dependency
+graph to Swift 6 is currently blocked by the pinned WasmKit package, and would not identify these
+latency defects in either case.
+
+The audit combined the existing semantic spans with a shipping-process `sample`, then traced the
+main-actor callees structurally. The sample's dominant actionable stacks were terminal/native
+conversation stream handling (about 1,009 ms of sampled main-thread stack presence) and duplicate
+session-title propagation (about 690 ms). The source pass also found synchronous audit-ledger
+writes, heartbeat writes, broad settings invalidation, repeated project-path resolution, and the
+existing family of attachment, browser-baseline, display-image and persistence stores whose APIs
+still permit filesystem or codec work from main.
+
+The implemented ownership rules are:
+
+- ACP, Codex and Claude native conversations share `AgentStreamTransport`. Pipe reads, bounded
+  newline framing, primary parsing, JSON serialization, stdin writes and bounded stderr capture
+  have dedicated serial worker lanes. Main receives complete typed events only. A newline-free
+  line is capped at 16 MiB and pending writes at 64, so neither stream direction can create an
+  unbounded buffer. The `FileHandle` readiness callback consumes available bytes before it
+  returns and queues only parsing/capture: postponing the read itself can leave a pipe readable
+  without another readiness edge, deadlocking a child whose stderr exceeds the pipe capacity.
+- The execution-audit live record APIs enqueue one ordered transaction containing correlation,
+  sanitization, hashing, rotation and append. The synchronous append remains only for callers
+  that explicitly need its returned seal (tests and support tooling); a following read drains the
+  writer lane and therefore preserves read-after-record behavior.
+- The main-queue heartbeat still represents UI liveness, but admits a coalesced utility-writer
+  stamp instead of performing the atomic file replacement itself.
+- A provider title change mutates `ProjectStore` once. The typed `ProjectsDidChange` impact is the
+  only presentation fan-out, and `MainWindowController` refreshes only the title or script context
+  named by that impact. Settings changes likewise carry the persisted key, so the General pane
+  rebuilds sound menus only for sound keys and the extension snapshot journal no longer rewrites
+  for settings it does not consume.
+- Project-script activation rejects an unchanged standardized path before paying symlink
+  resolution. The canonical result remains the authority when the requested spelling changed.
+
+`scripts/main_actor_latency_lint.swift` is a SwiftSyntax build check for explicit and inherited
+main-actor scopes. A repository-wide type prepass follows global-actor inheritance into separately
+declared feature extensions; those files are not an isolation escape hatch. The check recognizes
+detached/queue worker closures and ratchets synchronous file, directory, symlink, serialization,
+bitmap and blocking APIs by operation. The checked-in counts in
+`scripts/config/main-actor-latency.json` are an inventory of legacy debt: any new occurrence or new
+API category fails an ordinary build. Reducing a count is welcome; raising one requires a measured
+exception and updates this audit. This complements strict concurrency rather than pretending an
+actor annotation is a performance boundary.
+
+For uninstrumented stalls, Debug builds accept `THREADING_STALL_SAMPLE=1`. The watchdog launches at
+most one `/usr/bin/sample` capture at a time on its utility lane and files the bounded result beside
+the semantic incident. It is off by default and absent from the Release path. This turns the next
+otherwise anonymous 250 ms stall into a stack without requiring Instruments to have been attached
+beforehand.

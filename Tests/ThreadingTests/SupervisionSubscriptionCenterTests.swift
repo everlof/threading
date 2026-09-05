@@ -28,6 +28,7 @@ final class SupervisionSubscriptionCenterTests: XCTestCase {
             center: center,
             dependencies: .init(
                 activity: { activityBySession[$0] ?? .dormant },
+                runtime: { .test(activity: activityBySession[$0] ?? .dormant) },
                 title: { $0 == childID ? "Child" : "Manager" },
                 accountID: { $0 == childID ? accountID : nil },
                 supervision: { $0 == childID ? activeSupervision : nil },
@@ -40,8 +41,14 @@ final class SupervisionSubscriptionCenterTests: XCTestCase {
         )
 
         XCTAssertTrue(subscriptions.subscribe(managerID: managerID, childID: childID))
+        let previous = SessionRuntimeSnapshot.test(activity: .working)
         activityBySession[childID] = .idle
-        center.post(SessionActivityDidChange(sessionID: childID))
+        let current = SessionRuntimeSnapshot.test(activity: .idle)
+        center.post(SessionRuntimeDidChange(
+            sessionID: childID,
+            transition: SessionRuntimeTransition(previous: previous, current: current),
+            cause: nil
+        ))
 
         XCTAssertEqual(events, [.settled])
         XCTAssertEqual(deliveries.first?.1, managerID)

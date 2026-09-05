@@ -28,6 +28,8 @@ Seven rules that are cheapest to learn before you start:
   processes, or provider data, apply its [scaling gate](CLAUDE.md#scaling-gate). Collapsed or
   hidden content is not lazy if its views were already built; the detailed rules and current audit
   live in [`performance.md`](docs/architecture/performance.md#implementation-time-scaling-gate).
+  Swift 6 checks isolation, not latency: main-actor feature paths must hand file, codec, pipe and
+  process work to bounded workers, and `scripts/check_main_actor_latency.sh` ratchets that debt.
 - **Test sources are filesystem synchronized.** A new Swift file below `Tests/ThreadingTests`
   or `Tests/ThreadingUITests` is compiled automatically; do not add per-file entries to
   `project.pbxproj`.

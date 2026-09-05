@@ -75,7 +75,7 @@ final class GitTurnBaselineStore {
     private let maximumTotal: Int
     private var archive: GitTurnCheckpointArchive
 
-    private var lastActivity: [SessionID: SessionActivity] = [:]
+    private var lastRuntime: [SessionID: SessionRuntimeSnapshot] = [:]
     private var generations: [SessionID: Int] = [:]
     private var activeCheckpointIDs: [SessionID: GitTurnCheckpointID] = [:]
     private var preparingCheckpointIDs: [SessionID: GitTurnCheckpointID] = [:]
@@ -145,18 +145,17 @@ final class GitTurnBaselineStore {
     // MARK: - Admission and Completion
 
     /// Feed every activity change through here; the store finds fallback edges itself.
-    func noteActivity(
-        _ activity: SessionActivity,
-        sessionID: SessionID,
-        hasAuthoritativeReporting: Bool = false
-    ) {
-        let previous = lastActivity[sessionID]
-        lastActivity[sessionID] = activity
+    func noteRuntime(_ snapshot: SessionRuntimeSnapshot, sessionID: SessionID) {
+        let previous = lastRuntime[sessionID]
+        lastRuntime[sessionID] = snapshot
+        let transition = SessionRuntimeTransition(
+            previous: previous ?? .dormant,
+            current: snapshot
+        )
 
-        if activity == .working, previous != .working {
+        if transition.beganTurn {
             // Answering a question resumes the same turn. Re-baselining there would lose the
             // work performed before the question.
-            guard previous != .awaitingUser else { return }
             if preparingActivityEdges.remove(sessionID) != nil { return }
             if preparedActivityEdges.remove(sessionID) != nil { return }
 
@@ -169,13 +168,20 @@ final class GitTurnBaselineStore {
         // A reporting terminal finishes through its blocking hook before the tracker moves. If
         // that hook never arrives, a process exit is evidence of an interrupted boundary, not
         // permission to bless whatever bytes happen to remain as an authoritative turn end.
-        if previous?.hasTurnInFlight == true, !activity.hasTurnInFlight {
-            if hasAuthoritativeReporting {
+        if transition.endedTurn {
+            if snapshot.reportsOwnTurns {
                 markActiveTurnIncomplete(
                     sessionID: sessionID,
                     message: L10n.string(
                         "The provider process exited before the turn end checkpoint was captured."
                     )
+                )
+                // Transcript recovery and process-exit paths can close a provider-owned turn
+                // without traversing the blocking Stop hook. The incomplete checkpoint is the
+                // final decision for that turn; checkout settlement must still cross after it.
+                SessionCheckoutCoordinator.shared.finishPendingMove(
+                    sessionID: sessionID,
+                    completion: { _ in }
                 )
             } else {
                 // A runtime without hooks has no stronger completion signal. Preserve its
@@ -195,7 +201,7 @@ final class GitTurnBaselineStore {
         expectsActivityEdge: Bool = true,
         completion: @escaping @MainActor (GitTurnCheckpointID?) -> Void
     ) {
-        if lastActivity[sessionID] == .awaitingUser {
+        if lastRuntime[sessionID]?.activity == .awaitingUser {
             completion(activeCheckpointIDs[sessionID] ?? preparingCheckpointIDs[sessionID])
             return
         }
@@ -726,7 +732,7 @@ final class GitTurnBaselineStore {
     /// Drops transient state and garbage-collects durable records for sessions that no longer
     /// exist. Archived sessions remain in the supplied set and therefore retain their history.
     func retainOnly(sessionIDs: Set<SessionID>) {
-        lastActivity = lastActivity.filter { sessionIDs.contains($0.key) }
+        lastRuntime = lastRuntime.filter { sessionIDs.contains($0.key) }
         generations = generations.filter { sessionIDs.contains($0.key) }
         activeCheckpointIDs = activeCheckpointIDs.filter { sessionIDs.contains($0.key) }
         for sessionID in Array(preparingCheckpointIDs.keys) where !sessionIDs.contains(sessionID) {
@@ -1004,7 +1010,7 @@ final class GitTurnBaselineStore {
                   let record = checkpoint(id: checkpointID),
                   let otherWorktree = record.worktreeIdentity,
                   otherWorktree == worktreeIdentity,
-                  lastActivity[otherSessionID]?.hasTurnInFlight == true
+                  lastRuntime[otherSessionID]?.hasOpenTurn == true
                       || record.status.isTransitional else { continue }
             seen.insert(otherSessionID)
             contenders.append((otherSessionID, checkpointID))

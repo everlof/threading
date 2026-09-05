@@ -4,13 +4,20 @@ struct SessionCheckoutDidMove: AppEvent {
     static let name = Notification.Name("sessionCheckoutDidMove")
     let sessionID: SessionID
     let projectID: ProjectID
-    /// Why ownership moved, because the answer decides whether the runtime has to be replaced.
-    ///
-    /// A move the user or the agent *asked* for leaves the process running in the checkout it was
-    /// launched in, so it has to be replaced to reach the new one. An `observedExecution` move is
-    /// the opposite by construction: ownership is following a process that is **already** there,
-    /// and replacing it would kill a working agent to put it back where it already is.
+    let requestID: UUID
+    let checkoutDisplayName: String
+    /// Why ownership moved, retained for the completion receipt and audit trail. Every committed
+    /// move replaces the runtime: descendant-process evidence proves where the finished turn did
+    /// work, not that the provider's root process changed its launch directory.
     let authorityBasis: SessionCheckoutAuthorityBasis
+}
+
+struct SessionCheckoutMoveDidFail: AppEvent {
+    static let name = Notification.Name("sessionCheckoutMoveDidFail")
+    let sessionID: SessionID
+    let requestID: UUID
+    let checkoutDisplayName: String
+    let message: String
 }
 
 /// Bounds on how often ownership may follow an observation.
@@ -86,6 +93,7 @@ struct ValidatedSessionCheckout: Equatable, Sendable {
 
 enum SessionCheckoutMoveRequestResult: Equatable {
     case queued(PendingCheckoutMove)
+    case alreadyPending(PendingCheckoutMove)
     case approvalRequired(PendingCheckoutMove)
     case denied
     case failed(String)
@@ -98,9 +106,10 @@ final class SessionCheckoutCoordinator {
 
     private let projects: ProjectStore
     private let fileManager: FileManager
-    private let hasTurnInFlight: @MainActor (SessionID) -> Bool
+    private let runtimeSnapshot: @MainActor (SessionID) -> SessionRuntimeSnapshot
     private let now: @MainActor () -> Date
     private var inputFences: Set<SessionID> = []
+    private var settlements: [SessionID: [@MainActor @Sendable (Bool) -> Void]] = [:]
 
     /// The worktree each session most recently *left*, and when — the dwell's whole memory.
     ///
@@ -123,14 +132,14 @@ final class SessionCheckoutCoordinator {
         projects: ProjectStore = .shared,
         runtime: AgentRuntime = .shared,
         fileManager: FileManager = .default,
-        hasTurnInFlight: (@MainActor (SessionID) -> Bool)? = nil,
+        runtimeSnapshot: (@MainActor (SessionID) -> SessionRuntimeSnapshot)? = nil,
         now: @escaping @MainActor () -> Date = Date.init
     ) {
         self.projects = projects
         self.fileManager = fileManager
         self.now = now
-        self.hasTurnInFlight = hasTurnInFlight ?? { sessionID in
-            runtime.activity(sessionID: sessionID).hasTurnInFlight
+        self.runtimeSnapshot = runtimeSnapshot ?? { sessionID in
+            runtime.runtimeSnapshot(sessionID: sessionID)
         }
     }
 
@@ -187,6 +196,9 @@ final class SessionCheckoutCoordinator {
         approval: Bool? = nil,
         waitForCurrentTurnBoundary: Bool = false
     ) -> SessionCheckoutMoveRequestResult {
+        if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove {
+            return .alreadyPending(pending)
+        }
         switch validate(checkoutPath: checkoutPath, forSessionID: sessionID) {
         case .failure(let failure):
             return .failed(failure.localizedDescription)
@@ -197,7 +209,7 @@ final class SessionCheckoutCoordinator {
                 worktreeIdentity: checkout.worktreeIdentity,
                 authorityBasis: authorityBasis,
                 reason: String(reason.prefix(2_000)),
-                requestedAt: Date()
+                requestedAt: now()
             )
             if Self.requiresApproval(
                 policy: policy,
@@ -214,7 +226,7 @@ final class SessionCheckoutCoordinator {
             }
             inputFences.insert(sessionID)
             recordAudit("Checkout move queued", sessionID: sessionID, pending: pending)
-            if !waitForCurrentTurnBoundary, !hasTurnInFlight(sessionID) {
+            if !waitForCurrentTurnBoundary, !runtimeSnapshot(sessionID).hasPendingOutcome {
                 finishPendingMove(sessionID: sessionID) { _ in }
             }
             return .queued(pending)
@@ -243,7 +255,7 @@ final class SessionCheckoutCoordinator {
         // another tool call reports the same directory would rewrite the pending record and
         // restart its fence for no change.
         if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove {
-            return .queued(pending)
+            return .alreadyPending(pending)
         }
 
         // Both guards below are deliberately *only* on this entry point. A move the user or the
@@ -277,6 +289,7 @@ final class SessionCheckoutCoordinator {
         }
         guard projects.setPendingCheckoutMove(nil, forSessionID: sessionID) else { return false }
         inputFences.remove(sessionID)
+        SessionExecutionLocusTracker.shared.forget(sessionID: sessionID)
         recordAudit("Checkout move cancelled", sessionID: sessionID, pending: pending)
         return true
     }
@@ -287,8 +300,9 @@ final class SessionCheckoutCoordinator {
     func resumePendingMovesAtLaunch(
         completion: @escaping @MainActor @Sendable () -> Void = {}
     ) {
-        let pendingIDs = Array(projects.projects.lazy.flatMap(\.sessions).compactMap { session in
-            session.pendingCheckoutMove == nil ? nil : session.id
+        let pendingIDs: [SessionID] = Array(projects.projects.lazy.flatMap(\.sessions).compactMap { session -> SessionID? in
+            guard let move = session.pendingCheckoutMove, move.phase != .failed else { return nil }
+            return session.id
         })
         func settle(_ remaining: ArraySlice<SessionID>) {
             guard let sessionID = remaining.first else {
@@ -312,22 +326,38 @@ final class SessionCheckoutCoordinator {
             completion(true)
             return
         }
-        inputFences.insert(sessionID)
-        let validated: ValidatedSessionCheckout
-        switch validate(checkoutPath: pending.checkoutPath, forSessionID: sessionID) {
-        case .failure(let failure):
-            _ = projects.setPendingCheckoutMove(nil, forSessionID: sessionID)
-            inputFences.remove(sessionID)
-            recordAudit("Checkout move failed", sessionID: sessionID, pending: pending, detail: failure.localizedDescription)
+        guard pending.phase != .failed else {
             completion(false)
+            return
+        }
+        if settlements[sessionID] != nil {
+            settlements[sessionID, default: []].append(completion)
+            return
+        }
+        settlements[sessionID] = [completion]
+        inputFences.insert(sessionID)
+        let settling = pending.updating(phase: .settling)
+        guard projects.setPendingCheckoutMove(settling, forSessionID: sessionID) else {
+            failMove(
+                sessionID: sessionID,
+                pending: pending,
+                message: L10n.string("The checkout move could not enter its settlement phase.")
+            )
+            return
+        }
+        let validated: ValidatedSessionCheckout
+        switch validate(checkoutPath: settling.checkoutPath, forSessionID: sessionID) {
+        case .failure(let failure):
+            failMove(sessionID: sessionID, pending: settling, message: failure.localizedDescription)
             return
         case .success(let checkout):
             guard checkout.repositoryIdentity == pending.repositoryIdentity,
                   checkout.worktreeIdentity == pending.worktreeIdentity else {
-                _ = projects.setPendingCheckoutMove(nil, forSessionID: sessionID)
-                inputFences.remove(sessionID)
-                recordAudit("Checkout move failed", sessionID: sessionID, pending: pending, detail: SessionCheckoutValidationFailure.checkoutChanged.localizedDescription)
-                completion(false)
+                failMove(
+                    sessionID: sessionID,
+                    pending: settling,
+                    message: SessionCheckoutValidationFailure.checkoutChanged.localizedDescription
+                )
                 return
             }
             validated = checkout
@@ -342,8 +372,10 @@ final class SessionCheckoutCoordinator {
             completeStoreMove(
                 sessionIDs: movingIDs,
                 checkout: validated,
-                pending: pending,
-                completion: completion
+                pending: settling,
+                completion: { [weak self] succeeded in
+                    self?.finishSettlement(sessionID: sessionID, succeeded: succeeded)
+                }
             )
             return
         }
@@ -355,8 +387,10 @@ final class SessionCheckoutCoordinator {
             completeStoreMove(
                 sessionIDs: movingIDs,
                 checkout: validated,
-                pending: pending,
-                completion: completion
+                pending: settling,
+                completion: { [weak self] succeeded in
+                    self?.finishSettlement(sessionID: sessionID, succeeded: succeeded)
+                }
             )
             return
         }
@@ -371,7 +405,7 @@ final class SessionCheckoutCoordinator {
                     guard let self else { completion(false); return }
                     do {
                         let commitCheckout = try self.revalidatedCheckout(
-                            pending,
+                            settling,
                             sessionID: sessionID
                         )
                         var storeResult: SessionCheckoutStoreMoveResult?
@@ -390,33 +424,65 @@ final class SessionCheckoutCoordinator {
                             storeResult,
                             sessionIDs: movingIDs,
                             checkout: commitCheckout,
-                            pending: pending,
-                            completion: completion
+                            pending: settling,
+                            completion: { [weak self] succeeded in
+                                self?.finishSettlement(sessionID: sessionID, succeeded: succeeded)
+                            }
                         )
                     } catch {
-                        self.recordAudit(
-                            "Checkout move failed",
+                        self.failMove(
                             sessionID: sessionID,
-                            pending: pending,
-                            detail: error.localizedDescription
+                            pending: settling,
+                            message: error.localizedDescription
                         )
-                        self.inputFences.remove(sessionID)
-                        completion(false)
                     }
                 }
             } catch {
                 DispatchQueue.main.async { [weak self] in
-                    self?.recordAudit(
-                        "Checkout move failed",
+                    self?.failMove(
                         sessionID: sessionID,
-                        pending: pending,
-                        detail: error.localizedDescription
+                        pending: settling,
+                        message: error.localizedDescription
                     )
-                    self?.inputFences.remove(sessionID)
-                    completion(false)
                 }
             }
         }
+    }
+
+    func retryPendingMove(sessionID: SessionID) {
+        guard settlements[sessionID] == nil,
+              let pending = projects.session(withID: sessionID)?.pendingCheckoutMove,
+              pending.phase == .failed,
+              projects.setPendingCheckoutMove(
+                pending.updating(phase: .pendingBoundary),
+                forSessionID: sessionID
+              ) else { return }
+        finishPendingMove(sessionID: sessionID) { _ in }
+    }
+
+    private func failMove(
+        sessionID: SessionID,
+        pending: PendingCheckoutMove,
+        message: String
+    ) {
+        let failed = pending.updating(
+            phase: .failed,
+            failureDescription: String(message.prefix(2_000))
+        )
+        _ = projects.setPendingCheckoutMove(failed, forSessionID: sessionID)
+        recordAudit("Checkout move failed", sessionID: sessionID, pending: failed, detail: message)
+        NotificationCenter.default.post(SessionCheckoutMoveDidFail(
+            sessionID: sessionID,
+            requestID: pending.requestID,
+            checkoutDisplayName: URL(fileURLWithPath: pending.checkoutPath).lastPathComponent,
+            message: message
+        ))
+        finishSettlement(sessionID: sessionID, succeeded: false)
+    }
+
+    private func finishSettlement(sessionID: SessionID, succeeded: Bool) {
+        let completions = settlements.removeValue(forKey: sessionID) ?? []
+        for completion in completions { completion(succeeded) }
     }
 
     /// Whether one request needs a human answer before it may change durable ownership.
@@ -507,13 +573,11 @@ final class SessionCheckoutCoordinator {
             inputFences.remove(sessionIDs[0])
             completion(true)
         case .sessionNotFound, .persistenceRefused:
-            recordAudit(
-                "Checkout move failed",
+            failMove(
                 sessionID: sessionIDs[0],
                 pending: pending,
-                detail: "The checkout ownership transaction was refused."
+                message: "The checkout ownership transaction was refused."
             )
-            inputFences.remove(sessionIDs[0])
             completion(false)
         }
     }
@@ -546,6 +610,8 @@ final class SessionCheckoutCoordinator {
             let event = SessionCheckoutDidMove(
                 sessionID: sessionIDs[0],
                 projectID: projectID,
+                requestID: pending.requestID,
+                checkoutDisplayName: URL(fileURLWithPath: checkout.path).lastPathComponent,
                 authorityBasis: pending.authorityBasis
             )
             DispatchQueue.main.async { NotificationCenter.default.post(event) }

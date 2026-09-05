@@ -74,6 +74,33 @@ shape and localization cardinality before presentation or navigation. Codable co
 is not treated as validation. The hosted broker independently enforces the same external-boundary
 shape and binds both delivery operations to the authenticated host and opaque recipient record.
 
+## Completion follows the outcome, not the spinner
+
+`SessionRuntimeDidChange` carries a typed transition with foreground-turn and background-
+continuation facts kept separate. A provider `Stop` can therefore end the foreground turn and
+make the prompt ready without completing the pending outcome. `RemoteNotificationService` opens
+one generation on `beganPendingOutcome` and sends “finished its turn” only on
+`completedPendingOutcome`; the intermediate `readyWithBackgroundWork` state sends nothing. The
+continuation's later automatic result turn stays in the same generation, so it produces exactly
+one completion. `SessionActivityDidChange` remains the read/attention presentation channel and
+cannot authorize completion delivery.
+
+## One notification tap is one navigation transaction
+
+iOS can describe the same response in two lifecycle places: the user-notification-center
+delegate and a new scene's `connectionOptions.notificationResponse`. Both enter
+`RemoteAppModel.openSessionFromNotification`, keyed by host and event id; a bounded in-memory
+ledger admits the tap once, and a duplicate scene callback can only strengthen the pending
+transaction to connecting-scene semantics.
+
+That distinction preserves both navigation contracts. A notification delivered to an existing
+scene is one forward push, retaining the current screen as Back's destination. A notification
+that creates a scene is the scene's initial route and replaces saved continuity. The pending
+intent is recorded synchronously before the root view starts its catalogue refresh, and route
+restoration refuses to run while that intent is pending. After the authenticated catalogue
+confirms the target, the model commits exactly one route and publishes the destination request;
+if the target no longer exists, ordinary continuity restoration is allowed again.
+
 ## Ownership and diagnostics
 
 The activity window, automatic suppression, consent enforcement, preview bounds, authorization,

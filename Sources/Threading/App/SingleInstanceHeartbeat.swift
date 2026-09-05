@@ -24,13 +24,18 @@ final class SingleInstanceHeartbeat {
     static let shared = SingleInstanceHeartbeat()
 
     private let url: URL
+    private let writer: SingleInstanceHeartbeatWriter
     private var timer: DispatchSourceTimer?
     private var wakeObservations: AppEventObservations?
 
     // MARK: - Initialization
 
-    init(url: URL = SingleInstanceHeartbeat.defaultURL) {
+    init(
+        url: URL = SingleInstanceHeartbeat.defaultURL,
+        writer: SingleInstanceHeartbeatWriter = SingleInstanceHeartbeatWriter()
+    ) {
         self.url = url
+        self.writer = writer
     }
 
     /// Nonisolated with the lock's own path accessors: both are pure path arithmetic, and the
@@ -109,16 +114,56 @@ final class SingleInstanceHeartbeat {
     /// a person looking at the directory can see what the file is — and a failure is silent
     /// beyond the log: a heartbeat that cannot be written must not be able to end a launch.
     private func touch() {
-        do {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try Data(String(Date().timeIntervalSince1970).utf8).write(to: url, options: .atomic)
-        } catch {
-            ThreadingLogger.app.error(
-                "Single-instance heartbeat could not be written: \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
+        // The main-queue timer remains the liveness signal. Only the filesystem write crosses
+        // the boundary, so a wedged UI still stops admitting fresh heartbeats.
+        writer.write(Date(), to: url)
+    }
+}
+
+/// Coalesces heartbeat writes on one utility lane. A slow disk can delay a stamp, but it cannot
+/// build an unbounded queue or make the main actor wait behind an atomic replacement.
+final class SingleInstanceHeartbeatWriter: @unchecked Sendable {
+    private let queue = DispatchQueue(
+        label: "codes.threading.single-instance-heartbeat",
+        qos: .utility
+    )
+    private let lock = NSLock()
+    private var pending: (Date, URL)?
+    private var isWriting = false
+
+    func write(_ date: Date, to url: URL) {
+        lock.lock()
+        pending = (date, url)
+        let shouldStart = !isWriting
+        if shouldStart { isWriting = true }
+        lock.unlock()
+        guard shouldStart else { return }
+        queue.async { [self] in drain() }
+    }
+
+    private func drain() {
+        while true {
+            lock.lock()
+            guard let next = pending else {
+                isWriting = false
+                lock.unlock()
+                return
+            }
+            pending = nil
+            lock.unlock()
+
+            do {
+                try FileManager.default.createDirectory(
+                    at: next.1.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+                try Data(String(next.0.timeIntervalSince1970).utf8)
+                    .write(to: next.1, options: .atomic)
+            } catch {
+                ThreadingLogger.app.error(
+                    "Single-instance heartbeat could not be written: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
         }
     }
 }

@@ -56,7 +56,7 @@ final class CodexStreamSession:
 
     private(set) var isRunning = false
     var canSend: Bool {
-        isRunning && input != nil && !isTurnInFlight && pendingTurn == nil
+        isRunning && acceptsInput && !isTurnInFlight && pendingTurn == nil
             && !isCompactionInFlight
     }
 
@@ -82,11 +82,10 @@ final class CodexStreamSession:
     private let hostPlan: () -> PTYHostChildPlan?
 
     private var process: AgentChildProcess?
-    private var input: FileHandle?
+    private var transport: AgentStreamTransport<JSONRPCLineEnvelope>?
+    private var acceptsInput = false
     private var launchResumeState: ResumeState = .unavailable
 
-    private var buffer = Data()
-    private var errorBuffer = Data()
     private var parseDiagnostics = StreamParseDiagnostics()
     var malformedLineCount: Int { parseDiagnostics.malformedLineCount }
 
@@ -205,27 +204,24 @@ final class CodexStreamSession:
             return
         }
 
-        process.standardOutput.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            Task { @MainActor [weak self] in
-                self?.received(chunk)
-            }
-        }
-
-        // A separate pipe rather than merged into stdout: diagnostics interleaved with the
-        // JSON-RPC stream would corrupt every line they landed inside.
-        process.standardError.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            Task { @MainActor [weak self] in
-                self?.receivedError(chunk)
-            }
-        }
-
+        let transport = AgentStreamTransport(
+            label: "codes.threading.agent.codex-stream",
+            input: process.standardInput,
+            output: process.standardOutput,
+            error: process.standardError,
+            maximumErrorBytes: CodexStreamDefaults.maximumErrorBytes,
+            parser: { JSONRPCLineEnvelope.parse($0) },
+            onLine: { [weak self] envelope in self?.route(envelope) },
+            onMalformedLine: { [weak self] in
+                self?.parseDiagnostics.recordMalformedLine(provider: "Codex app-server")
+            },
+            onFailure: { [weak self] failure in self?.transportFailed(failure) }
+        )
         self.process = process
-        self.input = process.standardInput
+        self.transport = transport
+        acceptsInput = true
         isRunning = true
+        transport.start()
         onInteractionAvailabilityChange?()
         sendInitialize()
     }
@@ -348,9 +344,9 @@ final class CodexStreamSession:
 
     /// Closing stdin asks the persistent server to shut down after its current work.
     func finish() {
-        guard input != nil else { return }
-        try? input?.close()
-        input = nil
+        guard acceptsInput, let transport else { return }
+        acceptsInput = false
+        transport.closeInput()
         onInteractionAvailabilityChange?()
     }
 
@@ -380,6 +376,9 @@ final class CodexStreamSession:
             return false
         }
         isRunning = false
+        transport?.detach()
+        transport = nil
+        acceptsInput = false
         onInteractionAvailabilityChange?()
         return true
     }
@@ -388,8 +387,8 @@ final class CodexStreamSession:
 
     private func resetForLaunch(resumeState: ResumeState) {
         launchResumeState = resumeState
-        buffer.removeAll(keepingCapacity: true)
-        errorBuffer.removeAll(keepingCapacity: true)
+        transport = nil
+        acceptsInput = false
         parseDiagnostics.reset()
         requestSequence = 0
         pendingRequests.removeAll()
@@ -486,7 +485,7 @@ final class CodexStreamSession:
     // MARK: - Turn Control
 
     var canInterrupt: Bool {
-        isRunning && input != nil && isTurnInFlight && activeTurnID != nil
+        isRunning && acceptsInput && isTurnInFlight && activeTurnID != nil
     }
 
     /// Whether app-server will accept an addition to the turn in flight.
@@ -495,7 +494,7 @@ final class CodexStreamSession:
     /// person holding a message: nothing running (wait), or a review/compaction running (this
     /// particular work cannot be steered, but the next turn can).
     var steerAvailability: SteerAvailability {
-        guard isRunning, input != nil, isTurnInFlight, activeTurnID != nil else {
+        guard isRunning, acceptsInput, isTurnInFlight, activeTurnID != nil else {
             return .unavailable(.noActiveTurn)
         }
         return activeTurnKind.acceptsSteering
@@ -831,40 +830,10 @@ final class CodexStreamSession:
     }
 
     private func writeLine(_ object: [String: Any]) -> Bool {
-        guard let input,
-              JSONSerialization.isValidJSONObject(object),
-              var data = try? JSONSerialization.data(withJSONObject: object)
-        else { return false }
-        data.append(0x0A)
-
-        do {
-            try input.write(contentsOf: data)
-            return true
-        } catch {
-            ThreadingLogger.agent.error(
-                "Codex app-server write failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
-            )
-            return false
-        }
+        transport?.writeJSONObject(object) ?? false
     }
 
     // MARK: - Event Stream
-
-    private func received(_ chunk: Data) {
-        buffer.append(chunk)
-
-        while let newline = buffer.firstIndex(of: 0x0A) {
-            let lineData = buffer[buffer.startIndex..<newline]
-            buffer = Data(buffer[buffer.index(after: newline)...])
-
-            guard let line = String(data: lineData, encoding: .utf8),
-                  let envelope = CodexAppServerEnvelope.parse(line) else {
-                parseDiagnostics.recordMalformedLine(provider: "Codex app-server")
-                continue
-            }
-            route(envelope)
-        }
-    }
 
     private func route(_ envelope: CodexAppServerEnvelope) {
         switch envelope {
@@ -1176,19 +1145,23 @@ final class CodexStreamSession:
 
     // MARK: - Completion
 
-    private func receivedError(_ chunk: Data) {
-        guard errorBuffer.count < CodexStreamDefaults.maximumErrorBytes else { return }
-        let remaining = CodexStreamDefaults.maximumErrorBytes - errorBuffer.count
-        errorBuffer.append(chunk.prefix(remaining))
-    }
-
     private func handleTermination(status: Int32) {
         guard process != nil else { return }
+        let transport = self.transport
+        acceptsInput = false
+        guard let transport else {
+            finishTermination(status: status, diagnostics: "")
+            return
+        }
+        transport.finish { [weak self] diagnostics in
+            self?.finishTermination(status: status, diagnostics: diagnostics)
+        }
+    }
 
-        process?.standardOutput.readabilityHandler = nil
-        process?.standardError.readabilityHandler = nil
+    private func finishTermination(status: Int32, diagnostics: String) {
+        guard process != nil else { return }
         process = nil
-        input = nil
+        transport = nil
 
         let wasTerminating = isTerminating
         isTerminating = false
@@ -1198,8 +1171,6 @@ final class CodexStreamSession:
         shouldReloadSkills = false
 
         if !wasTerminating, isTurnInFlight, !receivedTurnFinished {
-            let diagnostics = String(decoding: errorBuffer, as: UTF8.self)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
             finishTurnWithTransportError(
                 diagnostics.isEmpty
                     ? "Codex app-server exited with status \(status)."
@@ -1209,6 +1180,16 @@ final class CodexStreamSession:
 
         onInteractionAvailabilityChange?()
         onExit?(status)
+    }
+
+    private func transportFailed(_ failure: AgentStreamTransportFailure) {
+        guard process != nil else { return }
+        let reason = failure.userFacingDescription
+        ThreadingLogger.agent.error(
+            "Codex app-server transport failed: \(reason, privacy: .private(mask: .hash))"
+        )
+        if isTurnInFlight, !receivedTurnFinished { finishTurnWithTransportError(reason) }
+        terminate()
     }
 
     private func finishTurnWithTransportError(_ message: String) {

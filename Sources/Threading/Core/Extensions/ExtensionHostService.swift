@@ -2056,9 +2056,6 @@ final class ExtensionHostService {
         observations.observe(ProjectsDidChange.self) { [weak self] change in
             self?.refreshSnapshotJournal(for: change)
         }
-        observations.observe(AppSettingsDidChange.self) { [weak self] _ in
-            self?.refreshSnapshotJournal()
-        }
         observations.observe(SessionActivityDidChange.self) { [weak self] event in
             guard let self else { return }
             if hasSnapshotBaseline {

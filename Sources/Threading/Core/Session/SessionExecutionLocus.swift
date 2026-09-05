@@ -307,6 +307,31 @@ final class SessionExecutionLocusTracker {
     }
 
     private func applyDrift(_ drift: SessionExecutionDrift, sessionID: SessionID) {
+        if let pending = projects.session(withID: sessionID)?.pendingCheckoutMove {
+            switch drift {
+            case .siblingCheckout(let checkout)
+            where checkout.worktreeIdentity == pending.worktreeIdentity:
+                break
+            case .none:
+                // The root process returning to its launch directory between tool calls is not
+                // stronger than the sibling-checkout evidence that created the durable move.
+                return
+            case .siblingCheckout(let checkout):
+                EventLog.shared.record(.session, "Checkout observation conflicted with pending move", [
+                    "session": sessionID.uuidString,
+                    "pending": pending.checkoutPath,
+                    "observed": checkout.root
+                ])
+                return
+            case .unrelated(let path):
+                EventLog.shared.record(.session, "Checkout observation conflicted with pending move", [
+                    "session": sessionID.uuidString,
+                    "pending": pending.checkoutPath,
+                    "observed": path
+                ])
+                return
+            }
+        }
         // Absent *is* `.none`, so a chat that has only ever worked where it belongs — nearly all
         // of them — stores nothing and announces nothing. Only a chat that leaves, or returns,
         // is news.

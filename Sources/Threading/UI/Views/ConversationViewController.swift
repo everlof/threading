@@ -913,7 +913,30 @@ final class ConversationViewController: NSViewController, RemoteConversationSurf
         if isTurnInFlight { return .working }
         guard stream.isRunning else { return .dormant }
         if usageLimit != nil { return .limitReached }
-        return pausedOnOwnWork ? .working : .idle
+        return pausedOnOwnWork ? .readyWithBackgroundWork : .idle
+    }
+
+    var runtimeSnapshot: SessionRuntimeSnapshot {
+        let continuation: SessionContinuationState = if pausedOnOwnWork {
+            backgroundWorkInFlight.contains { $0.kind == .delegated } ? .delegated : .standing
+        } else {
+            .none
+        }
+        let blocker: SessionRuntimeBlocker = if hasPendingPermission {
+            .awaitingUser
+        } else if usageLimit != nil {
+            .usageLimit
+        } else {
+            .none
+        }
+        return SessionRuntimeSnapshot(
+            process: stream.isRunning ? .ready : .dormant,
+            turn: isTurnInFlight ? .inFlight(.reported) : .none,
+            continuation: continuation,
+            blocker: blocker,
+            activity: activity,
+            reportsOwnTurns: true
+        )
     }
 
     // MARK: - Initialization

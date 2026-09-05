@@ -151,7 +151,7 @@ enum AttentionAlertPolicy {
             return .post(.unread)
         case .idle where old == .working && !appIsActive && reportsOwnTurns:
             return .post(.finished)
-        case .idle, .working, .dormant, .limitReached:
+        case .idle, .working, .readyWithBackgroundWork, .dormant, .limitReached:
             // Whatever this session had delivered described `old`; the edge makes it stale.
             // `idle` is in the list because a `.finished` alert leaves the session idle.
             //

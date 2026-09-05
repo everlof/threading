@@ -5,7 +5,11 @@ import Foundation
 /// Codex omits the optional `"jsonrpc"` member while ACP includes it. Keeping this decoder
 /// tolerant and dictionary-backed lets either protocol add fields without taking down a native
 /// conversation, and keeps process/framing mechanics out of each provider adapter.
-enum JSONRPCLineEnvelope {
+/// JSONSerialization returns an immutable Foundation value graph. The envelope never exposes a
+/// mutating reference to it, so it is safe to transfer once from the transport parser to main.
+/// The provider adapters still consume their historical Foundation dictionaries; migrating that
+/// schema surface is separate from the pipe's actor boundary.
+enum JSONRPCLineEnvelope: @unchecked Sendable {
     case response(id: JSONRPCRequestID, result: [String: Any]?, error: String?)
     case request(
         id: JSONRPCRequestID,
@@ -15,8 +19,12 @@ enum JSONRPCLineEnvelope {
     case notification(method: String, parameters: [String: Any])
 
     static func parse(_ line: String) -> JSONRPCLineEnvelope? {
-        guard let data = line.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let data = line.data(using: .utf8) else { return nil }
+        return parse(data)
+    }
+
+    static func parse(_ data: Data) -> JSONRPCLineEnvelope? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
 
         let method = object["method"] as? String

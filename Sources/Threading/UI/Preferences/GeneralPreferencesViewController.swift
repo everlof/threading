@@ -1050,8 +1050,14 @@ final class GeneralPreferencesViewController: NSViewController {
     /// out: the Customize sheet's kind rows **are** these two preferences, so a bell chosen
     /// there has to move the pop-up here rather than leaving the page claiming the old sound.
     private func observeSilenceGate() {
-        appEvents.observe(AppSettingsDidChange.self) { [weak self] _ in
+        appEvents.observe(AppSettingsDidChange.self) { [weak self] change in
             guard let self else { return }
+            guard change.affects(
+                AppSettingIdentity.silencesAllSounds.rawValue,
+                AppSettingIdentity.attentionAlertSound.rawValue,
+                AppSettingIdentity.terminalBellSound.rawValue,
+                AppSettingIdentity.soundEventChoices.rawValue
+            ) else { return }
             let state: NSControl.StateValue =
                 AppSettings.shared.silencesAllSounds ? .on : .off
             if self.silenceToggle.state != state { self.silenceToggle.state = state }

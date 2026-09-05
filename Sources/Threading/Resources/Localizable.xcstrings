@@ -13509,6 +13509,17 @@
         }
       }
     },
+    "Could not move “%@” to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kunde inte flytta ”%@” till %@"
+          }
+        }
+      }
+    },
     "Could not read the test credential (%lld)." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -17740,6 +17751,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Misslyckades · %@"
+          }
+        }
+      }
+    },
+    "Failed: %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Misslyckades: %@"
           }
         }
       }
@@ -24729,6 +24751,17 @@
         }
       }
     },
+    "Moved “%@” to %@" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flyttade ”%@” till %@"
+          }
+        }
+      }
+    },
     "Moves to %@" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -24769,6 +24802,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Film"
+          }
+        }
+      }
+    },
+    "Moving “%@” to %@ after this turn" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Flyttar ”%@” till %@ efter den här turen"
           }
         }
       }
@@ -32044,6 +32088,17 @@
         }
       }
     },
+    "Ready for input; background work running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo för inmatning; bakgrundsarbete pågår"
+          }
+        }
+      }
+    },
     "Ready to Install" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -32073,6 +32128,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Redo när du är."
+          }
+        }
+      }
+    },
+    "Ready · background work" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo · bakgrundsarbete"
+          }
+        }
+      }
+    },
+    "Ready · background work running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo · bakgrundsarbete pågår"
           }
         }
       }
@@ -34086,6 +34163,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Försök igen"
+          }
+        }
+      }
+    },
+    "Retry Checkout Move" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Försök flytta checkout igen"
           }
         }
       }
@@ -42131,6 +42219,17 @@
         }
       }
     },
+    "The chat and its agent now use the same checkout." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatten och dess agent använder nu samma checkout."
+          }
+        }
+      }
+    },
     "The chat could not be created." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42153,6 +42252,17 @@
         }
       }
     },
+    "The chat still belongs to its current checkout until the move finishes." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chatten tillhör fortfarande sin nuvarande checkout tills flytten är klar."
+          }
+        }
+      }
+    },
     "The chat was created, but its agent didn’t start." : {
       "extractionState" : "manual",
       "localizations" : {
@@ -42171,6 +42281,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Checkout-flytten kunde inte avbrytas."
+          }
+        }
+      }
+    },
+    "The checkout move could not enter its settlement phase." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checkout-flytten kunde inte påbörja slutfasen."
           }
         }
       }

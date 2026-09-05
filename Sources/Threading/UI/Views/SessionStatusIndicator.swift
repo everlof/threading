@@ -27,6 +27,12 @@ final class SessionStatusIndicator: NSView {
     /// for every visible idle row made an invisible working state part of cold launch.
     private var spinner: ThemedSpinner?
     private let attentionDot = NSView()
+    private lazy var attentionDotWidth = attentionDot.widthAnchor.constraint(
+        equalToConstant: StatusIndicatorDefaults.finishedDotSize
+    )
+    private lazy var attentionDotHeight = attentionDot.heightAnchor.constraint(
+        equalToConstant: StatusIndicatorDefaults.finishedDotSize
+    )
     private let limitMark = ThemedWarningMark()
 
     /// A ground the containing row paints over the sidebar surface.
@@ -45,6 +51,8 @@ final class SessionStatusIndicator: NSView {
 
     /// Which of the two marks the dot is currently drawn as.
     private enum DotStyle {
+        /// The prompt is ready but autonomous work can still speak again.
+        case background
         /// A turn stopped on a question: filled, in the warning role.
         case blocked
         /// A turn that ended unseen: a hollow accent ring.
@@ -94,8 +102,8 @@ final class SessionStatusIndicator: NSView {
         NSLayoutConstraint.activate([
             attentionDot.centerXAnchor.constraint(equalTo: centerXAnchor),
             attentionDot.centerYAnchor.constraint(equalTo: centerYAnchor),
-            attentionDot.widthAnchor.constraint(equalToConstant: StatusIndicatorDefaults.dotSize),
-            attentionDot.heightAnchor.constraint(equalToConstant: StatusIndicatorDefaults.dotSize),
+            attentionDotWidth,
+            attentionDotHeight,
 
             limitMark.centerXAnchor.constraint(equalTo: centerXAnchor),
             limitMark.centerYAnchor.constraint(equalTo: centerYAnchor),
@@ -135,6 +143,15 @@ final class SessionStatusIndicator: NSView {
             attentionDot.isHidden = true
             let spinner = ensureSpinner()
             spinner.isAnimating = true
+
+        case .readyWithBackgroundWork:
+            spinner?.isAnimating = false
+            dotStyle = .background
+            attentionDot.setAccessibilityLabel(
+                L10n.string("Ready for input; background work running")
+            )
+            applyDotSurface()
+            showAttentionDot(animated: !isFirstUpdate)
 
         case .limitReached:
             // No fade. The other two marks are faded in because they mean something *just*
@@ -189,10 +206,22 @@ final class SessionStatusIndicator: NSView {
     /// Through `applySurface` rather than straight onto the layer: a `cgColor` resolves once,
     /// and the mark would keep the previous theme's colour until the session changed state.
     private func applyDotSurface() {
-        let radius = SurfaceRadius.fixed(StatusIndicatorDefaults.dotSize / 2)
+        let size = switch dotStyle {
+        case .background: StatusIndicatorDefaults.backgroundDotSize
+        case .blocked: StatusIndicatorDefaults.dotSize
+        case .unread: StatusIndicatorDefaults.finishedDotSize
+        }
+        attentionDotWidth.constant = size
+        attentionDotHeight.constant = size
+        let radius = SurfaceRadius.fixed(size / 2)
         let hostInk = hostGround?.ink.label
 
         switch dotStyle {
+        case .background:
+            attentionDot.applySurface(
+                fill: hostInk ?? Design.Surface.accent,
+                radius: radius
+            )
         case .blocked:
             attentionDot.applySurface(
                 fill: hostInk ?? Design.Status.warning,
@@ -236,4 +265,6 @@ enum StatusIndicatorDefaults {
     static let size: CGFloat = 12
     static let spinnerSize: CGFloat = 12
     static let dotSize: CGFloat = 6
+    static let backgroundDotSize: CGFloat = 4
+    static let finishedDotSize: CGFloat = 7
 }

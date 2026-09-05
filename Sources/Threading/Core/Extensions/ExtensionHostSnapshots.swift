@@ -221,7 +221,7 @@ final class LiveExtensionHostSnapshotProvider:
     private func extensionActivity(_ activity: SessionActivity) -> ExtensionSessionActivity {
         switch activity {
         case .dormant: return .dormant
-        case .idle: return .idle
+        case .idle, .readyWithBackgroundWork: return .idle
         case .working: return .working
         // One state to extensions, deliberately. `ExtensionSessionActivity` is a published
         // vocabulary an installed extension already switches on, and splitting it would hand

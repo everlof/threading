@@ -547,7 +547,7 @@ extension JSONValue: ExpressibleByDictionaryLiteral {
 
 /// A complete JSONL line either yields zero or more provider-neutral events, or is malformed.
 /// Unknown but well-formed provider events are ordinary `.unknown` events, never malformed.
-enum StreamLineParseResult {
+enum StreamLineParseResult: Sendable {
     case events([StreamEvent])
     case malformed
 }

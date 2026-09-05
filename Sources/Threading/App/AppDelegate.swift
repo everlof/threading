@@ -674,10 +674,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation, 
             let inhibitor = ActiveTurnSleepInhibitor(
                 currentInFlightSessionIDs: {
                     Set(runtime.runningSessionIDs.filter {
-                        runtime.activity(sessionID: $0).hasTurnInFlight
+                        runtime.runtimeSnapshot(sessionID: $0).hasWorkAtRisk
                     })
                 },
-                activity: { runtime.activity(sessionID: $0) },
+                runtime: { runtime.runtimeSnapshot(sessionID: $0) },
                 isEnabled: { settings.preventsIdleSystemSleepWhileAgentsWork }
             )
             inhibitor.start()

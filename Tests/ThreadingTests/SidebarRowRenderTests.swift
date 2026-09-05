@@ -175,7 +175,16 @@ final class SidebarRowRenderTests: XCTestCase {
             selected: true
         )
 
-        XCTAssertEqual(written, 36, "Every story should render in both appearances")
+        // Prompt-ready while delegated or standing work continues. It occupies the ordinary
+        // status line but is smaller than the final idle ring, so the two facts cannot be read
+        // as the same lifecycle state.
+        written += try write(
+            story: "19-ready-with-background-work",
+            activity: .readyWithBackgroundWork,
+            hovered: false
+        )
+
+        XCTAssertEqual(written, 38, "Every story should render in both appearances")
         print("Rendered sidebar-row storybook to \(Render.directory.path)")
     }
 
@@ -278,6 +287,7 @@ final class SidebarRowRenderTests: XCTestCase {
             ("Idle session", .idle, false),
             ("Loading session", .idle, true),
             ("Working session", .working, false),
+            ("Ready with background work", .readyWithBackgroundWork, false),
             ("Blocked session", .awaitingUser, false),
             ("Unread session", .needsAttention, false)
         ]

@@ -81,6 +81,96 @@ final class NotificationDeepLinkTests: XCTestCase {
         ]))
     }
 
+    @MainActor
+    func testConnectingSceneNotificationSuppressesSavedRouteRestoration() async throws {
+        let (model, continuity, defaults, suite) = try makeDemoModel()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let response = try XCTUnwrap(model.me)
+        let previous = try XCTUnwrap(response.sessions.first)
+        let target = try XCTUnwrap(response.sessions.dropFirst().first)
+        let hostID = try XCTUnwrap(model.activeHostID)
+        continuity.setLastRoute(hostID: hostID, sessionID: previous.id)
+
+        XCTAssertTrue(model.openSessionFromNotification(
+            event(id: "cold-tap", hostID: hostID, sessionID: target.id),
+            origin: .connectingScene
+        ))
+
+        // The root's refresh can finish while the notification transaction is waiting on the
+        // same catalogue. Saved continuity must not put its chat on the stack in that window.
+        model.restoreRouteIfPossible(hostID: hostID, response: response)
+        XCTAssertTrue(model.navigationPath.isEmpty)
+
+        await waitForPath([.session(target.id)], in: model)
+        XCTAssertEqual(model.navigationPath, [.session(target.id)])
+    }
+
+    @MainActor
+    func testDuplicateLifecycleDeliveryCoalescesIntoTheConnectingSceneRoute() async throws {
+        let (model, _, defaults, suite) = try makeDemoModel()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let sessions = try XCTUnwrap(model.me?.sessions)
+        let previous = try XCTUnwrap(sessions.first)
+        let target = try XCTUnwrap(sessions.dropFirst().first)
+        let hostID = try XCTUnwrap(model.activeHostID)
+        model.navigationPath = [.session(previous.id)]
+        let notification = event(
+            id: "one-tap-two-callbacks",
+            hostID: hostID,
+            sessionID: target.id,
+            destination: .attachment(id: "attachment-42")
+        )
+
+        XCTAssertTrue(model.openSessionFromNotification(
+            notification,
+            origin: .notificationCenter
+        ))
+        XCTAssertFalse(model.openSessionFromNotification(
+            notification,
+            origin: .connectingScene
+        ))
+
+        await waitForPath([.session(target.id)], in: model)
+        XCTAssertEqual(model.navigationPath, [.session(target.id)])
+        XCTAssertEqual(
+            model.notificationOpenRequest,
+            RemoteNotificationOpenRequest(
+                eventID: notification.id,
+                sessionID: target.id,
+                destination: notification.destination
+            )
+        )
+        XCTAssertFalse(model.openSessionFromNotification(
+            notification,
+            origin: .notificationCenter
+        ))
+        await Task.yield()
+        XCTAssertEqual(model.navigationPath, [.session(target.id)])
+    }
+
+    @MainActor
+    func testExistingSceneNotificationIsOneForwardPush() async throws {
+        let (model, _, defaults, suite) = try makeDemoModel()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let sessions = try XCTUnwrap(model.me?.sessions)
+        let previous = try XCTUnwrap(sessions.first)
+        let target = try XCTUnwrap(sessions.dropFirst().first)
+        let hostID = try XCTUnwrap(model.activeHostID)
+        model.navigationPath = [.session(previous.id)]
+
+        XCTAssertTrue(model.openSessionFromNotification(
+            event(id: "warm-tap", hostID: hostID, sessionID: target.id),
+            origin: .notificationCenter
+        ))
+
+        let expected: [MobileNavigationRoute] = [
+            .session(previous.id),
+            .session(target.id),
+        ]
+        await waitForPath(expected, in: model)
+        XCTAssertEqual(model.navigationPath, expected)
+    }
+
     func testLegacyPairedHostRecordDecodesWithoutHostedRoute() throws {
         let link = try XCTUnwrap(RemoteConnectionLink(
             string: "https://mac.example.test/#capability"
@@ -166,18 +256,47 @@ final class NotificationDeepLinkTests: XCTestCase {
     }
 
     private func event(
-        destination: RemoteNotificationDestinationDTO
+        id: String = "event-1",
+        hostID: String = "host-1",
+        sessionID: String = "session-1",
+        destination: RemoteNotificationDestinationDTO = .session
     ) -> RemoteNotificationEventDTO {
         RemoteNotificationEventDTO(
-            id: "event-1",
+            id: id,
             kind: .agentMessage,
-            hostID: "host-1",
-            sessionID: "session-1",
+            hostID: hostID,
+            sessionID: sessionID,
             title: "Done",
             body: "Inspect the step",
             destination: destination,
             createdAt: 123
         )
+    }
+
+    @MainActor
+    private func makeDemoModel() throws -> (
+        RemoteAppModel,
+        MobileSessionContinuityStore,
+        UserDefaults,
+        String
+    ) {
+        let suite = "NotificationDeepLinkTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        let continuity = MobileSessionContinuityStore(defaults: defaults)
+        let model = RemoteAppModel(continuity: continuity)
+        model.startDemo()
+        return (model, continuity, defaults, suite)
+    }
+
+    @MainActor
+    private func waitForPath(
+        _ expected: [MobileNavigationRoute],
+        in model: RemoteAppModel
+    ) async {
+        for _ in 0..<20 {
+            if model.navigationPath == expected { return }
+            await Task.yield()
+        }
     }
 
     private func jsonObject(

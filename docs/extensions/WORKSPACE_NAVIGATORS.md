@@ -298,8 +298,8 @@ and `archive`, conditionally shows the applicable controls, and omits them for s
 rows which Threading would refuse. The extension still receives no session snapshot or callback.
 
 `session.activity.detailed@1` currently publishes six named raw values through
-`ExtensionSessionDetailedActivity`: `dormant`, `idle`, `working`, `awaiting-user`,
-`needs-attention`, and `limit-reached`. Use those constants instead of reproducing private host
+`ExtensionSessionDetailedActivity`: `dormant`, `idle`, `working`, `ready-with-background-work`,
+`awaiting-user`, `needs-attention`, and `limit-reached`. Use those constants instead of reproducing private host
 model strings. The raw-value type deliberately keeps unknown future values decodable.
 
 ## Host-owned row intents

@@ -12,7 +12,7 @@ enum SessionCheckoutApprovalCommand {
     ) {
         func finish(_ result: SessionCheckoutMoveRequestResult) {
             switch result {
-            case .queued(let move):
+            case .queued(let move), .alreadyPending(let move):
                 completion(.success(
                     "Checkout move queued for \(move.checkoutPath). End this turn now; the next turn resumes in that checkout."
                 ))
@@ -68,7 +68,7 @@ enum SessionWorktreeCommand {
 
         func finish(_ result: SessionCheckoutMoveRequestResult, path: String) {
             switch result {
-            case .queued:
+            case .queued, .alreadyPending:
                 completion(.success(
                     "Created \(path) and queued this conversation's move into it. End this turn now; the next turn resumes there."
                 ))

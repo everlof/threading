@@ -155,7 +155,7 @@ final class ClaudeTurnInterruptionTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .working)
         XCTAssertTrue(tracker.noteTurnInterrupted(turn: tracker.turnGeneration))
         XCTAssertEqual(tracker.activity, .idle)
-        XCTAssertFalse(tracker.activity.hasTurnInFlight)
+        XCTAssertFalse(tracker.runtimeSnapshot.hasOpenTurn)
     }
 
     /// Off screen it takes the unread mark, settling exactly as Codex's interruption and as `Stop`
@@ -186,7 +186,7 @@ final class ClaudeTurnInterruptionTests: XCTestCase {
 
         XCTAssertFalse(tracker.noteTurnInterrupted(turn: interruptedTurn))
         XCTAssertEqual(tracker.activity, .working)
-        XCTAssertTrue(tracker.activity.hasTurnInFlight)
+        XCTAssertTrue(tracker.runtimeSnapshot.hasOpenTurn)
     }
 
     /// A fallback, not a second activity source. A session whose hooks never arrived is driven by

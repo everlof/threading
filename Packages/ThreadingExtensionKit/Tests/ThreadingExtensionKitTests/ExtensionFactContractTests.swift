@@ -186,16 +186,18 @@ final class ExtensionFactContractTests: XCTestCase {
         XCTAssertFalse(ExtensionHostFactKey.isReserved(.init(id: "gitlab.mr.state", version: 1)))
     }
 
-    func testDetailedActivityVocabularyPinsAllSixHostFactValues() {
+    func testDetailedActivityVocabularyPinsAllSevenHostFactValues() {
         XCTAssertEqual([
             ExtensionSessionDetailedActivity.dormant.rawValue,
             ExtensionSessionDetailedActivity.idle.rawValue,
             ExtensionSessionDetailedActivity.working.rawValue,
+            ExtensionSessionDetailedActivity.readyWithBackgroundWork.rawValue,
             ExtensionSessionDetailedActivity.awaitingUser.rawValue,
             ExtensionSessionDetailedActivity.needsAttention.rawValue,
             ExtensionSessionDetailedActivity.limitReached.rawValue,
         ], [
-            "dormant", "idle", "working", "awaiting-user", "needs-attention", "limit-reached",
+            "dormant", "idle", "working", "ready-with-background-work",
+            "awaiting-user", "needs-attention", "limit-reached",
         ])
         XCTAssertEqual(
             try? JSONDecoder().decode(

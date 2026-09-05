@@ -452,7 +452,31 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(summary.wokeAt)
         XCTAssertNil(summary.accountID)
         XCTAssertNil(summary.limitRecovery)
+        XCTAssertNil(summary.continuation)
         XCTAssertFalse(summary.isSnoozed())
+    }
+
+    func testSessionBackgroundContinuationIsAdditiveAndLossless() throws {
+        for continuation in [
+            RemoteSessionContinuation.delegated,
+            .standing,
+            .unknown("future-continuation")
+        ] {
+            let summary = RemoteSessionSummaryDTO(
+                id: "continuing",
+                title: "Background work",
+                agentKind: "claude",
+                surface: .terminal,
+                state: .idle,
+                continuation: continuation,
+                projectName: "Project"
+            )
+            let roundTrip = try JSONDecoder().decode(
+                RemoteSessionSummaryDTO.self,
+                from: JSONEncoder().encode(summary)
+            )
+            XCTAssertEqual(roundTrip.continuation, continuation)
+        }
     }
 
     func testSessionArchiveTimestampRoundTrips() throws {

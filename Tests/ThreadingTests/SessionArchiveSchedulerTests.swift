@@ -44,7 +44,9 @@ final class SessionArchiveSchedulerTests: XCTestCase {
     private func scheduler(settle: TimeInterval = 0.02) -> SessionArchiveScheduler {
         let scheduler = SessionArchiveScheduler(
             center: center,
-            activity: { [weak self] _ in self?.activity ?? .dormant },
+            runtime: { [weak self] _ in
+                .test(activity: self?.activity ?? .dormant)
+            },
             session: { [weak self] id in
                 guard let self, id == self.session.id else { return nil }
                 return self.session
@@ -54,10 +56,16 @@ final class SessionArchiveSchedulerTests: XCTestCase {
         return scheduler
     }
 
-    /// The one signal the scheduler listens to, as the container posts it.
+    /// The typed lifecycle signal the scheduler listens to, as the runtime posts it.
     private func reportActivity(_ new: SessionActivity, of sessionID: SessionID? = nil) {
+        let previous = SessionRuntimeSnapshot.test(activity: activity)
         activity = new
-        center.post(SessionActivityDidChange(sessionID: sessionID ?? session.id))
+        let current = SessionRuntimeSnapshot.test(activity: new)
+        center.post(SessionRuntimeDidChange(
+            sessionID: sessionID ?? session.id,
+            transition: SessionRuntimeTransition(previous: previous, current: current),
+            cause: nil
+        ))
     }
 
     private func settle(_ interval: TimeInterval = 0.2) {

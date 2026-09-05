@@ -20,7 +20,7 @@ final class LimitRecoveryTests: XCTestCase {
 
         XCTAssertEqual(tracker.activity, .limitReached)
         XCTAssertFalse(
-            tracker.activity.hasTurnInFlight,
+            tracker.runtimeSnapshot.hasOpenTurn,
             "A refused turn is over — there is nothing left for an interruption to cost"
         )
     }
@@ -55,8 +55,8 @@ final class LimitRecoveryTests: XCTestCase {
         )
     }
 
-    /// Work the refused turn left running cannot wake a limited agent, so the park outranks
-    /// `pausedOnOwnWork` — `working` would be a lie the sidebar holds for hours.
+    /// Work the refused turn left running leaves the prompt ready, then the park outranks that
+    /// background continuation — a foreground `working` spinner would be a lie held for hours.
     func testAnArmedParkOutranksWorkTheRefusedTurnLeftRunning() {
         let tracker = SessionActivityTracker()
         tracker.markRunning()
@@ -64,7 +64,7 @@ final class LimitRecoveryTests: XCTestCase {
         tracker.noteTurnFinished(
             backgroundWork: [BackgroundTask(id: "task-1", kind: .standing)]
         )
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
 
         tracker.noteLimitParked(recoveryArmed: true)
 

@@ -35,10 +35,15 @@ extension SessionCoordinator {
             // a different one, which is the same class of lie this whole feature exists to stop.
             // It happens for real: an agent that visits a second worktree and moves on again.
             guard move.worktreeIdentity == checkout.worktreeIdentity else { return }
-            toastPresenter(Self.observedMoveToast(
+            toastPresenter(Self.observedMovePendingToast(
                 for: session,
-                checkout: checkout
+                checkout: checkout,
+                requestID: move.requestID
             ))
+        case .alreadyPending:
+            // Repeated process observations describe the standing request; they are not a new
+            // transition and must not restart its toast's dismissal clock.
+            break
         case .approvalRequired:
             toastPresenter(Self.observedMoveOfferToast(
                 for: session,
@@ -76,7 +81,7 @@ extension SessionCoordinator {
             reason: "Observed running in \(checkout.displayName)",
             approval: true
         ) {
-        case .queued:
+        case .queued, .alreadyPending:
             break
         case .approvalRequired, .denied:
             break
@@ -98,20 +103,59 @@ extension SessionCoordinator {
     /// Keyed on the session so one chat holds one band. An agent that visits a worktree, moves on
     /// and comes back reports drift more than once, and a stack of bands about one conversation
     /// reads as several things having happened.
-    static func observedMoveToast(
+    static func observedMovePendingToast(
         for session: AgentSession,
-        checkout: ObservedCheckout
+        checkout: ObservedCheckout,
+        requestID: UUID
     ) -> ToastRequest {
         ToastRequest(
             message: L10n.format(
-                "“%@” now runs in %@",
+                "Moving “%@” to %@ after this turn",
                 session.displayTitle,
                 checkout.displayName
             ),
-            detail: L10n.string("The agent has been working there."),
+            detail: L10n.string("The chat still belongs to its current checkout until the move finishes."),
+            identifier: "sidebar.toast.execution-drift.pending",
+            persistsUntilDismissed: true,
+            replacementID: "checkout-move.\(requestID.uuidString)"
+        )
+    }
+
+    static func observedMoveCompletedToast(
+        for session: AgentSession,
+        checkoutDisplayName: String,
+        requestID: UUID
+    ) -> ToastRequest {
+        ToastRequest(
+            message: L10n.format(
+                "Moved “%@” to %@",
+                session.displayTitle,
+                checkoutDisplayName
+            ),
+            detail: L10n.string("The chat and its agent now use the same checkout."),
             dwell: ToastDefaults.unattendedDwell,
             identifier: "sidebar.toast.execution-drift.moved",
-            replacementID: "execution-drift.\(session.id.uuidString)"
+            replacementID: "checkout-move.\(requestID.uuidString)"
+        )
+    }
+
+    static func checkoutMoveFailedToast(
+        for session: AgentSession,
+        event: SessionCheckoutMoveDidFail,
+        retry: @escaping () -> Void
+    ) -> ToastRequest {
+        ToastRequest(
+            message: L10n.format(
+                "Could not move “%@” to %@",
+                session.displayTitle,
+                event.checkoutDisplayName
+            ),
+            detail: event.message,
+            actionTitle: L10n.string("Retry"),
+            action: retry,
+            identifier: "sidebar.toast.execution-drift.failed",
+            persistsUntilDismissed: true,
+            replacementID: "checkout-move.\(event.requestID.uuidString)"
         )
     }
 

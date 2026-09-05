@@ -99,7 +99,9 @@ final class SessionInfoPopoverViewController: NSViewController {
             let supervision = ControlGrantStore.shared.overview(for: session.id)
             if ControlGrantStore.shared.isManager(session.id) {
                 let activities = supervision.children.map { AgentRuntime.shared.activity(sessionID: $0) }
-                let working = activities.filter(\.hasTurnInFlight).count
+                let working = supervision.children.filter {
+                    AgentRuntime.shared.runtimeSnapshot(sessionID: $0).hasPendingOutcome
+                }.count
                 let waiting = activities.filter { $0 == .awaitingUser || $0 == .needsAttention }.count
                 let detail = [
                     working > 0 ? L10n.format("%lld working", Int64(working)) : nil,
@@ -162,6 +164,9 @@ final class SessionInfoPopoverViewController: NSViewController {
             case .working:
                 stateText = SessionPopoverDefaults.workingState
                 stateSymbol = SessionPopoverDefaults.workingSymbol
+            case .readyWithBackgroundWork:
+                stateText = L10n.string("Ready · background work running")
+                stateSymbol = SessionPopoverDefaults.runningSymbol
             case .awaitingUser:
                 stateText = SessionPopoverDefaults.waitingState
                 stateSymbol = SessionPopoverDefaults.waitingSymbol

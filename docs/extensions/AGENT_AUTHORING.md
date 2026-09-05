@@ -483,8 +483,9 @@ The static manifest list is inspection metadata, not a render source. Threading 
 complete raw registration against it before localization and inventories only the matched live
 generation. A mismatch or process termination exposes no navigator from that generation.
 `session.activity.detailed@1` currently publishes the public
-`ExtensionSessionDetailedActivity` raw values `dormant`, `idle`, `working`, `awaiting-user`,
-`needs-attention`, and `limit-reached`; unknown future raw values remain decodable.
+`ExtensionSessionDetailedActivity` raw values `dormant`, `idle`, `working`,
+`ready-with-background-work`, `awaiting-user`, `needs-attention`, and `limit-reached`; unknown
+future raw values remain decodable.
 
 A pipeline row may use `.intent(.pin)`, `.intent(.unpin)`, or `.intent(.archive)` after listing the
 same value in its navigator's `intents` array. Declare at most eight unique values, bind every one

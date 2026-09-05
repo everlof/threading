@@ -19,9 +19,10 @@ struct MainThreadStallDidOccur: AppEvent {
 
 /// Detects long periods in which the main dispatch queue cannot service a trivial ping.
 ///
-/// This deliberately does not sample stacks; MetricKit, `sample` and `xctrace` do that without
-/// private APIs. Its job is to immediately persist the app-level operation that was in flight,
-/// then leave the richer timestamped trace beside it.
+/// Its ordinary path does not sample stacks; MetricKit and the bounded semantic trace remain the
+/// zero-configuration evidence. A developer can opt into one `/usr/bin/sample` capture per live
+/// incident with `THREADING_STALL_SAMPLE=1`, which makes a newly discovered uninstrumented stall
+/// actionable without making process launch part of the shipping hot path.
 final class MainThreadStallMonitor: @unchecked Sendable {
 
     static let shared = MainThreadStallMonitor()
@@ -38,6 +39,7 @@ final class MainThreadStallMonitor: @unchecked Sendable {
 
     private let recorder: PerformanceRecorder
     private let incidentStore: MainThreadStallIncidentStore
+    private let stackSampler: MainThreadStackSampler
     private let thresholdNanoseconds: UInt64
     private let thresholdMilliseconds: Double
     private let queue = DispatchQueue(
@@ -53,10 +55,12 @@ final class MainThreadStallMonitor: @unchecked Sendable {
     init(
         recorder: PerformanceRecorder = .shared,
         incidentStore: MainThreadStallIncidentStore = .shared,
+        stackSampler: MainThreadStackSampler = MainThreadStackSampler(),
         thresholdMilliseconds: Double = 250
     ) {
         self.recorder = recorder
         self.incidentStore = incidentStore
+        self.stackSampler = stackSampler
         if thresholdMilliseconds <= 0 || thresholdMilliseconds.isNaN {
             thresholdNanoseconds = 0
             self.thresholdMilliseconds = 0
@@ -111,6 +115,12 @@ final class MainThreadStallMonitor: @unchecked Sendable {
                     mainThreadID: mainThreadID,
                     activeOperations: activeOperations
                 )
+                if let incidentID = pendingPing.incidentID {
+                    stackSampler.captureIfEnabled(
+                        incidentID: incidentID,
+                        in: incidentStore.directory
+                    )
+                }
                 self.pendingPing = pendingPing
                 recorder.requestAutomaticExport(reason: "main-thread-stall-detected")
                 ThreadingLogger.performance.error(
@@ -165,6 +175,79 @@ final class MainThreadStallMonitor: @unchecked Sendable {
                     operationNames: operationNames
                 )
             )
+        }
+    }
+}
+
+/// Developer-only stack evidence for a live hang, admitted without touching the main actor.
+/// One blocked `sample` process cannot create a queue of more samplers behind itself.
+final class MainThreadStackSampler: @unchecked Sendable {
+    private let enabled: Bool
+    private let queue = DispatchQueue(
+        label: "codes.threading.performance.main-thread-sample",
+        qos: .utility
+    )
+    private let lock = NSLock()
+    private var isSampling = false
+
+    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
+#if DEBUG
+        enabled = environment["THREADING_STALL_SAMPLE"] == "1"
+#else
+        enabled = false
+#endif
+    }
+
+    func captureIfEnabled(incidentID: UUID, in directory: URL) {
+        guard enabled else { return }
+        lock.lock()
+        guard !isSampling else {
+            lock.unlock()
+            return
+        }
+        isSampling = true
+        lock.unlock()
+
+        queue.async { [self] in
+            defer {
+                lock.lock()
+                isSampling = false
+                lock.unlock()
+            }
+            do {
+                try FileManager.default.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true
+                )
+                let destination = directory.appendingPathComponent(
+                    "stall-\(incidentID.uuidString.lowercased()).sample.txt"
+                )
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/sample")
+                process.arguments = [
+                    String(ProcessInfo.processInfo.processIdentifier),
+                    "1",
+                    "1",
+                    "-file",
+                    destination.path
+                ]
+                process.standardOutput = FileHandle.nullDevice
+                process.standardError = FileHandle.nullDevice
+                try process.run()
+                process.waitUntilExit()
+                guard process.terminationStatus == 0 else {
+                    try? FileManager.default.removeItem(at: destination)
+                    return
+                }
+                if let bytes = try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+                   bytes > 4 * 1_024 * 1_024 {
+                    try? FileManager.default.removeItem(at: destination)
+                }
+            } catch {
+                ThreadingLogger.performance.error(
+                    "Main-thread stack sample failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
         }
     }
 }

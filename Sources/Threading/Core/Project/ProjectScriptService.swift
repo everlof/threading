@@ -15,6 +15,7 @@ final class ProjectScriptService {
 
     private let registry: CommandRegistry
     private var watcher: ProjectScriptConfigurationWatcher?
+    private var requestedExecutionDirectory: URL?
     private var activeExecutionDirectory: URL?
     private(set) var activeCatalog: ProjectScriptCatalog?
 
@@ -27,6 +28,7 @@ final class ProjectScriptService {
             guard activeCatalog != nil || watcher != nil else { return }
             watcher?.stop()
             watcher = nil
+            requestedExecutionDirectory = nil
             activeExecutionDirectory = nil
             activeCatalog = nil
             registry.replaceProjectScripts([])
@@ -34,16 +36,25 @@ final class ProjectScriptService {
             return
         }
 
-        let standardized = executionDirectory.standardizedFileURL.resolvingSymlinksInPath()
-        guard standardized != activeExecutionDirectory else { return }
+        // Store notifications are intentionally broader than script identity. Most calls name
+        // the same literal path, so reject them before the filesystem-backed symlink resolution.
+        let requested = executionDirectory.standardizedFileURL
+        guard requested != requestedExecutionDirectory else { return }
+        let standardized = requested.resolvingSymlinksInPath()
+        if standardized == activeExecutionDirectory {
+            requestedExecutionDirectory = requested
+            return
+        }
         let root = GitInfo.worktreeLocation(for: standardized.path)?.root
             ?? standardized
         if activeCatalog?.repositoryRoot == root {
+            requestedExecutionDirectory = requested
             activeExecutionDirectory = standardized
             return
         }
 
         watcher?.stop()
+        requestedExecutionDirectory = requested
         activeExecutionDirectory = standardized
         watcher = ProjectScriptConfigurationWatcher(repositoryRoot: root) { [weak self] in
             self?.reload()

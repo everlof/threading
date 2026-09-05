@@ -517,7 +517,7 @@ enum HostFactCatalog {
     private static func legacyActivity(_ activity: SessionActivity) -> String {
         switch activity {
         case .dormant: "dormant"
-        case .idle: "idle"
+        case .idle, .readyWithBackgroundWork: "idle"
         case .working: "working"
         case .awaitingUser, .needsAttention, .limitReached: "needs-attention"
         }
@@ -528,6 +528,8 @@ enum HostFactCatalog {
         case .dormant: ExtensionSessionDetailedActivity.dormant.rawValue
         case .idle: ExtensionSessionDetailedActivity.idle.rawValue
         case .working: ExtensionSessionDetailedActivity.working.rawValue
+        case .readyWithBackgroundWork:
+            ExtensionSessionDetailedActivity.readyWithBackgroundWork.rawValue
         case .awaitingUser: ExtensionSessionDetailedActivity.awaitingUser.rawValue
         case .needsAttention: ExtensionSessionDetailedActivity.needsAttention.rawValue
         case .limitReached: ExtensionSessionDetailedActivity.limitReached.rawValue

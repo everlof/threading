@@ -24,21 +24,27 @@ final class ActiveTurnSleepInhibitorTests: XCTestCase {
         let center = NotificationCenter()
         let assertion = Assertion()
         var enabled = false
-        var activities: [SessionID: SessionActivity] = [:]
+        var runtimes: [SessionID: SessionRuntimeSnapshot] = [:]
 
         lazy var inhibitor = ActiveTurnSleepInhibitor(
             center: center,
             currentInFlightSessionIDs: { [unowned self] in
-                Set(activities.compactMap { $0.value.hasTurnInFlight ? $0.key : nil })
+                Set(runtimes.compactMap { $0.value.hasPendingOutcome ? $0.key : nil })
             },
-            activity: { [unowned self] in activities[$0] ?? .dormant },
+            runtime: { [unowned self] in runtimes[$0] ?? .dormant },
             isEnabled: { [unowned self] in enabled },
             assertion: assertion
         )
 
         func report(_ activity: SessionActivity, for sessionID: SessionID) {
-            activities[sessionID] = activity
-            center.post(SessionActivityDidChange(sessionID: sessionID))
+            let previous = runtimes[sessionID] ?? .dormant
+            let current = SessionRuntimeSnapshot.test(activity: activity)
+            runtimes[sessionID] = current
+            center.post(SessionRuntimeDidChange(
+                sessionID: sessionID,
+                transition: SessionRuntimeTransition(previous: previous, current: current),
+                cause: nil
+            ))
         }
     }
 
@@ -99,7 +105,7 @@ final class ActiveTurnSleepInhibitorTests: XCTestCase {
     func testTurningThePreferenceOffReleasesAndTurningItBackOnReacquires() {
         let fixture = Fixture()
         fixture.enabled = true
-        fixture.activities[SessionID()] = .working
+        fixture.runtimes[SessionID()] = .test(activity: .working)
         fixture.inhibitor.start()
 
         fixture.enabled = false

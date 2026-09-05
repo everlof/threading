@@ -267,7 +267,7 @@ final class SingleInstanceTriageTests: XCTestCase {
     }
 
     @MainActor
-    func testStartingTheHeartbeatWritesOneImmediatelyAndStoppingIsIdempotent() throws {
+    func testStartingTheHeartbeatAdmitsOneImmediatelyAndStoppingIsIdempotent() async throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("threading-heartbeat-\(UUID().uuidString)", isDirectory: true)
             .appendingPathComponent(SingleInstanceDefaults.heartbeatFileName)
@@ -277,6 +277,10 @@ final class SingleInstanceTriageTests: XCTestCase {
         heartbeat.start()
         defer { heartbeat.stop() }
 
+        let deadline = Date().addingTimeInterval(1)
+        while SingleInstanceHeartbeat.age(of: url) == nil, Date() < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         let age = try XCTUnwrap(SingleInstanceHeartbeat.age(of: url))
         XCTAssertLessThan(age, SingleInstanceDefaults.staleThreshold)
 

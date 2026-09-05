@@ -727,7 +727,7 @@ final class HookLifecycleTests: XCTestCase {
 
         XCTAssertTrue(tracker.noteTurnInterrupted(turnID: "turn-1"))
         XCTAssertEqual(tracker.activity, .idle)
-        XCTAssertFalse(tracker.activity.hasTurnInFlight)
+        XCTAssertFalse(tracker.runtimeSnapshot.hasOpenTurn)
     }
 
     /// The tail scan is asynchronous. If another prompt starts before it lands, an old abort may
@@ -742,7 +742,7 @@ final class HookLifecycleTests: XCTestCase {
 
         XCTAssertFalse(tracker.noteTurnInterrupted(turnID: "turn-1"))
         XCTAssertEqual(tracker.activity, .working)
-        XCTAssertTrue(tracker.activity.hasTurnInFlight)
+        XCTAssertTrue(tracker.runtimeSnapshot.hasOpenTurn)
     }
 
     /// A provider version that stops naming turns cannot safely use a delayed transcript fact:
@@ -756,7 +756,7 @@ final class HookLifecycleTests: XCTestCase {
 
         XCTAssertFalse(tracker.noteTurnInterrupted(turnID: "turn-1"))
         XCTAssertEqual(tracker.activity, .working)
-        XCTAssertTrue(tracker.activity.hasTurnInFlight)
+        XCTAssertTrue(tracker.runtimeSnapshot.hasOpenTurn)
     }
 
     @MainActor
@@ -1582,12 +1582,14 @@ final class HookLifecycleTests: XCTestCase {
         offScreen.noteTurnStarted()
         offScreen.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
 
-        XCTAssertEqual(onScreen.activity, .working, "nothing has finished yet")
+        XCTAssertEqual(onScreen.activity, .readyWithBackgroundWork, "the prompt is ready")
         XCTAssertEqual(
             offScreen.activity,
-            .working,
+            .readyWithBackgroundWork,
             "nor is there anything unread: the agent has not said its piece"
         )
+        XCTAssertTrue(onScreen.runtimeSnapshot.isPromptReady)
+        XCTAssertTrue(onScreen.runtimeSnapshot.hasPendingOutcome)
     }
 
     /// The wake, and the real end. The task lands, the CLI submits it as a prompt of its own,
@@ -1600,7 +1602,7 @@ final class HookLifecycleTests: XCTestCase {
 
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
 
         // The background task completed and Claude submitted its result as a new prompt.
         tracker.noteTurnStarted()
@@ -1621,7 +1623,7 @@ final class HookLifecycleTests: XCTestCase {
 
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(backgroundWork: [standingWork("dev-server")])
-        XCTAssertEqual(tracker.activity, .working, "the turn that started it is waiting on it")
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
 
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(backgroundWork: [standingWork("dev-server")])
@@ -1636,7 +1638,7 @@ final class HookLifecycleTests: XCTestCase {
         tracker.noteTurnFinished(
             backgroundWork: [standingWork("dev-server"), standingWork("test-run")]
         )
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
     }
 
     /// The reported symptom, end to end: "no progress circle, but a subagent is working".
@@ -1655,7 +1657,7 @@ final class HookLifecycleTests: XCTestCase {
         // The turn that spawned it.
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-a904492d00a55f1da")])
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
 
         // Three turns of "is it still going?", each ending with the same child in flight.
         for turn in 1...3 {
@@ -1663,7 +1665,7 @@ final class HookLifecycleTests: XCTestCase {
             tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-a904492d00a55f1da")])
             XCTAssertEqual(
                 tracker.activity,
-                .working,
+                .readyWithBackgroundWork,
                 "the child was still working after turn \(turn)"
             )
         }
@@ -1673,7 +1675,7 @@ final class HookLifecycleTests: XCTestCase {
         tracker.isVisible = false
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-a904492d00a55f1da")])
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
 
         // The child reported back, and the turn that outlives it is the one that finishes.
         tracker.noteTurnStarted()
@@ -1707,7 +1709,7 @@ final class HookLifecycleTests: XCTestCase {
         tracker.isVisible = false
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
 
         tracker.markDormant()
         XCTAssertEqual(tracker.activity, .dormant)
@@ -1740,10 +1742,14 @@ final class HookLifecycleTests: XCTestCase {
 
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(backgroundWork: [delegatedWork("agent-abac596acbf5c268f")])
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
 
         tracker.noteAwaitingUser(.idlePrompt)
-        XCTAssertEqual(tracker.activity, .working, "the prompt is idle because the child is not")
+        XCTAssertEqual(
+            tracker.activity,
+            .readyWithBackgroundWork,
+            "the prompt is ready while the child is not"
+        )
         XCTAssertEqual(attentionCount, 0, "nothing has been handed back to read")
         XCTAssertEqual(
             tracker.lastCause,
@@ -1753,7 +1759,7 @@ final class HookLifecycleTests: XCTestCase {
 
         // Looking at it must not be what fixes it — but it must not break it either.
         tracker.isVisible = true
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
 
         // The child reported back, and the turn that outlives it is the one that finishes.
         tracker.isVisible = false
@@ -1797,23 +1803,36 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertEqual(tracker.activity, .needsAttention)
     }
 
-    /// The narrowing to delegated work, which is the other half of failing closed. A subagent
-    /// ends and reports back, so a suppressed notice costs nothing — the row corrects itself. A
-    /// backgrounded shell carries no such promise: `npm test` and `npm run dev` are the same
-    /// entry in the payload, so a session parked on one is exactly where a late "nothing is
-    /// happening here" is worth keeping.
+    /// Standing work has the same typed continuation boundary. Its lifetime may be indefinite,
+    /// but an idle prompt still says nothing about whether the user is needed.
     @MainActor
-    func testAnIdlePromptStillFlagsASessionParkedOnAShellThatMayNeverEnd() {
+    func testAnIdlePromptDoesNotCompleteAStandingBackgroundContinuation() {
         let tracker = SessionActivityTracker()
+        var ledger = SessionRuntimeTransitionLedger()
+        let sessionID = SessionID()
+        var transitions: [SessionRuntimeTransition] = []
+        tracker.onRuntimeChange = { snapshot in
+            transitions.append(ledger.observe(snapshot, for: sessionID))
+        }
         tracker.markRunning()
         tracker.isVisible = false
 
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
-        XCTAssertEqual(tracker.activity, .working)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
+        XCTAssertTrue(try! XCTUnwrap(transitions.last).endedTurn)
+        XCTAssertFalse(try! XCTUnwrap(transitions.last).completedPendingOutcome)
 
+        let transitionCount = transitions.count
         tracker.noteAwaitingUser(.idlePrompt)
-        XCTAssertEqual(tracker.activity, .needsAttention)
+        XCTAssertEqual(tracker.activity, .readyWithBackgroundWork)
+        XCTAssertTrue(tracker.runtimeSnapshot.hasPendingOutcome)
+        XCTAssertTrue(tracker.runtimeSnapshot.isPromptReady)
+        XCTAssertEqual(transitions.count, transitionCount, "idle prompt changes no runtime fact")
+
+        tracker.noteTurnStarted()
+        tracker.noteTurnFinished()
+        XCTAssertTrue(try! XCTUnwrap(transitions.last).completedPendingOutcome)
     }
 
     /// An idle prompt on a session that left nothing running is untouched: the prompt really is
@@ -1847,11 +1866,11 @@ final class HookLifecycleTests: XCTestCase {
         XCTAssertFalse(tracker.honoursAwaitingUserNotice(.idlePrompt))
         XCTAssertTrue(tracker.honoursAwaitingUserNotice(.unspecified))
 
-        // A pause on standing work is not the same claim: it may never end, so the notice keeps
-        // its say. Same tracker, so this also pins that the pause is re-read per boundary.
+        // Standing work has the same continuation boundary. Same tracker, so this also pins that
+        // the pause kind is re-read per turn boundary.
         tracker.noteTurnStarted()
         tracker.noteTurnFinished(backgroundWork: [standingWork("bwf9miuvg")])
-        XCTAssertTrue(tracker.honoursAwaitingUserNotice(.idlePrompt))
+        XCTAssertFalse(tracker.honoursAwaitingUserNotice(.idlePrompt))
 
         // The unattended grace refuses every notice, and refuses it for both readers — a
         // restored session's idle prompt is the "request that predates Snooze" that
@@ -1931,16 +1950,16 @@ final class HookLifecycleTests: XCTestCase {
         tracker.markRunning()
         tracker.isVisible = false
 
-        var transitions = SessionActivityTransitionLedger()
+        var transitions = SessionRuntimeTransitionLedger()
         var completions = 0
         var attentionEpisodes = 0
         var activityChanges = 0
-        tracker.onChange = { activity in
-            activityChanges += 1
-            if transitions.observe(activity, for: sessionID).completedTurn {
+        tracker.onRuntimeChange = { snapshot in
+            if transitions.observe(snapshot, for: sessionID).completedPendingOutcome {
                 completions += 1
             }
         }
+        tracker.onChange = { _ in activityChanges += 1 }
         tracker.onAttention = { attentionEpisodes += 1 }
 
         tracker.recordOutput(byteCount: ActivityDefaults.workingByteThreshold + 1)
@@ -1977,29 +1996,38 @@ final class HookLifecycleTests: XCTestCase {
 
     @MainActor
     func testTransitionLedgerTreatsBlockedAndReadPresentationAsTheSameTurn() {
-        var transitions = SessionActivityTransitionLedger()
+        var transitions = SessionRuntimeTransitionLedger()
         let sessionID = SessionID()
 
-        XCTAssertFalse(transitions.observe(.idle, for: sessionID).completedTurn)
-        XCTAssertTrue(transitions.observe(.working, for: sessionID).beganTurn)
+        XCTAssertFalse(
+            transitions.observe(.test(activity: .idle), for: sessionID).completedPendingOutcome
+        )
+        XCTAssertTrue(
+            transitions.observe(.test(activity: .working), for: sessionID).beganTurn
+        )
 
-        let blocked = transitions.observe(.awaitingUser, for: sessionID)
+        let blocked = transitions.observe(.test(activity: .awaitingUser), for: sessionID)
         XCTAssertFalse(blocked.beganTurn)
-        XCTAssertFalse(blocked.completedTurn)
+        XCTAssertFalse(blocked.completedPendingOutcome)
 
-        let finished = transitions.observe(.needsAttention, for: sessionID)
-        XCTAssertTrue(finished.completedTurn)
+        let finished = transitions.observe(.test(activity: .needsAttention), for: sessionID)
+        XCTAssertTrue(finished.completedPendingOutcome)
 
-        let read = transitions.observe(.idle, for: sessionID)
+        let read = transitions.observe(.test(activity: .idle), for: sessionID)
         XCTAssertFalse(read.beganTurn)
-        XCTAssertFalse(read.completedTurn)
+        XCTAssertFalse(read.completedPendingOutcome)
 
         transitions.remove(sessionID)
         XCTAssertFalse(
-            transitions.observe(.needsAttention, for: sessionID).completedTurn,
+            transitions.observe(
+                .test(activity: .needsAttention),
+                for: sessionID
+            ).completedPendingOutcome,
             "a removed session cannot inherit a completion edge if its identifier is reused"
         )
-        XCTAssertTrue(transitions.observe(.working, for: sessionID).beganTurn)
+        XCTAssertTrue(
+            transitions.observe(.test(activity: .working), for: sessionID).beganTurn
+        )
     }
 
     // MARK: - Asking Inside a Turn

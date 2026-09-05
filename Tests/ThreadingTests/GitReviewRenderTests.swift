@@ -1090,7 +1090,7 @@ final class GitReviewRenderTests: HostedStoreTestCase {
                 markerCount = terminalView.recentLogicalBufferText(
                     maximumUTF8Bytes: 256 * 1_024
                 ).text.components(separatedBy: liveProductMarker).count - 1
-                providerSettled = markerCount >= 2 && !terminal.activity.hasTurnInFlight
+                providerSettled = markerCount >= 2 && !terminal.runtimeSnapshot.hasOpenTurn
             } while !providerSettled && Date() < providerDeadline
             XCTAssertGreaterThanOrEqual(
                 markerCount,

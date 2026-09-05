@@ -106,6 +106,12 @@ final class SessionCurfewCenterTests: XCTestCase {
             now: { [weak self] in self?.now ?? .distantPast },
             calendar: calendar,
             activity: { [weak self] in self?.activities[$0] ?? .dormant },
+            runtime: { [weak self] id in
+                .test(
+                    activity: self?.activities[id] ?? .dormant,
+                    reportsOwnTurns: self?.reportsTurns ?? false
+                )
+            },
             reportsOwnTurns: { [weak self] _ in self?.reportsTurns ?? false },
             supportsEscape: { [weak self] _ in self?.escapeCapable ?? false },
             isWatched: { [weak self] in self?.watched.contains($0) ?? false },
@@ -115,6 +121,18 @@ final class SessionCurfewCenterTests: XCTestCase {
             performers: recordingPerformers(),
             typesIntoLiveSessions: typesIntoLiveSessions
         )
+    }
+
+    private func postRuntimeChange(_ sessionID: SessionID) {
+        let current = SessionRuntimeSnapshot.test(
+            activity: activities[sessionID] ?? .dormant,
+            reportsOwnTurns: reportsTurns
+        )
+        events.post(SessionRuntimeDidChange(
+            sessionID: sessionID,
+            transition: SessionRuntimeTransition(previous: .dormant, current: current),
+            cause: nil
+        ))
     }
 
     private func recordingPerformers() -> SessionCurfewCenter.Performers {
@@ -437,25 +455,25 @@ final class SessionCurfewCenterTests: XCTestCase {
 
         now = deadline.addingTimeInterval(CurfewDefaults.grace)
         activities[chatID] = .working
-        events.post(SessionActivityDidChange(sessionID: chatID))
+        postRuntimeChange(chatID)
         XCTAssertEqual(nativeInterrupts.count, 1, "the first press did not land")
 
         // The turn ends, and the next one begins while the user is looking at it.
         activities[chatID] = .idle
-        events.post(SessionActivityDidChange(sessionID: chatID))
+        postRuntimeChange(chatID)
         now = now.addingTimeInterval(CurfewDefaults.reinterruptSpacing + 10)
         watched.insert(chatID)
         activities[chatID] = .working
-        events.post(SessionActivityDidChange(sessionID: chatID))
+        postRuntimeChange(chatID)
         XCTAssertEqual(nativeInterrupts.count, 1, "a turn the user started was interrupted")
 
         // And the one after that begins with nobody watching.
         activities[chatID] = .idle
-        events.post(SessionActivityDidChange(sessionID: chatID))
+        postRuntimeChange(chatID)
         watched.removeAll()
         now = now.addingTimeInterval(CurfewDefaults.reinterruptSpacing + 10)
         activities[chatID] = .working
-        events.post(SessionActivityDidChange(sessionID: chatID))
+        postRuntimeChange(chatID)
         XCTAssertEqual(nativeInterrupts.count, 2)
     }
 

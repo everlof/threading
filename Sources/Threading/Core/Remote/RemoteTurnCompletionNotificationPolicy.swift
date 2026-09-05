@@ -8,13 +8,11 @@ import Foundation
 /// read (`idle`) or unread (`needsAttention`); refusals, dormant sessions, and questions are not
 /// successful completion edges.
 enum RemoteTurnCompletionNotificationPolicy {
-    static func shouldNotify(
-        from old: SessionActivity,
-        to new: SessionActivity,
-        reportsOwnTurns: Bool
-    ) -> Bool {
-        guard reportsOwnTurns, old.hasTurnInFlight else { return false }
-        return new == .idle || new == .needsAttention
+    static func shouldNotify(_ transition: SessionRuntimeTransition) -> Bool {
+        guard transition.current.reportsOwnTurns,
+              transition.completedPendingOutcome else { return false }
+        return transition.current.activity == .idle
+            || transition.current.activity == .needsAttention
     }
 }
 

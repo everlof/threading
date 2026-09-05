@@ -288,7 +288,7 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
     private let appEvents = AppEventObservations()
     /// One scalar per session, so high-frequency presentation callbacks can drive expensive
     /// post-turn work only on the semantic edge out of an unfinished turn.
-    private var sessionActivityTransitions = SessionActivityTransitionLedger()
+    private var sessionRuntimeTransitions = SessionRuntimeTransitionLedger()
     private var lastBlockedInputToastAt = Date.distantPast
     #if DEBUG
         private(set) var lastDisplayPaneRequestPhaseDurations = DisplayPaneRequestPhaseDurations()
@@ -1446,31 +1446,46 @@ final class MainWindowController: ThemedWindowController, RemoteWorkspaceProvidi
         // window. Only the *agent's* own title reached here before, through
         // `sessionTitleChanged`, so a rename left the tab holding the old name until the
         // pane next changed.
-        appEvents.observe(ProjectsDidChange.self) { [weak self] _ in
-            self?.updateSessionTitleItem()
-            self?.refreshProjectScriptContext()
+        appEvents.observe(ProjectsDidChange.self) { [weak self] change in
+            guard let self else { return }
+            switch change.sidebarImpact {
+            case .structure:
+                self.updateSessionTitleItem()
+                self.refreshProjectScriptContext()
+            case .projectRemoved(let projectID, let sessionIDs, let terminalIDs):
+                if projectID == self.currentProjectID
+                    || self.currentSessionID.map(sessionIDs.contains) == true
+                    || self.currentTerminalID.map(terminalIDs.contains) == true {
+                    self.updateSessionTitleItem()
+                    self.refreshProjectScriptContext()
+                }
+            case .projectStructure(let projectID):
+                if projectID == self.currentProjectID { self.refreshProjectScriptContext() }
+            case .sessionRemoved(_, let sessionID), .sessionStructure(_, let sessionID):
+                if sessionID == self.currentSessionID {
+                    self.updateSessionTitleItem()
+                    self.refreshProjectScriptContext()
+                }
+            case .sessionTitle(let sessionID, _):
+                if sessionID == self.currentSessionID { self.updateSessionTitleItem() }
+            case .projectRow, .sessionAdded, .terminalAdded, .sessionRow, .terminalRow:
+                break
+            }
         }
         appEvents.observe(SessionCheckoutDidMove.self) { [weak self] event in
             guard let self else { return }
             self.displayPaneController.noteSessionCheckoutMoved(event.sessionID)
             environment.agentRuntime.preserveCheckoutMoveOutbox(sessionID: event.sessionID)
-            // A move the user or the agent asked for leaves the process in the checkout it was
-            // launched in, so the runtime has to be replaced to reach the new one. An observed
-            // move is the reverse: ownership is catching up with a process that is *already*
-            // running there, and replacing it would kill a working agent to reinstate it where it
-            // already is — while the fresh `sessionStarted` that follows is a new observation,
-            // which is how one disagreement between the two locus signals became 88 moves and 89
-            // relaunches in four and a half minutes.
-            if event.authorityBasis != .observedExecution {
-                if self.containerViewController.currentSessionID == event.sessionID {
-                    self.containerViewController.resumeCurrentSession()
-                } else {
-                    environment.agentRuntime.discard(sessionID: event.sessionID)
-                    self.containerViewController.launchInBackground(sessionID: event.sessionID)
-                }
+            // Durable ownership and the launch directory change together. An observed tool cwd
+            // proves where the finished turn worked, but the provider's root process may still
+            // belong to the source checkout; retaining it would make the next turn drift again.
+            if self.containerViewController.currentSessionID == event.sessionID {
+                self.containerViewController.resumeCurrentSession()
+            } else {
+                environment.agentRuntime.discard(sessionID: event.sessionID)
+                self.containerViewController.launchInBackground(sessionID: event.sessionID)
             }
-            // Unconditional: this is what releases the transient input fence, and a session whose
-            // runtime was deliberately left alone must not stay fenced for the rest of the run.
+            // This releases the transient store/event fence only after replacement has started.
             SessionCheckoutCoordinator.shared.runtimeRelaunchDidStart(
                 sessionID: event.sessionID
             )
@@ -4987,7 +5002,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         SessionAttachmentStore.shared.removeSession(sessionID)
         DisplayPaneStore.shared.removeSession(sessionID)
         MCPSessionRegistry.remove(sessionID: sessionID)
-        sessionActivityTransitions.remove(sessionID)
+        sessionRuntimeTransitions.remove(sessionID)
         BrowserAutoCaptureRing.shared.clear(for: sessionID)
 
         // `discardDeletedSession` already removed the live controller and subagent state at the
@@ -5028,7 +5043,7 @@ extension MainWindowController: ProjectSidebarViewControllerDelegate {
         displayPaneController.removeSessions(sessionIDs)
         for sessionID in sessionIDs {
             dismissedDisplayPaneRevisionBySession.removeValue(forKey: sessionID)
-            sessionActivityTransitions.remove(sessionID)
+            sessionRuntimeTransitions.remove(sessionID)
             BrowserAutoCaptureRing.shared.clear(for: sessionID)
         }
         containerViewController.removeDrawerSessions(sessionIDs)
@@ -5149,19 +5164,6 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
     func terminalContainer(
         _: TerminalContainerViewController,
-        sessionTitleChanged _: String,
-        for sessionID: SessionID
-    ) {
-        // The sidebar row carries the session name; the window stays named after the app.
-        sidebarViewController.refreshRow(sessionID: sessionID)
-
-        if sessionID == currentSessionID {
-            updateSessionTitleItem()
-        }
-    }
-
-    func terminalContainer(
-        _: TerminalContainerViewController,
         sessionDidExit sessionID: SessionID,
         exitCode _: Int32?
     ) {
@@ -5235,19 +5237,15 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
         _: TerminalContainerViewController,
         sessionStateDidChange sessionID: SessionID
     ) {
-        let activity = environment.agentRuntime.activity(sessionID: sessionID)
-        let transition = sessionActivityTransitions.observe(activity, for: sessionID)
+        let snapshot = environment.agentRuntime.runtimeSnapshot(sessionID: sessionID)
+        let transition = sessionRuntimeTransitions.observe(snapshot, for: sessionID)
 
         // Only the affected row, so a working session does not rebuild the whole list.
         sidebarViewController.refreshRow(sessionID: sessionID)
 
         // The review's Last Turn baseline is captured on the entering-working edge; the store
         // watches every change and finds that edge itself.
-        GitTurnBaselineStore.shared.noteActivity(
-            activity,
-            sessionID: sessionID,
-            hasAuthoritativeReporting: environment.agentRuntime.reportsOwnTurns(sessionID: sessionID)
-        )
+        GitTurnBaselineStore.shared.noteRuntime(snapshot, sessionID: sessionID)
 
         if transition.beganTurn {
             displayPaneController.noteSessionStartedWorking(sessionID)
@@ -5255,9 +5253,9 @@ extension MainWindowController: TerminalContainerViewControllerDelegate {
 
         // A blocked turn, a read receipt and a visibility change are all non-working
         // presentations, but none completed a turn. Filesystem/process work belongs only to the
-        // semantic edge out of `hasTurnInFlight`; otherwise one repainting off-screen terminal
+        // typed end-of-turn edge; otherwise one repainting off-screen terminal
         // can launch this whole fan-out on every quiet interval.
-        if transition.completedTurn {
+        if transition.endedTurn {
             // A finished turn is the useful freshness boundary for this receipt. The global
             // scan is off-main and warm files resolve through the usage cache.
             SessionUsageService.shared.refresh(sessionID, forceIndex: true)

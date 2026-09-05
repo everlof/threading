@@ -200,6 +200,7 @@ extension AgentToolCoordinator {
         case .dormant: return "dormant"
         case .idle: return "idle"
         case .working: return "working"
+        case .readyWithBackgroundWork: return "ready-with-background-work"
         case .awaitingUser: return "waiting on input"
         case .needsAttention: return "needs attention"
         // Spelt out rather than folded into "needs attention": an agent reading this listing to

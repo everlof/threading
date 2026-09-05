@@ -64,15 +64,15 @@ final class SystemIdleSleepAssertion: IdleSystemSleepAsserting {
 
 /// Prevents idle system sleep while at least one agent turn is unfinished and the user opted in.
 ///
-/// `SessionActivityDidChange` is the common activity channel for terminal and native sessions.
-/// The event carries the session id, so ordinary edges update one set entry in O(1) instead of
+/// `SessionRuntimeDidChange` is the lifecycle channel for terminal and native sessions. The
+/// event carries the session id, so ordinary edges update one set entry in O(1) instead of
 /// rescanning every live session. The complete projection is read only once at `start()`, covering
 /// sessions that were already working before this observer was installed.
 @MainActor
 final class ActiveTurnSleepInhibitor {
     private let observations: AppEventObservations
     private let currentInFlightSessionIDs: @MainActor () -> Set<SessionID>
-    private let activity: @MainActor (SessionID) -> SessionActivity
+    private let runtime: @MainActor (SessionID) -> SessionRuntimeSnapshot
     private let isEnabled: @MainActor () -> Bool
     private let assertion: any IdleSystemSleepAsserting
 
@@ -83,13 +83,13 @@ final class ActiveTurnSleepInhibitor {
     init(
         center: NotificationCenter = .default,
         currentInFlightSessionIDs: @escaping @MainActor () -> Set<SessionID>,
-        activity: @escaping @MainActor (SessionID) -> SessionActivity,
+        runtime: @escaping @MainActor (SessionID) -> SessionRuntimeSnapshot,
         isEnabled: @escaping @MainActor () -> Bool,
         assertion: any IdleSystemSleepAsserting = SystemIdleSleepAssertion()
     ) {
         observations = AppEventObservations(center: center)
         self.currentInFlightSessionIDs = currentInFlightSessionIDs
-        self.activity = activity
+        self.runtime = runtime
         self.isEnabled = isEnabled
         self.assertion = assertion
     }
@@ -98,8 +98,8 @@ final class ActiveTurnSleepInhibitor {
         guard !isStarted else { return }
         isStarted = true
 
-        observations.observe(SessionActivityDidChange.self) { [weak self] event in
-            self?.activityChanged(for: event.sessionID)
+        observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
+            self?.runtimeChanged(for: event.sessionID)
         }
         observations.observe(TerminalSessionDidEnd.self) { [weak self] event in
             self?.sessionEnded(event.sessionID)
@@ -122,8 +122,8 @@ final class ActiveTurnSleepInhibitor {
         reconcileAssertion()
     }
 
-    private func activityChanged(for sessionID: SessionID) {
-        if activity(sessionID).hasTurnInFlight {
+    private func runtimeChanged(for sessionID: SessionID) {
+        if runtime(sessionID).hasPendingOutcome {
             inFlightSessionIDs.insert(sessionID)
         } else {
             inFlightSessionIDs.remove(sessionID)

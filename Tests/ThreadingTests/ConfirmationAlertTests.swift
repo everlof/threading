@@ -240,11 +240,11 @@ final class ConfirmationAlertTests: XCTestCase {
     /// The count behind that title: a turn stopped on a question is as unfinished as one being
     /// written, while a finished-but-unread session has nothing left to lose.
     func testOnlyAnUnfinishedTurnCountsAsInFlight() {
-        XCTAssertTrue(SessionActivity.working.hasTurnInFlight)
-        XCTAssertTrue(SessionActivity.awaitingUser.hasTurnInFlight)
-        XCTAssertFalse(SessionActivity.idle.hasTurnInFlight)
-        XCTAssertFalse(SessionActivity.needsAttention.hasTurnInFlight)
-        XCTAssertFalse(SessionActivity.dormant.hasTurnInFlight)
+        XCTAssertTrue(SessionRuntimeSnapshot.test(activity: .working).hasOpenTurn)
+        XCTAssertTrue(SessionRuntimeSnapshot.test(activity: .awaitingUser).hasOpenTurn)
+        XCTAssertFalse(SessionRuntimeSnapshot.test(activity: .idle).hasOpenTurn)
+        XCTAssertFalse(SessionRuntimeSnapshot.test(activity: .needsAttention).hasOpenTurn)
+        XCTAssertFalse(SessionRuntimeSnapshot.dormant.hasOpenTurn)
     }
 
     /// The share sheet ships four buttons and the named modal responses stop at three, so its

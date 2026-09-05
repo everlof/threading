@@ -7515,6 +7515,17 @@
         }
       }
     },
+    "Ready for input; background work running" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "sv" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Redo för inmatning; bakgrundsarbete pågår"
+          }
+        }
+      }
+    },
     "Reasoning" : {
       "extractionState" : "manual",
       "localizations" : {

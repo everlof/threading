@@ -404,7 +404,9 @@ final class ArtifactScanService {
     /// The one question both busy rules ask, kept in one place because they differ only in which
     /// sessions they hand it: a project's own, or every session there is.
     private static func isWorking(_ sessions: [AgentSession]) -> Bool {
-        sessions.contains { AgentRuntime.shared.activity(sessionID: $0.id) == .working }
+        sessions.contains {
+            AgentRuntime.shared.runtimeSnapshot(sessionID: $0.id).hasWorkAtRisk
+        }
     }
 
     private func notifyChanged() {

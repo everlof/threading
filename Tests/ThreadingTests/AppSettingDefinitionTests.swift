@@ -342,18 +342,21 @@ final class AppSettingDefinitionTests: XCTestCase {
         let settings = AppSettings(defaults: defaults)
 
         var notificationCount = 0
+        var changedSettings: Set<String>?
         let observer = NotificationCenter.default.addObserver(
             forName: AppSettingsDidChange.name,
             object: nil,
             queue: nil
-        ) { _ in
+        ) { notification in
             notificationCount += 1
+            changedSettings = (notification.object as? AppSettingsDidChange)?.changedSettings
         }
         defer { NotificationCenter.default.removeObserver(observer) }
 
         settings.githubAppClientID = "truthful-client-id"
         XCTAssertEqual(settings.githubAppClientID, "truthful-client-id")
         XCTAssertEqual(notificationCount, 1)
+        XCTAssertEqual(changedSettings, [AppSettingIdentity.githubAppClientID.rawValue])
 
         settings.githubAppClientID = String(repeating: "é", count: 513)
         XCTAssertEqual(settings.githubAppClientID, "truthful-client-id")

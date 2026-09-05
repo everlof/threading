@@ -23,6 +23,7 @@ final class WorkspaceControlPlane {
         /// The project a session belongs to, with its member sessions.
         let projectForSession: (SessionID) -> Project?
         let activity: (SessionID) -> SessionActivity
+        var runtime: (SessionID) -> SessionRuntimeSnapshot = { _ in .dormant }
         /// Which input surface is live for a session right now.
         let surface: (SessionID) -> ControlSessionOverview.Surface
         /// Hands text to a session's live surface. The plane has already decided the send is
@@ -102,6 +103,7 @@ final class WorkspaceControlPlane {
             session: { ProjectStore.shared.session(withID: $0) },
             projectForSession: { ProjectStore.shared.project(forSessionID: $0) },
             activity: { AgentRuntime.shared.activity(sessionID: $0) },
+            runtime: { AgentRuntime.shared.runtimeSnapshot(sessionID: $0) },
             surface: { SessionMessageDelivery.surface(for: $0) },
             deliver: { SessionMessageDelivery.deliver($0, to: $1, completion: $2) },
             steer: { SessionMessageDelivery.steer($0, to: $1) },
@@ -482,7 +484,7 @@ final class WorkspaceControlPlane {
         guard let target = dependencies.session(targetID), !target.isArchived else {
             return .refused(targetID == callerID ? .callerUnknown : .targetArchived)
         }
-        if targetID != callerID, dependencies.activity(targetID).hasTurnInFlight {
+        if targetID != callerID, dependencies.runtime(targetID).hasPendingOutcome {
             return .refused(.targetBusy)
         }
         let row = overview(of: target, caller: callerID)
@@ -558,7 +560,7 @@ final class WorkspaceControlPlane {
         guard let target = dependencies.session(targetID), !target.isArchived else {
             return .targetUnknown
         }
-        guard !dependencies.activity(targetID).hasTurnInFlight else { return .targetBusy }
+        guard !dependencies.runtime(targetID).hasPendingOutcome else { return .targetBusy }
         guard target.usesNativeUI else { return .terminalCannotBeWoken }
         if let held = dependencies.heldByOwnLimit(targetID) {
             return .targetHeldByOwnLimit(reason: held)
@@ -618,7 +620,7 @@ final class WorkspaceControlPlane {
         }
         guard case .agentSession(let managerID) = actor,
               dependencies.session(targetID) != nil else { return .callerUnknown }
-        guard !dependencies.activity(targetID).hasTurnInFlight else { return .targetBusy }
+        guard !dependencies.runtime(targetID).hasPendingOutcome else { return .targetBusy }
         let since = Calendar(identifier: .gregorian).date(byAdding: .day, value: -1, to: now)
             ?? now.addingTimeInterval(-86_400)
         guard dependencies.accountMoveCount(managerID, targetID, since)
@@ -637,7 +639,7 @@ final class WorkspaceControlPlane {
         }
         guard let target = dependencies.session(targetID),
               let workspace = target.managedWorkspace else { return .workspaceUnavailable }
-        guard !dependencies.activity(targetID).hasTurnInFlight else { return .targetBusy }
+        guard !dependencies.runtime(targetID).hasPendingOutcome else { return .targetBusy }
         guard workspace.state != .needsAttention else { return .workspaceUnavailable }
         guard let grant = storedGrant(for: actor, operation: .finishWorkspace),
               grant.allowedDeliveries.contains(workspace.delivery) else {

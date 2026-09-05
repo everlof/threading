@@ -144,6 +144,130 @@ final class MobileIdentityPickerTests: XCTestCase {
         XCTAssertTrue(MobileIdentityPickerStrip.rows([1], tilesPerRow: 0).isEmpty)
     }
 
+    // MARK: - Every point in the surface belongs to an item
+
+    /// The complaint the arithmetic exists for: with a button per tile, the target was each
+    /// tile's own drawn frame, so the group's margin and the gaps between plates swallowed
+    /// touches that plainly pointed at a runtime. Dividing the surface leaves no dead point in
+    /// it — this sweeps the whole strip at two-point steps and expects every one of them to land
+    /// on a runtime.
+    func testNoPointInsideAFullStripFallsBetweenTiles() {
+        let size = CGSize(width: 324, height: 68)
+        var missed: [CGPoint] = []
+        for x in stride(from: CGFloat(0), to: size.width, by: 2) {
+            for y in stride(from: CGFloat(0), to: size.height, by: 2) {
+                let point = CGPoint(x: x, y: y)
+                if MobileIdentityPickerHitTest.tile(
+                    at: point, in: size, tilesPerRow: 5, count: 5
+                ) == nil {
+                    missed.append(point)
+                }
+            }
+        }
+        XCTAssertEqual(missed, [], "every point inside the strip belongs to a runtime")
+    }
+
+    func testTheFirstAndLastColumnsReachTheirOwnEdges() {
+        let size = CGSize(width: 300, height: 68)
+        XCTAssertEqual(
+            MobileIdentityPickerHitTest.tile(
+                at: CGPoint(x: 0, y: 0), in: size, tilesPerRow: 5, count: 5
+            ),
+            0
+        )
+        XCTAssertEqual(
+            MobileIdentityPickerHitTest.tile(
+                at: CGPoint(x: 299.5, y: 67.5), in: size, tilesPerRow: 5, count: 5
+            ),
+            4
+        )
+        // The seam between two tiles belongs to the one on its trailing side, and never to
+        // neither.
+        XCTAssertEqual(
+            MobileIdentityPickerHitTest.tile(
+                at: CGPoint(x: 60, y: 34), in: size, tilesPerRow: 5, count: 5
+            ),
+            1
+        )
+    }
+
+    func testASecondRowIsAddressedByItsOwnBand() {
+        let size = CGSize(width: 300, height: 136)
+        XCTAssertEqual(
+            MobileIdentityPickerHitTest.tile(
+                at: CGPoint(x: 30, y: 10), in: size, tilesPerRow: 5, count: 7
+            ),
+            0
+        )
+        XCTAssertEqual(
+            MobileIdentityPickerHitTest.tile(
+                at: CGPoint(x: 30, y: 100), in: size, tilesPerRow: 5, count: 7
+            ),
+            5
+        )
+        // A wrapped strip's last row is padded with blanks. A finger there is on nothing rather
+        // than on the runtime that happens to be first.
+        XCTAssertNil(
+            MobileIdentityPickerHitTest.tile(
+                at: CGPoint(x: 250, y: 100), in: size, tilesPerRow: 5, count: 7
+            )
+        )
+    }
+
+    /// Outside is nil rather than the nearest edge, so a drag that wanders off the surface holds
+    /// the item it last crossed instead of snapping the choice somewhere the finger has left.
+    func testAPointOutsideTheSurfaceBelongsToNothing() {
+        let size = CGSize(width: 300, height: 68)
+        for point in [
+            CGPoint(x: -1, y: 10),
+            CGPoint(x: 10, y: -1),
+            CGPoint(x: 300, y: 10),
+            CGPoint(x: 10, y: 68),
+        ] {
+            XCTAssertNil(
+                MobileIdentityPickerHitTest.tile(
+                    at: point, in: size, tilesPerRow: 5, count: 5
+                ),
+                "\(point) is outside the strip"
+            )
+        }
+        XCTAssertNil(
+            MobileIdentityPickerHitTest.tile(
+                at: CGPoint(x: 10, y: 10), in: .zero, tilesPerRow: 5, count: 5
+            )
+        )
+        XCTAssertNil(
+            MobileIdentityPickerHitTest.tile(
+                at: CGPoint(x: 10, y: 10), in: size, tilesPerRow: 0, count: 5
+            )
+        )
+    }
+
+    func testALoginRowOwnsItsOwnBandAndNothingBelowTheLast() {
+        XCTAssertEqual(MobileIdentityPickerHitTest.row(at: 0, rowHeight: 56, count: 3), 0)
+        XCTAssertEqual(MobileIdentityPickerHitTest.row(at: 55.9, rowHeight: 56, count: 3), 0)
+        XCTAssertEqual(MobileIdentityPickerHitTest.row(at: 56, rowHeight: 56, count: 3), 1)
+        XCTAssertEqual(MobileIdentityPickerHitTest.row(at: 167.9, rowHeight: 56, count: 3), 2)
+        XCTAssertNil(MobileIdentityPickerHitTest.row(at: 168, rowHeight: 56, count: 3))
+        XCTAssertNil(MobileIdentityPickerHitTest.row(at: -1, rowHeight: 56, count: 3))
+        XCTAssertNil(MobileIdentityPickerHitTest.row(at: 10, rowHeight: 0, count: 3))
+        XCTAssertNil(MobileIdentityPickerHitTest.row(at: 10, rowHeight: 56, count: 0))
+    }
+
+    /// A drag that crosses the strip visits every runtime in order, which is what makes the
+    /// selection tick at each crossing rather than jumping.
+    func testADragAcrossTheStripVisitsEveryRuntimeInOrder() {
+        let size = CGSize(width: 300, height: 68)
+        var visited: [Int] = []
+        for x in stride(from: CGFloat(0), to: size.width, by: 1) {
+            guard let index = MobileIdentityPickerHitTest.tile(
+                at: CGPoint(x: x, y: 34), in: size, tilesPerRow: 5, count: 5
+            ) else { continue }
+            if visited.last != index { visited.append(index) }
+        }
+        XCTAssertEqual(visited, [0, 1, 2, 3, 4])
+    }
+
     // MARK: - Fixture
 
     private enum Fixture {

@@ -395,6 +395,51 @@ private struct SessionDraftComposerScreen: View {
         accounts.first { $0.id == accountID }
     }
 
+    /// Every runtime the Mac offers, for the identity picker's strip.
+    private var agents: [RemoteAgentChoiceDTO] {
+        let resolved = catalog?.agents ?? []
+#if DEBUG
+        // The demo Mac is logged into two runtimes; a real one is commonly logged into all
+        // five, which is the strip's full width and the case its tile measurements exist for.
+        // The evidence state adds the missing three so the shipping layout is photographed at
+        // the cardinality it actually ships at.
+        if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+            == "new-session-identity-picker-full" {
+            return resolved + Self.identityEvidenceRuntimes
+        }
+#endif
+        return resolved
+    }
+
+#if DEBUG
+    /// The runtimes the demo catalogue has no login for. They route no account, which is also
+    /// the strip's other real shape: a symbol mark rather than a brand image, and a tile whose
+    /// choice ends the panel.
+    private static let identityEvidenceRuntimes: [RemoteAgentChoiceDTO] = [
+        .init(
+            id: "grok",
+            name: "Grok",
+            models: [],
+            defaultModelID: nil,
+            supportsConversation: false
+        ),
+        .init(
+            id: "opencode",
+            name: "OpenCode",
+            models: [],
+            defaultModelID: nil,
+            supportsConversation: false
+        ),
+        .init(
+            id: "cursor",
+            name: "Cursor",
+            models: [],
+            defaultModelID: nil,
+            supportsConversation: false
+        ),
+    ]
+#endif
+
     private var models: [RemoteModelChoiceDTO] {
         let resolved = selectedAccount?.models ?? selectedAgent?.models ?? []
 #if DEBUG
@@ -547,7 +592,9 @@ private struct SessionDraftComposerScreen: View {
                 runPickerIsPresented = true
             }
             if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
-                == "new-session-identity-picker" {
+                == "new-session-identity-picker"
+                || ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
+                == "new-session-identity-picker-full" {
                 identityPickerIsPresented = true
             }
             if ProcessInfo.processInfo.environment[MobileDemoScene.environmentKey]
@@ -1158,7 +1205,7 @@ private struct SessionDraftComposerScreen: View {
             makeRoom: makeRoomForChooser
         ) {
             MobileIdentityPicker(
-                agents: catalog?.agents ?? [],
+                agents: agents,
                 selectedAgentID: agentID,
                 accounts: accounts,
                 selectedAccountID: accountID,
@@ -1169,8 +1216,7 @@ private struct SessionDraftComposerScreen: View {
                     // closes the panel the way a login does. The catalogue is asked rather than
                     // this screen's `accounts`, which still describes the runtime being left:
                     // a state write is visible to the next update, not inside this closure.
-                    if catalog?.agents.first(where: { $0.id == chosen })?
-                        .accounts?.isEmpty != false {
+                    if agents.first(where: { $0.id == chosen })?.accounts?.isEmpty != false {
                         identityPickerIsPresented = false
                     }
                 },

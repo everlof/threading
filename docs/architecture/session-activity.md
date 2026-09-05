@@ -5,10 +5,12 @@ the inference.
 
 Part of the [CLAUDE.md](../../CLAUDE.md) index.
 
-`SessionActivityTracker` derives `dormant` / `idle` / `working` / `awaitingUser` /
-`needsAttention` from PTY output and lifecycle boundaries, because an idle agent writes nothing
-at all — measured at zero bytes over 19s while sitting at its prompt. This works for any program
-rather than one specific agent.
+`SessionActivityTracker` derives presentation activity from PTY output and lifecycle boundaries,
+because an idle agent writes nothing at all — measured at zero bytes over 19s while sitting at
+its prompt. Operational policy reads `SessionRuntimeSnapshot` instead: process, foreground turn,
+background continuation, blocker, and turn authority are orthogonal typed facts. In particular,
+`readyWithBackgroundWork` means the prompt accepts input while an earlier turn's work can still
+re-enter the conversation; it is neither a spinner nor a completed outcome.
 
 Five guards and one interaction boundary keep it honest:
 
@@ -42,8 +44,10 @@ Five guards and one interaction boundary keep it honest:
   `reportsOwnActivity`, since it does prove the hooks arrived). **Looking does not end the
   grace**: selecting the restored session or attaching a phone is presentation, and both provoke
   the very resize/repaint traffic the grace exists to reject. The grace ends at the first actual
-  terminal input, or at the first reported turn — the remote mirror can type into an unattended
-  terminal, and from that interaction on the session flags like any other. There is a third end,
+  terminal input, or at the first reported turn boundary. That boundary can be a start, or the
+  finish of a turn that began before Threading relaunched; either is proof that the boot repaint
+  is over. The remote mirror can type into an unattended terminal, and from that interaction on
+  the session flags like any other. There is a third end,
   `endUnattendedLaunchGrace()`, and it exists for exactly one caller: see
   [After a reattach](#after-a-reattach).
 - A **submitted-input boundary** (`noteUserInput`). Claude reports a permission prompt but no
@@ -141,6 +145,19 @@ output inference by an ending, and had no way back into `working` at all. Measur
 `idle` for the seventy minutes that turn ran while the pane painted "Working". `outputMayOpenTurn`
 is the rule that fixes it — output may open a turn where nothing reports, and where the runtime
 reports endings without ever having declared a start.
+
+That fallback still has to get past unattended-launch suppression. Measured on 4 September 2026,
+Threading relaunched a Codex goal session during an existing turn; the new tracker first received
+`Stop` at 22:10:28.405, the rollout wrote the next `task_started` 20 ms later, and the turn was
+still writing tool records at 22:28 while its phone row showed no loader. The finish had latched
+the runtime into exactly the `reportsTurnEnds && !reportsTurnStarts` case above, but the launch
+grace returned from `recordOutput` before that rule was reached. `noteTurnFinished` therefore ends
+the grace as well: an authoritative end is proof the resumed CLI has moved beyond boot, and its
+self-opened continuation can immediately restore `working` from output even when the rollout path
+has not yet been rediscovered by the new controller. That first unobserved finish also opts into
+the ordinary Codex continuation grace while preserving the prior idle presentation; a continuation
+cancels it, while a genuine finish commits the unread result once the grace expires. This prevents
+the same restart gap from posting a false completion alert before it repairs the loader.
 
 The `reportsTurnEnds` condition is what keeps a runtime's *notice* out of this: Claude's
 idle-prompt `Notification` says the session is waiting, and a redraw arriving after it must not
@@ -479,9 +496,9 @@ is the one the split above already paid for: the turn is what a `Notification` i
 so borrowing it here would make Claude's idle-prompt notice — which holds nothing up — arrive
 looking like a blocked turn. Two rules follow:
 
-- **It keeps the session out of `idle` without opening a turn.** `settle()` reports `working`,
-  because "still going" is what the sidebar has to say and there is no third mark worth
-  teaching every reader of `SessionActivity`.
+- **It keeps the continuation open without opening a turn.** `settle()` reports
+  `readyWithBackgroundWork`: the composer is usable, the spinner stops, and a smaller static
+  accent dot distinguishes autonomous background work from the larger final-result mark.
 - **It suppresses the unread mark too, not just the notification.** A turn ended on top of its
   own running work has said nothing for the user to read, so `noteTurnFinished` leaves
   `awaitsUser` down even off screen.
@@ -524,13 +541,10 @@ anything.** Two narrowings, both the same instinct:
   swallowed permission prompt is a session waiting for an answer nobody knows it wants — and a
   terminal session has no other signal for one, since `blockingAskOpened` is scoped to the tools
   that ask outright and a `Bash` approval is not among them.
-- **A `delegated` pause only, not every pause.** So the tracker keeps the pause's *kind*
-  (`TurnPause`) rather than a boolean, read straight off the same payload. A subagent is bounded
-  by construction: it ends, its result re-enters the conversation, and the row corrects itself
-  with nobody typing — so a suppressed notice costs nothing. Standing work promises none of that,
-  since `npm test` and `npm run dev` are the same entry, and a session parked on one is exactly
-  where a late *"nothing is happening here"* is worth keeping. `BackgroundWorkLedger` still owns
-  whether there is a pause at all; only the reason is new.
+- **Any explicitly reported continuation, delegated or standing.** The tracker keeps the pause's
+  *kind* (`TurnPause`) rather than a boolean, read straight off the same payload. Their lifetimes
+  differ, but neither makes an idle prompt evidence that the user is needed. Permission and
+  unknown notices still fail closed and flag the session.
 
 So suppression is opt-in twice over, and a build that stopped recognising the field would behave
 exactly as every build did before it. The pause reason is on the trail line too — `paused=none` /
@@ -650,14 +664,14 @@ that bounded presentation value alongside the exact count and top-effort fact.
 
 **An unfinished turn may also hold one process-wide idle-sleep assertion.**
 `ActiveTurnSleepInhibitor` is started with the other real-app activity consumers and follows
-`hasTurnInFlight`, not `.working`: a permission or question inside a turn is still unfinished,
-so sleeping there can lose exactly the response the user is being asked to give. An agent process
-alive at its prompt holds nothing. The General-page switch is off by default, and changing it
-acquires or releases immediately.
+`SessionRuntimeSnapshot.hasPendingOutcome`: a permission inside a turn is unfinished, and a
+background continuation can still be lost to sleep after its foreground turn closes. An agent
+process alive at an ordinary prompt holds nothing. The General-page switch is off by default,
+and changing it acquires or releases immediately.
 
 The service keeps a set of in-flight session ids. One initial scan admits work that predates its
-observer; each later `SessionActivityDidChange` updates one set entry, and the last edge out of
-flight releases the single `kIOPMAssertPreventUserIdleSystemSleep` assertion. This is deliberately
+observer; each later `SessionRuntimeDidChange` updates one set entry, and the last completed
+pending outcome releases the single `kIOPMAssertPreventUserIdleSystemSleep` assertion. This is deliberately
 idle **system** sleep only: display sleep and forced sleep such as closing a MacBook lid remain
 macOS's. `TerminalSessionDidEnd` clears a terminal that disappears without another activity edge.
 `AgentRuntime.discard` also posts the common activity event after either renderer has left its
@@ -758,13 +772,13 @@ Viewing it, submitting a line, an authoritative turn start, or a new process re-
 This deliberately prefers one stable unread state over pretending that periodic paint proves a
 second autonomous turn.
 
-The window's expensive completion fan-out follows the same semantic edge. A per-session
-`SessionActivityTransitionLedger` turns `hasTurnInFlight` true→false into one completion; moving
-between `working` and `awaitingUser`, reading `needsAttention` back to `idle`, or repeating a
-finished presentation launches no usage scan, hydration, Git/branch read, naming pass, project
-statistics process or display-pane refresh. The ledger retains one scalar state per durable
-session and no event history. `HookLifecycleTests` drives eight repaint/quiet periods through the
-real timer and requires one attention episode and one completion before a genuine boundary.
+The window's expensive completion fan-out follows the typed foreground-turn edge. A per-session
+`SessionRuntimeTransitionLedger` recognizes `endedTurn`; moving between presentation states,
+reading `needsAttention` back to `idle`, or changing continuation kind launches no usage scan,
+hydration, Git/branch read, naming pass, project statistics process or display-pane refresh.
+Outcome consumers such as notifications, watches, scheduled sends, archive, Snooze, quit risk,
+and idle-sleep use the separate `completedPendingOutcome` edge, so a `Stop` carrying background
+work cannot claim the entire result is done.
 
 **A banner carries the project's icon as an attachment** (`AttentionAlertIcon`), on the
 trailing side — the leading slot is the app's and cannot be taken. That was measured, not

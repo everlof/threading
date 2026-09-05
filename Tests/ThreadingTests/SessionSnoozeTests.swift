@@ -31,6 +31,9 @@ final class SessionSnoozeTests: XCTestCase {
             projectStore: store,
             now: { [weak self] in self?.now ?? .distantPast },
             activity: { [weak self] _ in self?.activity ?? .dormant },
+            runtime: { [weak self] _ in
+                .test(activity: self?.activity ?? .dormant)
+            },
             notificationCenter: events
         )
     }
@@ -75,6 +78,7 @@ final class SessionSnoozeTests: XCTestCase {
             projectStore: store,
             now: { [weak self] in self?.now ?? .distantPast },
             activity: { _ in .dormant },
+            runtime: { _ in .dormant },
             notificationCenter: NotificationCenter()
         )
         relaunched.start()
@@ -124,12 +128,19 @@ final class SessionSnoozeTests: XCTestCase {
         XCTAssertEqual(store.session(withID: sessionID)?.wake?.reason, .turnCompleted)
     }
 
-    func testActivityEdgeIsProviderNeutralFallbackForCompletionAndInput() {
+    func testTypedCompletionAndPresentationAttentionWakeForTheirOwnReasons() {
         center.start()
         activity = .working
         center.snooze(sessionID, until: now.addingTimeInterval(3_600))
         activity = .idle
-        events.post(SessionActivityDidChange(sessionID: sessionID))
+        events.post(SessionRuntimeDidChange(
+            sessionID: sessionID,
+            transition: SessionRuntimeTransition(
+                previous: .test(activity: .working),
+                current: .test(activity: .idle)
+            ),
+            cause: nil
+        ))
         XCTAssertEqual(store.session(withID: sessionID)?.wake?.reason, .turnCompleted)
 
         store.acknowledgeWake(for: sessionID)
@@ -177,6 +188,7 @@ final class SessionSnoozeTests: XCTestCase {
             projectStore: store,
             now: { [weak self] in self?.now ?? .distantPast },
             activity: { _ in .idle },
+            runtime: { _ in .test(activity: .idle) },
             notificationCenter: NotificationCenter()
         )
         XCTAssertEqual(store.session(withID: sessionID)?.wake?.reason, .approvalRequested)

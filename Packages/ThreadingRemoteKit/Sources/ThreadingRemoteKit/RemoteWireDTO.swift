@@ -347,6 +347,38 @@ public enum RemoteSessionActivity: RawRepresentable, Codable, Equatable, Hashabl
     }
 }
 
+/// Work that can re-enter a prompt-ready conversation without another user message.
+public enum RemoteSessionContinuation: RawRepresentable, Codable, Equatable, Hashable, Sendable {
+    case delegated
+    case standing
+    case unknown(String)
+
+    public init(rawValue: String) {
+        switch rawValue {
+        case "delegated": self = .delegated
+        case "standing": self = .standing
+        default: self = .unknown(rawValue)
+        }
+    }
+
+    public var rawValue: String {
+        switch self {
+        case .delegated: "delegated"
+        case .standing: "standing"
+        case .unknown(let value): value
+        }
+    }
+
+    public init(from decoder: Decoder) throws {
+        try self.init(rawValue: decoder.singleValueContainer().decode(String.self))
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
 /// One session as it appears to a remote client's session list.
 public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendable {
     public let id: String
@@ -354,6 +386,8 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     public let agentKind: String
     public let surface: RemoteSessionSurface
     public let state: RemoteSessionActivity
+    /// Additive so older hosts and clients safely read this as no background continuation.
+    public let continuation: RemoteSessionContinuation?
     public let projectName: String
     /// Stable checkout identity for routes that must not collapse duplicate display names.
     public let projectID: String?
@@ -402,6 +436,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         agentKind: String,
         surface: RemoteSessionSurface,
         state: RemoteSessionActivity,
+        continuation: RemoteSessionContinuation? = nil,
         projectName: String,
         projectID: String? = nil,
         isAvailable: Bool = true,
@@ -428,6 +463,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         self.agentKind = agentKind
         self.surface = surface
         self.state = state
+        self.continuation = continuation
         self.projectName = projectName
         self.projectID = projectID
         self.isAvailable = isAvailable
@@ -451,7 +487,7 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, agentKind, surface, state, projectName, projectID, isAvailable, lastActiveAt
+        case id, title, agentKind, surface, state, continuation, projectName, projectID, isAvailable, lastActiveAt
         case isPinned, isArchived, archivedAt, isShared
         case snoozedAt, snoozedUntil, wokeReason, wokeAt
         case terminalTheme, terminalThemeAssignmentID, inheritedTerminalThemeName
@@ -465,6 +501,10 @@ public struct RemoteSessionSummaryDTO: Codable, Equatable, Identifiable, Sendabl
         agentKind = try container.decode(String.self, forKey: .agentKind)
         surface = try container.decode(RemoteSessionSurface.self, forKey: .surface)
         state = try container.decode(RemoteSessionActivity.self, forKey: .state)
+        continuation = try container.decodeIfPresent(
+            RemoteSessionContinuation.self,
+            forKey: .continuation
+        )
         projectName = try container.decode(String.self, forKey: .projectName)
         projectID = try container.decodeIfPresent(String.self, forKey: .projectID)
         // The first wire build listed only live sessions, so a missing field means available.

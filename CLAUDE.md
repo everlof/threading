@@ -342,6 +342,14 @@ unbounded. Read the full rationale and current audit in
 - Discovery, parsing, filesystem reads, image decoding, and child processes stay off the main
   actor unless a measured, documented bound makes them frame-cheap. Debouncing repeated calls is
   useful only after one call is itself bounded.
+- Swift 6 isolation proves who may touch state; it does **not** prove that actor-isolated code is
+  fast. Before adding a feature callback, follow every synchronous callee reached from
+  `@MainActor` (including isolation inherited from AppKit/UIKit) and move file APIs, symlink or
+  directory resolution, JSON/image encoding or decoding, `queue.sync`, pipe writes and process
+  waits to a bounded worker. Return an immutable `Sendable` result and make the main-actor phase a
+  small state mutation. `scripts/check_main_actor_latency.sh` is the build ratchet for the APIs
+  the compiler cannot classify as latency bugs; its existing counts are debt ceilings, never an
+  allowance for new code.
 - Add an opt-in deterministic stress fixture when the surface can grow or the callback is
   high-frequency. Measure background preparation, main-thread mount/mutation, layout, scroll or
   resize tails, live view count, correctness of exact jumps/bottom position, and footprint as

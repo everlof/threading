@@ -10,6 +10,24 @@ struct RemoteNotificationOpenRequest: Equatable, Identifiable {
     var id: String { eventID }
 }
 
+/// Which UIKit lifecycle delivered a notification response.
+///
+/// A response attached to a connecting scene is that scene's initial route, so it replaces
+/// saved continuity. A response delivered to an existing scene is ordinary forward navigation
+/// and keeps the screen beneath it as Back's destination. The same response can arrive through
+/// both paths; the model coalesces them and the connecting-scene meaning wins.
+enum RemoteNotificationOpenOrigin: Equatable {
+    case notificationCenter
+    case connectingScene
+
+    func merged(with other: Self) -> Self {
+        if self == .connectingScene || other == .connectingScene {
+            return .connectingScene
+        }
+        return .notificationCenter
+    }
+}
+
 /// A chat being written before the Mac has a session for it.
 ///
 /// Identified by the phone, because the Mac mints the session's id only when Start is tapped,
@@ -360,6 +378,23 @@ final class RemoteAppModel: ObservableObject {
     private var pendingSessionDeltas: [String: RemoteSessionsChangedDTO] = [:]
     private var sessionDeltaApplicationTask: Task<Void, Never>?
     private var sessionDeltaApplicationGeneration = 0
+    private struct NotificationOpenIdentity: Hashable {
+        let hostID: String
+        let eventID: String
+    }
+    private struct PendingNotificationOpen {
+        let identity: NotificationOpenIdentity
+        let event: RemoteNotificationEventDTO
+        let candidateID: String
+        var origin: RemoteNotificationOpenOrigin
+        let generation: Int
+    }
+    private var pendingNotificationOpen: PendingNotificationOpen?
+    private var notificationOpenTask: Task<Void, Never>?
+    private var notificationOpenGeneration = 0
+    private var recentNotificationOpenIdentities: [NotificationOpenIdentity] = []
+    private var recentNotificationOpenIdentitySet = Set<NotificationOpenIdentity>()
+    private static let maximumRecentNotificationOpenCount = 128
     private var catalogueRevision = 0
     private var catalogueRefreshInFlightGeneration: Int?
     private var refreshGeneration = 0
@@ -1991,29 +2026,99 @@ final class RemoteAppModel: ObservableObject {
         me = response
     }
 
-    func openSessionFromNotification(_ event: RemoteNotificationEventDTO) {
+    /// Begins one navigation transaction for a notification response.
+    ///
+    /// UIKit may describe one tap both on `UIScene.ConnectionOptions` and through the user-
+    /// notification-center delegate. The event identity is admitted synchronously, before any
+    /// refresh can restore continuity, so both callbacks converge on one task and one route.
+    @discardableResult
+    func openSessionFromNotification(
+        _ event: RemoteNotificationEventDTO,
+        origin: RemoteNotificationOpenOrigin
+    ) -> Bool {
         let candidate = hosts.first {
             ($0.hostID ?? $0.id) == event.hostID && $0.isOwnerDevice
         } ?? hosts.first { ($0.hostID ?? $0.id) == event.hostID }
-        guard let candidate else { return }
+        guard let candidate else { return false }
+
+        let identity = NotificationOpenIdentity(hostID: event.hostID, eventID: event.id)
+        if var pending = pendingNotificationOpen, pending.identity == identity {
+            pending.origin = pending.origin.merged(with: origin)
+            pendingNotificationOpen = pending
+            return false
+        }
+        guard !recentNotificationOpenIdentitySet.contains(identity) else { return false }
+        rememberNotificationOpen(identity)
+
+        notificationOpenGeneration &+= 1
+        let generation = notificationOpenGeneration
+        notificationOpenTask?.cancel()
+        notificationOpenRequest = nil
+        pendingNotificationOpen = PendingNotificationOpen(
+            identity: identity,
+            event: event,
+            candidateID: candidate.id,
+            origin: origin,
+            generation: generation
+        )
 
         selectHost(candidate.id)
-        Task {
-            await refresh()
-            guard activeHostID == candidate.id,
-                  me?.sessions.contains(where: { $0.id == event.sessionID }) == true
-            else {
-                return
-            }
-            if openSessionID != event.sessionID {
-                navigationPath.append(.session(event.sessionID))
-            }
-            notificationOpenRequest = RemoteNotificationOpenRequest(
-                eventID: event.id,
-                sessionID: event.sessionID,
-                destination: event.destination
-            )
+        notificationOpenTask = Task { @MainActor [weak self] in
+            await self?.performNotificationOpen(generation: generation)
         }
+        return true
+    }
+
+    private func performNotificationOpen(generation: Int) async {
+        await refresh()
+        guard !Task.isCancelled,
+              let pending = pendingNotificationOpen,
+              pending.generation == generation,
+              activeHostID == pending.candidateID else {
+            finishNotificationOpen(generation: generation)
+            return
+        }
+        guard let response = me,
+              response.sessions.contains(where: { $0.id == pending.event.sessionID }) else {
+            finishNotificationOpen(generation: generation)
+            if let response = me, activeHostID == pending.candidateID {
+                restoreRouteIfPossible(hostID: pending.candidateID, response: response)
+            }
+            return
+        }
+
+        if openSessionID != pending.event.sessionID {
+            switch pending.origin {
+            case .notificationCenter:
+                navigationPath.append(.session(pending.event.sessionID))
+            case .connectingScene:
+                navigationPath = [.session(pending.event.sessionID)]
+            }
+        }
+        notificationOpenRequest = RemoteNotificationOpenRequest(
+            eventID: pending.event.id,
+            sessionID: pending.event.sessionID,
+            destination: pending.event.destination
+        )
+        finishNotificationOpen(generation: generation)
+    }
+
+    private func finishNotificationOpen(generation: Int) {
+        guard pendingNotificationOpen?.generation == generation else { return }
+        pendingNotificationOpen = nil
+        notificationOpenTask = nil
+    }
+
+    private func rememberNotificationOpen(_ identity: NotificationOpenIdentity) {
+        recentNotificationOpenIdentities.append(identity)
+        recentNotificationOpenIdentitySet.insert(identity)
+        let overflow = recentNotificationOpenIdentities.count
+            - Self.maximumRecentNotificationOpenCount
+        guard overflow > 0 else { return }
+        for expired in recentNotificationOpenIdentities.prefix(overflow) {
+            recentNotificationOpenIdentitySet.remove(expired)
+        }
+        recentNotificationOpenIdentities.removeFirst(overflow)
     }
 
     func consumeNotificationOpenRequest(eventID: String) {
@@ -2056,8 +2161,9 @@ final class RemoteAppModel: ObservableObject {
         }
     }
 
-    private func restoreRouteIfPossible(hostID: String, response: RemoteMeDTO) {
-        guard navigationPath.isEmpty,
+    func restoreRouteIfPossible(hostID: String, response: RemoteMeDTO) {
+        guard pendingNotificationOpen == nil,
+              navigationPath.isEmpty,
               let route = continuity.lastRoute,
               route.hostID == hostID,
               response.sessions.contains(where: { $0.id == route.sessionID }) else { return }
@@ -3819,6 +3925,7 @@ final class RemoteAppModel: ObservableObject {
             agentKind: "claude",
             surface: .terminal,
             state: .idle,
+            continuation: .delegated,
             projectName: "AnotherTerminal",
             isAvailable: true,
             lastActiveAt: now - 380,
@@ -4273,7 +4380,7 @@ final class RemoteAppModel: ObservableObject {
     }
 }
 
-private extension RemoteMeDTO {
+extension RemoteMeDTO {
     func applying(_ updates: [RemoteSessionsChangedDTO]) -> RemoteMeDTO {
         var updatedSessions = sessions
         let changedIDs = Set(updates.compactMap { $0.removedSessionID ?? $0.session?.id })
@@ -4341,7 +4448,9 @@ private extension RemoteMeDTO {
                     agentKind: session.agentKind,
                     surface: session.surface,
                     state: session.state,
+                    continuation: session.continuation,
                     projectName: session.projectName,
+                    projectID: session.projectID,
                     isAvailable: session.isAvailable,
                     lastActiveAt: session.lastActiveAt,
                     isPinned: session.isPinned,
@@ -4358,7 +4467,8 @@ private extension RemoteMeDTO {
                     inheritedTerminalTheme: session.inheritedTerminalTheme,
                     account: session.account,
                     accountID: session.accountID,
-                    limitRecovery: session.limitRecovery
+                    limitRecovery: session.limitRecovery,
+                    model: session.model
                 )
             },
             terminals: terminals,
@@ -4383,7 +4493,9 @@ private extension RemoteMeDTO {
                 agentKind: session.agentKind,
                 surface: surface,
                 state: session.state,
+                continuation: session.continuation,
                 projectName: session.projectName,
+                projectID: session.projectID,
                 isAvailable: session.isAvailable,
                 lastActiveAt: session.lastActiveAt,
                 isPinned: session.isPinned,
@@ -4402,7 +4514,8 @@ private extension RemoteMeDTO {
                 // refresh. Switching surface must not blank the chat's account chip.
                 account: session.account,
                 accountID: session.accountID,
-                limitRecovery: session.limitRecovery
+                limitRecovery: session.limitRecovery,
+                model: session.model
             )
         }
 

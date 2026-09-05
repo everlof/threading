@@ -5,6 +5,7 @@ import Foundation
 final class SupervisionSubscriptionCenter {
     struct Dependencies {
         let activity: (SessionID) -> SessionActivity
+        var runtime: (SessionID) -> SessionRuntimeSnapshot = { _ in .dormant }
         let title: (SessionID) -> String?
         var accountID: (SessionID) -> AccountID? = { _ in nil }
         let supervision: (SessionID) -> Supervision?
@@ -16,6 +17,7 @@ final class SupervisionSubscriptionCenter {
 
     static let shared = SupervisionSubscriptionCenter(dependencies: .init(
         activity: { AgentRuntime.shared.activity(sessionID: $0) },
+        runtime: { AgentRuntime.shared.runtimeSnapshot(sessionID: $0) },
         title: { ProjectStore.shared.session(withID: $0)?.displayTitle },
         accountID: { sessionID in
             guard let session = ProjectStore.shared.session(withID: sessionID) else { return nil }
@@ -46,8 +48,8 @@ final class SupervisionSubscriptionCenter {
     init(center: NotificationCenter = .default, dependencies: Dependencies) {
         self.dependencies = dependencies
         observations = AppEventObservations(center: center)
-        observations.observe(SessionActivityDidChange.self) { [weak self] event in
-            self?.activityChanged(event.sessionID)
+        observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
+            self?.runtimeChanged(event)
         }
         observations.observe(SessionArchivedStateDidChange.self) { [weak self] event in
             guard event.isArchived else { return }
@@ -86,17 +88,18 @@ final class SupervisionSubscriptionCenter {
         subscriptions.contains(Key(managerID: managerID, childID: childID))
     }
 
-    private func activityChanged(_ childID: SessionID) {
-        let state = dependencies.activity(childID)
+    private func runtimeChanged(_ change: SessionRuntimeDidChange) {
+        let childID = change.sessionID
+        let state = change.transition.current.activity
         let previous = lastActivity.updateValue(state.logName, forKey: childID)
         guard previous != state.logName else { return }
 
         // A manager becoming free is the retry edge for notices held while its turn ran.
-        if !state.hasTurnInFlight {
+        if change.transition.current.isPromptReady {
             switch state {
             case .idle, .needsAttention:
                 drain(managerID: childID)
-            case .dormant, .working, .awaitingUser, .limitReached:
+            case .dormant, .working, .readyWithBackgroundWork, .awaitingUser, .limitReached:
                 break
             }
         }
@@ -105,7 +108,7 @@ final class SupervisionSubscriptionCenter {
         guard !keys.isEmpty, let supervision = dependencies.supervision(childID) else { return }
         let event: SupervisionEventKind
         switch state {
-        case .working:
+        case .working, .readyWithBackgroundWork:
             return
         case .idle:
             event = .settled

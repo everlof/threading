@@ -340,7 +340,9 @@ final class ProjectStatsService {
     // MARK: - Private Methods
 
     private func isWorking(_ project: Project) -> Bool {
-        project.sessions.contains { AgentRuntime.shared.activity(sessionID: $0.id) == .working }
+        project.sessions.contains {
+            AgentRuntime.shared.runtimeSnapshot(sessionID: $0.id).hasWorkAtRisk
+        }
     }
 
     private func isAged(_ date: Date?, past threshold: TimeInterval, now: Date) -> Bool {

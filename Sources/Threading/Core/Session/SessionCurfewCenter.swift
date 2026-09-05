@@ -39,6 +39,7 @@ final class SessionCurfewCenter {
 
     typealias Clock = @MainActor () -> Date
     typealias Activity = @MainActor (SessionID) -> SessionActivity
+    typealias Runtime = @MainActor (SessionID) -> SessionRuntimeSnapshot
     typealias SessionPredicate = @MainActor (SessionID) -> Bool
 
     // MARK: - Performers
@@ -116,6 +117,7 @@ final class SessionCurfewCenter {
     private let now: Clock
     private let calendar: Calendar
     private let activity: Activity
+    private let runtime: Runtime
     private let reportsOwnTurns: SessionPredicate
     private let supportsEscape: @MainActor (AgentKind) -> Bool
     private let isWatched: SessionPredicate
@@ -167,6 +169,7 @@ final class SessionCurfewCenter {
         now: @escaping Clock = { Date() },
         calendar: Calendar = .current,
         activity: @escaping Activity = { AgentRuntime.shared.activity(sessionID: $0) },
+        runtime: @escaping Runtime = { AgentRuntime.shared.runtimeSnapshot(sessionID: $0) },
         reportsOwnTurns: @escaping SessionPredicate = {
             AgentRuntime.shared.reportsOwnTurns(sessionID: $0)
         },
@@ -191,6 +194,7 @@ final class SessionCurfewCenter {
         self.now = now
         self.calendar = calendar
         self.activity = activity
+        self.runtime = runtime
         self.reportsOwnTurns = reportsOwnTurns
         self.supportsEscape = supportsEscape
         self.isWatched = isWatched
@@ -233,7 +237,7 @@ final class SessionCurfewCenter {
         }
         // The provider-neutral edge: a turn started, or one ended. O(1) — only the session that
         // moved is re-evaluated.
-        observations.observe(SessionActivityDidChange.self) { [weak self] event in
+        observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
             self?.activityChanged(event.sessionID)
         }
         observations.observe(CurfewSettingsDidChange.self) { [weak self] _ in
@@ -503,7 +507,7 @@ final class SessionCurfewCenter {
     }
 
     private func activityChanged(_ sessionID: SessionID) {
-        if activity(sessionID).hasTurnInFlight {
+        if runtime(sessionID).hasOpenTurn {
             // The edge, not the state: only the *first* report of a turn in flight decides
             // whether it began in front of the user.
             if turnStartedWatched[sessionID] == nil {
@@ -741,7 +745,7 @@ final class SessionCurfewCenter {
            moment < curfew.windDownDeliverableUntil {
             // An idle session has nothing to wrap up, and typing into it would wake it and spend
             // usage the curfew exists to stop spending.
-            guard activity(session.id).hasTurnInFlight else {
+            guard runtime(session.id).hasPendingOutcome else {
                 state.record(.windDownSkippedIdle, at: moment)
                 eventLog.record(.curfew, "Curfew wrap-up skipped: nothing in flight", [
                     "session": session.id.uuidString
@@ -870,7 +874,7 @@ final class SessionCurfewCenter {
         guard let interruptAt = curfew.interruptAt,
               moment >= interruptAt,
               state.gaveUpAt == nil,
-              activity(session.id).hasTurnInFlight else { return false }
+              runtime(session.id).canInterrupt else { return false }
 
         // Also what keeps a second Escape away from an idle prompt, where Claude reads it as
         // "open the rewind chooser".

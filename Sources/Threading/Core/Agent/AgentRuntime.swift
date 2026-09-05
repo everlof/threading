@@ -96,6 +96,7 @@ protocol AgentConversationRuntimeSurface:
 {
     var activity: SessionActivity { get }
     var isTurnInFlight: Bool { get }
+    var runtimeSnapshot: SessionRuntimeSnapshot { get }
     var runProgress: RunProgress? { get }
     var isVisible: Bool { get set }
     var onAttention: (() -> Void)? { get set }
@@ -199,6 +200,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// the CLI in different ways and share almost no surface beyond starting and stopping.
     /// A session appears in exactly one of the two.
     private var conversations: [SessionID: any AgentConversationRuntimeSurface] = [:]
+    private var runtimeSnapshots: [SessionID: SessionRuntimeSnapshot] = [:]
 
     /// Provider-neutral child timelines outlive either renderer.
     ///
@@ -259,6 +261,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             self?.noteSessionAttention(sessionID)
         }
         controllers[sessionID] = surface
+        runtimeSnapshots[sessionID] = surface.activityTracker.runtimeSnapshot
         return true
     }
 
@@ -281,6 +284,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
             self?.noteSessionAttention(sessionID)
         }
         conversations[sessionID] = surface
+        runtimeSnapshots[sessionID] = surface.runtimeSnapshot
         return true
     }
 
@@ -371,7 +375,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
     /// its question is about.
     func inFlightTurnCount(among sessionIDs: Set<SessionID>) -> Int {
         sessionIDs
-            .filter { activity(sessionID: $0).hasTurnInFlight }
+            .filter { runtimeSnapshot(sessionID: $0).hasOpenTurn }
             .count
     }
 
@@ -477,6 +481,30 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     private func sharedActivity(sessionID: SessionID) -> SessionActivity {
         controllers[sessionID]?.activity ?? conversations[sessionID]?.activity ?? .dormant
+    }
+
+    /// The operational value used by policy. Presentation and read receipts are deliberately
+    /// absent from this lookup.
+    func runtimeSnapshot(sessionID: SessionID) -> SessionRuntimeSnapshot {
+        controllers[sessionID]?.activityTracker.runtimeSnapshot
+            ?? conversations[sessionID]?.runtimeSnapshot
+            ?? .dormant
+    }
+
+    /// Called by both renderer adapters whenever an operational fact may have moved.
+    func publishRuntimeChange(sessionID: SessionID) {
+        let current = runtimeSnapshot(sessionID: sessionID)
+        let previous = runtimeSnapshots.updateValue(current, forKey: sessionID) ?? .dormant
+        guard current != previous else { return }
+        let transition = SessionRuntimeTransition(previous: previous, current: current)
+        NotificationCenter.default.post(SessionRuntimeDidChange(
+            sessionID: sessionID,
+            transition: transition,
+            cause: activityCause(sessionID: sessionID)
+        ))
+        if previous.activity != current.activity {
+            NotificationCenter.default.post(SessionActivityDidChange(sessionID: sessionID))
+        }
     }
 
     /// Opens one unread generation and spends it immediately for participants who already have
@@ -635,14 +663,13 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
         // Dropped on the floor here, it left every session idle since an app relaunch
         // reading as still-booting — refused by send_to_session while listed as idle.
         //
-        // It is announced as an activity change even though the *state* did not move, because
-        // what moved is the thing delivery asks about: a session that could not be typed into
-        // a moment ago can be now. `SessionWatchCenter` drains the notices it held for exactly
-        // this session on that edge, and without the announcement a notice held during a boot
+        // It is announced as a runtime change even though presentation did not move, because
+        // process readiness is the thing delivery asks about: a session that could not be typed
+        // into a moment ago can be now. `SessionWatchCenter` drains notices held for exactly this
+        // session on that edge, and without the announcement a notice held during a boot
         // waits for some unrelated later edge — for a session that then sits idle, forever.
         case .sessionStarted:
             tracker.noteSessionStarted()
-            NotificationCenter.default.post(SessionActivityDidChange(sessionID: report.sessionID))
         case .subagentStarted, .subagentStopped: break
         }
 
@@ -671,7 +698,7 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
 
     func runProgress(for sessionID: SessionID) -> RunProgress? {
         if let controller = controllers[sessionID],
-           controller.activity.hasTurnInFlight {
+           controller.activityTracker.runtimeSnapshot.hasOpenTurn {
             return controller.runProgress
         }
         if let conversation = conversations[sessionID], conversation.isTurnInFlight {
@@ -970,9 +997,17 @@ final class AgentRuntime: RemoteTerminalSurfaceQuerying {
                 // Both renderers have left the runtime maps, so the common activity projection
                 // now answers dormant. Consumers must receive that edge even for a native chat,
                 // which has no TerminalSessionDidEnd callback of its own.
-                NotificationCenter.default.post(
-                    SessionActivityDidChange(sessionID: sessionID)
-                )
+                let previousActivity = runtimeSnapshots[sessionID]?.activity ?? .dormant
+                publishRuntimeChange(sessionID: sessionID)
+                // A newly attached native surface can already project dormant before its stream
+                // launches. Discard still changes catalogue availability, which presentation
+                // consumers historically invalidate through this event even though the compact
+                // activity value itself is unchanged.
+                if previousActivity == .dormant {
+                    NotificationCenter.default.post(
+                        SessionActivityDidChange(sessionID: sessionID)
+                    )
+                }
             }
         }
 

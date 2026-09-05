@@ -32,8 +32,7 @@ final class ScheduledMessageScheduler {
     private let center: NotificationCenter
     private let workspaceCenter: NotificationCenter
     private let now: @MainActor () -> Date
-    private let activity: @MainActor (SessionID) -> SessionActivity
-    private let reportsOwnTurns: @MainActor (SessionID) -> Bool
+    private let runtime: @MainActor (SessionID) -> SessionRuntimeSnapshot
     private let sessionExists: @MainActor (SessionID) -> Bool
 
     private var observations: AppEventObservations?
@@ -48,9 +47,8 @@ final class ScheduledMessageScheduler {
 
     /// Watched turns this run of Threading has actually seen in flight.
     ///
-    /// `SessionActivityDidChange` intentionally carries only an id, and `SessionStart` posts it
-    /// even when activity stays idle. Requiring this receipt turns a current idle snapshot into
-    /// the edge it claims to be and prevents a relaunch from spending an old condition.
+    /// Requiring a typed runtime receipt turns a settled snapshot into the edge it claims to be
+    /// and prevents a relaunch from spending an old condition.
     private var finishTurnsObservedInFlight: Set<SessionID> = []
 
     // MARK: - Initialization
@@ -62,11 +60,8 @@ final class ScheduledMessageScheduler {
         center: NotificationCenter = .default,
         workspaceCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
         now: @escaping @MainActor () -> Date = { Date() },
-        activity: @escaping @MainActor (SessionID) -> SessionActivity = {
-            AgentRuntime.shared.activity(sessionID: $0)
-        },
-        reportsOwnTurns: @escaping @MainActor (SessionID) -> Bool = {
-            AgentRuntime.shared.reportsOwnTurns(sessionID: $0)
+        runtime: @escaping @MainActor (SessionID) -> SessionRuntimeSnapshot = {
+            AgentRuntime.shared.runtimeSnapshot(sessionID: $0)
         },
         sessionExists: @escaping @MainActor (SessionID) -> Bool = {
             ProjectStore.shared.session(withID: $0) != nil
@@ -76,8 +71,7 @@ final class ScheduledMessageScheduler {
         self.center = center
         self.workspaceCenter = workspaceCenter
         self.now = now
-        self.activity = activity
-        self.reportsOwnTurns = reportsOwnTurns
+        self.runtime = runtime
         self.sessionExists = sessionExists
     }
 
@@ -98,7 +92,7 @@ final class ScheduledMessageScheduler {
             self?.rearm()
         }
         // A send that found its target busy is owed another try the moment that target settles.
-        observations.observe(SessionActivityDidChange.self) { [weak self] event in
+        observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
             // Retry sends whose own trigger already happened first. If the same activity edge
             // satisfies a new finish trigger and its destination is busy, the performer changes
             // that record to `waiting`; evaluating after that would offer it twice on one edge.
@@ -205,12 +199,13 @@ final class ScheduledMessageScheduler {
             return
         }
 
-        if activity(sessionID).hasTurnInFlight {
-            guard reportsOwnTurns(sessionID) else { return }
+        let snapshot = runtime(sessionID)
+        if snapshot.hasPendingOutcome {
+            guard snapshot.reportsOwnTurns else { return }
             finishTurnsObservedInFlight.insert(sessionID)
             return
         }
-        guard acceptsSettledSnapshot || reportsOwnTurns(sessionID) else { return }
+        guard acceptsSettledSnapshot || snapshot.reportsOwnTurns else { return }
         guard acceptsSettledSnapshot
                 || finishTurnsObservedInFlight.remove(sessionID) != nil else { return }
 
@@ -257,7 +252,7 @@ final class ScheduledMessageScheduler {
         // — `SessionActivity` says so itself. Waiting on a guess and then typing on it is the
         // one thing an unattended send must not do.
         guard let sessionID = message.target.sessionID else { return true }
-        return reportsOwnTurns(sessionID)
+        return runtime(sessionID).reportsOwnTurns
     }
 
     private func reanchorAndEvaluate() {
@@ -313,9 +308,11 @@ final class ScheduledMessageScheduler {
     private func rememberFinishTurnsInFlight() {
         let armed = store.armedFinishSessionIDs
         finishTurnsObservedInFlight.formIntersection(armed)
-        for sessionID in armed
-        where reportsOwnTurns(sessionID) && activity(sessionID).hasTurnInFlight {
-            finishTurnsObservedInFlight.insert(sessionID)
+        for sessionID in armed {
+            let snapshot = runtime(sessionID)
+            if snapshot.reportsOwnTurns && snapshot.hasPendingOutcome {
+                finishTurnsObservedInFlight.insert(sessionID)
+            }
         }
     }
 }

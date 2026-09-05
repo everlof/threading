@@ -16,10 +16,12 @@ final class SessionSnoozeCenter {
 
     typealias Clock = @MainActor () -> Date
     typealias Activity = @MainActor (SessionID) -> SessionActivity
+    typealias Runtime = @MainActor (SessionID) -> SessionRuntimeSnapshot
 
     private let projectStore: ProjectStore
     private let now: Clock
     private let activity: Activity
+    private let runtime: Runtime
     private let observations: AppEventObservations
     private var deadlines: [SessionID: Date] = [:]
     private var deadlineTimer: Timer?
@@ -29,11 +31,13 @@ final class SessionSnoozeCenter {
         projectStore: ProjectStore = .shared,
         now: @escaping Clock = { Date() },
         activity: @escaping Activity = { AgentRuntime.shared.activity(sessionID: $0) },
+        runtime: @escaping Runtime = { AgentRuntime.shared.runtimeSnapshot(sessionID: $0) },
         notificationCenter: NotificationCenter = .default
     ) {
         self.projectStore = projectStore
         self.now = now
         self.activity = activity
+        self.runtime = runtime
         self.observations = AppEventObservations(center: notificationCenter)
     }
 
@@ -50,7 +54,10 @@ final class SessionSnoozeCenter {
         // Providers with exact hooks wake at the event boundary below. This shared activity
         // edge is the provider-neutral fallback for a surface that can only report state.
         observations.observe(SessionActivityDidChange.self) { [weak self] event in
-            self?.activityChanged(for: event.sessionID)
+            self?.attentionChanged(for: event.sessionID)
+        }
+        observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
+            self?.runtimeChanged(event)
         }
     }
 
@@ -65,7 +72,7 @@ final class SessionSnoozeCenter {
         projectStore.setSnoozed(
             until: deadline,
             at: date,
-            hadTurnInFlight: activity(sessionID).hasTurnInFlight,
+            hadTurnInFlight: runtime(sessionID).hasPendingOutcome,
             for: sessionID
         )
         guard projectStore.session(withID: sessionID)?.isSnoozed(at: date) == true else { return }
@@ -101,14 +108,22 @@ final class SessionSnoozeCenter {
         projectStore.acknowledgeWake(for: sessionID)
     }
 
-    private func activityChanged(for sessionID: SessionID) {
+    private func attentionChanged(for sessionID: SessionID) {
         guard let session = projectStore.session(withID: sessionID),
               session.isSnoozed(at: now()) else { return }
         let current = activity(sessionID)
         if current == .awaitingUser {
             record(.inputRequested, for: sessionID)
-        } else if session.hadTurnInFlightWhenSnoozed, !current.hasTurnInFlight {
-            record(.turnCompleted, for: sessionID)
+        }
+    }
+
+    private func runtimeChanged(_ event: SessionRuntimeDidChange) {
+        guard event.transition.completedPendingOutcome,
+              let session = projectStore.session(withID: event.sessionID),
+              session.isSnoozed(at: now()),
+              session.hadTurnInFlightWhenSnoozed else { return }
+        if event.transition.current.blocker != .usageLimit {
+            record(.turnCompleted, for: event.sessionID)
         }
     }
 

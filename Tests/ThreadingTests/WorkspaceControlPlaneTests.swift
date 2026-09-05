@@ -96,6 +96,7 @@ final class WorkspaceControlPlaneTests: XCTestCase {
                     return nil
                 },
                 activity: activity,
+                runtime: { .test(activity: activity($0)) },
                 surface: surface,
                 deliver: { text, target, done in
                     delivered.texts.append((text, target))

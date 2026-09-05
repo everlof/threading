@@ -6,9 +6,7 @@ final class RemoteTurnCompletionNotificationPolicyTests: XCTestCase {
         for old in [SessionActivity.working, .awaitingUser] {
             for new in [SessionActivity.idle, .needsAttention] {
                 XCTAssertTrue(RemoteTurnCompletionNotificationPolicy.shouldNotify(
-                    from: old,
-                    to: new,
-                    reportsOwnTurns: true
+                    transition(from: old, to: new)
                 ))
             }
         }
@@ -16,9 +14,30 @@ final class RemoteTurnCompletionNotificationPolicyTests: XCTestCase {
 
     func testShellQuietEdgeNeverClaimsCompletion() {
         XCTAssertFalse(RemoteTurnCompletionNotificationPolicy.shouldNotify(
-            from: .working,
-            to: .idle,
-            reportsOwnTurns: false
+            transition(from: .working, to: .idle, reportsOwnTurns: false)
+        ))
+    }
+
+    func testForegroundTurnEndingIntoBackgroundWorkIsNotCompletion() {
+        XCTAssertFalse(RemoteTurnCompletionNotificationPolicy.shouldNotify(
+            SessionRuntimeTransition(
+                previous: .test(activity: .working),
+                current: .test(activity: .readyWithBackgroundWork)
+            )
+        ))
+    }
+
+    func testContinuationCompletesOnlyAfterItsResultTurnFinishes() {
+        let waiting = SessionRuntimeSnapshot.test(activity: .readyWithBackgroundWork)
+        let resultTurn = SessionRuntimeSnapshot.test(activity: .working, continuation: .standing)
+        XCTAssertFalse(RemoteTurnCompletionNotificationPolicy.shouldNotify(
+            SessionRuntimeTransition(previous: waiting, current: resultTurn)
+        ))
+        XCTAssertTrue(RemoteTurnCompletionNotificationPolicy.shouldNotify(
+            SessionRuntimeTransition(
+                previous: resultTurn,
+                current: .test(activity: .needsAttention)
+            )
         ))
     }
 
@@ -30,16 +49,23 @@ final class RemoteTurnCompletionNotificationPolicyTests: XCTestCase {
             .dormant,
         ] {
             XCTAssertFalse(RemoteTurnCompletionNotificationPolicy.shouldNotify(
-                from: .working,
-                to: new,
-                reportsOwnTurns: true
+                transition(from: .working, to: new)
             ))
         }
         XCTAssertFalse(RemoteTurnCompletionNotificationPolicy.shouldNotify(
-            from: .idle,
-            to: .needsAttention,
-            reportsOwnTurns: true
+            transition(from: .idle, to: .needsAttention)
         ))
+    }
+
+    private func transition(
+        from old: SessionActivity,
+        to new: SessionActivity,
+        reportsOwnTurns: Bool = true
+    ) -> SessionRuntimeTransition {
+        SessionRuntimeTransition(
+            previous: .test(activity: old, reportsOwnTurns: reportsOwnTurns),
+            current: .test(activity: new, reportsOwnTurns: reportsOwnTurns)
+        )
     }
 
     func testCompletionTargetsOnlyTheParticipantWhoStartedTheTurn() {

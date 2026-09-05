@@ -1380,6 +1380,11 @@ The pending request survives an app restart. Because external commands may have 
 boundary in ways Threading cannot attribute safely, that just-finished **Last Turn** comparison is
 marked unavailable; the next turn gets a normal checkpoint in the new checkout.
 
+If validation, transcript copying or the ownership transaction fails, the move stays visible as
+**Failed** and the chat remains fenced so another prompt cannot enter the wrong checkout. Use
+**Retry Checkout Move** after fixing the cause, or **Cancel Checkout Move** to keep the chat in
+its current checkout. Failed moves are not silently retried after relaunch.
+
 Agents have the same operation through `set_session_checkout(checkout_path, authority_basis,
 reason)` and can withdraw it with `cancel_session_checkout_move()`. An agent must call the move
 before it starts working in the other checkout and end its current turn so the boundary can
@@ -1410,8 +1415,10 @@ That line appears for any disagreement, including one that can never be resolved
 as an agent working in a different repository altogether.
 
 When the agent executes in one unambiguous checkout of the **same** repository, Threading waits for
-the active turn's final Git checkpoint, moves the chat, restarts the same conversation there and
-reports what it did. The checkout appears in the sidebar even when it was created with raw Git;
+the active turn's final Git checkpoint. It shows one pending receipt, moves the chat, restarts the
+same conversation there, and replaces that receipt with a completion result. Repeated process
+samples do not create more receipts or change the pending destination. The checkout appears in
+the sidebar even when it was created with raw Git;
 an already-open Review or Overview tab is rebound to it too. **Always Ask** changes this into a
 band with a **Move Chat** button. **Same Repository** also permits moves proposed by the agent;
 the default still asks about those proposals while following work Threading directly observed.

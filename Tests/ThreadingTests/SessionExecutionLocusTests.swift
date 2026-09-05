@@ -159,6 +159,35 @@ final class SessionExecutionLocusTests: XCTestCase {
         XCTAssertEqual(tracker.drift(forSessionID: session.id), .none)
     }
 
+    func testPendingMoveKeepsTransientRootProcessReadingsFromErasingItsDrift() throws {
+        let session = try XCTUnwrap(store.addSession(to: project.id, kind: .grok))
+        let sibling = siblingCheckout()
+        let tracker = makeTracker(resolving: [ownedPath: ownedCheckout, sibling.root: sibling])
+
+        tracker.observeProcessWorkingDirectories(
+            [ownedPath, sibling.root + "/Sources/Feature"],
+            sessionID: session.id
+        )
+        try waitForClassification(of: session.id, in: tracker)
+        XCTAssertEqual(tracker.drift(forSessionID: session.id), .siblingCheckout(sibling))
+
+        XCTAssertTrue(store.setPendingCheckoutMove(PendingCheckoutMove(
+            checkoutPath: sibling.root,
+            repositoryIdentity: sibling.repositoryIdentity,
+            worktreeIdentity: sibling.worktreeIdentity,
+            authorityBasis: .observedExecution,
+            reason: "observed there",
+            requestedAt: Date()
+        ), forSessionID: session.id))
+
+        tracker.observeProcessWorkingDirectories([ownedPath], sessionID: session.id)
+        XCTAssertEqual(
+            tracker.drift(forSessionID: session.id),
+            .siblingCheckout(sibling),
+            "the launch process between tool calls must not revoke a durable pending move"
+        )
+    }
+
     /// Two sibling checkouts active under one agent root are real evidence but not a unique
     /// destination. Picking whichever process happened to be sampled first would move the chat
     /// nondeterministically, so the observer leaves ownership alone.

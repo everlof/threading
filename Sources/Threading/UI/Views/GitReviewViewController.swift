@@ -23,7 +23,7 @@ final class GitReviewViewController: NSViewController {
 
     private var isTurnInFlight: Bool {
         guard mode == .lastTurn else {
-            return AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight
+            return AgentRuntime.shared.runtimeSnapshot(sessionID: sessionID).hasOpenTurn
         }
         return selectedTurnID == GitTurnBaselineStore.shared
             .activeCheckpoint(forSessionID: sessionID)?.id

@@ -140,9 +140,17 @@ final class SessionNameToolTests: XCTestCase {
     /// what it asked for, because it is.
     func testNamingASessionWhatItIsAlreadyCalledSucceeds() throws {
         let (store, session) = try makeSessionInProject(named: "app")
+        let observations = AppEventObservations()
+        var titleChanges = 0
+        observations.observe(ProjectsDidChange.self) { change in
+            if case .sessionTitle(let id, _) = change.sidebarImpact, id == session.id {
+                titleChanges += 1
+            }
+        }
 
         XCTAssertEqual(store.updateAgentTitle("worktree diff crash", for: session.id), .accepted)
         XCTAssertEqual(store.updateAgentTitle("worktree diff crash", for: session.id), .accepted)
+        XCTAssertEqual(titleChanges, 1, "one provider title mutation has one presentation edge")
     }
 
     /// The load-bearing one. The tool writes `agentTitle`; a user's own rename lives in

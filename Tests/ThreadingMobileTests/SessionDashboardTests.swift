@@ -1066,6 +1066,8 @@ final class MobileDemoSceneTests: XCTestCase {
                 expected = ("new-session-model-effort-picker", .newSession)
             case .newSessionIdentityPicker:
                 expected = ("new-session-identity-picker", .newSession)
+            case .newSessionIdentityPickerFull:
+                expected = ("new-session-identity-picker-full", .newSession)
             case .newSessionMultiline: expected = ("new-session-multiline", .newSession)
             case .newSessionSingleCharacter:
                 expected = ("new-session-single-character", .newSession)

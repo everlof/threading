@@ -83,7 +83,7 @@ extension AppMessageReceiving {
 /// deliberately *keeps* a `ConversationViewController` after its agent exits — the transcript is
 /// worth more than a dormant placeholder — so the runtime surface goes on answering
 /// for a session with no process. Without the check, `submit` fell through its `stream.canSend`
-/// guard into `enqueue`, which took the message and answered true, and `hasTurnInFlight` is false
+/// guard into `enqueue`, which took the message and answered true, while the runtime has no open turn
 /// for a dead session: `deliver` therefore reported **`.sentNow`** for a message no transport had
 /// or would ever have. Its next stop was an in-memory outbox that `resumeCurrentSession` discards
 /// through `AgentRuntime.discard`, so the text was destroyed and the caller had been told it
@@ -92,7 +92,7 @@ extension AppMessageReceiving {
 /// `.noLiveSurface` is the truth, and it is what lets a caller decide to resume.
 ///
 /// **The outcome is the surface's own answer, never a guess from beside it.** An earlier shape
-/// read `activity.hasTurnInFlight` before the send and inferred sent-versus-queued from that —
+/// read the typed runtime before the send and inferred sent-versus-queued from that —
 /// wrong in both directions: `sendAppPrompt` answered true for a real send *and* for an enqueue,
 /// and a turn already settled on the wire still reads `.working` while its background work
 /// finishes, so a message sent immediately was reported as "queued where the user can remove it"
@@ -189,9 +189,12 @@ enum SessionMessageDelivery {
             return true
         case .terminal:
             let kind = ProjectStore.shared.session(withID: sessionID)?.kind
-            return !AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight
-                && (AgentRuntime.shared.hasHeardFromProcess(sessionID: sessionID)
-                    || !(kind?.supports(.terminalThreadingBridge) ?? true))
+            let runtime = AgentRuntime.shared.runtimeSnapshot(sessionID: sessionID)
+            let transportIsReady = AgentRuntime.shared.hasHeardFromProcess(sessionID: sessionID)
+                || !(kind?.supports(.terminalThreadingBridge) ?? true)
+            return !runtime.hasOpenTurn
+                && runtime.blocker == .none
+                && transportIsReady
         case .dormant:
             return false
         }
@@ -366,7 +369,7 @@ enum SessionMessageDelivery {
 
         let kind = ProjectStore.shared.session(withID: sessionID)?.kind
         return TerminalTarget(
-            isMidTurn: AgentRuntime.shared.activity(sessionID: sessionID).hasTurnInFlight,
+            isMidTurn: AgentRuntime.shared.runtimeSnapshot(sessionID: sessionID).hasOpenTurn,
             hasVerifiedBoot: AgentRuntime.shared.hasHeardFromProcess(sessionID: sessionID),
             // A record that has vanished mid-call verifies nothing and requires everything.
             requiresVerifiedBoot: kind?.supports(.terminalThreadingBridge) ?? true,

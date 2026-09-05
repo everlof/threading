@@ -139,6 +139,8 @@ enum MobileDesign {
         static let accountDiscEmoji: CGFloat = 14
         static let accountChipRing: CGFloat = 1.5
         static let rowAttentionDot: CGFloat = 8
+        static let rowFinishedDot: CGFloat = 9
+        static let rowBackgroundDot: CGFloat = 5
         /// The working orb at a row's trailing edge, standing where the age would be. Sized to
         /// the caption line it replaces so a working row is no taller than an idle one.
         static let rowWorkingOrb: CGFloat = 16
@@ -167,8 +169,9 @@ enum MobileDesign {
         /// How far the attention dot hangs past the mark's top-trailing corner so that its
         /// centre sits on the tile's edge — the midpoint of the corner arc, not the corner of the
         /// bounding box, which on a rounded tile floats the dot off the ink.
-        static let rowAttentionDotOverhang: CGFloat = Size.rowAttentionDot / 2
-            - Size.rowMarkRadius * (1 - 1 / 2.squareRoot())
+        static func rowStatusDotOverhang(diameter: CGFloat) -> CGFloat {
+            diameter / 2 - Size.rowMarkRadius * (1 - 1 / 2.squareRoot())
+        }
     }
 
     /// Identity colour that is content rather than chrome, so it does not come from a theme role.

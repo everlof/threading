@@ -11,6 +11,15 @@ struct SessionActivityDidChange: AppEvent {
     let sessionID: SessionID
 }
 
+/// Operational lifecycle moved. Unlike `SessionActivityDidChange`, this carries the exact facts
+/// and edge so consumers never reconstruct turn completion from a reader-specific UI state.
+struct SessionRuntimeDidChange: AppEvent {
+    static let name = Notification.Name("sessionRuntimeDidChange")
+    let sessionID: SessionID
+    let transition: SessionRuntimeTransition
+    let cause: SessionActivityCause?
+}
+
 /// One chat's live audience moved: somebody joined, left, resized, or started composing.
 ///
 /// Separate from `SessionSharingDidChange` on purpose — who is *watching* changes many times a

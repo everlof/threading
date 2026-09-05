@@ -500,13 +500,24 @@ compares both repository and worktree identities. Only an existing worktree root
 branch in the same repository is eligible. Managed workspaces are excluded on both sides; branch
 names never serve as identity.
 
-The request is first persisted on the session as `PendingCheckoutMove`, including canonical
-identities, authority basis and audit reason. An idle session settles it immediately. For a live
-turn, native `turnFinished` and the terminal Stop hook call the coordinator only after the final
-Git capture. A transient input fence remains after the pending field is cleared and until the
-window has initiated runtime replacement, so neither the native outbox, scheduled delivery nor a
-watch notification can enter the old runtime during the store/event gap. Launch restoration is
-also gated until every persisted move has settled serially.
+The request is first persisted on the session as `PendingCheckoutMove`, including a stable request
+ID, canonical identities, authority basis, audit reason and its pending/settling/failed phase. An
+idle session settles it immediately. For a live turn, native `turnFinished` and the terminal Stop
+hook call the coordinator only after the final Git capture. A transient input fence remains after
+the pending field is cleared and until the window has initiated runtime replacement, so neither
+the native outbox, scheduled delivery nor a watch notification can enter the old runtime during
+the store/event gap. Launch restoration is also gated until every persisted nonfailed move has
+settled serially. A failed validation, copy or store transaction keeps the durable target and
+input fence, and exposes explicit retry and cancel; launch restoration never turns that failure
+into an unrequested retry.
+
+Process observations are evidence for the request, not repeated requests. Once the durable move
+exists, a root process briefly observed in the source checkout cannot clear its sibling-checkout
+drift, and a different destination is logged as a conflict rather than retargeting the move. The
+request ID keys one truthful pending toast; only the committed store event replaces it with a
+completion receipt. Commit always starts runtime replacement in the destination, including for an
+observed move, because a tool descendant's cwd does not establish the provider root's next-turn
+launch directory.
 
 `ProjectStore.moveSessionsToCheckout` changes membership as one SQLite graph transaction. It
 reuses a project with the same canonical worktree identity or creates the destination project in

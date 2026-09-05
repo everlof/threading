@@ -27,6 +27,10 @@ saw the betas.
   choosing a login closes it — where the old menu was a single scrolling list that closed after
   the first choice, so picking an agent and then a login meant opening it twice. Your keyboard
   stays up while you choose.
+- Both rows in that panel now answer a press and drag: hold anywhere in the agents or the
+  accounts and slide, and the choice follows your finger with a tick at each one, taking effect
+  where you lift. Tapping still works exactly as before. The whole cell is the target as well,
+  so the space around an agent's mark and name no longer swallows a tap that clearly meant it.
 
 ## [0.1.0]
 

@@ -142,6 +142,7 @@
     {"id": "new-session-model-effort-picker-keyboard-open-custom-dark", "entryID": "ios-new-session", "demo": "new-session-model-effort-picker", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
     {"id": "new-session-identity-picker-custom-dark", "entryID": "ios-new-session", "demo": "new-session-identity-picker", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "new-session-identity-picker-keyboard-open-custom-dark", "entryID": "ios-new-session", "demo": "new-session-identity-picker", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
+    {"id": "new-session-identity-picker-full-custom-dark", "entryID": "ios-new-session", "demo": "new-session-identity-picker-full", "appearance": "dark", "theme": "custom", "keyboardState": "closed", "assertions": ["keyboardHidden", "noFirstResponder"]},
     {"id": "new-session-keyboard-open-custom-dark", "entryID": "ios-new-session", "demo": "new-session", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
     {"id": "new-session-keyboard-dismissed-custom-dark", "entryID": "ios-new-session", "demo": "new-session", "appearance": "dark", "theme": "custom", "keyboardState": "dismissed-after-open", "captureMode": "app", "assertions": ["keyboardShownOnce", "keyboardHidden", "noFirstResponder", "safeAreaRestored", "editorFrameRestored"]},
     {"id": "new-session-single-character-keyboard-open-custom-dark", "entryID": "ios-new-session", "demo": "new-session-single-character", "appearance": "dark", "theme": "custom", "keyboardState": "open", "captureMode": "display", "assertions": ["editorFocused", "keyboardShown"]},
@@ -498,7 +499,7 @@
       "priority": "important",
       "title": "New remote session",
       "description": "The owner flow for choosing checkout, agent account, model, effort and interface before starting work on the Mac.",
-      "states": ["Catalogue loaded", "Agent choices", "Model × effort popover with Ultra", "Model × effort popover standing on the keyboard", "Agent and account popover hanging from the bar", "Attachment sources", "Start action", "Multiline prompt growth", "Keyboard open", "Keyboard dismissed and geometry restored"],
+      "states": ["Catalogue loaded", "Agent choices", "Model × effort popover with Ultra", "Model × effort popover standing on the keyboard", "Agent and account popover hanging from the bar", "Agent and account popover at all five runtimes", "Attachment sources", "Start action", "Multiline prompt growth", "Keyboard open", "Keyboard dismissed and geometry restored"],
       "source": {"path": "scripts/ui-evidence-ios.sh", "command": "capture_fixture"},
       "capture": {"glob": "ios/new-session-*.png"},
       "matrix": {"devices": ["iPhone 17 Pro"], "appearances": ["Dark"], "themes": ["Mac-supplied"]}

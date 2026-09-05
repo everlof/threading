@@ -10,9 +10,9 @@ import Foundation
 /// learn nothing, and the interval between calls deciding how late the answer arrives. A watch
 /// costs one delivery, at the moment the fact becomes true.
 ///
-/// **The boundary is the app's existing `hasTurnInFlight` answer in both directions.** A target
-/// with a turn in flight is watched for the edge out (including `.dormant` and `.limitReached`);
-/// a target without one is watched for the next edge in. The state read and watch insertion are
+/// **The boundary is the runtime's typed pending-outcome answer in both directions.** A target
+/// with an unfinished outcome is watched for its completion; a settled target is watched for the
+/// next outcome to begin. The state read and watch insertion are
 /// one main-actor operation, so the transition cannot land in between them. Re-arming after each
 /// notice gives a caller fail-closed current-state coverage without an unbounded subscription.
 ///
@@ -32,6 +32,7 @@ final class SessionWatchCenter {
 
     struct Dependencies {
         let activity: (SessionID) -> SessionActivity
+        let runtime: (SessionID) -> SessionRuntimeSnapshot
         /// Read at fire time, not at arm time: a session is renamed by its own agent mid-turn,
         /// and a notice naming what the row said half an hour ago names something the watcher
         /// cannot find in `list_sessions`.
@@ -65,6 +66,7 @@ final class SessionWatchCenter {
     static let shared = SessionWatchCenter(
         dependencies: Dependencies(
             activity: { AgentRuntime.shared.activity(sessionID: $0) },
+            runtime: { AgentRuntime.shared.runtimeSnapshot(sessionID: $0) },
             sessionTitle: { ProjectStore.shared.session(withID: $0)?.displayTitle },
             deliverNotice: { SessionMessageDelivery.deliver($0, to: $1, completion: $2) }
         )
@@ -109,8 +111,8 @@ final class SessionWatchCenter {
         self.now = now
         self.observations = AppEventObservations(center: center)
 
-        observations.observe(SessionActivityDidChange.self) { [weak self] event in
-            self?.activityChanged(for: event.sessionID)
+        observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
+            self?.runtimeChanged(event)
         }
     }
 
@@ -143,7 +145,7 @@ final class SessionWatchCenter {
         // Main-actor isolation makes this snapshot and the insertion below atomic with respect
         // to `activityChanged`. An edge can happen before the read or after the insertion, never
         // in the gap — the fail-closed property a wait-for-all caller depends on.
-        let awaiting: ControlWatchEdge = dependencies.activity(target).hasTurnInFlight
+        let awaiting: ControlWatchEdge = dependencies.runtime(target).hasPendingOutcome
             ? .turnSettled
             : .turnStarted
 
@@ -170,12 +172,13 @@ final class SessionWatchCenter {
     /// One session's activity moved. It may be a watched target — several watchers may hold a
     /// watch on it, each spent or retired on its own terms — and it may itself be a watcher
     /// owed notices held from while it was busy; its settle edge is the retry moment.
-    private func activityChanged(for target: SessionID) {
-        let activity = dependencies.activity(target)
+    private func runtimeChanged(_ event: SessionRuntimeDidChange) {
+        let target = event.sessionID
+        let runtime = event.transition.current
 
         // Drain before anything else: a dormant or limit-parked session cannot take a
         // delivery, so those states hold rather than spend an attempt that must fail.
-        if !activity.hasTurnInFlight, activity != .dormant, activity != .limitReached {
+        if runtime.isPromptReady {
             drainHeldNotices(for: target)
         }
 
@@ -186,7 +189,10 @@ final class SessionWatchCenter {
             if let expiresAfter = watch.expiresAfter,
                now().timeIntervalSince(watch.armedAt) >= expiresAfter {
                 expire(key)
-            } else if let transition = Self.transition(awaitedBy: watch, after: activity) {
+            } else if let transition = Self.transition(
+                awaitedBy: watch,
+                after: event.transition
+            ) {
                 fire(
                     key,
                     notice: Self.notice(
@@ -285,12 +291,14 @@ final class SessionWatchCenter {
 
     private static func transition(
         awaitedBy watch: Watch,
-        after activity: SessionActivity
+        after runtime: SessionRuntimeTransition
     ) -> Transition? {
+        let activity = runtime.current.activity
         switch watch.awaiting {
         case .turnStarted:
-            return activity.hasTurnInFlight ? .turnStarted(activity) : nil
+            return runtime.beganPendingOutcome ? .turnStarted(activity) : nil
         case .turnSettled:
+            guard runtime.completedPendingOutcome else { return nil }
             switch activity {
             case .dormant:
                 return .agentExited
@@ -298,7 +306,7 @@ final class SessionWatchCenter {
                 return .usageLimit
             case .idle, .needsAttention:
                 return .turnFinished
-            case .working, .awaitingUser:
+            case .working, .readyWithBackgroundWork, .awaitingUser:
                 return nil
             }
         }

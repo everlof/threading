@@ -1229,6 +1229,23 @@ final class ThemedIndicatorsTests: XCTestCase {
         XCTAssertEqual(dot.accessibilityLabel(), "Session needs attention")
     }
 
+    func testReadyBackgroundWorkTakesTheSmallerFilledAccentDot() throws {
+        let indicator = SessionStatusIndicator()
+        indicator.frame = NSRect(x: 0, y: 0, width: 12, height: 12)
+        let dot = try mark(of: indicator)
+
+        indicator.update(for: .readyWithBackgroundWork)
+        indicator.layoutSubtreeIfNeeded()
+
+        XCTAssertFalse(dot.isHidden)
+        XCTAssertEqual(dot.bounds.size, NSSize(width: 4, height: 4))
+        XCTAssertEqual(dot.layer?.backgroundColor, resolved(Design.Surface.accent, in: dot))
+        XCTAssertEqual(dot.layer?.borderWidth, 0)
+        XCTAssertEqual(dot.accessibilityLabel(), "Ready for input; background work running")
+        XCTAssertEqual(dot.frame.midX, indicator.bounds.midX, accuracy: 0.01)
+        XCTAssertEqual(dot.frame.midY, indicator.bounds.midY, accuracy: 0.01)
+    }
+
     /// Filled versus hollow is what carries the distinction where colour cannot — the two must
     /// differ in ink at the centre, not only in hue.
     func testTheTwoMarksDifferInShapeRatherThanOnlyInColour() throws {

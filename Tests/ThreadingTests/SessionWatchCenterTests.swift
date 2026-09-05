@@ -52,6 +52,9 @@ final class SessionWatchCenterTests: XCTestCase {
             now: { [weak self] in self?.clock ?? Date() },
             dependencies: SessionWatchCenter.Dependencies(
                 activity: { [weak self] id in self?.activities[id] ?? .dormant },
+                runtime: { [weak self] id in
+                    .test(activity: self?.activities[id] ?? .dormant)
+                },
                 sessionTitle: { [weak self] id in self?.titles[id] },
                 deliverNotice: { [weak self] text, watcher, completion in
                     self?.delivered.append((text, watcher))
@@ -61,10 +64,23 @@ final class SessionWatchCenterTests: XCTestCase {
         )
     }
 
-    /// The one signal the centre listens to, as the container posts it.
-    private func reportActivity(_ new: SessionActivity, of sessionID: SessionID? = nil) {
-        activities[sessionID ?? target] = new
-        notifications.post(SessionActivityDidChange(sessionID: sessionID ?? target))
+    /// The typed lifecycle signal the centre listens to, as the runtime posts it.
+    private func reportActivity(
+        _ new: SessionActivity,
+        of sessionID: SessionID? = nil,
+        previous explicitPrevious: SessionActivity? = nil
+    ) {
+        let id = sessionID ?? target!
+        let previous = SessionRuntimeSnapshot.test(
+            activity: explicitPrevious ?? activities[id] ?? .dormant
+        )
+        activities[id] = new
+        let current = SessionRuntimeSnapshot.test(activity: new)
+        notifications.post(SessionRuntimeDidChange(
+            sessionID: id,
+            transition: SessionRuntimeTransition(previous: previous, current: current),
+            cause: nil
+        ))
         settle()
     }
 
@@ -108,7 +124,7 @@ final class SessionWatchCenterTests: XCTestCase {
         center.arm(watcher: watcher, target: target)
 
         deliveryOutcome = .typedUnconfirmed
-        reportActivity(.idle)
+        reportActivity(.idle, previous: .working)
         XCTAssertEqual(delivered.count, 1)
 
         deliveryOutcome = .sentNow
@@ -280,7 +296,7 @@ final class SessionWatchCenterTests: XCTestCase {
             "a duplicate must report the installed edge, not infer a new one from current state"
         )
 
-        reportActivity(.idle)
+        reportActivity(.idle, previous: .working)
         XCTAssertEqual(delivered.count, 1)
     }
 

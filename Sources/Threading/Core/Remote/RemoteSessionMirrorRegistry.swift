@@ -148,9 +148,10 @@ final class RemoteSessionMirrorRegistry {
         appEvents.observe(AccountPreferencesDidChange.self) { [weak self] _ in
             self?.broadcastSessionsChanged(ProjectsDidChange())
         }
-        // Activity is live row state, not a project mutation. Depending on a coincident title or
-        // branch write left a completed chat's phone badge stale indefinitely.
-        appEvents.observe(SessionActivityDidChange.self) { [weak self] event in
+        // Runtime is live row state, not a project mutation. The continuation kind can change
+        // while its compact presentation remains "ready with background work", so observing
+        // only presentation activity would silently leave that typed wire fact stale.
+        appEvents.observe(SessionRuntimeDidChange.self) { [weak self] event in
             self?.broadcastSessionRow(event.sessionID)
         }
         // The System theme can change without an AppTheme event when macOS itself crosses
@@ -628,6 +629,7 @@ final class RemoteSessionMirrorRegistry {
         authorization: RemoteAuthorization
     ) -> RemoteSessionSummaryDTO {
         let available = AgentRuntime.shared.isRunning(sessionID: session.id)
+        let runtime = AgentRuntime.shared.runtimeSnapshot(sessionID: session.id)
         let ownsSessionLifecycle = canManageSessions(authorization)
         let resolvedLimitRecovery = LimitRecoveryResolution.resolve(
             session: session.limitRecoveryPolicy,
@@ -643,6 +645,7 @@ final class RemoteSessionMirrorRegistry {
                 sessionID: session.id,
                 participantID: authorization.collaborationParticipantID
             )),
+            continuation: RemoteSessionContinuation(runtime.continuation),
             projectName: projectName,
             projectID: projectID.uuidString,
             isAvailable: available,
@@ -3627,9 +3630,20 @@ private extension RemoteSessionActivity {
         case .dormant: self = .dormant
         case .idle: self = .idle
         case .working: self = .working
+        case .readyWithBackgroundWork: self = .idle
         case .awaitingUser: self = .awaitingUser
         case .needsAttention: self = .needsAttention
         case .limitReached: self = .limitReached
+        }
+    }
+}
+
+private extension RemoteSessionContinuation {
+    init?(_ continuation: SessionContinuationState) {
+        switch continuation {
+        case .none: return nil
+        case .delegated: self = .delegated
+        case .standing: self = .standing
         }
     }
 }

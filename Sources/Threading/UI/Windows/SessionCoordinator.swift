@@ -111,6 +111,31 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         appEvents.observe(SessionExecutionDriftDidChange.self) { [weak self] event in
             self?.reconcileObservedExecutionDrift(event.sessionID)
         }
+        appEvents.observe(SessionCheckoutDidMove.self) { [weak self] event in
+            guard event.authorityBasis == .observedExecution,
+                  let self,
+                  let session = self.environment.projectStore.session(withID: event.sessionID)
+            else { return }
+            self.toastPresenter(Self.observedMoveCompletedToast(
+                for: session,
+                checkoutDisplayName: event.checkoutDisplayName,
+                requestID: event.requestID
+            ))
+        }
+        appEvents.observe(SessionCheckoutMoveDidFail.self) { [weak self] event in
+            guard let self,
+                  let session = self.environment.projectStore.session(withID: event.sessionID)
+            else { return }
+            self.toastPresenter(Self.checkoutMoveFailedToast(
+                for: session,
+                event: event,
+                retry: {
+                    SessionCheckoutCoordinator.shared.retryPendingMove(
+                        sessionID: event.sessionID
+                    )
+                }
+            ))
+        }
 
         // The same arrangement, one feature along: `ScheduledMessageScheduler` is in Core and
         // owns only the clock. See `SessionCoordinator+ScheduledMessages`.
@@ -635,7 +660,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
         agentRuntime: AgentRuntime
     ) -> Bool {
         agentRuntime.isRunning(sessionID: sessionID)
-            && !agentRuntime.activity(sessionID: sessionID).hasTurnInFlight
+            && agentRuntime.runtimeSnapshot(sessionID: sessionID).isPromptReady
             && MCPToolCatalog.isEnabled(MCPToolCatalog.session)
     }
 
@@ -703,7 +728,7 @@ final class SessionCoordinator: SessionComposerViewControllerDelegate {
             of: projectStore.session(withID: sessionID),
             parent: { projectStore.session(withID: $0) }
         )
-            && !agentRuntime.activity(sessionID: sessionID).hasTurnInFlight
+            && agentRuntime.runtimeSnapshot(sessionID: sessionID).isPromptReady
             && SessionMessageDelivery.isReadyForDelivery(sessionID)
             && MCPToolCatalog.isEnabled(MCPToolCatalog.workspace)
     }

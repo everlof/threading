@@ -34,22 +34,19 @@ enum ScheduledFinishCandidates {
     static func current() -> [ScheduledFinishCandidate] {
         make(
             projects: ProjectStore.shared.projects,
-            activity: { AgentRuntime.shared.activity(sessionID: $0) },
-            reportsOwnTurns: { AgentRuntime.shared.reportsOwnTurns(sessionID: $0) }
+            runtime: { AgentRuntime.shared.runtimeSnapshot(sessionID: $0) }
         )
     }
 
     static func make(
         projects: [Project],
-        activity: (SessionID) -> SessionActivity,
-        reportsOwnTurns: (SessionID) -> Bool
+        runtime: (SessionID) -> SessionRuntimeSnapshot
     ) -> [ScheduledFinishCandidate] {
         var candidates: [ScheduledFinishCandidate] = []
         for project in projects {
-            for session in project.sessions
-            where !session.isArchived
-                && activity(session.id).hasTurnInFlight
-                && reportsOwnTurns(session.id) {
+            for session in project.sessions where !session.isArchived {
+                let snapshot = runtime(session.id)
+                guard snapshot.hasPendingOutcome, snapshot.reportsOwnTurns else { continue }
                 let agentName = session.accountHandle.isStandard
                     ? session.kind.displayName
                     : "\(session.kind.displayName) · \(session.accountHandle.name)"

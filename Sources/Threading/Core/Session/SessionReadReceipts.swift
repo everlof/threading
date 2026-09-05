@@ -117,7 +117,7 @@ final class SessionReadReceiptStore {
             return hasUnread(sessionID: sessionID, participantID: participantID)
                 ? .needsAttention
                 : .idle
-        case .dormant, .working, .awaitingUser, .limitReached:
+        case .dormant, .working, .readyWithBackgroundWork, .awaitingUser, .limitReached:
             return activity
         }
     }

@@ -141,10 +141,9 @@ final class AccountUsageService {
     /// a filesystem walk and its answer does not change between readings.
     private var seededHistory: Set<AccountID> = []
 
-    /// Last known activity per session, kept to recognise the transition *out of* working —
-    /// the one moment a turn has just spent tokens and the number on the server has moved.
+    /// Last known open-turn fact per session, retained only for the process-exit fallback.
     private let observations = AppEventObservations()
-    private var lastActivity: [SessionID: SessionActivity] = [:]
+    private var lastOpenTurn: [SessionID: Bool] = [:]
 
     // MARK: - Initialization
 
@@ -161,8 +160,8 @@ final class AccountUsageService {
         // every pacing rule above still applies: the floor, the endpoint's own notBefore,
         // and single-flight. An idle app stops generating turn boundaries and therefore
         // stops generating these refreshes, which is the back-off half of "adaptive".
-        observations.observe(SessionActivityDidChange.self) { [weak self] event in
-            Task { @MainActor in self?.activityChanged(for: event.sessionID) }
+        observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
+            Task { @MainActor in self?.runtimeChanged(event) }
         }
         observations.observe(TerminalSessionDidEnd.self) { [weak self] event in
             Task { @MainActor in self?.sessionEnded(event.sessionID) }
@@ -332,20 +331,16 @@ final class AccountUsageService {
     /// server's number moved and a refresh right now is worth the most it will ever be.
     /// Everything else — `working → working`, a session waking up — changes nothing upstream
     /// and asks for nothing.
-    private func activityChanged(for sessionID: SessionID) {
-        let new = AgentRuntime.shared.activity(sessionID: sessionID)
-        let old = lastActivity[sessionID] ?? .dormant
-        lastActivity[sessionID] = new
-
-        guard old == .working, new != .working else { return }
-        refreshAccount(of: sessionID)
+    private func runtimeChanged(_ event: SessionRuntimeDidChange) {
+        lastOpenTurn[event.sessionID] = event.transition.current.hasOpenTurn
+        if event.transition.endedTurn { refreshAccount(of: event.sessionID) }
     }
 
     /// An exiting agent is the end of whatever it was doing — the same boundary, minus the
     /// session to keep watching.
     private func sessionEnded(_ sessionID: SessionID) {
-        let wasWorking = lastActivity.removeValue(forKey: sessionID) == .working
-        if wasWorking { refreshAccount(of: sessionID) }
+        let hadOpenTurn = lastOpenTurn.removeValue(forKey: sessionID) == true
+        if hadOpenTurn { refreshAccount(of: sessionID) }
     }
 
     private func refreshAccount(of sessionID: SessionID) {

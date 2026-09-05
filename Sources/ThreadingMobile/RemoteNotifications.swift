@@ -467,23 +467,32 @@ final class ThreadingMobileAppDelegate: NSObject, UIApplicationDelegate,
         // main actor, but it does not need to hold the notification callback open.
         completionHandler()
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            MobileDiagnostics.record(.notificationOpened, fields: [
-                .trace: event.id,
-                .kind: event.kind.rawValue,
-                .transport: "apns",
-            ])
-            model.openSessionFromNotification(event)
+            self?.openNotification(event, origin: .notificationCenter)
         }
     }
 
-    func openNotification(from response: UNNotificationResponse) {
+    func openNotification(
+        from response: UNNotificationResponse,
+        origin: RemoteNotificationOpenOrigin
+    ) {
         guard let event = RemoteNotificationPayloadDecoder.event(
             from: response.notification.request.content.userInfo
         ) else {
             return
         }
-        model.openSessionFromNotification(event)
+        openNotification(event, origin: origin)
+    }
+
+    private func openNotification(
+        _ event: RemoteNotificationEventDTO,
+        origin: RemoteNotificationOpenOrigin
+    ) {
+        guard model.openSessionFromNotification(event, origin: origin) else { return }
+        MobileDiagnostics.record(.notificationOpened, fields: [
+            .trace: event.id,
+            .kind: event.kind.rawValue,
+            .transport: "apns",
+        ])
     }
 
 }
@@ -555,6 +564,12 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene,
               let appDelegate = UIApplication.shared.delegate as? ThreadingMobileAppDelegate
         else { return }
+        if let response = connectionOptions.notificationResponse {
+            // Admit the deep link before the root starts its catalogue refresh. Otherwise that
+            // refresh can restore the previous chat and the notification then pushes its target
+            // on top, constructing two detail controllers for one scene connection.
+            appDelegate.openNotification(from: response, origin: .connectingScene)
+        }
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = appDelegate.makeRootViewController()
         self.window = window
@@ -562,9 +577,6 @@ final class ThreadingMobileSceneDelegate: UIResponder, UIWindowSceneDelegate {
 #if DEBUG
         MobileUIEvidenceCapture.startIfRequested(in: window)
 #endif
-        if let response = connectionOptions.notificationResponse {
-            appDelegate.openNotification(from: response)
-        }
         open(connectionOptions.urlContexts)
     }
 

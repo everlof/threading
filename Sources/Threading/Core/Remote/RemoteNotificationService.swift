@@ -196,7 +196,10 @@ final class RemoteNotificationService {
         // its deferral, never overtake completion classification through an extra unstructured
         // task. AppEventObservations already delivers this handler on the main actor.
         observations.observe(SessionActivityDidChange.self) { [weak self] event in
-            self?.activityChanged(sessionID: event.sessionID)
+            self?.attentionPresentationChanged(sessionID: event.sessionID)
+        }
+        observations.observe(SessionRuntimeDidChange.self) { [weak self] event in
+            self?.runtimeChanged(event)
         }
         observations.observe(TerminalSessionDidEnd.self) { [weak self] event in
             self?.lastActivityBySession[event.sessionID] = nil
@@ -528,13 +531,12 @@ final class RemoteNotificationService {
 
     /// Turns provider-neutral lifecycle edges into completion or response-needed notifications.
     /// The hook/BEL layer owns those states; notifications never scrape terminal text.
-    private func activityChanged(sessionID: SessionID) {
-        let activity = AgentRuntime.shared.activity(sessionID: sessionID)
-        let previous = lastActivityBySession[sessionID] ?? .dormant
-        lastActivityBySession[sessionID] = activity
+    private func runtimeChanged(_ event: SessionRuntimeDidChange) {
+        let sessionID = event.sessionID
+        let transition = event.transition
         guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
 
-        if activity.hasTurnInFlight, !previous.hasTurnInFlight {
+        if transition.beganPendingOutcome {
             let generation = CompletedTurnSnapshotStore.shared.beginTurn(sessionID: sessionID)
             turnParticipantBySession[sessionID] = (
                 generation,
@@ -543,11 +545,7 @@ final class RemoteNotificationService {
             turnDeliveryCoordinator.turnStarted(sessionID: sessionID, generation: generation)
         }
 
-        if RemoteTurnCompletionNotificationPolicy.shouldNotify(
-            from: previous,
-            to: activity,
-            reportsOwnTurns: AgentRuntime.shared.reportsOwnTurns(sessionID: sessionID)
-        ) {
+        if RemoteTurnCompletionNotificationPolicy.shouldNotify(transition) {
             var generation = CompletedTurnSnapshotStore.shared.currentGeneration(
                 sessionID: sessionID
             )
@@ -574,6 +572,13 @@ final class RemoteNotificationService {
                 createdAt: Date().timeIntervalSince1970
             ))
         }
+    }
+
+    private func attentionPresentationChanged(sessionID: SessionID) {
+        let activity = AgentRuntime.shared.activity(sessionID: sessionID)
+        let previous = lastActivityBySession[sessionID] ?? .dormant
+        lastActivityBySession[sessionID] = activity
+        guard let session = ProjectStore.shared.session(withID: sessionID) else { return }
 
         guard activity == .awaitingUser, previous != .awaitingUser else { return }
 

@@ -971,12 +971,23 @@ extension ProjectSidebarViewController {
         if let pending = session.pendingCheckoutMove {
             let branch = GitInfo.currentBranch(for: pending.checkoutPath)
                 ?? URL(fileURLWithPath: pending.checkoutPath).lastPathComponent
+            let statusTitle = pending.phase == .failed
+                ? L10n.format("Failed: %@", branch)
+                : L10n.format("Pending: %@", branch)
             submenu.append(.item(ThemedMenuItem(
-                title: L10n.format("Pending: %@", branch),
+                title: statusTitle,
                 subtitle: pending.checkoutPath,
-                image: ThemedMenuIcon.symbol("clock"),
+                image: ThemedMenuIcon.symbol(pending.phase == .failed ? "exclamationmark.triangle" : "clock"),
                 isEnabled: false
             )))
+            if pending.phase == .failed {
+                submenu.append(action(
+                    L10n.string("Retry Checkout Move"),
+                    symbol: "arrow.clockwise"
+                ) {
+                    SessionCheckoutCoordinator.shared.retryPendingMove(sessionID: session.id)
+                })
+            }
             submenu.append(action(
                 L10n.string("Cancel Checkout Move"),
                 symbol: "xmark.circle"

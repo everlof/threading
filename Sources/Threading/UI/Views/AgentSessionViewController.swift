@@ -37,6 +37,7 @@ final class AgentSessionViewController: NSViewController {
     let activityTracker = SessionActivityTracker()
 
     var activity: SessionActivity { activityTracker.activity }
+    var runtimeSnapshot: SessionRuntimeSnapshot { activityTracker.runtimeSnapshot }
 
     /// Structured provider-owned checklist for the current terminal turn.
     private(set) var runProgress: RunProgress?
@@ -95,7 +96,7 @@ final class AgentSessionViewController: NSViewController {
     )
     private var attachmentObserver: TerminalAttachmentObserver?
     private var transcriptAttachmentObserver: TerminalTranscriptAttachmentObserver?
-    private var activityHadTurnInFlight = false
+    private var lastRuntimeSnapshot: SessionRuntimeSnapshot = .dormant
     private var selectedSubagentID: String?
     private var subagentTranscriptLoads = SubagentTranscriptLoadCache()
     private var transcriptRecheckGeneration: [String: Int] = [:]
@@ -196,25 +197,18 @@ final class AgentSessionViewController: NSViewController {
         )
 
         activityTracker.markDormant()
-        activityTracker.onChange = { [weak self] activity in
+        activityTracker.onRuntimeChange = { [weak self] snapshot in
             guard let self else { return }
-
-            // Hooks are the exact boundary when they arrive, while the activity tracker also
-            // owns the bounded quiet-period fallback for a provider whose hooks are missing.
-            // Observe the shared edge so both routes recover intact transcript paths. A reported
-            // turn with background work may remain visually `working`; AgentRuntime explicitly
-            // scans that boundary because there is intentionally no activity edge to observe.
-            let turnFinished = self.activityHadTurnInFlight && !activity.hasTurnInFlight
-            // The same shared edge, the other way round, and the only honest answer to "when was
-            // this conversation last used": it fires for a reported turn and for an inferred one,
-            // and it cannot fire for the relaunch that merely brought the session back.
-            let turnBegan = !self.activityHadTurnInFlight && activity.hasTurnInFlight
-            self.activityHadTurnInFlight = activity.hasTurnInFlight
-            if turnBegan {
+            let transition = SessionRuntimeTransition(
+                previous: self.lastRuntimeSnapshot,
+                current: snapshot
+            )
+            self.lastRuntimeSnapshot = snapshot
+            if transition.beganTurn {
                 self.beginRunProgressTurn()
                 ProjectStore.shared.noteTurnStarted(sessionID: self.sessionID)
             }
-            if turnFinished {
+            if transition.endedTurn {
                 self.clearRunProgress(resetTranscriptCursor: false)
                 self.noteTurnFinishedForAttachmentDetection()
             }
@@ -1022,7 +1016,7 @@ final class AgentSessionViewController: NSViewController {
 
     private func publishRunProgress(_ progress: RunProgress?, generation: Int) {
         guard generation == runProgressGeneration,
-              activityTracker.activity.hasTurnInFlight,
+              activityTracker.runtimeSnapshot.hasOpenTurn,
               runProgress != progress else { return }
         runProgress = progress
         delegate?.agentSessionDidChangeState(self)
@@ -1100,7 +1094,7 @@ final class AgentSessionViewController: NSViewController {
 
     /// Coalesces terminal repaint bursts into one resumable, off-main transcript pass.
     private func scheduleRunProgressTranscriptRefresh(after delay: TimeInterval = 0.25) {
-        guard activityTracker.activity.hasTurnInFlight,
+        guard activityTracker.runtimeSnapshot.hasOpenTurn,
               TranscriptReplayFormat(kind: agentKind) != nil else { return }
 
         runProgressRefreshWorkItem?.cancel()
@@ -1108,7 +1102,7 @@ final class AgentSessionViewController: NSViewController {
         let item = DispatchWorkItem { [weak self] in
             guard let self,
                   generation == self.runProgressGeneration,
-                  self.activityTracker.activity.hasTurnInFlight else { return }
+                  self.activityTracker.runtimeSnapshot.hasOpenTurn else { return }
             self.runProgressRefreshWorkItem = nil
 
             if let url = self.attachmentTranscriptURL() {
@@ -1296,7 +1290,7 @@ final class AgentSessionViewController: NSViewController {
         guard agentKind.supports(.transcriptRefusedTurnRecord)
                 || agentKind.supports(.transcriptInterruptedMessageRecord),
               activityTracker.reportsOwnActivity,
-              activityTracker.activity.hasTurnInFlight,
+              activityTracker.runtimeSnapshot.hasOpenTurn,
               let url = resolvedClaudeTranscriptURL() else {
             return
         }

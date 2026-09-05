@@ -179,6 +179,7 @@ final class SupervisionListViewController: NSViewController {
         case .dormant: L10n.string("Dormant")
         case .idle: L10n.string("Idle")
         case .working: L10n.string("Working")
+        case .readyWithBackgroundWork: L10n.string("Ready · background work")
         case .awaitingUser: L10n.string("Waiting for you")
         case .needsAttention: L10n.string("Needs attention")
         case .limitReached: L10n.string("Limit reached")
